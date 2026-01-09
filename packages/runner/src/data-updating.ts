@@ -441,6 +441,7 @@ export function normalizeAndDiff(
   const valueIsFunction = isFunction(newValue);
   const valueIsInstance = isInstance(newValue);
   if (valueIsFunction || valueIsInstance) {
+    const newValueObj = newValue as object; // Appeases the TS compiler.
     const { typeName, typeNameCaps } = valueIsFunction
       ? { typeName: "function", typeNameCaps: "FUNCTION" }
       : { typeName: "instance", typeNameCaps: "INSTANCE" };
@@ -449,14 +450,11 @@ export function normalizeAndDiff(
       "diff",
       () => `[BRANCH_${typeNameCaps}] Processing function at path=${pathStr}`,
     );
-    if (
-      "toJSON" in (newValue as object) &&
-      typeof (newValue as { toJSON?: unknown }).toJSON === "function"
-    ) {
+    if ("toJSON" in newValueObj && typeof newValueObj.toJSON === "function") {
       // Note: This assumes that `toJSON()` won't ever return anything that
       // requires any of the special handling above this handler block (e.g.,
       // we aren't expecting it to turn out to be a `Cell`).
-      newValue = (newValue as { toJSON: () => unknown }).toJSON();
+      newValue = newValueObj.toJSON();
     } else {
       throw new Error(
         `Cannot store ${typeName} per se (needs to have a \`toJSON()\` method)`,
