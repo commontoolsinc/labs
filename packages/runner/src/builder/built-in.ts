@@ -22,6 +22,7 @@ import type {
   BuiltInLLMState,
   FetchOptions,
   PatternToolFunction,
+  PatternToolResult,
   WishParams,
   WishState,
 } from "commontools";
@@ -409,7 +410,8 @@ export type { createCell };
  * );
  * const grepTool2 = patternTool(myRecipe, { content });
  *
- * // Both result in type: OpaqueRef<{ query: string }>
+ * // Both result in type: PatternToolResult<{ content: string }>
+ * // which has { pattern: Recipe, extraParams: { content: string } }
  * ```
  */
 export const patternTool = (<
@@ -418,11 +420,11 @@ export const patternTool = (<
 >(
   fnOrRecipe: ((input: OpaqueRef<Required<T>>) => any) | RecipeFactory<T, any>,
   extraParams?: Opaque<E>,
-): OpaqueRef<Omit<T, keyof E>> => {
+): PatternToolResult<E> => {
   const pattern = isRecipe(fnOrRecipe) ? fnOrRecipe : recipe(fnOrRecipe);
 
   return {
     pattern,
-    extraParams: extraParams ?? {},
-  } as any as OpaqueRef<Omit<T, keyof E>>;
+    extraParams: (extraParams ?? {}) as E,
+  };
 }) as PatternToolFunction;

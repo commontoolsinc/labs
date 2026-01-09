@@ -61,6 +61,7 @@ const proof1 = withoutStripCell((input: OpaqueRef<Required<TestInput>>) => {
 
 // Result: Factory<TestInput, { items: OpaqueCell<string[]> & ...; count: number }>
 // items is properly inferred! ✅
+// @ts-expect-error - This is a type investigation file; error is expected
 const _proof1: "PROOF1" = proof1;
 
 // =============================================================================
@@ -81,6 +82,7 @@ const proof2 = withStripCell((input: OpaqueRef<Required<TestInput>>) => {
 
 // Result: Factory<TestInput, { items: unknown; count: number }>
 // items becomes `unknown`! ❌
+// @ts-expect-error - This is a type investigation file; error is expected
 const _proof2: "PROOF2" = proof2;
 
 // =============================================================================
@@ -103,6 +105,7 @@ const proof3a = simpleUnwrap((input: OpaqueRef<Required<TestInput>>) => {
 });
 
 // Result: items is OpaqueCell<string[]> ✅
+// @ts-expect-error - This is a type investigation file; error is expected
 const _proof3a: "PROOF3A" = proof3a;
 
 // This BREAKS (conditional with infer + recursive mapping):
@@ -126,6 +129,7 @@ const proof3b = conditionalRecursive(
 );
 
 // Result: items is `unknown` ❌
+// @ts-expect-error - This is a type investigation file; error is expected
 const _proof3b: "PROOF3B" = proof3b;
 
 // =============================================================================
@@ -166,6 +170,7 @@ const proof4a = pattern((input: OpaqueRef<Required<TestInput>>) => {
   return { items: input.items, count: 5 };
 });
 // Result: { items: unknown; count: number } ❌
+// @ts-expect-error - This is a type investigation file; error is expected
 const _proof4a: "PROOF4A" = proof4a;
 
 // pattern<T>() - one type param: matches overload 2, `any` return gives `any`
@@ -173,6 +178,7 @@ const proof4b = pattern<TestInput>((input) => {
   return { items: input.items, count: 5 };
 });
 // Result: any ❌
+// @ts-expect-error - This is a type investigation file; error is expected
 const _proof4b: "PROOF4B" = proof4b;
 
 // pattern<T, R>() - both type params: explicit types, works
@@ -182,6 +188,7 @@ const proof4c = pattern<TestInput, { items: string[]; count: number }>(
   },
 );
 // Result: { items: string[]; count: number } ✅
+// @ts-expect-error - This is a type investigation file; error is expected
 const _proof4c: "PROOF4C" = proof4c;
 
 // =============================================================================
