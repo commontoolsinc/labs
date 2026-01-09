@@ -889,14 +889,21 @@ export declare const CELL_LIKE: unique symbol;
  * Helper type to transform Cell<T> to Opaque<T> in pattern/lift/handler inputs.
  * Preserves Stream<T> since Streams are callable interfaces (.send()), not data containers.
  *
- * Uses non-distributive conditionals ([T] extends [...]) to prevent TypeScript from
- * distributing over union/intersection types, which caused issues with OpaqueRef's
- * intersection types. See packages/api/STRIPCELL_TYPE_INFERENCE_FIX.md for details.
+ * Implementation uses two-phase approach:
+ * 1. Outer `T extends any ? ... : never` forces distribution over unions (needed for
+ *    optional properties like `title?: Writable<string>` which expand to `Writable<string> | undefined`)
+ * 2. Inner non-distributive conditionals ([T] extends [...]) prevent distribution over
+ *    intersection types (needed for OpaqueRef's `OpaqueCell<T> & T` intersections)
+ *
+ * See packages/api/STRIPCELL_TYPE_INFERENCE_FIX.md for details.
  */
-export type StripCell<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - it's a callable interface
+export type StripCell<T> = T extends any ? StripCellInner<T> : never;
+
+type StripCellInner<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - it's a callable interface
   : [T] extends [AnyBrandedCell<infer U>] ? StripCell<U>
   : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
   : [T] extends [Array<infer U>] ? StripCell<U>[]
+  : [T] extends [Function] ? T // Preserve function types
   : [T] extends [object] ? { [K in keyof T]: StripCell<T[K]> }
   : T;
 
