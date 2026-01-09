@@ -1,4 +1,5 @@
-import { isFunction, isInstance, isRecord } from "@commontools/utils/types";
+import { isRecord } from "@commontools/utils/types";
+import { toStorableValue } from "./value-codec.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import { createRef } from "./create-ref.ts";
@@ -431,38 +432,17 @@ export function normalizeAndDiff(
     ];
   }
 
-  // Handle functions and instances, by converting to JSON-encodable values if
-  // possible, and throwing if not. We do these conversions and let the
-  // converted value (if any) flow down into the subsequent handlers.
-  //
-  // TODO(@danfuzz): This section is very similar to (and has the same puropose
-  // as) a section of `convertCellsToLinks()` in `cell.ts`. The two versions
-  // should probably be extracted to a common location.
-  const valueIsFunction = isFunction(newValue);
-  const valueIsInstance = isInstance(newValue);
-  if (valueIsFunction || valueIsInstance) {
-    const newValueObj = newValue as object; // Appeases the TS compiler.
-    const { typeName, typeNameCaps } = valueIsFunction
-      ? { typeName: "function", typeNameCaps: "FUNCTION" }
-      : { typeName: "instance", typeNameCaps: "INSTANCE" };
-
+  // Convert the (top level of) the value to something JSON-encodable if not
+  // already JSON-encodable, or throw if it's neither already valid nor
+  // convertible.
+  const storableValue = toStorableValue(newValue);
+  if (storableValue !== newValue) {
     diffLogger.debug(
       "diff",
-      () => `[BRANCH_${typeNameCaps}] Processing function at path=${pathStr}`,
+      () =>
+        `[TO_STORABLE_VALUE] Converted ${typeof newValue} at path=${pathStr}`,
     );
-    if ("toJSON" in newValueObj && typeof newValueObj.toJSON === "function") {
-      // Note: This assumes that `toJSON()` won't ever return anything that
-      // requires any of the special handling above this handler block (e.g.,
-      // we aren't expecting it to turn out to be a `Cell`).
-      newValue = newValueObj.toJSON();
-    } else {
-      throw new Error(
-        `Cannot store ${typeName} per se (needs to have a \`toJSON()\` method)`,
-      );
-    }
-
-    // ...and fall through to handle whatever sort of thing the converted value
-    // turns out to be.
+    newValue = storableValue;
   }
 
   // Handle arrays
