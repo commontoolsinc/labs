@@ -1,5 +1,5 @@
 import { css, html } from "lit";
-import { type Cell } from "@commontools/runner";
+import { type CellHandle } from "@commontools/runtime-client";
 import { BaseElement } from "../../core/base-element.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
 import type { CTTab } from "../ct-tab/ct-tab.ts";
@@ -11,7 +11,7 @@ import type { CTTabPanel } from "../ct-tab-panel/ct-tab-panel.ts";
  * @element ct-tabs
  *
  * @attr {string} value - Currently selected tab value (plain string)
- * @prop {Cell<string>|string} value - Selected tab value (supports Cell for two-way binding)
+ * @prop {CellHandle<string>|string} value - Selected tab value (supports Cell for two-way binding)
  * @attr {string} orientation - Tab orientation: "horizontal" | "vertical" (default: "horizontal")
  *
  * @slot - Default slot for ct-tab-list and ct-tab-panel elements
@@ -84,17 +84,15 @@ export class CTTabs extends BaseElement {
     orientation: { type: String },
   };
 
-  declare value: Cell<string> | string;
+  declare value: CellHandle<string> | string;
   declare orientation: "horizontal" | "vertical";
 
-  private _changeGroup = crypto.randomUUID();
   // Track last known value to detect external cell changes
   private _lastKnownValue: string = "";
 
   /* ---------- Cell controller for value binding ---------- */
   private _cellController = createStringCellController(this, {
     timing: { strategy: "immediate" }, // Tab changes should be immediate
-    changeGroup: this._changeGroup,
     onChange: (newValue: string, oldValue: string) => {
       // Track this internal change so render() doesn't double-update
       this._lastKnownValue = newValue;

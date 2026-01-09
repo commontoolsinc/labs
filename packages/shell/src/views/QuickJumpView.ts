@@ -3,12 +3,8 @@ import { property, state } from "lit/decorators.js";
 import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { Task } from "@lit/task";
-import { CharmController } from "@commontools/charm/ops";
-import { charmId } from "@commontools/charm";
-import { Cell } from "@commontools/runner";
-import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
-import { NAME } from "@commontools/runner";
-import { navigate } from "../lib/navigate.ts";
+import { navigate } from "../../shared/mod.ts";
+import { PageHandle } from "@commontools/runtime-client";
 
 type CharmItem = { id: string; name: string };
 
@@ -104,16 +100,32 @@ export class XQuickJumpView extends BaseView {
   private selectedIndex = 0;
 
   private inputEl?: HTMLInputElement | null;
-  private charmListSubscription?: CellEventTarget<Cell<unknown>[]>;
-  private nameSubscriptions: Map<string, CellEventTarget<string | undefined>> =
-    new Map();
 
   private _charms = new Task(this, {
     task: async ([rt]) => {
       if (!rt) return undefined;
-      const manager = rt.cc().manager();
-      await manager.synced();
-      return rt.cc().getAllCharms();
+      await rt.synced();
+
+      const charmsListCell = await rt.getCharmsListCell();
+      await charmsListCell.sync();
+
+      const charmsList = charmsListCell.get() as any[];
+      if (!charmsList) return [];
+
+      // @TODO(runtime-worker-refactor)
+      /*
+      const handles: PageHandle[] = [];
+      for (const charmData of charmsList) {
+        const id = isCellHandle(charmData) ? charmData.id() : charmData?.$ID;
+        if (id) {
+          const charm = await rt.getPattern(id);
+          if (charm) {
+            handles.push(charm);
+          }
+        }
+      }
+      */
+      return [];
     },
     args: () => [this.rt],
   });
@@ -121,8 +133,7 @@ export class XQuickJumpView extends BaseView {
   override updated(changed: Map<string, unknown>) {
     super.updated(changed);
     if (changed.has("rt")) {
-      this.teardownSubscriptions();
-      this.setupSubscriptions();
+      this._charms.run();
     }
     if (changed.has("visible") && this.visible) {
       // Focus input when opened
@@ -133,69 +144,6 @@ export class XQuickJumpView extends BaseView {
       });
     }
   }
-
-  private setupSubscriptions() {
-    const rt = this.rt;
-    if (!rt) return;
-    const charmsCell = rt.cc().manager().getCharms();
-    this.charmListSubscription = new CellEventTarget(charmsCell);
-    this.charmListSubscription.addEventListener(
-      "update",
-      this.onCharmListUpdate,
-    );
-    // Initialize name subscriptions with current list
-    try {
-      const list = charmsCell.get();
-      this.resetNameSubscriptions(list);
-    } catch {
-      // ignore
-    }
-  }
-
-  private teardownSubscriptions() {
-    if (this.charmListSubscription) {
-      this.charmListSubscription.removeEventListener(
-        "update",
-        this.onCharmListUpdate,
-      );
-      this.charmListSubscription = undefined;
-    }
-    for (const [_, target] of this.nameSubscriptions) {
-      target.removeEventListener("update", this.onCharmNameUpdate);
-    }
-    this.nameSubscriptions.clear();
-  }
-
-  private onCharmListUpdate = (e: Event) => {
-    const event = e as CellUpdateEvent<readonly Cell<any>[]>;
-    const list = event.detail ?? [];
-    this.resetNameSubscriptions(list);
-    // Rebuild controllers list used by getItems
-    this._charms.run();
-  };
-
-  private resetNameSubscriptions(list: readonly Cell<any>[]) {
-    // Remove old
-    for (const [_, target] of this.nameSubscriptions) {
-      target.removeEventListener("update", this.onCharmNameUpdate);
-    }
-    this.nameSubscriptions.clear();
-
-    // Add new
-    for (const c of list) {
-      const id = charmId(c as Cell<any>);
-      if (!id) continue;
-      const nameCell = (c as Cell<any>).key(NAME) as Cell<string | undefined>;
-      const target = new CellEventTarget(nameCell);
-      target.addEventListener("update", this.onCharmNameUpdate);
-      this.nameSubscriptions.set(id, target);
-    }
-  }
-
-  private onCharmNameUpdate = (_e: Event) => {
-    // Any name change should refresh render so c.name() reflects latest value
-    this.requestUpdate();
-  };
 
   private close() {
     this.query = "";
@@ -209,8 +157,8 @@ export class XQuickJumpView extends BaseView {
 
   private getItems(): CharmItem[] {
     const list = this._charms.value || [];
-    return list.map((c: CharmController) => ({
-      id: c.id,
+    return list.map((c: PageHandle) => ({
+      id: c.id(),
       name: c.name() ?? "Untitled Charm",
     }));
   }
@@ -290,7 +238,7 @@ export class XQuickJumpView extends BaseView {
   };
 
   private navigateTo(id: string) {
-    const spaceName = this.rt?.cc().manager().getSpaceName();
+    const spaceName = this.rt?.spaceName();
     if (!spaceName) return;
     navigate({ spaceName, charmId: id });
     this.close();
@@ -299,12 +247,10 @@ export class XQuickJumpView extends BaseView {
   override connectedCallback(): void {
     super.connectedCallback();
     document.addEventListener("keydown", this.onKeyDown);
-    this.setupSubscriptions();
   }
 
   override disconnectedCallback(): void {
     document.removeEventListener("keydown", this.onKeyDown);
-    this.teardownSubscriptions();
     super.disconnectedCallback();
   }
 

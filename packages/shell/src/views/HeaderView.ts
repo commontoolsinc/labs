@@ -108,9 +108,6 @@ export class XHeaderView extends BaseView {
   @property()
   showSidebar = false;
 
-  @property({ type: Boolean })
-  hasSidebarContent = false;
-
   private handleAuthClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
@@ -189,20 +186,15 @@ export class XHeaderView extends BaseView {
         ${this.isLoggedIn
           ? html`
             <div class="button-group">
-              ${this.hasSidebarContent
-                ? html`
-                  <x-button
-                    class="emoji-button"
-                    size="small"
-                    @click="${this.handleSidebarToggleClick}"
-                    title="${this.showSidebar
-                      ? "Hide Sidebar"
-                      : "Show Sidebar"}"
-                  >
-                    ${this.showSidebar ? "⏵" : "⏴"}
-                  </x-button>
-                `
-                : null} ${this.charmId
+              <x-button
+                class="emoji-button"
+                size="small"
+                @click="${this.handleSidebarToggleClick}"
+                title="${this.showSidebar ? "Hide Sidebar" : "Show Sidebar"}"
+              >
+                ${this.showSidebar ? "⏵" : "⏴"}
+              </x-button>
+              ${this.charmId
                 ? html`
                   <x-favorite-button
                     .charmId="${this.charmId}"

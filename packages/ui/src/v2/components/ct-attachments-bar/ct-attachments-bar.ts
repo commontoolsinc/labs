@@ -2,6 +2,7 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import "../ct-chip/ct-chip.ts";
+import { isCellHandle } from "@commontools/runtime-client";
 
 /**
  * Attachment data structure
@@ -97,6 +98,14 @@ export class CTAttachmentsBar extends BaseElement {
   }
 
   override render() {
+    // TODO(runtime-worker-refactor): This component expects `Attachment[]`,
+    // matching jsx.d.ts, BuiltInLLMDialogState response, but is receiving
+    // a CellHandle (guessing of type Attachment[]).
+    if (isCellHandle(this.pinnedCells)) {
+      return html`
+        <div class="empty-state">TODO(runtime-worker-refactor)</div>
+      `;
+    }
     if (!this.pinnedCells || this.pinnedCells.length === 0) {
       return html`
         <div class="empty-state">No pinned cells</div>

@@ -12,7 +12,7 @@ import {
   type CTTheme,
   themeContext,
 } from "../theme-context.ts";
-import { type Cell, isCell } from "@commontools/runner";
+import { type CellHandle, isCellHandle } from "@commontools/runtime-client";
 
 export type MarkdownVariant = "default" | "inverse";
 
@@ -21,7 +21,7 @@ export type MarkdownVariant = "default" | "inverse";
  *
  * @element ct-markdown
  *
- * @attr {string} content - The markdown content to render (string or Cell<string>)
+ * @attr {string} content - The markdown content to render (string or CellHandle<string>)
  * @attr {string} variant - Visual variant: "default" or "inverse" (for light text on dark bg)
  * @attr {boolean} streaming - Shows a blinking cursor at the end (for streaming content)
  * @attr {boolean} compact - Reduces paragraph spacing for more compact display
@@ -370,7 +370,7 @@ export class CTMarkdown extends BaseElement {
   ];
 
   @property({ attribute: false })
-  declare content: Cell<string> | string;
+  declare content: CellHandle<string> | string;
 
   @property({ type: String, reflect: true })
   declare variant: MarkdownVariant;
@@ -396,7 +396,7 @@ export class CTMarkdown extends BaseElement {
   }
 
   private _getContentValue(): string {
-    if (isCell(this.content)) {
+    if (isCellHandle<string>(this.content)) {
       return this.content.get() ?? "";
     }
     return this.content ?? "";
@@ -516,8 +516,8 @@ export class CTMarkdown extends BaseElement {
       }
 
       // Subscribe to new Cell if it's a Cell
-      if (this.content && isCell(this.content)) {
-        this._unsubscribe = this.content.sink(() => {
+      if (this.content && isCellHandle(this.content)) {
+        this._unsubscribe = this.content.subscribe(() => {
           this.requestUpdate();
         });
       }

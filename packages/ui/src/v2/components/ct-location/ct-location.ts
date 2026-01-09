@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import { type Cell } from "@commontools/runner";
+import { type CellHandle } from "@commontools/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 import { consume } from "@lit/context";
 import {
@@ -223,7 +223,7 @@ export class CTLocation extends BaseElement {
 
   // Cell binding for location data
   @property({ attribute: false })
-  location: Cell<LocationData | null> | LocationData | null = null;
+  location: CellHandle<LocationData | null> | LocationData | null = null;
 
   // Configuration
   @property({ type: Boolean })
@@ -249,11 +249,9 @@ export class CTLocation extends BaseElement {
   private _errorMessage = "";
 
   private _watchId: number | null = null;
-  private _changeGroup = crypto.randomUUID();
 
   private _cellController = createCellController<LocationData | null>(this, {
     timing: { strategy: "immediate" },
-    changeGroup: this._changeGroup,
     onChange: (newValue) => {
       this.emit("ct-change", { location: newValue });
     },

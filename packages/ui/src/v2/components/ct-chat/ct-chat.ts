@@ -2,7 +2,7 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
-import { type Cell } from "@commontools/runner";
+import { type CellHandle } from "@commontools/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 import "../ct-chat-message/ct-chat-message.ts";
 import "../ct-tool-call/ct-tool-call.ts";
@@ -25,7 +25,7 @@ import {
  *
  * @element ct-chat
  *
- * @prop {Cell<BuiltInLLMMessage[]>|BuiltInLLMMessage[]} messages - Messages array or Cell containing messages
+ * @prop {CellHandle<BuiltInLLMMessage[]>|BuiltInLLMMessage[]} messages - Messages array or Cell containing messages
  * @prop {boolean} pending - Show animated typing indicator for assistant response
  * @prop {CTTheme} theme - Theme configuration for chat components
  *
@@ -147,7 +147,7 @@ export class CTChat extends BaseElement {
   });
 
   @property({ type: Array })
-  declare messages: Cell<BuiltInLLMMessage[]> | BuiltInLLMMessage[];
+  declare messages: CellHandle<BuiltInLLMMessage[]> | BuiltInLLMMessage[];
 
   @property({ type: Boolean, reflect: true })
   declare pending: boolean;

@@ -3,6 +3,13 @@ import { property, state } from "lit/decorators.js";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { Task } from "@lit/task";
 
+/**
+ * Favorite button component.
+ *
+ * NOTE: Favorites functionality is currently disabled while RuntimeClient
+ * integration is in progress. The button renders but clicking has no effect.
+ * TODO: Re-enable once favorites IPC is implemented.
+ */
 export class XFavoriteButtonElement extends LitElement {
   static override styles = css`
     x-button.emoji-button {
@@ -18,6 +25,12 @@ export class XFavoriteButtonElement extends LitElement {
     x-button.auth-button {
       font-size: 1rem;
     }
+
+    /* Disabled state */
+    x-button.emoji-button.disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
   `;
 
   @property()
@@ -31,28 +44,14 @@ export class XFavoriteButtonElement extends LitElement {
   @state()
   isFavorite: boolean | undefined = undefined;
 
-  private async handleFavoriteClick(e: Event) {
+  private handleFavoriteClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
-    if (!this.rt || !this.charmId) return;
-    const manager = this.rt.cc().manager();
 
-    const isFavorite = this.deriveIsFavorite();
-
-    // Update local state, and use until overridden by
-    // syncing state, or another click.
-    this.isFavorite = !isFavorite;
-
-    try {
-      const charmCell = (await this.rt.cc().get(this.charmId, true)).getCell();
-      if (isFavorite) {
-        await manager.removeFavorite(charmCell);
-      } else {
-        await manager.addFavorite(charmCell);
-      }
-    } finally {
-      this.isFavoriteSync.run();
-    }
+    // TODO(runtime-worker-refactor)
+    console.warn(
+      "[FavoriteButton] Favorites functionality is disabled during RuntimeClient migration",
+    );
   }
 
   protected override willUpdate(changedProperties: PropertyValues): void {
@@ -62,27 +61,17 @@ export class XFavoriteButtonElement extends LitElement {
   }
 
   private deriveIsFavorite(): boolean {
-    // If `isFavorite` is defined, we have local state that is not
-    // yet synced. Prefer local state if defined, otherwise use server state.
-    return this.isFavorite ?? this.isFavoriteSync.value ?? false;
+    // Always return false since favorites are disabled
+    return false;
   }
 
   isFavoriteSync = new Task(this, {
     task: async (
-      [charmId, rt],
-      { signal },
+      [_charmId, _rt],
+      { signal: _signal },
     ): Promise<boolean> => {
-      const isFavorite = await isFavoriteSync(rt, charmId);
-
-      // If another favorite request was initiated, store
-      // the sync status, but don't overwrite the local state.
-      if (signal.aborted) return isFavorite;
-
-      // We update `this.isFavorite` here to `undefined`,
-      // indicating that the synced state should be preferred
-      // now that it's fresh.
-      this.isFavorite = undefined;
-      return isFavorite;
+      // TODO(runtime-worker-refactor)
+      return await false;
     },
     args: () => [this.charmId, this.rt],
   });
@@ -92,10 +81,10 @@ export class XFavoriteButtonElement extends LitElement {
 
     return html`
       <x-button
-        class="emoji-button"
+        class="emoji-button disabled"
         size="small"
         @click="${this.handleFavoriteClick}"
-        title="${isFavorite ? "Remove from Favorites" : "Add to Favorites"}"
+        title="Favorites temporarily disabled"
       >
         ${isFavorite ? "⭐" : "☆"}
       </x-button>
@@ -104,26 +93,3 @@ export class XFavoriteButtonElement extends LitElement {
 }
 
 globalThis.customElements.define("x-favorite-button", XFavoriteButtonElement);
-
-async function isFavoriteSync(
-  rt?: RuntimeInternals,
-  charmId?: string,
-): Promise<boolean> {
-  if (!charmId || !rt) {
-    return false;
-  }
-  const manager = rt.cc().manager();
-  try {
-    const charm = await manager.get(charmId, true);
-    if (charm) {
-      const favorites = manager.getFavorites();
-      await favorites.sync();
-      return manager.isFavorite(charm);
-    } else {
-      return false;
-    }
-  } catch (_) {
-    //
-  }
-  return false;
-}

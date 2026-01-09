@@ -1,11 +1,12 @@
-import { render, VNode } from "@commontools/html";
-import { Cell, UI } from "@commontools/runner";
+import { render } from "@commontools/html/client";
+import { UI } from "@commontools/runner";
 import { vdomSchema } from "@commontools/runner/schemas";
 import { loadManager } from "./charm.ts";
 import { CharmsController } from "@commontools/charm/ops";
 import type { CharmConfig } from "./charm.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { MockDoc } from "../../html/src/mock-doc.ts";
+import { CellHandle, VNode } from "@commontools/runtime-client";
 
 const logger = getLogger("charm-render", { level: "info", enabled: false });
 
@@ -54,7 +55,11 @@ export async function renderCharm(
   if (options.watch) {
     // 4a. Reactive rendering - pass the Cell directly
     const uiCell = cell.key(UI);
-    const cancel = render(container, uiCell as Cell<VNode>, renderOptions); // FIXME: types
+    const cancel = render(
+      container,
+      uiCell as unknown as CellHandle<VNode>,
+      renderOptions,
+    ); // FIXME: types
 
     // 5a. Set up monitoring for changes
     let updateCount = 0;

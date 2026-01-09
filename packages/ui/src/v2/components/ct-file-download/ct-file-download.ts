@@ -1,6 +1,6 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
-import { type Cell } from "@commontools/runner";
+import { type CellHandle } from "@commontools/runtime-client";
 import { createStringCellController } from "../../core/cell-controller.ts";
 
 /**
@@ -29,8 +29,8 @@ const MIME_EXTENSIONS: Record<string, string> = {
  *
  * @element ct-file-download
  *
- * @property {string|Cell<string>} data - Content to download (required)
- * @property {string|Cell<string>} filename - Download filename (auto-generated if not provided)
+ * @property {string|CellHandle<string>} data - Content to download (required)
+ * @property {string|CellHandle<string>} filename - Download filename (auto-generated if not provided)
  * @attr {string} mime-type - MIME type for the file (default: "application/octet-stream")
  * @attr {boolean} base64 - If true, decode data as base64 before downloading (default: false)
  * @attr {string} variant - Button style variant (default: "secondary")
@@ -100,8 +100,8 @@ export class CTFileDownload extends BaseElement {
     iconOnly: { type: Boolean, attribute: "icon-only", reflect: true },
   };
 
-  declare data: Cell<string> | string;
-  declare filename: Cell<string> | string;
+  declare data: CellHandle<string> | string;
+  declare filename: CellHandle<string> | string;
   declare mimeType: string;
   declare base64: boolean;
   declare variant?:

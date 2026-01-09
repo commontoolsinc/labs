@@ -9,7 +9,7 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
-import { type Cell } from "@commontools/runner";
+import { type CellHandle } from "@commontools/runtime-client";
 import { createStringCellController } from "../../core/cell-controller.ts";
 
 export type TimingStrategy = "immediate" | "debounce" | "throttle" | "blur";
@@ -20,7 +20,7 @@ export type TimingStrategy = "immediate" | "debounce" | "throttle" | "blur";
  * @element ct-textarea
  *
  * @attr {string} placeholder - Placeholder text
- * @attr {string|Cell<string>} value - Textarea value (supports both plain string and Cell<string>)
+ * @attr {string|CellHandle<string>} value - Textarea value (supports both plain string and CellHandle<string>)
  * @attr {boolean} disabled - Whether the textarea is disabled
  * @attr {boolean} readonly - Whether the textarea is read-only
  * @attr {boolean} required - Whether the textarea is required
@@ -74,7 +74,7 @@ export class CTTextarea extends BaseElement {
     timingDelay: { type: Number, attribute: "timing-delay" },
   };
   declare placeholder: string;
-  declare value: Cell<string> | string;
+  declare value: CellHandle<string> | string;
   declare disabled: boolean;
   declare readonly: boolean;
   declare error: boolean;
@@ -279,14 +279,12 @@ export class CTTextarea extends BaseElement {
       declare theme?: CTTheme;
 
       // Cache + initial setup
-      private _changeGroup = crypto.randomUUID();
       private _textarea: HTMLTextAreaElement | null = null;
       private _cellController = createStringCellController(this, {
         timing: {
           strategy: "debounce",
           delay: 300,
         },
-        changeGroup: this._changeGroup,
       });
 
       constructor() {
