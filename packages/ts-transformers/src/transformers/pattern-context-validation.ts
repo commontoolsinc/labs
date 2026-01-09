@@ -248,7 +248,7 @@ export class PatternContextValidationTransformer extends Transformer {
 
   /**
    * Checks if a function is being passed directly as a callback to a safe wrapper
-   * (computed, action, derive, lift, handler).
+   * (computed, action, derive, lift, handler) or to a .map() call on cells/opaques.
    */
   private isSafeWrapperCallback(
     node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
@@ -268,6 +268,9 @@ export class PatternContextValidationTransformer extends Transformer {
 
     // derive is a safe wrapper
     if (callKind.kind === "derive") return true;
+
+    // array-map on cells/opaques is transformed, so callbacks are allowed
+    if (callKind.kind === "array-map") return true;
 
     // Check builder-based safe wrappers (computed, action, lift, handler)
     if (callKind.kind === "builder") {

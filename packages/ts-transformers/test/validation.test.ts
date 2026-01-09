@@ -613,6 +613,33 @@ Deno.test("Pattern Context Validation - Function Creation", async (t) => {
     const errors = getErrors(diagnostics);
     assertEquals(errors.length, 0, "Map callback inside JSX should be allowed");
   });
+
+  await t.step("allows map callback outside JSX in pattern body", async () => {
+    const source = `/// <cts-enable />
+      import { pattern, OpaqueRef } from "commontools";
+
+      interface Item { name: string; }
+
+      const listItems = pattern<
+        { items: OpaqueRef<Item[]> },
+        { result: Array<{ label: string }> }
+      >(({ items }) => {
+        const result = items.map((item) => ({
+          label: item.name,
+        }));
+        return { result };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(
+      errors.length,
+      0,
+      "Map callback outside JSX in pattern should be allowed (transformed to pattern)",
+    );
+  });
 });
 
 Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
