@@ -1762,17 +1762,6 @@ export function convertCellsToLinks(
   // convertible.
   value = toStorableValue(value);
 
-  // Process toJSON if it exists like JSON.stringify does.
-  if ("toJSON" in value && typeof value.toJSON === "function") {
-    value = value.toJSON();
-    if (!isRecord(value)) return value;
-    // Fall through to process, so even if there is a .toJSON on the
-    // result we don't call it again.
-  } else if (typeof value === "function") {
-    // Handle functions without toJSON like JSON.stringify does.
-    value = undefined;
-  }
-
   // Recursively process arrays and objects.
   if (Array.isArray(value)) {
     value = value.map((value, index) =>
