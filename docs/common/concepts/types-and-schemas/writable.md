@@ -4,6 +4,10 @@
 `Writable<>` in type signatures indicates **write intent**, not reactivity. Everything is reactive by default.
 
 ```typescript
+import { Writable } from 'commontools';
+
+interface Item {}
+
 // Read-only (still reactive!)
 interface ReadOnlyInput {
   count: number;

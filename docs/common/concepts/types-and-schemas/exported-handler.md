@@ -3,6 +3,8 @@
 Handlers exposed in Output interfaces must be typed as `Stream<T>`.
 
 ```typescript
+import { Stream } from 'commontools';
+
 interface Output {
   count: number;
   increment: Stream<void>;           // Handler with no parameters
@@ -19,25 +21,33 @@ interface Output {
 A bound handler IS a `Stream<EventType>`. Don't try to create streams directly:
 
 ```typescript
-// ❌ WRONG - Stream.of() and .subscribe() don't exist
-const addItem: Stream<{ title: string }> = Stream.of();
-addItem.subscribe(({ title }) => { ... });  // Error!
+import { handler, pattern, Writable, Cell, Stream } from 'commontools';
+
+interface Item { title: string }
 
 // ✅ CORRECT - Define handler, bind with state
 const addItemHandler = handler<
-  { title: string },          // Event type
+  Item,          // Event type
   { items: Writable<Item[]> } // State type
 >(({ title }, { items }) => {
   items.push({ title });
 });
 
-// Binding returns Stream<{ title: string }>
-const addItem = addItemHandler({ items });
+interface Output {
+  addItem: Stream<{ title: string }>;
+}
 
-// Export in return
-return {
-  addItem,  // This IS Stream<{ title: string }>
-};
+export default pattern<Record<string, never>, Output>(_ => {
+  const items = Cell.of([] as Array<Item>)
+  
+  // Binding returns Stream<Item>
+  const addItem = addItemHandler({ items });
+  
+  // Export in return
+  return {
+    addItem,  // This IS Stream<{ title: string }>
+  };
+})
 ```
 
 The bound handler is the stream. Other patterns or charms can send events to it via linking.
