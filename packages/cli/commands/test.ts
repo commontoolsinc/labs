@@ -77,15 +77,18 @@ export const test = new Command()
       }
     }
 
-    if (testFiles.length === 0) {
+    // Deduplicate test files (in case of overlapping paths like ./patterns/ and ./patterns/counter.test.tsx)
+    const uniqueTestFiles = [...new Set(testFiles)];
+
+    if (uniqueTestFiles.length === 0) {
       console.error(`Error: No test files found`);
       Deno.exit(1);
     }
 
-    console.log(`Found ${testFiles.length} test file(s)`);
+    console.log(`Found ${uniqueTestFiles.length} test file(s)`);
 
     // Run tests
-    const { failed } = await runTests(testFiles, {
+    const { failed } = await runTests(uniqueTestFiles, {
       timeout: options.timeout,
       verbose: options.verbose,
     });
