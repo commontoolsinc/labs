@@ -26,6 +26,9 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | CLI `get` returns stale computed values | `charm set` doesn't trigger recompute | Run `charm step` after `set` to trigger re-evaluation ([see below](#stale-computed-values-after-charm-set)) |
 | Space URL 404 or routing errors | Space name contains `/` | Use only `a-z`, `0-9`, `-`, `_` in space names |
 | "StorageTransactionInconsistent" | Read-modify-write race with spread | Use `.push()` for append, `.key(idx).set()` for updates ([see below](#array-mutation-patterns)) |
+| "handler() should be defined at module scope" | handler() inside pattern body | Move handler() outside pattern ([see below](#handler-or-function-inside-pattern)) |
+| "Function creation is not allowed in pattern context" | Helper function inside pattern | Move function to module scope ([see below](#handler-or-function-inside-pattern)) |
+| "lift() should not be immediately invoked inside a pattern" | `lift(...)(args)` inside pattern | Use `computed()` instead, or define lift() at module scope ([see below](#handler-or-function-inside-pattern)) |
 
 ---
 
@@ -490,6 +493,56 @@ const groupedItems = computed(() => {
 
 The same scoping limitation applies to `lift()`. See [REACTIVITY.md](REACTIVITY.md#lift-and-closure-limitations) for the workaround pattern and explanation of frame-based execution.
 
+### handler() or Function Inside Pattern
+
+**Error:** `handler() should be defined at module scope, not inside a pattern` or `Function creation is not allowed in pattern context`
+
+**Cause:** The CTS transformer requires that `handler()`, `lift()`, and helper functions be defined at module scope (outside the pattern body). The transformer cannot process closures over pattern-scoped variables.
+
+```typescript
+// ❌ WRONG - handler inside pattern body
+export default pattern<Input, Input>(({ items }) => {
+  const addItem = handler((_, { items }) => {  // Error!
+    items.push({ title: "New" });
+  });
+
+  const formatDate = (d: string) => new Date(d).toLocaleDateString();  // Error!
+
+  return { ... };
+});
+
+// ✅ CORRECT - handler at module scope
+const addItem = handler<unknown, { items: Writable<Item[]> }>(
+  (_, { items }) => {
+    items.push({ title: "New" });
+  }
+);
+
+const formatDate = (d: string): string => new Date(d).toLocaleDateString();
+
+export default pattern<Input, Input>(({ items }) => ({
+  [UI]: <ct-button onClick={addItem({ items })}>Add</ct-button>,
+  items,
+}));
+```
+
+**For immediately-invoked lift():**
+
+```typescript
+// ❌ WRONG - lift defined and invoked inside pattern
+const result = lift((args) => args.grouped[args.date])({ grouped, date });
+
+// ✅ CORRECT - use computed() instead
+const result = computed(() => grouped[date]);
+
+// ✅ OR define lift at module scope
+const getByDate = lift((args: { grouped: Record<string, Item[]>; date: string }) =>
+  args.grouped[args.date]
+);
+// Then use inside pattern:
+const result = getByDate({ grouped, date });
+```
+
 ## Runtime Errors
 
 ### No Direct DOM Access
@@ -497,24 +550,34 @@ The same scoping limitation applies to `lift()`. See [REACTIVITY.md](REACTIVITY.
 Patterns run in a sandboxed environment. DOM APIs don't work:
 
 ```typescript
-// ❌ Won't work
+// ❌ Won't work - DOM APIs not available in sandbox
 const addItem = handler((_, { items }) => {
-  const input = document.getElementById('item-input');
-  const value = input.value;
-  items.push({ title: value });
+  const input = document.getElementById('item-input');  // Error!
+  items.push({ title: input.value });
 });
 
-// ✅ Use cells to capture state
-const itemTitle = Cell.of("");
-
-<ct-input $value={itemTitle} />
-
-const addItem = handler((_, { items, itemTitle }) => {
-  const value = itemTitle.get();
-  if (value.trim()) {
-    items.push({ title: value });
-    itemTitle.set("");
+// ✅ Use cells to capture state (handler at module scope)
+const addItem = handler<unknown, { items: Writable<Item[]>; itemTitle: Writable<string> }>(
+  (_, { items, itemTitle }) => {
+    const value = itemTitle.get();
+    if (value.trim()) {
+      items.push({ title: value });
+      itemTitle.set("");
+    }
   }
+);
+
+export default pattern<Input, Input>(({ items }) => {
+  const itemTitle = Cell.of("");
+  return {
+    [UI]: (
+      <div>
+        <ct-input $value={itemTitle} />
+        <ct-button onClick={addItem({ items, itemTitle })}>Add</ct-button>
+      </div>
+    ),
+    items,
+  };
 });
 ```
 
@@ -523,7 +586,7 @@ const addItem = handler((_, { items, itemTitle }) => {
 Using `await` in handlers blocks the entire UI:
 
 ```typescript
-// ❌ Blocks UI
+// ❌ Blocks UI - async handlers block the entire UI
 const handleFetch = handler(async (_, { url, result }) => {
   const response = await fetch(url.get());  // BLOCKS!
   const data = await response.json();
@@ -531,16 +594,16 @@ const handleFetch = handler(async (_, { url, result }) => {
 });
 
 // ✅ Use fetchData - reactive, non-blocking
+// Handler at module scope - just updates the query
+const handleSearch = handler<{ detail: { message: string } }, { searchQuery: Writable<string> }>(
+  ({ detail }, { searchQuery }) => searchQuery.set(detail.message)
+);
+
 export default pattern(({ searchQuery }) => {
   const searchUrl = computed(() =>
     searchQuery ? `/api/search?q=${encodeURIComponent(searchQuery)}` : ""
   );
   const { result, error, loading } = fetchData({ url: searchUrl });
-
-  // Handler just updates the query, fetchData handles the rest
-  const handleSearch = handler<{ detail: { message: string } }, { searchQuery: Writable<string> }>(
-    ({ detail }, { searchQuery }) => searchQuery.set(detail.message)
-  );
 
   return {
     [UI]: (
@@ -555,7 +618,7 @@ export default pattern(({ searchQuery }) => {
 });
 ```
 
-**Rule:** Handlers should be synchronous state changes. Use `fetchData` for async operations.
+**Rule:** Handlers should be synchronous state changes defined at module scope. Use `fetchData` for async operations.
 
 ### Array Mutation Patterns
 
