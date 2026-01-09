@@ -5,8 +5,8 @@ export type MentionableCharm = {
   [NAME]?: string;
   isHidden?: boolean;
   isMentionable?: boolean;
-  mentioned: MentionableCharm[];
-  backlinks: MentionableCharm[];
+  mentioned?: MentionableCharm[];
+  backlinks?: MentionableCharm[];
   mentionable?: MentionableCharm[] | { get?: () => MentionableCharm[] };
 };
 

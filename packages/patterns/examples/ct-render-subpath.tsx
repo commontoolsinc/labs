@@ -27,7 +27,10 @@ export default pattern<State>((state) => {
       </div>
     ),
     // Explicitly undefined - ct-render should NOT wait forever for this
-    sidebarUI: undefined,
+    // For now, exclude the sidebarUI property entirely -- having it in our
+    // returned value makes the transformer think it should be required,
+    // but since it's undefined, our object won't match the schema.
+    //sidebarUI: undefined,
     // Valid UI for testing variant rendering
     previewUI: (
       <div id="preview-ui">

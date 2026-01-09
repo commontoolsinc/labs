@@ -7,29 +7,34 @@
 import { JSONSchema, NAME, type Schema, TYPE, UI } from "./shared.ts";
 
 export const vdomSchema: JSONSchema = {
-  type: "object",
-  properties: {
-    type: { type: "string" },
-    name: { type: "string" },
-    props: {
+  $defs: {
+    VNode: {
       type: "object",
-      additionalProperties: { asCell: true },
-    },
-    children: {
-      type: "array",
-      items: {
-        anyOf: [
-          { $ref: "#", asCell: true },
-          { type: "string", asCell: true },
-          { type: "number", asCell: true },
-          { type: "boolean", asCell: true },
-          { type: "array", items: { $ref: "#", asCell: true } },
-        ],
+      properties: {
+        type: { type: "string" },
+        name: { type: "string" },
+        props: {
+          type: "object",
+          additionalProperties: { asCell: true },
+        },
+        children: {
+          type: "array",
+          items: {
+            anyOf: [
+              { $ref: "#/$defs/VNode", asCell: true },
+              { type: "string", asCell: true },
+              { type: "number", asCell: true },
+              { type: "boolean", asCell: true },
+              { type: "array", items: { $ref: "#/$defs/VNode", asCell: true } },
+            ],
+          },
+          asCell: true,
+        },
+        [UI]: { $ref: "#/$defs/VNode" },
       },
-      asCell: true,
     },
-    [UI]: { $ref: "#" },
   },
+  $ref: "#/$defs/VNode",
 } as const;
 
 export const nameSchema = {
@@ -48,9 +53,11 @@ export const uiSchema = {
 
 export type UISchema = Schema<typeof uiSchema>;
 
+// We specify not true for the items, since we don't want to recursively load them
 export const charmListSchema = {
   type: "array",
   items: { not: true, asCell: true },
+  default: [],
 } as const satisfies JSONSchema;
 
 export const charmLineageSchema = {
