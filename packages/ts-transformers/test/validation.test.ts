@@ -1,34 +1,7 @@
 import { assertEquals, assertGreater } from "@std/assert";
 import { validateSource } from "./utils.ts";
 import type { TransformationDiagnostic } from "../src/mod.ts";
-
-const COMMONTOOLS_TYPES = {
-  "commontools.d.ts": `
-    declare module "commontools" {
-      export interface Cell<T> {
-        get(): T;
-        set(value: T): void;
-        map<U>(fn: (value: T) => U): Cell<U>;
-      }
-      export interface OpaqueRef<T> {
-        readonly __opaque: T;
-        map<U>(fn: (value: T) => U): OpaqueRef<U>;
-      }
-      export interface OpaqueCell<T> extends Cell<T> {
-        readonly __opaque: T;
-      }
-      export type Writable<T> = Cell<T>;
-      export function recipe<T>(name: string, fn: (state: T) => any): any;
-      export function pattern<T>(fn: (state: T) => any): any;
-      export function handler<T>(fn: (event: T) => void): any;
-      export function action<T>(fn: () => T): any;
-      export function computed<T>(fn: () => T): T;
-      export function derive<T, U>(cell: Cell<T>, fn: (value: T) => U): U;
-      export function lift<T>(fn: () => T): T;
-      export function h(tag: string, props?: any, ...children: any[]): any;
-    }
-  `,
-};
+import { COMMONTOOLS_TYPES } from "./commontools-test-types.ts";
 
 function getErrors(diagnostics: readonly TransformationDiagnostic[]) {
   return diagnostics.filter((d) => d.severity === "error");
@@ -290,6 +263,33 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
       "Reading opaques inside derive() should be allowed",
     );
   });
+
+  await t.step(
+    "allows reading opaques inside standalone derive()",
+    async () => {
+      const source = `/// <cts-enable />
+      import { recipe, derive, h } from "commontools";
+
+      interface Item { name: string; price: number; }
+
+      export default recipe<{ item: Item }>("test", ({ item }) => {
+        // Standalone derive (nullary form) - should allow opaque access
+        const isExpensive = derive(() => item.price > 100);
+        const doubled = derive(() => item.price * 2);
+        return <div>{isExpensive ? "Expensive" : "Affordable"} - {doubled}</div>;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Reading opaques inside standalone derive() should be allowed",
+      );
+    },
+  );
 
   await t.step("allows reading opaques inside lift()", async () => {
     const source = `/// <cts-enable />
