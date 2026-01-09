@@ -1563,7 +1563,8 @@ export const DietaryRestrictionsModule = recipe<
               Your Restrictions
             </span>
             <ct-hstack gap="2" wrap>
-              {(restrictions as unknown as Writable<RestrictionEntry[]>).map(
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              {(restrictions as any as Writable<RestrictionEntry[]>).map(
                 (item, index: number) => {
                   // Get style reactively based on item.level
                   const style = getLevelStyle(item.level);

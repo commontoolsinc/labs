@@ -475,9 +475,9 @@ export const documentSignatureWorkflow = recipe<DocumentSignatureWorkflowArgs>(
         : combined;
     })({ title: titleView, entries: logEntries });
 
-    const context: DocumentSignatureContext = {
-      signers: signers as unknown as Cell<SignerSeed[]>,
-      log: logEntries as unknown as Cell<string[]>,
+    const context = {
+      signers: signers,
+      log: logEntries,
     };
 
     return {
@@ -491,9 +491,9 @@ export const documentSignatureWorkflow = recipe<DocumentSignatureWorkflowArgs>(
       statusLine,
       progressLabel,
       activityLog,
-      markSigned: markSignerSigned(context as never),
-      markDeclined: markSignerDeclined(context as never),
-      resetSigner: resetSigner(context as never),
+      markSigned: markSignerSigned(context),
+      markDeclined: markSignerDeclined(context),
+      resetSigner: resetSigner(context),
     };
   },
 );
