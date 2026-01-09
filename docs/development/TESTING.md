@@ -83,21 +83,3 @@ Deno.exit(0);
 **Adding integration tests:**
 
 When adding runtime features, consider adding integration tests to `packages/runner/integration/` that verify the feature works end-to-end. See existing tests like `basic-persistence.test.ts` or `array_push.test.ts` for examples.
-
-### Before Merging
-
-Ensure all tests pass:
-
-```bash
-# Type checking
-deno task check
-
-# All tests
-deno task test
-
-# Formatting
-deno fmt
-
-# Linting
-deno lint
-```
