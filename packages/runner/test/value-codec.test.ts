@@ -384,5 +384,14 @@ describe("value-codec", () => {
         expect(result).toEqual([1, null, 3]);
       });
     });
+
+    describe("throws for top-level function", () => {
+      it("throws when a bare function is passed (not nested)", () => {
+        // This must throw, not return an internal symbol or other non-JSON value.
+        expect(() => toDeepStorableValue(() => {})).toThrow(
+          "Cannot store function per se",
+        );
+      });
+    });
   });
 });

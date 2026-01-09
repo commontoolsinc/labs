@@ -170,7 +170,13 @@ export function toDeepStorableValue(
     // objects. Once the codebase is tightened up to not pass such values to
     // `setRaw()`, this block should be removed (letting the error propagate).
     if (e instanceof Error && e.message.includes("function per se")) {
-      return inArray ? null : OMIT;
+      if (inArray) {
+        return null;
+      } else if (seen.size > 0) {
+        // We're inside an object (seen contains ancestors) - omit this property.
+        return OMIT;
+      }
+      // At top level - let the error propagate.
     }
     throw e;
   }
