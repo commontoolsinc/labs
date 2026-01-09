@@ -63,6 +63,7 @@ export type SubCharmType =
   | "timing"
   | "age-category"
   | "dietary-restrictions"
+  | "gender"
   // Contact modules (with labels, support multiple instances)
   | "email"
   | "phone"

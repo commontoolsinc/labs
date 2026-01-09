@@ -54,6 +54,7 @@ import {
   DietaryRestrictionsModule,
   MODULE_METADATA as DietaryMeta,
 } from "../dietary-restrictions.tsx";
+import { GenderModule, MODULE_METADATA as GenderMeta } from "../gender.tsx";
 import { EmailModule, MODULE_METADATA as EmailMeta } from "../email.tsx";
 import { MODULE_METADATA as PhoneMeta, PhoneModule } from "../phone.tsx";
 import {
@@ -202,6 +203,7 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
     DietaryMeta,
     (init) => DietaryRestrictionsModule(init as any),
   ),
+  gender: fromMetadata(GenderMeta, (init) => GenderModule(init as any)),
   email: fromMetadata(EmailMeta, (init) => EmailModule(init as any)),
   phone: fromMetadata(PhoneMeta, (init) => PhoneModule(init as any)),
   "record-icon": fromMetadata(
