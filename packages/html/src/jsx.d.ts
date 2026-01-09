@@ -3346,7 +3346,10 @@ interface CTChevronButtonAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 interface CTInputAttributes<T> extends CTHTMLAttributes<T> {
-  "$value"?: CellLike<string> | CellLike<number> | CellLike<string | number | null>;
+  "$value"?:
+    | CellLike<string>
+    | CellLike<number>
+    | CellLike<string | number | null>;
   "customStyle"?: string; // bf: I think this is going to go away one day soon
   "type"?:
     | "text"
