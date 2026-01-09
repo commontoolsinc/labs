@@ -1264,7 +1264,7 @@ export interface BuiltInLLMParams {
    * Context cells to make available to the LLM.
    * These cells appear in the system prompt with their schemas and current values.
    */
-  context?: Record<string, Cell<any>>;
+  context?: Record<string, AnyCell<any>>;
 }
 
 export interface BuiltInLLMState {
@@ -1320,7 +1320,7 @@ export type BuiltInGenerateObjectParams =
 
 export type BuiltInGenerateTextParams =
   | {
-    prompt: string;
+    prompt: BuiltInLLMContent;
     messages?: never;
     context?: Record<string, any>;
     system?: string;
@@ -2079,7 +2079,8 @@ type InnerRenderNode =
   | string
   | number
   | boolean
-  | undefined;
+  | undefined
+  | null;
 
 /** A "virtual view node", e.g. a virtual DOM element */
 export type VNode = {
