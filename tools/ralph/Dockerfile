@@ -29,7 +29,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
     apt-get install -y nodejs
 
 # Deno (install globally to /usr/local with pinned version)
-RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s v2.5.2
+RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s v2.6.4
 
 # Helix editor (requires software-properties-common from base tools)
 RUN add-apt-repository -y ppa:maveonair/helix-editor && \
