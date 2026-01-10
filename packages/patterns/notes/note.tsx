@@ -44,12 +44,12 @@ type NoteCharm = {
 };
 
 type Input = {
-  title?: Default<string, "Untitled Note">;
-  content?: Default<string, "">;
+  title?: Writable<Default<string, "Untitled Note">>;
+  content?: Writable<Default<string, "">>;
   isHidden?: Default<boolean, false>;
   noteId?: Default<string, "">;
   /** Pattern JSON for [[wiki-links]]. Defaults to creating new Notes. */
-  linkPattern?: Default<string, "">;
+  linkPattern?: Writable<Default<string, "">>;
 };
 
 /** Represents a small #note a user took to remember some text. */
@@ -402,7 +402,7 @@ const Note = pattern<Input, Output>(
     );
 
     return {
-      [NAME]: computed(() => `📝 ${title}`),
+      [NAME]: computed(() => `📝 ${title.get()}`),
       [UI]: (
         <ct-screen>
           <ct-vstack
