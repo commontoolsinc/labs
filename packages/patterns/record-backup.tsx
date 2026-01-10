@@ -668,8 +668,9 @@ export default pattern<Input, Output>(({ importJson }) => {
                   filename={`record-backup-${
                     new Date().toISOString().slice(0, 10)
                   }.json`}
-                  mime-type="application/json"
+                  mimeType="application/json"
                   variant="primary"
+                  allowAutosave
                 >
                   Download Backup
                 </ct-file-download>
