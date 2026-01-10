@@ -1,7 +1,33 @@
-import { css, html } from "lit";
+import { css, html, type PropertyValues } from "lit";
+import { state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { type CellHandle } from "@commontools/runtime-client";
 import { createStringCellController } from "../../core/cell-controller.ts";
+
+/**
+ * File System Access API types
+ * These are not yet in all TypeScript lib versions
+ */
+interface FileSystemWritableFileStream extends WritableStream {
+  write(data: BufferSource | Blob | string): Promise<void>;
+  close(): Promise<void>;
+}
+
+interface FileSystemFileHandle {
+  createWritable(): Promise<FileSystemWritableFileStream>;
+}
+
+interface FileSystemDirectoryHandle {
+  name: string;
+  getFileHandle(
+    name: string,
+    options?: { create?: boolean },
+  ): Promise<FileSystemFileHandle>;
+}
+
+declare global {
+  var showDirectoryPicker: () => Promise<FileSystemDirectoryHandle>;
+}
 
 /**
  * Check if File System Access API is available
@@ -119,16 +145,25 @@ export class CTFileDownload extends BaseElement {
       }
 
       .autosave-indicator.saved {
-        background-color: #22c55e; /* green-500 */
+        background-color: var(
+          --ct-theme-color-success,
+          var(--ct-colors-success, #22c55e)
+        );
       }
 
       .autosave-indicator.pending {
-        background-color: #f59e0b; /* amber-500 */
+        background-color: var(
+          --ct-theme-color-warning,
+          var(--ct-colors-warning, #f59e0b)
+        );
         animation: gentle-pulse 2s ease-in-out infinite;
       }
 
       .autosave-indicator.saving {
-        background-color: #3b82f6; /* blue-500 */
+        background-color: var(
+          --ct-theme-color-primary,
+          var(--ct-colors-info, #3b82f6)
+        );
       }
 
       @keyframes gentle-pulse {
@@ -164,8 +199,11 @@ export class CTFileDownload extends BaseElement {
         left: 50%;
         transform: translateX(-50%);
         padding: 4px 8px;
-        background: rgba(0, 0, 0, 0.8);
-        color: white;
+        background: var(
+          --ct-theme-color-text,
+          var(--ct-colors-gray-900, rgba(0, 0, 0, 0.8))
+        );
+        color: var(--ct-theme-color-background, var(--ct-colors-gray-50, white));
         font-size: 12px;
         border-radius: 4px;
         white-space: nowrap;
@@ -217,18 +255,35 @@ export class CTFileDownload extends BaseElement {
   declare iconOnly: boolean;
   declare allowAutosave: boolean;
 
+  @state()
   private _downloaded = false;
+
+  @state()
   private _downloading = false;
+
   private _resetTimeout?: ReturnType<typeof setTimeout>;
 
   // Autosave state
+  @state()
   private _autosaveEnabled = false;
+
   private _autosaveDirHandle: FileSystemDirectoryHandle | null = null;
   private _autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  @state()
   private _isDirty = false;
+
   private _lastSavedData: string | null = null;
+
+  @state()
   private _isSavingAutosave = false;
+
+  @state()
   private _showNotAvailableTooltip = false;
+
+  @state()
+  private _notAvailableMessage = "";
+
   private _notAvailableTooltipTimeout?: ReturnType<typeof setTimeout>;
 
   /** Maximum file size in bytes (100MB) */
@@ -319,9 +374,7 @@ export class CTFileDownload extends BaseElement {
     return new Blob([data], { type: this.mimeType });
   }
 
-  override willUpdate(
-    changedProperties: Map<string | number | symbol, unknown>,
-  ) {
+  override willUpdate(changedProperties: PropertyValues) {
     super.willUpdate(changedProperties);
 
     // Bind CellControllers when properties change
@@ -331,8 +384,10 @@ export class CTFileDownload extends BaseElement {
     if (changedProperties.has("filename")) {
       this._filenameController.bind(this.filename);
     }
+  }
 
-    // Track data changes for autosave
+  override updated(_changedProperties: PropertyValues) {
+    // Track data changes for autosave (side effect belongs in updated)
     if (this._autosaveEnabled) {
       const currentData = this._getDataValue();
       if (currentData !== this._lastSavedData) {
@@ -345,10 +400,8 @@ export class CTFileDownload extends BaseElement {
   override connectedCallback() {
     super.connectedCallback();
     // Add visibility change listener for auto-save on tab switch
-    this._boundVisibilityHandler = this._handleVisibilityChange.bind(this);
-    this._boundBeforeUnloadHandler = this._handleBeforeUnload.bind(this);
-    document.addEventListener("visibilitychange", this._boundVisibilityHandler);
-    globalThis.addEventListener("beforeunload", this._boundBeforeUnloadHandler);
+    document.addEventListener("visibilitychange", this._handleVisibilityChange);
+    globalThis.addEventListener("beforeunload", this._handleBeforeUnload);
   }
 
   override disconnectedCallback() {
@@ -363,37 +416,26 @@ export class CTFileDownload extends BaseElement {
       clearTimeout(this._notAvailableTooltipTimeout);
     }
     // Remove event listeners
-    if (this._boundVisibilityHandler) {
-      document.removeEventListener(
-        "visibilitychange",
-        this._boundVisibilityHandler,
-      );
-    }
-    if (this._boundBeforeUnloadHandler) {
-      globalThis.removeEventListener(
-        "beforeunload",
-        this._boundBeforeUnloadHandler,
-      );
-    }
+    document.removeEventListener(
+      "visibilitychange",
+      this._handleVisibilityChange,
+    );
+    globalThis.removeEventListener("beforeunload", this._handleBeforeUnload);
   }
-
-  // Event handler references for cleanup
-  private _boundVisibilityHandler?: () => void;
-  private _boundBeforeUnloadHandler?: (e: BeforeUnloadEvent) => void;
 
   /**
    * Handle visibility change - save immediately when tab becomes hidden
    */
-  private _handleVisibilityChange() {
+  private _handleVisibilityChange = () => {
     if (document.hidden && this._autosaveEnabled && this._isDirty) {
       this._performAutosave();
     }
-  }
+  };
 
   /**
    * Handle beforeunload - warn user if there are unsaved changes
    */
-  private _handleBeforeUnload(e: BeforeUnloadEvent) {
+  private _handleBeforeUnload = (e: BeforeUnloadEvent) => {
     if (this._autosaveEnabled && this._isDirty) {
       // Attempt to save (may not complete)
       this._performAutosave();
@@ -401,7 +443,7 @@ export class CTFileDownload extends BaseElement {
       e.preventDefault();
       e.returnValue = "";
     }
-  }
+  };
 
   /**
    * Enable autosave mode by prompting user for folder
@@ -414,9 +456,7 @@ export class CTFileDownload extends BaseElement {
 
     try {
       // Prompt user to select a folder
-      const dirHandle = await (globalThis as unknown as {
-        showDirectoryPicker: () => Promise<FileSystemDirectoryHandle>;
-      }).showDirectoryPicker();
+      const dirHandle = await globalThis.showDirectoryPicker();
 
       this._autosaveDirHandle = dirHandle;
       this._autosaveEnabled = true;
@@ -427,7 +467,6 @@ export class CTFileDownload extends BaseElement {
         directoryName: dirHandle.name,
       });
 
-      this.requestUpdate();
       return true;
     } catch (error) {
       // User cancelled or permission denied
@@ -450,7 +489,6 @@ export class CTFileDownload extends BaseElement {
       this._autosaveTimer = null;
     }
     this.emit("ct-autosave-disabled", {});
-    this.requestUpdate();
   }
 
   /**
@@ -463,10 +501,20 @@ export class CTFileDownload extends BaseElement {
     if (!data) return;
 
     this._isSavingAutosave = true;
-    this.requestUpdate();
 
     try {
       const blob = this._createBlob(data);
+
+      // Check file size limit to prevent hanging on huge files
+      if (blob.size > CTFileDownload.MAX_FILE_SIZE) {
+        throw new Error(
+          `File size (${
+            Math.round(blob.size / 1024 / 1024)
+          }MB) exceeds maximum allowed (${
+            Math.round(CTFileDownload.MAX_FILE_SIZE / 1024 / 1024)
+          }MB)`,
+        );
+      }
 
       // Generate timestamped filename
       const timestamp = new Date()
@@ -488,26 +536,30 @@ export class CTFileDownload extends BaseElement {
       await writable.write(blob);
       await writable.close();
 
-      // Update state
+      // Update state - check if data changed during save (race condition)
+      const currentData = this._getDataValue();
       this._lastSavedData = data;
-      this._isDirty = false;
       this._isSavingAutosave = false;
 
-      // Clear timer since we just saved
-      if (this._autosaveTimer) {
-        clearTimeout(this._autosaveTimer);
-        this._autosaveTimer = null;
+      if (currentData !== data) {
+        // Data changed during save, keep dirty and reschedule
+        this._isDirty = true;
+        this._scheduleAutosave();
+      } else {
+        this._isDirty = false;
+        // Clear timer since we just saved and data is current
+        if (this._autosaveTimer) {
+          clearTimeout(this._autosaveTimer);
+          this._autosaveTimer = null;
+        }
       }
 
       this.emit("ct-autosave-success", {
         filename,
         size: blob.size,
       });
-
-      this.requestUpdate();
     } catch (error) {
       this._isSavingAutosave = false;
-      this.requestUpdate();
 
       // Check if permission was revoked
       if ((error as Error).name === "NotAllowedError") {
@@ -541,11 +593,8 @@ export class CTFileDownload extends BaseElement {
    */
   private _showNotAvailableFeedback(message: string) {
     this._showNotAvailableTooltip = true;
-    this.classList.add("shake");
-    this.requestUpdate();
-
-    // Store the message for the tooltip
     this._notAvailableMessage = message;
+    this.classList.add("shake");
 
     if (this._notAvailableTooltipTimeout) {
       clearTimeout(this._notAvailableTooltipTimeout);
@@ -554,11 +603,8 @@ export class CTFileDownload extends BaseElement {
     this._notAvailableTooltipTimeout = setTimeout(() => {
       this._showNotAvailableTooltip = false;
       this.classList.remove("shake");
-      this.requestUpdate();
     }, 2000);
   }
-
-  private _notAvailableMessage = "";
 
   private _handleClick(e: Event) {
     e.preventDefault();
@@ -609,7 +655,6 @@ export class CTFileDownload extends BaseElement {
 
     // Set downloading state to prevent rapid clicks
     this._downloading = true;
-    this.requestUpdate();
 
     try {
       // Create blob from data
@@ -645,7 +690,6 @@ export class CTFileDownload extends BaseElement {
       // Update state for visual feedback
       this._downloaded = true;
       this._downloading = false;
-      this.requestUpdate();
 
       this.emit("ct-download-success", {
         filename,
@@ -659,11 +703,9 @@ export class CTFileDownload extends BaseElement {
       }
       this._resetTimeout = setTimeout(() => {
         this._downloaded = false;
-        this.requestUpdate();
       }, this.feedbackDuration);
     } catch (error) {
       this._downloading = false;
-      this.requestUpdate();
       this.emit("ct-download-error", {
         error: error as Error,
         filename,

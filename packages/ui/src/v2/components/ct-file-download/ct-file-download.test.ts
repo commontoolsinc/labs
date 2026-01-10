@@ -2,8 +2,114 @@
  * Tests for CTFileDownload component
  */
 import { expect } from "@std/expect";
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { CTFileDownload } from "./ct-file-download.ts";
+
+/**
+ * Interface for accessing private members of CTFileDownload in tests.
+ * We use this to cast elements for testing internal state.
+ */
+interface CTFileDownloadPrivateAccess {
+  _autosaveEnabled: boolean;
+  _autosaveDirHandle: FileSystemDirectoryHandle | null;
+  _autosaveTimer: ReturnType<typeof setTimeout> | null;
+  _isDirty: boolean;
+  _lastSavedData: string | null;
+  _isSavingAutosave: boolean;
+  _showNotAvailableTooltip: boolean;
+  _notAvailableMessage: string;
+  _notAvailableTooltipTimeout?: ReturnType<typeof setTimeout>;
+  _downloading: boolean;
+  _handleClick: (e: Event) => void;
+  _enableAutosave: () => Promise<boolean>;
+  _disableAutosave: () => void;
+  _scheduleAutosave: () => void;
+  _performAutosave: () => Promise<void>;
+  _getAutosaveIndicatorClass: () => string;
+  _getAutosaveTooltip: () => string;
+  _showNotAvailableFeedback: (message: string) => void;
+  _sanitizeFilename: (f: string) => string;
+  _createBlob: (d: string) => Blob;
+  _getFilename: () => string;
+  _getDataValue: () => string;
+  _dataController: {
+    bind: (value: string) => void;
+    getValue: () => string | undefined;
+  };
+  _filenameController: {
+    bind: (value: string) => void;
+    getValue: () => string | undefined;
+  };
+}
+
+/**
+ * Helper to clear all timers on an element to prevent test leaks
+ */
+function clearElementTimers(privateAccess: CTFileDownloadPrivateAccess) {
+  if (privateAccess._autosaveTimer) {
+    clearTimeout(privateAccess._autosaveTimer);
+    privateAccess._autosaveTimer = null;
+  }
+  if (privateAccess._notAvailableTooltipTimeout) {
+    clearTimeout(privateAccess._notAvailableTooltipTimeout);
+    privateAccess._notAvailableTooltipTimeout = undefined;
+  }
+}
+
+/**
+ * Cast element to access private members for testing
+ */
+function asPrivate(element: CTFileDownload): CTFileDownloadPrivateAccess {
+  return element as unknown as CTFileDownloadPrivateAccess;
+}
+
+/**
+ * Mock FileSystemDirectoryHandle for testing
+ */
+class MockFileSystemDirectoryHandle {
+  name = "test-folder";
+  private files = new Map<string, MockFileSystemFileHandle>();
+
+  getFileHandle(
+    name: string,
+    options?: { create?: boolean },
+  ): Promise<MockFileSystemFileHandle> {
+    if (options?.create || this.files.has(name)) {
+      const handle = new MockFileSystemFileHandle(name);
+      this.files.set(name, handle);
+      return Promise.resolve(handle);
+    }
+    return Promise.reject(new DOMException("File not found", "NotFoundError"));
+  }
+}
+
+/**
+ * Mock FileSystemFileHandle for testing
+ */
+class MockFileSystemFileHandle {
+  constructor(public name: string) {}
+
+  createWritable(): Promise<MockFileSystemWritableFileStream> {
+    return Promise.resolve(new MockFileSystemWritableFileStream());
+  }
+}
+
+/**
+ * Mock FileSystemWritableFileStream for testing
+ */
+class MockFileSystemWritableFileStream {
+  writtenData: Blob | null = null;
+
+  write(data: Blob): Promise<void> {
+    this.writtenData = data;
+    return Promise.resolve();
+  }
+
+  close(): Promise<void> {
+    // No-op for testing
+    return Promise.resolve();
+  }
+}
 
 describe("CTFileDownload", () => {
   describe("component definition", () => {
@@ -206,6 +312,724 @@ describe("CTFileDownload", () => {
         _getAutosaveTooltip: () => string;
       })._getAutosaveTooltip();
       expect(tooltip).toBe("");
+    });
+  });
+
+  describe("Option+click behavior", () => {
+    it("should track not available state for feedback", () => {
+      const element = new CTFileDownload();
+      const privateAccess = asPrivate(element);
+
+      // Directly set the feedback state (as _showNotAvailableFeedback would do)
+      privateAccess._showNotAvailableTooltip = true;
+      privateAccess._notAvailableMessage =
+        "Auto-save not available for this download";
+
+      // Verify state can be set and read
+      expect(privateAccess._showNotAvailableTooltip).toBe(true);
+      expect(privateAccess._notAvailableMessage).toBe(
+        "Auto-save not available for this download",
+      );
+    });
+
+    it("should not enable autosave when allowAutosave is false", () => {
+      const element = new CTFileDownload();
+      element.allowAutosave = false;
+      const privateAccess = asPrivate(element);
+
+      // Direct check - autosave should remain disabled
+      expect(privateAccess._autosaveEnabled).toBe(false);
+      expect(element.allowAutosave).toBe(false);
+    });
+
+    it("should attempt to enable autosave when Option+click with allowAutosave=true", async () => {
+      const element = new CTFileDownload();
+      element.allowAutosave = true;
+      const privateAccess = asPrivate(element);
+
+      // Mock showDirectoryPicker to simulate user cancellation
+      const originalShowDirectoryPicker = (
+        globalThis as unknown as {
+          showDirectoryPicker?: () => Promise<unknown>;
+        }
+      ).showDirectoryPicker;
+
+      let pickerCalled = false;
+      (
+        globalThis as unknown as { showDirectoryPicker: () => Promise<never> }
+      ).showDirectoryPicker = () => {
+        pickerCalled = true;
+        const error = new DOMException("User cancelled", "AbortError");
+        return Promise.reject(error);
+      };
+
+      try {
+        // Directly call _enableAutosave to test the behavior
+        await privateAccess._enableAutosave();
+
+        expect(pickerCalled).toBe(true);
+      } finally {
+        // Restore original
+        if (originalShowDirectoryPicker) {
+          (
+            globalThis as unknown as {
+              showDirectoryPicker: () => Promise<unknown>;
+            }
+          ).showDirectoryPicker = originalShowDirectoryPicker;
+        } else {
+          delete (
+            globalThis as unknown as { showDirectoryPicker?: unknown }
+          ).showDirectoryPicker;
+        }
+      }
+    });
+
+    it("should not trigger autosave on regular click (no altKey) when autosave not enabled", () => {
+      const element = new CTFileDownload();
+      element.allowAutosave = true;
+      const privateAccess = asPrivate(element);
+
+      // Autosave is not enabled yet (would need directory picker)
+      expect(privateAccess._autosaveEnabled).toBe(false);
+
+      // Regular click behavior would trigger download, not autosave
+      // Since autosave is not enabled, clicking would download
+    });
+
+    it("should disable autosave when _disableAutosave is called", () => {
+      const element = new CTFileDownload();
+      element.allowAutosave = true;
+      const privateAccess = asPrivate(element);
+
+      // Set up autosave as enabled
+      privateAccess._autosaveEnabled = true;
+      privateAccess._autosaveDirHandle =
+        new MockFileSystemDirectoryHandle() as unknown as FileSystemDirectoryHandle;
+
+      let disabledEventFired = false;
+      element.addEventListener("ct-autosave-disabled", () => {
+        disabledEventFired = true;
+      });
+
+      privateAccess._disableAutosave();
+
+      expect(privateAccess._autosaveEnabled).toBe(false);
+      expect(disabledEventFired).toBe(true);
+    });
+
+    it("should toggle autosave off when Option+click while autosave is enabled", () => {
+      const element = new CTFileDownload();
+      element.allowAutosave = true;
+      const privateAccess = asPrivate(element);
+
+      // Set up autosave as enabled
+      privateAccess._autosaveEnabled = true;
+      privateAccess._autosaveDirHandle =
+        new MockFileSystemDirectoryHandle() as unknown as FileSystemDirectoryHandle;
+
+      // Verify initial state
+      expect(privateAccess._autosaveEnabled).toBe(true);
+
+      // Disable should work
+      privateAccess._disableAutosave();
+
+      expect(privateAccess._autosaveEnabled).toBe(false);
+      expect(privateAccess._autosaveDirHandle).toBeNull();
+    });
+  });
+
+  describe("timer scheduling", () => {
+    let element: CTFileDownload;
+    let privateAccess: CTFileDownloadPrivateAccess;
+
+    beforeEach(() => {
+      element = new CTFileDownload();
+      element.data = "test data";
+      privateAccess = asPrivate(element);
+    });
+
+    afterEach(() => {
+      // Clean up any timers
+      if (privateAccess._autosaveTimer) {
+        clearTimeout(privateAccess._autosaveTimer);
+        privateAccess._autosaveTimer = null;
+      }
+    });
+
+    it("should set a timer when _scheduleAutosave is called with autosave enabled", () => {
+      privateAccess._autosaveEnabled = true;
+
+      expect(privateAccess._autosaveTimer).toBeNull();
+
+      privateAccess._scheduleAutosave();
+
+      expect(privateAccess._autosaveTimer).not.toBeNull();
+    });
+
+    it("should not set a timer when autosave is disabled", () => {
+      privateAccess._autosaveEnabled = false;
+
+      privateAccess._scheduleAutosave();
+
+      expect(privateAccess._autosaveTimer).toBeNull();
+    });
+
+    it("should reset the timer when _scheduleAutosave is called again", () => {
+      privateAccess._autosaveEnabled = true;
+
+      privateAccess._scheduleAutosave();
+      const firstTimer = privateAccess._autosaveTimer;
+
+      privateAccess._scheduleAutosave();
+      const secondTimer = privateAccess._autosaveTimer;
+
+      // Timers should be different (old one cleared, new one created)
+      expect(secondTimer).not.toBe(firstTimer);
+      expect(secondTimer).not.toBeNull();
+    });
+
+    it("should have timer cleared by _disableAutosave", () => {
+      privateAccess._autosaveEnabled = true;
+      privateAccess._scheduleAutosave();
+
+      expect(privateAccess._autosaveTimer).not.toBeNull();
+
+      // _disableAutosave clears the timer (this is called during disconnect)
+      privateAccess._disableAutosave();
+
+      expect(privateAccess._autosaveTimer).toBeNull();
+    });
+  });
+
+  describe("state transition - indicator class", () => {
+    let element: CTFileDownload;
+    let privateAccess: CTFileDownloadPrivateAccess;
+
+    beforeEach(() => {
+      element = new CTFileDownload();
+      privateAccess = asPrivate(element);
+    });
+
+    it("should return empty string when autosave is disabled", () => {
+      privateAccess._autosaveEnabled = false;
+
+      expect(privateAccess._getAutosaveIndicatorClass()).toBe("");
+    });
+
+    it('should return "saved" when autosave enabled and not dirty or saving', () => {
+      privateAccess._autosaveEnabled = true;
+      privateAccess._isDirty = false;
+      privateAccess._isSavingAutosave = false;
+
+      expect(privateAccess._getAutosaveIndicatorClass()).toBe("saved");
+    });
+
+    it('should return "pending" when autosave enabled and dirty but not saving', () => {
+      privateAccess._autosaveEnabled = true;
+      privateAccess._isDirty = true;
+      privateAccess._isSavingAutosave = false;
+
+      expect(privateAccess._getAutosaveIndicatorClass()).toBe("pending");
+    });
+
+    it('should return "saving" when autosave enabled and currently saving', () => {
+      privateAccess._autosaveEnabled = true;
+      privateAccess._isSavingAutosave = true;
+      // _isDirty state doesn't matter when saving
+
+      expect(privateAccess._getAutosaveIndicatorClass()).toBe("saving");
+    });
+  });
+
+  describe("state transition - tooltip", () => {
+    let element: CTFileDownload;
+    let privateAccess: CTFileDownloadPrivateAccess;
+
+    beforeEach(() => {
+      element = new CTFileDownload();
+      privateAccess = asPrivate(element);
+    });
+
+    it("should return empty string when autosave is disabled", () => {
+      privateAccess._autosaveEnabled = false;
+      privateAccess._showNotAvailableTooltip = false;
+
+      expect(privateAccess._getAutosaveTooltip()).toBe("");
+    });
+
+    it("should return not available message when tooltip is showing", () => {
+      privateAccess._showNotAvailableTooltip = true;
+      privateAccess._notAvailableMessage = "Custom error message";
+
+      expect(privateAccess._getAutosaveTooltip()).toBe("Custom error message");
+    });
+
+    it('should return "Saving..." when currently saving', () => {
+      privateAccess._autosaveEnabled = true;
+      privateAccess._isSavingAutosave = true;
+
+      expect(privateAccess._getAutosaveTooltip()).toBe("Saving...");
+    });
+
+    it('should return "Auto-save on · Saving soon..." when dirty', () => {
+      privateAccess._autosaveEnabled = true;
+      privateAccess._isDirty = true;
+      privateAccess._isSavingAutosave = false;
+
+      expect(privateAccess._getAutosaveTooltip()).toBe(
+        "Auto-save on · Saving soon...",
+      );
+    });
+
+    it('should return "Auto-save on · All changes saved" when saved', () => {
+      privateAccess._autosaveEnabled = true;
+      privateAccess._isDirty = false;
+      privateAccess._isSavingAutosave = false;
+
+      expect(privateAccess._getAutosaveTooltip()).toBe(
+        "Auto-save on · All changes saved",
+      );
+    });
+  });
+
+  describe("File System Access API mock tests", () => {
+    let element: CTFileDownload;
+    let privateAccess: CTFileDownloadPrivateAccess;
+    let originalShowDirectoryPicker: (() => Promise<unknown>) | undefined;
+
+    beforeEach(() => {
+      element = new CTFileDownload();
+      element.allowAutosave = true;
+      element.data = "test data content";
+      element.filename = "test-file.txt";
+      element.mimeType = "text/plain";
+      privateAccess = asPrivate(element);
+
+      // Store original
+      originalShowDirectoryPicker = (
+        globalThis as unknown as {
+          showDirectoryPicker?: () => Promise<unknown>;
+        }
+      ).showDirectoryPicker;
+    });
+
+    afterEach(() => {
+      // Restore original
+      if (originalShowDirectoryPicker) {
+        (
+          globalThis as unknown as {
+            showDirectoryPicker: () => Promise<unknown>;
+          }
+        ).showDirectoryPicker = originalShowDirectoryPicker;
+      } else {
+        delete (
+          globalThis as unknown as { showDirectoryPicker?: unknown }
+        ).showDirectoryPicker;
+      }
+
+      // Clean up timers
+      if (privateAccess._autosaveTimer) {
+        clearTimeout(privateAccess._autosaveTimer);
+      }
+    });
+
+    it("should enable autosave successfully when directory picker returns handle", async () => {
+      const mockDirHandle = new MockFileSystemDirectoryHandle();
+
+      (
+        globalThis as unknown as {
+          showDirectoryPicker: () => Promise<MockFileSystemDirectoryHandle>;
+        }
+      ).showDirectoryPicker = () => Promise.resolve(mockDirHandle);
+
+      let enabledEventFired = false;
+      let eventDetail: { directoryName?: string } = {};
+      element.addEventListener(
+        "ct-autosave-enabled",
+        ((e: CustomEvent<{ directoryName: string }>) => {
+          enabledEventFired = true;
+          eventDetail = e.detail;
+        }) as EventListener,
+      );
+
+      const result = await privateAccess._enableAutosave();
+
+      expect(result).toBe(true);
+      expect(privateAccess._autosaveEnabled).toBe(true);
+      expect(privateAccess._autosaveDirHandle).toBe(
+        mockDirHandle as unknown as FileSystemDirectoryHandle,
+      );
+      expect(enabledEventFired).toBe(true);
+      expect(eventDetail.directoryName).toBe("test-folder");
+    });
+
+    it("should return false and not show error when user cancels (AbortError)", async () => {
+      (
+        globalThis as unknown as { showDirectoryPicker: () => Promise<never> }
+      ).showDirectoryPicker = () => {
+        const error = new DOMException("User cancelled", "AbortError");
+        return Promise.reject(error);
+      };
+
+      const result = await privateAccess._enableAutosave();
+
+      expect(result).toBe(false);
+      expect(privateAccess._autosaveEnabled).toBe(false);
+      // Should not show error feedback for AbortError (user cancellation)
+      expect(privateAccess._showNotAvailableTooltip).toBe(false);
+    });
+
+    it("should return false when permission denied (mocking classList)", async () => {
+      // Mock classList to avoid DOM dependency
+      (element as unknown as {
+        classList: { add: () => void; remove: () => void };
+      }).classList = {
+        add: () => {},
+        remove: () => {},
+      };
+
+      (
+        globalThis as unknown as { showDirectoryPicker: () => Promise<never> }
+      ).showDirectoryPicker = () => {
+        const error = new DOMException(
+          "Permission denied",
+          "NotAllowedError",
+        );
+        return Promise.reject(error);
+      };
+
+      try {
+        const result = await privateAccess._enableAutosave();
+
+        expect(result).toBe(false);
+        expect(privateAccess._autosaveEnabled).toBe(false);
+        expect(privateAccess._showNotAvailableTooltip).toBe(true);
+        expect(privateAccess._notAvailableMessage).toBe(
+          "Could not access folder",
+        );
+      } finally {
+        // Clean up timers to prevent leaks
+        clearElementTimers(privateAccess);
+        // Restore for other tests
+        delete (
+          globalThis as unknown as { showDirectoryPicker?: unknown }
+        ).showDirectoryPicker;
+      }
+    });
+
+    it("should return false when File System Access API is not available (mocking classList)", async () => {
+      // Mock classList to avoid DOM dependency
+      (element as unknown as {
+        classList: { add: () => void; remove: () => void };
+      }).classList = {
+        add: () => {},
+        remove: () => {},
+      };
+
+      // Ensure the API is not available
+      const current = (
+        globalThis as unknown as { showDirectoryPicker?: unknown }
+      ).showDirectoryPicker;
+      delete (
+        globalThis as unknown as { showDirectoryPicker?: unknown }
+      ).showDirectoryPicker;
+
+      try {
+        const result = await privateAccess._enableAutosave();
+
+        expect(result).toBe(false);
+        expect(privateAccess._autosaveEnabled).toBe(false);
+        expect(privateAccess._showNotAvailableTooltip).toBe(true);
+        expect(privateAccess._notAvailableMessage).toBe(
+          "Auto-save requires Chrome or Edge",
+        );
+      } finally {
+        // Clean up timers to prevent leaks
+        clearElementTimers(privateAccess);
+        // Restore if it existed
+        if (current) {
+          (
+            globalThis as unknown as { showDirectoryPicker: unknown }
+          ).showDirectoryPicker = current;
+        }
+      }
+    });
+  });
+
+  describe("event emission", () => {
+    let element: CTFileDownload;
+    let privateAccess: CTFileDownloadPrivateAccess;
+    let originalShowDirectoryPicker: (() => Promise<unknown>) | undefined;
+
+    beforeEach(() => {
+      element = new CTFileDownload();
+      element.allowAutosave = true;
+      element.data = "test data for events";
+      element.filename = "event-test.txt";
+      element.mimeType = "text/plain";
+      privateAccess = asPrivate(element);
+
+      originalShowDirectoryPicker = (
+        globalThis as unknown as {
+          showDirectoryPicker?: () => Promise<unknown>;
+        }
+      ).showDirectoryPicker;
+    });
+
+    afterEach(() => {
+      if (originalShowDirectoryPicker) {
+        (
+          globalThis as unknown as {
+            showDirectoryPicker: () => Promise<unknown>;
+          }
+        ).showDirectoryPicker = originalShowDirectoryPicker;
+      } else {
+        delete (
+          globalThis as unknown as { showDirectoryPicker?: unknown }
+        ).showDirectoryPicker;
+      }
+
+      if (privateAccess._autosaveTimer) {
+        clearTimeout(privateAccess._autosaveTimer);
+      }
+    });
+
+    it("should emit ct-autosave-enabled event with directory name", async () => {
+      const mockDirHandle = new MockFileSystemDirectoryHandle();
+      mockDirHandle.name = "my-backup-folder";
+
+      (
+        globalThis as unknown as {
+          showDirectoryPicker: () => Promise<MockFileSystemDirectoryHandle>;
+        }
+      ).showDirectoryPicker = () => Promise.resolve(mockDirHandle);
+
+      let eventDetail: { directoryName?: string } = {};
+      element.addEventListener(
+        "ct-autosave-enabled",
+        ((e: CustomEvent<{ directoryName: string }>) => {
+          eventDetail = e.detail;
+        }) as EventListener,
+      );
+
+      await privateAccess._enableAutosave();
+
+      expect(eventDetail.directoryName).toBe("my-backup-folder");
+    });
+
+    it("should emit ct-autosave-disabled event", () => {
+      privateAccess._autosaveEnabled = true;
+      privateAccess._autosaveDirHandle =
+        new MockFileSystemDirectoryHandle() as unknown as FileSystemDirectoryHandle;
+
+      let disabledFired = false;
+      element.addEventListener("ct-autosave-disabled", () => {
+        disabledFired = true;
+      });
+
+      privateAccess._disableAutosave();
+
+      expect(disabledFired).toBe(true);
+      expect(privateAccess._autosaveEnabled).toBe(false);
+    });
+
+    it("should emit ct-autosave-success event with filename and size on successful save", async () => {
+      const mockDirHandle = new MockFileSystemDirectoryHandle();
+      privateAccess._autosaveEnabled = true;
+      privateAccess._autosaveDirHandle =
+        mockDirHandle as unknown as FileSystemDirectoryHandle;
+      privateAccess._isDirty = true;
+
+      // Bind the data controller directly for testing
+      privateAccess._dataController.bind("test data for events");
+      privateAccess._filenameController.bind("event-test.txt");
+
+      let eventDetail: { filename?: string; size?: number } = {};
+      element.addEventListener(
+        "ct-autosave-success",
+        ((e: CustomEvent<{ filename: string; size: number }>) => {
+          eventDetail = e.detail;
+        }) as EventListener,
+      );
+
+      await privateAccess._performAutosave();
+
+      expect(eventDetail.filename).toMatch(/^event-test-.*\.txt$/);
+      expect(typeof eventDetail.size).toBe("number");
+      expect(eventDetail.size).toBeGreaterThan(0);
+    });
+
+    it("should emit ct-autosave-error event on failure", async () => {
+      // Create a mock that throws on write
+      const mockDirHandle = {
+        name: "test-folder",
+        getFileHandle: () =>
+          Promise.resolve({
+            createWritable: () =>
+              Promise.resolve({
+                write: () => Promise.reject(new Error("Write failed")),
+                close: () => Promise.resolve(),
+              }),
+          }),
+      };
+
+      privateAccess._autosaveEnabled = true;
+      privateAccess._autosaveDirHandle =
+        mockDirHandle as unknown as FileSystemDirectoryHandle;
+      privateAccess._isDirty = true;
+
+      // Bind data controller
+      privateAccess._dataController.bind("test data for error");
+
+      let errorEventFired = false;
+      let eventError: Error | undefined;
+      element.addEventListener(
+        "ct-autosave-error",
+        ((e: CustomEvent<{ error: Error }>) => {
+          errorEventFired = true;
+          eventError = e.detail.error;
+        }) as EventListener,
+      );
+
+      await privateAccess._performAutosave();
+
+      expect(errorEventFired).toBe(true);
+      expect(eventError?.message).toBe("Write failed");
+    });
+
+    it("should disable autosave and emit error when permission is revoked", async () => {
+      // Mock classList to avoid DOM dependency
+      (element as unknown as {
+        classList: { add: () => void; remove: () => void };
+      }).classList = {
+        add: () => {},
+        remove: () => {},
+      };
+
+      const mockDirHandle = {
+        name: "test-folder",
+        getFileHandle: () => {
+          const error = new DOMException("Access revoked", "NotAllowedError");
+          return Promise.reject(error);
+        },
+      };
+
+      privateAccess._autosaveEnabled = true;
+      privateAccess._autosaveDirHandle =
+        mockDirHandle as unknown as FileSystemDirectoryHandle;
+      privateAccess._isDirty = true;
+
+      // Bind data controller
+      privateAccess._dataController.bind("test data for permission revoked");
+
+      let disabledFired = false;
+      let errorFired = false;
+
+      element.addEventListener("ct-autosave-disabled", () => {
+        disabledFired = true;
+      });
+      element.addEventListener("ct-autosave-error", () => {
+        errorFired = true;
+      });
+
+      try {
+        await privateAccess._performAutosave();
+
+        expect(disabledFired).toBe(true);
+        expect(errorFired).toBe(true);
+        expect(privateAccess._autosaveEnabled).toBe(false);
+      } finally {
+        // Clean up timers to prevent leaks
+        clearElementTimers(privateAccess);
+      }
+    });
+  });
+
+  describe("autosave perform operation", () => {
+    let element: CTFileDownload;
+    let privateAccess: CTFileDownloadPrivateAccess;
+
+    beforeEach(() => {
+      element = new CTFileDownload();
+      element.data = "content to save";
+      element.filename = "save-test.json";
+      element.mimeType = "application/json";
+      privateAccess = asPrivate(element);
+    });
+
+    afterEach(() => {
+      if (privateAccess._autosaveTimer) {
+        clearTimeout(privateAccess._autosaveTimer);
+      }
+    });
+
+    it("should not perform autosave if no directory handle", async () => {
+      privateAccess._autosaveEnabled = true;
+      privateAccess._autosaveDirHandle = null;
+      privateAccess._isDirty = true;
+
+      let successFired = false;
+      element.addEventListener("ct-autosave-success", () => {
+        successFired = true;
+      });
+
+      await privateAccess._performAutosave();
+
+      expect(successFired).toBe(false);
+    });
+
+    it("should not perform autosave if already saving", async () => {
+      const mockDirHandle = new MockFileSystemDirectoryHandle();
+      privateAccess._autosaveEnabled = true;
+      privateAccess._autosaveDirHandle =
+        mockDirHandle as unknown as FileSystemDirectoryHandle;
+      privateAccess._isSavingAutosave = true;
+
+      let successCount = 0;
+      element.addEventListener("ct-autosave-success", () => {
+        successCount++;
+      });
+
+      await privateAccess._performAutosave();
+
+      expect(successCount).toBe(0);
+    });
+
+    it("should update state after successful autosave", async () => {
+      const mockDirHandle = new MockFileSystemDirectoryHandle();
+      privateAccess._autosaveEnabled = true;
+      privateAccess._autosaveDirHandle =
+        mockDirHandle as unknown as FileSystemDirectoryHandle;
+      privateAccess._isDirty = true;
+      privateAccess._lastSavedData = "old data";
+
+      // Bind the data controller
+      privateAccess._dataController.bind("content to save");
+
+      await privateAccess._performAutosave();
+
+      expect(privateAccess._isDirty).toBe(false);
+      expect(privateAccess._lastSavedData).toBe("content to save");
+      expect(privateAccess._isSavingAutosave).toBe(false);
+    });
+
+    it("should clear timer after successful autosave", async () => {
+      const mockDirHandle = new MockFileSystemDirectoryHandle();
+      privateAccess._autosaveEnabled = true;
+      privateAccess._autosaveDirHandle =
+        mockDirHandle as unknown as FileSystemDirectoryHandle;
+      privateAccess._isDirty = true;
+
+      // Bind the data controller
+      privateAccess._dataController.bind("content to save for timer test");
+
+      // Set up a timer first
+      privateAccess._scheduleAutosave();
+      expect(privateAccess._autosaveTimer).not.toBeNull();
+
+      await privateAccess._performAutosave();
+
+      expect(privateAccess._autosaveTimer).toBeNull();
     });
   });
 });
