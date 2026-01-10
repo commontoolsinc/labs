@@ -1,349 +1,261 @@
 # Notification System Design
 
-> **Status**: Draft v4 — Ready for Review
+> **Status**: Draft v5 — Ready for Review
 > **Date**: 2026-01-09
-> **Author**: Alex + Claude
 > **Branch**: `feat/notifications-system`
 
 ---
 
-## TL;DR (30 seconds)
+## Decisions Needing Your Input
 
-**What**: Patterns can notify users about content. Notifications aggregate in an inbox in home space. Users control what interrupts them.
+### 1. Charm × Channel for user control?
 
-**Key decisions needing validation**:
-1. **Charm × Channel control** — Users mute by charm, by channel, or both. Is this the right granularity?
-2. **notify() as built-in** — Runtime injects charm identity. Patterns can't spoof who they are.
-3. **Annotations for seen state** — Your "seen" annotations are private, stored in your space. Multi-user ready.
-4. **Tauri as dumb projection** — Inbox owns state; Tauri just renders to OS. Scheduled notifications for background snooze.
+Every notification has a `(charmId, channelId)` coordinate. Users can mute:
+- `*:background` — all background notifications from any charm
+- `slack:*` — everything from Slack charm
+- `slack:messages` — just Slack's messages, keep Email's messages
 
----
+**The tradeoff**: Channels are folksonomy (shared namespace). Charms using `channel: 'messages'` share settings by default. The per-charm override is the escape hatch.
 
-## The 3-Minute Version
-
-### The Core Model
+**Question**: Is two-dimensional control right, or is per-charm enough?
 
-```
-Pattern calls notify({ ref: myCell, channel: 'messages' })
-                          ↓
-Runtime injects charm identity (did:charm:..., slug, name)
-                          ↓
-Inbox pattern in home space receives notification
-                          ↓
-User rules applied: Is this charm:channel muted?
-                          ↓
-        ┌─────────────────┴─────────────────┐
-        ↓                                   ↓
-   Show in inbox                      Discard silently
-   Update badge                       (muted)
-   Maybe OS notification
-   Maybe sound
-```
-
-### Two State Machines (Android's Key Insight)
-
-| State Machine | Owner | Purpose |
-|---------------|-------|---------|
-| **Notification state** | Inbox | Is this active/noticed/dismissed/snoozed? |
-| **Content seen state** | Annotations | Has user viewed the actual content? |
-
-These are **independent**. You can dismiss without viewing. You can view without dismissing. Inbox observes seen state reactively.
-
-### User Control: Charm × Channel
-
-Every notification has a coordinate: `(charmId, channelId)`
-
-```
-                     Channels
-                 messages  reminders  background
-              ┌──────────┬──────────┬──────────┐
-Charms   Chat │ ●        │          │          │
-              ├──────────┼──────────┼──────────┤
-        Email │ ●        │ ●        │ ●        │
-              └──────────┴──────────┴──────────┘
-```
+### 2. Runtime injects charm identity?
 
-**User rules**:
-- `*:background` → Mute all background notifications
-- `did:charm:slack:*` → Mute everything from Slack
-- `did:charm:slack:messages` → Mute Slack messages, keep Email messages
+`notify()` is a built-in. Runtime injects `charmId` (the DID), `charmSlug`, and `charmName` from execution context. Patterns cannot specify or spoof their identity.
 
-**Why charm DID?** Stable identity. Renaming "Slack Sync" to "Slack Integration" doesn't break rules.
+**Question**: Any concerns with this approach?
 
-### Channels are Folksonomy
+### 3. Notification state vs content seen state?
 
-Multiple charms using `channel: 'messages'` share user settings. Mute "messages" → all message-like notifications muted. This is a feature for coordination, with per-charm escape hatch.
-
----
-
-## The 10-Minute Version
-
-### Data Model
-
-```typescript
-interface InboxEntry {
-  id: string;
-  ref: NormalizedLink;           // Cross-space reference to content
-  addedAt: Date;
-
-  // Notification state (inbox-owned)
-  state: 'active' | 'noticed' | 'dismissed' | 'snoozed';
-  snoozedUntil?: Date;
-  expiresAt?: Date;              // Optional auto-dismiss
-
-  // Charm identity (injected by runtime)
-  charmId: string;               // did:charm:... — stable
-  charmSlug: string;             // Current slug
-  charmName: string;             // Current display name
-
-  // Channel
-  channelId: string;             // Folksonomy coordination
-
-  // Grouping
-  groupKey: string | null;       // Visual batching
-
-  // Cached for display
-  cachedName?: string;
-  cachedPreview?: string;
-}
-```
-
-### The notify() API
-
-```typescript
-// Built-in, available in all patterns
-notify({ ref: todoItem });
-
-// With channel
-notify({
-  ref: message,
-  channel: 'messages',
-  channelImportance: 'high',
-});
-
-// With expiry
-notify({
-  ref: eventReminder,
-  channel: 'reminders',
-  expiresAt: event.startTime,
-});
-```
-
-Runtime injects `charmId`, `charmSlug`, `charmName` from execution context. Patterns cannot lie about identity.
+Two independent state machines (Android's model):
 
-### Importance Levels
+| State Machine | Owner | States |
+|---------------|-------|--------|
+| **Notification** | Inbox pattern | active → noticed → dismissed (or snoozed) |
+| **Content seen** | Annotations | unseen → seen |
 
-| Level | Sound | OS Notification | Use Case |
-|-------|-------|-----------------|----------|
-| `urgent` | Yes | Heads-up | Calls, alarms, timers |
-| `high` | Yes | Yes | Direct messages |
-| `default` | Yes | Optional | Most notifications |
-| `low` | No | No | Social updates |
-| `min` | No | No | Background sync |
+"Noticed" = user saw the notification in inbox. "Seen" = user viewed the actual content.
 
-### Annotations (Seen State)
+User can dismiss without viewing (clear inbox, don't mark content seen). User can view content in the source charm, which marks it seen; inbox observes this reactively and can auto-dismiss.
 
-```typescript
-// Multi-user: seen state is per-user, private
-markSeen(messageRef);  // Writes to YOUR annotations in YOUR space
+**Question**: Is this separation clear? Any issues with inbox observing annotation changes?
 
-// Inbox checks seen state
-function isContentSeen(ref: NormalizedLink): boolean {
-  const annotation = getAnnotation(ref);
-  if (annotation?.seen) return true;
+### 4. Scheduled OS notifications for background snooze?
 
-  // Fallback for single-user patterns
-  const content = $(ref);
-  if (content?.seen) return true;
+When app is open, snooze uses `wish('#now')` reactively. When app is closed, we schedule an OS notification via Tauri for the wake-up time.
 
-  return false;
-}
-```
+**Question**: Is this the right split? Should Tauri own more?
 
-**Why annotations?** In multi-user, you can't write "seen" to shared content. Your seen state is private.
+### 5. What belongs in Phase 1?
 
-### Time Reactivity
-
-```typescript
-// wish('#now') provides reactive time
-const now = wish('#now', { interval: 1000 });
-
-// Expiry and snooze are just computeds
-const activeEntries = computed(() => {
-  const t = now.get();
-  return entries
-    .filter(e => !e.expiresAt || e.expiresAt > t)
-    .map(e => {
-      if (e.state === 'snoozed' && e.snoozedUntil <= t) {
-        return { ...e, state: 'active' };
-      }
-      return e;
-    });
-});
-```
-
-### Tauri Integration
-
-**Principle**: Inbox owns state. Tauri is a dumb renderer.
-
-| Tauri Does | Tauri Does NOT Do |
-|------------|-------------------|
-| Show OS notification | Decide when to notify |
-| Cancel OS notification | Track notification state |
-| Update badge | Handle snooze logic |
-| Schedule future notification | Rate limit |
-| Emit click/dismiss events | Own any state |
-
-**Background snooze**: When user snoozes, we schedule an OS notification for wake-up time. Works even when app is closed.
-
-```typescript
-// When user snoozes
-inbox.snooze({ id: entryId, until });
-tauriScheduleNotification({
-  id: `snooze-${entryId}`,
-  at: until,
-  title: entry.charmName,
-  body: 'Snoozed reminder',
-});
-```
-
----
-
-## Deep Dive: Key Design Decisions
-
-### Why Charm DID for Identity?
-
-**Problem**: Users need to mute specific charms. What identifies a charm?
-
-| Option | Stability | Uniqueness |
-|--------|-----------|------------|
-| Display name | Changes on rename | Not unique |
-| Slug | Changes on rename | Unique within space |
-| **Charm DID** | Content-addressed, stable | Globally unique |
-
-Charm DID survives renames. Rule for "Slack Sync" still works when renamed to "Slack Integration".
-
-### Why Folksonomy Channels?
-
-**Problem**: How do charms coordinate notification categories?
-
-**Android's answer**: Per-app channels. No coordination.
-
-**Our answer**: Shared namespace. `channel: 'messages'` from any charm shares settings.
-
-**Tradeoff**:
-- Pro: User mutes "messages" → all message-like things muted
-- Con: User can't mute Slack messages but keep Email messages
-
-**Solution**: Charm × Channel rules. Folksonomy for coordination, per-charm override for escape.
-
-### Why Two State Machines?
-
-**Problem**: When I view a message, does the notification go away?
-
-**Android's answer**: They're separate. App owns "read" state. OS owns notification state. Linked but independent.
-
-**Our answer**: Same. Inbox owns notification state. Source/annotations own seen state. Inbox observes seen state reactively.
-
-**Benefits**:
-- Dismiss without viewing ✓
-- View without dismissing ✓
-- View → auto-dismiss ✓ (optional, reactive)
-- Snooze (changes notification state, not seen state) ✓
-
-### Why Annotations for Seen State?
-
-**Problem**: In multi-user, where does "seen" live?
-
-| Option | Works for Multi-User? |
-|--------|----------------------|
-| `message.seen = true` | No — shared content |
-| `message.seenBy.push(me)` | Privacy leak |
-| **My annotation on message** | Yes — my space, my data |
-
-Annotations are private. Your seen state doesn't leak to others.
-
-### Why Tauri as Dumb Projection?
-
-**Problem**: Who owns notification state? Rust or TypeScript?
-
-**Answer**: TypeScript (inbox pattern). Tauri just projects.
-
-**Benefits**:
-- Single source of truth
-- Testable without Tauri
-- Works in browser (fallback to Web Notifications)
-- Minimal Rust code (~150 lines)
-
-**Snooze twist**: Reactive computations don't run when app is closed. We schedule OS notifications for background snooze.
-
----
-
-## Grouping
-
-Notifications can be grouped for visual batching:
-
-```typescript
-notify({
-  ref: message,
-  channel: 'messages',
-  group: `conversation:${conversationId}`,
-  groupTitle: 'Team Chat',
-});
-```
-
-- Same `group` → batched visually
-- One sound per group arrival, not per notification
-- Dismiss group → dismisses all entries
-- Group is orthogonal to channel (channel = interruption, group = batching)
-
----
-
-## Implementation Phases
-
-### Phase 1: MVP
+Proposed MVP:
 - Inbox pattern with entries cell
-- `notify()` built-in with charm identity
-- Default channel only
-- Basic inbox UI (list, dismiss)
-- Annotations shim
+- `notify()` built-in with charm identity injection
+- States: active, dismissed only (no noticed/snoozed yet)
+- Default channel only (no user rules yet)
+- Annotations shim for seen state
+- Basic inbox UI in shell
 
-### Phase 2: Full State Machine + Channels
-- States: active, noticed, dismissed, snoozed
-- Channel system with folksonomy
-- Charm × channel user rules
-- `#now` for time-based features
-
-### Phase 3: Tauri
-- OS notifications as projection
-- Scheduled notifications for snooze
-- Badge sync
-- Deep linking
-
-### Phase 4: Production Polish
-- Grouping
-- Channel filtering
-- Real annotations (remove shim)
-- Multi-device sync
+**Question**: Too much? Too little?
 
 ---
 
 ## Open Questions
 
-1. **Rule conflict resolution**: When two rules match with same specificity, last-defined wins. Is this right?
+1. **Rate limiting** — Where enforced? Per-charm quotas? What happens when exceeded?
 
-2. **Snooze UI**: What snooze intervals? "1 hour", "Tomorrow morning", custom?
+2. **Deleted content** — Notification references content that's deleted or access revoked. Show tombstone? Auto-dismiss?
 
-3. **Notification expiry**: Should expired notifications transition to 'dismissed' or just disappear?
+3. **Rule conflicts** — Two rules match with same specificity. Last-defined wins?
 
-4. **Channel discovery**: How do users discover what channels exist? Just from settings UI?
+4. **Snooze intervals** — "1 hour", "Tomorrow morning", custom picker?
 
-5. **Rate limiting**: Per-charm limits? Per-channel? Global? Where enforced?
+5. **Notification expiry** — Expired entries transition to dismissed, or just disappear?
+
+6. **Group dismissal** — Dismissing a group dismisses entries user never saw. Intentional?
 
 ---
 
-## References
+## The Model
 
-- [Android Notification Philosophy](https://developer.android.com/develop/ui/views/notifications)
-- [Fabric URL Structure PRD](../../Downloads/Fabric%20URL%20Structure%20-%20Product%20Requirements%20Document.md) — Charm identity model
-- [Tauri Notification Plugin](https://v2.tauri.app/plugin/notification/)
+### State Transitions
+
+```
+NOTIFICATION STATE (inbox-owned):
+
+                    ┌─────────────────────────────────┐
+                    │                                 │
+                    ▼                                 │
+┌────────┐  view in   ┌─────────┐  dismiss   ┌───────────┐
+│ ACTIVE │ ─────────► │ NOTICED │ ─────────► │ DISMISSED │
+└────────┘  inbox     └─────────┘            └───────────┘
+    │                      │                       ▲
+    │                      │ snooze                │
+    │                      ▼                       │
+    │                 ┌─────────┐                  │
+    │                 │ SNOOZED │ ─── expires ─────┘
+    │                 └─────────┘       │
+    │                      ▲            │
+    │                      │            ▼
+    └──────── snooze ──────┘      back to ACTIVE
+    │
+    └──────── dismiss directly ──────► DISMISSED
+
+
+CONTENT SEEN STATE (annotation-owned):
+
+┌────────┐  user views content   ┌──────┐
+│ UNSEEN │ ────────────────────► │ SEEN │
+└────────┘  (in source charm)    └──────┘
+```
+
+Inbox observes content seen state. When content becomes seen, inbox can optionally auto-transition notification from active/noticed → dismissed.
+
+### Data Flow
+
+```
+Pattern: notify({ ref, channel: 'messages' })
+                    │
+                    ▼
+Runtime: inject charmId, charmSlug, charmName from context
+                    │
+                    ▼
+Inbox pattern: receive in home space
+                    │
+                    ├── Apply user rules (is this charmId:channelId muted?)
+                    │
+                    ├── If muted: discard
+                    │
+                    ├── If allowed: create InboxEntry
+                    │       │
+                    │       ├── Update badge count
+                    │       ├── Maybe play sound (per channel importance)
+                    │       └── Maybe push to Tauri (OS notification)
+                    │
+                    └── Observe content seen state via annotations
+                            │
+                            └── When seen: optionally auto-dismiss
+```
+
+### Importance Levels
+
+Channels have importance (pattern-suggested, user-overridable):
+
+| Level | Sound | OS Notification | Example |
+|-------|-------|-----------------|---------|
+| `urgent` | Yes | Heads-up | Alarms, calls |
+| `high` | Yes | Yes | Direct messages |
+| `default` | Yes | Optional | Most things |
+| `low` | No | No | Social updates |
+| `min` | No | No | Background sync |
+
+### Grouping
+
+Optional visual batching. Orthogonal to channels.
+
+```typescript
+notify({
+  ref: message,
+  channel: 'messages',        // Controls interruption
+  group: `chat:${roomId}`,    // Controls batching
+  groupTitle: 'Team Chat',
+});
+```
+
+- Same group key → batched visually in inbox
+- One sound per group arrival
+- Dismiss group → dismisses all entries in group
+
+---
+
+## Tauri Integration
+
+**Principle**: Inbox owns all state. Tauri projects to OS.
+
+Tauri commands:
+- `showNotification(id, title, body, payload)` — show OS notification
+- `cancelNotification(id)` — remove from notification center
+- `scheduleNotification(id, at, title, body, payload)` — for background snooze
+- `cancelScheduledNotification(id)` — if user dismisses before snooze expires
+- `updateBadge(count)` — dock badge
+
+Tauri events (back to frontend):
+- `notification-clicked` → navigate to content, mark noticed
+- `notification-dismissed` → no-op (OS dismiss ≠ inbox dismiss)
+
+**Key behavior**: Swiping away an OS notification does NOT dismiss it from inbox. User still sees it in inbox dropdown. This matches iOS/Android behavior.
+
+---
+
+## Data Model
+
+```typescript
+interface InboxEntry {
+  id: string;
+  ref: NormalizedLink;
+  addedAt: Date;
+
+  // Notification state
+  state: 'active' | 'noticed' | 'dismissed' | 'snoozed';
+  snoozedUntil?: Date;
+  expiresAt?: Date;
+
+  // Charm identity (runtime-injected)
+  charmId: string;      // did:charm:... — stable across renames
+  charmSlug: string;
+  charmName: string;
+
+  // Channel
+  channelId: string;
+
+  // Grouping
+  groupKey: string | null;
+
+  // Display cache
+  cachedName?: string;
+  cachedPreview?: string;
+}
+
+interface NotificationPayload {
+  ref: NormalizedLink;
+  channel?: string;              // defaults to 'default'
+  channelImportance?: ChannelImportance;
+  group?: string | null;         // null = singleton
+  groupTitle?: string;
+  expiresAt?: Date;
+  // charmId, charmSlug, charmName injected by runtime
+}
+
+interface NotificationRule {
+  charmId: string;    // DID or '*'
+  channel: string;    // channel ID or '*'
+  showInInbox?: boolean;
+  importance?: ChannelImportance;
+  sound?: boolean;
+}
+```
+
+---
+
+## Edge Cases
+
+| Scenario | Behavior |
+|----------|----------|
+| Content deleted | Show tombstone in inbox, user can dismiss |
+| Access revoked | Same as deleted |
+| Duplicate notify() for same ref | Dedupe, keep existing entry state |
+| Snooze while app closed | Scheduled OS notification fires |
+| Content marked seen before notification arrives | Inbox observes, shows as already seen |
+| User on multiple devices | Inbox syncs via home space |
+
+---
+
+## Implementation Phases
+
+**Phase 1 (MVP)**: Inbox pattern, `notify()` built-in, active/dismissed states, default channel, annotations shim, basic shell UI.
+
+**Phase 2**: noticed/snoozed states, channel system, charm×channel rules, `#now` for time features.
+
+**Phase 3**: Tauri integration, scheduled notifications, badge sync.
+
+**Phase 4**: Grouping, real annotations, multi-device polish.
