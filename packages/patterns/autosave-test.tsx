@@ -1,9 +1,22 @@
 /// <cts-enable />
-import { Default, handler, NAME, pattern, Stream, UI } from "commontools";
+import {
+  Default,
+  handler,
+  NAME,
+  pattern,
+  Stream,
+  UI,
+  Writable,
+} from "commontools";
 
 interface State {
   data: Default<string, "Initial test data">;
   counter: Default<number, 0>;
+}
+
+interface WritableState {
+  data: Writable<Default<string, "Initial test data">>;
+  counter: Writable<Default<number, 0>>;
 }
 
 interface Output {
@@ -12,10 +25,10 @@ interface Output {
   updateData: Stream<void>;
 }
 
-const updateData = handler<State, void>((state) => {
-  const newCount = (state.counter ?? 0) + 1;
-  state.counter = newCount;
-  state.data = `Updated data #${newCount} - ${new Date().toISOString()}`;
+const updateData = handler<unknown, WritableState>((_event, state) => {
+  const newCount = (state.counter.get() ?? 0) + 1;
+  state.counter.set(newCount);
+  state.data.set(`Updated data #${newCount} - ${new Date().toISOString()}`);
 });
 
 export default pattern<State, Output>((state) => {
