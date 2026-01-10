@@ -4,7 +4,6 @@ import {
   equals,
   handler,
   ifElse,
-  lift,
   NAME,
   navigateTo,
   pattern,
@@ -281,12 +280,12 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
               <tbody>
                 {visibleCharms.map((charm) => {
                   // Check if charm is a notebook by NAME prefix (isNotebook prop not reliable through proxy)
-                  const isNotebook = lift((args: { c: unknown }) => {
-                    const name = (args.c as any)?.[NAME];
+                  const isNotebook = computed(() => {
+                    const name = charm[NAME];
                     const result = typeof name === "string" &&
                       name.startsWith("📓");
                     return result;
-                  })({ c: charm });
+                  });
 
                   const dragHandle = (
                     <ct-drag-source $cell={charm} type="note">
