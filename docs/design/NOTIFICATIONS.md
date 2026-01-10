@@ -1,8 +1,9 @@
 # Common Tools Notification System Design
 
-> **Status**: Draft v3
+> **Status**: Draft v4
 > **Date**: 2026-01-09
 > **Branch**: `feat/notifications-system`
+> **Depends on**: Fabric URL Structure (charm identity), Annotations System
 
 ---
 
@@ -17,6 +18,7 @@ This document describes the design for a notification system in Common Tools. Th
 - **High integrity** - clicking always shows current, live content
 - **Two state machines** - notification state and content seen state are separate
 - **Simple by default** - convention over configuration, annotations-ready for multi-user
+- **Charm × Channel control** - users can mute by charm, by channel, or both
 
 ---
 
@@ -171,24 +173,51 @@ interface InboxEntry {
   // Notification state (inbox-owned)
   state: 'active' | 'noticed' | 'dismissed' | 'snoozed';
   snoozedUntil?: Date;
+  expiresAt?: Date;              // Optional: auto-dismiss after this time
+
+  // Charm identity (injected by runtime, not user-supplied)
+  charmId: string;               // did:charm:... - stable, content-addressed
+  charmSlug: string;             // Current human-readable slug
+  charmName: string;             // Current display name
+
+  // Channel (folksonomy coordination)
+  channelId: string;             // e.g., "messages", "reminders", "default"
+
+  // Grouping (orthogonal to channels)
+  groupKey: GroupKey;            // For visual batching
 
   // Cached data for display/offline
-  cachedName?: string;           // Last known [NAME]
-  sourceSpace?: string;
+  cachedName?: string;           // Last known [NAME] of content
+  cachedPreview?: string;        // Optional preview text
 }
 ```
 
-No `seenStrategy` field needed. The inbox uses convention to determine seen state (see below).
+**Key insight**: `charmId` is the stable identity from Fabric's URL system. It's a content-addressed DID that survives renames. Rules keyed on `charmId` remain valid even when the charm is renamed from "Slack Sync" to "Slack Integration".
 
 ### Notification Payload (for sending)
 
 ```typescript
 interface NotificationPayload {
   ref: NormalizedLink;           // Reference to content cell
+
+  // Channel (optional, defaults to 'default')
+  channel?: string;              // Channel ID for folksonomy coordination
+  channelName?: string;          // Human-readable name (for new channels)
+  channelImportance?: ChannelImportance;  // Suggested importance
+
+  // Grouping (optional)
+  group?: string | null;         // Explicit group key (null = singleton)
+  groupTitle?: string;           // Human-readable group name
+
+  // Lifecycle (optional)
+  expiresAt?: Date;              // Auto-dismiss after this time
+
+  // Note: charmId, charmSlug, charmName are injected by runtime
+  // Patterns cannot spoof their identity
 }
 ```
 
-That's it. Simple. Patterns just send a reference.
+Patterns just send a reference and optional metadata. Identity is injected.
 
 ### Inbox Pattern Interface
 
@@ -214,22 +243,50 @@ interface InboxInterface {
 
 ## The notify() API
 
-Sending a notification is trivially simple:
+`notify()` is a built-in function available in pattern scope. It captures the current charm's identity from runtime context:
 
 ```typescript
-export async function notify(payload: { ref: NormalizedLink }) {
-  const inbox = await wish('#inbox');
-  inbox.send(payload);
+// Built-in - available in all patterns
+notify({ ref: todoItem });
+
+// With channel
+notify({
+  ref: message,
+  channel: 'messages',
+  channelImportance: 'high',
+});
+
+// With expiry
+notify({
+  ref: eventReminder,
+  channel: 'reminders',
+  expiresAt: event.startTime,  // Auto-dismiss when event starts
+});
+```
+
+### How It Works Internally
+
+```typescript
+// Runtime implementation (not user-visible)
+function notify(payload: NotificationPayload): void {
+  const runtime = getRuntime();
+  const context = runtime.getCurrentCharmContext();
+
+  runtime.inbox.send({
+    ...payload,
+    // Identity injected from runtime context - cannot be spoofed
+    charmId: context.charmId,      // did:charm:ve3r...
+    charmSlug: context.slug,        // "team-chat"
+    charmName: context.name,        // "Team Chat"
+  });
 }
 ```
 
-No magic. Just `wish` + `send`. Patterns can also do this directly without the helper:
-
-```typescript
-// Equivalent - patterns can skip the helper
-const inbox = await wish('#inbox');
-inbox.send({ ref: myCell });
-```
+**Key properties:**
+- Synchronous (no async/await needed)
+- Identity is injected by runtime (patterns can't lie about who they are)
+- Channel defaults to `'default'` if not specified
+- Deduplication by ref (same content = same notification)
 
 ---
 
@@ -550,25 +607,173 @@ Background service watches inbox cell, triggers native notifications for new 'ac
 
 ---
 
+## Time Reactivity
+
+Time-based features (expiry, snooze) require reactive time primitives.
+
+### The `#now` Primitive
+
+Patterns can access reactive time via `wish('#now')`:
+
+```typescript
+// In inbox pattern
+const now = wish('#now', { interval: 1000 });  // Updates every second
+
+// Expiry becomes a simple computed
+const nonExpiredEntries = computed(() => {
+  const t = now.get();
+  return entries.filter(e => !e.expiresAt || e.expiresAt > t);
+});
+
+// Snooze unfreeze is also reactive
+const activeEntries = computed(() => {
+  const t = now.get();
+  return nonExpiredEntries.get().map(e => {
+    if (e.state === 'snoozed' && e.snoozedUntil && e.snoozedUntil <= t) {
+      return { ...e, state: 'active', snoozedUntil: undefined };
+    }
+    return e;
+  });
+});
+```
+
+### Background Snooze (Tauri)
+
+When app is closed, snooze relies on OS-level scheduled notifications:
+
+```typescript
+// When user snoozes
+handler(snooze, async ({ id, until }, ctx) => {
+  updateEntry(id, { state: 'snoozed', snoozedUntil: until });
+
+  // Schedule OS notification for wake-up (Tauri)
+  await tauriScheduleNotification({
+    id: `snooze-${id}`,
+    at: until,
+    title: entry.charmName,
+    body: entry.cachedName || 'Snoozed reminder',
+  });
+});
+```
+
+See `TAURI_NOTIFICATION_PROJECTION.md` for details.
+
+---
+
+## User Control: Charm × Channel
+
+Users need granular control over notifications. The system provides two-dimensional filtering:
+
+```
+                     Channels
+                 messages  reminders  background
+              ┌──────────┬──────────┬──────────┐
+Charms   Chat │ ●        │          │          │
+              ├──────────┼──────────┼──────────┤
+        Email │ ●        │ ●        │ ●        │
+              ├──────────┼──────────┼──────────┤
+         Todo │          │ ●        │          │
+              └──────────┴──────────┴──────────┘
+```
+
+Every notification lives at a `(charmId, channelId)` coordinate.
+
+### Notification Rules
+
+```typescript
+interface NotificationRule {
+  // Matching (both support wildcards)
+  charmId: string;       // Charm DID or '*'
+  channel: string;       // Channel ID or '*'
+
+  // Settings (override channel defaults)
+  importance?: ChannelImportance;
+  sound?: boolean;
+  osNotification?: boolean;
+  showInInbox?: boolean;  // false = complete mute
+}
+```
+
+### Rule Examples
+
+```typescript
+// Mute all background notifications (any charm)
+{ charmId: '*', channel: 'background', showInInbox: false }
+
+// Mute everything from a specific charm
+{ charmId: 'did:charm:spammy...', channel: '*', showInInbox: false }
+
+// Mute just Slack's messages (keep Email's messages)
+{ charmId: 'did:charm:slack...', channel: 'messages', showInInbox: false }
+
+// Make one charm always urgent
+{ charmId: 'did:charm:alerts...', channel: '*', importance: 'urgent' }
+```
+
+### Rule Specificity
+
+When multiple rules match, most specific wins:
+
+| Specificity | Pattern | Example |
+|-------------|---------|---------|
+| 2 (highest) | `charmId:channel` | `did:charm:abc:messages` |
+| 1 | `charmId:*` or `*:channel` | `did:charm:abc:*` |
+| 0 (lowest) | `*:*` | Global default |
+
+If two rules have the same specificity, the one defined later wins.
+
+### Settings UI
+
+```
+Notification Settings
+═══════════════════════════════════════════════════════
+
+Channels (shared across charms)
+─────────────────────────────────────────────────────
+messages        High   🔊 🔔   [Used by: Chat, Email, Slack]
+reminders       Urgent 🔊 🔔   [Used by: Todo, Calendar]
+background      Min    🔇 ─    [Used by: Email, Sync]
+
+Charm Overrides
+─────────────────────────────────────────────────────
+Slack Integration   [Muted entirely]              [Remove]
+Critical Alerts     [Always urgent]               [Remove]
+
+[+ Add override]
+```
+
+The UI shows human-readable charm names, but rules key on stable charm DIDs. When a charm is renamed, the rule continues to work.
+
+---
+
 ## Implementation Phases
 
 ### Phase 1: MVP (Single-User Focus)
 - Inbox pattern with entries cell and send stream
-- `notify()` helper API
+- `notify()` built-in with charm identity injection
 - `isContentSeen()` checking source `seen` field
 - Annotations shim (stores in home space cell)
 - Shell bell icon with badge
 - Basic inbox UI (list, navigate, dismiss)
 - Notification states: active, dismissed
+- Default channel only
 
-### Phase 2: Full State Machine + Tauri
+### Phase 2: Full State Machine + Channels
 - Notification states: noticed, snoozed
 - `markSeen()` writes annotation via shim
+- Channel system with folksonomy coordination
+- Charm × channel user rules
 - Grouping by source/channel
-- Tauri OS notifications
-- Animation and feedback
+- `#now` reactive primitive for time-based features
+- Expiry support
 
-### Phase 3: Real Annotations
+### Phase 3: Tauri Integration
+- Tauri OS notifications as projection
+- Scheduled notifications for background snooze
+- Badge count sync
+- Deep linking from OS notifications
+
+### Phase 4: Real Annotations + Multi-User
 - Delete annotations shim
 - Real projection space annotations
 - Full multi-user seen state
@@ -578,6 +783,15 @@ Background service watches inbox cell, triggers native notifications for new 'ac
 
 ## References
 
+### Related Design Documents
+- [NOTIFICATIONS_CHANNELS.md](./NOTIFICATIONS_CHANNELS.md) - Channel system with folksonomy coordination
+- [NOTIFICATIONS_GROUPING.md](./NOTIFICATIONS_GROUPING.md) - Notification grouping and batching
+- [TAURI_NOTIFICATION_PROJECTION.md](./TAURI_NOTIFICATION_PROJECTION.md) - Tauri OS notification integration
+- [NOTIFICATIONS_DEEP_LINKING.md](./NOTIFICATIONS_DEEP_LINKING.md) - Navigation and action buttons
+- [ANNOTATIONS.md](./ANNOTATIONS.md) - General-purpose annotation system
+
+### External References
 - [Android Notification Design Philosophy](https://developer.android.com/develop/ui/views/notifications)
 - [Material Design Notifications](https://m3.material.io/foundations/content-design/notifications)
+- [Fabric URL Structure PRD](../../Downloads/Fabric%20URL%20Structure%20-%20Product%20Requirements%20Document.md) - Charm identity model
 - Common Tools Roadmap: Multi-User Scopes, Annotations

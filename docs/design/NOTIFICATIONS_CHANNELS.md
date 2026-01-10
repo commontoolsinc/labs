@@ -1,20 +1,21 @@
 # Notification Channels System Design
 
-> **Status**: Draft v1
+> **Status**: Draft v2
 > **Date**: 2026-01-09
-> **Depends on**: `NOTIFICATIONS.md`, `NOTIFICATIONS_GROUPING.md`
+> **Depends on**: `NOTIFICATIONS.md`, `NOTIFICATIONS_GROUPING.md`, Fabric URL Structure
 
 ---
 
 ## Executive Summary
 
-This document specifies the notification channels system for Common Tools, adapted from Android's channel model for a pattern-based reactive runtime. Channels enable **user agency over notification importance** while supporting **folksonomy-based coordination** across patterns.
+This document specifies the notification channels system for Common Tools, adapted from Android's channel model for a pattern-based reactive runtime. Channels enable **user agency over notification importance** while supporting **folksonomy-based coordination** across charms.
 
 **Core Philosophy**:
-- Patterns declare channels with suggested importance; users control final settings
-- Channels use a folksonomy model: shared names enable cross-pattern coordination
+- Charms declare channels with suggested importance; users control final settings
+- Channels use a folksonomy model: shared names enable cross-charm coordination
 - Convention-based coordination; namespacing is opt-in, not mandatory
 - Channels are orthogonal to groups: channels control *how* notifications interrupt; groups control *what* batches together
+- **Charm × Channel control**: Users can mute by charm, by channel, or any combination
 
 ---
 
@@ -60,13 +61,14 @@ type ChannelImportance =
   | 'min';      // Silent, de-emphasized (weather, background info)
 
 /**
- * Record of a pattern declaring a channel
+ * Record of a charm declaring a channel
  */
 interface ChannelDeclaration {
-  patternId: string;                // Pattern that declared this channel
-  patternName?: string;             // Human-readable pattern name
+  charmId: string;                  // Charm DID (did:charm:...) - stable identity
+  charmSlug?: string;               // Current human-readable slug
+  charmName?: string;               // Current display name
   declaredAt: Date;
-  suggestedImportance: ChannelImportance;  // What the pattern wanted
+  suggestedImportance: ChannelImportance;  // What the charm suggested
 }
 ```
 
@@ -292,13 +294,122 @@ notify({
 });
 ```
 
-**Rationale**: Coordination is the primary value; isolation is the exception. Patterns that need isolation can achieve it via naming conventions.
+**Rationale**: Coordination is the primary value; isolation is the exception. Charms that need isolation can achieve it via naming conventions.
 
 ---
 
-## Part 6: Interaction with Grouping
+## Part 6: Charm × Channel User Control
 
-### 6.1 Channels and Groups are Orthogonal
+Folksonomy coordination is powerful, but users need an escape hatch. The **Charm × Channel** model provides two-dimensional control.
+
+### 6.1 The Control Matrix
+
+Every notification lives at a `(charmId, channelId)` coordinate:
+
+```
+                     Channels
+                 messages  reminders  background
+              ┌──────────┬──────────┬──────────┐
+Charms   Chat │ ●        │          │          │
+              ├──────────┼──────────┼──────────┤
+        Email │ ●        │ ●        │ ●        │
+              ├──────────┼──────────┼──────────┤
+         Todo │          │ ●        │          │
+              └──────────┴──────────┴──────────┘
+```
+
+Users can create rules that match:
+- `*:channel` - All charms using this channel
+- `charmId:*` - All channels from this charm
+- `charmId:channel` - Specific combination
+
+### 6.2 Notification Rules
+
+```typescript
+interface NotificationRule {
+  // Matching (both support wildcards)
+  charmId: string;       // Charm DID or '*'
+  channel: string;       // Channel ID or '*'
+
+  // Settings (override channel defaults)
+  importance?: ChannelImportance;
+  sound?: boolean;
+  osNotification?: boolean;
+  showInInbox?: boolean;  // false = complete mute
+}
+```
+
+### 6.3 Rule Specificity
+
+When multiple rules match, most specific wins:
+
+| Specificity | Pattern | Example |
+|-------------|---------|---------|
+| 2 (highest) | `charmId:channel` | `did:charm:abc:messages` |
+| 1 | `charmId:*` or `*:channel` | `did:charm:abc:*` |
+| 0 (lowest) | `*:*` | Global default |
+
+If two rules have the same specificity, the one defined later wins.
+
+### 6.4 Common Use Cases
+
+```typescript
+// Mute all background notifications (any charm)
+{ charmId: '*', channel: 'background', showInInbox: false }
+
+// Mute everything from a specific charm
+{ charmId: 'did:charm:spammy...', channel: '*', showInInbox: false }
+
+// Mute Slack's messages but keep Email's messages
+// (Both use channel: 'messages', but user wants different treatment)
+{ charmId: 'did:charm:slack...', channel: 'messages', showInInbox: false }
+
+// Make one charm always urgent regardless of channel
+{ charmId: 'did:charm:alerts...', channel: '*', importance: 'urgent' }
+```
+
+### 6.5 Charm Identity Stability
+
+Rules key on **charm DID** (`did:charm:...`), not display name. This is crucial:
+
+- Charm DIDs are content-addressed and stable
+- Renaming a charm from "Slack Sync" to "Slack Integration" doesn't break rules
+- User sees current name in UI, but rules persist across renames
+
+```typescript
+// UI shows:
+"Slack Integration" [Muted] [Remove]
+  (was: Slack Sync)  ← shown if name changed since rule created
+
+// Rule stores:
+{ charmId: 'did:charm:bafyabc123...', channel: '*', showInInbox: false }
+```
+
+### 6.6 Settings UI
+
+```
+Notification Settings
+═══════════════════════════════════════════════════════
+
+Channels (shared across charms)
+─────────────────────────────────────────────────────
+messages        High   🔊 🔔   [Used by: Chat, Email, Slack]
+reminders       Urgent 🔊 🔔   [Used by: Todo, Calendar]
+background      Min    🔇 ─    [Used by: Email, Sync]
+
+Charm Overrides
+─────────────────────────────────────────────────────
+Slack Integration   [Muted entirely]              [Remove]
+Critical Alerts     [Always urgent]               [Remove]
+
+[+ Add charm override]
+```
+
+---
+
+## Part 7: Interaction with Grouping
+
+### 7.1 Channels and Groups are Orthogonal
 
 | Concept | Controls | Scope |
 |---------|----------|-------|
@@ -320,11 +431,11 @@ notify({
 });
 ```
 
-### 6.2 Sound Behavior
+### 7.2 Sound Behavior
 
 One sound per group arrival (not per entry), using the channel's sound setting.
 
-### 6.3 Channel Filtering (Phase 2+)
+### 7.3 Channel Filtering (Phase 2+)
 
 The inbox can offer channel filtering:
 
@@ -338,9 +449,9 @@ interface InboxFilterState {
 
 ---
 
-## Part 7: Delivery Decision Flow
+## Part 8: Delivery Decision Flow
 
-### 7.1 How Channel Affects Delivery
+### 8.1 How Channel Affects Delivery
 
 ```typescript
 function processNotification(payload: NotificationPayload, context: Context): void {
@@ -372,7 +483,7 @@ function processNotification(payload: NotificationPayload, context: Context): vo
 }
 ```
 
-### 7.2 Importance-Based Behavior Matrix
+### 8.2 Importance-Based Behavior Matrix
 
 | Importance | Sound | OS Notif | Heads-up | Badge | Inbox Prominence |
 |------------|-------|----------|----------|-------|------------------|
@@ -384,7 +495,7 @@ function processNotification(payload: NotificationPayload, context: Context): vo
 
 ---
 
-## Part 8: Common Channel Conventions
+## Part 9: Common Channel Conventions
 
 To bootstrap the folksonomy, we recommend these standard channel IDs:
 
@@ -404,9 +515,9 @@ Patterns are encouraged to use these conventions for maximum user benefit.
 
 ---
 
-## Part 9: Updated Data Models
+## Part 10: Updated Data Models
 
-### 9.1 Updated InboxEntry
+### 10.1 Updated InboxEntry
 
 ```typescript
 interface InboxEntry {
@@ -417,21 +528,26 @@ interface InboxEntry {
   // Notification state
   state: 'active' | 'noticed' | 'dismissed' | 'snoozed';
   snoozedUntil?: Date;
+  expiresAt?: Date;
 
-  // Grouping
-  groupKey: GroupKey;
+  // Charm identity (injected by runtime)
+  charmId: string;               // did:charm:... - stable, content-addressed
+  charmSlug: string;             // Current human-readable slug
+  charmName: string;             // Current display name
 
   // Channel reference
   channelId: string;
 
+  // Grouping
+  groupKey: GroupKey;
+
   // Cached data
   cachedName?: string;
-  sourceSpace?: string;
-  sourcePattern?: string;
+  cachedPreview?: string;
 }
 ```
 
-### 9.2 Updated NotificationPayload
+### 10.2 Updated NotificationPayload
 
 ```typescript
 interface NotificationPayload {
@@ -453,16 +569,17 @@ interface NotificationPayload {
 
 ---
 
-## Part 10: Implementation Phases
+## Part 11: Implementation Phases
 
 ### Phase 1: MVP Channels
 
 1. Add `Channel` type and `ChannelRegistry`
-2. Add `channelId` to `InboxEntry`
+2. Add `channelId` and charm identity to `InboxEntry`
 3. Accept channel fields in `notify()`
-4. Auto-create channels on first use
-5. Apply channel importance to delivery
-6. Default channel works
+4. Inject charm identity from runtime context
+5. Auto-create channels on first use
+6. Apply channel importance to delivery
+7. Default channel works
 
 **No UI changes yet** - channels work automatically.
 
@@ -472,14 +589,22 @@ interface NotificationPayload {
 2. Per-channel importance control
 3. Per-channel sound/OS notification toggles
 4. Complete mute (`showInInbox: false`)
-5. "Used by" display showing declaring patterns
+5. "Used by" display showing declaring charms
 
-### Phase 3: Advanced Features
+### Phase 3: Charm × Channel Rules
+
+1. Add `NotificationRule` type
+2. Rule matching with specificity resolution
+3. Settings UI for charm overrides
+4. Per-charm muting (independent of channels)
+5. Per-charm-channel combinations
+
+### Phase 4: Advanced Features
 
 1. Channel filtering in inbox
 2. Importance override restrictions
 3. Channel archiving
-4. Per-pattern channel muting
+4. Rule import/export
 
 ---
 

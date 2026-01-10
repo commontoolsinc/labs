@@ -1,9 +1,9 @@
 # Tauri OS Notification Projection System
 
-> **Status**: Draft
+> **Status**: Draft v2
 > **Date**: 2026-01-09
-> **Parent Document**: `NOTIFICATIONS.md` (Phase 2)
-> **Replaces**: Tauri sections of `NOTIFICATIONS_DEEP_LINKING.md`
+> **Parent Document**: `NOTIFICATIONS.md` (Phase 3)
+> **Depends on**: Fabric URL Structure (charm identity)
 
 ---
 
@@ -269,24 +269,186 @@ computed(() => {
 
 **Tauri has zero knowledge of snooze.** It just sees entries become active.
 
-### Background Snooze Check
+### Background Snooze Check (App Running)
 
-For snooze to work when the app is in background:
+When the app is running, snooze uses the `#now` reactive primitive:
 
 ```typescript
-// Option 1: Periodic check when app is running
-setInterval(() => {
-  // Inbox's computed will trigger on access
-  const _ = inbox.entries;
-}, 60_000); // Check every minute
+// In inbox pattern
+const now = wish('#now', { interval: 1000 });
 
-// Option 2: Web Worker keeps inbox alive
-// (Already planned for background sync)
+// Snooze expiry is reactive
+const activeEntries = computed(() => {
+  const t = now.get();
+  return entries.map(e => {
+    if (e.state === 'snoozed' && e.snoozedUntil && e.snoozedUntil <= t) {
+      return { ...e, state: 'active', snoozedUntil: undefined };
+    }
+    return e;
+  });
+});
 ```
 
 ---
 
-## 5. Badge Sync
+## 5. Scheduled Notifications (Background Snooze)
+
+When the app is **closed**, snooze relies on OS-level scheduled notifications.
+
+### The Problem
+
+Reactive computations only run when observed. If the user closes the app:
+1. `wish('#now')` stops ticking
+2. Snooze expiry computed doesn't run
+3. User misses their reminder
+
+### The Solution: Tauri Scheduled Notifications
+
+When a user snoozes, we schedule an OS notification for the wake-up time:
+
+```typescript
+// Frontend: when user snoozes
+async function handleSnooze(entryId: string, until: Date): Promise<void> {
+  // 1. Update inbox state
+  inbox.snooze({ id: entryId, until });
+
+  // 2. Schedule OS notification for wake-up
+  const entry = inbox.getEntry(entryId);
+  await tauriNotificationBridge.scheduleNotification({
+    id: `snooze-${entryId}`,
+    at: until,
+    title: entry.charmName || 'Reminder',
+    body: entry.cachedName || 'Snoozed notification',
+    payload: {
+      notificationId: entryId,
+      refSpace: entry.ref.space,
+      refId: entry.ref.id,
+      refPath: entry.ref.path,
+      isSnoozedWakeup: true,
+    },
+  });
+}
+```
+
+### Tauri Scheduled Notification Command
+
+```rust
+// src-tauri/src/commands/notifications.rs
+
+use chrono::{DateTime, Utc};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScheduledNotificationParams {
+    pub id: String,
+    pub at: DateTime<Utc>,
+    pub title: String,
+    pub body: String,
+    pub payload: NotificationPayload,
+}
+
+/// Schedule a notification for future delivery
+#[tauri::command]
+pub async fn schedule_notification(
+    app: tauri::AppHandle,
+    params: ScheduledNotificationParams,
+) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+
+    let notification = app.notification();
+
+    let payload_json = serde_json::to_string(&params.payload)
+        .map_err(|e| e.to_string())?;
+
+    notification
+        .builder()
+        .identifier(&params.id)
+        .title(&params.title)
+        .body(&params.body)
+        .extra("payload", payload_json)
+        .schedule(params.at)
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+/// Cancel a scheduled notification
+#[tauri::command]
+pub async fn cancel_scheduled_notification(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+
+    app.notification()
+        .cancel_scheduled(&id)
+        .map_err(|e| e.to_string())
+}
+```
+
+### Handling Snooze Cancellation
+
+If user dismisses a snoozed notification before wake-up, cancel the scheduled OS notification:
+
+```typescript
+// Frontend: when dismissing a snoozed entry
+async function handleDismiss(entryId: string): Promise<void> {
+  const entry = inbox.getEntry(entryId);
+
+  // If it was snoozed, cancel the scheduled wake-up
+  if (entry.state === 'snoozed') {
+    await tauriNotificationBridge.cancelScheduledNotification(`snooze-${entryId}`);
+  }
+
+  inbox.dismiss({ id: entryId });
+}
+```
+
+### When Scheduled Notification Fires
+
+When the OS delivers the scheduled notification:
+
+1. If app is open: InboxController already transitioned entry to 'active' via reactive time
+2. If app is closed: OS shows notification, user clicks, app opens
+3. On click: Navigate to content, mark as noticed
+
+```typescript
+// Frontend: handle scheduled notification click
+listen<NotificationPayload>("notification-clicked", async (event) => {
+  const { isSnoozedWakeup, notificationId } = event.payload;
+
+  // Activate window
+  await tauriNotificationBridge.activateWindow();
+
+  if (isSnoozedWakeup) {
+    // Snooze already expired in inbox (or will when we access it)
+    // Just navigate to the content
+  }
+
+  // Navigate to content
+  await navigateToCell({
+    space: event.payload.refSpace,
+    id: event.payload.refId,
+    path: event.payload.refPath,
+  });
+
+  // Mark as noticed
+  inbox.markNoticed({ id: notificationId });
+});
+```
+
+### Edge Cases
+
+| Scenario | Behavior |
+|----------|----------|
+| User snoozes, app open at snooze time | Reactive time handles it, OS notification also fires (redundant but harmless) |
+| User snoozes, app closed at snooze time | OS scheduled notification fires |
+| User dismisses before snooze expires | Cancel scheduled notification |
+| User modifies snooze time | Cancel old scheduled, create new one |
+| App crashes | Scheduled notification still fires (OS-managed) |
+
+---
+
+## 6. Badge Sync
 
 ### Simple Number Push
 
@@ -342,7 +504,7 @@ pub fn update_badge(app: tauri::AppHandle, count: u32) -> Result<(), String> {
 
 ---
 
-## 6. Permission Flow
+## 7. Permission Flow
 
 ### Lazy Request on First Notification
 
@@ -410,7 +572,7 @@ if (tauriBridge.permissionState === 'denied') {
 
 ---
 
-## 7. Grouping Projection
+## 8. Grouping Projection
 
 ### Inbox Groups → OS Groups
 
@@ -460,7 +622,7 @@ private async updateGroupSummary(groupId: string, entries: InboxEntry[]) {
 
 ---
 
-## 8. Minimal Tauri Rust Code
+## 9. Minimal Tauri Rust Code
 
 The Rust side should be as thin as possible - just receiving commands and calling OS APIs.
 
@@ -597,7 +759,7 @@ That's the entire Rust notification system: ~100 lines of thin wrapper code.
 
 ---
 
-## 9. Frontend → Tauri Bridge
+## 10. Frontend → Tauri Bridge
 
 ### Complete API Surface
 
@@ -626,6 +788,17 @@ export interface TauriNotificationBridge {
   }): Promise<void>;
 
   cancelNotification(id: string): Promise<void>;
+
+  // Scheduled notifications (for background snooze)
+  scheduleNotification(params: {
+    id: string;
+    at: Date;
+    title: string;
+    body: string;
+    payload: NotificationPayload;
+  }): Promise<void>;
+
+  cancelScheduledNotification(id: string): Promise<void>;
 
   updateBadge(count: number): Promise<void>;
 
@@ -715,7 +888,7 @@ export const tauriNotificationBridge = new TauriNotificationBridgeImpl();
 
 ---
 
-## 10. InboxController Integration
+## 11. InboxController Integration
 
 ### Complete Flow Example
 
@@ -859,7 +1032,7 @@ export class InboxController {
 
 ---
 
-## 11. Summary: The Projection Model
+## 12. Summary: The Projection Model
 
 ### What Tauri Does
 
@@ -867,6 +1040,8 @@ export class InboxController {
 |-----------|--------------|
 | Show notification | Call `tauri_plugin_notification::show()` |
 | Cancel notification | Call `tauri_plugin_notification::remove()` |
+| **Schedule notification** | Call `tauri_plugin_notification::schedule()` for background snooze |
+| **Cancel scheduled** | Call `tauri_plugin_notification::cancel_scheduled()` |
 | Update badge | Call `app.dock().set_badge_label()` |
 | Handle click | Emit event to frontend |
 | Handle dismiss | Emit event to frontend |
@@ -877,7 +1052,7 @@ export class InboxController {
 |-----------|---------------|
 | Decide when to notify | Inbox pattern decides |
 | Track notification state | Inbox pattern owns state |
-| Handle snooze logic | Inbox pattern handles |
+| Handle snooze logic (app open) | Inbox pattern + `#now` reactive primitive |
 | Rate limit | Inbox pattern handles |
 | Group notifications | Frontend decides groupId |
 | Manage permissions | Frontend requests |
