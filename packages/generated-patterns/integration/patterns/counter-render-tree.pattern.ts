@@ -32,15 +32,16 @@ const normalizeNumber = (input: number | undefined, fallback: number) => {
   return typeof input === "number" && Number.isFinite(input) ? input : fallback;
 };
 
+const liftSafeStep = lift((raw: number | undefined) => normalizeNumber(raw, 1));
+const liftSafeValue = lift((raw: number | undefined) =>
+  normalizeNumber(raw, 0)
+);
+
 export const counterWithRenderTree = recipe<RenderTreeArgs>(
   "Counter With Render Tree",
   ({ value, step }) => {
-    const safeStep = lift((raw: number | undefined) => normalizeNumber(raw, 1))(
-      step,
-    );
-    const safeValue = lift((raw: number | undefined) =>
-      normalizeNumber(raw, 0)
-    )(value);
+    const safeStep = liftSafeStep(step);
+    const safeValue = liftSafeValue(value);
 
     const increment = adjustValue({
       value,
@@ -88,3 +89,5 @@ export const counterWithRenderTree = recipe<RenderTreeArgs>(
     };
   },
 );
+
+export default counterWithRenderTree;

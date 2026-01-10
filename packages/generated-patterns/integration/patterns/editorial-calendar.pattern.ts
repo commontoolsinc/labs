@@ -520,69 +520,83 @@ const defineChannel = handler(
   },
 );
 
+const liftSanitizeChannelList = lift(sanitizeChannelList);
+
+const liftSanitizeEntryList = lift(
+  (
+    state: {
+      entries: readonly EditorialEntrySeed[] | undefined;
+      channels: readonly string[];
+    },
+  ) => sanitizeEntryList(state.entries, state.channels),
+);
+
+const liftBuildChannelSchedule = lift(
+  (
+    state: {
+      entries: readonly EditorialEntry[];
+      channels: readonly string[];
+    },
+  ) => buildChannelSchedule(state.entries, state.channels),
+);
+
+const liftSelectNextPublish = lift(selectNextPublish);
+
+const liftBuildSummary = lift(
+  (
+    state: {
+      channels: readonly string[];
+      entries: readonly EditorialEntry[];
+      next: NextPublish | null;
+    },
+  ) => buildSummary(state.channels, state.entries, state.next),
+);
+
+const liftChannelCounts = lift((schedule: readonly ChannelSchedule[]) =>
+  schedule.map((item) => ({
+    channel: item.channel,
+    count: item.entries.length,
+  }))
+);
+
+const liftHistoryView = lift((value: readonly string[] | undefined) =>
+  Array.isArray(value) && value.length > 0 ? value : ["Calendar initialized"]
+);
+
+const liftLatestActivity = lift((log: readonly string[]) =>
+  log.length > 0 ? log[log.length - 1] : "Calendar initialized"
+);
+
 export const editorialCalendar = recipe<EditorialCalendarArgs>(
   "Editorial Calendar Pattern",
   ({ entries, channels }) => {
     const history = cell<string[]>(["Calendar initialized"]);
 
-    const channelList = lift(sanitizeChannelList)(channels);
+    const channelList = liftSanitizeChannelList(channels);
 
-    const entriesView = lift(
-      (
-        state: {
-          entries: readonly EditorialEntrySeed[] | undefined;
-          channels: readonly string[];
-        },
-      ) => sanitizeEntryList(state.entries, state.channels),
-    )({
+    const entriesView = liftSanitizeEntryList({
       entries,
       channels: channelList,
     });
 
-    const channelSchedule = lift(
-      (
-        state: {
-          entries: readonly EditorialEntry[];
-          channels: readonly string[];
-        },
-      ) => buildChannelSchedule(state.entries, state.channels),
-    )({
+    const channelSchedule = liftBuildChannelSchedule({
       entries: entriesView,
       channels: channelList,
     });
 
-    const nextPublish = lift(selectNextPublish)(entriesView);
+    const nextPublish = liftSelectNextPublish(entriesView);
 
-    const summaryLabel = lift(
-      (
-        state: {
-          channels: readonly string[];
-          entries: readonly EditorialEntry[];
-          next: NextPublish | null;
-        },
-      ) => buildSummary(state.channels, state.entries, state.next),
-    )({
+    const summaryLabel = liftBuildSummary({
       channels: channelList,
       entries: entriesView,
       next: nextPublish,
     });
 
-    const channelCounts = lift((schedule: readonly ChannelSchedule[]) =>
-      schedule.map((item) => ({
-        channel: item.channel,
-        count: item.entries.length,
-      }))
-    )(channelSchedule);
+    const channelCounts = liftChannelCounts(channelSchedule);
 
-    const historyView = lift((value: readonly string[] | undefined) =>
-      Array.isArray(value) && value.length > 0
-        ? value
-        : ["Calendar initialized"]
-    )(history);
+    const historyView = liftHistoryView(history);
 
-    const latestActivity = lift((log: readonly string[]) =>
-      log.length > 0 ? log[log.length - 1] : "Calendar initialized"
-    )(historyView);
+    const latestActivity = liftLatestActivity(historyView);
 
     return {
       channels,
@@ -600,3 +614,5 @@ export const editorialCalendar = recipe<EditorialCalendarArgs>(
     };
   },
 );
+
+export default editorialCalendar;

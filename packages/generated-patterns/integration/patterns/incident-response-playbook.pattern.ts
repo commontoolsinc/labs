@@ -426,6 +426,42 @@ const resetPlaybook = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeState = lift(sanitizeState);
+
+const liftComputeSummary = lift((input: IncidentStep[]) =>
+  computeSummary(input)
+);
+
+const liftPendingCount = lift((value: IncidentStatusSummary) => value.pending);
+const liftInProgressCount = lift((value: IncidentStatusSummary) =>
+  value.inProgress
+);
+const liftBlockedCount = lift((value: IncidentStatusSummary) => value.blocked);
+const liftDoneCount = lift((value: IncidentStatusSummary) => value.done);
+
+const liftFindStalledSteps = lift((input: IncidentStep[]) =>
+  findStalledSteps(input)
+);
+
+const liftStalledCount = lift((value: string[]) => value.length);
+const liftNeedsEscalation = lift((count: number) => count > 0);
+const liftEscalationState = lift((flag: boolean) =>
+  flag ? "required" : "clear"
+);
+
+const liftTimeline = lift((entries: string[] | undefined) =>
+  toHistory(entries)
+);
+
+const liftActiveStepId = lift((value: string | null | undefined) =>
+  typeof value === "string" && value.length > 0 ? value : ""
+);
+
+const liftClockMinutes = lift((value: number | undefined) =>
+  typeof value === "number" && Number.isFinite(value) ? value : 0
+);
+
 export const incidentResponsePlaybook = recipe<IncidentResponsePlaybookArgs>(
   "Incident Response Playbook",
   ({ steps }) => {
@@ -433,47 +469,27 @@ export const incidentResponsePlaybook = recipe<IncidentResponsePlaybookArgs>(
     const activeStep = cell<string | null>(null);
     const clock = cell(0);
 
-    const stepsView = lift(sanitizeState)(steps);
+    const stepsView = liftSanitizeState(steps);
 
-    const summary = lift((input: IncidentStep[]) => computeSummary(input))(
-      stepsView,
-    );
+    const summary = liftComputeSummary(stepsView);
 
-    const pendingCount = lift((value: IncidentStatusSummary) => value.pending)(
-      summary,
-    );
-    const inProgressCount = lift(
-      (value: IncidentStatusSummary) => value.inProgress,
-    )(summary);
-    const blockedCount = lift((value: IncidentStatusSummary) => value.blocked)(
-      summary,
-    );
-    const doneCount = lift((value: IncidentStatusSummary) => value.done)(
-      summary,
-    );
+    const pendingCount = liftPendingCount(summary);
+    const inProgressCount = liftInProgressCount(summary);
+    const blockedCount = liftBlockedCount(summary);
+    const doneCount = liftDoneCount(summary);
 
     const statusLabel =
       str`Pending ${pendingCount} | Active ${inProgressCount} | Blocked ${blockedCount} | Done ${doneCount}`;
 
-    const stalledSteps = lift((input: IncidentStep[]) =>
-      findStalledSteps(input)
-    )(
-      stepsView,
-    );
+    const stalledSteps = liftFindStalledSteps(stepsView);
 
-    const stalledCount = lift((value: string[]) => value.length)(stalledSteps);
-    const needsEscalation = lift((count: number) => count > 0)(stalledCount);
-    const escalationState = lift((flag: boolean) =>
-      flag ? "required" : "clear"
-    )(needsEscalation);
+    const stalledCount = liftStalledCount(stalledSteps);
+    const needsEscalation = liftNeedsEscalation(stalledCount);
+    const escalationState = liftEscalationState(needsEscalation);
     const escalationLabel =
       str`Escalation ${escalationState} (${stalledCount})`;
 
-    const timeline = lift((entries: string[] | undefined) =>
-      toHistory(entries)
-    )(
-      history,
-    );
+    const timeline = liftTimeline(history);
 
     const latestLogEntry = derive(timeline, (entries) => {
       if (entries.length === 0) {
@@ -482,9 +498,7 @@ export const incidentResponsePlaybook = recipe<IncidentResponsePlaybookArgs>(
       return entries[entries.length - 1];
     });
 
-    const activeStepId = lift((value: string | null | undefined) =>
-      typeof value === "string" && value.length > 0 ? value : ""
-    )(activeStep);
+    const activeStepId = liftActiveStepId(activeStep);
 
     const activeStepTitle = derive(
       { list: stepsView, active: activeStep },
@@ -498,9 +512,7 @@ export const incidentResponsePlaybook = recipe<IncidentResponsePlaybookArgs>(
       },
     );
 
-    const clockMinutes = lift((value: number | undefined) =>
-      typeof value === "number" && Number.isFinite(value) ? value : 0
-    )(clock);
+    const clockMinutes = liftClockMinutes(clock);
 
     return {
       steps: stepsView,
@@ -549,3 +561,5 @@ export type {
   IncidentStep,
   IncidentStepSeed,
 };
+
+export default incidentResponsePlaybook;

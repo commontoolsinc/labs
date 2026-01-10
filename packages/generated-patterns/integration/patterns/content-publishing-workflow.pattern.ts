@@ -2,9 +2,9 @@
 import {
   type Cell,
   cell,
+  computed,
   Default,
   handler,
-  lift,
   recipe,
   str,
 } from "commontools";
@@ -387,33 +387,159 @@ const getSanitizedDrafts = (context: WorkflowContext): DraftEntry[] => {
   return sanitizeDraftList(context.drafts.get());
 };
 
+const liftCountEntries = (entries: readonly DraftEntry[]): number =>
+  entries.length;
+
+const liftCountScheduled = (entries: readonly DraftEntry[]): number =>
+  entries.filter((entry) => entry.stage === "scheduled").length;
+
+const liftExtractNextDraft = (
+  entries: readonly DraftEntry[],
+): DraftEntry | null => (entries.length > 0 ? entries[0] : null);
+
+const liftBuildPriorityScheduleOrder = (
+  entries: readonly DraftEntry[],
+): {
+  id: string;
+  title: string;
+  priority: DraftPriority;
+  scheduledDate: string;
+}[] =>
+  sortDrafts(entries).map((entry) => ({
+    id: entry.id,
+    title: entry.title,
+    priority: entry.priority,
+    scheduledDate: entry.scheduledDate,
+  }));
+
+const addDraft = handler(
+  (event: AddDraftEvent | undefined, ctx: WorkflowContext) => {
+    const current = getSanitizedDrafts(ctx);
+    const used = new Set(current.map((draft) => draft.id));
+    const nextIndex = Math.max(ctx.sequence.get() ?? 0, current.length) + 1;
+    ctx.sequence.set(nextIndex);
+    const fallback = defaultDrafts[(nextIndex - 1) % defaultDrafts.length];
+    const id = ensureUniqueId(
+      sanitizeIdentifier(event?.id, `draft-${nextIndex}`),
+      used,
+    );
+    const title = sanitizeTitle(
+      event?.title,
+      fallback.title ?? `Draft ${nextIndex}`,
+    );
+    const summary = sanitizeSummary(
+      event?.summary,
+      fallback.summary ?? "Workflow intake submission.",
+    );
+    const priority = sanitizePriority(
+      event?.priority,
+      fallback.priority ?? "medium",
+    );
+    const stage = sanitizeStage(event?.stage, "drafting");
+    const scheduledDate = sanitizeDate(
+      event?.scheduledDate,
+      fallback.scheduledDate ?? suggestSchedule(nextIndex),
+    );
+    const assignedEditor = sanitizeEditor(
+      event?.assignedEditor,
+      fallback.assignedEditor ?? "Unassigned",
+    );
+    const entry: DraftEntry = {
+      id,
+      title,
+      summary,
+      priority,
+      stage,
+      scheduledDate,
+      assignedEditor,
+    };
+    ctx.drafts.set(sortDrafts([...current, entry]));
+    const message =
+      `${title} queued as ${priority} priority due ${scheduledDate}`;
+    ctx.activityLog.set(appendHistory(ctx.activityLog.get(), message));
+  },
+);
+
+const rescheduleDraft = handler(
+  (event: UpdateScheduleEvent | undefined, ctx: WorkflowContext) => {
+    const id = sanitizeIdentifier(event?.id, "");
+    if (id.length === 0) return;
+    const current = getSanitizedDrafts(ctx);
+    const index = current.findIndex((draft) => draft.id === id);
+    if (index === -1) return;
+    const draft = current[index];
+    const scheduledDate = sanitizeDate(
+      event?.scheduledDate,
+      draft.scheduledDate,
+    );
+    if (scheduledDate === draft.scheduledDate) return;
+    const next = current.slice();
+    next[index] = { ...draft, scheduledDate };
+    ctx.drafts.set(sortDrafts(next));
+    const message = `${draft.title} rescheduled for ${scheduledDate}`;
+    ctx.activityLog.set(appendHistory(ctx.activityLog.get(), message));
+  },
+);
+
+const reprioritizeDraft = handler(
+  (event: UpdatePriorityEvent | undefined, ctx: WorkflowContext) => {
+    const id = sanitizeIdentifier(event?.id, "");
+    if (id.length === 0) return;
+    const current = getSanitizedDrafts(ctx);
+    const index = current.findIndex((draft) => draft.id === id);
+    if (index === -1) return;
+    const priority = sanitizePriority(
+      event?.priority,
+      current[index].priority,
+    );
+    if (priority === current[index].priority) return;
+    const next = current.slice();
+    next[index] = { ...current[index], priority };
+    ctx.drafts.set(sortDrafts(next));
+    const message = `${next[index].title} reprioritized to ${priority}`;
+    ctx.activityLog.set(appendHistory(ctx.activityLog.get(), message));
+  },
+);
+
+const advanceStage = handler(
+  (event: AdvanceStageEvent | undefined, ctx: WorkflowContext) => {
+    const id = sanitizeIdentifier(event?.id, "");
+    if (id.length === 0) return;
+    const current = getSanitizedDrafts(ctx);
+    const index = current.findIndex((draft) => draft.id === id);
+    if (index === -1) return;
+    const draft = current[index];
+    const requested = sanitizeStage(event?.stage, draft.stage);
+    const nextStage = requested !== draft.stage
+      ? requested
+      : stageOrder[stageRank[draft.stage] + 1] ?? draft.stage;
+    if (nextStage === draft.stage) return;
+    const next = current.slice();
+    next[index] = { ...draft, stage: nextStage };
+    ctx.drafts.set(sortDrafts(next));
+    const message = `${draft.title} moved to ${stageActionLabel(nextStage)}`;
+    ctx.activityLog.set(appendHistory(ctx.activityLog.get(), message));
+  },
+);
+
 export const contentPublishingWorkflow = recipe<ContentPublishingWorkflowArgs>(
   "Content Publishing Workflow",
   ({ drafts }) => {
     const sequence = cell(0);
     const activityLog = cell<string[]>(["Workflow initialized"]);
 
-    const draftsView = lift(sanitizeDraftList)(drafts);
-    const queue = lift(buildQueue)(draftsView);
-    const queueCount = lift((entries: DraftEntry[]) => entries.length)(queue);
-    const scheduledCount = lift((entries: DraftEntry[]) =>
-      entries.filter((entry) => entry.stage === "scheduled").length
-    )(draftsView);
+    const draftsView = computed(() => sanitizeDraftList(drafts));
+    const queue = computed(() => buildQueue(draftsView));
+    const queueCount = computed(() => liftCountEntries(queue));
+    const scheduledCount = computed(() => liftCountScheduled(draftsView));
     const statusLine =
       str`${queueCount} drafts awaiting, ${scheduledCount} scheduled`;
-    const queuePreview = lift(formatQueuePreview)(queue);
-    const nextDraft = lift((entries: DraftEntry[]) =>
-      entries.length > 0 ? entries[0] : null
-    )(queue);
-    const stageTotals = lift(buildStageTotals)(draftsView);
-    const priorityScheduleOrder = lift((entries: DraftEntry[]) =>
-      sortDrafts(entries).map((entry) => ({
-        id: entry.id,
-        title: entry.title,
-        priority: entry.priority,
-        scheduledDate: entry.scheduledDate,
-      }))
-    )(draftsView);
+    const queuePreview = computed(() => formatQueuePreview(queue));
+    const nextDraft = computed(() => liftExtractNextDraft(queue));
+    const stageTotals = computed(() => buildStageTotals(draftsView));
+    const priorityScheduleOrder = computed(() =>
+      liftBuildPriorityScheduleOrder(draftsView)
+    );
 
     const context = {
       drafts,
@@ -421,118 +547,6 @@ export const contentPublishingWorkflow = recipe<ContentPublishingWorkflowArgs>(
       sequence,
       activityLog,
     } as const;
-
-    const addDraft = handler(
-      (event: AddDraftEvent | undefined, ctx: WorkflowContext) => {
-        const current = getSanitizedDrafts(ctx);
-        const used = new Set(current.map((draft) => draft.id));
-        const nextIndex = Math.max(ctx.sequence.get() ?? 0, current.length) + 1;
-        ctx.sequence.set(nextIndex);
-        const fallback = defaultDrafts[(nextIndex - 1) % defaultDrafts.length];
-        const id = ensureUniqueId(
-          sanitizeIdentifier(event?.id, `draft-${nextIndex}`),
-          used,
-        );
-        const title = sanitizeTitle(
-          event?.title,
-          fallback.title ?? `Draft ${nextIndex}`,
-        );
-        const summary = sanitizeSummary(
-          event?.summary,
-          fallback.summary ?? "Workflow intake submission.",
-        );
-        const priority = sanitizePriority(
-          event?.priority,
-          fallback.priority ?? "medium",
-        );
-        const stage = sanitizeStage(event?.stage, "drafting");
-        const scheduledDate = sanitizeDate(
-          event?.scheduledDate,
-          fallback.scheduledDate ?? suggestSchedule(nextIndex),
-        );
-        const assignedEditor = sanitizeEditor(
-          event?.assignedEditor,
-          fallback.assignedEditor ?? "Unassigned",
-        );
-        const entry: DraftEntry = {
-          id,
-          title,
-          summary,
-          priority,
-          stage,
-          scheduledDate,
-          assignedEditor,
-        };
-        ctx.drafts.set(sortDrafts([...current, entry]));
-        const message =
-          `${title} queued as ${priority} priority due ${scheduledDate}`;
-        ctx.activityLog.set(appendHistory(ctx.activityLog.get(), message));
-      },
-    );
-
-    const rescheduleDraft = handler(
-      (event: UpdateScheduleEvent | undefined, ctx: WorkflowContext) => {
-        const id = sanitizeIdentifier(event?.id, "");
-        if (id.length === 0) return;
-        const current = getSanitizedDrafts(ctx);
-        const index = current.findIndex((draft) => draft.id === id);
-        if (index === -1) return;
-        const draft = current[index];
-        const scheduledDate = sanitizeDate(
-          event?.scheduledDate,
-          draft.scheduledDate,
-        );
-        if (scheduledDate === draft.scheduledDate) return;
-        const next = current.slice();
-        next[index] = { ...draft, scheduledDate };
-        ctx.drafts.set(sortDrafts(next));
-        const message = `${draft.title} rescheduled for ${scheduledDate}`;
-        ctx.activityLog.set(appendHistory(ctx.activityLog.get(), message));
-      },
-    );
-
-    const reprioritizeDraft = handler(
-      (event: UpdatePriorityEvent | undefined, ctx: WorkflowContext) => {
-        const id = sanitizeIdentifier(event?.id, "");
-        if (id.length === 0) return;
-        const current = getSanitizedDrafts(ctx);
-        const index = current.findIndex((draft) => draft.id === id);
-        if (index === -1) return;
-        const priority = sanitizePriority(
-          event?.priority,
-          current[index].priority,
-        );
-        if (priority === current[index].priority) return;
-        const next = current.slice();
-        next[index] = { ...current[index], priority };
-        ctx.drafts.set(sortDrafts(next));
-        const message = `${next[index].title} reprioritized to ${priority}`;
-        ctx.activityLog.set(appendHistory(ctx.activityLog.get(), message));
-      },
-    );
-
-    const advanceStage = handler(
-      (event: AdvanceStageEvent | undefined, ctx: WorkflowContext) => {
-        const id = sanitizeIdentifier(event?.id, "");
-        if (id.length === 0) return;
-        const current = getSanitizedDrafts(ctx);
-        const index = current.findIndex((draft) => draft.id === id);
-        if (index === -1) return;
-        const draft = current[index];
-        const requested = sanitizeStage(event?.stage, draft.stage);
-        const nextStage = requested !== draft.stage
-          ? requested
-          : stageOrder[stageRank[draft.stage] + 1] ?? draft.stage;
-        if (nextStage === draft.stage) return;
-        const next = current.slice();
-        next[index] = { ...draft, stage: nextStage };
-        ctx.drafts.set(sortDrafts(next));
-        const message = `${draft.title} moved to ${
-          stageActionLabel(nextStage)
-        }`;
-        ctx.activityLog.set(appendHistory(ctx.activityLog.get(), message));
-      },
-    );
 
     return {
       drafts,
@@ -550,3 +564,5 @@ export const contentPublishingWorkflow = recipe<ContentPublishingWorkflowArgs>(
     };
   },
 );
+
+export default contentPublishingWorkflow;

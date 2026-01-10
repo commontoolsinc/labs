@@ -162,6 +162,110 @@ const normalizeRatio = (value: number): number => {
 
 const formatPercent = (ratio: number): string => `${(ratio * 100).toFixed(1)}%`;
 
+// Module-scope lift definitions
+const liftSanitizeStages = lift(sanitizeStages);
+
+const liftStageMetrics = lift((entries: FunnelStage[]) => {
+  if (!Array.isArray(entries) || entries.length === 0) return [];
+  const base = entries[0]?.count ?? 0;
+  let previous = base;
+  return entries.map((stage, index) => {
+    const dropOffBase = index === 0 ? 0 : previous;
+    const drop = dropOffBase === 0
+      ? 0
+      : normalizeRatio((dropOffBase - stage.count) / dropOffBase);
+    const conversion = base === 0 ? 0 : normalizeRatio(stage.count / base);
+    previous = stage.count;
+    return {
+      id: stage.id,
+      label: stage.label,
+      count: stage.count,
+      dropOffRate: drop,
+      conversionRate: conversion,
+      dropOffPercent: formatPercent(drop),
+      conversionPercent: formatPercent(conversion),
+    };
+  });
+});
+
+const liftDropOffDetails = lift((metrics: StageMetric[]) => {
+  if (!Array.isArray(metrics)) return [];
+  const details: FunnelDropOffDetail[] = [];
+  for (let index = 1; index < metrics.length; index++) {
+    const current = metrics[index];
+    const previous = metrics[index - 1];
+    const lost = previous.count - current.count;
+    details.push({
+      fromId: previous.id,
+      toId: current.id,
+      fromStage: previous.label,
+      toStage: current.label,
+      lost: lost > 0 ? lost : 0,
+      dropOffRate: current.dropOffRate,
+      dropOffPercent: current.dropOffPercent,
+    });
+  }
+  return details;
+});
+
+const liftStageOrder = lift((metrics: StageMetric[]) =>
+  Array.isArray(metrics) ? metrics.map((stage) => stage.id) : []
+);
+
+const liftOverallConversionRate = lift((metrics: StageMetric[]) => {
+  if (!Array.isArray(metrics) || metrics.length === 0) return 0;
+  const last = metrics[metrics.length - 1];
+  return normalizeRatio(last.conversionRate);
+});
+
+const liftOverallConversionPercent = lift((ratio: number) =>
+  formatPercent(normalizeRatio(ratio))
+);
+
+const liftWorstStage = lift((metrics: StageMetric[] | undefined) => {
+  if (!Array.isArray(metrics) || metrics.length === 0) {
+    return { label: "No stages", dropOffPercent: "0.0%" };
+  }
+  if (metrics.length === 1) {
+    return {
+      label: metrics[0].label,
+      dropOffPercent: metrics[0].dropOffPercent,
+    };
+  }
+  let worst = metrics[1];
+  for (let index = 2; index < metrics.length; index++) {
+    const candidate = metrics[index];
+    if (candidate.dropOffRate > worst.dropOffRate) {
+      worst = candidate;
+      continue;
+    }
+    if (
+      candidate.dropOffRate === worst.dropOffRate &&
+      candidate.label.localeCompare(worst.label) < 0
+    ) {
+      worst = candidate;
+    }
+  }
+  return { label: worst.label, dropOffPercent: worst.dropOffPercent };
+});
+
+const liftWorstLabel = lift((entry: { label: string }) => entry.label);
+
+const liftWorstPercent = lift(
+  (entry: { dropOffPercent: string }) => entry.dropOffPercent,
+);
+
+const liftHistoryView = lift((entries: StageUpdateEntry[] | undefined) =>
+  Array.isArray(entries) ? entries : []
+);
+
+const liftLastUpdate = lift((entries: StageUpdateEntry[]) => {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return { stageId: "none", label: "None", count: 0, mode: "delta" };
+  }
+  return entries[entries.length - 1];
+});
+
 const updateStageCount = handler(
   (
     event: StageUpdateEvent | undefined,
@@ -234,112 +338,25 @@ export const funnelAnalytics = recipe<FunnelAnalyticsArgs>(
   ({ stages }) => {
     const updateHistory = cell<StageUpdateEntry[]>([]);
 
-    const stageList = lift(sanitizeStages)(stages);
-    const stageMetrics = lift((entries: FunnelStage[]) => {
-      if (!Array.isArray(entries) || entries.length === 0) return [];
-      const base = entries[0]?.count ?? 0;
-      let previous = base;
-      return entries.map((stage, index) => {
-        const dropOffBase = index === 0 ? 0 : previous;
-        const drop = dropOffBase === 0
-          ? 0
-          : normalizeRatio((dropOffBase - stage.count) / dropOffBase);
-        const conversion = base === 0 ? 0 : normalizeRatio(stage.count / base);
-        previous = stage.count;
-        return {
-          id: stage.id,
-          label: stage.label,
-          count: stage.count,
-          dropOffRate: drop,
-          conversionRate: conversion,
-          dropOffPercent: formatPercent(drop),
-          conversionPercent: formatPercent(conversion),
-        };
-      });
-    })(stageList);
-
-    const dropOffDetails = lift((metrics: StageMetric[]) => {
-      if (!Array.isArray(metrics)) return [];
-      const details: FunnelDropOffDetail[] = [];
-      for (let index = 1; index < metrics.length; index++) {
-        const current = metrics[index];
-        const previous = metrics[index - 1];
-        const lost = previous.count - current.count;
-        details.push({
-          fromId: previous.id,
-          toId: current.id,
-          fromStage: previous.label,
-          toStage: current.label,
-          lost: lost > 0 ? lost : 0,
-          dropOffRate: current.dropOffRate,
-          dropOffPercent: current.dropOffPercent,
-        });
-      }
-      return details;
-    })(stageMetrics);
-
-    const stageOrder = lift((metrics: StageMetric[]) =>
-      Array.isArray(metrics) ? metrics.map((stage) => stage.id) : []
-    )(stageMetrics);
-
-    const overallConversionRate = lift((metrics: StageMetric[]) => {
-      if (!Array.isArray(metrics) || metrics.length === 0) return 0;
-      const last = metrics[metrics.length - 1];
-      return normalizeRatio(last.conversionRate);
-    })(stageMetrics);
-
-    const overallConversionPercent = lift((ratio: number) =>
-      formatPercent(normalizeRatio(ratio))
-    )(overallConversionRate);
+    const stageList = liftSanitizeStages(stages);
+    const stageMetrics = liftStageMetrics(stageList);
+    const dropOffDetails = liftDropOffDetails(stageMetrics);
+    const stageOrder = liftStageOrder(stageMetrics);
+    const overallConversionRate = liftOverallConversionRate(stageMetrics);
+    const overallConversionPercent = liftOverallConversionPercent(
+      overallConversionRate,
+    );
 
     const overallConversionLabel =
       str`Overall conversion ${overallConversionPercent}`;
 
-    const worstStage = lift((metrics: StageMetric[] | undefined) => {
-      if (!Array.isArray(metrics) || metrics.length === 0) {
-        return { label: "No stages", dropOffPercent: "0.0%" };
-      }
-      if (metrics.length === 1) {
-        return {
-          label: metrics[0].label,
-          dropOffPercent: metrics[0].dropOffPercent,
-        };
-      }
-      let worst = metrics[1];
-      for (let index = 2; index < metrics.length; index++) {
-        const candidate = metrics[index];
-        if (candidate.dropOffRate > worst.dropOffRate) {
-          worst = candidate;
-          continue;
-        }
-        if (
-          candidate.dropOffRate === worst.dropOffRate &&
-          candidate.label.localeCompare(worst.label) < 0
-        ) {
-          worst = candidate;
-        }
-      }
-      return { label: worst.label, dropOffPercent: worst.dropOffPercent };
-    })(stageMetrics);
-
-    const worstLabel = lift((entry: { label: string }) => entry.label)(
-      worstStage,
-    );
-    const worstPercent = lift(
-      (entry: { dropOffPercent: string }) => entry.dropOffPercent,
-    )(worstStage);
+    const worstStage = liftWorstStage(stageMetrics);
+    const worstLabel = liftWorstLabel(worstStage);
+    const worstPercent = liftWorstPercent(worstStage);
     const dropOffSummary = str`${worstLabel} drop-off ${worstPercent}`;
 
-    const historyView = lift((entries: StageUpdateEntry[] | undefined) =>
-      Array.isArray(entries) ? entries : []
-    )(updateHistory);
-
-    const lastUpdate = lift((entries: StageUpdateEntry[]) => {
-      if (!Array.isArray(entries) || entries.length === 0) {
-        return { stageId: "none", label: "None", count: 0, mode: "delta" };
-      }
-      return entries[entries.length - 1];
-    })(historyView);
+    const historyView = liftHistoryView(updateHistory);
+    const lastUpdate = liftLastUpdate(historyView);
 
     return {
       stages,
@@ -365,3 +382,5 @@ export type {
   StageMetric,
   StageUpdateEntry,
 };
+
+export default funnelAnalytics;

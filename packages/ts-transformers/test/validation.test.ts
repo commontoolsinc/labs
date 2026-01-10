@@ -291,8 +291,10 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
     },
   );
 
-  await t.step("allows reading opaques inside lift()", async () => {
-    const source = `/// <cts-enable />
+  await t.step(
+    "errors on lift() inside pattern (must be at module scope)",
+    async () => {
+      const source = `/// <cts-enable />
       import { recipe, lift, h } from "commontools";
 
       interface Item { name: string; price: number; }
@@ -302,19 +304,23 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
         return <div>{doubled}</div>;
       });
     `;
-    const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
-    });
-    const errors = getErrors(diagnostics);
-    assertEquals(
-      errors.length,
-      0,
-      "Reading opaques inside lift() should be allowed",
-    );
-  });
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(
+        errors.length,
+        0,
+        "lift() inside pattern should error (must be at module scope)",
+      );
+      assertEquals(errors[0]!.type, "pattern-context:builder-placement");
+    },
+  );
 
-  await t.step("allows reading opaques inside handler()", async () => {
-    const source = `/// <cts-enable />
+  await t.step(
+    "errors on handler() inside pattern (must be at module scope)",
+    async () => {
+      const source = `/// <cts-enable />
       import { recipe, handler, h } from "commontools";
 
       interface Item { name: string; price: number; }
@@ -328,16 +334,18 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
         return <div onClick={onClick}>Click</div>;
       });
     `;
-    const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
-    });
-    const errors = getErrors(diagnostics);
-    assertEquals(
-      errors.length,
-      0,
-      "Reading opaques inside handler() should be allowed",
-    );
-  });
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(
+        errors.length,
+        0,
+        "handler() inside pattern should error (must be at module scope)",
+      );
+      assertEquals(errors[0]!.type, "pattern-context:builder-placement");
+    },
+  );
 
   await t.step(
     "allows reading opaques inside inline JSX event handlers",
@@ -375,7 +383,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
   );
 
   await t.step(
-    "allows reading opaques inside standalone function declarations",
+    "errors on standalone function declarations in pattern (must be at module scope)",
     async () => {
       const source = `/// <cts-enable />
       import { recipe, computed, h } from "commontools";
@@ -383,7 +391,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
       interface Item { name: string; price: number; }
 
       export default recipe<{ item: Item }>("test", ({ item }) => {
-        // Helper function defined in pattern - called from computed
+        // Helper function defined in pattern - now an error
         function isExpensive() {
           return item.price > 100;
         }
@@ -396,16 +404,17 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
         types: COMMONTOOLS_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertEquals(
+      assertGreater(
         errors.length,
         0,
-        "Reading opaques inside standalone function declarations should be allowed",
+        "Function declarations in pattern should error (must be at module scope)",
       );
+      assertEquals(errors[0]!.type, "pattern-context:function-creation");
     },
   );
 
   await t.step(
-    "allows reading opaques inside standalone arrow functions",
+    "errors on standalone arrow functions in pattern (must be at module scope)",
     async () => {
       const source = `/// <cts-enable />
       import { recipe, computed, h } from "commontools";
@@ -413,7 +422,7 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
       interface Item { name: string; price: number; }
 
       export default recipe<{ item: Item }>("test", ({ item }) => {
-        // Helper arrow function defined in pattern - called from computed
+        // Helper arrow function defined in pattern - now an error
         const isExpensive = () => item.price > 100;
 
         const expensive = computed(() => isExpensive());
@@ -424,11 +433,12 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
         types: COMMONTOOLS_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertEquals(
+      assertGreater(
         errors.length,
         0,
-        "Reading opaques inside standalone arrow functions should be allowed",
+        "Arrow functions in pattern should error (must be at module scope)",
       );
+      assertEquals(errors[0]!.type, "pattern-context:function-creation");
     },
   );
 });
@@ -455,5 +465,347 @@ Deno.test("Diagnostic output format", async (t) => {
     assertGreater(error.length, 0, "Length should be positive");
     assertEquals(typeof error.message, "string");
     assertEquals(typeof error.type, "string");
+  });
+});
+
+Deno.test("Pattern Context Validation - Function Creation", async (t) => {
+  await t.step("errors on arrow function in recipe body", async () => {
+    const source = `/// <cts-enable />
+      import { recipe, h } from "commontools";
+
+      interface Item { price: number; }
+
+      export default recipe<{ item: Item }>("test", ({ item }) => {
+        const helper = () => item.price * 2;
+        return <div>{helper()}</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "pattern-context:function-creation");
+  });
+
+  await t.step("errors on function expression in pattern body", async () => {
+    const source = `/// <cts-enable />
+      import { pattern, h } from "commontools";
+
+      interface Item { price: number; }
+
+      export default pattern<{ item: Item }>(({ item }) => {
+        const helper = function() { return item.price * 2; };
+        return { UI: <div>{helper()}</div> };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "pattern-context:function-creation");
+  });
+
+  await t.step("errors on function declaration in recipe body", async () => {
+    const source = `/// <cts-enable />
+      import { recipe, h } from "commontools";
+
+      interface Item { price: number; }
+
+      export default recipe<{ item: Item }>("test", ({ item }) => {
+        function helper() { return item.price * 2; }
+        return <div>{helper()}</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "pattern-context:function-creation");
+  });
+
+  await t.step("allows arrow function inside computed()", async () => {
+    const source = `/// <cts-enable />
+      import { recipe, computed, h } from "commontools";
+
+      interface Item { price: number; }
+
+      export default recipe<{ item: Item }>("test", ({ item }) => {
+        const doubled = computed(() => {
+          const multiply = (x: number) => x * 2;
+          return multiply(item.price);
+        });
+        return <div>{doubled}</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(
+      errors.length,
+      0,
+      "Arrow function inside computed() should be allowed",
+    );
+  });
+
+  await t.step("allows arrow function inside action()", async () => {
+    const source = `/// <cts-enable />
+      import { recipe, action, h } from "commontools";
+
+      interface Item { price: number; }
+
+      export default recipe<{ item: Item }>("test", ({ item }) => {
+        const doSomething = action(() => {
+          const helper = () => item.price * 2;
+          console.log(helper());
+        });
+        return <div onClick={doSomething}>Click</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(
+      errors.length,
+      0,
+      "Arrow function inside action() should be allowed",
+    );
+  });
+
+  await t.step("allows inline JSX event handler", async () => {
+    const source = `/// <cts-enable />
+      import { recipe, h } from "commontools";
+
+      interface Item { price: number; }
+
+      export default recipe<{ item: Item }>("test", ({ item }) => {
+        return <div onClick={() => console.log(item.price)}>Click</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(
+      errors.length,
+      0,
+      "Inline JSX event handler should be allowed",
+    );
+  });
+
+  await t.step("allows map callback inside JSX", async () => {
+    const source = `/// <cts-enable />
+      import { recipe, h, OpaqueRef } from "commontools";
+
+      interface Item { name: string; }
+
+      export default recipe<{ items: OpaqueRef<Item[]> }>("test", ({ items }) => {
+        return <div>{items.map(item => <span>{item.name}</span>)}</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0, "Map callback inside JSX should be allowed");
+  });
+
+  await t.step("allows map callback outside JSX in pattern body", async () => {
+    const source = `/// <cts-enable />
+      import { pattern, OpaqueRef } from "commontools";
+
+      interface Item { name: string; }
+
+      const listItems = pattern<
+        { items: OpaqueRef<Item[]> },
+        { result: Array<{ label: string }> }
+      >(({ items }) => {
+        const result = items.map((item) => ({
+          label: item.name,
+        }));
+        return { result };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(
+      errors.length,
+      0,
+      "Map callback outside JSX in pattern should be allowed (transformed to pattern)",
+    );
+  });
+});
+
+Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
+  await t.step("errors on lift() inside recipe body", async () => {
+    const source = `/// <cts-enable />
+      import { recipe, lift, h } from "commontools";
+
+      interface Item { price: number; }
+
+      export default recipe<{ item: Item }>("test", ({ item }) => {
+        const doubled = lift(() => item.price * 2);
+        return <div>{doubled}</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "pattern-context:builder-placement");
+  });
+
+  await t.step(
+    "errors on lift() immediately invoked with computed suggestion",
+    async () => {
+      const source = `/// <cts-enable />
+      import { recipe, lift, h } from "commontools";
+
+      interface Item { price: number; }
+
+      export default recipe<{ item: Item }>("test", ({ item }) => {
+        const doubled = lift(({ x }: { x: number }) => x * 2)({ x: item.price });
+        return <div>{doubled}</div>;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "pattern-context:builder-placement");
+      assertEquals(
+        errors[0]!.message.includes("computed"),
+        true,
+        "Error should suggest using computed()",
+      );
+    },
+  );
+
+  await t.step("errors on handler() inside pattern body", async () => {
+    const source = `/// <cts-enable />
+      import { pattern, handler, h } from "commontools";
+
+      interface Item { price: number; }
+
+      export default pattern<{ item: Item }>(({ item }) => {
+        const onClick = handler(() => console.log(item.price));
+        return { UI: <div onClick={onClick}>Click</div> };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertGreater(errors.length, 0, "Expected at least one error");
+    assertEquals(errors[0]!.type, "pattern-context:builder-placement");
+  });
+
+  await t.step("allows lift() at module scope", async () => {
+    const source = `/// <cts-enable />
+      import { recipe, lift, h } from "commontools";
+
+      interface Item { price: number; }
+
+      const doublePrice = lift((price: number) => price * 2);
+
+      export default recipe<{ item: Item }>("test", ({ item }) => {
+        const doubled = doublePrice(item.price);
+        return <div>{doubled}</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0, "lift() at module scope should be allowed");
+  });
+
+  await t.step("allows handler() at module scope", async () => {
+    const source = `/// <cts-enable />
+      import { recipe, handler, h } from "commontools";
+
+      interface Item { price: number; }
+
+      const logPrice = handler((price: number) => console.log(price));
+
+      export default recipe<{ item: Item }>("test", ({ item }) => {
+        return <div onClick={() => logPrice(item.price)}>Click</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(
+      errors.length,
+      0,
+      "handler() at module scope should be allowed",
+    );
+  });
+
+  await t.step("allows computed() inside pattern", async () => {
+    const source = `/// <cts-enable />
+      import { recipe, computed, h } from "commontools";
+
+      interface Item { price: number; }
+
+      export default recipe<{ item: Item }>("test", ({ item }) => {
+        const doubled = computed(() => item.price * 2);
+        return <div>{doubled}</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(
+      errors.length,
+      0,
+      "computed() inside pattern should be allowed",
+    );
+  });
+
+  await t.step("allows action() inside pattern", async () => {
+    const source = `/// <cts-enable />
+      import { recipe, action, h } from "commontools";
+
+      interface Item { price: number; }
+
+      export default recipe<{ item: Item }>("test", ({ item }) => {
+        const log = action(() => console.log(item.price));
+        return <div onClick={log}>Click</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0, "action() inside pattern should be allowed");
+  });
+
+  await t.step("allows derive() inside pattern", async () => {
+    const source = `/// <cts-enable />
+      import { recipe, derive, h } from "commontools";
+
+      interface Item { price: number; }
+
+      export default recipe<{ item: Item }>("test", ({ item }) => {
+        const doubled = derive(() => item.price * 2);
+        return <div>{doubled}</div>;
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONTOOLS_TYPES,
+    });
+    const errors = getErrors(diagnostics);
+    assertEquals(errors.length, 0, "derive() inside pattern should be allowed");
   });
 });

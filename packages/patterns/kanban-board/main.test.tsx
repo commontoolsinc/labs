@@ -43,8 +43,21 @@
  * ============================================================================
  * deno task ct test packages/patterns/kanban-board/main.test.tsx --verbose
  */
-import { action, Cell, computed, handler, pattern } from "commontools";
+import { action, Cell, computed, handler, pattern, Stream } from "commontools";
 import KanbanBoard, { type Column } from "./main.tsx";
+
+// Handler moved to module scope with explicit type parameters
+// This is the correct pattern for handlers that need to be used in tests
+const action_via_state_handler = handler<
+  void,
+  { stream: Stream<{ columnId: string; title: string; description?: string }> }
+>((_event, { stream }) => {
+  stream.send({
+    columnId: "todo",
+    title: "Test Card (via state)",
+    description: "Stream passed as handler state parameter",
+  });
+});
 
 export default pattern(() => {
   // Initialize columns Cell
@@ -61,15 +74,8 @@ export default pattern(() => {
   // Expected: stream.send() adds a card
   // Actual: TypeError: stream.send is not a function
   // Reason: stream becomes {} (empty object) when passed through handler state
-  const action_via_state = handler<void, { stream: typeof board.addCard }>(
-    (_event, { stream }) => {
-      stream.send({
-        columnId: "todo",
-        title: "Test Card (via state)",
-        description: "Stream passed as handler state parameter",
-      });
-    },
-  )({ stream: board.addCard });
+  // NOTE: Handler moved to module scope with explicit type parameters
+  const action_via_state = action_via_state_handler({ stream: board.addCard });
 
   // ============ APPROACH 2: Access Stream via closure (using action) ============
   // Expected: board.addCard.send() adds a card

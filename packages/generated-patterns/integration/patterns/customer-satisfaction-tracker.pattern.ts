@@ -312,50 +312,68 @@ const logSurveyResponse = handler(
   },
 );
 
+const liftSanitizeEntryList = lift((
+  value: readonly SatisfactionSampleInput[] | undefined,
+) => sanitizeEntryList(value));
+
+const liftComputeDailySummaries = lift((
+  entries: readonly SatisfactionEntry[],
+) => computeDailySummaries(entries));
+
+const liftProjectDailySummaries = lift((
+  summaries: readonly DailySummaryInternal[],
+) => projectDailySummaries(summaries));
+
+const liftComputeMovingSeries = lift((
+  summaries: readonly DailySummaryInternal[],
+) => computeMovingSeries(summaries));
+
+const liftComputeOverallAverage = lift((
+  summaries: readonly DailySummaryInternal[],
+) => computeOverallAverage(summaries));
+
+const liftFormatAverage = lift((value: number) => value.toFixed(2));
+
+const liftResponseCount = lift((entries: readonly SatisfactionEntry[]) =>
+  entries.reduce((sum, entry) => sum + entry.responses, 0)
+);
+
+const liftDayCount = lift((summaries: readonly DailySummaryInternal[]) =>
+  summaries.length
+);
+
+const liftDetermineTrend = lift((series: readonly MovingAveragePoint[]) =>
+  determineTrend(series)
+);
+
+const liftComputeChannelAverages = lift((
+  entries: readonly SatisfactionEntry[],
+) => computeChannelAverages(entries));
+
 export const customerSatisfactionTracker = recipe<CustomerSatisfactionArgs>(
   "Customer Satisfaction Tracker",
   ({ responses }) => {
     const runtimeSeed = cell(0);
 
-    const responseLog = lift((
-      value: readonly SatisfactionSampleInput[] | undefined,
-    ) => sanitizeEntryList(value))(responses);
+    const responseLog = liftSanitizeEntryList(responses);
 
-    const dailySummaryInternal = lift((entries: readonly SatisfactionEntry[]) =>
-      computeDailySummaries(entries)
-    )(responseLog);
+    const dailySummaryInternal = liftComputeDailySummaries(responseLog);
 
-    const dailySummaries = lift((summaries: readonly DailySummaryInternal[]) =>
-      projectDailySummaries(summaries)
-    )(dailySummaryInternal);
+    const dailySummaries = liftProjectDailySummaries(dailySummaryInternal);
 
-    const movingAverages = lift((summaries: readonly DailySummaryInternal[]) =>
-      computeMovingSeries(summaries)
-    )(dailySummaryInternal);
+    const movingAverages = liftComputeMovingSeries(dailySummaryInternal);
 
-    const overallAverage = lift((summaries: readonly DailySummaryInternal[]) =>
-      computeOverallAverage(summaries)
-    )(dailySummaryInternal);
+    const overallAverage = liftComputeOverallAverage(dailySummaryInternal);
 
-    const overallAverageLabel = lift((value: number) => value.toFixed(2))(
-      overallAverage,
-    );
+    const overallAverageLabel = liftFormatAverage(overallAverage);
 
-    const responseCount = lift((entries: readonly SatisfactionEntry[]) =>
-      entries.reduce((sum, entry) => sum + entry.responses, 0)
-    )(responseLog);
+    const responseCount = liftResponseCount(responseLog);
 
-    const dayCount = lift((summaries: readonly DailySummaryInternal[]) =>
-      summaries.length
-    )(dailySummaryInternal);
+    const dayCount = liftDayCount(dailySummaryInternal);
 
-    const trendDirection = lift((series: readonly MovingAveragePoint[]) =>
-      determineTrend(series)
-    )(movingAverages);
+    const trendDirection = liftDetermineTrend(movingAverages);
 
-    const channelAverages = lift((entries: readonly SatisfactionEntry[]) =>
-      computeChannelAverages(entries)
-    )(responseLog);
+    const channelAverages = liftComputeChannelAverages(responseLog);
 
     const summary =
       str`${responseCount} responses across ${dayCount} days avg ${overallAverageLabel} trend ${trendDirection}`;
@@ -382,3 +400,5 @@ export type {
   SatisfactionEntry,
   TrendDirection,
 };
+
+export default customerSatisfactionTracker;

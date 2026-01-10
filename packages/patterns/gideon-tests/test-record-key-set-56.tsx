@@ -27,126 +27,126 @@ interface Input {
   logs: Default<string[], []>;
 }
 
+// ============================================================
+// TEST A: .key().set() on EMPTY record with SIMPLE key
+// ============================================================
+const testEmptySimpleKey = handler<
+  unknown,
+  { record: Cell<Record<string, Item>>; logs: Cell<string[]> }
+>(
+  (_, { record, logs }) => {
+    try {
+      const key = "simplekey";
+      record.key(key).set({ value: "test-a", count: 1 });
+      const msg = `A: SUCCESS - .key("${key}").set() on empty record`;
+      console.log(`[#56] ${msg}`);
+      logs.set([...logs.get(), msg]);
+    } catch (e) {
+      const msg = `A: FAILED - ${e}`;
+      console.error(`[#56] ${msg}`);
+      logs.set([...logs.get(), msg]);
+    }
+  },
+);
+
+// ============================================================
+// TEST B: .key().set() on EMPTY record with HYPHENATED key
+// ============================================================
+const testEmptyHyphenKey = handler<
+  unknown,
+  { record: Cell<Record<string, Item>>; logs: Cell<string[]> }
+>(
+  (_, { record, logs }) => {
+    try {
+      const key = "0-Technical_Expertise"; // The exact key from the superstition
+      record.key(key).set({ value: "test-b", count: 2 });
+      const msg = `B: SUCCESS - .key("${key}").set() on empty record`;
+      console.log(`[#56] ${msg}`);
+      logs.set([...logs.get(), msg]);
+    } catch (e) {
+      const msg = `B: FAILED - ${e}`;
+      console.error(`[#56] ${msg}`);
+      logs.set([...logs.get(), msg]);
+    }
+  },
+);
+
+// ============================================================
+// TEST C: .key().set() on POPULATED record (update existing)
+// ============================================================
+const testPopulatedUpdate = handler<
+  unknown,
+  { record: Cell<Record<string, Item>>; logs: Cell<string[]> }
+>(
+  (_, { record, logs }) => {
+    try {
+      const key = "existing"; // This key already exists
+      record.key(key).set({ value: "updated", count: 99 });
+      const msg = `C: SUCCESS - .key("${key}").set() update existing key`;
+      console.log(`[#56] ${msg}`);
+      logs.set([...logs.get(), msg]);
+    } catch (e) {
+      const msg = `C: FAILED - ${e}`;
+      console.error(`[#56] ${msg}`);
+      logs.set([...logs.get(), msg]);
+    }
+  },
+);
+
+// ============================================================
+// TEST D: .key().set() on POPULATED record (create new)
+// ============================================================
+const testPopulatedNew = handler<
+  unknown,
+  { record: Cell<Record<string, Item>>; logs: Cell<string[]> }
+>(
+  (_, { record, logs }) => {
+    try {
+      const key = "new-hyphen-key"; // New key with hyphen
+      record.key(key).set({ value: "test-d", count: 4 });
+      const msg =
+        `D: SUCCESS - .key("${key}").set() new key on populated record`;
+      console.log(`[#56] ${msg}`);
+      logs.set([...logs.get(), msg]);
+    } catch (e) {
+      const msg = `D: FAILED - ${e}`;
+      console.error(`[#56] ${msg}`);
+      logs.set([...logs.get(), msg]);
+    }
+  },
+);
+
+// ============================================================
+// TEST E: Spread workaround (should always work)
+// ============================================================
+const testSpreadWorkaround = handler<
+  unknown,
+  { record: Cell<Record<string, Item>>; logs: Cell<string[]> }
+>(
+  (_, { record, logs }) => {
+    try {
+      const key = "spread-key";
+      const current = record.get() ?? {};
+      record.set({ ...current, [key]: { value: "test-e", count: 5 } });
+      const msg = `E: SUCCESS - spread workaround with key "${key}"`;
+      console.log(`[#56] ${msg}`);
+      logs.set([...logs.get(), msg]);
+    } catch (e) {
+      const msg = `E: FAILED - ${e}`;
+      console.error(`[#56] ${msg}`);
+      logs.set([...logs.get(), msg]);
+    }
+  },
+);
+
+// Clear logs handler
+const clearLogs = handler<unknown, { logs: Cell<string[]> }>(
+  (_, { logs }) => {
+    logs.set([]);
+  },
+);
+
 export default pattern<Input>(({ emptyRecord, populatedRecord, logs }) => {
-  // ============================================================
-  // TEST A: .key().set() on EMPTY record with SIMPLE key
-  // ============================================================
-  const testEmptySimpleKey = handler<
-    unknown,
-    { record: Cell<Record<string, Item>>; logs: Cell<string[]> }
-  >(
-    (_, { record, logs }) => {
-      try {
-        const key = "simplekey";
-        record.key(key).set({ value: "test-a", count: 1 });
-        const msg = `A: SUCCESS - .key("${key}").set() on empty record`;
-        console.log(`[#56] ${msg}`);
-        logs.set([...logs.get(), msg]);
-      } catch (e) {
-        const msg = `A: FAILED - ${e}`;
-        console.error(`[#56] ${msg}`);
-        logs.set([...logs.get(), msg]);
-      }
-    },
-  );
-
-  // ============================================================
-  // TEST B: .key().set() on EMPTY record with HYPHENATED key
-  // ============================================================
-  const testEmptyHyphenKey = handler<
-    unknown,
-    { record: Cell<Record<string, Item>>; logs: Cell<string[]> }
-  >(
-    (_, { record, logs }) => {
-      try {
-        const key = "0-Technical_Expertise"; // The exact key from the superstition
-        record.key(key).set({ value: "test-b", count: 2 });
-        const msg = `B: SUCCESS - .key("${key}").set() on empty record`;
-        console.log(`[#56] ${msg}`);
-        logs.set([...logs.get(), msg]);
-      } catch (e) {
-        const msg = `B: FAILED - ${e}`;
-        console.error(`[#56] ${msg}`);
-        logs.set([...logs.get(), msg]);
-      }
-    },
-  );
-
-  // ============================================================
-  // TEST C: .key().set() on POPULATED record (update existing)
-  // ============================================================
-  const testPopulatedUpdate = handler<
-    unknown,
-    { record: Cell<Record<string, Item>>; logs: Cell<string[]> }
-  >(
-    (_, { record, logs }) => {
-      try {
-        const key = "existing"; // This key already exists
-        record.key(key).set({ value: "updated", count: 99 });
-        const msg = `C: SUCCESS - .key("${key}").set() update existing key`;
-        console.log(`[#56] ${msg}`);
-        logs.set([...logs.get(), msg]);
-      } catch (e) {
-        const msg = `C: FAILED - ${e}`;
-        console.error(`[#56] ${msg}`);
-        logs.set([...logs.get(), msg]);
-      }
-    },
-  );
-
-  // ============================================================
-  // TEST D: .key().set() on POPULATED record (create new)
-  // ============================================================
-  const testPopulatedNew = handler<
-    unknown,
-    { record: Cell<Record<string, Item>>; logs: Cell<string[]> }
-  >(
-    (_, { record, logs }) => {
-      try {
-        const key = "new-hyphen-key"; // New key with hyphen
-        record.key(key).set({ value: "test-d", count: 4 });
-        const msg =
-          `D: SUCCESS - .key("${key}").set() new key on populated record`;
-        console.log(`[#56] ${msg}`);
-        logs.set([...logs.get(), msg]);
-      } catch (e) {
-        const msg = `D: FAILED - ${e}`;
-        console.error(`[#56] ${msg}`);
-        logs.set([...logs.get(), msg]);
-      }
-    },
-  );
-
-  // ============================================================
-  // TEST E: Spread workaround (should always work)
-  // ============================================================
-  const testSpreadWorkaround = handler<
-    unknown,
-    { record: Cell<Record<string, Item>>; logs: Cell<string[]> }
-  >(
-    (_, { record, logs }) => {
-      try {
-        const key = "spread-key";
-        const current = record.get() ?? {};
-        record.set({ ...current, [key]: { value: "test-e", count: 5 } });
-        const msg = `E: SUCCESS - spread workaround with key "${key}"`;
-        console.log(`[#56] ${msg}`);
-        logs.set([...logs.get(), msg]);
-      } catch (e) {
-        const msg = `E: FAILED - ${e}`;
-        console.error(`[#56] ${msg}`);
-        logs.set([...logs.get(), msg]);
-      }
-    },
-  );
-
-  // Clear logs handler
-  const clearLogs = handler<unknown, { logs: Cell<string[]> }>(
-    (_, { logs }) => {
-      logs.set([]);
-    },
-  );
-
   return {
     [NAME]: "TEST: Record .key().set() #56",
     [UI]: (

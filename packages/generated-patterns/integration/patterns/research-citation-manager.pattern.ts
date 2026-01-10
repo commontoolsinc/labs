@@ -329,91 +329,110 @@ const updateActiveStyle = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftActiveStyle = lift(
+  (value: CitationStyle | string | undefined) => normalizeStyle(value, "APA"),
+);
+
+const liftCitationCatalog = lift(
+  toSchema<{
+    entries: Cell<CitationInput[]>;
+    fallback: Cell<CitationStyle>;
+  }>(),
+  toSchema<CitationRecord[]>(),
+  ({ entries, fallback }) => sanitizeCitations(entries.get(), fallback.get()),
+);
+
+const liftGroups = lift(
+  toSchema<{ entries: Cell<CitationRecord[]> }>(),
+  toSchema<BibliographyGroups>(),
+  ({ entries }) => buildGroups(entries.get() ?? []),
+);
+
+const liftTopicBibliographies = lift(
+  (mapping: Record<string, CitationRecord[]>) => {
+    const labels: Record<string, string[]> = {};
+    for (const key of Object.keys(mapping)) {
+      labels[key] = formatBibliography(mapping[key]);
+    }
+    return labels;
+  },
+);
+
+const liftStyleBibliographies = lift(
+  (mapping: Record<string, CitationRecord[]>) => {
+    const labels: Record<string, string[]> = {};
+    for (const key of Object.keys(mapping)) {
+      labels[key] = formatBibliography(mapping[key]);
+    }
+    return labels;
+  },
+);
+
+const liftActiveBibliography = lift(
+  toSchema<
+    { style: Cell<CitationStyle>; catalog: Cell<Record<string, string[]>> }
+  >(),
+  toSchema<string[]>(),
+  ({ style: active, catalog }) => {
+    const current = active.get();
+    const mapping = catalog.get() ?? {};
+    return mapping[current] ?? [];
+  },
+);
+
+const liftSnapshot = lift(
+  toSchema<{
+    entries: Cell<CitationRecord[]>;
+    topics: Cell<Record<string, CitationRecord[]>>;
+    styles: Cell<Record<string, CitationRecord[]>>;
+    active: Cell<CitationStyle>;
+    bibliography: Cell<string[]>;
+  }>(),
+  toSchema<BibliographySnapshot>(),
+  ({ entries, topics, styles, active, bibliography }) => {
+    const catalog = entries.get() ?? [];
+    const topicKeys = Object.keys(topics.get() ?? {});
+    const styleKeys = Object.keys(styles.get() ?? {});
+    const activeStyleValue = active.get();
+    const headline =
+      `${catalog.length} citations across ${topicKeys.length} topics using ${styleKeys.length} styles.`;
+    return {
+      total: catalog.length,
+      topics: topicKeys.length,
+      styles: styleKeys.length,
+      activeStyle: activeStyleValue,
+      activeBibliography: bibliography.get() ?? [],
+      headline,
+    };
+  },
+);
+
 export const researchCitationManager = recipe<CitationArgs>(
   "Research Citation Manager",
   ({ citations, style }) => {
-    const activeStyle = lift(
-      (value: CitationStyle | string | undefined) =>
-        normalizeStyle(value, "APA"),
-    )(style);
+    const activeStyle = liftActiveStyle(style);
 
-    const citationCatalog = lift(
-      toSchema<{
-        entries: Cell<CitationInput[]>;
-        fallback: Cell<CitationStyle>;
-      }>(),
-      toSchema<CitationRecord[]>(),
-      ({ entries, fallback }) =>
-        sanitizeCitations(entries.get(), fallback.get()),
-    )({ entries: citations, fallback: activeStyle });
+    const citationCatalog = liftCitationCatalog({
+      entries: citations,
+      fallback: activeStyle,
+    });
 
-    const groups = lift(
-      toSchema<{ entries: Cell<CitationRecord[]> }>(),
-      toSchema<BibliographyGroups>(),
-      ({ entries }) => buildGroups(entries.get() ?? []),
-    )({ entries: citationCatalog });
+    const groups = liftGroups({ entries: citationCatalog });
 
     const groupedByTopic = derive(groups, (result) => result.byTopic);
     const groupedByStyle = derive(groups, (result) => result.byStyle);
 
-    const topicBibliographies = lift(
-      (mapping: Record<string, CitationRecord[]>) => {
-        const labels: Record<string, string[]> = {};
-        for (const key of Object.keys(mapping)) {
-          labels[key] = formatBibliography(mapping[key]);
-        }
-        return labels;
-      },
-    )(groupedByTopic);
+    const topicBibliographies = liftTopicBibliographies(groupedByTopic);
 
-    const styleBibliographies = lift(
-      (mapping: Record<string, CitationRecord[]>) => {
-        const labels: Record<string, string[]> = {};
-        for (const key of Object.keys(mapping)) {
-          labels[key] = formatBibliography(mapping[key]);
-        }
-        return labels;
-      },
-    )(groupedByStyle);
+    const styleBibliographies = liftStyleBibliographies(groupedByStyle);
 
-    const activeBibliography = lift(
-      toSchema<
-        { style: Cell<CitationStyle>; catalog: Cell<Record<string, string[]>> }
-      >(),
-      toSchema<string[]>(),
-      ({ style: active, catalog }) => {
-        const current = active.get();
-        const mapping = catalog.get() ?? {};
-        return mapping[current] ?? [];
-      },
-    )({ style: activeStyle, catalog: styleBibliographies });
+    const activeBibliography = liftActiveBibliography({
+      style: activeStyle,
+      catalog: styleBibliographies,
+    });
 
-    const snapshot = lift(
-      toSchema<{
-        entries: Cell<CitationRecord[]>;
-        topics: Cell<Record<string, CitationRecord[]>>;
-        styles: Cell<Record<string, CitationRecord[]>>;
-        active: Cell<CitationStyle>;
-        bibliography: Cell<string[]>;
-      }>(),
-      toSchema<BibliographySnapshot>(),
-      ({ entries, topics, styles, active, bibliography }) => {
-        const catalog = entries.get() ?? [];
-        const topicKeys = Object.keys(topics.get() ?? {});
-        const styleKeys = Object.keys(styles.get() ?? {});
-        const activeStyleValue = active.get();
-        const headline =
-          `${catalog.length} citations across ${topicKeys.length} topics using ${styleKeys.length} styles.`;
-        return {
-          total: catalog.length,
-          topics: topicKeys.length,
-          styles: styleKeys.length,
-          activeStyle: activeStyleValue,
-          activeBibliography: bibliography.get() ?? [],
-          headline,
-        };
-      },
-    )({
+    const snapshot = liftSnapshot({
       entries: citationCatalog,
       topics: groupedByTopic,
       styles: groupedByStyle,
@@ -443,3 +462,5 @@ export const researchCitationManager = recipe<CitationArgs>(
     };
   },
 );
+
+export default researchCitationManager;

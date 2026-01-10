@@ -339,28 +339,37 @@ const triggerSubscription = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeSubscriptions = lift(sanitizeSubscriptions);
+const liftTotalSubscriptions = lift((list: SavedSearchSubscription[]) =>
+  list.length
+);
+const liftSubscriptionSummaries = lift((list: SavedSearchSubscription[]) =>
+  list.map(summarizeSubscription)
+);
+const liftPersistedQueries = lift((list: SavedSearchSubscription[]) =>
+  list.map((entry) => entry.query)
+);
+const liftLatestTrigger = lift((entries: string[]) => {
+  if (entries.length === 0) return "No triggers yet";
+  return entries[entries.length - 1];
+});
+
 export const savedSearchSubscription = recipe<SavedSearchArgs>(
   "Saved Search Subscription",
   ({ savedSubscriptions }) => {
     const savedLog = cell<string[]>([]);
     const triggerLog = cell<string[]>([]);
 
-    const sanitizedSubscriptions = lift(
-      sanitizeSubscriptions,
-    )(savedSubscriptions);
-    const totalSubscriptions = lift((list: SavedSearchSubscription[]) =>
-      list.length
-    )(sanitizedSubscriptions);
-    const subscriptionSummaries = lift((list: SavedSearchSubscription[]) =>
-      list.map(summarizeSubscription)
-    )(sanitizedSubscriptions);
-    const persistedQueries = lift((list: SavedSearchSubscription[]) =>
-      list.map((entry) => entry.query)
-    )(sanitizedSubscriptions);
-    const latestTrigger = lift((entries: string[]) => {
-      if (entries.length === 0) return "No triggers yet";
-      return entries[entries.length - 1];
-    })(triggerLog);
+    const sanitizedSubscriptions = liftSanitizeSubscriptions(
+      savedSubscriptions,
+    );
+    const totalSubscriptions = liftTotalSubscriptions(sanitizedSubscriptions);
+    const subscriptionSummaries = liftSubscriptionSummaries(
+      sanitizedSubscriptions,
+    );
+    const persistedQueries = liftPersistedQueries(sanitizedSubscriptions);
+    const latestTrigger = liftLatestTrigger(triggerLog);
 
     const statusLabel = str`${totalSubscriptions} saved searches active`;
 
@@ -394,3 +403,5 @@ export const savedSearchSubscription = recipe<SavedSearchArgs>(
     };
   },
 );
+
+export default savedSearchSubscription;

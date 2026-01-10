@@ -254,72 +254,93 @@ const updateResultMetricsHandler = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeResults = lift(sanitizeResults);
+const liftSanitizeWeights = lift(sanitizeWeights);
+const liftNormalizeWeights = lift(normalizeWeights);
+
+const liftRankedResults = lift((input: {
+  results: SearchResult[];
+  weights: SearchWeights;
+}): ScoredResult[] => {
+  const scored = input.results.map((entry) =>
+    scoreResult(entry, input.weights)
+  );
+  return scored.sort((a, b) => {
+    if (b.score === a.score) return a.id.localeCompare(b.id);
+    return b.score - a.score;
+  });
+});
+
+const liftRelevanceOrder = lift((entries: ScoredResult[]) =>
+  entries.map((entry) => entry.id)
+);
+
+const liftScoreSample = lift((entries: ScoredResult[]) =>
+  entries.map((entry) => `${entry.title}: ${entry.score.toFixed(3)}`)
+);
+
+const liftTopResult = lift((entries: ScoredResult[]) => entries[0] ?? null);
+
+const liftTopTitle = lift((entry: ScoredResult | null) =>
+  entry?.title ?? "(none)"
+);
+
+const liftTopScore = lift((entry: ScoredResult | null) =>
+  entry ? entry.score.toFixed(3) : "0.000"
+);
+
+const liftWeightSummary = lift((values: SearchWeights) => {
+  const textPortion = values.text.toFixed(3);
+  const clicksPortion = values.clicks.toFixed(3);
+  const freshnessPortion = values.freshness.toFixed(3);
+  return "Weights text " + textPortion + " | clicks " + clicksPortion +
+    " | freshness " + freshnessPortion;
+});
+
+const liftContributionSummary = lift((entry: ScoredResult | null) => {
+  if (!entry) return "text 0.000 | clicks 0.000 | freshness 0.000";
+  const parts = entry.contributions;
+  return "text " + parts.text.toFixed(3) + " | clicks " +
+    parts.clicks.toFixed(3) + " | freshness " +
+    parts.freshness.toFixed(3);
+});
+
+const liftScoreSummary = lift((input: {
+  title: string;
+  score: string;
+  weights: string;
+}) => `${input.title} leads at ${input.score} with ${input.weights}`);
+
 export const searchRelevanceTuning = recipe<SearchRelevanceArgs>(
   "Search Relevance Tuning Pattern",
   ({ results, weights }) => {
-    const sanitizedResults = lift(sanitizeResults)(results);
-    const sanitizedWeights = lift(sanitizeWeights)(weights);
-    const normalizedWeights = lift(normalizeWeights)(sanitizedWeights);
+    const sanitizedResults = liftSanitizeResults(results);
+    const sanitizedWeights = liftSanitizeWeights(weights);
+    const normalizedWeights = liftNormalizeWeights(sanitizedWeights);
 
     const scoringInputs = {
       results: sanitizedResults,
       weights: normalizedWeights,
     };
 
-    const rankedResults = lift((input: {
-      results: SearchResult[];
-      weights: SearchWeights;
-    }): ScoredResult[] => {
-      const scored = input.results.map((entry) =>
-        scoreResult(entry, input.weights)
-      );
-      return scored.sort((a, b) => {
-        if (b.score === a.score) return a.id.localeCompare(b.id);
-        return b.score - a.score;
-      });
-    })(scoringInputs);
+    const rankedResults = liftRankedResults(scoringInputs);
 
-    const relevanceOrder = lift((entries: ScoredResult[]) =>
-      entries.map((entry) => entry.id)
-    )(rankedResults);
+    const relevanceOrder = liftRelevanceOrder(rankedResults);
 
-    const scoreSample = lift((entries: ScoredResult[]) =>
-      entries.map((entry) => `${entry.title}: ${entry.score.toFixed(3)}`)
-    )(rankedResults);
+    const scoreSample = liftScoreSample(rankedResults);
 
-    const topResult = lift((entries: ScoredResult[]) => entries[0] ?? null)(
-      rankedResults,
-    );
+    const topResult = liftTopResult(rankedResults);
 
-    const topTitle = lift((entry: ScoredResult | null) =>
-      entry?.title ?? "(none)"
-    )(topResult);
+    const topTitle = liftTopTitle(topResult);
 
-    const topScore = lift((entry: ScoredResult | null) =>
-      entry ? entry.score.toFixed(3) : "0.000"
-    )(topResult);
+    const topScore = liftTopScore(topResult);
 
-    const weightSummary = lift((values: SearchWeights) => {
-      const textPortion = values.text.toFixed(3);
-      const clicksPortion = values.clicks.toFixed(3);
-      const freshnessPortion = values.freshness.toFixed(3);
-      return "Weights text " + textPortion + " | clicks " + clicksPortion +
-        " | freshness " + freshnessPortion;
-    })(normalizedWeights);
+    const weightSummary = liftWeightSummary(normalizedWeights);
 
-    const contributionSummary = lift((entry: ScoredResult | null) => {
-      if (!entry) return "text 0.000 | clicks 0.000 | freshness 0.000";
-      const parts = entry.contributions;
-      return "text " + parts.text.toFixed(3) + " | clicks " +
-        parts.clicks.toFixed(3) + " | freshness " +
-        parts.freshness.toFixed(3);
-    })(topResult);
+    const contributionSummary = liftContributionSummary(topResult);
 
-    const scoreSummary = lift((input: {
-      title: string;
-      score: string;
-      weights: string;
-    }) => `${input.title} leads at ${input.score} with ${input.weights}`)({
+    const scoreSummary = liftScoreSummary({
       title: topTitle,
       score: topScore,
       weights: weightSummary,
@@ -345,3 +366,5 @@ export const searchRelevanceTuning = recipe<SearchRelevanceArgs>(
     };
   },
 );
+
+export default searchRelevanceTuning;

@@ -70,6 +70,12 @@ const applyIncrement = handler(
   },
 );
 
+const liftCurrentValue = lift((raw: number | undefined) => ensureNumber(raw));
+
+const liftParity = lift((snapshot: Summary) => snapshot.parity);
+
+const liftVersion = lift((snapshot: Summary) => snapshot.version);
+
 const applyOverride = handler(
   (
     event: OverrideEvent | undefined,
@@ -109,9 +115,7 @@ export const counterWithReferenceEqualityAssertions = recipe<
 >(
   "Counter With Reference Equality Assertions",
   ({ value }) => {
-    const currentValue = lift((raw: number | undefined) => ensureNumber(raw))(
-      value,
-    );
+    const currentValue = liftCurrentValue(value);
 
     const stability = cell<StabilityStatus>({
       stable: true,
@@ -137,8 +141,8 @@ export const counterWithReferenceEqualityAssertions = recipe<
       },
     );
 
-    const parity = lift((snapshot: Summary) => snapshot.parity)(summary);
-    const version = lift((snapshot: Summary) => snapshot.version)(summary);
+    const parity = liftParity(summary);
+    const version = liftVersion(summary);
     const label = str`Value ${currentValue} is ${parity}`;
 
     return {
@@ -154,3 +158,5 @@ export const counterWithReferenceEqualityAssertions = recipe<
     };
   },
 );
+
+export default counterWithReferenceEqualityAssertions;

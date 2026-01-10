@@ -211,6 +211,42 @@ const recordHistoryEntry = (
   history.set(list.slice(-12));
 };
 
+const liftSharedAvailability = lift(
+  (
+    input: { participants: ParticipantAvailability[]; blocked: SlotId[] },
+  ): SlotId[] => {
+    return computeSharedAvailability(input.participants, input.blocked);
+  },
+);
+
+const liftSharedLabel = lift((slots: readonly SlotId[]) => {
+  if (!Array.isArray(slots) || slots.length === 0) {
+    return "none";
+  }
+  return slots.join(", ");
+});
+
+const liftNextAvailableSlot = lift((slots: readonly SlotId[]) => {
+  return Array.isArray(slots) && slots.length > 0 ? slots[0] : "none";
+});
+
+const liftFreeSlotCount = lift((slots: readonly SlotId[]) => {
+  return Array.isArray(slots) ? slots.length : 0;
+});
+
+const liftHistoryView = lift((entries: string[] | undefined) => {
+  return Array.isArray(entries) ? [...entries] : [];
+});
+
+const liftLatestChangeView = lift(
+  (entry: AvailabilityChange | null | undefined) => {
+    return entry ? { ...entry } : null;
+  },
+);
+
+const liftSanitizeParticipants = lift(sanitizeParticipants);
+const liftSanitizeBlocked = lift(sanitizeBlocked);
+
 const modifySharedAvailability = handler(
   (
     event: ModifyAvailabilityEvent | undefined,
@@ -267,40 +303,22 @@ export const calendarAvailabilityPattern = recipe<CalendarAvailabilityArgs>(
     const history = cell<string[]>([]);
     const latestChange = cell<AvailabilityChange | null>(null);
 
-    const participantsView = lift(sanitizeParticipants)(participants);
-    const blockedView = lift(sanitizeBlocked)(blocked);
-    const sharedAvailability = lift(
-      (
-        input: { participants: ParticipantAvailability[]; blocked: SlotId[] },
-      ): SlotId[] => {
-        return computeSharedAvailability(input.participants, input.blocked);
-      },
-    )({ participants: participantsView, blocked: blockedView });
+    const participantsView = liftSanitizeParticipants(participants);
+    const blockedView = liftSanitizeBlocked(blocked);
+    const sharedAvailability = liftSharedAvailability({
+      participants: participantsView,
+      blocked: blockedView,
+    });
 
-    const sharedLabel = lift((slots: readonly SlotId[]) => {
-      if (!Array.isArray(slots) || slots.length === 0) {
-        return "none";
-      }
-      return slots.join(", ");
-    })(sharedAvailability);
+    const sharedLabel = liftSharedLabel(sharedAvailability);
 
-    const nextAvailableSlot = lift((slots: readonly SlotId[]) => {
-      return Array.isArray(slots) && slots.length > 0 ? slots[0] : "none";
-    })(sharedAvailability);
+    const nextAvailableSlot = liftNextAvailableSlot(sharedAvailability);
 
-    const freeSlotCount = lift((slots: readonly SlotId[]) => {
-      return Array.isArray(slots) ? slots.length : 0;
-    })(sharedAvailability);
+    const freeSlotCount = liftFreeSlotCount(sharedAvailability);
 
-    const historyView = lift((entries: string[] | undefined) => {
-      return Array.isArray(entries) ? [...entries] : [];
-    })(history);
+    const historyView = liftHistoryView(history);
 
-    const latestChangeView = lift(
-      (entry: AvailabilityChange | null | undefined) => {
-        return entry ? { ...entry } : null;
-      },
-    )(latestChange);
+    const latestChangeView = liftLatestChangeView(latestChange);
 
     const sharedSummary = str`Shared slots: ${sharedLabel}`;
     const nextSlotSummary = str`Next slot: ${nextAvailableSlot}`;
@@ -330,3 +348,5 @@ export const calendarAvailabilityPattern = recipe<CalendarAvailabilityArgs>(
     };
   },
 );
+
+export default calendarAvailabilityPattern;

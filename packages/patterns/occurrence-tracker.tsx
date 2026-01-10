@@ -468,9 +468,11 @@ export const OccurrenceTrackerModule = recipe<
                 >
                   <ct-vstack gap="0" style={{ flex: "1" }}>
                     <span style={{ fontSize: "0.875rem" }}>
-                      {lift((ts: string) =>
-                        `${formatRelativeTime(ts)} · ${formatHistoryTime(ts)}`
-                      )(occ.timestamp)}
+                      {computed(() =>
+                        `${formatRelativeTime(occ.timestamp)} · ${
+                          formatHistoryTime(occ.timestamp)
+                        }`
+                      )}
                     </span>
                     <ct-input
                       $value={occ.note}

@@ -239,17 +239,6 @@ const optionMatchesId = (
   return false;
 };
 
-const fingerprintOptions = (
-  entries: readonly QuoteOption[] | undefined,
-): string => {
-  if (!entries || entries.length === 0) return "";
-  return entries.map((option) => {
-    const price = option.price.toFixed(2);
-    const flag = option.selected ? "1" : "0";
-    return `${option.id}:${option.label}:${price}:${flag}`;
-  }).join("|");
-};
-
 const sanitizeBasePrice = (value: number | undefined): number => {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return clampCurrency(defaultBasePrice);
@@ -357,87 +346,85 @@ const configurePricing = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeBasePrice = lift(sanitizeBasePrice);
+const liftSanitizeDiscountRate = lift(sanitizeDiscountRate);
+
+const liftOptionsView = lift((list: QuoteOption[] | undefined) => {
+  if (!Array.isArray(list)) {
+    return [] as QuoteOption[];
+  }
+  return list.map((option) => ({ ...option }));
+});
+
+const liftSelectedOptionIds = lift((list: QuoteOption[]) => {
+  return list.filter((option) => option.selected).map((option) => option.id);
+});
+
+const liftPricing = lift((input: {
+  base: number;
+  addOns: QuoteOption[];
+  discount: number;
+}): PricingDetails => {
+  const addOnTotal = input.addOns.reduce((total, option) => {
+    return option.selected ? total + option.price : total;
+  }, 0);
+  const normalizedBase = clampCurrency(input.base);
+  const normalizedAddOns = clampCurrency(addOnTotal);
+  const subtotal = clampCurrency(normalizedBase + normalizedAddOns);
+  const discountAmount = clampCurrency(subtotal * input.discount);
+  const total = clampCurrency(subtotal - discountAmount);
+  return {
+    base: normalizedBase,
+    optionsTotal: normalizedAddOns,
+    subtotal,
+    discountAmount,
+    total,
+  };
+});
+
+const liftSubtotal = lift((details: PricingDetails) => details.subtotal);
+const liftDiscountAmount = lift((details: PricingDetails) =>
+  details.discountAmount
+);
+const liftTotal = lift((details: PricingDetails) => details.total);
+const liftOptionsTotal = lift((details: PricingDetails) =>
+  details.optionsTotal
+);
+const liftFormatCurrency = lift((value: number) => `$${value.toFixed(2)}`);
+
+const liftSyncOptions = lift((raw: QuoteOptionInput[] | undefined) => {
+  return sanitizeOptionList(raw);
+});
+
 export const quoteConfiguration = recipe<QuoteConfigurationArgs>(
   "Quote Configuration Pattern",
   ({ basePrice, discountRate, options }) => {
     const initialOptions = sanitizeOptionList(undefined);
     const optionState = cell<QuoteOption[]>(initialOptions);
-    let lastOptionSignature = fingerprintOptions(initialOptions);
 
-    const syncOptions = lift((raw: QuoteOptionInput[] | undefined) => {
-      const normalized = sanitizeOptionList(raw);
-      const signature = fingerprintOptions(normalized);
-      if (signature === lastOptionSignature) {
-        return normalized;
-      }
-      lastOptionSignature = signature;
-      optionState.set(normalized);
-      return normalized;
-    })(options);
+    const syncOptions = liftSyncOptions(options);
 
-    const safeBasePrice = lift(sanitizeBasePrice)(basePrice);
-    const safeDiscountRate = lift(sanitizeDiscountRate)(discountRate);
+    const safeBasePrice = liftSanitizeBasePrice(basePrice);
+    const safeDiscountRate = liftSanitizeDiscountRate(discountRate);
 
-    const optionsView = lift((list: QuoteOption[] | undefined) => {
-      if (!Array.isArray(list)) {
-        return [] as QuoteOption[];
-      }
-      return list.map((option) => ({ ...option }));
-    })(optionState);
+    const optionsView = liftOptionsView(optionState);
 
-    const selectedOptionIds = lift((list: QuoteOption[]) => {
-      return list.filter((option) => option.selected).map((option) =>
-        option.id
-      );
-    })(optionsView);
+    const selectedOptionIds = liftSelectedOptionIds(optionsView);
 
-    const pricing = lift((input: {
-      base: number;
-      addOns: QuoteOption[];
-      discount: number;
-    }): PricingDetails => {
-      const addOnTotal = input.addOns.reduce((total, option) => {
-        return option.selected ? total + option.price : total;
-      }, 0);
-      const normalizedBase = clampCurrency(input.base);
-      const normalizedAddOns = clampCurrency(addOnTotal);
-      const subtotal = clampCurrency(normalizedBase + normalizedAddOns);
-      const discountAmount = clampCurrency(subtotal * input.discount);
-      const total = clampCurrency(subtotal - discountAmount);
-      return {
-        base: normalizedBase,
-        optionsTotal: normalizedAddOns,
-        subtotal,
-        discountAmount,
-        total,
-      };
-    })({
+    const pricing = liftPricing({
       base: safeBasePrice,
       addOns: optionsView,
       discount: safeDiscountRate,
     });
 
-    const subtotal = lift((details: PricingDetails) => details.subtotal)(
-      pricing,
-    );
-    const discountAmount = lift((details: PricingDetails) =>
-      details.discountAmount
-    )(
-      pricing,
-    );
-    const total = lift((details: PricingDetails) => details.total)(pricing);
-    const optionsTotal = lift((details: PricingDetails) =>
-      details.optionsTotal
-    )(
-      pricing,
-    );
+    const subtotal = liftSubtotal(pricing);
+    const discountAmount = liftDiscountAmount(pricing);
+    const total = liftTotal(pricing);
+    const optionsTotal = liftOptionsTotal(pricing);
 
-    const formattedTotal = lift((value: number) => `$${value.toFixed(2)}`)(
-      total,
-    );
-    const formattedDiscount = lift((value: number) => `$${value.toFixed(2)}`)(
-      discountAmount,
-    );
+    const formattedTotal = liftFormatCurrency(total);
+    const formattedDiscount = liftFormatCurrency(discountAmount);
     const summary =
       str`Quote total ${formattedTotal} (discount ${formattedDiscount})`;
 
@@ -462,3 +449,5 @@ export const quoteConfiguration = recipe<QuoteConfigurationArgs>(
     };
   },
 );
+
+export default quoteConfiguration;

@@ -204,93 +204,116 @@ const triageTicket = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeTickets = lift(sanitizeTickets);
+
+const liftNormalizedTickets = lift((input: {
+  stored: TicketRecord[];
+  base: TicketRecord[];
+}) => {
+  const stored = Array.isArray(input.stored) ? input.stored : [];
+  if (stored.length > 0) {
+    const cloned = stored.map(cloneTicket);
+    cloned.sort(sortTickets);
+    return cloned;
+  }
+  const base = Array.isArray(input.base) ? input.base : [];
+  const cloned = base.map(cloneTicket);
+  cloned.sort(sortTickets);
+  return cloned;
+});
+
+const liftTicketsView = lift((entries: TicketRecord[]) =>
+  entries.map(cloneTicket)
+);
+
+const liftBuildQueueSummaries = lift(buildQueueSummaries);
+
+const liftQueueSummariesView = lift((summaries: QueueSummary[]) =>
+  summaries.map((summary) => ({
+    ...summary,
+    countdowns: [...summary.countdowns],
+  }))
+);
+
+const liftQueueAlerts = lift((summaries: QueueSummary[]) => {
+  return summaries.map((summary) => {
+    const base = `${summary.label}: ${summary.nearestHours}h SLA`;
+    if (summary.criticalCount > 0) {
+      return `${base} (${summary.criticalCount} critical)`;
+    }
+    return `${base} (stable)`;
+  });
+});
+
+const liftQueueAlertsView = lift((alerts: string[]) => [...alerts]);
+
+const liftTotalOpen = lift((summaries: QueueSummary[]) =>
+  summaries.reduce((sum, summary) => sum + summary.openCount, 0)
+);
+
+const liftTotalUnassigned = lift((summaries: QueueSummary[]) =>
+  summaries.reduce((sum, summary) => sum + summary.unassignedCount, 0)
+);
+
+const liftSummaryLabel = lift((summaries: QueueSummary[]) => {
+  if (!Array.isArray(summaries) || summaries.length === 0) {
+    return "No open tickets";
+  }
+  const segments = summaries.map((summary) => {
+    const base = `${summary.label} next SLA ${summary.nearestHours}h`;
+    if (summary.criticalCount > 0) {
+      return `${base} (${summary.criticalCount} critical)`;
+    }
+    return `${base} (stable)`;
+  });
+  return segments.join(" | ");
+});
+
+const liftEscalationCount = lift((value: number | undefined) =>
+  typeof value === "number" && value > 0 ? value : 0
+);
+
+const liftHistoryView = lift((entries: string[] | undefined) =>
+  Array.isArray(entries) ? [...entries] : []
+);
+
 export const supportTicketTriagePattern = recipe<SupportTicketArgs>(
   "Support Ticket Triage",
   ({ tickets }) => {
-    const sanitizedTickets = lift(sanitizeTickets)(tickets);
+    const sanitizedTickets = liftSanitizeTickets(tickets);
 
     const ticketStore = cell<TicketRecord[]>([]);
     const history = cell<string[]>([]);
     const escalations = cell(0);
 
-    const normalizedTickets = lift((input: {
-      stored: TicketRecord[];
-      base: TicketRecord[];
-    }) => {
-      const stored = Array.isArray(input.stored) ? input.stored : [];
-      if (stored.length > 0) {
-        const cloned = stored.map(cloneTicket);
-        cloned.sort(sortTickets);
-        return cloned;
-      }
-      const base = Array.isArray(input.base) ? input.base : [];
-      const cloned = base.map(cloneTicket);
-      cloned.sort(sortTickets);
-      return cloned;
-    })({
+    const normalizedTickets = liftNormalizedTickets({
       stored: ticketStore,
       base: sanitizedTickets,
     });
 
-    const ticketsView = lift((entries: TicketRecord[]) =>
-      entries.map(cloneTicket)
-    )(normalizedTickets);
+    const ticketsView = liftTicketsView(normalizedTickets);
 
-    const queueSummaries = lift(buildQueueSummaries)(normalizedTickets);
-    const queueSummariesView = lift((summaries: QueueSummary[]) =>
-      summaries.map((summary) => ({
-        ...summary,
-        countdowns: [...summary.countdowns],
-      }))
-    )(queueSummaries);
+    const queueSummaries = liftBuildQueueSummaries(normalizedTickets);
+    const queueSummariesView = liftQueueSummariesView(queueSummaries);
 
-    const queueAlerts = lift((summaries: QueueSummary[]) => {
-      return summaries.map((summary) => {
-        const base = `${summary.label}: ${summary.nearestHours}h SLA`;
-        if (summary.criticalCount > 0) {
-          return `${base} (${summary.criticalCount} critical)`;
-        }
-        return `${base} (stable)`;
-      });
-    })(queueSummaries);
+    const queueAlerts = liftQueueAlerts(queueSummaries);
 
-    const queueAlertsView = lift((alerts: string[]) => [...alerts])(
-      queueAlerts,
-    );
+    const queueAlertsView = liftQueueAlertsView(queueAlerts);
 
-    const totalOpen = lift((summaries: QueueSummary[]) =>
-      summaries.reduce((sum, summary) => sum + summary.openCount, 0)
-    )(queueSummaries);
+    const totalOpen = liftTotalOpen(queueSummaries);
 
-    const totalUnassigned = lift((summaries: QueueSummary[]) =>
-      summaries.reduce((sum, summary) => sum + summary.unassignedCount, 0)
-    )(queueSummaries);
+    const totalUnassigned = liftTotalUnassigned(queueSummaries);
 
-    const summaryLabel = lift((summaries: QueueSummary[]) => {
-      if (!Array.isArray(summaries) || summaries.length === 0) {
-        return "No open tickets";
-      }
-      const segments = summaries.map((summary) => {
-        const base = `${summary.label} next SLA ${summary.nearestHours}h`;
-        if (summary.criticalCount > 0) {
-          return `${base} (${summary.criticalCount} critical)`;
-        }
-        return `${base} (stable)`;
-      });
-      return segments.join(" | ");
-    })(queueSummaries);
+    const summaryLabel = liftSummaryLabel(queueSummaries);
 
-    const escalationCount = lift((value: number | undefined) =>
-      typeof value === "number" && value > 0 ? value : 0
-    )(escalations);
+    const escalationCount = liftEscalationCount(escalations);
 
     const escalationSummary = str`Escalations applied: ${escalationCount}`;
     const backlogSummary =
       str`${totalOpen} open / ${totalUnassigned} unassigned`;
 
-    const historyView = lift((entries: string[] | undefined) =>
-      Array.isArray(entries) ? [...entries] : []
-    )(history);
+    const historyView = liftHistoryView(history);
 
     const controls = {
       triage: triageTicket({
@@ -556,3 +579,5 @@ function formatQueueLabel(value: string): string {
 function formatPriorityLabel(priority: Priority): string {
   return priority[0].toUpperCase() + priority.slice(1);
 }
+
+export default supportTicketTriagePattern;

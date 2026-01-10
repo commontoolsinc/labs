@@ -16,12 +16,12 @@ const addOne = handler(
   },
 );
 
+const liftFormatted = lift((count: number) => `Value: ${count.toFixed(2)}`);
+
 export const counterWithLiftFormatting = recipe<LiftFormattingArgs>(
   "Counter With Lift Formatting",
   ({ value }) => {
-    const formatted = lift((count: number) => `Value: ${count.toFixed(2)}`)(
-      value,
-    );
+    const formatted = liftFormatted(value);
 
     return {
       value,
@@ -30,3 +30,5 @@ export const counterWithLiftFormatting = recipe<LiftFormattingArgs>(
     };
   },
 );
+
+export default counterWithLiftFormatting;

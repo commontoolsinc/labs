@@ -142,6 +142,13 @@ const updateHierarchicalCounter = handler(
   },
 );
 
+const liftOverall = lift(sumTotals);
+const liftUpdates = lift((count: number | undefined) => count ?? 0);
+const liftLastUpdatedPath = lift(
+  (value: string | undefined) => value ?? DEFAULT_PATH_STRING,
+);
+const liftPathLogView = lift(clampPathLog);
+
 /** Pattern updating nested counters by traversing key paths. */
 export const counterWithHierarchicalKeyPath = recipe<HierarchyArgs>(
   "Counter With Hierarchical Key Path",
@@ -151,14 +158,10 @@ export const counterWithHierarchicalKeyPath = recipe<HierarchyArgs>(
     const pathLog = cell<string[]>([]);
 
     const totals = derive(hierarchy, computeClusterTotals);
-    const overall = lift(sumTotals)(totals);
-    const updates = lift((count: number | undefined) => count ?? 0)(
-      updateCount,
-    );
-    const lastUpdatedPath = lift(
-      (value: string | undefined) => value ?? DEFAULT_PATH_STRING,
-    )(lastPath);
-    const pathLogView = lift(clampPathLog)(pathLog);
+    const overall = liftOverall(totals);
+    const updates = liftUpdates(updateCount);
+    const lastUpdatedPath = liftLastUpdatedPath(lastPath);
+    const pathLogView = liftPathLogView(pathLog);
     const label = str`${updates} updates via ${lastUpdatedPath}`;
 
     return {
@@ -179,3 +182,5 @@ export const counterWithHierarchicalKeyPath = recipe<HierarchyArgs>(
     };
   },
 );
+
+export default counterWithHierarchicalKeyPath;

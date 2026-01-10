@@ -281,49 +281,59 @@ const unlinkDependency = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeIssues = lift(sanitizeIssueList);
+
+const liftIssuesView = lift((entries: Issue[]) =>
+  entries.map((issue) => ({
+    id: issue.id,
+    title: issue.title,
+    dependencies: issue.dependencies.slice(),
+  }))
+);
+
+const liftGraphDetails = lift(buildGraphDetails);
+
+const liftAdjacency = lift((details: GraphDetails) => {
+  const result: Record<string, string[]> = {};
+  for (const key of Object.keys(details.adjacency)) {
+    result[key] = details.adjacency[key].slice();
+  }
+  return result;
+});
+
+const liftOrder = lift((details: GraphDetails) => details.order.slice());
+const liftRoots = lift((details: GraphDetails) => details.roots.slice());
+const liftBlocked = lift((details: GraphDetails) => details.blocked.slice());
+const liftHasCycle = lift((details: GraphDetails) => details.hasCycle);
+
+const liftRejectionHistory = lift((entries: RejectedEdge[] | undefined) =>
+  Array.isArray(entries) ? entries.map((entry) => ({ ...entry })) : []
+);
+
+const liftOrderText = lift((ids: string[]) =>
+  ids.length > 0 ? ids.join(" -> ") : "none"
+);
+
+const liftCycleStatus = lift((flag: boolean) => flag ? "cycle" : "valid");
+
 export const issueDependencyGraph = recipe<IssueDependencyArgs>(
   "Issue Dependency Graph",
   ({ issues }) => {
     const rejectedEdges = cell<RejectedEdge[]>([]);
 
-    const sanitizedIssues = lift(sanitizeIssueList)(issues);
-    const issuesView = lift((entries: Issue[]) =>
-      entries.map((issue) => ({
-        id: issue.id,
-        title: issue.title,
-        dependencies: issue.dependencies.slice(),
-      }))
-    )(sanitizedIssues);
-    const graphDetails = lift(buildGraphDetails)(sanitizedIssues);
-    const adjacency = lift((details: GraphDetails) => {
-      const result: Record<string, string[]> = {};
-      for (const key of Object.keys(details.adjacency)) {
-        result[key] = details.adjacency[key].slice();
-      }
-      return result;
-    })(graphDetails);
-    const order = lift((details: GraphDetails) => details.order.slice())(
-      graphDetails,
-    );
-    const roots = lift((details: GraphDetails) => details.roots.slice())(
-      graphDetails,
-    );
-    const blocked = lift((details: GraphDetails) => details.blocked.slice())(
-      graphDetails,
-    );
-    const hasCycle = lift((details: GraphDetails) => details.hasCycle)(
-      graphDetails,
-    );
-    const rejectionHistory = lift((entries: RejectedEdge[] | undefined) =>
-      Array.isArray(entries) ? entries.map((entry) => ({ ...entry })) : []
-    )(rejectedEdges);
+    const sanitizedIssues = liftSanitizeIssues(issues);
+    const issuesView = liftIssuesView(sanitizedIssues);
+    const graphDetails = liftGraphDetails(sanitizedIssues);
+    const adjacency = liftAdjacency(graphDetails);
+    const order = liftOrder(graphDetails);
+    const roots = liftRoots(graphDetails);
+    const blocked = liftBlocked(graphDetails);
+    const hasCycle = liftHasCycle(graphDetails);
+    const rejectionHistory = liftRejectionHistory(rejectedEdges);
 
-    const orderText = lift((ids: string[]) =>
-      ids.length > 0 ? ids.join(" -> ") : "none"
-    )(order);
-    const cycleStatus = lift((flag: boolean) => flag ? "cycle" : "valid")(
-      hasCycle,
-    );
+    const orderText = liftOrderText(order);
+    const cycleStatus = liftCycleStatus(hasCycle);
     const summary = str`${cycleStatus}: ${orderText}`;
 
     return {
@@ -350,3 +360,5 @@ export const issueDependencyGraph = recipe<IssueDependencyArgs>(
     };
   },
 );
+
+export default issueDependencyGraph;

@@ -528,30 +528,50 @@ const recordGrade = handler(
   },
 );
 
+const liftSanitizeStudents = lift(sanitizeStudents);
+
+const liftSanitizeAssignments = lift(sanitizeAssignments);
+
+const liftGradeEntries = lift((input: {
+  entries: GradeInput[] | undefined;
+  students: StudentRecord[];
+  assignments: AssignmentRecord[];
+}) => {
+  const baseEntries = Array.isArray(input.entries) ? input.entries : [];
+  return sanitizeGrades(baseEntries, input.students, input.assignments);
+});
+
+const liftGradeMatrix = lift((input: {
+  entries: GradeRecord[];
+  students: StudentRecord[];
+  assignments: AssignmentRecord[];
+}) => {
+  return buildGradeMatrix(input.entries, input.students, input.assignments);
+});
+
+const liftClassAverageText = lift((matrix: GradeMatrixView) =>
+  formatPercent(matrix.classAveragePercent)
+);
+
+const liftStudentCountText = lift((matrix: GradeMatrixView) =>
+  `${matrix.studentCount}`
+);
+
+const liftAssignmentCountText = lift((matrix: GradeMatrixView) =>
+  `${matrix.assignmentCount}`
+);
+
 export const assignmentGradingMatrix = recipe<AssignmentGradingMatrixArgs>(
   "Assignment Grading Matrix",
   ({ students, assignments, grades }) => {
-    const sanitizedStudents = lift(sanitizeStudents)(students);
-    const sanitizedAssignments = lift(sanitizeAssignments)(assignments);
-    const gradeEntries = lift((input: {
-      entries: GradeInput[] | undefined;
-      students: StudentRecord[];
-      assignments: AssignmentRecord[];
-    }) => {
-      const baseEntries = Array.isArray(input.entries) ? input.entries : [];
-      return sanitizeGrades(baseEntries, input.students, input.assignments);
-    })({
+    const sanitizedStudents = liftSanitizeStudents(students);
+    const sanitizedAssignments = liftSanitizeAssignments(assignments);
+    const gradeEntries = liftGradeEntries({
       entries: grades,
       students: sanitizedStudents,
       assignments: sanitizedAssignments,
     });
-    const gradeMatrix = lift((input: {
-      entries: GradeRecord[];
-      students: StudentRecord[];
-      assignments: AssignmentRecord[];
-    }) => {
-      return buildGradeMatrix(input.entries, input.students, input.assignments);
-    })({
+    const gradeMatrix = liftGradeMatrix({
       entries: gradeEntries,
       students: sanitizedStudents,
       assignments: sanitizedAssignments,
@@ -561,15 +581,9 @@ export const assignmentGradingMatrix = recipe<AssignmentGradingMatrixArgs>(
       gradeMatrix,
       (matrix) => highlightAssignment(matrix.assignmentStats),
     );
-    const classAverageText = lift((matrix: GradeMatrixView) =>
-      formatPercent(matrix.classAveragePercent)
-    )(gradeMatrix);
-    const studentCountText = lift((matrix: GradeMatrixView) =>
-      `${matrix.studentCount}`
-    )(gradeMatrix);
-    const assignmentCountText = lift((matrix: GradeMatrixView) =>
-      `${matrix.assignmentCount}`
-    )(gradeMatrix);
+    const classAverageText = liftClassAverageText(gradeMatrix);
+    const studentCountText = liftStudentCountText(gradeMatrix);
+    const assignmentCountText = liftAssignmentCountText(gradeMatrix);
     const summaryLabel =
       str`Class average ${classAverageText} across ${studentCountText} students for ${assignmentCountText} assignments`;
 
@@ -591,3 +605,5 @@ export const assignmentGradingMatrix = recipe<AssignmentGradingMatrixArgs>(
     };
   },
 );
+
+export default assignmentGradingMatrix;

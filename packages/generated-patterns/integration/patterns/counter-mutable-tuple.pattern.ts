@@ -31,23 +31,29 @@ const adjustPair = handler(
   },
 );
 
+const liftTuple = lift((values: [number, number] | undefined) => {
+  const leftValue = Array.isArray(values) && typeof values[0] === "number"
+    ? values[0]
+    : 0;
+  const rightValue = Array.isArray(values) && typeof values[1] === "number"
+    ? values[1]
+    : 0;
+  return [leftValue, rightValue] as [number, number];
+});
+
+const liftLeft = lift((values: [number, number]) => values[0]);
+
+const liftRight = lift((values: [number, number]) => values[1]);
+
+const liftSum = lift((values: [number, number]) => values[0] + values[1]);
+
 export const counterWithMutableTuple = recipe<MutableTupleArgs>(
   "Counter With Mutable Tuple",
   ({ pair }) => {
-    const tuple = lift((values: [number, number] | undefined) => {
-      const leftValue = Array.isArray(values) && typeof values[0] === "number"
-        ? values[0]
-        : 0;
-      const rightValue = Array.isArray(values) && typeof values[1] === "number"
-        ? values[1]
-        : 0;
-      return [leftValue, rightValue] as [number, number];
-    })(pair);
-    const left = lift((values: [number, number]) => values[0])(tuple);
-    const right = lift((values: [number, number]) => values[1])(tuple);
-    const sum = lift((values: [number, number]) => values[0] + values[1])(
-      tuple,
-    );
+    const tuple = liftTuple(pair);
+    const left = liftLeft(tuple);
+    const right = liftRight(tuple);
+    const sum = liftSum(tuple);
     const label = str`Tuple (${left}, ${right}) sum ${sum}`;
 
     return {
@@ -62,3 +68,5 @@ export const counterWithMutableTuple = recipe<MutableTupleArgs>(
     };
   },
 );
+
+export default counterWithMutableTuple;

@@ -1245,6 +1245,80 @@ const nextMonth = handler<
   viewedYearMonth.set(newDate.substring(0, 7));
 });
 
+// Handler to select a day from the calendar
+// OPTIMIZATION v508: Also update viewedYearMonth when selecting a day
+const selectDayFromCalendar = handler<
+  { target: { dataset: { date: string } } },
+  { currentDate: Writable<string>; viewedYearMonth: Writable<string> }
+>(({ target }, { currentDate, viewedYearMonth }) => {
+  const date = target.dataset.date;
+  if (date) {
+    currentDate.set(date);
+    // Update viewed month if selecting a day in a different month
+    const newYearMonth = date.substring(0, 7);
+    if (viewedYearMonth.get() !== newYearMonth) {
+      viewedYearMonth.set(newYearMonth);
+    }
+  }
+});
+
+// Handler to change month
+const _changeMonth = handler<
+  { detail: { value: number } },
+  { currentDate: Writable<string> }
+>(({ detail }, { currentDate }) => {
+  const current = new Date(currentDate.get() + "T00:00:00");
+  current.setMonth(detail.value);
+  currentDate.set(current.toISOString().split("T")[0]);
+});
+
+// Handler to change year
+const _changeYear = handler<
+  { detail: { value: number } },
+  { currentDate: Writable<string> }
+>(({ detail }, { currentDate }) => {
+  const current = new Date(currentDate.get() + "T00:00:00");
+  current.setFullYear(detail.value);
+  currentDate.set(current.toISOString().split("T")[0]);
+});
+
+// Handler to add a new note to current date
+const addNote = handler<
+  never,
+  { entries: Writable<DayEntry[]>; currentDate: Writable<string> }
+>((_event, { entries, currentDate }) => {
+  const date = currentDate.get();
+  const allEntries = entries.get();
+  const existingIndex = allEntries.findIndex((e: DayEntry) => e.date === date);
+  const newNoteId = Date.now().toString();
+  const newNote: Note = { id: newNoteId, text: "" };
+
+  // Notes start in view mode - user can click to edit
+
+  if (existingIndex >= 0) {
+    // Add note to existing entry - make sure to create a completely new object
+    const updated = [...allEntries];
+    const existingNotes = Array.from(updated[existingIndex].notes || []);
+    // Create a fresh plain object array to avoid Cell wrapping
+    const newNotes: Note[] = [...existingNotes];
+    newNotes.push(newNote);
+    updated[existingIndex] = {
+      date,
+      notes: newNotes,
+    };
+    entries.set(updated);
+  } else {
+    // Create new entry with note
+    entries.set([...allEntries, { date, notes: [newNote] }]);
+  }
+});
+
+// Pre-computed Settings time select items (for Start Time and End Time)
+const timeSelectItems = Array.from({ length: 24 }, (_, i) => ({
+  value: i,
+  label: formatTimeAMPMCache(i, 0),
+}));
+
 // RRULE expansion logic
 // OPTIMIZATION v506: Direct calculation instead of day-by-day iteration
 // Reduces O(n × days) to O(n × occurrences)
@@ -1537,6 +1611,388 @@ const expandRecurringEventsForMonth = lift(
     return notesByDate;
   },
 );
+
+// Handler to add a note at a specific time
+const addNoteAtTime = handler<
+  never,
+  {
+    entries: Writable<DayEntry[]>;
+    currentDate: Writable<string>;
+    scheduledTime: string;
+    duration?: number;
+  }
+>((_event, { entries, currentDate, scheduledTime, duration }) => {
+  const date = currentDate.get();
+  const allEntries = entries.get();
+  const existingIndex = allEntries.findIndex((e: DayEntry) => e.date === date);
+  const newNoteId = Date.now().toString();
+  const finalDuration = duration !== undefined ? duration : 60;
+  const newNote: Note = {
+    id: newNoteId,
+    text: "",
+    scheduledTime,
+    duration: String(finalDuration), // Use provided duration or default to 1 hour
+  };
+
+  if (existingIndex >= 0) {
+    const updated = [...allEntries];
+    const existingNotes = Array.from(updated[existingIndex].notes || []);
+    const newNotes: Note[] = [...existingNotes];
+    newNotes.push(newNote);
+    updated[existingIndex] = {
+      date,
+      notes: newNotes,
+    };
+    entries.set(updated);
+  } else {
+    entries.set([...allEntries, { date, notes: [newNote] }]);
+  }
+});
+
+// Handler to update a specific note
+const updateNote = handler<
+  { target: { value: string } },
+  {
+    entries: Writable<DayEntry[]>;
+    currentDate: Writable<string>;
+    noteId: string;
+    customTimeLabels: Writable<TimeLabel[]>;
+  }
+>(({ target }, { entries, currentDate, noteId, customTimeLabels }) => {
+  const text = target?.value ?? "";
+  const date = currentDate.get();
+  const allEntries = entries.get();
+  const existingIndex = allEntries.findIndex((e: DayEntry) => e.date === date);
+  const configuredCustomTimeLabels = customTimeLabels.get();
+
+  if (existingIndex >= 0) {
+    const updated = [...allEntries];
+    const notes = Array.from(updated[existingIndex].notes || []);
+    const noteIndex = notes.findIndex((n: any) => n.id === noteId);
+
+    if (noteIndex >= 0) {
+      const currentNote = notes[noteIndex];
+
+      // Normal single-event handling first - parse time from text
+      let finalText = text;
+      let newScheduledTime = currentNote.scheduledTime;
+      let newDuration = currentNote.duration;
+
+      // Only parse and remove time if note doesn't already have a scheduled time
+      if (!currentNote.scheduledTime) {
+        const parseResult = parseTimeFromText(
+          text,
+          configuredCustomTimeLabels,
+        );
+        if (parseResult) {
+          // Use the cleaned text (with time removed) and set the scheduled time
+          finalText = parseResult.cleanedText;
+          newScheduledTime = parseResult.time;
+          newDuration = parseResult.duration;
+        }
+      }
+
+      // AFTER normal parsing, check for multi-event detection
+      // Look for " and " or commas
+      if (text.match(/\s+and\s+|,/i)) {
+        const events = parseMultipleEvents(
+          text,
+          configuredCustomTimeLabels,
+        );
+
+        // Only split if we got multiple events AND at least the first event has a parseable time
+        if (events.length > 1 && events[0].time) {
+          // Multiple events detected - split them with SEMANTIC NOTIFICATION LINKING
+          const newNotes = [...notes];
+
+          // Update current note with first event (with its specific notification if any)
+          const firstEvent = events[0];
+          newNotes[noteIndex] = {
+            id: noteId,
+            text: firstEvent.text,
+            ...(firstEvent.time && { scheduledTime: firstEvent.time }),
+            ...(firstEvent.duration && { duration: firstEvent.duration }),
+            // Only apply notification if THIS EVENT has one
+            ...(firstEvent.notification && {
+              notificationEnabled: firstEvent.notification.enabled,
+              notificationValue: firstEvent.notification.value,
+              notificationUnit: firstEvent.notification.unit,
+            }),
+          };
+
+          // Add remaining events as new notes (each with their own notification if any)
+          for (let i = 1; i < events.length; i++) {
+            const event = events[i];
+            newNotes.push({
+              id: (Date.now() + i).toString(),
+              text: event.text,
+              ...(event.time && { scheduledTime: event.time }),
+              ...(event.duration && { duration: event.duration }),
+              // Only apply notification if THIS EVENT has one
+              ...(event.notification && {
+                notificationEnabled: event.notification.enabled,
+                notificationValue: event.notification.value,
+                notificationUnit: event.notification.unit,
+              }),
+            });
+          }
+
+          updated[existingIndex] = { date, notes: newNotes };
+          entries.set(updated);
+          return;
+        }
+      }
+
+      // Single event - parse for notifications
+      const notifResult = parseNotifications(text);
+
+      // Create fresh plain objects to avoid Cell wrapping
+      const updatedNotes: Note[] = notes.map((n: any, idx: number) => {
+        if (idx === noteIndex) {
+          // Update the current note being edited
+          return {
+            ...n,
+            text: finalText,
+            ...(newScheduledTime && { scheduledTime: newScheduledTime }),
+            ...(newDuration && { duration: newDuration }),
+            ...(notifResult && {
+              notificationEnabled: notifResult.enabled,
+              notificationValue: notifResult.value,
+              notificationUnit: notifResult.unit,
+            }),
+          };
+        } else {
+          // Preserve other notes unchanged
+          return n;
+        }
+      });
+      updated[existingIndex] = { date, notes: updatedNotes };
+      entries.set(updated);
+    }
+  }
+});
+
+// Helper function to perform deletion logic
+const performDeleteLogic = (state: {
+  entries: Writable<DayEntry[]>;
+  recurringSeries: Writable<RecurringSeries[]>;
+  seriesOverrides: Writable<SeriesOverride[]>;
+  noteId: string;
+  date: string;
+  deleteScope: string;
+}) => {
+  const {
+    entries,
+    recurringSeries,
+    seriesOverrides,
+    noteId,
+    date,
+    deleteScope,
+  } = state;
+
+  // Check if this is a recurring event
+  if (noteId.includes(":")) {
+    const [seriesId, occurrenceDate] = noteId.split(":");
+
+    if (deleteScope === "this") {
+      // Delete only this occurrence by creating a deletion override
+      const allOverrides = seriesOverrides.get();
+      const override: SeriesOverride = {
+        seriesId,
+        recurrenceDate: occurrenceDate,
+        deleted: true,
+      };
+
+      const existingOverrideIndex = allOverrides.findIndex(
+        (o: SeriesOverride) =>
+          o.seriesId === seriesId && o.recurrenceDate === occurrenceDate,
+      );
+
+      if (existingOverrideIndex >= 0) {
+        const updated = [...allOverrides];
+        updated[existingOverrideIndex] = override;
+        seriesOverrides.set(updated);
+      } else {
+        seriesOverrides.set([...allOverrides, override]);
+      }
+      return;
+    }
+
+    if (deleteScope === "future") {
+      // End the series before this occurrence
+      const allSeries = recurringSeries.get();
+      const seriesIndex = allSeries.findIndex((s: RecurringSeries) =>
+        s.seriesId === seriesId
+      );
+
+      if (seriesIndex >= 0) {
+        const currentOccurrence = new Date(occurrenceDate + "T00:00:00");
+        const dayBefore = new Date(currentOccurrence);
+        dayBefore.setDate(dayBefore.getDate() - 1);
+        const untilDate = dayBefore.toISOString().split("T")[0];
+
+        const updated = [...allSeries];
+        updated[seriesIndex] = {
+          ...updated[seriesIndex],
+          until: untilDate,
+        };
+        recurringSeries.set(updated);
+      }
+      return;
+    }
+
+    if (deleteScope === "all") {
+      // Delete the entire series family (including all ancestors and descendants)
+      const allSeries = recurringSeries.get();
+
+      // Helper function to find all related series IDs
+      const findRelatedSeriesIds = (targetId: string): Set<string> => {
+        const relatedIds = new Set<string>();
+        relatedIds.add(targetId);
+
+        // Find the root ancestor by walking up the parentSeriesId chain
+        let currentId = targetId;
+        let currentSeries = allSeries.find((s: RecurringSeries) =>
+          s.seriesId === currentId
+        );
+
+        while (currentSeries?.parentSeriesId) {
+          relatedIds.add(currentSeries.parentSeriesId);
+          currentId = currentSeries.parentSeriesId;
+          currentSeries = allSeries.find((s: RecurringSeries) =>
+            s.seriesId === currentId
+          );
+        }
+
+        // Now find all descendants by walking down from all known ancestors
+        const idsToCheck = Array.from(relatedIds);
+        for (const id of idsToCheck) {
+          const children = allSeries.filter((s: RecurringSeries) =>
+            s.parentSeriesId === id
+          );
+          for (const child of children) {
+            if (!relatedIds.has(child.seriesId)) {
+              relatedIds.add(child.seriesId);
+              idsToCheck.push(child.seriesId); // Check this child's children too
+            }
+          }
+        }
+
+        return relatedIds;
+      };
+
+      const relatedSeriesIds = findRelatedSeriesIds(seriesId);
+
+      // Delete all related series
+      const filtered = allSeries.filter((s: RecurringSeries) =>
+        !relatedSeriesIds.has(s.seriesId)
+      );
+      recurringSeries.set(filtered);
+
+      // Delete all overrides for all related series
+      const allOverrides = seriesOverrides.get();
+      const filteredOverrides = allOverrides.filter((o: SeriesOverride) =>
+        !relatedSeriesIds.has(o.seriesId)
+      );
+      seriesOverrides.set(filteredOverrides);
+
+      return;
+    }
+  }
+
+  // Handle one-off event deletion
+  const allEntries = entries.get();
+  const existingIndex = allEntries.findIndex((e: DayEntry) => e.date === date);
+
+  if (existingIndex >= 0) {
+    const updated = [...allEntries];
+    const notes = Array.from(updated[existingIndex].notes || []);
+    const filteredNotes: Note[] = notes
+      .filter((n: any) => n.id !== noteId);
+    updated[existingIndex] = { date, notes: filteredNotes };
+    entries.set(updated);
+  }
+};
+
+// Handler to delete a note
+const deleteNote = handler<
+  never,
+  {
+    entries: Writable<DayEntry[]>;
+    recurringSeries: Writable<RecurringSeries[]>;
+    seriesOverrides: Writable<SeriesOverride[]>;
+    currentDate: Writable<string>;
+    noteId: string;
+    seriesId?: string;
+    deletionConfirmingScopeCell: Writable<boolean>;
+    deletionPendingCell: Writable<{ noteId: string; date: string } | null>;
+    scheduleEditScopeCell: Writable<string>;
+  }
+>((
+  _event,
+  {
+    entries,
+    recurringSeries,
+    seriesOverrides,
+    currentDate,
+    noteId,
+    seriesId,
+    deletionConfirmingScopeCell,
+    deletionPendingCell,
+    scheduleEditScopeCell,
+  },
+) => {
+  const date = currentDate.get();
+
+  // Check if this is a recurring event (has seriesId or noteId contains ':')
+  const isRecurring = seriesId || noteId.includes(":");
+
+  if (isRecurring) {
+    // Check if we need to show confirmation dialog
+    const isConfirming = deletionConfirmingScopeCell.get();
+
+    if (!isConfirming) {
+      // Not yet confirming - show confirmation dialog
+      deletionPendingCell.set({ noteId, date });
+      deletionConfirmingScopeCell.set(true);
+      return;
+    }
+
+    // User has confirmed scope - proceed with deletion
+    const deleteScope = scheduleEditScopeCell.get();
+    deletionConfirmingScopeCell.set(false);
+
+    performDeleteLogic({
+      entries,
+      recurringSeries,
+      seriesOverrides,
+      noteId,
+      date,
+      deleteScope,
+    });
+
+    deletionPendingCell.set(null);
+    return;
+  }
+
+  // One-off event - delete directly
+  performDeleteLogic({
+    entries,
+    recurringSeries,
+    seriesOverrides,
+    noteId,
+    date,
+    deleteScope: "this",
+  });
+});
+
+// Handler to enable inline editing of a note
+const _enableNoteEditing = handler<
+  never,
+  { noteId: string; editingNoteId: Writable<string> }
+>((_event, { noteId, editingNoteId }) => {
+  editingNoteId.set(noteId);
+});
 
 export default recipe<Input, Output>(
   "calendar",
@@ -1987,23 +2443,6 @@ export default recipe<Input, Output>(
       },
     );
 
-    // Handler to select a day from the calendar
-    // OPTIMIZATION v508: Also update viewedYearMonth when selecting a day
-    const selectDayFromCalendar = handler<
-      { target: { dataset: { date: string } } },
-      { currentDate: Writable<string>; viewedYearMonth: Writable<string> }
-    >(({ target }, { currentDate, viewedYearMonth }) => {
-      const date = target.dataset.date;
-      if (date) {
-        currentDate.set(date);
-        // Update viewed month if selecting a day in a different month
-        const newYearMonth = date.substring(0, 7);
-        if (viewedYearMonth.get() !== newYearMonth) {
-          viewedYearMonth.set(newYearMonth);
-        }
-      }
-    });
-
     // Create the handler closure once at the recipe level
     const selectDayHandler = selectDayFromCalendar({
       currentDate,
@@ -2195,12 +2634,6 @@ export default recipe<Input, Output>(
       { value: "PM", label: "PM" },
     ];
 
-    // Settings time select items (for Start Time and End Time)
-    const timeSelectItems = Array.from({ length: 24 }, (_, i) => ({
-      value: i,
-      label: formatTimeAMPMCache(i, 0),
-    }));
-
     // Settings interval items
     const intervalSelectItems = [
       { value: 60, label: "1 hour" },
@@ -2218,450 +2651,6 @@ export default recipe<Input, Output>(
       currentDateParsed,
       (parsed: any) => parsed.monthIndex,
     );
-
-    // Handler to change month
-    const _changeMonth = handler<
-      { detail: { value: number } },
-      { currentDate: Writable<string> }
-    >(({ detail }, { currentDate }) => {
-      const current = new Date(currentDate.get() + "T00:00:00");
-      current.setMonth(detail.value);
-      currentDate.set(current.toISOString().split("T")[0]);
-    });
-
-    // Handler to change year
-    const _changeYear = handler<
-      { detail: { value: number } },
-      { currentDate: Writable<string> }
-    >(({ detail }, { currentDate }) => {
-      const current = new Date(currentDate.get() + "T00:00:00");
-      current.setFullYear(detail.value);
-      currentDate.set(current.toISOString().split("T")[0]);
-    });
-
-    // Handler to add a new note to current date
-    const addNote = handler<
-      never,
-      { entries: Writable<DayEntry[]>; currentDate: Writable<string> }
-    >((_event, { entries, currentDate }) => {
-      const date = currentDate.get();
-      const allEntries = entries.get();
-      const existingIndex = allEntries.findIndex((e: DayEntry) =>
-        e.date === date
-      );
-      const newNoteId = Date.now().toString();
-      const newNote: Note = { id: newNoteId, text: "" };
-
-      // Notes start in view mode - user can click to edit
-
-      if (existingIndex >= 0) {
-        // Add note to existing entry - make sure to create a completely new object
-        const updated = [...allEntries];
-        const existingNotes = Array.from(updated[existingIndex].notes || []);
-        // Create a fresh plain object array to avoid Cell wrapping
-        const newNotes: Note[] = [...existingNotes];
-        newNotes.push(newNote);
-        updated[existingIndex] = {
-          date,
-          notes: newNotes,
-        };
-        entries.set(updated);
-      } else {
-        // Create new entry with note
-        entries.set([...allEntries, { date, notes: [newNote] }]);
-      }
-    });
-
-    // Handler to add a note at a specific time
-    const addNoteAtTime = handler<
-      never,
-      {
-        entries: Writable<DayEntry[]>;
-        currentDate: Writable<string>;
-        scheduledTime: string;
-        duration?: number;
-      }
-    >((_event, { entries, currentDate, scheduledTime, duration }) => {
-      const date = currentDate.get();
-      const allEntries = entries.get();
-      const existingIndex = allEntries.findIndex((e: DayEntry) =>
-        e.date === date
-      );
-      const newNoteId = Date.now().toString();
-      const finalDuration = duration !== undefined ? duration : 60;
-      const newNote: Note = {
-        id: newNoteId,
-        text: "",
-        scheduledTime,
-        duration: String(finalDuration), // Use provided duration or default to 1 hour
-      };
-
-      if (existingIndex >= 0) {
-        const updated = [...allEntries];
-        const existingNotes = Array.from(updated[existingIndex].notes || []);
-        const newNotes: Note[] = [...existingNotes];
-        newNotes.push(newNote);
-        updated[existingIndex] = {
-          date,
-          notes: newNotes,
-        };
-        entries.set(updated);
-      } else {
-        entries.set([...allEntries, { date, notes: [newNote] }]);
-      }
-    });
-
-    // Handler to update a specific note
-    const updateNote = handler<
-      { target: { value: string } },
-      {
-        entries: Writable<DayEntry[]>;
-        currentDate: Writable<string>;
-        noteId: string;
-        customTimeLabels: Writable<TimeLabel[]>;
-      }
-    >(({ target }, { entries, currentDate, noteId, customTimeLabels }) => {
-      const text = target?.value ?? "";
-      const date = currentDate.get();
-      const allEntries = entries.get();
-      const existingIndex = allEntries.findIndex((e: DayEntry) =>
-        e.date === date
-      );
-      const configuredCustomTimeLabels = customTimeLabels.get();
-
-      if (existingIndex >= 0) {
-        const updated = [...allEntries];
-        const notes = Array.from(updated[existingIndex].notes || []);
-        const noteIndex = notes.findIndex((n: any) => n.id === noteId);
-
-        if (noteIndex >= 0) {
-          const currentNote = notes[noteIndex];
-
-          // Normal single-event handling first - parse time from text
-          let finalText = text;
-          let newScheduledTime = currentNote.scheduledTime;
-          let newDuration = currentNote.duration;
-
-          // Only parse and remove time if note doesn't already have a scheduled time
-          if (!currentNote.scheduledTime) {
-            const parseResult = parseTimeFromText(
-              text,
-              configuredCustomTimeLabels,
-            );
-            if (parseResult) {
-              // Use the cleaned text (with time removed) and set the scheduled time
-              finalText = parseResult.cleanedText;
-              newScheduledTime = parseResult.time;
-              newDuration = parseResult.duration;
-            }
-          }
-
-          // AFTER normal parsing, check for multi-event detection
-          // Look for " and " or commas
-          if (text.match(/\s+and\s+|,/i)) {
-            const events = parseMultipleEvents(
-              text,
-              configuredCustomTimeLabels,
-            );
-
-            // Only split if we got multiple events AND at least the first event has a parseable time
-            if (events.length > 1 && events[0].time) {
-              // Multiple events detected - split them with SEMANTIC NOTIFICATION LINKING
-              const newNotes = [...notes];
-
-              // Update current note with first event (with its specific notification if any)
-              const firstEvent = events[0];
-              newNotes[noteIndex] = {
-                id: noteId,
-                text: firstEvent.text,
-                ...(firstEvent.time && { scheduledTime: firstEvent.time }),
-                ...(firstEvent.duration && { duration: firstEvent.duration }),
-                // Only apply notification if THIS EVENT has one
-                ...(firstEvent.notification && {
-                  notificationEnabled: firstEvent.notification.enabled,
-                  notificationValue: firstEvent.notification.value,
-                  notificationUnit: firstEvent.notification.unit,
-                }),
-              };
-
-              // Add remaining events as new notes (each with their own notification if any)
-              for (let i = 1; i < events.length; i++) {
-                const event = events[i];
-                newNotes.push({
-                  id: (Date.now() + i).toString(),
-                  text: event.text,
-                  ...(event.time && { scheduledTime: event.time }),
-                  ...(event.duration && { duration: event.duration }),
-                  // Only apply notification if THIS EVENT has one
-                  ...(event.notification && {
-                    notificationEnabled: event.notification.enabled,
-                    notificationValue: event.notification.value,
-                    notificationUnit: event.notification.unit,
-                  }),
-                });
-              }
-
-              updated[existingIndex] = { date, notes: newNotes };
-              entries.set(updated);
-              return;
-            }
-          }
-
-          // Single event - parse for notifications
-          const notifResult = parseNotifications(text);
-
-          // Create fresh plain objects to avoid Cell wrapping
-          const updatedNotes: Note[] = notes.map((n: any, idx: number) => {
-            if (idx === noteIndex) {
-              // Update the current note being edited
-              return {
-                ...n,
-                text: finalText,
-                ...(newScheduledTime && { scheduledTime: newScheduledTime }),
-                ...(newDuration && { duration: newDuration }),
-                ...(notifResult && {
-                  notificationEnabled: notifResult.enabled,
-                  notificationValue: notifResult.value,
-                  notificationUnit: notifResult.unit,
-                }),
-              };
-            } else {
-              // Preserve other notes unchanged
-              return n;
-            }
-          });
-          updated[existingIndex] = { date, notes: updatedNotes };
-          entries.set(updated);
-        }
-      }
-    });
-
-    // Handler to delete a note
-    // Helper function to perform deletion logic
-    const performDeleteLogic = (state: {
-      entries: Writable<DayEntry[]>;
-      recurringSeries: Writable<RecurringSeries[]>;
-      seriesOverrides: Writable<SeriesOverride[]>;
-      noteId: string;
-      date: string;
-      deleteScope: string;
-    }) => {
-      const {
-        entries,
-        recurringSeries,
-        seriesOverrides,
-        noteId,
-        date,
-        deleteScope,
-      } = state;
-
-      // Check if this is a recurring event
-      if (noteId.includes(":")) {
-        const [seriesId, occurrenceDate] = noteId.split(":");
-
-        if (deleteScope === "this") {
-          // Delete only this occurrence by creating a deletion override
-          const allOverrides = seriesOverrides.get();
-          const override: SeriesOverride = {
-            seriesId,
-            recurrenceDate: occurrenceDate,
-            deleted: true,
-          };
-
-          const existingOverrideIndex = allOverrides.findIndex(
-            (o: SeriesOverride) =>
-              o.seriesId === seriesId && o.recurrenceDate === occurrenceDate,
-          );
-
-          if (existingOverrideIndex >= 0) {
-            const updated = [...allOverrides];
-            updated[existingOverrideIndex] = override;
-            seriesOverrides.set(updated);
-          } else {
-            seriesOverrides.set([...allOverrides, override]);
-          }
-          return;
-        }
-
-        if (deleteScope === "future") {
-          // End the series before this occurrence
-          const allSeries = recurringSeries.get();
-          const seriesIndex = allSeries.findIndex((s: RecurringSeries) =>
-            s.seriesId === seriesId
-          );
-
-          if (seriesIndex >= 0) {
-            const currentOccurrence = new Date(occurrenceDate + "T00:00:00");
-            const dayBefore = new Date(currentOccurrence);
-            dayBefore.setDate(dayBefore.getDate() - 1);
-            const untilDate = dayBefore.toISOString().split("T")[0];
-
-            const updated = [...allSeries];
-            updated[seriesIndex] = {
-              ...updated[seriesIndex],
-              until: untilDate,
-            };
-            recurringSeries.set(updated);
-          }
-          return;
-        }
-
-        if (deleteScope === "all") {
-          // Delete the entire series family (including all ancestors and descendants)
-          const allSeries = recurringSeries.get();
-
-          // Helper function to find all related series IDs
-          const findRelatedSeriesIds = (targetId: string): Set<string> => {
-            const relatedIds = new Set<string>();
-            relatedIds.add(targetId);
-
-            // Find the root ancestor by walking up the parentSeriesId chain
-            let currentId = targetId;
-            let currentSeries = allSeries.find((s: RecurringSeries) =>
-              s.seriesId === currentId
-            );
-
-            while (currentSeries?.parentSeriesId) {
-              relatedIds.add(currentSeries.parentSeriesId);
-              currentId = currentSeries.parentSeriesId;
-              currentSeries = allSeries.find((s: RecurringSeries) =>
-                s.seriesId === currentId
-              );
-            }
-
-            // Now find all descendants by walking down from all known ancestors
-            const idsToCheck = Array.from(relatedIds);
-            for (const id of idsToCheck) {
-              const children = allSeries.filter((s: RecurringSeries) =>
-                s.parentSeriesId === id
-              );
-              for (const child of children) {
-                if (!relatedIds.has(child.seriesId)) {
-                  relatedIds.add(child.seriesId);
-                  idsToCheck.push(child.seriesId); // Check this child's children too
-                }
-              }
-            }
-
-            return relatedIds;
-          };
-
-          const relatedSeriesIds = findRelatedSeriesIds(seriesId);
-
-          // Delete all related series
-          const filtered = allSeries.filter((s: RecurringSeries) =>
-            !relatedSeriesIds.has(s.seriesId)
-          );
-          recurringSeries.set(filtered);
-
-          // Delete all overrides for all related series
-          const allOverrides = seriesOverrides.get();
-          const filteredOverrides = allOverrides.filter((o: SeriesOverride) =>
-            !relatedSeriesIds.has(o.seriesId)
-          );
-          seriesOverrides.set(filteredOverrides);
-
-          return;
-        }
-      }
-
-      // Handle one-off event deletion
-      const allEntries = entries.get();
-      const existingIndex = allEntries.findIndex((e: DayEntry) =>
-        e.date === date
-      );
-
-      if (existingIndex >= 0) {
-        const updated = [...allEntries];
-        const notes = Array.from(updated[existingIndex].notes || []);
-        const filteredNotes: Note[] = notes
-          .filter((n: any) => n.id !== noteId);
-        updated[existingIndex] = { date, notes: filteredNotes };
-        entries.set(updated);
-      }
-    };
-
-    const deleteNote = handler<
-      never,
-      {
-        entries: Writable<DayEntry[]>;
-        recurringSeries: Writable<RecurringSeries[]>;
-        seriesOverrides: Writable<SeriesOverride[]>;
-        currentDate: Writable<string>;
-        noteId: string;
-        seriesId?: string;
-        deletionConfirmingScopeCell: Writable<boolean>;
-        deletionPendingCell: Writable<{ noteId: string; date: string } | null>;
-        scheduleEditScopeCell: Writable<string>;
-      }
-    >((
-      _event,
-      {
-        entries,
-        recurringSeries,
-        seriesOverrides,
-        currentDate,
-        noteId,
-        seriesId,
-        deletionConfirmingScopeCell,
-        deletionPendingCell,
-        scheduleEditScopeCell,
-      },
-    ) => {
-      const date = currentDate.get();
-
-      // Check if this is a recurring event (has seriesId or noteId contains ':')
-      const isRecurring = seriesId || noteId.includes(":");
-
-      if (isRecurring) {
-        // Check if we need to show confirmation dialog
-        const isConfirming = deletionConfirmingScopeCell.get();
-
-        if (!isConfirming) {
-          // Show confirmation dialog
-          deletionPendingCell.set({ noteId, date });
-          deletionConfirmingScopeCell.set(true);
-          return;
-        }
-
-        // User has confirmed - reset and proceed
-        deletionConfirmingScopeCell.set(false);
-        const deleteScope = scheduleEditScopeCell.get();
-        performDeleteLogic({
-          entries,
-          recurringSeries,
-          seriesOverrides,
-          noteId,
-          date,
-          deleteScope,
-        });
-        deletionPendingCell.set(null);
-        return;
-      }
-
-      // One-off event - delete directly
-      performDeleteLogic({
-        entries,
-        recurringSeries,
-        seriesOverrides,
-        noteId,
-        date,
-        deleteScope: "this",
-      });
-    });
-
-    // Handler to enable inline editing of a note
-    const _enableNoteEditing = handler<
-      never,
-      { noteId: string }
-    >((_event, { noteId }) => {
-      editingNoteId.set(noteId);
-    });
-
-    // Handler to disable inline editing (exit edit mode)
-    const _disableNoteEditing = handler<never, never>((_event) => {
-      editingNoteId.set("");
-    });
 
     // Handler for date picker input (used on small screens)
     const handleDateInputChange = handler<
@@ -3296,7 +3285,7 @@ export default recipe<Input, Output>(
     );
 
     // Track which note is being edited inline (empty string = none)
-    const editingNoteId = Writable.of<string>("");
+    const _editingNoteId = Writable.of<string>("");
 
     // Track if this is a new event (text was empty when modal opened)
     const isNewEventCell = Writable.of<boolean>(false);

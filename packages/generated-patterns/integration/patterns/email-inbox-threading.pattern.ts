@@ -108,17 +108,43 @@ const receiveEmail = handler(
   },
 );
 
+const liftSanitizedMessages = lift(
+  (value: EmailMessage[] | undefined): EmailMessage[] => {
+    if (!Array.isArray(value)) return [];
+    return value.map((item, index) => normalizeMessage(item, index + 1));
+  },
+);
+
+const liftThreadCount = lift((items: ThreadSummary[]) => items.length);
+
+const liftTopThreadLabel = lift(
+  (thread: ThreadSummary | null): string => {
+    if (!thread) return "Inbox empty";
+    return `${thread.subject} (${thread.messageCount})`;
+  },
+);
+
+const liftActiveThreadView = lift(
+  (value: string | null | undefined): string | null =>
+    typeof value === "string" && value.length > 0 ? value : null,
+);
+
+const liftActiveThreadSummary = lift(
+  (
+    input: { threads: ThreadSummary[]; active: string | null },
+  ): ThreadSummary | null => {
+    if (!input.active) return null;
+    return input.threads.find((item) => item.threadId === input.active) ??
+      null;
+  },
+);
+
 export const emailInboxThreading = recipe<EmailInboxArgs>(
   "Email Inbox Threading",
   ({ messages, activeThreadId }) => {
     const threadActivity = cell<string[]>([]);
 
-    const sanitizedMessages = lift(
-      (value: EmailMessage[] | undefined): EmailMessage[] => {
-        if (!Array.isArray(value)) return [];
-        return value.map((item, index) => normalizeMessage(item, index + 1));
-      },
-    )(messages);
+    const sanitizedMessages = liftSanitizedMessages(messages);
 
     const threads = derive(
       sanitizedMessages,
@@ -165,7 +191,7 @@ export const emailInboxThreading = recipe<EmailInboxArgs>(
       },
     );
 
-    const threadCount = lift((items: ThreadSummary[]) => items.length)(threads);
+    const threadCount = liftThreadCount(threads);
     const orderedThreadIds = derive(
       threads,
       (items) => items.map((item) => item.threadId),
@@ -174,25 +200,12 @@ export const emailInboxThreading = recipe<EmailInboxArgs>(
       threads,
       (items) => items.length > 0 ? items[0] : null,
     );
-    const topThreadLabel = lift(
-      (thread: ThreadSummary | null): string => {
-        if (!thread) return "Inbox empty";
-        return `${thread.subject} (${thread.messageCount})`;
-      },
-    )(topThread);
-    const activeThreadView = lift(
-      (value: string | null | undefined): string | null =>
-        typeof value === "string" && value.length > 0 ? value : null,
-    )(activeThreadId);
-    const activeThreadSummary = lift(
-      (
-        input: { threads: ThreadSummary[]; active: string | null },
-      ): ThreadSummary | null => {
-        if (!input.active) return null;
-        return input.threads.find((item) => item.threadId === input.active) ??
-          null;
-      },
-    )({ threads, active: activeThreadView });
+    const topThreadLabel = liftTopThreadLabel(topThread);
+    const activeThreadView = liftActiveThreadView(activeThreadId);
+    const activeThreadSummary = liftActiveThreadSummary({
+      threads,
+      active: activeThreadView,
+    });
 
     return {
       messages,
@@ -216,3 +229,5 @@ export const emailInboxThreading = recipe<EmailInboxArgs>(
     };
   },
 );
+
+export default emailInboxThreading;

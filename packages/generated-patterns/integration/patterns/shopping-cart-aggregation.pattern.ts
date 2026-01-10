@@ -392,48 +392,66 @@ const configureDiscounts = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeCartItems = lift(sanitizeCartItems);
+const liftSanitizeDiscountRules = lift(sanitizeDiscountRules);
+const liftComputeCategoryTotals = lift(computeCategoryTotals);
+const liftComputeLineTotals = lift(computeLineTotals);
+const liftSumLineSubtotal = lift(sumLineSubtotal);
+const liftSumLineQuantity = lift(sumLineQuantity);
+
+const liftDiscountApplications = lift((input: {
+  rules: DiscountRule[];
+  totals: CategoryTotal[];
+}) => computeDiscountApplications(input.rules, input.totals));
+
+const liftSumDiscountAmount = lift(sumDiscountAmount);
+
+const liftGrandTotal = lift((input: { subtotal: number; discount: number }) =>
+  roundCurrency(Math.max(0, input.subtotal - input.discount))
+);
+
+const liftFormatCurrency = lift(formatCurrency);
+
+const liftLastEvent = lift((input: { log: string[]; lines: LineTotal[] }) => {
+  if (!Array.isArray(input.log) || input.log.length === 0) {
+    const count = Array.isArray(input.lines) ? input.lines.length : 0;
+    return `Cart initialized with ${count} item(s)`;
+  }
+  return input.log[input.log.length - 1];
+});
+
 export const shoppingCartAggregation = recipe<ShoppingCartArgs>(
   "Shopping Cart Aggregation",
   ({ items, discounts }) => {
-    const cartItems = lift(sanitizeCartItems)(items);
-    const discountRules = lift(sanitizeDiscountRules)(discounts);
+    const cartItems = liftSanitizeCartItems(items);
+    const discountRules = liftSanitizeDiscountRules(discounts);
 
-    const categoryTotals = lift(computeCategoryTotals)(cartItems);
-    const lineTotals = lift(computeLineTotals)(cartItems);
+    const categoryTotals = liftComputeCategoryTotals(cartItems);
+    const lineTotals = liftComputeLineTotals(cartItems);
 
-    const subtotal = lift(sumLineSubtotal)(lineTotals);
+    const subtotal = liftSumLineSubtotal(lineTotals);
 
-    const itemCount = lift(sumLineQuantity)(lineTotals);
+    const itemCount = liftSumLineQuantity(lineTotals);
 
-    const discountApplications = lift((input: {
-      rules: DiscountRule[];
-      totals: CategoryTotal[];
-    }) => computeDiscountApplications(input.rules, input.totals))({
+    const discountApplications = liftDiscountApplications({
       rules: discountRules,
       totals: categoryTotals,
     });
 
-    const totalDiscount = lift(sumDiscountAmount)(discountApplications);
+    const totalDiscount = liftSumDiscountAmount(discountApplications);
 
-    const grandTotal = lift((input: { subtotal: number; discount: number }) =>
-      roundCurrency(Math.max(0, input.subtotal - input.discount))
-    )({
+    const grandTotal = liftGrandTotal({
       subtotal,
       discount: totalDiscount,
     });
 
-    const subtotalDisplay = lift(formatCurrency)(subtotal);
-    const discountDisplay = lift(formatCurrency)(totalDiscount);
-    const totalDisplay = lift(formatCurrency)(grandTotal);
+    const subtotalDisplay = liftFormatCurrency(subtotal);
+    const discountDisplay = liftFormatCurrency(totalDiscount);
+    const totalDisplay = liftFormatCurrency(grandTotal);
 
     const history = cell<string[]>([]);
-    const lastEvent = lift((input: { log: string[]; lines: LineTotal[] }) => {
-      if (!Array.isArray(input.log) || input.log.length === 0) {
-        const count = Array.isArray(input.lines) ? input.lines.length : 0;
-        return `Cart initialized with ${count} item(s)`;
-      }
-      return input.log[input.log.length - 1];
-    })({
+    const lastEvent = liftLastEvent({
       log: history,
       lines: lineTotals,
     });
@@ -459,3 +477,5 @@ export const shoppingCartAggregation = recipe<ShoppingCartArgs>(
     };
   },
 );
+
+export default shoppingCartAggregation;

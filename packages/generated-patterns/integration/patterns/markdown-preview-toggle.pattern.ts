@@ -64,27 +64,29 @@ const togglePreview = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeContent = lift(sanitizeContent);
+const liftSanitizePreview = lift(sanitizePreview);
+const liftPreviewText = lift((value: string) => formatMarkdown(value));
+const liftModeLabel = lift((enabled: boolean) => enabled ? "Preview" : "Raw");
+
+const liftActiveView = lift(
+  ({ enabled, raw, formatted }: {
+    enabled: boolean;
+    raw: string;
+    formatted: string;
+  }) => (enabled ? formatted : raw),
+);
+
 export const markdownPreviewToggle = recipe<MarkdownPreviewArgs>(
   "Markdown Preview Toggle",
   ({ initialContent, preview }) => {
-    const content = lift(sanitizeContent)(initialContent);
-    const previewEnabled = lift(sanitizePreview)(preview);
+    const content = liftSanitizeContent(initialContent);
+    const previewEnabled = liftSanitizePreview(preview);
+    const previewText = liftPreviewText(content);
+    const modeLabel = liftModeLabel(previewEnabled);
 
-    const previewText = lift((value: string) => formatMarkdown(value))(
-      content,
-    );
-
-    const modeLabel = lift((enabled: boolean) => enabled ? "Preview" : "Raw")(
-      previewEnabled,
-    );
-
-    const activeView = lift(
-      ({ enabled, raw, formatted }: {
-        enabled: boolean;
-        raw: string;
-        formatted: string;
-      }) => (enabled ? formatted : raw),
-    )({
+    const activeView = liftActiveView({
       enabled: previewEnabled,
       raw: content,
       formatted: previewText,
@@ -103,3 +105,5 @@ export const markdownPreviewToggle = recipe<MarkdownPreviewArgs>(
     };
   },
 );
+
+export default markdownPreviewToggle;

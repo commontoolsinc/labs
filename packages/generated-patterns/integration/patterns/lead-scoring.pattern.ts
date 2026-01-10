@@ -504,6 +504,85 @@ const applySignalMutation = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizedDefaultWeight = lift((value: number | undefined) =>
+  sanitizeWeightValue(value, 1)
+);
+
+const liftSanitizedLeads = lift((value: LeadInput[] | undefined) =>
+  sanitizeLeadList(value)
+);
+
+const liftSanitizedWeights = lift((
+  input: {
+    weights: SignalWeightInput[] | undefined;
+    fallback: number;
+  },
+) => sanitizeSignalWeights(input.weights, input.fallback));
+
+const liftWeightRecord = lift(
+  (list: SignalWeightState[] | undefined) =>
+    computeWeightRecord(Array.isArray(list) ? list : []),
+);
+
+const liftLeadSummaries = lift((
+  input: {
+    leads: LeadState[] | undefined;
+    weightMap: Record<string, SignalWeightState>;
+    fallback: number;
+  },
+) => {
+  const leadList = Array.isArray(input.leads) ? input.leads : [];
+  return computeLeadSummaries(
+    leadList,
+    input.weightMap,
+    input.fallback,
+  );
+});
+
+const liftSignalSummary = lift((list: LeadScoreSummary[] | undefined) =>
+  aggregateSignalTotals(Array.isArray(list) ? list : [])
+);
+
+const liftScoreByLead = lift((list: LeadScoreSummary[] | undefined) => {
+  const record: Record<string, number> = {};
+  for (const entry of list ?? []) {
+    record[entry.id] = entry.score;
+  }
+  return record;
+});
+
+const liftTotalScore = lift((list: LeadScoreSummary[] | undefined) => {
+  let total = 0;
+  for (const entry of list ?? []) {
+    total = roundTwo(total + entry.score);
+  }
+  return total;
+});
+
+const liftLeadCount = lift((list: LeadScoreSummary[] | undefined) =>
+  Array.isArray(list) ? list.length : 0
+);
+
+const liftSignalCount = lift((list: SignalAggregate[] | undefined) =>
+  Array.isArray(list) ? list.length : 0
+);
+
+const liftTopScoreLabel = lift((value: number | undefined) =>
+  formatDecimal(typeof value === "number" ? value : 0)
+);
+
+const liftLastMutationView = lift((value: string | undefined) => {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value;
+  }
+  return "none";
+});
+
+const liftHistoryView = lift((entries: string[] | undefined) =>
+  Array.isArray(entries) ? [...entries] : []
+);
+
 export const leadScoring = recipe<LeadScoringArgs>(
   "Lead Scoring",
   ({ leads, signalWeights, defaultWeight }) => {
@@ -511,67 +590,28 @@ export const leadScoring = recipe<LeadScoringArgs>(
     const lastMutation = cell("none");
     const sequence = cell(0);
 
-    const sanitizedDefaultWeight = lift((value: number | undefined) =>
-      sanitizeWeightValue(value, 1)
-    )(defaultWeight);
+    const sanitizedDefaultWeight = liftSanitizedDefaultWeight(defaultWeight);
 
-    const sanitizedLeads = lift((value: LeadInput[] | undefined) =>
-      sanitizeLeadList(value)
-    )(leads);
+    const sanitizedLeads = liftSanitizedLeads(leads);
 
-    const sanitizedWeights = lift((
-      input: {
-        weights: SignalWeightInput[] | undefined;
-        fallback: number;
-      },
-    ) => sanitizeSignalWeights(input.weights, input.fallback))({
+    const sanitizedWeights = liftSanitizedWeights({
       weights: signalWeights,
       fallback: sanitizedDefaultWeight,
     });
 
-    const weightRecord = lift(
-      (list: SignalWeightState[] | undefined) =>
-        computeWeightRecord(Array.isArray(list) ? list : []),
-    )(sanitizedWeights);
+    const weightRecord = liftWeightRecord(sanitizedWeights);
 
-    const leadSummaries = lift((
-      input: {
-        leads: LeadState[] | undefined;
-        weightMap: Record<string, SignalWeightState>;
-        fallback: number;
-      },
-    ) => {
-      const leadList = Array.isArray(input.leads) ? input.leads : [];
-      return computeLeadSummaries(
-        leadList,
-        input.weightMap,
-        input.fallback,
-      );
-    })({
+    const leadSummaries = liftLeadSummaries({
       leads: sanitizedLeads,
       weightMap: weightRecord,
       fallback: sanitizedDefaultWeight,
     });
 
-    const signalSummary = lift((list: LeadScoreSummary[] | undefined) =>
-      aggregateSignalTotals(Array.isArray(list) ? list : [])
-    )(leadSummaries);
+    const signalSummary = liftSignalSummary(leadSummaries);
 
-    const scoreByLead = lift((list: LeadScoreSummary[] | undefined) => {
-      const record: Record<string, number> = {};
-      for (const entry of list ?? []) {
-        record[entry.id] = entry.score;
-      }
-      return record;
-    })(leadSummaries);
+    const scoreByLead = liftScoreByLead(leadSummaries);
 
-    const totalScore = lift((list: LeadScoreSummary[] | undefined) => {
-      let total = 0;
-      for (const entry of list ?? []) {
-        total = roundTwo(total + entry.score);
-      }
-      return total;
-    })(leadSummaries);
+    const totalScore = liftTotalScore(leadSummaries);
 
     const signalTotals = derive(signalSummary, (list) => {
       const record: Record<string, number> = {};
@@ -589,13 +629,9 @@ export const leadScoring = recipe<LeadScoringArgs>(
       return record;
     });
 
-    const leadCount = lift((list: LeadScoreSummary[] | undefined) =>
-      Array.isArray(list) ? list.length : 0
-    )(leadSummaries);
+    const leadCount = liftLeadCount(leadSummaries);
 
-    const signalCount = lift((list: SignalAggregate[] | undefined) =>
-      Array.isArray(list) ? list.length : 0
-    )(signalSummary);
+    const signalCount = liftSignalCount(signalSummary);
 
     const topLeadName = derive(
       leadSummaries,
@@ -607,23 +643,14 @@ export const leadScoring = recipe<LeadScoringArgs>(
       (list) => list.length > 0 ? list[0].score : 0,
     );
 
-    const topScoreLabel = lift((value: number | undefined) =>
-      formatDecimal(typeof value === "number" ? value : 0)
-    )(topLeadScore);
+    const topScoreLabel = liftTopScoreLabel(topLeadScore);
 
     const summaryLabel =
       str`${leadCount} leads scored; top ${topLeadName} ${topScoreLabel} across ${signalCount} signals`;
 
-    const lastMutationView = lift((value: string | undefined) => {
-      if (typeof value === "string" && value.trim().length > 0) {
-        return value;
-      }
-      return "none";
-    })(lastMutation);
+    const lastMutationView = liftLastMutationView(lastMutation);
 
-    const historyView = lift((entries: string[] | undefined) =>
-      Array.isArray(entries) ? [...entries] : []
-    )(history);
+    const historyView = liftHistoryView(history);
 
     const mutationControls = {
       applySignal: applySignalMutation({
@@ -664,3 +691,5 @@ export type {
   SignalAggregate,
   SignalWeightInput,
 };
+
+export default leadScoring;

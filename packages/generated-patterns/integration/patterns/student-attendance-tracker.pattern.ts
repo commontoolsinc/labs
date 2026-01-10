@@ -346,6 +346,44 @@ const recordAttendance = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftRosterView = lift((value: readonly StudentSeed[] | undefined) =>
+  sanitizeRoster(value)
+);
+
+const liftAttendanceLog = lift((entries: readonly AttendanceEntryInternal[]) =>
+  projectView(entries)
+);
+
+const liftSessionSummaries = lift((inputs: {
+  entries: AttendanceEntryInternal[];
+  roster: StudentRecord[];
+}) => computeSummaries(inputs.entries, inputs.roster));
+
+const liftLatestSummary = lift((summaries: readonly SessionSummary[]) =>
+  summaries.length === 0 ? null : summaries[summaries.length - 1]
+);
+
+const liftSessionAbsenceLabels = lift((summaries: readonly SessionSummary[]) =>
+  summaries.map((summary) => formatSessionLabel(summary))
+);
+
+const liftTotalAbsences = lift((summaries: readonly SessionSummary[]) =>
+  summaries.reduce((sum, summary) => sum + summary.absentCount, 0)
+);
+
+const liftTotalSessions = lift((summaries: readonly SessionSummary[]) =>
+  summaries.length
+);
+
+const liftAbsenceWord = lift((count: number) =>
+  count === 1 ? "absence" : "absences"
+);
+
+const liftSessionWord = lift((count: number) =>
+  count === 1 ? "session" : "sessions"
+);
+
 export const studentAttendanceTrackerPattern = recipe<
   StudentAttendanceTrackerArgs
 >(
@@ -353,47 +391,28 @@ export const studentAttendanceTrackerPattern = recipe<
   ({ roster }) => {
     const runtimeSeed = cell(0);
 
-    const rosterView = lift((value: readonly StudentSeed[] | undefined) =>
-      sanitizeRoster(value)
-    )(roster);
+    const rosterView = liftRosterView(roster);
 
     const attendanceLogInternal = cell<AttendanceEntryInternal[]>([]);
 
-    const attendanceLog = lift((entries: readonly AttendanceEntryInternal[]) =>
-      projectView(entries)
-    )(attendanceLogInternal);
+    const attendanceLog = liftAttendanceLog(attendanceLogInternal);
 
-    const sessionSummaries = lift((inputs: {
-      entries: AttendanceEntryInternal[];
-      roster: StudentRecord[];
-    }) => computeSummaries(inputs.entries, inputs.roster))({
+    const sessionSummaries = liftSessionSummaries({
       entries: attendanceLogInternal,
       roster: rosterView,
     });
 
-    const latestSummary = lift((summaries: readonly SessionSummary[]) =>
-      summaries.length === 0 ? null : summaries[summaries.length - 1]
-    )(sessionSummaries);
+    const latestSummary = liftLatestSummary(sessionSummaries);
 
-    const sessionAbsenceLabels = lift((summaries: readonly SessionSummary[]) =>
-      summaries.map((summary) => formatSessionLabel(summary))
-    )(sessionSummaries);
+    const sessionAbsenceLabels = liftSessionAbsenceLabels(sessionSummaries);
 
-    const totalAbsences = lift((summaries: readonly SessionSummary[]) =>
-      summaries.reduce((sum, summary) => sum + summary.absentCount, 0)
-    )(sessionSummaries);
+    const totalAbsences = liftTotalAbsences(sessionSummaries);
 
-    const totalSessions = lift((summaries: readonly SessionSummary[]) =>
-      summaries.length
-    )(sessionSummaries);
+    const totalSessions = liftTotalSessions(sessionSummaries);
 
-    const absenceWord = lift((count: number) =>
-      count === 1 ? "absence" : "absences"
-    )(totalAbsences);
+    const absenceWord = liftAbsenceWord(totalAbsences);
 
-    const sessionWord = lift((count: number) =>
-      count === 1 ? "session" : "sessions"
-    )(totalSessions);
+    const sessionWord = liftSessionWord(totalSessions);
 
     const absenceSummaryLabel =
       str`${totalAbsences} ${absenceWord} across ${totalSessions} ${sessionWord}`;
@@ -415,6 +434,8 @@ export const studentAttendanceTrackerPattern = recipe<
     };
   },
 );
+
+export default studentAttendanceTrackerPattern;
 
 export type {
   AbsentStudentSummary,

@@ -26,3 +26,5 @@ export const simpleCounter = recipe<CounterState>(
     };
   },
 );
+
+export default simpleCounter;

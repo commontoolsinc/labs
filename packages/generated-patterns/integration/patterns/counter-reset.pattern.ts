@@ -39,3 +39,5 @@ export const counterWithReset = recipe<ResetCounterArgs>(
     };
   },
 );
+
+export default counterWithReset;

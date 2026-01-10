@@ -275,31 +275,37 @@ const relocateMember = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeMembers = lift((value: OrgMember[] | undefined) =>
+  sanitizeMembers(value)
+);
+const liftBuildHierarchy = lift(buildHierarchy);
+const liftBuildReportingChains = lift(buildReportingChains);
+const liftTopLevelNames = lift((nodes: OrgChartNode[]) =>
+  nodes.map((node) => node.name)
+);
+const liftMemberCount = lift((entries: OrgMember[]) => entries.length);
+const liftRootCount = lift((nodes: OrgChartNode[]) => nodes.length);
+const liftChainSummaries = lift((chains: Record<string, string[]>) =>
+  Object.entries(chains)
+    .map(([id, chain]) => `${id}: ${chain.join(" > ")}`)
+    .sort((left, right) => left.localeCompare(right))
+);
+
 export const orgChartHierarchy = recipe<OrgChartArgs>(
   "Org Chart Hierarchy",
   ({ members }) => {
     const history = cell<string[]>([]);
 
-    const memberList = lift((value: OrgMember[] | undefined) =>
-      sanitizeMembers(value)
-    )(members);
-
-    const hierarchy = lift(buildHierarchy)(memberList);
-    const reportingChains = lift(buildReportingChains)(memberList);
-    const topLevelNames = lift((nodes: OrgChartNode[]) =>
-      nodes.map((node) => node.name)
-    )(hierarchy);
-    const memberCount = lift((entries: OrgMember[]) => entries.length)(
-      memberList,
-    );
-    const rootCount = lift((nodes: OrgChartNode[]) => nodes.length)(hierarchy);
+    const memberList = liftSanitizeMembers(members);
+    const hierarchy = liftBuildHierarchy(memberList);
+    const reportingChains = liftBuildReportingChains(memberList);
+    const topLevelNames = liftTopLevelNames(hierarchy);
+    const memberCount = liftMemberCount(memberList);
+    const rootCount = liftRootCount(hierarchy);
     const summary =
       str`Org has ${memberCount} members across ${rootCount} root nodes`;
-    const chainSummaries = lift((chains: Record<string, string[]>) =>
-      Object.entries(chains)
-        .map(([id, chain]) => `${id}: ${chain.join(" > ")}`)
-        .sort((left, right) => left.localeCompare(right))
-    )(reportingChains);
+    const chainSummaries = liftChainSummaries(reportingChains);
 
     return {
       members,
@@ -313,3 +319,5 @@ export const orgChartHierarchy = recipe<OrgChartArgs>(
     };
   },
 );
+
+export default orgChartHierarchy;

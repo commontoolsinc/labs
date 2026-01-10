@@ -338,72 +338,103 @@ const updateThresholds = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftReadableName = lift((value: string | undefined) => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
+  }
+  return "Unknown patient";
+});
+
+const liftHistorySeed = lift((seed: VitalReadingSeed[] | undefined) =>
+  sanitizeReadings(seed)
+);
+
+const liftHistoryView = lift(
+  (
+    input: { state: VitalReading[]; seed: VitalReading[] },
+  ): VitalReading[] => {
+    const stateEntries = Array.isArray(input.state) ? input.state : [];
+    return stateEntries.length > 0 ? stateEntries : input.seed;
+  },
+);
+
+const liftSummariesView = lift((entries: VitalReading[]) =>
+  buildHistorySummaries(entries)
+);
+
+const liftThresholdsView = lift((seed: VitalThresholdsInput | undefined) =>
+  sanitizeThresholds(seed, defaultThresholds)
+);
+
+const liftLatestReading = lift((entries: VitalReading[]) => {
+  return entries.length === 0 ? null : entries[entries.length - 1];
+});
+
+const liftAlerts = lift(
+  (
+    input: {
+      reading: VitalReading | null;
+      thresholds: VitalThresholds;
+    },
+  ) => computeAlerts(input.reading, input.thresholds),
+);
+
+const liftAlertHistory = lift(
+  (
+    input: {
+      readings: VitalReading[];
+      thresholds: VitalThresholds;
+    },
+  ) => buildAlertHistory(input.readings, input.thresholds),
+);
+
+const liftAlertCount = lift((list: string[] | undefined) =>
+  Array.isArray(list) ? list.length : 0
+);
+
+const liftCritical = lift((count: number) => count > 0);
+
+const liftLatestSummaryText = lift((reading: VitalReading | null) =>
+  reading ? summarizeReading(reading) : "No readings yet"
+);
+
+const liftAlertSummaryText = lift((count: number) =>
+  count === 0 ? "All vitals within range" : `${count} active alerts`
+);
+
 /** Pattern tracking patient vitals with derived alert summaries. */
 export const patientVitalsDashboardPattern = recipe<PatientVitalsArgs>(
   "Patient Vitals Dashboard",
   ({ patientName, initialReadings, thresholds }) => {
-    const readableName = lift((value: string | undefined) => {
-      if (typeof value === "string") {
-        const trimmed = value.trim();
-        if (trimmed.length > 0) {
-          return trimmed;
-        }
-      }
-      return "Unknown patient";
-    })(patientName);
+    const readableName = liftReadableName(patientName);
 
     const history = cell<VitalReading[]>([]);
-    const historySeed = lift((seed: VitalReadingSeed[] | undefined) =>
-      sanitizeReadings(seed)
-    )(initialReadings);
-    const historyView = lift(
-      (
-        input: { state: VitalReading[]; seed: VitalReading[] },
-      ): VitalReading[] => {
-        const stateEntries = Array.isArray(input.state) ? input.state : [];
-        return stateEntries.length > 0 ? stateEntries : input.seed;
-      },
-    )({ state: history, seed: historySeed });
-    const summariesView = lift((entries: VitalReading[]) =>
-      buildHistorySummaries(entries)
-    )(historyView);
-    const thresholdsView = lift((seed: VitalThresholdsInput | undefined) =>
-      sanitizeThresholds(seed, defaultThresholds)
-    )(thresholds);
+    const historySeed = liftHistorySeed(initialReadings);
+    const historyView = liftHistoryView({ state: history, seed: historySeed });
+    const summariesView = liftSummariesView(historyView);
+    const thresholdsView = liftThresholdsView(thresholds);
 
-    const latestReading = lift((entries: VitalReading[]) => {
-      return entries.length === 0 ? null : entries[entries.length - 1];
-    })(historyView);
+    const latestReading = liftLatestReading(historyView);
 
-    const alerts = lift(
-      (
-        input: {
-          reading: VitalReading | null;
-          thresholds: VitalThresholds;
-        },
-      ) => computeAlerts(input.reading, input.thresholds),
-    )({ reading: latestReading, thresholds: thresholdsView });
+    const alerts = liftAlerts({
+      reading: latestReading,
+      thresholds: thresholdsView,
+    });
 
-    const alertHistory = lift(
-      (
-        input: {
-          readings: VitalReading[];
-          thresholds: VitalThresholds;
-        },
-      ) => buildAlertHistory(input.readings, input.thresholds),
-    )({ readings: historyView, thresholds: thresholdsView });
+    const alertHistory = liftAlertHistory({
+      readings: historyView,
+      thresholds: thresholdsView,
+    });
 
-    const alertCount = lift((list: string[] | undefined) =>
-      Array.isArray(list) ? list.length : 0
-    )(alerts);
-    const critical = lift((count: number) => count > 0)(alertCount);
+    const alertCount = liftAlertCount(alerts);
+    const critical = liftCritical(alertCount);
 
-    const latestSummaryText = lift((reading: VitalReading | null) =>
-      reading ? summarizeReading(reading) : "No readings yet"
-    )(latestReading);
-    const alertSummaryText = lift((count: number) =>
-      count === 0 ? "All vitals within range" : `${count} active alerts`
-    )(alertCount);
+    const latestSummaryText = liftLatestSummaryText(latestReading);
+    const alertSummaryText = liftAlertSummaryText(alertCount);
 
     const statusLabel = str`${readableName} · Alerts: ${alertCount}`;
     const latestSummary = str`Latest: ${latestSummaryText}`;
@@ -430,3 +461,5 @@ export const patientVitalsDashboardPattern = recipe<PatientVitalsArgs>(
     };
   },
 );
+
+export default patientVitalsDashboardPattern;

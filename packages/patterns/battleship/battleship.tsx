@@ -173,6 +173,121 @@ function createInitialState(): GameState {
 }
 
 // =============================================================================
+// Handlers (module scope with explicit type parameters)
+// =============================================================================
+
+const fireShot = handler<
+  unknown,
+  { row: number; col: number; game: Writable<GameState> }
+>((_, { row, col, game }) => {
+  const state = game.get();
+
+  // Can't fire if game is over, in transition, or awaiting pass
+  if (state.phase === "finished") return;
+  if (state.viewingAs === null) return;
+  if (state.awaitingPass) return;
+
+  // Can only fire on your turn
+  if (state.currentTurn !== state.viewingAs) return;
+
+  // Target the opponent's board
+  const targetPlayer = state.viewingAs === 1 ? 2 : 1;
+  const targetBoard = targetPlayer === 1 ? state.player1 : state.player2;
+  const shots = targetBoard.shots;
+
+  // Can't fire at same spot twice
+  if (shots[row][col] !== "empty") return;
+
+  // Check if hit
+  const hitShip = findShipAt(targetBoard.ships, { row, col });
+  const newShots = shots.map((r, ri) =>
+    r.map((
+      c,
+      ci,
+    ) => (ri === row && ci === col ? (hitShip ? "hit" : "miss") : c))
+  );
+
+  const newTargetBoard = { ...targetBoard, shots: newShots };
+
+  // Build message
+  let message = "";
+  const coordStr = `${COLS[col]}${row + 1}`;
+
+  if (hitShip) {
+    if (isShipSunk(hitShip, newShots)) {
+      message = `${coordStr}: Hit! You sunk the ${SHIP_NAMES[hitShip.type]}!`;
+    } else {
+      message = `${coordStr}: Hit!`;
+    }
+  } else {
+    message = `${coordStr}: Miss.`;
+  }
+
+  // Check for win
+  const allSunk = areAllShipsSunk(targetBoard.ships, newShots);
+
+  if (allSunk) {
+    game.set({
+      ...state,
+      player1: targetPlayer === 1 ? newTargetBoard : state.player1,
+      player2: targetPlayer === 2 ? newTargetBoard : state.player2,
+      phase: "finished",
+      winner: state.currentTurn,
+      lastMessage: `${message} Player ${state.currentTurn} wins!`,
+      viewingAs: state.viewingAs,
+      awaitingPass: false,
+    });
+  } else {
+    const nextTurn = state.currentTurn === 1 ? 2 : 1;
+    game.set({
+      ...state,
+      player1: targetPlayer === 1 ? newTargetBoard : state.player1,
+      player2: targetPlayer === 2 ? newTargetBoard : state.player2,
+      currentTurn: nextTurn as 1 | 2,
+      lastMessage: message,
+      viewingAs: state.viewingAs, // Stay on current view to show result
+      awaitingPass: true, // Lock board, show pass button
+    });
+  }
+});
+
+const passDevice = handler<unknown, { game: Writable<GameState> }>(
+  (_, { game }) => {
+    const state = game.get();
+    if (state.phase === "finished") return;
+    if (!state.awaitingPass) return;
+    // Go to full transition screen
+    game.set({
+      ...state,
+      viewingAs: null,
+      awaitingPass: false,
+    });
+  },
+);
+
+const playerReady = handler<unknown, { game: Writable<GameState> }>(
+  (_, { game }) => {
+    const state = game.get();
+    if (state.phase === "finished") return;
+    if (state.viewingAs !== null) return; // Must be on transition screen
+    // Set viewingAs to whoever's turn it is
+    game.set({
+      ...state,
+      viewingAs: state.currentTurn,
+      awaitingPass: false,
+      lastMessage:
+        `Player ${state.currentTurn}'s turn - fire at the enemy board!`,
+    });
+  },
+);
+
+const resetGame = handler<unknown, { game: Writable<GameState> }>(
+  (_, { game }) => {
+    game.set(createInitialState());
+  },
+);
+
+// =============================================================================
 // Pattern
 // =============================================================================
 
@@ -184,121 +299,6 @@ interface Output {
 
 export default pattern<Input, Output>((_input) => {
   const game = Writable.of<GameState>(createInitialState());
-
-  // ---------------------------------------------------------------------------
-  // Handlers
-  // ---------------------------------------------------------------------------
-
-  const fireShot = handler<
-    unknown,
-    { row: number; col: number; game: Writable<GameState> }
-  >((_, { row, col, game }) => {
-    const state = game.get();
-
-    // Can't fire if game is over, in transition, or awaiting pass
-    if (state.phase === "finished") return;
-    if (state.viewingAs === null) return;
-    if (state.awaitingPass) return;
-
-    // Can only fire on your turn
-    if (state.currentTurn !== state.viewingAs) return;
-
-    // Target the opponent's board
-    const targetPlayer = state.viewingAs === 1 ? 2 : 1;
-    const targetBoard = targetPlayer === 1 ? state.player1 : state.player2;
-    const shots = targetBoard.shots;
-
-    // Can't fire at same spot twice
-    if (shots[row][col] !== "empty") return;
-
-    // Check if hit
-    const hitShip = findShipAt(targetBoard.ships, { row, col });
-    const newShots = shots.map((r, ri) =>
-      r.map((
-        c,
-        ci,
-      ) => (ri === row && ci === col ? (hitShip ? "hit" : "miss") : c))
-    );
-
-    const newTargetBoard = { ...targetBoard, shots: newShots };
-
-    // Build message
-    let message = "";
-    const coordStr = `${COLS[col]}${row + 1}`;
-
-    if (hitShip) {
-      if (isShipSunk(hitShip, newShots)) {
-        message = `${coordStr}: Hit! You sunk the ${SHIP_NAMES[hitShip.type]}!`;
-      } else {
-        message = `${coordStr}: Hit!`;
-      }
-    } else {
-      message = `${coordStr}: Miss.`;
-    }
-
-    // Check for win
-    const allSunk = areAllShipsSunk(targetBoard.ships, newShots);
-
-    if (allSunk) {
-      game.set({
-        ...state,
-        player1: targetPlayer === 1 ? newTargetBoard : state.player1,
-        player2: targetPlayer === 2 ? newTargetBoard : state.player2,
-        phase: "finished",
-        winner: state.currentTurn,
-        lastMessage: `${message} Player ${state.currentTurn} wins!`,
-        viewingAs: state.viewingAs,
-        awaitingPass: false,
-      });
-    } else {
-      const nextTurn = state.currentTurn === 1 ? 2 : 1;
-      game.set({
-        ...state,
-        player1: targetPlayer === 1 ? newTargetBoard : state.player1,
-        player2: targetPlayer === 2 ? newTargetBoard : state.player2,
-        currentTurn: nextTurn as 1 | 2,
-        lastMessage: message,
-        viewingAs: state.viewingAs, // Stay on current view to show result
-        awaitingPass: true, // Lock board, show pass button
-      });
-    }
-  });
-
-  const passDevice = handler<unknown, { game: Writable<GameState> }>(
-    (_, { game }) => {
-      const state = game.get();
-      if (state.phase === "finished") return;
-      if (!state.awaitingPass) return;
-      // Go to full transition screen
-      game.set({
-        ...state,
-        viewingAs: null,
-        awaitingPass: false,
-      });
-    },
-  );
-
-  const playerReady = handler<unknown, { game: Writable<GameState> }>(
-    (_, { game }) => {
-      const state = game.get();
-      if (state.phase === "finished") return;
-      if (state.viewingAs !== null) return; // Must be on transition screen
-      // Set viewingAs to whoever's turn it is
-      game.set({
-        ...state,
-        viewingAs: state.currentTurn,
-        awaitingPass: false,
-        lastMessage:
-          `Player ${state.currentTurn}'s turn - fire at the enemy board!`,
-      });
-    },
-  );
-
-  const resetGame = handler<unknown, { game: Writable<GameState> }>(
-    (_, { game }) => {
-      game.set(createInitialState());
-    },
-  );
 
   // ---------------------------------------------------------------------------
   // Computed Values - Consolidated to reduce reactive subscriptions

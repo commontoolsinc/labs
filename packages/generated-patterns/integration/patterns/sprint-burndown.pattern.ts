@@ -283,68 +283,96 @@ const logSprintProgress = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftScopeView = lift((value: number | undefined) => sanitizeScope(value));
+
+const liftLengthView = lift((value: number | undefined) =>
+  sanitizeSprintLength(value)
+);
+
+const liftHistoryView = lift((input: {
+  list: BurndownEntry[];
+  scope: number;
+  length: number;
+}) => sanitizeSnapshots(input.list, input.scope, input.length));
+
+const liftLastDayView = lift((entries: BurndownEntry[]) => {
+  const last = entries[entries.length - 1];
+  return last ? last.day : 0;
+});
+
+const liftRemainingView = lift(
+  (input: { history: BurndownEntry[]; scope: number }) => {
+    const last = input.history[input.history.length - 1];
+    return last ? last.remaining : input.scope;
+  },
+);
+
+const liftBurnedView = lift((input: { scope: number; remaining: number }) => {
+  return roundToTwo(Math.max(0, input.scope - input.remaining));
+});
+
+const liftCompletionView = lift((input: { burned: number; scope: number }) => {
+  if (input.scope === 0) return 100;
+  const ratio = (input.burned / input.scope) * 100;
+  return Math.min(100, Math.max(0, Math.round(ratio)));
+});
+
+const liftIdealLine = lift((input: { scope: number; length: number }) =>
+  buildIdealLine(input.scope, input.length)
+);
+
+const liftBurndownCurve = lift((input: {
+  history: BurndownEntry[];
+  scope: number;
+  length: number;
+}) => buildBurndownCurve(input.history, input.scope, input.length));
+
+const liftActivityLogView = lift((entries: string[] | undefined) =>
+  Array.isArray(entries) ? entries : []
+);
+
 export const sprintBurndown = recipe<SprintBurndownArgs>(
   "Sprint Burndown Tracker",
   ({ totalScope, sprintLength, snapshots }) => {
     const activityLog = cell<string[]>([]);
 
-    const scopeView = lift((value: number | undefined) => sanitizeScope(value))(
-      totalScope,
-    );
+    const scopeView = liftScopeView(totalScope);
 
-    const lengthView = lift((value: number | undefined) =>
-      sanitizeSprintLength(value)
-    )(sprintLength);
+    const lengthView = liftLengthView(sprintLength);
 
-    const historyView = lift((input: {
-      list: BurndownEntry[];
-      scope: number;
-      length: number;
-    }) => sanitizeSnapshots(input.list, input.scope, input.length))({
+    const historyView = liftHistoryView({
       list: snapshots,
       scope: scopeView,
       length: lengthView,
     });
 
-    const lastDayView = lift((entries: BurndownEntry[]) => {
-      const last = entries[entries.length - 1];
-      return last ? last.day : 0;
-    })(historyView);
+    const lastDayView = liftLastDayView(historyView);
 
-    const remainingView = lift(
-      (input: { history: BurndownEntry[]; scope: number }) => {
-        const last = input.history[input.history.length - 1];
-        return last ? last.remaining : input.scope;
-      },
-    )({ history: historyView, scope: scopeView });
+    const remainingView = liftRemainingView({
+      history: historyView,
+      scope: scopeView,
+    });
 
-    const burnedView = lift((input: { scope: number; remaining: number }) => {
-      return roundToTwo(Math.max(0, input.scope - input.remaining));
-    })({ scope: scopeView, remaining: remainingView });
+    const burnedView = liftBurnedView({
+      scope: scopeView,
+      remaining: remainingView,
+    });
 
-    const completionView = lift((input: { burned: number; scope: number }) => {
-      if (input.scope === 0) return 100;
-      const ratio = (input.burned / input.scope) * 100;
-      return Math.min(100, Math.max(0, Math.round(ratio)));
-    })({ burned: burnedView, scope: scopeView });
+    const completionView = liftCompletionView({
+      burned: burnedView,
+      scope: scopeView,
+    });
 
-    const idealLine = lift((input: { scope: number; length: number }) =>
-      buildIdealLine(input.scope, input.length)
-    )({ scope: scopeView, length: lengthView });
+    const idealLine = liftIdealLine({ scope: scopeView, length: lengthView });
 
-    const burndownCurve = lift((input: {
-      history: BurndownEntry[];
-      scope: number;
-      length: number;
-    }) => buildBurndownCurve(input.history, input.scope, input.length))({
+    const burndownCurve = liftBurndownCurve({
       history: historyView,
       scope: scopeView,
       length: lengthView,
     });
 
-    const activityLogView = lift((entries: string[] | undefined) =>
-      Array.isArray(entries) ? entries : []
-    )(activityLog);
+    const activityLogView = liftActivityLogView(activityLog);
 
     const statusLabel =
       str`Day ${lastDayView}/${lengthView} — burned ${burnedView} (${completionView}%)`;
@@ -369,3 +397,5 @@ export const sprintBurndown = recipe<SprintBurndownArgs>(
     };
   },
 );
+
+export default sprintBurndown;

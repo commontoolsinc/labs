@@ -41,23 +41,33 @@ const setValue = handler(
   },
 );
 
+const liftCurrent = lift((raw: number | undefined) =>
+  typeof raw === "number" && Number.isFinite(raw) ? Math.trunc(raw) : 0
+);
+
+const liftMagnitude = lift((count: number) => Math.abs(count));
+
+const liftParity = lift((absolute: number) =>
+  Math.abs(absolute % 2) === 0 ? "even" : "odd"
+);
+
+const liftEmphasis = lift((label: "even" | "odd") =>
+  label === "even" ? "steady" : "swing"
+);
+
+const liftParityCode = lift((label: "steady" | "swing") =>
+  label === "steady" ? 0 : 1
+);
+
 export const counterWithNestedDeriveWatchers = recipe<NestedDeriveArgs>(
   "Counter With Nested Derive Watchers",
   ({ value }) => {
-    const current = lift((raw: number | undefined) =>
-      typeof raw === "number" && Number.isFinite(raw) ? Math.trunc(raw) : 0
-    )(value);
+    const current = liftCurrent(value);
 
-    const magnitude = lift((count: number) => Math.abs(count))(current);
-    const parity = lift((absolute: number) =>
-      Math.abs(absolute % 2) === 0 ? "even" : "odd"
-    )(magnitude);
-    const emphasis = lift((label: "even" | "odd") =>
-      label === "even" ? "steady" : "swing"
-    )(parity);
-    const parityCode = lift((label: "steady" | "swing") =>
-      label === "steady" ? 0 : 1
-    )(emphasis);
+    const magnitude = liftMagnitude(current);
+    const parity = liftParity(magnitude);
+    const emphasis = liftEmphasis(parity);
+    const parityCode = liftParityCode(emphasis);
 
     const parityDetail = str`parity ${parity} emphasis ${emphasis}`;
     const summary =
@@ -77,3 +87,5 @@ export const counterWithNestedDeriveWatchers = recipe<NestedDeriveArgs>(
     };
   },
 );
+
+export default counterWithNestedDeriveWatchers;

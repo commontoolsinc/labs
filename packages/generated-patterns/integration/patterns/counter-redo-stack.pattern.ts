@@ -96,30 +96,32 @@ const redoNext = handler(
   },
 );
 
+const liftSanitizeNumber = lift((raw: number | undefined) =>
+  sanitizeNumber(raw)
+);
+
+const liftSanitizeStack = lift((entries: number[] | undefined) =>
+  sanitizeStack(entries)
+);
+
+const liftStackLength = lift((entries: number[]) => entries.length);
+
+const liftStackNotEmpty = lift((entries: number[]) => entries.length > 0);
+
 export const counterRedoStack = recipe<CounterRedoStackArgs>(
   "Counter Redo Stack",
   ({ value, undoStack, redoStack }) => {
-    const currentValue = lift((raw: number | undefined) => sanitizeNumber(raw))(
-      value,
-    );
+    const currentValue = liftSanitizeNumber(value);
 
-    const undoHistory = lift((entries: number[] | undefined) =>
-      sanitizeStack(entries)
-    )(undoStack);
+    const undoHistory = liftSanitizeStack(undoStack);
 
-    const redoHistory = lift((entries: number[] | undefined) =>
-      sanitizeStack(entries)
-    )(redoStack);
+    const redoHistory = liftSanitizeStack(redoStack);
 
-    const undoCount = lift((entries: number[]) => entries.length)(undoHistory);
-    const redoCount = lift((entries: number[]) => entries.length)(redoHistory);
+    const undoCount = liftStackLength(undoHistory);
+    const redoCount = liftStackLength(redoHistory);
 
-    const canUndo = lift((entries: number[]) => entries.length > 0)(
-      undoHistory,
-    );
-    const canRedo = lift((entries: number[]) => entries.length > 0)(
-      redoHistory,
-    );
+    const canUndo = liftStackNotEmpty(undoHistory);
+    const canRedo = liftStackNotEmpty(redoHistory);
 
     const status =
       str`Value ${currentValue} | undo ${undoCount} | redo ${redoCount}`;
@@ -142,3 +144,5 @@ export const counterRedoStack = recipe<CounterRedoStackArgs>(
     };
   },
 );
+
+export default counterRedoStack;

@@ -96,26 +96,32 @@ const childIncrement = handler(
   },
 );
 
+const liftSafeIdentity = lift((input: string | undefined) =>
+  typeof input === "string" && input.trim().length > 0 ? input.trim() : "child"
+);
+
+const liftNormalizedStep = lift((input: number | undefined) =>
+  normalizeStep(input)
+);
+
+const liftNormalizedValue = lift((input: number | undefined) =>
+  toFiniteNumber(input, 0)
+);
+
+const liftSanitizedPrefix = lift((input: string | undefined) =>
+  sanitizeLabelPrefix(input, "Child")
+);
+
 export const parameterizedChildCounter = recipe<ParameterizedChildArgs>(
   "Parameterized Child Counter",
   ({ identity, value, step, labelPrefix }) => {
-    const safeIdentity = lift((input: string | undefined) =>
-      typeof input === "string" && input.trim().length > 0
-        ? input.trim()
-        : "child"
-    )(identity);
+    const safeIdentity = liftSafeIdentity(identity);
 
-    const normalizedStep = lift((input: number | undefined) =>
-      normalizeStep(input)
-    )(step);
+    const normalizedStep = liftNormalizedStep(step);
 
-    const normalizedValue = lift((input: number | undefined) =>
-      toFiniteNumber(input, 0)
-    )(value);
+    const normalizedValue = liftNormalizedValue(value);
 
-    const sanitizedPrefix = lift((input: string | undefined) =>
-      sanitizeLabelPrefix(input, "Child")
-    )(labelPrefix);
+    const sanitizedPrefix = liftSanitizedPrefix(labelPrefix);
 
     const label =
       str`${sanitizedPrefix} (${safeIdentity}) value ${normalizedValue}`;
@@ -160,30 +166,36 @@ const configureChildren = handler(
   },
 );
 
+const liftSanitizedConfigs = lift((entries: ChildConfigInput[] | undefined) =>
+  sanitizeConfigEntries(entries)
+);
+
+const liftManifest = lift((entries: ChildConfig[]) => {
+  const records = entries.map(toRecord);
+  return records;
+});
+
+const liftChildren = lift((entries: ChildConfig[]) => {
+  return entries.map((config) =>
+    parameterizedChildCounter({
+      identity: config.id,
+      value: config.start,
+      step: config.step,
+      labelPrefix: config.labelPrefix,
+    })
+  );
+});
+
 export const counterNestedParameterized = recipe<NestedParameterizedArgs>(
   "Counter With Nested Parameterized Patterns",
   ({ configs }) => {
     const configurationVersion = cell(0);
 
-    const sanitizedConfigs = lift((entries: ChildConfigInput[] | undefined) =>
-      sanitizeConfigEntries(entries)
-    )(configs);
+    const sanitizedConfigs = liftSanitizedConfigs(configs);
 
-    const manifest = lift((entries: ChildConfig[]) => {
-      const records = entries.map(toRecord);
-      return records;
-    })(sanitizedConfigs);
+    const manifest = liftManifest(sanitizedConfigs);
 
-    const children = lift((entries: ChildConfig[]) => {
-      return entries.map((config) =>
-        parameterizedChildCounter({
-          identity: config.id,
-          value: config.start,
-          step: config.step,
-          labelPrefix: config.labelPrefix,
-        })
-      );
-    })(sanitizedConfigs);
+    const children = liftChildren(sanitizedConfigs);
 
     const childCount = derive(sanitizedConfigs, (entries) => entries.length);
 
@@ -212,3 +224,5 @@ export const counterNestedParameterized = recipe<NestedParameterizedArgs>(
     };
   },
 );
+
+export default counterNestedParameterized;

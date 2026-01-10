@@ -238,10 +238,12 @@ const addItem = handler<{ detail: { message: string } }, { items: Writable<Item[
 ```
 
 **Key rules:**
+- **Define handlers at module scope** - NOT inside the pattern body (transformer requirement)
 - Pass **state only** when binding - event data comes at runtime
 - For test buttons with hardcoded data, use **inline handlers**: `onClick={() => items.push(...)}`
 - A bound handler IS a `Stream<T>` - don't use `Stream.of()` or `.subscribe()`
 - Use `Writable<T[]>` in handler state (plain array type)
+- Helper functions and `lift()` should also be at module scope
 
 See `PATTERNS.md` for handler patterns, `TYPES_AND_SCHEMAS.md` for Stream typing, `DEBUGGING.md` for common errors.
 

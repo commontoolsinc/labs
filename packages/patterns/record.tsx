@@ -902,63 +902,56 @@ const Record = pattern<RecordInput, RecordOutput>(
       pinnedCount,
       hasUnpinned,
       hasExpandedModule,
-    } = lift(
-      (
-        { sc, expandedIdx }: {
-          sc: SubCharmEntry[];
-          expandedIdx: number | undefined;
-        },
-      ) => {
-        const entries = (sc || []).map((entry, index) => {
-          // Compute displayInfo inline (same logic as getModuleDisplay)
-          const def = getDefinition(entry.type);
-          // deno-lint-ignore no-explicit-any
-          const charmLabel = (entry.charm as any)?.label;
-          const displayInfo = {
-            icon: def?.icon || "📋",
-            label: charmLabel || def?.label || entry.type,
-          };
-          return {
-            entry,
-            index,
-            isExpanded: expandedIdx === index,
-            displayInfo,
-            isPinned: entry.pinned || false,
-          };
-        });
-        const pinned = entries.filter((item) => item.entry?.pinned);
-        const unpinned = entries.filter((item) => !item.entry?.pinned);
-        return {
-          pinnedEntries: pinned,
-          unpinnedEntries: unpinned,
-          allEntries: entries,
-          pinnedCount: pinned.length,
-          hasUnpinned: unpinned.length > 0,
-          hasExpandedModule: expandedIdx !== undefined,
+    } = computed(() => {
+      const sc = subCharms;
+      const expandedIdx = expandedIndex.get();
+      const entries = (sc || []).map((entry, index) => {
+        // Compute displayInfo inline (same logic as getModuleDisplay)
+        const def = getDefinition(entry.type);
+        // deno-lint-ignore no-explicit-any
+        const charmLabel = (entry.charm as any)?.label;
+        const displayInfo = {
+          icon: def?.icon || "📋",
+          label: charmLabel || def?.label || entry.type,
         };
-      },
-    )({ sc: subCharms, expandedIdx: expandedIndex });
+        return {
+          entry,
+          index,
+          isExpanded: expandedIdx === index,
+          displayInfo,
+          isPinned: entry.pinned || false,
+        };
+      });
+      const pinned = entries.filter((item) => item.entry?.pinned);
+      const unpinned = entries.filter((item) => !item.entry?.pinned);
+      return {
+        pinnedEntries: pinned,
+        unpinnedEntries: unpinned,
+        allEntries: entries,
+        pinnedCount: pinned.length,
+        hasUnpinned: unpinned.length > 0,
+        hasExpandedModule: expandedIdx !== undefined,
+      };
+    });
 
     // Check if there are any module types available to add
     // (always true unless registry is empty - multiple of same type allowed)
     const hasTypesToAdd = getAddableTypes().length > 0;
 
-    // Extract just the module types - only recomputes when types change
-    const moduleTypes = lift((
-      { sc }: { sc: SubCharmEntry[] },
-    ) => [...new Set((sc || []).map((e) => e?.type).filter(Boolean))])({
-      sc: subCharms,
-    });
-
     // Build dropdown items from registry, separating new types from existing ones
-    // Now only recomputes when moduleTypes changes (not every subCharms change)
-    const addSelectItems = lift(({ types }: { types: string[] }) => {
-      const existingTypes = new Set(types);
+    const addSelectItems = computed(() => {
+      // Extract module types inline to avoid Cell type issues
+      const moduleTypes = [
+        ...new Set((subCharms || []).map((e) => e?.type).filter(Boolean)),
+      ];
+      const existingTypes = new Set<string>(moduleTypes);
       const allTypes = getAddableTypes();
 
-      const newTypes = allTypes.filter((def) => !existingTypes.has(def.type));
+      const newTypes = allTypes.filter((def) =>
+        !existingTypes.has(String(def.type))
+      );
       const existingTypesDefs = allTypes.filter((def) =>
-        existingTypes.has(def.type)
+        existingTypes.has(String(def.type))
       );
 
       const items: { value: string; label: string; disabled?: boolean }[] = [];
@@ -979,17 +972,19 @@ const Record = pattern<RecordInput, RecordOutput>(
       }
 
       return items;
-    })({ types: moduleTypes });
+    });
 
     // Infer record type from modules (data-up philosophy)
-    const inferredType = lift(({ sc }: { sc: SubCharmEntry[] }) => {
-      const moduleTypes = (sc || []).map((e) => e?.type).filter(Boolean);
-      return inferTypeFromModules(moduleTypes as string[]);
-    })({ sc: subCharms });
+    const inferredType = computed(() => {
+      const types = (subCharms || []).map((e) => e?.type).filter(Boolean);
+      return inferTypeFromModules(types as string[]);
+    });
 
     // Check for manual icon override from record-icon module
-    const manualIcon = lift(({ sc }: { sc: SubCharmEntry[] }) => {
-      const iconModule = (sc || []).find((e) => e?.type === "record-icon");
+    const manualIcon = computed(() => {
+      const iconModule = (subCharms || []).find((e) =>
+        e?.type === "record-icon"
+      );
       if (!iconModule) return null;
 
       try {
@@ -1004,21 +999,18 @@ const Record = pattern<RecordInput, RecordOutput>(
       } catch {
         return null;
       }
-    })({ sc: subCharms });
+    });
 
     // Extract icon: manual icon takes precedence over inferred type
-    const recordIcon = lift(
-      ({
-        manual,
-        inferred,
-      }: {
-        manual: string | null;
-        inferred: { icon: string };
-      }) => manual || inferred?.icon || "\u{1F4CB}",
-    )({ manual: manualIcon, inferred: inferredType });
+    const recordIcon = computed(() => {
+      const manual = manualIcon;
+      const inferred = inferredType;
+      return manual || inferred?.icon || "\u{1F4CB}";
+    });
 
     // Extract nicknames from nickname modules for display in NAME
-    const nicknamesList = lift(({ sc }: { sc: SubCharmEntry[] }) => {
+    const nicknamesList = computed(() => {
+      const sc = subCharms;
       const nicknameModules = (sc || []).filter((e) => e?.type === "nickname");
       const nicknames: string[] = [];
       for (const mod of nicknameModules) {
@@ -1035,98 +1027,70 @@ const Record = pattern<RecordInput, RecordOutput>(
         }
       }
       return nicknames;
-    })({ sc: subCharms });
+    });
 
     // Build display name with nickname alias if present
-    const displayNameWithAlias = lift(
-      ({
-        name,
-        nicknames,
-      }: {
-        name: string;
-        nicknames: string[];
-      }) => {
-        if (nicknames.length === 0) return name;
-        // Show all nicknames as aliases (aka Liz, Beth, Lizzie)
-        return `${name} (aka ${nicknames.join(", ")})`;
-      },
-    )({ name: displayName, nicknames: nicknamesList });
+    const displayNameWithAlias = computed(() => {
+      const name = displayName;
+      const nicknames = nicknamesList;
+      if (nicknames.length === 0) return name;
+      // Show all nicknames as aliases (aka Liz, Beth, Lizzie)
+      return `${name} (aka ${nicknames.join(", ")})`;
+    });
 
     // ===== Trash Section Computed Values =====
 
     // Pre-compute trashed entries with displayInfo to avoid calling getModuleDisplay in .map() JSX
-    type TrashedEntryWithDisplay = {
-      entry: TrashedSubCharmEntry;
-      trashIndex: number;
-      displayInfo: { icon: string; label: string };
-    };
-    const trashedEntriesWithDisplay = lift(
-      ({ t }: { t: TrashedSubCharmEntry[] }) => {
-        return (t || []).map((entry, trashIndex) => {
-          // Compute displayInfo inline (same logic as getModuleDisplay)
-          const def = getDefinition(entry.type);
-          // deno-lint-ignore no-explicit-any
-          const charmLabel = (entry.charm as any)?.label;
-          const displayInfo = {
-            icon: def?.icon || "📋",
-            label: charmLabel || def?.label || entry.type,
-          };
-          return { entry, trashIndex, displayInfo };
-        });
-      },
-    )({ t: trashedSubCharms });
+    const trashedEntriesWithDisplay = computed(() => {
+      const t = trashedSubCharms;
+      return (t || []).map((entry, trashIndex) => {
+        // Compute displayInfo inline (same logic as getModuleDisplay)
+        const def = getDefinition(entry.type);
+        // deno-lint-ignore no-explicit-any
+        const charmLabel = (entry.charm as any)?.label;
+        const displayInfo = {
+          icon: def?.icon || "📋",
+          label: charmLabel || def?.label || entry.type,
+        };
+        return { entry, trashIndex, displayInfo };
+      });
+    });
 
     // Compute trash count directly
-    const trashCount = lift(({ t }: { t: TrashedSubCharmEntry[] }) =>
-      (t || []).length
-    )({ t: trashedSubCharms });
+    const trashCount = computed(() => (trashedSubCharms || []).length);
 
     // Check if there are any trashed items
-    const hasTrash = lift(({ t }: { t: TrashedSubCharmEntry[] }) =>
-      (t || []).length > 0
-    )({ t: trashedSubCharms });
+    const hasTrash = computed(() => (trashedSubCharms || []).length > 0);
 
     // ===== Settings Modal Computed Values =====
 
     // Get the settings UI for the currently selected module (if any)
-    const currentSettingsUI = lift(
-      ({
-        idx,
-        sc,
-      }: {
-        idx: number | undefined;
-        sc: SubCharmEntry[];
-      }) => {
-        if (idx === undefined) return null;
-        const entry = sc?.[idx];
-        if (!entry) return null;
-        // Access settingsUI from the charm output
-        // deno-lint-ignore no-explicit-any
-        return (entry.charm as any)?.settingsUI || null;
-      },
-    )({ idx: settingsModuleIndex, sc: subCharms });
+    const currentSettingsUI = computed(() => {
+      const idx = settingsModuleIndex.get();
+      const sc = subCharms;
+      if (idx === undefined) return null;
+      const entry = sc?.[idx];
+      if (!entry) return null;
+      // Access settingsUI from the charm output
+      // deno-lint-ignore no-explicit-any
+      return (entry.charm as any)?.settingsUI || null;
+    });
 
     // Get display info for the module whose settings are open
-    const settingsModuleDisplay = lift(
-      ({
-        idx,
-        sc,
-      }: {
-        idx: number | undefined;
-        sc: SubCharmEntry[];
-      }) => {
-        if (idx === undefined) return { icon: "", label: "Settings" };
-        const entry = sc?.[idx];
-        if (!entry) return { icon: "", label: "Settings" };
-        const def = getDefinition(entry.type);
-        // deno-lint-ignore no-explicit-any
-        const charmLabel = (entry.charm as any)?.label;
-        return {
-          icon: def?.icon || "📋",
-          label: charmLabel || def?.label || entry.type,
-        };
-      },
-    )({ idx: settingsModuleIndex, sc: subCharms });
+    const settingsModuleDisplay = computed(() => {
+      const idx = settingsModuleIndex.get();
+      const sc = subCharms;
+      if (idx === undefined) return { icon: "", label: "Settings" };
+      const entry = sc?.[idx];
+      if (!entry) return { icon: "", label: "Settings" };
+      const def = getDefinition(entry.type);
+      // deno-lint-ignore no-explicit-any
+      const charmLabel = (entry.charm as any)?.label;
+      return {
+        icon: def?.icon || "📋",
+        label: charmLabel || def?.label || entry.type,
+      };
+    });
 
     // ===== Main UI =====
     return {

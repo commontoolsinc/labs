@@ -48,12 +48,18 @@ const childIncrement = handler(
   },
 );
 
+const liftSafeCount = lift((count: number | undefined) =>
+  typeof count === "number" && Number.isFinite(count) ? count : 0
+);
+
+const liftSafeHistory = lift((records: BubbleRecord[] | undefined) =>
+  Array.isArray(records) ? records : []
+);
+
 const childCounter = recipe<{ value: Default<number, 0> }>(
   "Bubbled Child Counter",
   ({ value }) => {
-    const safeValue = lift((count: number | undefined) =>
-      typeof count === "number" && Number.isFinite(count) ? count : 0
-    )(value);
+    const safeValue = liftSafeCount(value);
     return {
       value,
       label: str`Child count ${safeValue}`,
@@ -107,20 +113,14 @@ const parentIncrement = handler(
 export const counterWithParentChildBubbling = recipe<ParentChildBubbleArgs>(
   "Counter With Parent-Child Event Bubbling",
   ({ parent, child }) => {
-    const parentView = lift((count: number | undefined) =>
-      typeof count === "number" && Number.isFinite(count) ? count : 0
-    )(parent);
+    const parentView = liftSafeCount(parent);
 
     const forwardedCount = cell(0);
     const history = cell<BubbleRecord[]>([]);
 
-    const forwardedView = lift((count: number | undefined) =>
-      typeof count === "number" && Number.isFinite(count) ? count : 0
-    )(forwardedCount);
+    const forwardedView = liftSafeCount(forwardedCount);
 
-    const historyView = lift((records: BubbleRecord[] | undefined) =>
-      Array.isArray(records) ? records : []
-    )(history);
+    const historyView = liftSafeHistory(history);
 
     const childState = childCounter({ value: child });
 
@@ -139,3 +139,5 @@ export const counterWithParentChildBubbling = recipe<ParentChildBubbleArgs>(
     };
   },
 );
+
+export default counterWithParentChildBubbling;

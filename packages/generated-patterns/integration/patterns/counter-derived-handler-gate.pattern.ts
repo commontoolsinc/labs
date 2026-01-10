@@ -69,6 +69,23 @@ const setGateMode = handler(
   },
 );
 
+const liftSafeValue = lift((input: number | undefined) =>
+  typeof input === "number" && Number.isFinite(input) ? input : 0
+);
+const liftSafeGateMode = lift((mode: GateMode | string | undefined) =>
+  mode === "disabled" ? "disabled" : "enabled"
+);
+const liftIsActive = lift((mode: GateMode) => mode === "enabled");
+const liftStatusLabel = lift((mode: GateMode) =>
+  mode === "disabled" ? "disabled" : "enabled"
+);
+const liftAttemptHistory = lift((entries: string[] | undefined) =>
+  Array.isArray(entries) ? entries : []
+);
+const liftSafeCount = lift((count: number | undefined) =>
+  typeof count === "number" && Number.isFinite(count) ? count : 0
+);
+
 export const counterWithDerivedHandlerGate = recipe<DerivedHandlerGateArgs>(
   "Counter With Derived Handler Gate",
   ({ value, gateMode }) => {
@@ -76,33 +93,19 @@ export const counterWithDerivedHandlerGate = recipe<DerivedHandlerGateArgs>(
     const blockedCount = cell<number>(0);
     const appliedCount = cell<number>(0);
 
-    const safeValue = lift((input: number | undefined) =>
-      typeof input === "number" && Number.isFinite(input) ? input : 0
-    )(value);
+    const safeValue = liftSafeValue(value);
 
-    const safeGateMode = lift((mode: GateMode | string | undefined) =>
-      mode === "disabled" ? "disabled" : "enabled"
-    )(gateMode);
+    const safeGateMode = liftSafeGateMode(gateMode);
 
-    const isActive = lift((mode: GateMode) => mode === "enabled")(
-      safeGateMode,
-    );
+    const isActive = liftIsActive(safeGateMode);
 
-    const statusLabel = lift((mode: GateMode) =>
-      mode === "disabled" ? "disabled" : "enabled"
-    )(safeGateMode);
+    const statusLabel = liftStatusLabel(safeGateMode);
 
-    const attemptHistory = lift((entries: string[] | undefined) =>
-      Array.isArray(entries) ? entries : []
-    )(attemptLog);
+    const attemptHistory = liftAttemptHistory(attemptLog);
 
-    const blockedAttempts = lift((count: number | undefined) =>
-      typeof count === "number" && Number.isFinite(count) ? count : 0
-    )(blockedCount);
+    const blockedAttempts = liftSafeCount(blockedCount);
 
-    const appliedAttempts = lift((count: number | undefined) =>
-      typeof count === "number" && Number.isFinite(count) ? count : 0
-    )(appliedCount);
+    const appliedAttempts = liftSafeCount(appliedCount);
 
     const increment = applyIncrement({
       value,
@@ -129,3 +132,5 @@ export const counterWithDerivedHandlerGate = recipe<DerivedHandlerGateArgs>(
     };
   },
 );
+
+export default counterWithDerivedHandlerGate;

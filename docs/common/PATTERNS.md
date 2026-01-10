@@ -50,6 +50,37 @@ Before writing a handler, ask: "Am I just syncing UI ↔ data?"
 // Use handlers only for side effects, validation, or structural changes
 ```
 
+### 4. Define handler(), lift(), and Helper Functions at Module Scope
+
+The pattern transformer requires that `handler()`, `lift()`, and helper functions be defined **outside** the pattern body (at module scope). Only the *binding* (passing state) happens inside the pattern:
+
+```typescript
+// ✅ CORRECT - Define at module scope, bind inside pattern
+const addItem = handler<{ title: string }, { items: Writable<Item[]> }>(
+  ({ title }, { items }) => items.push({ title, done: false })
+);
+
+const formatDate = (date: string): string => new Date(date).toLocaleDateString();
+
+export default pattern<Input, Input>(({ items }) => ({
+  [UI]: (
+    <div>
+      <ct-button onClick={addItem({ items })}>Add</ct-button>  {/* Bind here */}
+    </div>
+  ),
+  items,
+}));
+
+// ❌ WRONG - Defined inside pattern body (will cause transformer error)
+export default pattern<Input, Input>(({ items }) => {
+  const addItem = handler(...);  // Error: handler() must be at module scope
+  const formatDate = (d) => ...;  // Error: functions must be at module scope
+  return { ... };
+});
+```
+
+**Why:** The CTS transformer processes patterns at compile time and cannot handle closures over pattern-scoped variables in handlers or lifted functions.
+
 ---
 
 ## Levels: Progressive Examples
@@ -258,19 +289,24 @@ export default pattern<Input, Output>(({ ... }) => {
 });
 ```
 
-For dynamic collections, use a Cell:
+For dynamic collections, define the handler at module scope and use a Cell:
 
 ```typescript
-const createdCharms = Cell.of<any[]>([]);
+// Handler at module scope (required by transformer)
+const createCharm = handler<unknown, { createdCharms: Writable<any[]> }>(
+  (_, { createdCharms }) => {
+    createdCharms.push(ChildPattern({ name: "New" }));
+  }
+);
 
-const create = handler((_, { createdCharms }) => {
-  createdCharms.push(ChildPattern({ name: "New" }));
+export default pattern<Input, Output>(({ ... }) => {
+  const createdCharms = Cell.of<any[]>([]);
+
+  return {
+    [UI]: <ct-button onClick={createCharm({ createdCharms })}>Create</ct-button>,
+    mentionable: createdCharms,  // Cell is automatically unwrapped
+  };
 });
-
-return {
-  [UI]: <ct-button onClick={create({ createdCharms })}>Create</ct-button>,
-  mentionable: createdCharms,  // Cell is automatically unwrapped
-};
 ```
 
 **Notes:**
