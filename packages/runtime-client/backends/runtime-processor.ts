@@ -5,6 +5,8 @@ import {
   type Cancel,
   convertCellsToLinks,
   Runtime,
+  RuntimeTelemetry,
+  RuntimeTelemetryEvent,
   setRecipeEnvironment,
 } from "@commontools/runner";
 import { NameSchema, nameSchema } from "@commontools/runner/schemas";
@@ -22,6 +24,8 @@ import {
   type CellSubscribeRequest,
   type CellUnsubscribeRequest,
   type GetCellRequest,
+  GetGraphSnapshotRequest,
+  GraphSnapshotResponse,
   type InitializationData,
   IPCClientRequest,
   JSONValueResponse,
@@ -56,17 +60,21 @@ export class RuntimeProcessor {
   private _isDisposed = false;
   private disposingPromise: Promise<void> | undefined;
   private subscriptions = new Map<string, Cancel>();
+  private telemetry: RuntimeTelemetry;
 
   private constructor(
     runtime: Runtime,
     charmManager: CharmManager,
     cc: CharmsController,
     space: DID,
+    telemetry: RuntimeTelemetry,
   ) {
     this.runtime = runtime;
     this.charmManager = charmManager;
     this.cc = cc;
     this.space = space;
+    this.telemetry = telemetry;
+    this.telemetry.addEventListener("telemetry", this.#onTelemetry);
   }
 
   static async initialize(data: InitializationData): Promise<RuntimeProcessor> {
@@ -76,6 +84,7 @@ export class RuntimeProcessor {
       ? await Identity.deserialize(data.spaceIdentity)
       : undefined;
     const space = data.spaceDid;
+    const telemetry = new RuntimeTelemetry();
 
     setLLMUrl(data.apiUrl);
     setRecipeEnvironment({ apiUrl: apiUrlObj });
@@ -98,7 +107,7 @@ export class RuntimeProcessor {
       apiUrl: apiUrlObj,
       storageManager,
       recipeEnvironment: { apiUrl: apiUrlObj },
-
+      telemetry,
       consoleHandler: ({ metadata, method, args }) => {
         self.postMessage({
           type: NotificationType.ConsoleMessage,
@@ -147,13 +156,14 @@ export class RuntimeProcessor {
     await charmManager.synced();
     const cc = new CharmsController(charmManager);
 
-    return new RuntimeProcessor(runtime, charmManager, cc, space);
+    return new RuntimeProcessor(runtime, charmManager, cc, space, telemetry);
   }
 
   dispose(): Promise<void> {
     if (this.disposingPromise) return this.disposingPromise;
     this._isDisposed = true;
     this.disposingPromise = (async () => {
+      this.telemetry.removeEventListener("telemetry", this.#onTelemetry);
       try {
         for (const cancel of this.subscriptions.values()) {
           cancel();
@@ -385,6 +395,18 @@ export class RuntimeProcessor {
     await this.charmManager.synced();
   }
 
+  getGraphSnapshot(_: GetGraphSnapshotRequest): GraphSnapshotResponse {
+    return { snapshot: this.runtime.scheduler.getGraphSnapshot() };
+  }
+
+  #onTelemetry = (event: Event) => {
+    const marker = (event as RuntimeTelemetryEvent).marker;
+    self.postMessage({
+      type: NotificationType.Telemetry,
+      marker,
+    });
+  };
+
   async handleRequest(
     request: IPCClientRequest,
   ): Promise<RemoteResponse | void> {
@@ -425,6 +447,8 @@ export class RuntimeProcessor {
         return this.handlePageGetAll();
       case RequestType.PageSynced:
         return await this.handlePageSynced();
+      case RequestType.GetGraphSnapshot:
+        return this.getGraphSnapshot(request);
       default:
         throw new Error(`Unknown message type: ${(request as any).type}`);
     }

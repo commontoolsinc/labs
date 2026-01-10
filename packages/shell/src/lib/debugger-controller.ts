@@ -334,19 +334,14 @@ export class DebuggerController implements ReactiveController {
   /**
    * Request a fresh graph snapshot from the scheduler
    */
-  requestGraphSnapshot(): void {
+  async requestGraphSnapshot(): Promise<void> {
     if (!this.runtime) return;
 
     const rt = this.runtime.runtime();
     if (!rt) return;
-
-    // TODO(runtime-worker-refactor)
-    // re-enable
-    /*
-    const snapshot = rt.scheduler.getGraphSnapshot();
+    const snapshot = await rt.getGraphSnapshot();
     this.processGraphSnapshot(snapshot);
     this.host.requestUpdate();
-    */
   }
 
   /**

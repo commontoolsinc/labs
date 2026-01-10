@@ -53,6 +53,7 @@ export class RuntimeInternals extends EventTarget {
     this.#client.on("console", this.#onConsole);
     this.#client.on("navigaterequest", this.#onNavigateRequest);
     this.#client.on("error", this.#onError);
+    this.#client.on("telemetry", this.#onTelemetry);
   }
 
   runtime(): RuntimeClient {
@@ -156,6 +157,11 @@ export class RuntimeInternals extends EventTarget {
 
   #onError = (event: RuntimeClientEvents["error"][0]) => {
     console.error("[RuntimeClient Error]", event);
+  };
+
+  #onTelemetry = (marker: RuntimeTelemetryMarkerResult) => {
+    this.#telemetryMarkers.push(marker);
+    this.dispatchEvent(new CustomEvent("telemetryupdate"));
   };
 
   #check() {
