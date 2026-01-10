@@ -196,6 +196,17 @@ describe("value-codec", () => {
         expect(toStorableValue(date)).toBe("2024-01-15T12:00:00.000Z");
       });
 
+      it("converts regular objects with toJSON", () => {
+        const obj = {
+          secret: "internal",
+          toJSON() {
+            return { exposed: true };
+          },
+        };
+        const result = toStorableValue(obj);
+        expect(result).toEqual({ exposed: true });
+      });
+
       it("throws if toJSON returns a non-storable value", () => {
         class BadToJSON {
           toJSON() {

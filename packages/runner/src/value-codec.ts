@@ -87,18 +87,31 @@ export function toStorableValue(value: unknown): unknown {
       }
     }
 
-    case "function": {
-      // Break out for the more involved work.
-      break;
-    }
-
+    case "function":
     case "object": {
-      if (!isInstance(value)) {
-        return value;
+      if (value === null) {
+        return null;
       }
 
-      // Break out for the more involved work.
-      break;
+      const valueObj = value as object;
+
+      if ("toJSON" in valueObj && typeof valueObj.toJSON === "function") {
+        const converted = valueObj.toJSON();
+
+        if (!isStorableValue(converted)) {
+          throw new Error(
+            `\`toJSON()\` on ${typeName} returned something other than a \`JSONValue\``,
+          );
+        }
+
+        return converted;
+      } else if (typeof valueObj === "function" || isInstance(valueObj)) {
+        throw new Error(
+          `Cannot store ${typeName} per se (needs to have a \`toJSON()\` method)`,
+        );
+      } else {
+        return valueObj;
+      }
     }
 
     // TODO(@danfuzz): This is allowed for now, even though it isn't
@@ -119,24 +132,6 @@ export function toStorableValue(value: unknown): unknown {
       throw new Error(`Shouldn't happen: Unrecognized type ${typeName}`);
     }
   }
-
-  const valueObj = value as object; // Safe, given the `switch` above.
-
-  if (!("toJSON" in valueObj && typeof valueObj.toJSON === "function")) {
-    throw new Error(
-      `Cannot store ${typeName} per se (needs to have a \`toJSON()\` method)`,
-    );
-  }
-
-  const converted = valueObj.toJSON();
-
-  if (!isStorableValue(converted)) {
-    throw new Error(
-      `\`toJSON()\` on ${typeName} returned something other than a \`JSONValue\``,
-    );
-  }
-
-  return converted;
 }
 
 // TODO(@danfuzz): This sentinel is used to indicate a property should be
