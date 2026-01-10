@@ -3234,6 +3234,7 @@ interface CTFileDownloadAttributes<T> extends CTHTMLAttributes<T> {
   "$filename"?: CellLike<string>;
   "filename"?: string;
   "mime-type"?: string;
+  "mimeType"?: string;
   "base64"?: boolean;
   "variant"?:
     | "primary"
@@ -3246,7 +3247,11 @@ interface CTFileDownloadAttributes<T> extends CTHTMLAttributes<T> {
   "size"?: "default" | "sm" | "lg" | "icon" | "md";
   "disabled"?: boolean;
   "feedback-duration"?: number;
+  "feedbackDuration"?: number;
   "icon-only"?: boolean;
+  "iconOnly"?: boolean;
+  "allow-autosave"?: boolean;
+  "allowAutosave"?: boolean;
 }
 
 interface CTIframeAttributes<T> extends CTHTMLAttributes<T> {

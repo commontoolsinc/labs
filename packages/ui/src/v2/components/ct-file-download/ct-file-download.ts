@@ -710,6 +710,9 @@ export class CTFileDownload extends BaseElement {
     } else if (this._downloaded) {
       title = "Downloaded!";
       ariaLabel = "File downloaded";
+    } else if (this.allowAutosave) {
+      title = "Download file · Option+click for auto-save";
+      ariaLabel = "Download file, option click to enable auto-save";
     } else {
       title = "Download file";
       ariaLabel = "Download file";
