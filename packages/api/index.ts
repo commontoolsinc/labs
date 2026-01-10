@@ -1460,10 +1460,11 @@ export interface PatternToolResult<E = Record<PropertyKey, never>> {
 
 export type PatternToolFunction = <
   T,
-  E extends Partial<T> = Record<PropertyKey, never>,
+  E extends object = Record<PropertyKey, never>,
 >(
   fnOrRecipe: ((input: OpaqueRef<Required<T>>) => any) | RecipeFactory<T, any>,
-  extraParams?: Opaque<E>,
+  // Validate that E (after stripping cells) is a subset of T
+  extraParams?: StripCell<E> extends Partial<T> ? Opaque<E> : never,
 ) => PatternToolResult<E>;
 
 export type LiftFunction = {
