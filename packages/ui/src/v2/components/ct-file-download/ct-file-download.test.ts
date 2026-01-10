@@ -33,6 +33,7 @@ describe("CTFileDownload", () => {
       expect(element.disabled).toBe(false);
       expect(element.feedbackDuration).toBe(2000);
       expect(element.iconOnly).toBe(false);
+      expect(element.allowAutosave).toBe(false);
     });
   });
 
@@ -160,6 +161,51 @@ describe("CTFileDownload", () => {
         MAX_FILE_SIZE: number;
       }).MAX_FILE_SIZE;
       expect(maxSize).toBe(100 * 1024 * 1024);
+    });
+  });
+
+  describe("autosave configuration", () => {
+    it("should have AUTOSAVE_INTERVAL of 60 seconds", () => {
+      const interval = (CTFileDownload as unknown as {
+        AUTOSAVE_INTERVAL: number;
+      }).AUTOSAVE_INTERVAL;
+      expect(interval).toBe(60_000);
+    });
+
+    it("should set allowAutosave via property", () => {
+      const element = new CTFileDownload();
+      element.allowAutosave = true;
+      expect(element.allowAutosave).toBe(true);
+    });
+
+    it("should have autosave indicator methods", () => {
+      const element = new CTFileDownload();
+      // Access private methods for testing
+      const getIndicatorClass = (element as unknown as {
+        _getAutosaveIndicatorClass: () => string;
+      })._getAutosaveIndicatorClass;
+      const getTooltip = (element as unknown as {
+        _getAutosaveTooltip: () => string;
+      })._getAutosaveTooltip;
+
+      expect(typeof getIndicatorClass).toBe("function");
+      expect(typeof getTooltip).toBe("function");
+    });
+
+    it("should return empty indicator class when autosave disabled", () => {
+      const element = new CTFileDownload();
+      const indicatorClass = (element as unknown as {
+        _getAutosaveIndicatorClass: () => string;
+      })._getAutosaveIndicatorClass();
+      expect(indicatorClass).toBe("");
+    });
+
+    it("should return empty tooltip when autosave disabled", () => {
+      const element = new CTFileDownload();
+      const tooltip = (element as unknown as {
+        _getAutosaveTooltip: () => string;
+      })._getAutosaveTooltip();
+      expect(tooltip).toBe("");
     });
   });
 });
