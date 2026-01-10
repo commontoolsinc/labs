@@ -10,6 +10,9 @@ interface ListManagerArgs {
   items: Default<Item[], []>;
 }
 
+// Module-scope lift definitions
+const liftSize = lift((collection: Item[]) => collection.length);
+
 const addItem = handler(
   (
     event: { label?: string; count?: number } | undefined,
@@ -38,7 +41,7 @@ const incrementItem = handler(
 export const listManager = recipe<ListManagerArgs>(
   "List Manager",
   ({ items }) => {
-    const size = lift((collection: Item[]) => collection.length)(items);
+    const size = liftSize(items);
     const names = derive(
       items,
       (collection) => collection.map((item) => item.label),
@@ -55,3 +58,5 @@ export const listManager = recipe<ListManagerArgs>(
     };
   },
 );
+
+export default listManager;

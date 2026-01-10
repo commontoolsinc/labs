@@ -236,44 +236,54 @@ const resetAdherence = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeSchedule = lift(sanitizeSchedule);
+
+const liftAdherence = lift((input: {
+  schedule: MedicationDose[];
+  records: DoseRecord[];
+}) => computeAdherenceSnapshot(input));
+
+const liftAdherencePercentage = lift((snapshot: AdherenceSnapshot) =>
+  snapshot.percentage
+);
+const liftTakenCount = lift((snapshot: AdherenceSnapshot) => snapshot.taken);
+const liftTotalCount = lift((snapshot: AdherenceSnapshot) => snapshot.total);
+const liftRemainingCount = lift((snapshot: AdherenceSnapshot) =>
+  snapshot.pending
+);
+
+const liftRemainingLabel = lift((count: number) =>
+  `${count} dose${count === 1 ? "" : "s"} remaining`
+);
+
+const liftUpcomingDoses = lift((input: {
+  schedule: MedicationDose[];
+  records: DoseRecord[];
+}) => computeUpcoming(input));
+
 export const medicationAdherencePattern = recipe<MedicationAdherenceArgs>(
   "Medication Adherence Pattern",
   ({ doses }) => {
-    const schedule = lift(sanitizeSchedule)(doses);
+    const schedule = liftSanitizeSchedule(doses);
     const takenRecords = cell<DoseRecord[]>([]);
     const history = cell<string[]>([]);
 
-    const adherence = lift((input: {
-      schedule: MedicationDose[];
-      records: DoseRecord[];
-    }) => computeAdherenceSnapshot(input))({
+    const adherence = liftAdherence({
       schedule,
       records: takenRecords,
     });
 
-    const adherencePercentage = lift((snapshot: AdherenceSnapshot) =>
-      snapshot.percentage
-    )(adherence);
-    const takenCount = lift((snapshot: AdherenceSnapshot) => snapshot.taken)(
-      adherence,
-    );
-    const totalCount = lift((snapshot: AdherenceSnapshot) => snapshot.total)(
-      adherence,
-    );
-    const remainingCount = lift((snapshot: AdherenceSnapshot) =>
-      snapshot.pending
-    )(adherence);
+    const adherencePercentage = liftAdherencePercentage(adherence);
+    const takenCount = liftTakenCount(adherence);
+    const totalCount = liftTotalCount(adherence);
+    const remainingCount = liftRemainingCount(adherence);
 
     const percentageLabel = str`${adherencePercentage}% adherence`;
     const adherenceLabel = str`${takenCount} of ${totalCount} doses taken`;
-    const remainingLabel = lift((count: number) =>
-      `${count} dose${count === 1 ? "" : "s"} remaining`
-    )(remainingCount);
+    const remainingLabel = liftRemainingLabel(remainingCount);
 
-    const upcomingDoses = lift((input: {
-      schedule: MedicationDose[];
-      records: DoseRecord[];
-    }) => computeUpcoming(input))({
+    const upcomingDoses = liftUpcomingDoses({
       schedule,
       records: takenRecords,
     });
@@ -299,3 +309,5 @@ export const medicationAdherencePattern = recipe<MedicationAdherenceArgs>(
 );
 
 export type { AdherenceSnapshot, DoseRecord, MedicationDose };
+
+export default medicationAdherencePattern;

@@ -199,6 +199,14 @@ const configureChannel = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizePreferenceList = lift(sanitizePreferenceList);
+const liftBuildScheduleMap = lift(buildScheduleMap);
+const liftFormatActiveSummary = lift(formatActiveSummary);
+const liftActiveCount = lift((entries: readonly ChannelPreference[]) =>
+  entries.filter((entry) => entry.enabled).length
+);
+
 export const notificationPreferences = recipe<NotificationPreferenceArgs>(
   "Notification Preferences",
   ({ channels }) => {
@@ -206,15 +214,13 @@ export const notificationPreferences = recipe<NotificationPreferenceArgs>(
     const history = cell<string[]>(["Preferences loaded"]);
     const sequence = cell(0);
 
-    const channelList = lift(sanitizePreferenceList)(channels);
-    const scheduleMap = lift(buildScheduleMap)(channelList);
+    const channelList = liftSanitizePreferenceList(channels);
+    const scheduleMap = liftBuildScheduleMap(channelList);
 
-    const summaryBase = lift(formatActiveSummary)(channelList);
+    const summaryBase = liftFormatActiveSummary(channelList);
     const scheduleSummary = str`Notification schedules — ${summaryBase}`;
 
-    const activeCount = lift((entries: readonly ChannelPreference[]) =>
-      entries.filter((entry) => entry.enabled).length
-    )(channelList);
+    const activeCount = liftActiveCount(channelList);
 
     return {
       channels,
@@ -233,3 +239,5 @@ export const notificationPreferences = recipe<NotificationPreferenceArgs>(
     };
   },
 );
+
+export default notificationPreferences;

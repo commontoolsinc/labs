@@ -492,6 +492,67 @@ const proposeSlot = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeParticipants = lift(sanitizeParticipants);
+const liftSanitizeSlots = lift(sanitizeSlots);
+
+const liftVoteState = lift(
+  (
+    input: {
+      state: VoteRecord | undefined;
+      slots: SlotDefinition[];
+      participants: ParticipantDefinition[];
+    },
+  ) => normalizeVoteState(input.state, input.slots, input.participants),
+);
+
+const liftSlotTallies = lift(
+  (
+    input: {
+      slots: SlotDefinition[];
+      participants: ParticipantDefinition[];
+      votes: VoteRecord;
+    },
+  ) => buildVoteTallies(input.slots, input.participants, input.votes),
+);
+
+const liftConsensus = lift(
+  (
+    input: {
+      tallies: SlotVoteSummary[];
+      participants: ParticipantDefinition[];
+    },
+  ) => computeConsensus(input.tallies, input.participants),
+);
+
+const liftConsensusLabel = lift((entry: ConsensusSnapshot) => entry.slotLabel);
+const liftConsensusYes = lift((entry: ConsensusSnapshot) => entry.yes);
+
+const liftOutstandingNames = lift(
+  (entry: ConsensusSnapshot) =>
+    entry.outstandingNames.length > 0
+      ? entry.outstandingNames.join(", ")
+      : "none",
+);
+
+const liftOutstandingCount = lift(
+  (entry: ConsensusSnapshot) => entry.outstanding,
+);
+
+const liftHistoryView = lift((entries: string[] | undefined) => {
+  return Array.isArray(entries) ? [...entries] : [];
+});
+
+const liftLatestVoteView = lift((entry: VoteChange | null | undefined) => {
+  return entry ? { ...entry } : null;
+});
+
+const liftLatestSlotUpdateView = lift(
+  (entry: SlotUpdate | null | undefined) => {
+    return entry ? { ...entry } : null;
+  },
+);
+
 /**
  * Meeting scheduler that tracks proposed slots, records participant votes, and
  * surfaces consensus snapshots for offline planning.
@@ -504,65 +565,34 @@ export const meetingSchedulerPattern = recipe<MeetingSchedulerArgs>(
     const latestVote = cell<VoteChange | null>(null);
     const latestSlotUpdate = cell<SlotUpdate | null>(null);
 
-    const participantList = lift(sanitizeParticipants)(participants);
-    const slotList = lift(sanitizeSlots)(slots);
+    const participantList = liftSanitizeParticipants(participants);
+    const slotList = liftSanitizeSlots(slots);
 
-    const voteState = lift(
-      (
-        input: {
-          state: VoteRecord | undefined;
-          slots: SlotDefinition[];
-          participants: ParticipantDefinition[];
-        },
-      ) => normalizeVoteState(input.state, input.slots, input.participants),
-    )({ state: votes, slots: slotList, participants: participantList });
+    const voteState = liftVoteState({
+      state: votes,
+      slots: slotList,
+      participants: participantList,
+    });
 
-    const slotTallies = lift(
-      (
-        input: {
-          slots: SlotDefinition[];
-          participants: ParticipantDefinition[];
-          votes: VoteRecord;
-        },
-      ) => buildVoteTallies(input.slots, input.participants, input.votes),
-    )({ slots: slotList, participants: participantList, votes: voteState });
+    const slotTallies = liftSlotTallies({
+      slots: slotList,
+      participants: participantList,
+      votes: voteState,
+    });
 
-    const consensus = lift(
-      (
-        input: {
-          tallies: SlotVoteSummary[];
-          participants: ParticipantDefinition[];
-        },
-      ) => computeConsensus(input.tallies, input.participants),
-    )({ tallies: slotTallies, participants: participantList });
+    const consensus = liftConsensus({
+      tallies: slotTallies,
+      participants: participantList,
+    });
 
-    const consensusLabel = lift((entry: ConsensusSnapshot) => entry.slotLabel)(
-      consensus,
-    );
-    const consensusYes = lift((entry: ConsensusSnapshot) => entry.yes)(
-      consensus,
-    );
-    const outstandingNames = lift(
-      (entry: ConsensusSnapshot) =>
-        entry.outstandingNames.length > 0
-          ? entry.outstandingNames.join(", ")
-          : "none",
-    )(consensus);
-    const outstandingCount = lift(
-      (entry: ConsensusSnapshot) => entry.outstanding,
-    )(consensus);
+    const consensusLabel = liftConsensusLabel(consensus);
+    const consensusYes = liftConsensusYes(consensus);
+    const outstandingNames = liftOutstandingNames(consensus);
+    const outstandingCount = liftOutstandingCount(consensus);
 
-    const historyView = lift((entries: string[] | undefined) => {
-      return Array.isArray(entries) ? [...entries] : [];
-    })(history);
-    const latestVoteView = lift((entry: VoteChange | null | undefined) => {
-      return entry ? { ...entry } : null;
-    })(latestVote);
-    const latestSlotUpdateView = lift(
-      (entry: SlotUpdate | null | undefined) => {
-        return entry ? { ...entry } : null;
-      },
-    )(latestSlotUpdate);
+    const historyView = liftHistoryView(history);
+    const latestVoteView = liftLatestVoteView(latestVote);
+    const latestSlotUpdateView = liftLatestSlotUpdateView(latestSlotUpdate);
 
     const consensusSummary =
       str`Consensus slot: ${consensusLabel} (${consensusYes} yes)`;
@@ -599,3 +629,5 @@ export const meetingSchedulerPattern = recipe<MeetingSchedulerArgs>(
     };
   },
 );
+
+export default meetingSchedulerPattern;

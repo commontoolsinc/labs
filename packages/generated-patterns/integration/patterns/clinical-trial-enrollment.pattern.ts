@@ -416,44 +416,58 @@ const recordScreening = handler(
   },
 );
 
+const liftScreening = lift(
+  (input: { candid: TrialCandidate[]; crit: EnrollmentCriteria }) =>
+    buildScreeningReport(input.candid, input.crit),
+);
+
+const liftEligibleCandidates = lift((report: ScreeningResult[]) =>
+  report.filter((entry) => entry.eligible).map((entry) => entry.candidate)
+);
+
+const liftIneligibleReport = lift((report: ScreeningResult[]) =>
+  report
+    .filter((entry) => !entry.eligible)
+    .map((entry) => ({
+      id: entry.candidate.id,
+      reasons: entry.reasons,
+    }))
+);
+
+const liftEligibleIds = lift((list: readonly TrialCandidate[]) =>
+  list.map((candidate) => candidate.id)
+);
+
+const liftCandidateCount = lift(
+  (list: readonly TrialCandidate[]) => list.length,
+);
+
+const liftEligibleCount = lift((ids: readonly string[]) => ids.length);
+
+const liftSiteSummary = lift((report: ScreeningResult[]) =>
+  buildSiteSummary(report)
+);
+
+const liftSanitizeCandidates = lift(sanitizeCandidates);
+const liftSanitizeCriteria = lift(sanitizeCriteria);
+
 export const clinicalTrialEnrollment = recipe<ClinicalTrialEnrollmentArgs>(
   "Clinical Trial Enrollment",
   ({ participants, criteria }) => {
-    const candidateView = lift(sanitizeCandidates)(participants);
-    const criteriaView = lift(sanitizeCriteria)(criteria);
-    const screening = lift(({ candid, crit }) =>
-      buildScreeningReport(candid, crit)
-    )({
+    const candidateView = liftSanitizeCandidates(participants);
+    const criteriaView = liftSanitizeCriteria(criteria);
+    const screening = liftScreening({
       candid: candidateView,
       crit: criteriaView,
     });
-    const eligibleCandidates = lift((report: ScreeningResult[]) =>
-      report.filter((entry) => entry.eligible).map((entry) => entry.candidate)
-    )(screening);
-    const ineligibleReport = lift((report: ScreeningResult[]) =>
-      report
-        .filter((entry) => !entry.eligible)
-        .map((entry) => ({
-          id: entry.candidate.id,
-          reasons: entry.reasons,
-        }))
-    )(screening);
-    const eligibleIds = lift((list: readonly TrialCandidate[]) =>
-      list.map((candidate) => candidate.id)
-    )(eligibleCandidates);
-    const candidateCount = lift((list: readonly TrialCandidate[]) =>
-      list.length
-    )(
-      candidateView,
-    );
-    const eligibleCount = lift((ids: readonly string[]) => ids.length)(
-      eligibleIds,
-    );
+    const eligibleCandidates = liftEligibleCandidates(screening);
+    const ineligibleReport = liftIneligibleReport(screening);
+    const eligibleIds = liftEligibleIds(eligibleCandidates);
+    const candidateCount = liftCandidateCount(candidateView);
+    const eligibleCount = liftEligibleCount(eligibleIds);
     const eligibleSummary =
       str`${eligibleCount} of ${candidateCount} participants eligible`;
-    const siteSummary = lift((report: ScreeningResult[]) =>
-      buildSiteSummary(report)
-    )(screening);
+    const siteSummary = liftSiteSummary(screening);
 
     return {
       candidates: candidateView,
@@ -478,3 +492,5 @@ export type {
   SiteSummaryEntry,
   TrialCandidate,
 };
+
+export default clinicalTrialEnrollment;

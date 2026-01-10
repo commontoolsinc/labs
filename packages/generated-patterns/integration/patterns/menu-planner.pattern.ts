@@ -220,127 +220,128 @@ const ensurePlanStructure = (
   return structure;
 };
 
+// Module-scope lift definitions
+const liftSanitizeDays = lift(sanitizeDays);
+const liftSanitizeRecipes = lift(sanitizeRecipes);
+
+const liftPlanView = lift((inputs: {
+  plan: PlannedMeal[] | undefined;
+  days: string[];
+  recipes: RecipeDefinition[];
+}) => sanitizePlan(inputs.plan, inputs.days, inputs.recipes));
+
+const liftPlanByDay = lift((inputs: {
+  days: string[];
+  plan: PlannedMeal[];
+}) => ensurePlanStructure(inputs.days, inputs.plan));
+
+const liftShoppingList = lift((inputs: {
+  plan: PlannedMeal[];
+  recipes: RecipeDefinition[];
+}) => aggregateShopping(inputs.plan, inputs.recipes));
+
+const liftPlannedCount = lift((entries: PlannedMeal[] | undefined) =>
+  Array.isArray(entries) ? entries.length : 0
+);
+
+const assignMeal = handler(
+  (
+    event: AssignmentEvent | undefined,
+    context: {
+      plan: Cell<PlannedMeal[]>;
+      daysView: Cell<string[]>;
+      recipesView: Cell<RecipeDefinition[]>;
+      sequence: Cell<number>;
+      lastAction: Cell<string>;
+    },
+  ) => {
+    const dayList = context.daysView.get();
+    const recipeList = context.recipesView.get();
+    const validDays = new Set(dayList);
+    const validRecipes = new Set(recipeList.map((entry) => entry.name));
+    const day = sanitizeText(event?.day) ?? dayList[0];
+    if (!validDays.has(day)) return;
+    const meal = sanitizeMealSlot(event?.meal);
+    const recipeName = sanitizeText(event?.recipe);
+    if (!recipeName || !validRecipes.has(recipeName)) return;
+
+    const current = sanitizePlan(
+      context.plan.get(),
+      dayList,
+      recipeList,
+    );
+    const filtered = current.filter((entry) =>
+      !(entry.day === day && entry.meal === meal)
+    );
+    filtered.push({ day, meal, recipe: recipeName });
+    context.plan.set(filtered);
+
+    const sequenceValue = (context.sequence.get() ?? 0) + 1;
+    context.sequence.set(sequenceValue);
+    const action = `Assigned ${recipeName} to ${day} ${meal}`;
+    context.lastAction.set(action);
+  },
+);
+
+const clearMeal = handler(
+  (
+    event: AssignmentEvent | undefined,
+    context: {
+      plan: Cell<PlannedMeal[]>;
+      daysView: Cell<string[]>;
+      recipesView: Cell<RecipeDefinition[]>;
+      sequence: Cell<number>;
+      lastAction: Cell<string>;
+    },
+  ) => {
+    const dayList = context.daysView.get();
+    const recipeList = context.recipesView.get();
+    const day = sanitizeText(event?.day) ?? dayList[0];
+    if (!dayList.includes(day)) return;
+    const meal = sanitizeMealSlot(event?.meal);
+    const current = sanitizePlan(
+      context.plan.get(),
+      dayList,
+      recipeList,
+    );
+    const filtered = current.filter((entry) =>
+      !(entry.day === day && entry.meal === meal)
+    );
+    context.plan.set(filtered);
+    const sequenceValue = (context.sequence.get() ?? 0) + 1;
+    context.sequence.set(sequenceValue);
+    const action = `Cleared ${day} ${meal}`;
+    context.lastAction.set(action);
+  },
+);
+
 export const menuPlanner = recipe<MenuPlannerArgs>(
   "Menu Planner",
   ({ days, recipes, plan }) => {
     const sequence = cell(0);
     const lastAction = cell("initialized");
 
-    const daysView = lift(sanitizeDays)(days);
-    const recipesView = lift(sanitizeRecipes)(recipes);
-    const planView = lift((inputs: {
-      plan: PlannedMeal[] | undefined;
-      days: string[];
-      recipes: RecipeDefinition[];
-    }) => sanitizePlan(inputs.plan, inputs.days, inputs.recipes))({
+    const daysView = liftSanitizeDays(days);
+    const recipesView = liftSanitizeRecipes(recipes);
+    const planView = liftPlanView({
       plan,
       days: daysView,
       recipes: recipesView,
     });
 
-    const planByDay = lift((inputs: {
-      days: string[];
-      plan: PlannedMeal[];
-    }) => ensurePlanStructure(inputs.days, inputs.plan))({
+    const planByDay = liftPlanByDay({
       days: daysView,
       plan: planView,
     });
 
-    const shoppingList = lift((inputs: {
-      plan: PlannedMeal[];
-      recipes: RecipeDefinition[];
-    }) => aggregateShopping(inputs.plan, inputs.recipes))({
+    const shoppingList = liftShoppingList({
       plan: planView,
       recipes: recipesView,
     });
 
-    const plannedCount = lift((entries: PlannedMeal[] | undefined) =>
-      Array.isArray(entries) ? entries.length : 0
-    )(planView);
+    const plannedCount = liftPlannedCount(planView);
 
     const status = str`${plannedCount} meals scheduled`;
-
-    const convertContext = {
-      plan,
-      daysView,
-      recipesView,
-      planView,
-      sequence,
-      lastAction,
-    } as const;
-
-    const assignMeal = handler(
-      (
-        event: AssignmentEvent | undefined,
-        context: {
-          plan: Cell<PlannedMeal[]>;
-          daysView: Cell<string[]>;
-          recipesView: Cell<RecipeDefinition[]>;
-          planView: Cell<PlannedMeal[]>;
-          sequence: Cell<number>;
-          lastAction: Cell<string>;
-        },
-      ) => {
-        const dayList = context.daysView.get();
-        const recipeList = context.recipesView.get();
-        const validDays = new Set(dayList);
-        const validRecipes = new Set(recipeList.map((entry) => entry.name));
-        const day = sanitizeText(event?.day) ?? dayList[0];
-        if (!validDays.has(day)) return;
-        const meal = sanitizeMealSlot(event?.meal);
-        const recipe = sanitizeText(event?.recipe);
-        if (!recipe || !validRecipes.has(recipe)) return;
-
-        const current = sanitizePlan(
-          context.plan.get(),
-          dayList,
-          recipeList,
-        );
-        const filtered = current.filter((entry) =>
-          !(entry.day === day && entry.meal === meal)
-        );
-        filtered.push({ day, meal, recipe });
-        context.plan.set(filtered);
-
-        const sequenceValue = (context.sequence.get() ?? 0) + 1;
-        context.sequence.set(sequenceValue);
-        const action = `Assigned ${recipe} to ${day} ${meal}`;
-        context.lastAction.set(action);
-      },
-    );
-
-    const clearMeal = handler(
-      (
-        event: AssignmentEvent | undefined,
-        context: {
-          plan: Cell<PlannedMeal[]>;
-          daysView: Cell<string[]>;
-          recipesView: Cell<RecipeDefinition[]>;
-          planView: Cell<PlannedMeal[]>;
-          sequence: Cell<number>;
-          lastAction: Cell<string>;
-        },
-      ) => {
-        const dayList = context.daysView.get();
-        const recipeList = context.recipesView.get();
-        const day = sanitizeText(event?.day) ?? dayList[0];
-        if (!dayList.includes(day)) return;
-        const meal = sanitizeMealSlot(event?.meal);
-        const current = sanitizePlan(
-          context.plan.get(),
-          dayList,
-          recipeList,
-        );
-        const filtered = current.filter((entry) =>
-          !(entry.day === day && entry.meal === meal)
-        );
-        context.plan.set(filtered);
-        const sequenceValue = (context.sequence.get() ?? 0) + 1;
-        context.sequence.set(sequenceValue);
-        const action = `Cleared ${day} ${meal}`;
-        context.lastAction.set(action);
-      },
-    );
 
     return {
       days,
@@ -351,8 +352,22 @@ export const menuPlanner = recipe<MenuPlannerArgs>(
       plannedCount,
       status,
       lastAction,
-      assignMeal: assignMeal(convertContext as never),
-      clearMeal: clearMeal(convertContext as never),
+      assignMeal: assignMeal({
+        plan,
+        daysView,
+        recipesView,
+        sequence,
+        lastAction,
+      }),
+      clearMeal: clearMeal({
+        plan,
+        daysView,
+        recipesView,
+        sequence,
+        lastAction,
+      }),
     };
   },
 );
+
+export default menuPlanner;

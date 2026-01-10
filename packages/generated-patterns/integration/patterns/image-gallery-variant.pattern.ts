@@ -147,71 +147,87 @@ const updateDeviceVariant = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeModes = lift((value: unknown) => sanitizeModes(value));
+
+const liftSanitizeVariants = lift((input: {
+  entries: VariantInput[] | undefined;
+  modeList: string[];
+}) => sanitizeVariants(input.entries, input.modeList));
+
+const liftAvailableVariants = lift((input: {
+  variants: VariantMap;
+  modes: string[];
+}) => input.modes.map((mode) => ({ ...input.variants[mode] })));
+
+const liftSelectedMode = lift((input: {
+  candidate: string | undefined;
+  modes: string[];
+}) => {
+  const list = input.modes;
+  if (list.length === 0) return "desktop";
+  const mode = sanitizeMode(input.candidate);
+  return mode && list.includes(mode) ? mode : list[0];
+});
+
+const liftCurrentVariant = lift((input: {
+  variants: VariantMap;
+  mode: string;
+  modes: string[];
+}) => {
+  const list = input.modes;
+  if (list.length === 0) return defaultVariantForMode("desktop");
+  const target = input.variants[input.mode];
+  if (target) return { ...target };
+  const fallback = list[0];
+  return { ...input.variants[fallback] };
+});
+
+const liftCurrentSource = lift((variant: VariantDetails) => variant.src);
+const liftCurrentAlt = lift((variant: VariantDetails) => variant.alt);
+
+const liftVariantSummary = lift((variant: VariantDetails) =>
+  `${variant.mode}:${variant.src}`
+);
+
+const liftHistoryView = lift((value: string[] | undefined) =>
+  Array.isArray(value) ? value : []
+);
+
 export const imageGalleryVariant = recipe<ImageGalleryVariantArgs>(
   "Image Gallery Variant",
   ({ modes, variants, activeMode }) => {
     const selectionHistory = cell<string[]>([]);
 
-    const sanitizedModes = lift((value: unknown) => sanitizeModes(value))(
-      modes,
-    );
+    const sanitizedModes = liftSanitizeModes(modes);
 
-    const sanitizedVariants = lift((input: {
-      entries: VariantInput[] | undefined;
-      modeList: string[];
-    }) => sanitizeVariants(input.entries, input.modeList))({
+    const sanitizedVariants = liftSanitizeVariants({
       entries: variants,
       modeList: sanitizedModes,
     });
 
-    const availableVariants = lift((input: {
-      variants: VariantMap;
-      modes: string[];
-    }) => input.modes.map((mode) => ({ ...input.variants[mode] })))(
-      { variants: sanitizedVariants, modes: sanitizedModes },
-    );
+    const availableVariants = liftAvailableVariants({
+      variants: sanitizedVariants,
+      modes: sanitizedModes,
+    });
 
-    const selectedMode = lift((input: {
-      candidate: string | undefined;
-      modes: string[];
-    }) => {
-      const list = input.modes;
-      if (list.length === 0) return "desktop";
-      const mode = sanitizeMode(input.candidate);
-      return mode && list.includes(mode) ? mode : list[0];
-    })({ candidate: activeMode, modes: sanitizedModes });
+    const selectedMode = liftSelectedMode({
+      candidate: activeMode,
+      modes: sanitizedModes,
+    });
 
-    const currentVariant = lift((input: {
-      variants: VariantMap;
-      mode: string;
-      modes: string[];
-    }) => {
-      const list = input.modes;
-      if (list.length === 0) return defaultVariantForMode("desktop");
-      const target = input.variants[input.mode];
-      if (target) return { ...target };
-      const fallback = list[0];
-      return { ...input.variants[fallback] };
-    })({
+    const currentVariant = liftCurrentVariant({
       variants: sanitizedVariants,
       mode: selectedMode,
       modes: sanitizedModes,
     });
 
-    const currentSource = lift((variant: VariantDetails) => variant.src)(
-      currentVariant,
-    );
-    const currentAlt = lift((variant: VariantDetails) => variant.alt)(
-      currentVariant,
-    );
+    const currentSource = liftCurrentSource(currentVariant);
+    const currentAlt = liftCurrentAlt(currentVariant);
 
-    const variantSummary = lift((variant: VariantDetails) =>
-      `${variant.mode}:${variant.src}`
-    )(currentVariant);
+    const variantSummary = liftVariantSummary(currentVariant);
 
-    const historyView = lift((value: string[] | undefined) =>
-      Array.isArray(value) ? value : []
-    )(selectionHistory);
+    const historyView = liftHistoryView(selectionHistory);
 
     return {
       availableModes: sanitizedModes,
@@ -233,3 +249,5 @@ export const imageGalleryVariant = recipe<ImageGalleryVariantArgs>(
     };
   },
 );
+
+export default imageGalleryVariant;

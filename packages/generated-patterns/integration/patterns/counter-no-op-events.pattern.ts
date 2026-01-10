@@ -49,21 +49,27 @@ const applyIncrement = handler(
   },
 );
 
+const liftCurrentValue = lift((input: number | undefined) =>
+  typeof input === "number" && Number.isFinite(input) ? input : 0
+);
+
+const liftUpdateCount = lift((count: number | undefined) =>
+  typeof count === "number" && Number.isFinite(count) ? count : 0
+);
+
+const liftLastEventView = lift((label: string | undefined) =>
+  typeof label === "string" && label.length > 0 ? label : "none"
+);
+
 export const counterNoOpEvents = recipe<NoOpCounterArgs>(
   "Counter No-Op Events",
   ({ value }) => {
     const updates = cell(0);
     const lastEvent = cell("none");
 
-    const currentValue = lift((input: number | undefined) =>
-      typeof input === "number" && Number.isFinite(input) ? input : 0
-    )(value);
-    const updateCount = lift((count: number | undefined) =>
-      typeof count === "number" && Number.isFinite(count) ? count : 0
-    )(updates);
-    const lastEventView = lift((label: string | undefined) =>
-      typeof label === "string" && label.length > 0 ? label : "none"
-    )(lastEvent);
+    const currentValue = liftCurrentValue(value);
+    const updateCount = liftUpdateCount(updates);
+    const lastEventView = liftLastEventView(lastEvent);
     const hasChanges = derive(updateCount, (count) => count > 0);
     const status = derive(
       hasChanges,
@@ -83,3 +89,5 @@ export const counterNoOpEvents = recipe<NoOpCounterArgs>(
     };
   },
 );
+
+export default counterNoOpEvents;

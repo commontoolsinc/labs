@@ -13,12 +13,15 @@ const action = handler(
   },
 );
 
+// Module-scope lift definition
+const liftMapItems = lift((item: Item[]) => item.map((_) => ({})));
+
 export const conflictRepro = recipe<{ items: Default<Item[], []> }>(
   ({ items }) => {
     const sequence = cell(0);
 
     // Minimal repro: Removing the lift and the map removes the conflict
-    lift((item: Item[]) => item.map((_) => ({})))(items);
+    liftMapItems(items);
 
     return {
       action: action({
@@ -28,3 +31,5 @@ export const conflictRepro = recipe<{ items: Default<Item[], []> }>(
     };
   },
 );
+
+export default conflictRepro;

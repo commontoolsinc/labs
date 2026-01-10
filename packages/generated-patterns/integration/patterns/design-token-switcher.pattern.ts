@@ -115,68 +115,96 @@ const switchDesignToken = handler(
   },
 );
 
+const liftSanitizeCatalog = lift((value: TokenCatalog | undefined) =>
+  sanitizeCatalog(value)
+);
+
+const liftTokenNames = lift((catalog: TokenCatalog) =>
+  Object.keys(catalog).sort((a, b) => a.localeCompare(b))
+);
+
+const liftCurrentToken = lift((input: {
+  candidate?: string;
+  names: string[];
+}) => {
+  const names = input.names;
+  if (names.length === 0) return "light";
+  const sanitized = sanitizeTokenName(input.candidate);
+  return sanitized && names.includes(sanitized) ? sanitized : names[0];
+});
+
+const liftCurrentDefinition = lift((input: {
+  name: string;
+  catalog: TokenCatalog;
+}) =>
+  input.catalog[input.name] ??
+    sanitizeDefinition(undefined, DEFAULT_TOKEN_CATALOG.light)
+);
+
+const liftBackgroundColor = lift((definition: TokenDefinition) =>
+  definition.background
+);
+
+const liftForegroundColor = lift((definition: TokenDefinition) =>
+  definition.foreground
+);
+
+const liftAccentColor = lift((definition: TokenDefinition) =>
+  definition.accent
+);
+
+const liftColorSummary = lift((definition: TokenDefinition) =>
+  `${definition.background}/${definition.foreground}/${definition.accent}`
+);
+
+const liftPreview = lift((definition: TokenDefinition) => ({
+  background: definition.background,
+  foreground: definition.foreground,
+  accent: definition.accent,
+  summary: `bg ${definition.background} fg ${definition.foreground}`,
+}));
+
+const liftHistoryView = lift((value: string[] | undefined) =>
+  Array.isArray(value) ? value : []
+);
+
+const liftLastApplied = lift((value: string[]) => {
+  if (value.length === 0) return "none";
+  return value[value.length - 1];
+});
+
 export const designTokenSwitcher = recipe<DesignTokenSwitcherArgs>(
   "Design Token Switcher",
   ({ tokens, activeToken }) => {
     const appliedHistory = cell<string[]>([]);
 
-    const sanitizedCatalog = lift((value: TokenCatalog | undefined) =>
-      sanitizeCatalog(value)
-    )(tokens);
+    const sanitizedCatalog = liftSanitizeCatalog(tokens);
 
-    const tokenNames = lift((catalog: TokenCatalog) =>
-      Object.keys(catalog).sort((a, b) => a.localeCompare(b))
-    )(sanitizedCatalog);
+    const tokenNames = liftTokenNames(sanitizedCatalog);
 
-    const currentToken = lift((input: {
-      candidate?: string;
-      names: string[];
-    }) => {
-      const names = input.names;
-      if (names.length === 0) return "light";
-      const sanitized = sanitizeTokenName(input.candidate);
-      return sanitized && names.includes(sanitized) ? sanitized : names[0];
-    })({ candidate: activeToken, names: tokenNames });
+    const currentToken = liftCurrentToken({
+      candidate: activeToken,
+      names: tokenNames,
+    });
 
-    const currentDefinition = lift((input: {
-      name: string;
-      catalog: TokenCatalog;
-    }) =>
-      input.catalog[input.name] ??
-        sanitizeDefinition(undefined, DEFAULT_TOKEN_CATALOG.light)
-    )({ name: currentToken, catalog: sanitizedCatalog });
+    const currentDefinition = liftCurrentDefinition({
+      name: currentToken,
+      catalog: sanitizedCatalog,
+    });
 
-    const backgroundColor = lift((definition: TokenDefinition) =>
-      definition.background
-    )(currentDefinition);
+    const backgroundColor = liftBackgroundColor(currentDefinition);
 
-    const foregroundColor = lift((definition: TokenDefinition) =>
-      definition.foreground
-    )(currentDefinition);
+    const foregroundColor = liftForegroundColor(currentDefinition);
 
-    const accentColor = lift((definition: TokenDefinition) =>
-      definition.accent
-    )(currentDefinition);
+    const accentColor = liftAccentColor(currentDefinition);
 
-    const colorSummary = lift((definition: TokenDefinition) =>
-      `${definition.background}/${definition.foreground}/${definition.accent}`
-    )(currentDefinition);
+    const colorSummary = liftColorSummary(currentDefinition);
 
-    const preview = lift((definition: TokenDefinition) => ({
-      background: definition.background,
-      foreground: definition.foreground,
-      accent: definition.accent,
-      summary: `bg ${definition.background} fg ${definition.foreground}`,
-    }))(currentDefinition);
+    const preview = liftPreview(currentDefinition);
 
-    const historyView = lift((value: string[] | undefined) =>
-      Array.isArray(value) ? value : []
-    )(appliedHistory);
+    const historyView = liftHistoryView(appliedHistory);
 
-    const lastApplied = lift((value: string[]) => {
-      if (value.length === 0) return "none";
-      return value[value.length - 1];
-    })(historyView);
+    const lastApplied = liftLastApplied(historyView);
 
     return {
       tokens: sanitizedCatalog,
@@ -198,3 +226,5 @@ export const designTokenSwitcher = recipe<DesignTokenSwitcherArgs>(
     };
   },
 );
+
+export default designTokenSwitcher;

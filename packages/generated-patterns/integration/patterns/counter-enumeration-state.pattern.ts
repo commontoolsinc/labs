@@ -172,36 +172,42 @@ const tickValue = handler(
   },
 );
 
+const liftNormalizedState = lift(
+  (input: CounterState | undefined) => clampState(input),
+);
+const liftNormalizedValue = lift((input: number | undefined) =>
+  toNumber(input, 0)
+);
+const liftTransitionView = lift(
+  (input: TransitionRecord[] | undefined) => Array.isArray(input) ? input : [],
+);
+const liftTransitionCount = lift((list: TransitionRecord[] | undefined) =>
+  Array.isArray(list) ? list.length : 0
+);
+const liftStateIndex = lift((current: CounterState) =>
+  STATE_SEQUENCE.indexOf(current)
+);
+const liftCanAdvance = lift((index: number) =>
+  index < STATE_SEQUENCE.length - 1
+);
+const liftCanRetreat = lift((index: number) => index > 0);
+const liftIsRunning = lift((current: CounterState) => current === "running");
+
 export const counterWithEnumerationState = recipe<EnumerationArgs>(
   "Counter With Enumeration State",
   ({ state, value }) => {
     const transitions = cell<TransitionRecord[]>([]);
     const transitionSequence = cell(0);
 
-    const normalizedState = lift(
-      (input: CounterState | undefined) => clampState(input),
-    )(state);
-    const normalizedValue = lift((input: number | undefined) =>
-      toNumber(input, 0)
-    )(value);
-    const transitionView = lift(
-      (input: TransitionRecord[] | undefined) =>
-        Array.isArray(input) ? input : [],
-    )(transitions);
-    const transitionCount = lift((list: TransitionRecord[] | undefined) =>
-      Array.isArray(list) ? list.length : 0
-    )(transitionView);
+    const normalizedState = liftNormalizedState(state);
+    const normalizedValue = liftNormalizedValue(value);
+    const transitionView = liftTransitionView(transitions);
+    const transitionCount = liftTransitionCount(transitionView);
 
-    const stateIndex = lift((current: CounterState) =>
-      STATE_SEQUENCE.indexOf(current)
-    )(normalizedState);
-    const canAdvance = lift((index: number) =>
-      index < STATE_SEQUENCE.length - 1
-    )(stateIndex);
-    const canRetreat = lift((index: number) => index > 0)(stateIndex);
-    const isRunning = lift((current: CounterState) => current === "running")(
-      normalizedState,
-    );
+    const stateIndex = liftStateIndex(normalizedState);
+    const canAdvance = liftCanAdvance(stateIndex);
+    const canRetreat = liftCanRetreat(stateIndex);
+    const isRunning = liftIsRunning(normalizedState);
 
     const phaseLabel =
       str`state:${normalizedState} index:${stateIndex} value:${normalizedValue}`;
@@ -243,3 +249,5 @@ export const counterWithEnumerationState = recipe<EnumerationArgs>(
     };
   },
 );
+
+export default counterWithEnumerationState;

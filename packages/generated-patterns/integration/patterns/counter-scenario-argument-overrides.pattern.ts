@@ -77,6 +77,33 @@ const nextOverrideCount = (value: unknown): number => {
   return sanitizeOverrideCount(value) + 1;
 };
 
+const liftSanitizedArguments = lift(
+  (inputs: { value?: number; step?: number }) => ({
+    value: sanitizeCounterValue(inputs.value),
+    step: sanitizeStepValue(inputs.step),
+  }),
+);
+
+const liftOverrideCount = lift((value: number | undefined) =>
+  sanitizeOverrideCount(value)
+);
+
+const liftCurrentValue = lift((input: number | undefined) =>
+  sanitizeCounterValue(input)
+);
+
+const liftActiveStep = lift((input: number | undefined) =>
+  sanitizeStepValue(input)
+);
+
+const liftHistoryCount = lift((entries: number[]) => entries.length);
+
+const liftLastRecorded = lift((entries: number[]) =>
+  entries.length > 0 ? entries[entries.length - 1] : 0
+);
+
+const liftSanitizeHistory = lift(sanitizeHistory);
+
 const incrementCounter = handler(
   (
     event: IncrementEvent | undefined,
@@ -144,12 +171,7 @@ export const counterWithScenarioArgumentOverrides = recipe<
 >(
   "Counter With Scenario Driven Argument Overrides",
   ({ value, step }) => {
-    const sanitizedArguments = lift((
-      inputs: { value?: number; step?: number },
-    ) => ({
-      value: sanitizeCounterValue(inputs.value),
-      step: sanitizeStepValue(inputs.step),
-    }))({ value, step });
+    const sanitizedArguments = liftSanitizedArguments({ value, step });
 
     const sanitizedValue = sanitizedArguments.key("value");
     const sanitizedStep = sanitizedArguments.key("step");
@@ -158,23 +180,15 @@ export const counterWithScenarioArgumentOverrides = recipe<
     const runtimeStep = cell(1);
     const historyStore = cell<number[]>([]);
     const overrideSource = cell(0);
-    const overrideCount = lift((value: number | undefined) =>
-      sanitizeOverrideCount(value)
-    )(overrideSource);
+    const overrideCount = liftOverrideCount(overrideSource);
     const overrideNote = cell("initial arguments applied");
 
-    const currentValue = lift((input: number | undefined) =>
-      sanitizeCounterValue(input)
-    )(runtimeValue);
-    const activeStep = lift((input: number | undefined) =>
-      sanitizeStepValue(input)
-    )(runtimeStep);
+    const currentValue = liftCurrentValue(runtimeValue);
+    const activeStep = liftActiveStep(runtimeStep);
 
-    const history = lift(sanitizeHistory)(historyStore);
-    const historyCount = lift((entries: number[]) => entries.length)(history);
-    const lastRecorded = lift((entries: number[]) =>
-      entries.length > 0 ? entries[entries.length - 1] : 0
-    )(history);
+    const history = liftSanitizeHistory(historyStore);
+    const historyCount = liftHistoryCount(history);
+    const lastRecorded = liftLastRecorded(history);
 
     const argumentLabel =
       str`Argument baseline value ${sanitizedValue} step ${sanitizedStep}`;
@@ -212,3 +226,5 @@ export const counterWithScenarioArgumentOverrides = recipe<
     };
   },
 );
+
+export default counterWithScenarioArgumentOverrides;

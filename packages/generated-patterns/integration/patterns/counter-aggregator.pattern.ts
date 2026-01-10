@@ -90,43 +90,55 @@ const appendCounter = handler(
   },
 );
 
+const liftSanitizedCounters = lift((entries: CounterEntry[]) =>
+  entries.map((entry, index) => ({
+    id: entry.id && entry.id.length > 0 ? entry.id : `counter-${index + 1}`,
+    label: entry.label ?? `Counter ${index + 1}`,
+    value: typeof entry.value === "number" ? entry.value : 0,
+  }))
+);
+
+const liftValues = lift((entries: AggregatedCounter[]) =>
+  entries.map((entry) => entry.value)
+);
+
+const liftTotal = lift((numbers: number[]) =>
+  numbers.reduce((sum, value) => sum + value, 0)
+);
+
+const liftCount = lift((numbers: number[]) => numbers.length);
+
+const liftLargest = lift((numbers: number[]) => {
+  if (numbers.length === 0) {
+    return 0;
+  }
+
+  return numbers.reduce(
+    (max, value) => value > max ? value : max,
+    numbers[0],
+  );
+});
+
+const liftLabels = lift((entries: AggregatedCounter[]) =>
+  entries.map((entry) => entry.label)
+);
+
 export const counterAggregator = recipe<CounterAggregatorArgs>(
   "Counter Aggregator",
   ({ counters }) => {
-    const sanitizedCounters = lift((entries: CounterEntry[]) =>
-      entries.map((entry, index) => ({
-        id: entry.id && entry.id.length > 0 ? entry.id : `counter-${index + 1}`,
-        label: entry.label ?? `Counter ${index + 1}`,
-        value: typeof entry.value === "number" ? entry.value : 0,
-      }))
-    )(counters);
+    const sanitizedCounters = liftSanitizedCounters(counters);
 
-    const values = lift((entries: AggregatedCounter[]) =>
-      entries.map((entry) => entry.value)
-    )(sanitizedCounters);
+    const values = liftValues(sanitizedCounters);
 
-    const total = lift((numbers: number[]) =>
-      numbers.reduce((sum, value) => sum + value, 0)
-    )(values);
+    const total = liftTotal(values);
 
-    const count = lift((numbers: number[]) => numbers.length)(values);
+    const count = liftCount(values);
 
-    const largest = lift((numbers: number[]) => {
-      if (numbers.length === 0) {
-        return 0;
-      }
-
-      return numbers.reduce(
-        (max, value) => value > max ? value : max,
-        numbers[0],
-      );
-    })(values);
+    const largest = liftLargest(values);
 
     const summary = str`Aggregate total ${total} across ${count} counters`;
 
-    const labels = lift((entries: AggregatedCounter[]) =>
-      entries.map((entry) => entry.label)
-    )(sanitizedCounters);
+    const labels = liftLabels(sanitizedCounters);
 
     return {
       counters: sanitizedCounters,
@@ -141,3 +153,5 @@ export const counterAggregator = recipe<CounterAggregatorArgs>(
     };
   },
 );
+
+export default counterAggregator;

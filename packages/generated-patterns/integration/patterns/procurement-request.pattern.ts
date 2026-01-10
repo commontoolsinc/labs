@@ -630,6 +630,14 @@ const buildRerouteMessage = (
   ].join(" ");
 };
 
+// Module-scope lift definitions
+const liftSanitizeRequests = lift(sanitizeRequests);
+const liftCalculateTotals = lift(calculateTotals);
+const liftCalculateCounts = lift(calculateCounts);
+const liftBuildDepartmentTotals = lift(buildDepartmentTotals);
+const liftBuildAssignments = lift(buildAssignments);
+const liftBuildSummaryLine = lift(buildSummaryLine);
+
 const recordDecision = handler(
   (
     event: ApprovalDecisionEvent | undefined,
@@ -764,12 +772,12 @@ export const procurementRequest = recipe<ProcurementRequestArgs>(
     const history = cell<string[]>(["1. Procurement queue initialized"]);
     const sequence = cell(1);
 
-    const requestList = lift(sanitizeRequests)(requests);
-    const totals = lift(calculateTotals)(requestList);
-    const counts = lift(calculateCounts)(requestList);
-    const departmentTotals = lift(buildDepartmentTotals)(requestList);
-    const routingAssignments = lift(buildAssignments)(requestList);
-    const summaryLine = lift(buildSummaryLine)(requestList);
+    const requestList = liftSanitizeRequests(requests);
+    const totals = liftCalculateTotals(requestList);
+    const counts = liftCalculateCounts(requestList);
+    const departmentTotals = liftBuildDepartmentTotals(requestList);
+    const routingAssignments = liftBuildAssignments(requestList);
+    const summaryLine = liftBuildSummaryLine(requestList);
     const stageHeadline = str`${counts.routing} requests awaiting review`;
 
     const handlerContext = { requests, history, sequence };
@@ -789,3 +797,5 @@ export const procurementRequest = recipe<ProcurementRequestArgs>(
     };
   },
 );
+
+export default procurementRequest;

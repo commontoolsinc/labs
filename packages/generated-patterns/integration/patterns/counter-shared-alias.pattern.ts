@@ -5,6 +5,10 @@ interface SharedAliasArgs {
   value: Default<number, 0>;
 }
 
+const liftSafeValue = lift((count: number | undefined) =>
+  typeof count === "number" ? count : 0
+);
+
 const sharedIncrement = handler(
   (
     event: { amount?: number } | undefined,
@@ -19,9 +23,7 @@ const sharedIncrement = handler(
 export const counterWithSharedAlias = recipe<SharedAliasArgs>(
   "Counter With Shared Alias",
   ({ value }) => {
-    const safeValue = lift((count: number | undefined) =>
-      typeof count === "number" ? count : 0
-    )(value);
+    const safeValue = liftSafeValue(value);
     const label = str`Value ${safeValue}`;
 
     return {
@@ -36,3 +38,5 @@ export const counterWithSharedAlias = recipe<SharedAliasArgs>(
     };
   },
 );
+
+export default counterWithSharedAlias;

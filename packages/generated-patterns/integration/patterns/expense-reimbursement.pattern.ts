@@ -288,6 +288,19 @@ const buildStatusChangeHandler = (
     },
   );
 
+const liftSanitizeClaimList = lift(sanitizeClaimList);
+const liftCalculateTotals = lift(calculateTotals);
+
+const liftClaimCount = lift((entries: readonly ExpenseClaim[]) =>
+  entries.length
+);
+const liftSubmittedTotal = lift((data: ExpenseTotals) => data.submitted);
+const liftApprovedTotal = lift((data: ExpenseTotals) => data.approved);
+const liftRejectedTotal = lift((data: ExpenseTotals) => data.rejected);
+const liftPaidTotal = lift((data: ExpenseTotals) => data.paid);
+const liftPendingPayment = lift((data: ExpenseTotals) => data.pendingPayment);
+const liftSummaryLabel = lift(buildSummaryLabel);
+
 export const expenseReimbursement = recipe<ExpenseReimbursementArgs>(
   "Expense Reimbursement Tracker",
   ({ claims }) => {
@@ -295,24 +308,16 @@ export const expenseReimbursement = recipe<ExpenseReimbursementArgs>(
     const latestAction = cell("Reimbursement tracker initialized");
     const sequence = cell(0);
 
-    const claimList = lift(sanitizeClaimList)(claims);
-    const totals = lift(calculateTotals)(claimList);
+    const claimList = liftSanitizeClaimList(claims);
+    const totals = liftCalculateTotals(claimList);
 
-    const claimCount = lift((entries: readonly ExpenseClaim[]) =>
-      entries.length
-    )(
-      claimList,
-    );
-    const submittedTotal = lift((data: ExpenseTotals) => data.submitted)(
-      totals,
-    );
-    const approvedTotal = lift((data: ExpenseTotals) => data.approved)(totals);
-    const rejectedTotal = lift((data: ExpenseTotals) => data.rejected)(totals);
-    const paidTotal = lift((data: ExpenseTotals) => data.paid)(totals);
-    const pendingPayment = lift((data: ExpenseTotals) => data.pendingPayment)(
-      totals,
-    );
-    const summaryLabel = lift(buildSummaryLabel)(totals);
+    const claimCount = liftClaimCount(claimList);
+    const submittedTotal = liftSubmittedTotal(totals);
+    const approvedTotal = liftApprovedTotal(totals);
+    const rejectedTotal = liftRejectedTotal(totals);
+    const paidTotal = liftPaidTotal(totals);
+    const pendingPayment = liftPendingPayment(totals);
+    const summaryLabel = liftSummaryLabel(totals);
     const statusHeadline = str`${claimCount} claims ready for review`;
 
     const handlerContext = { claims, history, latestAction, sequence };
@@ -349,3 +354,5 @@ export const expenseReimbursement = recipe<ExpenseReimbursementArgs>(
     };
   },
 );
+
+export default expenseReimbursement;

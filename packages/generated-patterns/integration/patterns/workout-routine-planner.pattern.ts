@@ -366,6 +366,47 @@ const scheduleWorkout = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeDays = lift(sanitizeDays);
+const liftSanitizeCatalog = lift(sanitizeCatalog);
+
+const liftPlanView = lift((inputs: {
+  plan: WorkoutPlanSeed[] | undefined;
+  days: string[];
+  catalog: WorkoutExercise[];
+}) => sanitizePlan(inputs.plan, inputs.days, inputs.catalog));
+
+const liftScheduleByDay = lift((inputs: {
+  days: string[];
+  plan: WorkoutPlanEntry[];
+}) => buildScheduleByDay(inputs.days, inputs.plan));
+
+const liftVolumeByGroup = lift((entries: WorkoutPlanEntry[]) =>
+  computeVolumeByGroup(entries)
+);
+
+const liftTotalVolume = lift((entries: MuscleVolumeEntry[]) =>
+  entries.reduce((sum, entry) => sum + entry.totalVolume, 0)
+);
+
+const liftGroupCount = lift((entries: MuscleVolumeEntry[]) => entries.length);
+
+const liftFocusGroup = lift((entries: MuscleVolumeEntry[]) => {
+  if (entries.length === 0) return "None";
+  let candidate = entries[0];
+  for (const entry of entries) {
+    if (entry.totalVolume > candidate.totalVolume) {
+      candidate = entry;
+    } else if (
+      entry.totalVolume === candidate.totalVolume &&
+      entry.muscleGroup.localeCompare(candidate.muscleGroup) < 0
+    ) {
+      candidate = entry;
+    }
+  }
+  return `${candidate.muscleGroup} (${candidate.totalVolume} reps)`;
+});
+
 const removeWorkout = handler(
   (
     event: RemovalEvent | undefined,
@@ -402,53 +443,26 @@ export const workoutRoutinePlanner = recipe<WorkoutRoutinePlannerArgs>(
   ({ days, catalog, plan }) => {
     const lastAction = cell("initialized");
 
-    const daysView = lift(sanitizeDays)(days);
-    const catalogView = lift(sanitizeCatalog)(catalog);
-    const planView = lift((inputs: {
-      plan: WorkoutPlanSeed[] | undefined;
-      days: string[];
-      catalog: WorkoutExercise[];
-    }) => sanitizePlan(inputs.plan, inputs.days, inputs.catalog))({
+    const daysView = liftSanitizeDays(days);
+    const catalogView = liftSanitizeCatalog(catalog);
+    const planView = liftPlanView({
       plan,
       days: daysView,
       catalog: catalogView,
     });
 
-    const scheduleByDay = lift((inputs: {
-      days: string[];
-      plan: WorkoutPlanEntry[];
-    }) => buildScheduleByDay(inputs.days, inputs.plan))({
+    const scheduleByDay = liftScheduleByDay({
       days: daysView,
       plan: planView,
     });
 
-    const volumeByGroup = lift((entries: WorkoutPlanEntry[]) =>
-      computeVolumeByGroup(entries)
-    )(planView);
+    const volumeByGroup = liftVolumeByGroup(planView);
 
-    const totalVolume = lift((entries: MuscleVolumeEntry[]) =>
-      entries.reduce((sum, entry) => sum + entry.totalVolume, 0)
-    )(volumeByGroup);
+    const totalVolume = liftTotalVolume(volumeByGroup);
 
-    const groupCount = lift((entries: MuscleVolumeEntry[]) => entries.length)(
-      volumeByGroup,
-    );
+    const groupCount = liftGroupCount(volumeByGroup);
 
-    const focusGroup = lift((entries: MuscleVolumeEntry[]) => {
-      if (entries.length === 0) return "None";
-      let candidate = entries[0];
-      for (const entry of entries) {
-        if (entry.totalVolume > candidate.totalVolume) {
-          candidate = entry;
-        } else if (
-          entry.totalVolume === candidate.totalVolume &&
-          entry.muscleGroup.localeCompare(candidate.muscleGroup) < 0
-        ) {
-          candidate = entry;
-        }
-      }
-      return `${candidate.muscleGroup} (${candidate.totalVolume} reps)`;
-    })(volumeByGroup);
+    const focusGroup = liftFocusGroup(volumeByGroup);
 
     const status =
       str`${totalVolume} total reps across ${groupCount} muscle groups`;
@@ -477,5 +491,7 @@ export const workoutRoutinePlanner = recipe<WorkoutRoutinePlannerArgs>(
     };
   },
 );
+
+export default workoutRoutinePlanner;
 
 export type { MuscleVolumeEntry, WorkoutPlanEntry };

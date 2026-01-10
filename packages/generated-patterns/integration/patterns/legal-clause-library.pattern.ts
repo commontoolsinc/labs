@@ -540,77 +540,94 @@ const updateClauseStatus = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeClauseList = lift(sanitizeClauseList);
+
+const liftTopicOptions = lift((input: {
+  clauses: ClauseRecord[];
+  active: string | null;
+}) => buildTopicOptions(input.clauses, input.active));
+
+const liftRegionOptions = lift((input: {
+  clauses: ClauseRecord[];
+  active: RegionCode | null;
+}) => buildRegionOptions(input.clauses, input.active));
+
+const liftTotalCount = lift((entries: ClauseRecord[]) => entries.length);
+
+const liftFilteredClauses = lift((input: {
+  clauses: ClauseRecord[];
+  topic: string | null;
+  region: RegionCode | null;
+}) => buildFilteredClauses(input.clauses, input.topic, input.region));
+
+const liftFilteredCount = lift((entries: ClausePreview[]) => entries.length);
+
+const liftActiveTopicLabel = lift((input: {
+  active: string | null;
+  options: TopicOption[];
+}) => resolveTopicLabel(input.active, input.options));
+
+const liftActiveRegionLabel = lift((input: {
+  active: RegionCode | null;
+  options: RegionOption[];
+}) => resolveRegionLabel(input.active, input.options));
+
+const liftStatusSummary = lift((entries: ClauseRecord[]) =>
+  summarizeStatus(entries)
+);
+
+const liftSelectedTopic = lift((value: string | null) => value ?? "all");
+
+const liftSelectedRegion = lift((value: RegionCode | null) => value ?? "all");
+
+const liftSummaryLine = lift(buildSummaryLine);
+
 export const legalClauseLibrary = recipe<LegalClauseLibraryArgs>(
   "Legal Clause Library",
   ({ clauses }) => {
     const topicFilter = cell<string | null>(null);
     const regionFilter = cell<RegionCode | null>(null);
 
-    const clauseCatalog = lift(sanitizeClauseList)(clauses);
+    const clauseCatalog = liftSanitizeClauseList(clauses);
 
-    const topicOptions = lift((input: {
-      clauses: ClauseRecord[];
-      active: string | null;
-    }) => buildTopicOptions(input.clauses, input.active))({
+    const topicOptions = liftTopicOptions({
       clauses: clauseCatalog,
       active: topicFilter,
     });
 
-    const regionOptions = lift((input: {
-      clauses: ClauseRecord[];
-      active: RegionCode | null;
-    }) => buildRegionOptions(input.clauses, input.active))({
+    const regionOptions = liftRegionOptions({
       clauses: clauseCatalog,
       active: regionFilter,
     });
 
-    const totalCount = lift((entries: ClauseRecord[]) => entries.length)(
-      clauseCatalog,
-    );
+    const totalCount = liftTotalCount(clauseCatalog);
 
-    const filteredClauses = lift((input: {
-      clauses: ClauseRecord[];
-      topic: string | null;
-      region: RegionCode | null;
-    }) => buildFilteredClauses(input.clauses, input.topic, input.region))({
+    const filteredClauses = liftFilteredClauses({
       clauses: clauseCatalog,
       topic: topicFilter,
       region: regionFilter,
     });
 
-    const filteredCount = lift((entries: ClausePreview[]) => entries.length)(
-      filteredClauses,
-    );
+    const filteredCount = liftFilteredCount(filteredClauses);
 
-    const activeTopicLabel = lift((input: {
-      active: string | null;
-      options: TopicOption[];
-    }) => resolveTopicLabel(input.active, input.options))({
+    const activeTopicLabel = liftActiveTopicLabel({
       active: topicFilter,
       options: topicOptions,
     });
 
-    const activeRegionLabel = lift((input: {
-      active: RegionCode | null;
-      options: RegionOption[];
-    }) => resolveRegionLabel(input.active, input.options))({
+    const activeRegionLabel = liftActiveRegionLabel({
       active: regionFilter,
       options: regionOptions,
     });
 
-    const statusSummary = lift((entries: ClauseRecord[]) =>
-      summarizeStatus(entries)
-    )(clauseCatalog);
+    const statusSummary = liftStatusSummary(clauseCatalog);
 
-    const selectedTopic = lift((value: string | null) => value ?? "all")(
-      topicFilter,
-    );
+    const selectedTopic = liftSelectedTopic(topicFilter);
 
-    const selectedRegion = lift((value: RegionCode | null) => value ?? "all")(
-      regionFilter,
-    );
+    const selectedRegion = liftSelectedRegion(regionFilter);
 
-    const summaryLine = lift(buildSummaryLine)({
+    const summaryLine = liftSummaryLine({
       filtered: filteredCount,
       total: totalCount,
       topic: activeTopicLabel,
@@ -644,3 +661,5 @@ export type {
   TopicOption,
 };
 export type { ClauseStatus };
+
+export default legalClauseLibrary;

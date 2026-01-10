@@ -19,12 +19,14 @@ const applyIncrement = handler(
   },
 );
 
+const liftSafeStep = lift((input: number | undefined) =>
+  typeof input === "number" ? input : 1
+);
+
 export const counterWithPersistenceDefaults = recipe<PersistenceDefaultsArgs>(
   "Counter With Persistence Defaults",
   ({ value, step }) => {
-    const safeStep = lift((input: number | undefined) =>
-      typeof input === "number" ? input : 1
-    )(step);
+    const safeStep = liftSafeStep(step);
 
     return {
       value,
@@ -35,3 +37,5 @@ export const counterWithPersistenceDefaults = recipe<PersistenceDefaultsArgs>(
     };
   },
 );
+
+export default counterWithPersistenceDefaults;

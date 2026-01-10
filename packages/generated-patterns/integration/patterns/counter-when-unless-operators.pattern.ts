@@ -49,6 +49,47 @@ const clearItems = handler(
   },
 );
 
+const liftHasItemsMessage = lift(
+  (state: { itemCount: number }) => state.itemCount > 0 && "has items",
+);
+
+const liftItemsOrDefault = lift(
+  (state: { itemCount: number }) => state.itemCount || "no items",
+);
+
+const liftHighCountMessage = lift(
+  (state: { count: number }) => state.count > 5 && "high count",
+);
+
+const liftDisplayName = lift(
+  (state: { name: string }) => state.name || "Anonymous",
+);
+
+const liftHasItems = lift((len: number) => len > 0);
+
+const liftUserWithItems = lift(
+  (state: { hasItems: boolean; name: string }) =>
+    (state.hasItems && state.name) || "Guest with no items",
+);
+
+const liftPanelWithItems = lift(
+  (state: { show: boolean; hasItems: boolean }) =>
+    state.show && state.hasItems && "panel with items",
+);
+
+const liftFirstItem = lift((arr: string[]) => arr[0]);
+
+const liftFirstOption = lift(
+  (state: { name: string; firstItem: string | undefined }) =>
+    state.name || state.firstItem || "default",
+);
+
+const liftItemCount = lift((arr: string[]) => arr.length);
+
+const liftSafeCount = lift((n: number | undefined) =>
+  typeof n === "number" ? n : 0
+);
+
 const incrementCount = handler(
   (
     event: { amount?: number } | undefined,
@@ -65,63 +106,44 @@ export const counterWithWhenUnlessOperators = recipe<WhenUnlessArgs>(
   ({ items, showPanel, userName, count }) => {
     // Test 1: && with complex expression (items.length > 0)
     // This should transform to: when(derive(...items.length > 0...), "has items")
-    const hasItemsMessage = lift(
-      (state: { itemCount: number }) => state.itemCount > 0 && "has items",
-    )({ itemCount: items.length });
+    const hasItemsMessage = liftHasItemsMessage({ itemCount: items.length });
 
     // Test 2: || with complex expression (items.length)
     // This should transform to: unless(derive(...items.length...), "no items")
-    const itemsOrDefault = lift(
-      (state: { itemCount: number }) => state.itemCount || "no items",
-    )({ itemCount: items.length });
+    const itemsOrDefault = liftItemsOrDefault({ itemCount: items.length });
 
     // Test 3: && with derived boolean condition
     // count > 5 && "high count"
-    const highCountMessage = lift(
-      (state: { count: number }) => state.count > 5 && "high count",
-    )({ count });
+    const highCountMessage = liftHighCountMessage({ count });
 
     // Test 4: || for fallback with derived string
     // userName || "Anonymous"
-    const displayName = lift(
-      (state: { name: string }) => state.name || "Anonymous",
-    )({ name: userName });
+    const displayName = liftDisplayName({ name: userName });
 
     // Test 5: Chained && and || (a && b || c pattern)
     // (items.length > 0 && userName) || "Guest with no items"
-    const userWithItems = lift(
-      (state: { hasItems: boolean; name: string }) =>
-        (state.hasItems && state.name) || "Guest with no items",
-    )({
-      hasItems: lift((len: number) => len > 0)(items.length),
+    const userWithItems = liftUserWithItems({
+      hasItems: liftHasItems(items.length),
       name: userName,
     });
 
     // Test 6: Multiple && (a && b && c pattern)
     // showPanel && items.length > 0 && "panel with items"
-    const panelWithItems = lift(
-      (state: { show: boolean; hasItems: boolean }) =>
-        state.show && state.hasItems && "panel with items",
-    )({
+    const panelWithItems = liftPanelWithItems({
       show: showPanel,
-      hasItems: lift((len: number) => len > 0)(items.length),
+      hasItems: liftHasItems(items.length),
     });
 
     // Test 7: Multiple || (a || b || c pattern)
     // userName || items[0] || "default"
-    const firstOption = lift(
-      (state: { name: string; firstItem: string | undefined }) =>
-        state.name || state.firstItem || "default",
-    )({
+    const firstOption = liftFirstOption({
       name: userName,
-      firstItem: lift((arr: string[]) => arr[0])(items),
+      firstItem: liftFirstItem(items),
     });
 
     // Derived values for assertions
-    const itemCount = lift((arr: string[]) => arr.length)(items);
-    const safeCount = lift((n: number | undefined) =>
-      typeof n === "number" ? n : 0
-    )(count);
+    const itemCount = liftItemCount(items);
+    const safeCount = liftSafeCount(count);
 
     // Summary label combining multiple results
     const summary =
@@ -159,3 +181,5 @@ export const counterWithWhenUnlessOperators = recipe<WhenUnlessArgs>(
     };
   },
 );
+
+export default counterWithWhenUnlessOperators;

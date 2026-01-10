@@ -2,13 +2,12 @@
 import {
   type Cell,
   cell,
+  computed,
   Default,
   derive,
   handler,
-  lift,
   recipe,
   str,
-  toSchema,
 } from "commontools";
 
 interface CrossFieldValidationArgs {
@@ -115,38 +114,44 @@ const updateLimit = handler(
   },
 );
 
+const liftToIntegerZero = (input: number | undefined): number =>
+  toInteger(input, 0);
+
+const liftToIntegerTen = (input: number | undefined): number =>
+  toInteger(input, 10);
+
+const liftToPositiveStepOne = (input: number | undefined): number =>
+  toPositiveStep(input, 1);
+
+const liftBuildValidationSnapshot = (input: {
+  value: number;
+  limit: number;
+}): ValidationSnapshot => {
+  const currentValue = toInteger(input.value, 0);
+  const limitValue = toInteger(input.limit, 10);
+  const difference = currentValue - limitValue;
+  return {
+    value: currentValue,
+    limit: limitValue,
+    difference,
+    hasError: difference > 0,
+  };
+};
+
 export const counterWithCrossFieldValidation = recipe<CrossFieldValidationArgs>(
   "Counter With Cross Field Validation",
   ({ value, limit, step }) => {
     const auditTrail = cell<ValidationEntry[]>([], { type: "array" });
-    const sanitizedValue = lift((input: number | undefined) =>
-      toInteger(input, 0)
-    )(value);
-    const sanitizedLimit = lift((input: number | undefined) =>
-      toInteger(input, 10)
-    )(limit);
-    const sanitizedStep = lift((input: number | undefined) =>
-      toPositiveStep(input, 1)
-    )(step);
+    const sanitizedValue = computed(() => liftToIntegerZero(value));
+    const sanitizedLimit = computed(() => liftToIntegerTen(limit));
+    const sanitizedStep = computed(() => liftToPositiveStepOne(step));
 
-    const validationView = lift(
-      toSchema<{ value: Cell<number>; limit: Cell<number> }>(),
-      toSchema<ValidationSnapshot>(),
-      ({ value: current, limit: bound }) => {
-        const currentValue = toInteger(current.get(), 0);
-        const limitValue = toInteger(bound.get(), 10);
-        const difference = currentValue - limitValue;
-        return {
-          value: currentValue,
-          limit: limitValue,
-          difference,
-          hasError: difference > 0,
-        };
-      },
-    )({
-      value: sanitizedValue,
-      limit: sanitizedLimit,
-    });
+    const validationView = computed(() =>
+      liftBuildValidationSnapshot({
+        value: sanitizedValue,
+        limit: sanitizedLimit,
+      })
+    );
 
     const currentValueView = derive(
       validationView,
@@ -186,3 +191,5 @@ export const counterWithCrossFieldValidation = recipe<CrossFieldValidationArgs>(
     };
   },
 );
+
+export default counterWithCrossFieldValidation;

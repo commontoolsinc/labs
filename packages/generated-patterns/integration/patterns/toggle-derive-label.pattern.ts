@@ -27,3 +27,5 @@ export const toggleWithLabel = recipe<ToggleArgs>(
     };
   },
 );
+
+export default toggleWithLabel;

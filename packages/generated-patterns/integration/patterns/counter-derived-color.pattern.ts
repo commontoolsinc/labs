@@ -35,3 +35,5 @@ export const counterWithDerivedColor = recipe<DerivedColorArgs>(
     };
   },
 );
+
+export default counterWithDerivedColor;

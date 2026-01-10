@@ -1,10 +1,10 @@
 /// <cts-enable />
 import {
   type Cell,
+  computed,
   Default,
   handler,
   ifElse,
-  lift,
   recipe,
   str,
 } from "commontools";
@@ -22,6 +22,22 @@ interface BranchNode {
     description: string;
   };
 }
+
+const sanitizeValue = (count: number | undefined): number =>
+  typeof count === "number" ? count : 0;
+
+const normalizeVisible = (flag: boolean | undefined): boolean => flag === true;
+
+const extractBranchKind = (node: BranchNode): "enabled" | "disabled" =>
+  node.kind;
+
+const extractBranchHeader = (node: BranchNode): string => node.tree.header;
+
+const extractBranchVariant = (node: BranchNode): "primary" | "muted" =>
+  node.tree.variant;
+
+const extractBranchDescription = (node: BranchNode): string =>
+  node.tree.description;
 
 const toggleVisibility = handler(
   (_event: unknown, context: { visible: Cell<boolean> }) => {
@@ -44,42 +60,34 @@ const adjustValue = handler(
 export const counterWithConditionalUiBranch = recipe<ConditionalIfElseArgs>(
   "Counter With Conditional UI Branch",
   ({ value, visible }) => {
-    const safeValue = lift((count: number | undefined) =>
-      typeof count === "number" ? count : 0
-    )(value);
-    const isVisible = lift((flag: boolean | undefined) => flag === true)(
-      visible,
+    const safeValue = computed(() => sanitizeValue(value));
+    const isVisible = computed(() => normalizeVisible(visible));
+
+    const branchTree = ifElse<boolean, BranchNode, BranchNode>(
+      isVisible,
+      {
+        kind: "enabled" as const,
+        tree: {
+          header: "Enabled Panel",
+          variant: "primary" as const,
+          description: "Counter is interactive",
+        },
+      },
+      {
+        kind: "disabled" as const,
+        tree: {
+          header: "Disabled Panel",
+          variant: "muted" as const,
+          description: "Counter is hidden",
+        },
+      },
     );
 
-    const branchTree = ifElse<
-      boolean,
-      BranchNode,
-      BranchNode
-    >(isVisible, {
-      kind: "enabled" as const,
-      tree: {
-        header: "Enabled Panel",
-        variant: "primary" as const,
-        description: "Counter is interactive",
-      },
-    }, {
-      kind: "disabled" as const,
-      tree: {
-        header: "Disabled Panel",
-        variant: "muted" as const,
-        description: "Counter is hidden",
-      },
-    });
-
-    const branchKind = lift((node: BranchNode) => node.kind)(branchTree);
-    const branchHeader = lift((node: BranchNode) => node.tree.header)(
-      branchTree,
-    );
-    const branchVariant = lift((node: BranchNode) => node.tree.variant)(
-      branchTree,
-    );
-    const branchDescription = lift((node: BranchNode) => node.tree.description)(
-      branchTree,
+    const branchKind = computed(() => extractBranchKind(branchTree));
+    const branchHeader = computed(() => extractBranchHeader(branchTree));
+    const branchVariant = computed(() => extractBranchVariant(branchTree));
+    const branchDescription = computed(() =>
+      extractBranchDescription(branchTree)
     );
 
     const label = str`${branchHeader} ${safeValue}`;
@@ -102,3 +110,5 @@ export const counterWithConditionalUiBranch = recipe<ConditionalIfElseArgs>(
     };
   },
 );
+
+export default counterWithConditionalUiBranch;

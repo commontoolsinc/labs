@@ -354,126 +354,158 @@ const resetSigner = handler(
   },
 );
 
+const liftSanitizeTitle = lift((raw: string | undefined) => sanitizeTitle(raw));
+
+const liftSanitizeSignerList = lift(sanitizeSignerList);
+
+const liftOrderedSignersView = lift((entries: SignerEntry[]) =>
+  entries.map((entry) => ({
+    id: entry.id,
+    name: entry.name,
+    role: entry.role,
+    email: entry.email,
+    status: entry.status,
+    order: entry.order,
+    signedAt: entry.signedAt ?? null,
+  }))
+);
+
+const liftOutstandingEntries = lift((entries: SignerEntry[]) =>
+  entries.filter((entry) => entry.status !== "signed")
+);
+
+const liftOutstandingSignersView = lift((entries: SignerEntry[]) =>
+  entries.map((entry) => ({
+    id: entry.id,
+    name: entry.name,
+    role: entry.role,
+    status: entry.status,
+    order: entry.order,
+  }))
+);
+
+const liftOutstandingSummary = lift((entries: SignerEntry[]) => {
+  if (entries.length === 0) return "All signers completed";
+  return entries
+    .map((entry) =>
+      `${entry.order}. ${entry.name} (${entry.role}) - ${entry.status}`
+    )
+    .join(" | ");
+});
+
+const liftTotalCount = lift((entries: SignerEntry[]) => entries.length);
+
+const liftCompletedCount = lift((entries: SignerEntry[]) =>
+  entries.filter((entry) => entry.status === "signed").length
+);
+
+const liftOutstandingCount = lift((entries: SignerEntry[]) =>
+  entries.filter((entry) => entry.status !== "signed").length
+);
+
+const liftNextSigner = lift((entries: SignerEntry[]) => {
+  for (const entry of entries) {
+    if (entry.status === "pending") return entry;
+  }
+  return null;
+});
+
+const liftNextSignerView = lift((entry: SignerEntry | null) => {
+  if (!entry) return null;
+  return {
+    id: entry.id,
+    name: entry.name,
+    role: entry.role,
+    email: entry.email,
+    order: entry.order,
+  };
+});
+
+const liftStatusLine = lift((input: {
+  title: string;
+  next: SignerEntry | null;
+  outstanding: number;
+}) => {
+  if (input.outstanding === 0) {
+    return `${input.title}: all signatures collected`;
+  }
+  if (input.next) {
+    return `${input.title}: next ${input.next.name} (${input.next.role}); ` +
+      `${input.outstanding} outstanding`;
+  }
+  return `${input.title}: ${input.outstanding} outstanding signatures`;
+});
+
+const liftCounts = lift((input: {
+  total: number;
+  completed: number;
+  outstanding: number;
+}) => input);
+
+const liftCompletionPercent = lift((input: {
+  total: number;
+  completed: number;
+}) => {
+  if (input.total === 0) return 0;
+  return Math.round((input.completed / input.total) * 100);
+});
+
+const liftActivityLog = lift((input: {
+  title: string;
+  entries: string[];
+}) => {
+  const initial = `Signature packet prepared for ${input.title}`;
+  const combined = [initial, ...input.entries];
+  return combined.length > 6 ? combined.slice(combined.length - 6) : combined;
+});
+
 export const documentSignatureWorkflow = recipe<DocumentSignatureWorkflowArgs>(
   "Document Signature Workflow",
   ({ documentTitle, signers }) => {
     const logEntries = cell<string[]>([]);
 
-    const titleView = lift((raw: string | undefined) => sanitizeTitle(raw))(
-      documentTitle,
+    const titleView = liftSanitizeTitle(documentTitle);
+
+    const orderedSigners = liftSanitizeSignerList(signers);
+    const orderedSignersView = liftOrderedSignersView(orderedSigners);
+
+    const outstandingEntries = liftOutstandingEntries(orderedSigners);
+    const outstandingSignersView = liftOutstandingSignersView(
+      outstandingEntries,
     );
 
-    const orderedSigners = lift(sanitizeSignerList)(signers);
-    const orderedSignersView = lift((entries: SignerEntry[]) =>
-      entries.map((entry) => ({
-        id: entry.id,
-        name: entry.name,
-        role: entry.role,
-        email: entry.email,
-        status: entry.status,
-        order: entry.order,
-        signedAt: entry.signedAt ?? null,
-      }))
-    )(orderedSigners);
+    const outstandingSummary = liftOutstandingSummary(outstandingEntries);
 
-    const outstandingEntries = lift((entries: SignerEntry[]) =>
-      entries.filter((entry) => entry.status !== "signed")
-    )(orderedSigners);
-    const outstandingSignersView = lift((entries: SignerEntry[]) =>
-      entries.map((entry) => ({
-        id: entry.id,
-        name: entry.name,
-        role: entry.role,
-        status: entry.status,
-        order: entry.order,
-      }))
-    )(outstandingEntries);
+    const totalCount = liftTotalCount(orderedSigners);
+    const completedCount = liftCompletedCount(orderedSigners);
+    const outstandingCount = liftOutstandingCount(orderedSigners);
 
-    const outstandingSummary = lift((entries: SignerEntry[]) => {
-      if (entries.length === 0) return "All signers completed";
-      return entries
-        .map((entry) =>
-          `${entry.order}. ${entry.name} (${entry.role}) - ${entry.status}`
-        )
-        .join(" | ");
-    })(outstandingEntries);
+    const nextSigner = liftNextSigner(orderedSigners);
+    const nextSignerView = liftNextSignerView(nextSigner);
 
-    const totalCount = lift((entries: SignerEntry[]) => entries.length)(
-      orderedSigners,
-    );
-    const completedCount = lift((entries: SignerEntry[]) =>
-      entries.filter((entry) => entry.status === "signed").length
-    )(orderedSigners);
-    const outstandingCount = lift((entries: SignerEntry[]) =>
-      entries.filter((entry) => entry.status !== "signed").length
-    )(orderedSigners);
-
-    const nextSigner = lift((entries: SignerEntry[]) => {
-      for (const entry of entries) {
-        if (entry.status === "pending") return entry;
-      }
-      return null;
-    })(orderedSigners);
-    const nextSignerView = lift((entry: SignerEntry | null) => {
-      if (!entry) return null;
-      return {
-        id: entry.id,
-        name: entry.name,
-        role: entry.role,
-        email: entry.email,
-        order: entry.order,
-      };
-    })(nextSigner);
-
-    const statusLine = lift((input: {
-      title: string;
-      next: SignerEntry | null;
-      outstanding: number;
-    }) => {
-      if (input.outstanding === 0) {
-        return `${input.title}: all signatures collected`;
-      }
-      if (input.next) {
-        return `${input.title}: next ${input.next.name} (${input.next.role}); ` +
-          `${input.outstanding} outstanding`;
-      }
-      return `${input.title}: ${input.outstanding} outstanding signatures`;
-    })({
+    const statusLine = liftStatusLine({
       title: titleView,
       next: nextSigner,
       outstanding: outstandingCount,
     });
 
-    const counts = lift((input: {
-      total: number;
-      completed: number;
-      outstanding: number;
-    }) => input)({
+    const counts = liftCounts({
       total: totalCount,
       completed: completedCount,
       outstanding: outstandingCount,
     });
 
-    const completionPercent = lift((input: {
-      total: number;
-      completed: number;
-    }) => {
-      if (input.total === 0) return 0;
-      return Math.round((input.completed / input.total) * 100);
-    })({ total: totalCount, completed: completedCount });
+    const completionPercent = liftCompletionPercent({
+      total: totalCount,
+      completed: completedCount,
+    });
 
     const progressLabel = str`${completionPercent}% complete for ${titleView}`;
 
-    const activityLog = lift((input: {
-      title: string;
-      entries: string[];
-    }) => {
-      const initial = `Signature packet prepared for ${input.title}`;
-      const combined = [initial, ...input.entries];
-      return combined.length > 6
-        ? combined.slice(combined.length - 6)
-        : combined;
-    })({ title: titleView, entries: logEntries });
+    const activityLog = liftActivityLog({
+      title: titleView,
+      entries: logEntries,
+    });
 
     const context = {
       signers: signers,
@@ -497,3 +529,5 @@ export const documentSignatureWorkflow = recipe<DocumentSignatureWorkflowArgs>(
     };
   },
 );
+
+export default documentSignatureWorkflow;

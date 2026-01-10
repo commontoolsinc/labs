@@ -135,6 +135,19 @@ const composeAndApply = handler(
   },
 );
 
+const liftPreparedView = lift((count: number | undefined) => count ?? 0);
+
+const liftAppliedView = lift((count: number | undefined) => count ?? 0);
+
+const liftHistoryView = lift((entries: PipelineHistoryEntry[] | undefined) =>
+  Array.isArray(entries) ? entries : []
+);
+
+const liftLastPreparedView = lift(
+  (entry: PreparedSnapshot | undefined) =>
+    entry ?? { delta: 0, tag: "pipeline" },
+);
+
 /** Pattern composing nested handlers to simulate staged pipelines. */
 export const counterWithNestedHandlerComposition = recipe<NestedHandlerArgs>(
   "Counter With Nested Handler Composition",
@@ -169,19 +182,10 @@ export const counterWithNestedHandlerComposition = recipe<NestedHandlerArgs>(
       appliedCount,
     });
 
-    const preparedView = lift((count: number | undefined) => count ?? 0)(
-      preparedCount,
-    );
-    const appliedView = lift((count: number | undefined) => count ?? 0)(
-      appliedCount,
-    );
-    const historyView = lift((entries: PipelineHistoryEntry[] | undefined) =>
-      Array.isArray(entries) ? entries : []
-    )(history);
-    const lastPreparedView = lift(
-      (entry: PreparedSnapshot | undefined) =>
-        entry ?? { delta: 0, tag: "pipeline" },
-    )(lastPrepared);
+    const preparedView = liftPreparedView(preparedCount);
+    const appliedView = liftAppliedView(appliedCount);
+    const historyView = liftHistoryView(history);
+    const lastPreparedView = liftLastPreparedView(lastPrepared);
     const stageStatus = derive(
       stage,
       (current) => current.get() ? `staged:${current.get()!.tag}` : "idle",
@@ -206,3 +210,5 @@ export const counterWithNestedHandlerComposition = recipe<NestedHandlerArgs>(
     };
   },
 );
+
+export default counterWithNestedHandlerComposition;

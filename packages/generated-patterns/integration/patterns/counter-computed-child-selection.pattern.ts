@@ -1,5 +1,13 @@
 /// <cts-enable />
-import { Cell, Default, derive, handler, lift, recipe, str } from "commontools";
+import {
+  Cell,
+  computed,
+  Default,
+  derive,
+  handler,
+  recipe,
+  str,
+} from "commontools";
 
 const defaultCounterSeed = [2, 5, 3];
 
@@ -79,8 +87,8 @@ const fallbackSelection: ChildView = {
 export const counterComputedChildSelection = recipe<ComputedChildSelectionArgs>(
   "Counter With Computed Child Selection",
   ({ counts }) => {
-    const normalizedCounts = lift(sanitizeCounts)(counts);
-    const children = lift(buildChildViews)(normalizedCounts);
+    const normalizedCounts = computed(() => sanitizeCounts(counts));
+    const children = computed(() => buildChildViews(normalizedCounts));
 
     const selection = derive(children, (list) => {
       if (!Array.isArray(list) || list.length === 0) {
@@ -117,3 +125,5 @@ export const counterComputedChildSelection = recipe<ComputedChildSelectionArgs>(
     };
   },
 );
+
+export default counterComputedChildSelection;

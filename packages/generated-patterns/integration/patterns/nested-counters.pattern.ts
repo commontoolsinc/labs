@@ -31,15 +31,18 @@ const balanceCounters = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftTotal = lift((values: { left: number; right: number }) =>
+  values.left + values.right
+);
+
 export const nestedCounters = recipe<NestedCounterArgs>(
   "Nested Counters",
   ({ counters }) => {
     const left = counters.key("left");
     const right = counters.key("right");
 
-    const total = lift((values: { left: number; right: number }) =>
-      values.left + values.right
-    )({
+    const total = liftTotal({
       left,
       right,
     });
@@ -56,3 +59,5 @@ export const nestedCounters = recipe<NestedCounterArgs>(
     };
   },
 );
+
+export default nestedCounters;

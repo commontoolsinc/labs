@@ -150,80 +150,92 @@ const setConversionRate = handler(
   },
 );
 
+const liftSanitizeCode = lift((value: string | undefined) =>
+  sanitizeCode(value, "USD")
+);
+
+const liftSanitizeAmount = lift((value: number | undefined) =>
+  sanitizeAmount(value, 0)
+);
+
+const liftNormalizeRates = lift((inputs: {
+  rates: Record<string, number> | undefined;
+  base: string;
+}) => sanitizeRateMap(inputs.rates, inputs.base));
+
+const liftCurrencyCodes = lift((inputs: {
+  targets: string[] | undefined;
+  base: string;
+  normalizedRates: Record<string, number>;
+}) =>
+  ensureTargetList(
+    inputs.targets,
+    inputs.base,
+    Object.keys(inputs.normalizedRates),
+  )
+);
+
+const liftComputeConversions = lift((inputs: {
+  amount: number;
+  base: string;
+  rates: Record<string, number>;
+  codes: string[];
+}) =>
+  computeConversions({
+    amount: inputs.amount,
+    base: inputs.base,
+    rates: inputs.rates,
+    codes: inputs.codes,
+  })
+);
+
+const liftConversionList = lift((inputs: {
+  codes: string[];
+  conversions: Record<string, number>;
+}) =>
+  inputs.codes.map((code) => {
+    const value = inputs.conversions[code] ?? 0;
+    return `${code} ${value.toFixed(2)}`;
+  })
+);
+
+const liftCurrencyCount = lift((codes: string[]) => codes.length);
+
+const liftAmountLabel = lift((value: number) => value.toFixed(2));
+
 export const currencyConversionPattern = recipe<CurrencyConversionArgs>(
   "Currency Conversion Pattern",
   ({ amount, baseCurrency, rates, targets }) => {
-    const baseCode = lift((value: string | undefined) =>
-      sanitizeCode(value, "USD")
-    )(baseCurrency);
+    const baseCode = liftSanitizeCode(baseCurrency);
 
-    const normalizedAmount = lift((value: number | undefined) =>
-      sanitizeAmount(value, 0)
-    )(amount);
+    const normalizedAmount = liftSanitizeAmount(amount);
 
-    const normalizedRates = lift((inputs: {
-      rates: Record<string, number> | undefined;
-      base: string;
-    }) => sanitizeRateMap(inputs.rates, inputs.base))({
+    const normalizedRates = liftNormalizeRates({
       rates,
       base: baseCode,
     });
 
-    const currencyCodes = lift((inputs: {
-      targets: string[] | undefined;
-      base: string;
-      normalizedRates: Record<string, number>;
-    }) =>
-      ensureTargetList(
-        inputs.targets,
-        inputs.base,
-        Object.keys(inputs.normalizedRates),
-      )
-    )({
+    const currencyCodes = liftCurrencyCodes({
       targets,
       base: baseCode,
       normalizedRates,
     });
 
-    const conversions = lift((inputs: {
-      amount: number;
-      base: string;
-      rates: Record<string, number>;
-      codes: string[];
-    }) =>
-      computeConversions({
-        amount: inputs.amount,
-        base: inputs.base,
-        rates: inputs.rates,
-        codes: inputs.codes,
-      })
-    )({
+    const conversions = liftComputeConversions({
       amount: normalizedAmount,
       base: baseCode,
       rates: normalizedRates,
       codes: currencyCodes,
     });
 
-    const conversionList = lift((inputs: {
-      codes: string[];
-      conversions: Record<string, number>;
-    }) =>
-      inputs.codes.map((code) => {
-        const value = inputs.conversions[code] ?? 0;
-        return `${code} ${value.toFixed(2)}`;
-      })
-    )({
+    const conversionList = liftConversionList({
       codes: currencyCodes,
       conversions,
     });
 
-    const currencyCount = lift((codes: string[]) => codes.length)(
-      currencyCodes,
-    );
+    const currencyCount = liftCurrencyCount(currencyCodes);
 
-    const amountLabel = lift((value: number) => value.toFixed(2))(
-      normalizedAmount,
-    );
+    const amountLabel = liftAmountLabel(normalizedAmount);
 
     const summary =
       str`${amountLabel} ${baseCode} across ${currencyCount} currencies`;
@@ -250,3 +262,5 @@ export const currencyConversionPattern = recipe<CurrencyConversionArgs>(
     };
   },
 );
+
+export default currencyConversionPattern;

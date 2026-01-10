@@ -408,6 +408,31 @@ const readAuditLog = (value: unknown): string[] => {
   return entries;
 };
 
+// Module-scope lift definitions
+const liftSanitizeVendorList = lift(sanitizeVendorList);
+
+const liftVendorRiskSummaries = lift((records: VendorRecord[]) =>
+  buildSummaries(records, baselineThresholds)
+);
+
+const liftTierCounts = lift(buildTierCounts);
+const liftTierBreakdown = lift(buildTierBreakdown);
+
+const liftHighRiskCount = lift((counts: TierCounts) => counts.high);
+const liftMediumRiskCount = lift((counts: TierCounts) => counts.medium);
+const liftLowRiskCount = lift((counts: TierCounts) => counts.low);
+
+const liftRiskOverview = lift((counts: TierCounts) =>
+  `High: ${counts.high}, Medium: ${counts.medium}, Low: ${counts.low}`
+);
+
+const liftHighestRiskVendor = lift((summaries: VendorRiskSummary[]) =>
+  summaries.length > 0 ? summaries[0] : null
+);
+
+const liftHighestRiskLabel = lift(formatTopVendor);
+const liftAuditTrail = lift((entries: string[]) => [...entries]);
+
 const adjustVendorResponse = handler(
   (
     event: ResponseAdjustmentEvent | undefined,
@@ -531,33 +556,21 @@ export const vendorRiskAssessment = recipe<VendorRiskAssessmentArgs>(
   ({ vendors }) => {
     const auditLog = cell<string[]>([]);
 
-    const vendorsView = lift(sanitizeVendorList)(vendors);
-    const vendorRiskSummaries = lift((records: VendorRecord[]) =>
-      buildSummaries(records, baselineThresholds)
-    )(vendorsView);
+    const vendorsView = liftSanitizeVendorList(vendors);
+    const vendorRiskSummaries = liftVendorRiskSummaries(vendorsView);
 
-    const tierCounts = lift(buildTierCounts)(vendorRiskSummaries);
-    const tierBreakdown = lift(buildTierBreakdown)(vendorRiskSummaries);
-    const highRiskCount = lift((counts: TierCounts) => counts.high)(
-      tierCounts,
-    );
-    const mediumRiskCount = lift((counts: TierCounts) => counts.medium)(
-      tierCounts,
-    );
-    const lowRiskCount = lift((counts: TierCounts) => counts.low)(
-      tierCounts,
-    );
+    const tierCounts = liftTierCounts(vendorRiskSummaries);
+    const tierBreakdown = liftTierBreakdown(vendorRiskSummaries);
+    const highRiskCount = liftHighRiskCount(tierCounts);
+    const mediumRiskCount = liftMediumRiskCount(tierCounts);
+    const lowRiskCount = liftLowRiskCount(tierCounts);
 
-    const riskOverview = lift((counts: TierCounts) =>
-      `High: ${counts.high}, Medium: ${counts.medium}, Low: ${counts.low}`
-    )(tierCounts);
+    const riskOverview = liftRiskOverview(tierCounts);
 
-    const highestRiskVendor = lift((summaries: VendorRiskSummary[]) =>
-      summaries.length > 0 ? summaries[0] : null
-    )(vendorRiskSummaries);
+    const highestRiskVendor = liftHighestRiskVendor(vendorRiskSummaries);
 
-    const highestRiskLabel = lift(formatTopVendor)(highestRiskVendor);
-    const auditTrail = lift((entries: string[]) => [...entries])(auditLog);
+    const highestRiskLabel = liftHighestRiskLabel(highestRiskVendor);
+    const auditTrail = liftAuditTrail(auditLog);
 
     return {
       vendors,
@@ -579,6 +592,8 @@ export const vendorRiskAssessment = recipe<VendorRiskAssessmentArgs>(
     };
   },
 );
+
+export default vendorRiskAssessment;
 
 export type {
   ResponseAdjustmentEvent,

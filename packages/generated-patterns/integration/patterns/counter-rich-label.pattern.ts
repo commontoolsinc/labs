@@ -39,3 +39,5 @@ export const counterWithRichLabel = recipe<RichLabelArgs>(
     };
   },
 );
+
+export default counterWithRichLabel;

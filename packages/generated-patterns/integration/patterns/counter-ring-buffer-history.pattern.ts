@@ -61,20 +61,26 @@ const resizeBuffer = handler(
   },
 );
 
+const liftCurrentValue = lift((count: number | undefined) =>
+  typeof count === "number" ? count : 0
+);
+
+const liftHistoryView = lift((entries: number[] | undefined) =>
+  Array.isArray(entries) ? entries : []
+);
+
+const liftLimit = lift((raw: number | undefined) =>
+  normalizeCapacityValue(raw)
+);
+
 export const counterWithRingBufferHistory = recipe<RingBufferCounterArgs>(
   "Counter With Ring Buffer History",
   ({ value, history, capacity }) => {
-    const currentValue = lift((count: number | undefined) =>
-      typeof count === "number" ? count : 0
-    )(value);
+    const currentValue = liftCurrentValue(value);
 
-    const historyView = lift((entries: number[] | undefined) =>
-      Array.isArray(entries) ? entries : []
-    )(history);
+    const historyView = liftHistoryView(history);
 
-    const limit = lift((raw: number | undefined) =>
-      normalizeCapacityValue(raw)
-    )(capacity);
+    const limit = liftLimit(capacity);
 
     const label = str`Value ${currentValue} | limit ${limit}`;
 
@@ -91,3 +97,5 @@ export const counterWithRingBufferHistory = recipe<RingBufferCounterArgs>(
     };
   },
 );
+
+export default counterWithRingBufferHistory;

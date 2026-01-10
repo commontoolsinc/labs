@@ -83,3 +83,5 @@ export const counterWithHandlerSpawn = recipe<HandlerSpawnArgs>(
     };
   },
 );
+
+export default counterWithHandlerSpawn;

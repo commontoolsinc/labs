@@ -309,35 +309,50 @@ const updateLimitHandler = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeTaskList = lift(sanitizeTaskList);
+
+const liftLimitView = lift(
+  (value: Record<ColumnKey, number> | undefined) =>
+    sanitizeWipLimits(value, defaultWipLimits),
+);
+
+const liftLimitSnapshot = lift((limits: Record<ColumnKey, number>) => ({
+  backlog: limits.backlog,
+  inProgress: limits.inProgress,
+  review: limits.review,
+  done: limits.done,
+}));
+
+const liftColumnSummaries = lift(buildColumnSummaries);
+
+const liftOverloadedColumns = lift((summaries: ColumnSummary[]) =>
+  summaries
+    .filter((summary) => summary.overloaded)
+    .map((summary) => summary.key)
+);
+
+const liftDescribeStatus = lift(describeStatus);
+
+const liftHistoryView = lift((entries: MoveRecord[] | undefined) =>
+  Array.isArray(entries) ? entries : []
+);
+
 export const kanbanBoardGrouping = recipe<KanbanBoardArgs>(
   "Kanban Board Grouping",
   ({ tasks, wipLimits }) => {
     const moveHistory = cell<MoveRecord[]>([]);
-    const normalizedTasks = lift(sanitizeTaskList)(tasks);
-    const limitView = lift(
-      (value: Record<ColumnKey, number> | undefined) =>
-        sanitizeWipLimits(value, defaultWipLimits),
-    )(wipLimits);
-    const limitSnapshot = lift((limits: Record<ColumnKey, number>) => ({
-      backlog: limits.backlog,
-      inProgress: limits.inProgress,
-      review: limits.review,
-      done: limits.done,
-    }))(limitView);
-    const columnSummaries = lift(buildColumnSummaries)({
+    const normalizedTasks = liftSanitizeTaskList(tasks);
+    const limitView = liftLimitView(wipLimits);
+    const limitSnapshot = liftLimitSnapshot(limitView);
+    const columnSummaries = liftColumnSummaries({
       tasks: normalizedTasks,
       limits: limitView,
     });
-    const overloadedColumns = lift((summaries: ColumnSummary[]) =>
-      summaries
-        .filter((summary) => summary.overloaded)
-        .map((summary) => summary.key)
-    )(columnSummaries);
-    const statusText = lift(describeStatus)(columnSummaries);
+    const overloadedColumns = liftOverloadedColumns(columnSummaries);
+    const statusText = liftDescribeStatus(columnSummaries);
     const status = str`${statusText}`;
-    const historyView = lift((entries: MoveRecord[] | undefined) =>
-      Array.isArray(entries) ? entries : []
-    )(moveHistory);
+    const historyView = liftHistoryView(moveHistory);
 
     return {
       tasks: normalizedTasks,
@@ -351,3 +366,5 @@ export const kanbanBoardGrouping = recipe<KanbanBoardArgs>(
     };
   },
 );
+
+export default kanbanBoardGrouping;

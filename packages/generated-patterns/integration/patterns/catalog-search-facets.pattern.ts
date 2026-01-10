@@ -336,10 +336,26 @@ const clearFilters = handler(
   },
 );
 
+const liftItemsLength = lift((items: CatalogItem[]) => items.length);
+
+const liftSelectionSummary = lift(
+  (input: {
+    categories: string[];
+    brands: string[];
+    price: number | null;
+  }) => summarizeSelection(input.categories, input.brands, input.price),
+);
+
+const liftSanitizeCatalog = lift(sanitizeCatalog);
+const liftComputeAvailableCategories = lift(computeAvailableCategories);
+const liftComputeAvailableBrands = lift(computeAvailableBrands);
+const liftComputePriceRange = lift(computePriceRange);
+const liftFilterItems = lift(filterItems);
+
 export const catalogSearchFacets = recipe<CatalogSearchArgs>(
   "Catalog Search Facets",
   ({ catalog }) => {
-    const sanitizedCatalog = lift(sanitizeCatalog)(catalog);
+    const sanitizedCatalog = liftSanitizeCatalog(catalog);
 
     const selectedCategories = cell<string[]>(
       structuredClone(defaultSelection.categories),
@@ -349,31 +365,23 @@ export const catalogSearchFacets = recipe<CatalogSearchArgs>(
     );
     const priceCeiling = cell<number | null>(defaultSelection.priceCeiling);
 
-    const availableCategories = lift(computeAvailableCategories)(
+    const availableCategories = liftComputeAvailableCategories(
       sanitizedCatalog,
     );
-    const availableBrands = lift(computeAvailableBrands)(sanitizedCatalog);
-    const priceRange = lift(computePriceRange)(sanitizedCatalog);
+    const availableBrands = liftComputeAvailableBrands(sanitizedCatalog);
+    const priceRange = liftComputePriceRange(sanitizedCatalog);
 
-    const filteredItems = lift(filterItems)({
+    const filteredItems = liftFilterItems({
       items: sanitizedCatalog,
       categories: selectedCategories,
       brands: selectedBrands,
       priceCeiling,
     });
 
-    const totalCount = lift((items: CatalogItem[]) => items.length)(
-      sanitizedCatalog,
-    );
-    const filteredCount = lift((items: CatalogItem[]) => items.length)(
-      filteredItems,
-    );
+    const totalCount = liftItemsLength(sanitizedCatalog);
+    const filteredCount = liftItemsLength(filteredItems);
 
-    const selectionSummary = lift((input: {
-      categories: string[];
-      brands: string[];
-      price: number | null;
-    }) => summarizeSelection(input.categories, input.brands, input.price))({
+    const selectionSummary = liftSelectionSummary({
       categories: selectedCategories,
       brands: selectedBrands,
       price: priceCeiling,
@@ -418,3 +426,5 @@ export const catalogSearchFacets = recipe<CatalogSearchArgs>(
     };
   },
 );
+
+export default catalogSearchFacets;

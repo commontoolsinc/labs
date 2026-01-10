@@ -164,66 +164,70 @@ const updateStep = handler(
   },
 );
 
+const liftToInteger = lift((input: number | undefined) => toInteger(input, 0));
+const liftSanitizeStep = lift((input: number | undefined) =>
+  sanitizeStep(input)
+);
+const liftSanitizeHistory = lift(sanitizeHistory);
+const liftSanitizeAdjustments = lift(sanitizeAdjustments);
+const liftSummary = lift(
+  toSchema<SummaryInputs>(),
+  toSchema<SummarySnapshot>(),
+  ({ current, history, step, adjustments }) => {
+    const currentNumber = toInteger(current.get(), 0);
+    const historyList = sanitizeHistory(history.get());
+    const adjustmentList = sanitizeAdjustments(adjustments.get());
+    const lastAdjustment = adjustmentList.at(-1);
+    const delta = lastAdjustment?.delta ?? 0;
+    const previous = currentNumber - delta;
+    const latestHistory = historyList.at(-1) ?? currentNumber;
+    const recordsTotal = historyList.reduce(
+      (sum, entry) => sum + entry,
+      0,
+    );
+    const divisor = historyList.length === 0 ? 1 : historyList.length;
+    const averageBase = historyList.length === 0
+      ? currentNumber
+      : recordsTotal / divisor;
+    const average = Math.round(averageBase * 100) / 100;
+    const sanitizedStep = sanitizeStep(step.get());
+    const trend = deriveTrend(delta);
+    const parity = deriveParity(currentNumber);
+    const label =
+      `Current ${currentNumber} (${trend}) avg ${average} step ${sanitizedStep}`;
+
+    return {
+      current: currentNumber,
+      previous,
+      delta,
+      trend,
+      parity,
+      average,
+      historyCount: historyList.length,
+      adjustmentCount: adjustmentList.length,
+      step: sanitizedStep,
+      latestHistory,
+      label,
+    };
+  },
+);
+
 export const counterWithDerivedSummary = recipe<SummaryArgs>(
   "Counter With Derived Summary",
   ({ value, step, history }) => {
     const sequence = cell(0);
     const adjustments = cell<AdjustmentRecord[]>([]);
 
-    const currentValue = lift((input: number | undefined) =>
-      toInteger(input, 0)
-    )(value);
-    const stepValue = lift((input: number | undefined) => sanitizeStep(input))(
-      step,
-    );
-    const historyView = lift(sanitizeHistory)(history);
-    const adjustmentsView = lift(sanitizeAdjustments)(adjustments);
+    const currentValue = liftToInteger(value);
+    const stepValue = liftSanitizeStep(step);
+    const historyView = liftSanitizeHistory(history);
+    const adjustmentsView = liftSanitizeAdjustments(adjustments);
     const sequenceView = derive(
       sequence,
       (count) => toInteger(count.get() ?? 0, 0),
     );
 
-    const summary = lift(
-      toSchema<SummaryInputs>(),
-      toSchema<SummarySnapshot>(),
-      ({ current, history, step, adjustments }) => {
-        const currentNumber = toInteger(current.get(), 0);
-        const historyList = sanitizeHistory(history.get());
-        const adjustmentList = sanitizeAdjustments(adjustments.get());
-        const lastAdjustment = adjustmentList.at(-1);
-        const delta = lastAdjustment?.delta ?? 0;
-        const previous = currentNumber - delta;
-        const latestHistory = historyList.at(-1) ?? currentNumber;
-        const recordsTotal = historyList.reduce(
-          (sum, entry) => sum + entry,
-          0,
-        );
-        const divisor = historyList.length === 0 ? 1 : historyList.length;
-        const averageBase = historyList.length === 0
-          ? currentNumber
-          : recordsTotal / divisor;
-        const average = Math.round(averageBase * 100) / 100;
-        const sanitizedStep = sanitizeStep(step.get());
-        const trend = deriveTrend(delta);
-        const parity = deriveParity(currentNumber);
-        const label =
-          `Current ${currentNumber} (${trend}) avg ${average} step ${sanitizedStep}`;
-
-        return {
-          current: currentNumber,
-          previous,
-          delta,
-          trend,
-          parity,
-          average,
-          historyCount: historyList.length,
-          adjustmentCount: adjustmentList.length,
-          step: sanitizedStep,
-          latestHistory,
-          label,
-        };
-      },
-    )({
+    const summary = liftSummary({
       current: currentValue,
       history: historyView,
       step: stepValue,
@@ -261,3 +265,5 @@ export const counterWithDerivedSummary = recipe<SummaryArgs>(
     };
   },
 );
+
+export default counterWithDerivedSummary;

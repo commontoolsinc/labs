@@ -101,6 +101,16 @@ const recordValue = handler(
   },
 );
 
+const liftSanitizeNumbers = lift(sanitizeNumbers);
+const liftDefaultNumber = lift((value: number | undefined) => value ?? 0);
+const liftDefaultSnapshot = lift(
+  (snapshot: ChecksumSnapshot | undefined) =>
+    snapshot ?? { amount: 0, nextValue: 0, checksum: 0 },
+);
+const liftPrefixLabel = lift((text: string | undefined) =>
+  typeof text === "string" && text.length > 0 ? text : "Checksum"
+);
+
 /** Pattern computing checksum of recorded counter values via derive. */
 export const counterWithDerivedChecksum = recipe<CounterChecksumArgs>(
   "Counter With Derived Checksum",
@@ -117,21 +127,12 @@ export const counterWithDerivedChecksum = recipe<CounterChecksumArgs>(
       checksum: 0,
     });
 
-    const valuesView = lift(sanitizeNumbers)(values);
+    const valuesView = liftSanitizeNumbers(values);
     const checksum = derive(valuesView, computeChecksum);
-    const checksumView = lift((value: number | undefined) => value ?? 0)(
-      checksum,
-    );
-    const updatesView = lift((count: number | undefined) => count ?? 0)(
-      updateCount,
-    );
-    const lastEventView = lift(
-      (snapshot: ChecksumSnapshot | undefined) =>
-        snapshot ?? { amount: 0, nextValue: 0, checksum: 0 },
-    )(lastEvent);
-    const prefixLabel = lift((text: string | undefined) =>
-      typeof text === "string" && text.length > 0 ? text : "Checksum"
-    )(prefix);
+    const checksumView = liftDefaultNumber(checksum);
+    const updatesView = liftDefaultNumber(updateCount);
+    const lastEventView = liftDefaultSnapshot(lastEvent);
+    const prefixLabel = liftPrefixLabel(prefix);
     const label = str`${prefixLabel} ${checksumView}`;
     const summary = str`${prefixLabel} ${checksumView} after ${updatesView}`;
     const record = recordValue({
@@ -155,3 +156,5 @@ export const counterWithDerivedChecksum = recipe<CounterChecksumArgs>(
     };
   },
 );
+
+export default counterWithDerivedChecksum;

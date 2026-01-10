@@ -153,69 +153,86 @@ const adjustServings = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftRecipeName = lift((value: string | undefined) => {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0 ? normalized : defaultRecipeName;
+});
+
+const liftBaseView = lift((value: number | undefined) =>
+  sanitizeServings(value, defaultBaseServings, 1)
+);
+
+const liftDesiredView = lift((input: {
+  desired: number | undefined;
+  base: number;
+}) => sanitizeServings(input.desired, input.base, 0.5));
+
+const liftIngredientList = lift(sanitizeIngredientList);
+
+const liftMultiplier = lift((input: { desired: number; base: number }) =>
+  toMultiplier(input.desired, input.base)
+);
+
+const liftScaledIngredients = lift((input: {
+  items: Ingredient[];
+  multiplier: number;
+}) =>
+  input.items.map((item) => ({
+    name: item.name,
+    unit: item.unit,
+    quantity: Math.round(item.quantity * input.multiplier * 100) / 100,
+  }))
+);
+
+const liftFormatNumber = lift(formatNumber);
+
+const liftMultiplierLabel = lift((value: number) => `x${formatNumber(value)}`);
+
+const liftScaledLabel = lift((items: Ingredient[]) =>
+  items.map((item) =>
+    `${item.name}: ${formatNumber(item.quantity)} ${item.unit}`
+  ).join("; ")
+);
+
+const liftSummary = lift((input: {
+  name: string;
+  servings: string;
+  multiplier: string;
+}) => `${input.name}: ${input.servings} servings (${input.multiplier})`);
+
 export const recipeIngredientScaler = recipe<RecipeIngredientScalerArgs>(
   "Recipe Ingredient Scaler",
   ({ name, baseServings, desiredServings, ingredients }) => {
     const history = cell<string[]>([]);
 
-    const recipeName = lift((value: string | undefined) => {
-      const normalized = value?.trim();
-      return normalized && normalized.length > 0
-        ? normalized
-        : defaultRecipeName;
-    })(name);
+    const recipeName = liftRecipeName(name);
 
-    const baseView = lift((value: number | undefined) =>
-      sanitizeServings(value, defaultBaseServings, 1)
-    )(baseServings);
+    const baseView = liftBaseView(baseServings);
 
-    const desiredView = lift((input: {
-      desired: number | undefined;
-      base: number;
-    }) => sanitizeServings(input.desired, input.base, 0.5))({
+    const desiredView = liftDesiredView({
       desired: desiredServings,
       base: baseView,
     });
 
-    const ingredientsView = lift(sanitizeIngredientList)(ingredients);
+    const ingredientsView = liftIngredientList(ingredients);
 
-    const multiplier = lift((input: { desired: number; base: number }) =>
-      toMultiplier(input.desired, input.base)
-    )({
+    const multiplier = liftMultiplier({
       desired: desiredView,
       base: baseView,
     });
 
-    const scaledIngredients = lift((input: {
-      items: Ingredient[];
-      multiplier: number;
-    }) =>
-      input.items.map((item) => ({
-        name: item.name,
-        unit: item.unit,
-        quantity: Math.round(item.quantity * input.multiplier * 100) / 100,
-      }))
-    )({
+    const scaledIngredients = liftScaledIngredients({
       items: ingredientsView,
       multiplier,
     });
 
-    const desiredLabel = lift(formatNumber)(desiredView);
-    const multiplierLabel = lift((value: number) => `x${formatNumber(value)}`)(
-      multiplier,
-    );
+    const desiredLabel = liftFormatNumber(desiredView);
+    const multiplierLabel = liftMultiplierLabel(multiplier);
 
-    const scaledLabel = lift((items: Ingredient[]) =>
-      items.map((item) =>
-        `${item.name}: ${formatNumber(item.quantity)} ${item.unit}`
-      ).join("; ")
-    )(scaledIngredients);
+    const scaledLabel = liftScaledLabel(scaledIngredients);
 
-    const summary = lift((input: {
-      name: string;
-      servings: string;
-      multiplier: string;
-    }) => `${input.name}: ${input.servings} servings (${input.multiplier})`)({
+    const summary = liftSummary({
       name: recipeName,
       servings: desiredLabel,
       multiplier: multiplierLabel,
@@ -246,3 +263,5 @@ export const recipeIngredientScaler = recipe<RecipeIngredientScalerArgs>(
     };
   },
 );
+
+export default recipeIngredientScaler;

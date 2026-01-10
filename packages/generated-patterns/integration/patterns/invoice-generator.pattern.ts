@@ -324,87 +324,124 @@ const updateRates = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftNormalizedItems = lift((value: InvoiceItemInput[] | undefined) =>
+  sanitizeItemList(value)
+);
+
+const liftNormalizedTaxRate = lift((value: number | undefined) =>
+  clampRate(value, 0.0725)
+);
+
+const liftNormalizedInvoiceDiscountRate = lift((value: number | undefined) =>
+  clampRate(value, 0.05)
+);
+
+const liftLineSummaries = lift((entries: InvoiceItem[] | undefined) =>
+  computeLineSummaries(Array.isArray(entries) ? entries : [])
+);
+
+const liftTotals = lift((input: {
+  lines: InvoiceLineSummary[];
+  invoiceDiscountRate: number;
+  taxRate: number;
+}) =>
+  computeInvoiceTotals(
+    input.lines,
+    input.invoiceDiscountRate,
+    input.taxRate,
+  )
+);
+
+const liftSubtotal = lift((value: InvoiceTotals | undefined) =>
+  value?.subtotal ?? 0
+);
+
+const liftItemDiscountTotal = lift((value: InvoiceTotals | undefined) =>
+  value?.itemDiscountTotal ?? 0
+);
+
+const liftInvoiceDiscountAmount = lift((value: InvoiceTotals | undefined) =>
+  value?.invoiceDiscountAmount ?? 0
+);
+
+const liftDiscountedSubtotal = lift((value: InvoiceTotals | undefined) =>
+  value?.discountedSubtotal ?? 0
+);
+
+const liftTaxAmount = lift((value: InvoiceTotals | undefined) =>
+  value?.taxAmount ?? 0
+);
+
+const liftTotalDue = lift((value: InvoiceTotals | undefined) =>
+  value?.totalDue ?? 0
+);
+
+const liftFormattedTotalDue = lift((value: number | undefined) =>
+  formatCurrency(value ?? 0)
+);
+
+const liftTaxRatePercent = lift((value: number | undefined) =>
+  `${((value ?? 0) * 100).toFixed(2)}%`
+);
+
+const liftInvoiceDiscountPercent = lift((value: number | undefined) =>
+  `${((value ?? 0) * 100).toFixed(2)}%`
+);
+
+const liftLineCount = lift((entries: InvoiceLineSummary[] | undefined) =>
+  Array.isArray(entries) ? entries.length : 0
+);
+
+const liftLineLabels = lift((entries: InvoiceLineSummary[] | undefined) => {
+  if (!Array.isArray(entries)) return [];
+  return entries.map((entry) =>
+    `${entry.description}: ${formatCurrency(entry.lineTotal)}`
+  );
+});
+
 export const invoiceGeneratorPattern = recipe<InvoiceGeneratorArgs>(
   "Invoice Generator Pattern",
   ({ items, taxRate, invoiceDiscountRate }) => {
-    const normalizedItems = lift((value: InvoiceItemInput[] | undefined) =>
-      sanitizeItemList(value)
-    )(items);
+    const normalizedItems = liftNormalizedItems(items);
 
-    const normalizedTaxRate = lift((value: number | undefined) =>
-      clampRate(value, 0.0725)
-    )(taxRate);
+    const normalizedTaxRate = liftNormalizedTaxRate(taxRate);
 
-    const normalizedInvoiceDiscountRate = lift((value: number | undefined) =>
-      clampRate(value, 0.05)
-    )(invoiceDiscountRate);
+    const normalizedInvoiceDiscountRate = liftNormalizedInvoiceDiscountRate(
+      invoiceDiscountRate,
+    );
 
-    const lineSummaries = lift((entries: InvoiceItem[] | undefined) =>
-      computeLineSummaries(Array.isArray(entries) ? entries : [])
-    )(normalizedItems);
+    const lineSummaries = liftLineSummaries(normalizedItems);
 
-    const totals = lift((input: {
-      lines: InvoiceLineSummary[];
-      invoiceDiscountRate: number;
-      taxRate: number;
-    }) =>
-      computeInvoiceTotals(
-        input.lines,
-        input.invoiceDiscountRate,
-        input.taxRate,
-      )
-    )({
+    const totals = liftTotals({
       lines: lineSummaries,
       invoiceDiscountRate: normalizedInvoiceDiscountRate,
       taxRate: normalizedTaxRate,
     });
 
-    const subtotal = lift((value: InvoiceTotals | undefined) =>
-      value?.subtotal ?? 0
-    )(totals);
+    const subtotal = liftSubtotal(totals);
 
-    const itemDiscountTotal = lift((value: InvoiceTotals | undefined) =>
-      value?.itemDiscountTotal ?? 0
-    )(totals);
+    const itemDiscountTotal = liftItemDiscountTotal(totals);
 
-    const invoiceDiscountAmount = lift((value: InvoiceTotals | undefined) =>
-      value?.invoiceDiscountAmount ?? 0
-    )(totals);
+    const invoiceDiscountAmount = liftInvoiceDiscountAmount(totals);
 
-    const discountedSubtotal = lift((value: InvoiceTotals | undefined) =>
-      value?.discountedSubtotal ?? 0
-    )(totals);
+    const discountedSubtotal = liftDiscountedSubtotal(totals);
 
-    const taxAmount = lift((value: InvoiceTotals | undefined) =>
-      value?.taxAmount ?? 0
-    )(totals);
+    const taxAmount = liftTaxAmount(totals);
 
-    const totalDue = lift((value: InvoiceTotals | undefined) =>
-      value?.totalDue ?? 0
-    )(totals);
+    const totalDue = liftTotalDue(totals);
 
-    const formattedTotalDue = lift((value: number | undefined) =>
-      formatCurrency(value ?? 0)
-    )(totalDue);
+    const formattedTotalDue = liftFormattedTotalDue(totalDue);
 
-    const taxRatePercent = lift((value: number | undefined) =>
-      `${((value ?? 0) * 100).toFixed(2)}%`
-    )(normalizedTaxRate);
+    const taxRatePercent = liftTaxRatePercent(normalizedTaxRate);
 
-    const invoiceDiscountPercent = lift((value: number | undefined) =>
-      `${((value ?? 0) * 100).toFixed(2)}%`
-    )(normalizedInvoiceDiscountRate);
+    const invoiceDiscountPercent = liftInvoiceDiscountPercent(
+      normalizedInvoiceDiscountRate,
+    );
 
-    const lineCount = lift((entries: InvoiceLineSummary[] | undefined) =>
-      Array.isArray(entries) ? entries.length : 0
-    )(lineSummaries);
+    const lineCount = liftLineCount(lineSummaries);
 
-    const lineLabels = lift((entries: InvoiceLineSummary[] | undefined) => {
-      if (!Array.isArray(entries)) return [];
-      return entries.map((entry) =>
-        `${entry.description}: ${formatCurrency(entry.lineTotal)}`
-      );
-    })(lineSummaries);
+    const lineLabels = liftLineLabels(lineSummaries);
 
     const summary =
       str`Total due ${formattedTotalDue} (tax ${taxRatePercent}, discount ${invoiceDiscountPercent})`;
@@ -437,3 +474,5 @@ export const invoiceGeneratorPattern = recipe<InvoiceGeneratorArgs>(
     };
   },
 );
+
+export default invoiceGeneratorPattern;
