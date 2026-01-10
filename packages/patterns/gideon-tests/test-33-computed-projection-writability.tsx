@@ -40,9 +40,10 @@ interface InputSchema {
   }>;
 }
 
-// Pattern parameter type - wrap in Cell<> for write access
-interface Input {
-  source: Cell<Source>;
+// Pattern output type - describes the inner value, not the cell wrapper
+// The pattern returns OpaqueCell<Source>, so output type is `Source`
+interface Output {
+  source: Source;
 }
 
 // Handler to update via computed projection
@@ -90,7 +91,7 @@ const updateDirect = handler<
   });
 });
 
-export default pattern<InputSchema, Input>(({ source }) => {
+export default pattern<InputSchema, Output>(({ source }) => {
   // Approach 1: computed() projection - claims to be read-only
   // Inside computed(), use direct property access (not .get())
   const computedAuth = computed(() => source.auth);

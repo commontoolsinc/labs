@@ -17,7 +17,7 @@ import {
   clearMockResponses,
   enableMockMode,
 } from "@commontools/llm/client";
-import type { BuiltInLLMMessage } from "@commontools/api";
+import type { BuiltInLLMMessage, BuiltInLLMTool } from "@commontools/api";
 import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -834,8 +834,12 @@ describe("generateObject with tools", () => {
           prompt: testPrompt,
           schema: resultSchema,
           tools: {
-            listItems: patternTool(listItems, { items: itemsData }),
-            countItems: patternTool(countItems, { items: itemsData }),
+            listItems: patternTool(listItems, {
+              items: itemsData,
+            }) as unknown as BuiltInLLMTool,
+            countItems: patternTool(countItems, {
+              items: itemsData,
+            }) as unknown as BuiltInLLMTool,
           },
         });
         return result;
@@ -996,7 +1000,9 @@ describe("generateObject with tools", () => {
               description: "Fetch data from source",
               handler: fetchData({}),
             },
-            analyzeData: patternTool(analyzeData, { data: dataCell }),
+            analyzeData: patternTool(analyzeData, {
+              data: dataCell,
+            }) as unknown as BuiltInLLMTool,
           },
         });
         return result;

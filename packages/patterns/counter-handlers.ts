@@ -2,7 +2,7 @@
 import { Default, handler, Writable } from "commontools";
 
 export const increment = handler<
-  unknown,
+  void,
   { value: Writable<Default<number, 0>> }
 >(
   (_args, state) => {
@@ -11,7 +11,7 @@ export const increment = handler<
 );
 
 export const decrement = handler<
-  unknown,
+  void,
   { value: Writable<Default<number, 0>> }
 >(
   (_args, state) => {

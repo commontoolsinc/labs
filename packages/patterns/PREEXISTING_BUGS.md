@@ -5,27 +5,7 @@ issues, not API migration problems.
 
 ---
 
-## Bug 1: chatbot-note-composed.tsx - Blank Screen
-
-**Symptom:** Pattern deploys successfully but shows blank screen with no UI.
-
-**Suspected Cause:** Uses `wish()` calls that depend on other charms existing in
-the space (backlinks, mentionable items). When those dependencies don't exist,
-the pattern fails silently.
-
-**Impact:** Pattern unusable as standalone example.
-
-**Repro:**
-
-```bash
-deno task ct charm new packages/patterns/chatbot-note-composed.tsx \
-  -i claude.key -a http://localhost:8000 -s test-space
-# Navigate to charm - blank screen
-```
-
----
-
-## Bug 2: compiler.tsx - Navigation Button Not Working
+## Bug 1: compiler.tsx - Navigation Button Not Working
 
 **Symptom:** "Navigate To Charm" button appears after compilation succeeds, but
 clicking it does nothing.

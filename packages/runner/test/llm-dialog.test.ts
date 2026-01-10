@@ -7,7 +7,11 @@ import {
   clearMockResponses,
   enableMockMode,
 } from "@commontools/llm/client";
-import type { BuiltInLLMMessage, JSONSchema } from "@commontools/api";
+import type {
+  BuiltInLLMMessage,
+  BuiltInLLMTool,
+  JSONSchema,
+} from "@commontools/api";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -275,7 +279,9 @@ describe("llmDialog", () => {
         const dialog = llmDialog({
           messages,
           tools: {
-            getWeather: patternTool(getWeatherTool),
+            getWeather: patternTool(
+              getWeatherTool,
+            ) as unknown as BuiltInLLMTool,
           },
         });
         return {

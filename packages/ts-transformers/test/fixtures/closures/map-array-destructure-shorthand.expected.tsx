@@ -271,6 +271,9 @@ export default recipe({
                     element: {
                         $ref: "#/$defs/ItemTuple"
                     },
+                    index: {
+                        type: "number"
+                    },
                     params: {
                         type: "object",
                         properties: {}
@@ -386,7 +389,7 @@ export default recipe({
                         }
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: [item, count], params: {} }) => (<div key={item}>
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: [item, count], index, params: {} }) => (<div key={index}>
             {item}: {count}
           </div>)), {})}
       </div>),

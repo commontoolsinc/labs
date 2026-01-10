@@ -39,7 +39,7 @@ interface Output {
 
 // Handler that increments the counter and logs the invocation
 const incrementHandler = handler<
-  unknown,
+  void,
   { counter: Writable<number>; invocationLog: Writable<string[]> }
 >((_event, { counter, invocationLog }) => {
   // Increment counter
