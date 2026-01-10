@@ -89,6 +89,10 @@ export function toStorableValue(value: unknown): unknown {
 
     case "function":
     case "object": {
+      if (value === null) {
+        return null;
+      }
+
       const valueObj = value as object;
 
       if ("toJSON" in valueObj && typeof valueObj.toJSON === "function") {
@@ -101,13 +105,13 @@ export function toStorableValue(value: unknown): unknown {
         }
 
         return converted;
-      } else if (isInstance(valueObj)) {
+      } else if (typeof valueObj === "function" || isInstance(valueObj)) {
         throw new Error(
           `Cannot store ${typeName} per se (needs to have a \`toJSON()\` method)`,
         );
+      } else {
+        return valueObj;
       }
-
-      return valueObj;
     }
 
     // TODO(@danfuzz): This is allowed for now, even though it isn't
