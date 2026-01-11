@@ -4,11 +4,6 @@
  *
  * A configurable weekly calendar view showing days side-by-side
  * with hourly time slots and colored appointment blocks.
- *
- * WORKAROUND NOTE: This pattern uses lift() wrappers around static JSX children
- * inside map() callbacks. This is a workaround for a CT runtime bug where static
- * children in map() don't render for dynamically added items. By making content
- * depend on a reactive value (e.g., apt.id), the runtime properly renders it.
  */
 import {
   action,
@@ -17,7 +12,6 @@ import {
   Default,
   handler,
   ifElse,
-  lift,
   NAME,
   pattern,
   UI,
@@ -48,6 +42,7 @@ interface Output {
 const HOUR_HEIGHT = 60;
 const DAY_START = 6;
 const DAY_END = 22;
+const RESIZE_HANDLE_HEIGHT = 14;
 
 const COLORS = [
   "#fef08a", // yellow
@@ -60,7 +55,6 @@ const COLORS = [
 
 // ============ HELPERS ============
 
-// Format date as YYYY-MM-DD in Pacific time
 const formatDatePST = (d: Date): string => {
   return d.toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
 };
@@ -68,8 +62,7 @@ const formatDatePST = (d: Date): string => {
 const getTodayDate = (): string => formatDatePST(new Date());
 
 const getWeekStart = (date: string): string => {
-  // Parse date in Pacific time
-  const d = new Date(date + "T12:00:00-08:00"); // Use noon to avoid DST issues
+  const d = new Date(date + "T12:00:00-08:00");
   const day = d.getDay();
   const diff = d.getDate() - day + (day === 0 ? -6 : 1);
   d.setDate(diff);
@@ -111,9 +104,6 @@ const timeToMinutes = (time: string): number => {
 
 const generateId = (): string => Math.random().toString(36).substring(2, 10);
 
-/**
- * Add hours to a time string, returning new time string
- */
 const addHoursToTime = (time: string, hours: number): string => {
   const [h, m] = time.split(":").map(Number);
   const newHour = Math.min(23, Math.max(0, h + hours));
@@ -122,9 +112,6 @@ const addHoursToTime = (time: string, hours: number): string => {
   }`;
 };
 
-/**
- * Add minutes to a time string
- */
 const addMinutesToTime = (time: string, minutes: number): string => {
   const [h, m] = time.split(":").map(Number);
   const totalMinutes = h * 60 + (m || 0) + minutes;
@@ -135,14 +122,201 @@ const addMinutesToTime = (time: string, minutes: number): string => {
   }`;
 };
 
-/** Slot interval in minutes */
 const _SLOT_INTERVAL = 30;
-const SLOT_HEIGHT = HOUR_HEIGHT / 2; // 30px for 30-minute slots
+const SLOT_HEIGHT = HOUR_HEIGHT / 2;
+
+// ============ HANDLERS (MODULE SCOPE) ============
+
+// Navigation handlers
+const goPrevHandler = handler<
+  unknown,
+  { startDate: Cell<string>; visibleDays: Cell<number> }
+>((_, state) => {
+  const current = state.startDate.get();
+  const days = state.visibleDays.get();
+  if (current && days) {
+    state.startDate.set(addDays(current, -days));
+  }
+});
+
+const goNextHandler = handler<
+  unknown,
+  { startDate: Cell<string>; visibleDays: Cell<number> }
+>((_, state) => {
+  const current = state.startDate.get();
+  const days = state.visibleDays.get();
+  if (current && days) {
+    state.startDate.set(addDays(current, days));
+  }
+});
+
+const goTodayHandler = handler<
+  unknown,
+  { startDate: Cell<string>; visibleDays: Cell<number> }
+>((_, state) => {
+  const today = getTodayDate();
+  if (state.visibleDays.get() === 1) {
+    state.startDate.set(today);
+  } else {
+    state.startDate.set(getWeekStart(today));
+  }
+});
+
+// Day count handlers
+const setDays1Handler = handler<unknown, { visibleDays: Cell<number> }>(
+  (_, state) => {
+    state.visibleDays.set(1);
+  },
+);
+
+const setDays5Handler = handler<unknown, { visibleDays: Cell<number> }>(
+  (_, state) => {
+    state.visibleDays.set(5);
+  },
+);
+
+const setDays7Handler = handler<unknown, { visibleDays: Cell<number> }>(
+  (_, state) => {
+    state.visibleDays.set(7);
+  },
+);
+
+// Color handlers
+const setColor0Handler = handler<unknown, { formColor: Cell<string> }>(
+  (_, s) => s.formColor.set(COLORS[0]),
+);
+const setColor1Handler = handler<unknown, { formColor: Cell<string> }>(
+  (_, s) => s.formColor.set(COLORS[1]),
+);
+const setColor2Handler = handler<unknown, { formColor: Cell<string> }>(
+  (_, s) => s.formColor.set(COLORS[2]),
+);
+const setColor3Handler = handler<unknown, { formColor: Cell<string> }>(
+  (_, s) => s.formColor.set(COLORS[3]),
+);
+const setColor4Handler = handler<unknown, { formColor: Cell<string> }>(
+  (_, s) => s.formColor.set(COLORS[4]),
+);
+const setColor5Handler = handler<unknown, { formColor: Cell<string> }>(
+  (_, s) => s.formColor.set(COLORS[5]),
+);
+
+// Form handlers
+const openFormTodayHandler = handler<
+  unknown,
+  {
+    editingId: Cell<string | null>;
+    formTitle: Cell<string>;
+    formDate: Cell<string>;
+    formStartTime: Cell<string>;
+    formEndTime: Cell<string>;
+    formColor: Cell<string>;
+    showForm: Cell<boolean>;
+  }
+>((_, state) => {
+  state.editingId.set(null);
+  state.formTitle.set("");
+  state.formDate.set(getTodayDate());
+  state.formStartTime.set("09:00");
+  state.formEndTime.set("10:00");
+  state.formColor.set(COLORS[0]);
+  state.showForm.set(true);
+});
+
+const closeFormHandler = handler<unknown, { showForm: Cell<boolean> }>(
+  (_, state) => {
+    state.showForm.set(false);
+  },
+);
+
+const saveAppointment = handler<
+  unknown,
+  {
+    appointments: Cell<Appointment[]>;
+    editingId: Cell<string | null>;
+    formTitle: Cell<string>;
+    formDate: Cell<string>;
+    formStartTime: Cell<string>;
+    formEndTime: Cell<string>;
+    formColor: Cell<string>;
+    showForm: Cell<boolean>;
+  }
+>((_, state) => {
+  const title = state.formTitle.get().trim() || "Untitled";
+  const apt: Appointment = {
+    id: state.editingId.get() || generateId(),
+    title,
+    date: state.formDate.get(),
+    startTime: state.formStartTime.get(),
+    endTime: state.formEndTime.get(),
+    color: state.formColor.get(),
+    notes: "",
+  };
+  const current = state.appointments.get();
+  const existingIdx = current.findIndex((a) => a.id === apt.id);
+  if (existingIdx >= 0) {
+    const updated = [...current];
+    updated[existingIdx] = apt;
+    state.appointments.set(updated);
+  } else {
+    state.appointments.set([...current, apt]);
+  }
+  state.showForm.set(false);
+});
+
+const deleteAppointment = handler<
+  unknown,
+  {
+    appointments: Cell<Appointment[]>;
+    editingId: Cell<string | null>;
+    showForm: Cell<boolean>;
+  }
+>((_, state) => {
+  const id = state.editingId.get();
+  if (!id) return;
+  state.appointments.set(state.appointments.get().filter((a) => a.id !== id));
+  state.showForm.set(false);
+});
+
+const openEditHandler = handler<
+  unknown,
+  {
+    apt: Cell<Appointment>;
+    editingId: Cell<string | null>;
+    formTitle: Cell<string>;
+    formDate: Cell<string>;
+    formStartTime: Cell<string>;
+    formEndTime: Cell<string>;
+    formColor: Cell<string>;
+    showForm: Cell<boolean>;
+    lastDropTime: Cell<number>;
+  }
+>((_, state) => {
+  if (Date.now() - state.lastDropTime.get() < 300) return;
+  const a = state.apt.get();
+  state.editingId.set(a.id);
+  state.formTitle.set(a.title || "");
+  state.formDate.set(a.date);
+  state.formStartTime.set(a.startTime || "09:00");
+  state.formEndTime.set(a.endTime || "10:00");
+  state.formColor.set(a.color || COLORS[0]);
+  state.showForm.set(true);
+});
+
+const onStartTimeChange = handler<
+  { detail: { value: string } },
+  { formStartTime: Cell<string>; formEndTime: Cell<string> }
+>((e, state) => {
+  const newStart = e?.detail?.value || state.formStartTime.get();
+  if (newStart) {
+    state.formEndTime.set(addHoursToTime(newStart, 1));
+  }
+});
 
 // ============ PATTERN ============
 
 export default pattern<Input, Output>(({ appointments }) => {
-  // Navigation state - use input cells that persist
+  // Navigation state
   const startDate = Cell.of(getWeekStart(getTodayDate()));
   const visibleDays = Cell.of(7);
 
@@ -160,200 +334,6 @@ export default pattern<Input, Output>(({ appointments }) => {
 
   // Computed values
   const appointmentCount = computed(() => appointments.get().length);
-
-  // Navigation handlers - must use handler() for cell access
-  const goPrevHandler = handler<
-    unknown,
-    { startDate: Cell<string>; visibleDays: Cell<number> }
-  >(
-    (_, state) => {
-      const current = state.startDate.get();
-      const days = state.visibleDays.get();
-      if (current && days) {
-        state.startDate.set(addDays(current, -days));
-      }
-    },
-  );
-
-  const goNextHandler = handler<
-    unknown,
-    { startDate: Cell<string>; visibleDays: Cell<number> }
-  >(
-    (_, state) => {
-      const current = state.startDate.get();
-      const days = state.visibleDays.get();
-      if (current && days) {
-        state.startDate.set(addDays(current, days));
-      }
-    },
-  );
-
-  const goTodayHandler = handler<
-    unknown,
-    { startDate: Cell<string>; visibleDays: Cell<number> }
-  >(
-    (_, state) => {
-      const today = getTodayDate();
-      // In Day view (1 day), go to today; in Week view, go to week start
-      if (state.visibleDays.get() === 1) {
-        state.startDate.set(today);
-      } else {
-        state.startDate.set(getWeekStart(today));
-      }
-    },
-  );
-
-  // Specific handlers for each day count (can't pass data through onClick)
-  const setDays1Handler = handler<unknown, { visibleDays: Cell<number> }>(
-    (_, state) => {
-      state.visibleDays.set(1);
-    },
-  );
-  const setDays5Handler = handler<unknown, { visibleDays: Cell<number> }>(
-    (_, state) => {
-      state.visibleDays.set(5);
-    },
-  );
-  const setDays7Handler = handler<unknown, { visibleDays: Cell<number> }>(
-    (_, state) => {
-      state.visibleDays.set(7);
-    },
-  );
-
-  // Color handlers - one for each color
-  const setColor0Handler = handler<unknown, { formColor: Cell<string> }>((
-    _,
-    s,
-  ) => s.formColor.set(COLORS[0]));
-  const setColor1Handler = handler<unknown, { formColor: Cell<string> }>((
-    _,
-    s,
-  ) => s.formColor.set(COLORS[1]));
-  const setColor2Handler = handler<unknown, { formColor: Cell<string> }>((
-    _,
-    s,
-  ) => s.formColor.set(COLORS[2]));
-  const setColor3Handler = handler<unknown, { formColor: Cell<string> }>((
-    _,
-    s,
-  ) => s.formColor.set(COLORS[3]));
-  const setColor4Handler = handler<unknown, { formColor: Cell<string> }>((
-    _,
-    s,
-  ) => s.formColor.set(COLORS[4]));
-  const setColor5Handler = handler<unknown, { formColor: Cell<string> }>((
-    _,
-    s,
-  ) => s.formColor.set(COLORS[5]));
-
-  // Form open handler - for "+ Add" button (always uses today)
-  const openFormTodayHandler = handler<unknown, {
-    editingId: Cell<string | null>;
-    formTitle: Cell<string>;
-    formDate: Cell<string>;
-    formStartTime: Cell<string>;
-    formEndTime: Cell<string>;
-    formColor: Cell<string>;
-    showForm: Cell<boolean>;
-  }>((_, state) => {
-    state.editingId.set(null);
-    state.formTitle.set("");
-    state.formDate.set(getTodayDate());
-    state.formStartTime.set("09:00");
-    state.formEndTime.set("10:00");
-    state.formColor.set(COLORS[0]);
-    state.showForm.set(true);
-  });
-
-  const closeFormHandler = handler<unknown, { showForm: Cell<boolean> }>(
-    (_, state) => {
-      state.showForm.set(false);
-    },
-  );
-
-  // Save handler - needs handler() for proper cell binding
-  const saveAppointment = handler<unknown, {
-    appointments: Cell<Appointment[]>;
-    editingId: Cell<string | null>;
-    formTitle: Cell<string>;
-    formDate: Cell<string>;
-    formStartTime: Cell<string>;
-    formEndTime: Cell<string>;
-    formColor: Cell<string>;
-    showForm: Cell<boolean>;
-  }>((_, state) => {
-    const title = state.formTitle.get().trim() || "Untitled";
-
-    const apt: Appointment = {
-      id: state.editingId.get() || generateId(),
-      title,
-      date: state.formDate.get(),
-      startTime: state.formStartTime.get(),
-      endTime: state.formEndTime.get(),
-      color: state.formColor.get(),
-      notes: "",
-    };
-
-    const current = state.appointments.get();
-    const existingIdx = current.findIndex((a) => a.id === apt.id);
-    if (existingIdx >= 0) {
-      const updated = [...current];
-      updated[existingIdx] = apt;
-      state.appointments.set(updated);
-    } else {
-      state.appointments.set([...current, apt]);
-    }
-    state.showForm.set(false);
-  });
-
-  const deleteAppointment = handler<unknown, {
-    appointments: Cell<Appointment[]>;
-    editingId: Cell<string | null>;
-    showForm: Cell<boolean>;
-  }>((_, state) => {
-    const id = state.editingId.get();
-    if (!id) return;
-    state.appointments.set(state.appointments.get().filter((a) => a.id !== id));
-    state.showForm.set(false);
-  });
-
-  // Handler for opening edit form - takes apt cell as state (must be outside map!)
-  const openEditHandler = handler<unknown, {
-    apt: Cell<Appointment>;
-    editingId: Cell<string | null>;
-    formTitle: Cell<string>;
-    formDate: Cell<string>;
-    formStartTime: Cell<string>;
-    formEndTime: Cell<string>;
-    formColor: Cell<string>;
-    showForm: Cell<boolean>;
-    lastDropTime: Cell<number>;
-  }>((_, state) => {
-    if (Date.now() - state.lastDropTime.get() < 300) return;
-    const a = state.apt.get();
-    state.editingId.set(a.id);
-    state.formTitle.set(a.title || "");
-    state.formDate.set(a.date);
-    state.formStartTime.set(a.startTime || "09:00");
-    state.formEndTime.set(a.endTime || "10:00");
-    state.formColor.set(a.color || COLORS[0]);
-    state.showForm.set(true);
-  });
-
-  // Handler for start time changes - auto-updates end time to start + 1 hour
-  const onStartTimeChange = handler<
-    { detail: { value: string } },
-    { formStartTime: Cell<string>; formEndTime: Cell<string> }
-  >((e, state) => {
-    const newStart = e?.detail?.value || state.formStartTime.get();
-    if (newStart) {
-      state.formEndTime.set(addHoursToTime(newStart, 1));
-    }
-  });
-  const boundStartTimeChange = onStartTimeChange({
-    formStartTime,
-    formEndTime,
-  });
 
   // Bound handlers
   const formState = {
@@ -384,8 +364,12 @@ export default pattern<Input, Output>(({ appointments }) => {
     setColor4Handler({ formColor }),
     setColor5Handler({ formColor }),
   ];
+  const boundStartTimeChange = onStartTimeChange({
+    formStartTime,
+    formEndTime,
+  });
 
-  // Build hour data (static) - includes pre-computed values for click handlers
+  // Build hour data
   const hours: Array<{ idx: number; label: string; startTime: string }> = [];
   for (let h = DAY_START; h < DAY_END; h++) {
     const period = h >= 12 ? "PM" : "AM";
@@ -395,12 +379,10 @@ export default pattern<Input, Output>(({ appointments }) => {
   }
 
   const gridHeight = (DAY_END - DAY_START) * HOUR_HEIGHT;
-
-  // Static array of column indices 0-6 for rendering
   const columnIndices = [0, 1, 2, 3, 4, 5, 6];
 
-  // Always compute a full week of dates (7 days) - we'll show/hide columns via CSS
-  const allWeekDates = computed(() => getWeekDates(startDate.get(), 7));
+  // Computed week dates (kept for potential future use)
+  const _allWeekDates = computed(() => getWeekDates(startDate.get(), 7));
 
   return {
     [NAME]: "Weekly Calendar",
@@ -544,7 +526,7 @@ export default pattern<Input, Output>(({ appointments }) => {
             position: "relative",
           }}
         >
-          {/* Form modal - fixed to viewport */}
+          {/* Form modal */}
           {ifElse(
             showForm,
             <div
@@ -779,42 +761,42 @@ export default pattern<Input, Output>(({ appointments }) => {
                   ))}
                 </div>
 
-                {/* Day columns - always render 7, show/hide via CSS for fast switching */}
+                {/* Day columns */}
                 {columnIndices.map((colIdx) => {
-                  // Get date and visibility for this column via lift
-                  const columnData = lift((
-                    args: { dates: string[]; days: number; idx: number },
-                  ) => ({
-                    date: args.dates[args.idx] || "",
-                    isVisible: args.idx < args.days,
-                    isToday: args.dates[args.idx] === getTodayDate(),
-                    dateHeader: args.dates[args.idx]
-                      ? formatDateHeader(args.dates[args.idx])
-                      : "",
-                  }))({ dates: allWeekDates, days: visibleDays, idx: colIdx });
+                  // Use computed() for column data - closures capture cells automatically
+                  const _columnDate = computed(() => {
+                    const dates = getWeekDates(startDate.get(), 7);
+                    return dates[colIdx] || "";
+                  });
+                  const _isVisible = computed(() => colIdx < visibleDays.get());
+                  const isToday = computed(() => {
+                    const dates = getWeekDates(startDate.get(), 7);
+                    return dates[colIdx] === getTodayDate();
+                  });
+                  const dateHeader = computed(() => {
+                    const dates = getWeekDates(startDate.get(), 7);
+                    const d = dates[colIdx];
+                    return d ? formatDateHeader(d) : "";
+                  });
 
-                  const isVisible = lift((d: { isVisible: boolean }) =>
-                    d.isVisible
-                  )(columnData);
-                  const isToday = lift((d: { isToday: boolean }) => d.isToday)(
-                    columnData,
+                  // Computed styles - reference cells directly, not computed values
+                  const displayStyle = computed(() =>
+                    colIdx < visibleDays.get() ? "flex" : "none"
                   );
-                  const dateHeader = lift((d: { dateHeader: string }) =>
-                    d.dateHeader
-                  )(columnData);
+                  const headerBg = computed(() => {
+                    const dates = getWeekDates(startDate.get(), 7);
+                    return dates[colIdx] === getTodayDate()
+                      ? "#eff6ff"
+                      : "transparent";
+                  });
+                  const headerColor = computed(() => {
+                    const dates = getWeekDates(startDate.get(), 7);
+                    return dates[colIdx] === getTodayDate()
+                      ? "#2563eb"
+                      : "#374151";
+                  });
 
-                  // Visibility style
-                  const displayStyle = lift((visible: boolean) =>
-                    visible ? "flex" : "none"
-                  )(isVisible);
-                  const headerBg = lift((today: boolean) =>
-                    today ? "#eff6ff" : "transparent"
-                  )(isToday);
-                  const headerColor = lift((today: boolean) =>
-                    today ? "#2563eb" : "#374151"
-                  )(isToday);
-
-                  // Drop handler for moving appointments - uses colIdx (static)
+                  // Drop handler for moving appointments
                   const handleDayDrop = action(
                     (
                       e: {
@@ -843,12 +825,13 @@ export default pattern<Input, Output>(({ appointments }) => {
                       const newMin = (slotIdx % 2) * 30;
                       const newTime = `${
                         Math.min(DAY_END - 1, Math.max(DAY_START, newHour))
-                          .toString().padStart(2, "0")
+                          .toString()
+                          .padStart(2, "0")
                       }:${newMin.toString().padStart(2, "0")}`;
 
                       const current = appointments.get();
-                      const aptIdx = current.findIndex((a: Appointment) =>
-                        a.id === apt.id
+                      const aptIdx = current.findIndex(
+                        (a: Appointment) => a.id === apt.id,
                       );
                       if (aptIdx < 0) return;
 
@@ -856,8 +839,6 @@ export default pattern<Input, Output>(({ appointments }) => {
                       const dateVal = getWeekDates(startDate.get(), 7)[colIdx];
 
                       if (dragType === "appointment-resize") {
-                        // Resize: only change end time, keep start time fixed
-                        // Add offset to make drop feel more natural (cursor tip vs bottom of drag ghost)
                         const adjustedY = relativeY + SLOT_HEIGHT / 2;
                         const resizeSlotIdx = Math.max(
                           0,
@@ -866,25 +847,21 @@ export default pattern<Input, Output>(({ appointments }) => {
                         const resizeHour = DAY_START +
                           Math.floor(resizeSlotIdx / 2);
                         const resizeMin = (resizeSlotIdx % 2) * 30;
-
                         const startMin = timeToMinutes(
                           apt.startTime || "09:00",
                         );
                         const newEndMin = resizeHour * 60 + resizeMin;
-                        // Ensure end is after start (minimum 30 min duration)
                         const minEndMin = startMin + 30;
                         const finalEndMin = Math.max(minEndMin, newEndMin);
                         const finalEndHour = Math.floor(finalEndMin / 60);
                         const finalEndMinute = finalEndMin % 60;
                         const newEndTime = `${
-                          Math.min(DAY_END, finalEndHour).toString().padStart(
-                            2,
-                            "0",
-                          )
+                          Math.min(DAY_END, finalEndHour)
+                            .toString()
+                            .padStart(2, "0")
                         }:${finalEndMinute.toString().padStart(2, "0")}`;
                         updated[aptIdx] = { ...apt, endTime: newEndTime };
                       } else {
-                        // Move: change both start and end, preserving duration
                         const oldStartMin = timeToMinutes(
                           apt.startTime || "09:00",
                         );
@@ -904,7 +881,7 @@ export default pattern<Input, Output>(({ appointments }) => {
                     },
                   );
 
-                  // Click handler for creating appointments at specific hours
+                  // Click handlers for creating appointments
                   const createClickHandlers = hours.map((hour) =>
                     action(() => {
                       if (Date.now() - lastDropTime.get() < 300) return;
@@ -952,7 +929,9 @@ export default pattern<Input, Output>(({ appointments }) => {
                         </div>
                         {ifElse(
                           isToday,
-                          <div style={{ fontSize: "0.6rem", color: "#3b82f6" }}>
+                          <div
+                            style={{ fontSize: "0.6rem", color: "#3b82f6" }}
+                          >
                             Today
                           </div>,
                           null,
@@ -986,99 +965,54 @@ export default pattern<Input, Output>(({ appointments }) => {
 
                 {/* Draggable appointment blocks */}
                 {appointments.map((apt) => {
-                  // Height for resize handle area
-                  const RESIZE_HANDLE_HEIGHT = 14;
+                  // Compute all position/styles in one computed object
+                  // This avoids chaining computed() calls which can't have .get() called
+                  const styles = computed(() => {
+                    const weekStart = startDate.get();
+                    const visibleCount = visibleDays.get();
+                    const aptDate = apt.date;
+                    const aptStart = apt.startTime;
+                    const aptEnd = apt.endTime;
 
-                  // Calculate position using lift
-                  const posData = lift((args: {
-                    weekStart: string;
-                    visibleCount: number;
-                    aptDate: string;
-                    aptStart: string;
-                    aptEnd: string;
-                  }) => {
-                    if (!args.aptDate || !args.weekStart) return null;
-                    const startMs = new Date(args.weekStart + "T00:00:00")
-                      .getTime();
-                    const aptMs = new Date(args.aptDate + "T00:00:00")
-                      .getTime();
-                    if (isNaN(startMs) || isNaN(aptMs)) return null;
+                    // Default hidden styles
+                    const hidden = {
+                      top: "0",
+                      height: "0",
+                      left: "0",
+                      width: "0",
+                      display: "none" as const,
+                    };
+
+                    if (!aptDate || !weekStart) return hidden;
+                    const startMs = new Date(weekStart + "T00:00:00").getTime();
+                    const aptMs = new Date(aptDate + "T00:00:00").getTime();
+                    if (isNaN(startMs) || isNaN(aptMs)) return hidden;
                     const dayOffset = Math.floor(
                       (aptMs - startMs) / (24 * 60 * 60 * 1000),
                     );
-                    if (
-                      dayOffset < 0 || dayOffset >= args.visibleCount
-                    ) return null;
-                    const startMin = timeToMinutes(args.aptStart || "09:00") -
+                    if (dayOffset < 0 || dayOffset >= visibleCount) {
+                      return hidden;
+                    }
+
+                    const startMin = timeToMinutes(aptStart || "09:00") -
                       DAY_START * 60;
-                    const endMin = timeToMinutes(args.aptEnd || "10:00") -
+                    const endMin = timeToMinutes(aptEnd || "10:00") -
                       DAY_START * 60;
                     const top = (startMin / 60) * HOUR_HEIGHT;
                     const height = Math.max(
                       30,
                       ((endMin - startMin) / 60) * HOUR_HEIGHT,
                     );
-                    return {
-                      colIdx: dayOffset,
-                      top,
-                      height,
-                      count: args.visibleCount,
-                    };
-                  })({
-                    weekStart: startDate,
-                    visibleCount: visibleDays,
-                    aptDate: apt.date,
-                    aptStart: apt.startTime,
-                    aptEnd: apt.endTime,
-                  });
 
-                  // Derive styles from posData
-                  const topStyle = lift((
-                    p: {
-                      colIdx: number;
-                      top: number;
-                      height: number;
-                      count: number;
-                    } | null,
-                  ) => p ? `${50 + p.top}px` : "0")(posData);
-                  const heightStyle = lift((
-                    p: {
-                      colIdx: number;
-                      top: number;
-                      height: number;
-                      count: number;
-                    } | null,
-                  ) => p ? `${p.height}px` : "0")(posData);
-                  const leftStyle = lift((
-                    p: {
-                      colIdx: number;
-                      top: number;
-                      height: number;
-                      count: number;
-                    } | null,
-                  ) =>
-                    p
-                      ? `calc(50px + (100% - 50px) * ${p.colIdx} / ${p.count} + 2px)`
-                      : "0"
-                  )(posData);
-                  const widthStyle = lift((
-                    p: {
-                      colIdx: number;
-                      top: number;
-                      height: number;
-                      count: number;
-                    } | null,
-                  ) => p ? `calc((100% - 50px) / ${p.count} - 4px)` : "0")(
-                    posData,
-                  );
-                  const displayStyle = lift((
-                    p: {
-                      colIdx: number;
-                      top: number;
-                      height: number;
-                      count: number;
-                    } | null,
-                  ) => p !== null ? "block" : "none")(posData);
+                    return {
+                      top: `${50 + top}px`,
+                      height: `${height}px`,
+                      left:
+                        `calc(50px + (100% - 50px) * ${dayOffset} / ${visibleCount} + 2px)`,
+                      width: `calc((100% - 50px) / ${visibleCount} - 4px)`,
+                      display: "block" as const,
+                    };
+                  });
 
                   // Bind the edit handler
                   const openEdit = openEditHandler({
@@ -1093,45 +1027,51 @@ export default pattern<Input, Output>(({ appointments }) => {
                     lastDropTime,
                   });
 
-                  // WORKAROUND: Wrap static children in lift() to make them reactive
-                  // (See file header comment for explanation of CT runtime bug)
-                  const resizeHandleLines = lift((_id: string) => (
-                    <div
-                      style={{
-                        width: "20px",
-                        height: "4px",
-                        borderTop: "1px solid rgba(0,0,0,0.2)",
-                        borderBottom: "1px solid rgba(0,0,0,0.2)",
-                        pointerEvents: "none",
-                      }}
-                    />
-                  ))(apt.id);
+                  // WORKAROUND: Use computed() with apt.id dependency for static children
+                  // This ensures the runtime properly renders for dynamically added items
+                  const resizeHandleLines = computed(() => {
+                    const _id = apt.id; // Reference apt.id to create dependency
+                    return (
+                      <div
+                        style={{
+                          width: "20px",
+                          height: "4px",
+                          borderTop: "1px solid rgba(0,0,0,0.2)",
+                          borderBottom: "1px solid rgba(0,0,0,0.2)",
+                          pointerEvents: "none",
+                        }}
+                      />
+                    );
+                  });
 
-                  const dragAreaContent = lift((_id: string) => (
-                    <div
-                      style={{
-                        width: "100%",
-                        minHeight: "200px",
-                        touchAction: "none",
-                      }}
-                    />
-                  ))(apt.id);
+                  const dragAreaContent = computed(() => {
+                    const _id = apt.id; // Reference apt.id to create dependency
+                    return (
+                      <div
+                        style={{
+                          width: "100%",
+                          minHeight: "200px",
+                          touchAction: "none",
+                        }}
+                      />
+                    );
+                  });
 
                   return (
                     <div
                       style={{
                         position: "absolute",
-                        top: topStyle,
-                        left: leftStyle,
-                        width: widthStyle,
-                        height: heightStyle,
-                        minHeight: heightStyle,
+                        top: styles.top,
+                        left: styles.left,
+                        width: styles.width,
+                        height: styles.height,
+                        minHeight: styles.height,
                         zIndex: "2",
                         backgroundColor: apt.color || COLORS[0],
                         borderRadius: "4px",
                         borderLeft: "3px solid rgba(0,0,0,0.2)",
                         overflow: "hidden",
-                        display: displayStyle,
+                        display: styles.display,
                       }}
                     >
                       {/* Title */}
