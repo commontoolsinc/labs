@@ -527,206 +527,188 @@ export default pattern<Input, Output>(({ appointments }) => {
           }}
         >
           {/* Form modal */}
-          {ifElse(
-            showForm,
+          <ct-modal
+            $open={showForm}
+            dismissable
+            size="sm"
+            label="Appointment Form"
+          >
+            <span slot="header">
+              {ifElse(
+                computed(() => editingId.get() != null),
+                "Edit",
+                "New",
+              )} Appointment
+            </span>
+
             <div
-              style={{
-                position: "fixed",
-                top: "0",
-                left: "0",
-                right: "0",
-                bottom: "0",
-                backgroundColor: "rgba(0,0,0,0.3)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                zIndex: "1000",
-              }}
+              style={{ display: "flex", flexDirection: "column", gap: "12px" }}
             >
-              <div
-                style={{
-                  padding: "16px",
-                  backgroundColor: "#fff",
-                  borderRadius: "8px",
-                  boxShadow: "0 4px 6px rgba(0,0,0,0.1)",
-                  minWidth: "280px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "12px",
-                }}
-              >
-                <div style={{ fontWeight: "600" }}>
-                  {ifElse(
-                    computed(() => editingId.get() != null),
-                    "Edit",
-                    "New",
-                  )} Appointment
-                </div>
-                <div>
-                  <label
-                    style={{
-                      fontSize: "0.75rem",
-                      fontWeight: "500",
-                      display: "block",
-                      marginBottom: "4px",
-                    }}
-                  >
-                    Title
-                  </label>
-                  <ct-input
-                    $value={formTitle}
-                    placeholder="Title..."
-                    style={{ width: "100%" }}
-                    onct-submit={boundSave}
-                  />
-                </div>
-                <div>
-                  <label
-                    style={{
-                      fontSize: "0.75rem",
-                      fontWeight: "500",
-                      display: "block",
-                      marginBottom: "4px",
-                    }}
-                  >
-                    Date
-                  </label>
-                  <ct-input
-                    $value={formDate}
-                    type="date"
-                    style={{ width: "100%" }}
-                  />
-                </div>
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <div style={{ flex: 1 }}>
-                    <label
-                      style={{
-                        fontSize: "0.75rem",
-                        fontWeight: "500",
-                        display: "block",
-                        marginBottom: "4px",
-                      }}
-                    >
-                      Start
-                    </label>
-                    <ct-input
-                      $value={formStartTime}
-                      type="time"
-                      style={{ width: "100%" }}
-                      onct-change={boundStartTimeChange}
-                    />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <label
-                      style={{
-                        fontSize: "0.75rem",
-                        fontWeight: "500",
-                        display: "block",
-                        marginBottom: "4px",
-                      }}
-                    >
-                      End
-                    </label>
-                    <ct-input
-                      $value={formEndTime}
-                      type="time"
-                      style={{ width: "100%" }}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label
-                    style={{
-                      fontSize: "0.75rem",
-                      fontWeight: "500",
-                      display: "block",
-                      marginBottom: "4px",
-                    }}
-                  >
-                    Color
-                  </label>
-                  <div style={{ display: "flex", gap: "6px" }}>
-                    {COLORS.map((c, idx) => (
-                      <div
-                        style={{
-                          width: "24px",
-                          height: "24px",
-                          backgroundColor: c,
-                          borderRadius: "4px",
-                          cursor: "pointer",
-                          border: ifElse(
-                            computed(() => formColor.get() === c),
-                            "2px solid #111",
-                            "2px solid transparent",
-                          ),
-                        }}
-                        onClick={boundColors[idx]}
-                      />
-                    ))}
-                  </div>
-                </div>
-                <div
+              <div>
+                <label
                   style={{
-                    display: "flex",
-                    gap: "8px",
-                    justifyContent: "flex-end",
-                    marginTop: "8px",
+                    fontSize: "0.75rem",
+                    fontWeight: "500",
+                    display: "block",
+                    marginBottom: "4px",
                   }}
                 >
-                  {ifElse(
-                    computed(() => editingId.get() != null),
-                    <button
-                      type="button"
-                      style={{
-                        padding: "6px 12px",
-                        fontSize: "0.75rem",
-                        border: "none",
-                        borderRadius: "4px",
-                        backgroundColor: "#fee2e2",
-                        color: "#dc2626",
-                        cursor: "pointer",
-                      }}
-                      onClick={boundDelete}
-                    >
-                      Delete
-                    </button>,
-                    null,
-                  )}
-                  <div style={{ flex: 1 }} />
-                  <button
-                    type="button"
+                  Title
+                </label>
+                <ct-input
+                  $value={formTitle}
+                  placeholder="Title..."
+                  style={{ width: "100%" }}
+                  onct-submit={boundSave}
+                />
+              </div>
+              <div>
+                <label
+                  style={{
+                    fontSize: "0.75rem",
+                    fontWeight: "500",
+                    display: "block",
+                    marginBottom: "4px",
+                  }}
+                >
+                  Date
+                </label>
+                <ct-input
+                  $value={formDate}
+                  type="date"
+                  style={{ width: "100%" }}
+                />
+              </div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <div style={{ flex: 1 }}>
+                  <label
                     style={{
-                      padding: "6px 12px",
                       fontSize: "0.75rem",
-                      border: "1px solid #d1d5db",
-                      borderRadius: "4px",
-                      backgroundColor: "#fff",
-                      cursor: "pointer",
+                      fontWeight: "500",
+                      display: "block",
+                      marginBottom: "4px",
                     }}
-                    onClick={boundCloseForm}
                   >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
+                    Start
+                  </label>
+                  <ct-input
+                    $value={formStartTime}
+                    type="time"
+                    style={{ width: "100%" }}
+                    onct-change={boundStartTimeChange}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label
                     style={{
-                      padding: "6px 12px",
                       fontSize: "0.75rem",
-                      border: "none",
-                      borderRadius: "4px",
-                      backgroundColor: "#3b82f6",
-                      color: "#fff",
-                      cursor: "pointer",
+                      fontWeight: "500",
+                      display: "block",
+                      marginBottom: "4px",
                     }}
-                    onClick={boundSave}
                   >
-                    Save
-                  </button>
+                    End
+                  </label>
+                  <ct-input
+                    $value={formEndTime}
+                    type="time"
+                    style={{ width: "100%" }}
+                  />
                 </div>
               </div>
-            </div>,
-            null,
-          )}
+              <div>
+                <label
+                  style={{
+                    fontSize: "0.75rem",
+                    fontWeight: "500",
+                    display: "block",
+                    marginBottom: "4px",
+                  }}
+                >
+                  Color
+                </label>
+                <div style={{ display: "flex", gap: "6px" }}>
+                  {COLORS.map((c, idx) => (
+                    <div
+                      style={{
+                        width: "24px",
+                        height: "24px",
+                        backgroundColor: c,
+                        borderRadius: "4px",
+                        cursor: "pointer",
+                        border: ifElse(
+                          computed(() => formColor.get() === c),
+                          "2px solid #111",
+                          "2px solid transparent",
+                        ),
+                      }}
+                      onClick={boundColors[idx]}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div
+              slot="footer"
+              style={{
+                display: "flex",
+                gap: "8px",
+                justifyContent: "flex-end",
+                width: "100%",
+              }}
+            >
+              {ifElse(
+                computed(() => editingId.get() != null),
+                <button
+                  type="button"
+                  style={{
+                    padding: "6px 12px",
+                    fontSize: "0.75rem",
+                    border: "none",
+                    borderRadius: "4px",
+                    backgroundColor: "#fee2e2",
+                    color: "#dc2626",
+                    cursor: "pointer",
+                  }}
+                  onClick={boundDelete}
+                >
+                  Delete
+                </button>,
+                null,
+              )}
+              <div style={{ flex: 1 }} />
+              <button
+                type="button"
+                style={{
+                  padding: "6px 12px",
+                  fontSize: "0.75rem",
+                  border: "1px solid #d1d5db",
+                  borderRadius: "4px",
+                  backgroundColor: "#fff",
+                  cursor: "pointer",
+                }}
+                onClick={boundCloseForm}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                style={{
+                  padding: "6px 12px",
+                  fontSize: "0.75rem",
+                  border: "none",
+                  borderRadius: "4px",
+                  backgroundColor: "#3b82f6",
+                  color: "#fff",
+                  cursor: "pointer",
+                }}
+                onClick={boundSave}
+              >
+                Save
+              </button>
+            </div>
+          </ct-modal>
 
           {/* Calendar grid */}
           <div
