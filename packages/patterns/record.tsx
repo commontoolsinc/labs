@@ -1408,13 +1408,12 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 minHeight: isExpanded ? "0" : "auto",
                               }}
                             >
-                              <ct-render
-                                $cell={entry.charm}
-                                variant={getDefinition(entry.type)
-                                    ?.hasEmbeddedUI
-                                  ? "embedded"
-                                  : undefined}
-                              />
+                              {computed(() => {
+                                const charm = entry.charm as any;
+                                // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
+                                return charm?.embeddedUI ??
+                                  <ct-render $cell={entry.charm} />;
+                              })}
                             </div>,
                             null,
                           )}
@@ -1694,13 +1693,12 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   minHeight: isExpanded ? "0" : "auto",
                                 }}
                               >
-                                <ct-render
-                                  $cell={entry.charm}
-                                  variant={getDefinition(entry.type)
-                                      ?.hasEmbeddedUI
-                                    ? "embedded"
-                                    : undefined}
-                                />
+                                {computed(() => {
+                                  const charm = entry.charm as any;
+                                  // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
+                                  return charm?.embeddedUI ??
+                                    <ct-render $cell={entry.charm} />;
+                                })}
                               </div>,
                               null,
                             )}
@@ -1973,12 +1971,12 @@ const Record = pattern<RecordInput, RecordOutput>(
                               minHeight: isExpanded ? "0" : "auto",
                             }}
                           >
-                            <ct-render
-                              $cell={entry.charm}
-                              variant={getDefinition(entry.type)?.hasEmbeddedUI
-                                ? "embedded"
-                                : undefined}
-                            />
+                            {computed(() => {
+                              const charm = entry.charm as any;
+                              // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
+                              return charm?.embeddedUI ??
+                                <ct-render $cell={entry.charm} />;
+                            })}
                           </div>,
                           null,
                         )}
