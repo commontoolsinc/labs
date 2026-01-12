@@ -578,7 +578,7 @@ export default pattern<Input, Output>(({ appointments }) => {
                     if (aptIdx < 0) return;
 
                     const updated = [...current];
-                    const dateVal = weekDates[colIdx];
+                    const dateVal = getWeekDates(startDate.get(), 7)[colIdx];
 
                     if (dragType === "appointment-resize") {
                       const adjustedY = relativeY + SLOT_HEIGHT / 2;
@@ -621,7 +621,7 @@ export default pattern<Input, Output>(({ appointments }) => {
                       if (Date.now() - lastDropTime.get() < 300) return;
                       editingId.set(null);
                       formTitle.set("");
-                      formDate.set(columnDate);
+                      formDate.set(getWeekDates(startDate.get(), 7)[colIdx]);
                       formStartTime.set(hour.startTime);
                       formEndTime.set(addHoursToTime(hour.startTime, 1));
                       formColor.set(COLORS[0]);
