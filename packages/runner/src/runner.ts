@@ -1439,7 +1439,7 @@ export class Runner {
             argument !== undefined;
 
           if (!isValidArgument) {
-            logger.info(
+            logger.debug(
               "action",
               () => [
                 "action argument is undefined (potential schema mismatch) -- not running",
