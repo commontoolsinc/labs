@@ -129,6 +129,9 @@ export default pattern((cell) => {
                     type: "object",
                     properties: {}
                 }, {
+                    type: "object",
+                    properties: {}
+                }, {
                     type: "array",
                     items: {
                         $ref: "#/$defs/RenderNode"

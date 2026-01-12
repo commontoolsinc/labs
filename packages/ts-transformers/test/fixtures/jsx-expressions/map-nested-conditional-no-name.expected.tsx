@@ -70,6 +70,9 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                     type: "object",
                     properties: {}
                 }, {
+                    type: "object",
+                    properties: {}
+                }, {
                     type: "array",
                     items: {
                         $ref: "#/$defs/RenderNode"
@@ -375,6 +378,9 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                                 "enum": [true]
                             }, {
                                 $ref: "#/$defs/VNode"
+                            }, {
+                                type: "object",
+                                properties: {}
                             }, {
                                 type: "object",
                                 properties: {}

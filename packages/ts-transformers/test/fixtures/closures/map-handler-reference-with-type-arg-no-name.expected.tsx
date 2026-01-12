@@ -127,6 +127,9 @@ export default recipe({
                     type: "object",
                     properties: {}
                 }, {
+                    type: "object",
+                    properties: {}
+                }, {
                     type: "array",
                     items: {
                         $ref: "#/$defs/RenderNode"
@@ -264,6 +267,9 @@ export default recipe({
                                 "enum": [true]
                             }, {
                                 $ref: "#/$defs/VNode"
+                            }, {
+                                type: "object",
+                                properties: {}
                             }, {
                                 type: "object",
                                 properties: {}

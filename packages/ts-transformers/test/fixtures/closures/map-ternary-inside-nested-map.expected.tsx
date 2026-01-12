@@ -459,6 +459,9 @@ export default pattern(({ items, showInactive }) => {
                             type: "object",
                             properties: {}
                         }, {
+                            type: "object",
+                            properties: {}
+                        }, {
                             type: "array",
                             items: {
                                 $ref: "#/$defs/RenderNode"
@@ -604,6 +607,9 @@ export default pattern(({ items, showInactive }) => {
                             "enum": [true]
                         }, {
                             $ref: "#/$defs/VNode"
+                        }, {
+                            type: "object",
+                            properties: {}
                         }, {
                             type: "object",
                             properties: {}
@@ -772,6 +778,9 @@ export default pattern(({ items, showInactive }) => {
                                 "enum": [true]
                             }, {
                                 $ref: "#/$defs/VNode"
+                            }, {
+                                type: "object",
+                                properties: {}
                             }, {
                                 type: "object",
                                 properties: {}
@@ -973,6 +982,9 @@ export default pattern(({ items, showInactive }) => {
                     "enum": [true]
                 }, {
                     $ref: "#/$defs/VNode"
+                }, {
+                    type: "object",
+                    properties: {}
                 }, {
                     type: "object",
                     properties: {}

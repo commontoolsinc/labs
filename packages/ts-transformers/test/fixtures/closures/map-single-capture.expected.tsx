@@ -100,6 +100,9 @@ export default pattern((state) => {
                                 type: "object",
                                 properties: {}
                             }, {
+                                type: "object",
+                                properties: {}
+                            }, {
                                 type: "array",
                                 items: {
                                     $ref: "#/$defs/RenderNode"
@@ -265,6 +268,9 @@ export default pattern((state) => {
                     "enum": [true]
                 }, {
                     $ref: "#/$defs/VNode"
+                }, {
+                    type: "object",
+                    properties: {}
                 }, {
                     type: "object",
                     properties: {}

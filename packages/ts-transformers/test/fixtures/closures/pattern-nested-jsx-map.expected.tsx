@@ -455,6 +455,9 @@ export default pattern(({ items }) => {
                             type: "object",
                             properties: {}
                         }, {
+                            type: "object",
+                            properties: {}
+                        }, {
                             type: "array",
                             items: {
                                 $ref: "#/$defs/RenderNode"
@@ -595,6 +598,9 @@ export default pattern(({ items }) => {
                             type: "object",
                             properties: {}
                         }, {
+                            type: "object",
+                            properties: {}
+                        }, {
                             type: "array",
                             items: {
                                 $ref: "#/$defs/RenderNode"
@@ -731,6 +737,9 @@ export default pattern(({ items }) => {
                                 "enum": [true]
                             }, {
                                 $ref: "#/$defs/VNode"
+                            }, {
+                                type: "object",
+                                properties: {}
                             }, {
                                 type: "object",
                                 properties: {}
@@ -930,6 +939,9 @@ export default pattern(({ items }) => {
                     type: "object",
                     properties: {}
                 }, {
+                    type: "object",
+                    properties: {}
+                }, {
                     type: "array",
                     items: {
                         $ref: "#/$defs/RenderNode"
@@ -973,4 +985,3 @@ export default pattern(({ items }) => {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
-

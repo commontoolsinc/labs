@@ -108,6 +108,9 @@ export default pattern((state) => {
                                 type: "object",
                                 properties: {}
                             }, {
+                                type: "object",
+                                properties: {}
+                            }, {
                                 type: "array",
                                 items: {
                                     $ref: "#/$defs/RenderNode"
@@ -392,6 +395,9 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }, {
+                    type: "object",
+                    properties: {}
+                }, {
                     type: "array",
                     items: {
                         $ref: "#/$defs/RenderNode"
@@ -435,4 +441,3 @@ export default pattern((state) => {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
-
