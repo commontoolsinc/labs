@@ -407,7 +407,7 @@ export class RuntimeProcessor {
     // Get favorites cell and resolve it
     // NOTE: Handler invocation doesn't work - the handler never gets triggered.
     // Using direct cell modification instead.
-    // TODO: Investigate why handler streams aren't triggering from RuntimeProcessor
+    // TODO(ben): Investigate why handler streams aren't triggering from RuntimeProcessor
     //
     // Here's what we tried (handler in home.tsx never runs):
     // ```
