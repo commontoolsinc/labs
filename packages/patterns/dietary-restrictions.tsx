@@ -1314,7 +1314,7 @@ const _addRestriction = handler<
 
 const removeRestriction = handler<
   unknown,
-  { restrictions: Writable<RestrictionEntry[]>; index: number }
+  { restrictions: Writable<RestrictionInput[]>; index: number }
 >((_event, { restrictions, index }) => {
   // Use raw index directly since UI iterates over raw restrictions array
   const current = restrictions.get() || [];
@@ -1348,7 +1348,7 @@ const _selectSuggestion = handler<
 const onSelectRestriction = handler<
   CustomEvent<{ value: string; label: string; isCustom?: boolean }>,
   {
-    restrictions: Writable<RestrictionEntry[]>;
+    restrictions: Writable<RestrictionInput[]>;
     selectedLevel: Writable<RestrictionLevel>;
   }
 >((event, { restrictions, selectedLevel }) => {

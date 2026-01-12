@@ -11,9 +11,9 @@ interface NestedComputedTotalsArgs {
 }
 
 interface SubtotalGroupArgs {
-  label: Default<string, "">;
-  values: Default<number[], []>;
-  index: Default<number, 0>;
+  label?: Default<string, "">;
+  values?: Default<number[], []>;
+  index?: Default<number, 0>;
 }
 
 interface AppendGroupValueEvent {
@@ -136,7 +136,7 @@ const subtotalGroup = recipe<SubtotalGroupArgs>(
 
 const instantiateGroups = lift<
   { groups: Cell<SubtotalGroupSeed[]> },
-  SubtotalGroupArgs[]
+  ReturnType<typeof subtotalGroup>[]
 >(
   ({ groups }) => {
     const raw = groups.get();

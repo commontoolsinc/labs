@@ -471,7 +471,7 @@ const saveNote = handler<
 
 // Close the note editor without saving
 const closeNoteEditor = handler<
-  unknown,
+  { reason: string },
   {
     editingNoteIndex: Writable<number | undefined>;
     editingNoteText: Writable<string | undefined>;
@@ -494,7 +494,7 @@ const openSettings = handler<
 
 // Close the settings modal
 const closeSettings = handler<
-  unknown,
+  { reason: string },
   { settingsModuleIndex: Writable<number | undefined> }
 >((_event, { settingsModuleIndex }) => {
   settingsModuleIndex.set(undefined);

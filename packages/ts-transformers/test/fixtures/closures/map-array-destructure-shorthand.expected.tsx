@@ -100,10 +100,15 @@ export default recipe({
                     type: "object",
                     properties: {}
                 }, {
+                    type: "object",
+                    properties: {}
+                }, {
                     type: "array",
                     items: {
                         $ref: "#/$defs/RenderNode"
                     }
+                }, {
+                    type: "null"
                 }]
         },
         Props: {
@@ -226,10 +231,15 @@ export default recipe({
                                 type: "object",
                                 properties: {}
                             }, {
+                                type: "object",
+                                properties: {}
+                            }, {
                                 type: "array",
                                 items: {
                                     $ref: "#/$defs/RenderNode"
                                 }
+                            }, {
+                                type: "null"
                             }]
                     },
                     Props: {
@@ -270,6 +280,9 @@ export default recipe({
                 properties: {
                     element: {
                         $ref: "#/$defs/ItemTuple"
+                    },
+                    index: {
+                        type: "number"
                     },
                     params: {
                         type: "object",
@@ -350,10 +363,15 @@ export default recipe({
                                 type: "object",
                                 properties: {}
                             }, {
+                                type: "object",
+                                properties: {}
+                            }, {
                                 type: "array",
                                 items: {
                                     $ref: "#/$defs/RenderNode"
                                 }
+                            }, {
+                                type: "null"
                             }]
                     },
                     Props: {
@@ -386,7 +404,7 @@ export default recipe({
                         }
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: [item, count], params: {} }) => (<div key={item}>
+            } as const satisfies __ctHelpers.JSONSchema, ({ element: [item, count], index, params: {} }) => (<div key={index}>
             {item}: {count}
           </div>)), {})}
       </div>),

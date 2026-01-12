@@ -91,10 +91,15 @@ export default recipe({
                     type: "object",
                     properties: {}
                 }, {
+                    type: "object",
+                    properties: {}
+                }, {
                     type: "array",
                     items: {
                         $ref: "#/$defs/RenderNode"
                     }
+                }, {
+                    type: "null"
                 }]
         },
         Props: {
@@ -192,6 +197,8 @@ export default recipe({
                             items: {
                                 $ref: "#/$defs/RenderNode"
                             }
+                        }, {
+                            type: "null"
                         }]
                 },
                 Props: {
@@ -275,6 +282,8 @@ export default recipe({
                             items: {
                                 $ref: "#/$defs/RenderNode"
                             }
+                        }, {
+                            type: "null"
                         }]
                 },
                 Props: {
@@ -358,6 +367,8 @@ export default recipe({
                             items: {
                                 $ref: "#/$defs/RenderNode"
                             }
+                        }, {
+                            type: "null"
                         }]
                 },
                 Props: {

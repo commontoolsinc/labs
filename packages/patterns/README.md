@@ -49,18 +49,6 @@ keywords/features.
   - **Keywords**: lift, handler, navigateTo, ct-list-item, ct-select, ct-render,
     ct-autolayout, wish, [ID]
 
-- chatbot-note-composed.tsx: Composition of Chat and Note recipes with tool
-  integration
-  - **Data types**: array of LLM messages, array of list items, array of charms
-  - **Keywords**: wish, handler, navigateTo, recipe composition, derive, tools
-    integration
-
-- chatbot-outliner.tsx: Outliner with integrated chat for adding nodes
-  - **Data types**: outliner object (nested structure with
-    body/children/attachments), array of LLM messages
-  - **Keywords**: handler, ct-outliner, ct-checkbox, ct-input, wish, derive,
-    ifElse, ct-autolayout
-
 - chatbot.tsx: Full-featured chatbot with LLM integration and attachments
   - **Data types**: array of LLM messages, array of attachments (objects), array
     of charms

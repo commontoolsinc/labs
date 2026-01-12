@@ -41,7 +41,9 @@ interface TestInput {
 }
 
 interface TestOutput {
-  triggerCount: Writable<number>;
+  // Note: Output types describe the inner value type, not the cell wrapper
+  // The pattern returns OpaqueCell<number>, so the output is `number`
+  triggerCount: number;
   nonIdempotentRunCount: number;
   idempotentRunCount: number;
   nonIdempotentData: unknown[];

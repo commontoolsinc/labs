@@ -2840,7 +2840,7 @@ type CTEvent<T> = {
 };
 
 type EventHandler<T> =
-  | CellLike<CTEvent<T>>
+  | CellLike<CTEvent<T> | T>
   | ((event: CTEvent<T>) => void)
   | (() => void);
 
@@ -3323,7 +3323,7 @@ interface CTFabAttributes<T> extends CTHTMLAttributes<T> {
   "variant"?: "default" | "primary";
   "position"?: "bottom-right" | "bottom-left" | "top-right" | "top-left";
   "pending"?: boolean;
-  "$previewMessage"?: CellLike<string>;
+  "$previewMessage"?: CellLike<string | null>;
 }
 
 interface CTModalAttributes<T> extends CTHTMLAttributes<T> {
@@ -3332,10 +3332,10 @@ interface CTModalAttributes<T> extends CTHTMLAttributes<T> {
   "size"?: "sm" | "md" | "lg" | "full";
   "prevent-scroll"?: boolean;
   "label"?: string;
-  "onct-modal-open"?: (event: CustomEvent) => void;
-  "onct-modal-close"?: (event: CustomEvent<{ reason: string }>) => void;
-  "onct-modal-opened"?: (event: CustomEvent) => void;
-  "onct-modal-closed"?: (event: CustomEvent) => void;
+  "onct-modal-open"?: EventHandler<void>;
+  "onct-modal-close"?: EventHandler<{ reason: string }>;
+  "onct-modal-opened"?: EventHandler<void>;
+  "onct-modal-closed"?: EventHandler<void>;
 }
 
 interface CTModalProviderAttributes<T> extends CTHTMLAttributes<T> {}
@@ -3346,7 +3346,7 @@ interface CTChevronButtonAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 interface CTInputAttributes<T> extends CTHTMLAttributes<T> {
-  "$value"?: CellLike<string>;
+  "$value"?: CellLike<string | number | null>;
   "customStyle"?: string; // bf: I think this is going to go away one day soon
   "type"?:
     | "text"

@@ -9,6 +9,7 @@ import {
   pattern,
   Stream,
   UI,
+  type VNode,
   wish,
   Writable,
 } from "commontools";
@@ -47,6 +48,8 @@ interface Input {
 }
 
 interface Output {
+  [NAME]?: string;
+  [UI]?: VNode;
   title: string;
   notes: NoteCharm[];
   noteCount: number;
@@ -173,7 +176,7 @@ const removeFromNotebook = handler<
 
 // Handler for dropping a charm onto this notebook
 const _handleCharmDrop = handler<
-  { detail: { sourceCell: Writable<unknown> } },
+  { detail: { sourceCell: Writable<NoteCharm> } },
   { notes: Writable<NoteCharm[]> }
 >((event, { notes }) => {
   const sourceCell = event.detail.sourceCell;

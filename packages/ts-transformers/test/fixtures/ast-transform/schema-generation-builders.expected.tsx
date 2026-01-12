@@ -111,10 +111,15 @@ export default recipe({
                     type: "object",
                     properties: {}
                 }, {
+                    type: "object",
+                    properties: {}
+                }, {
                     type: "array",
                     items: {
                         $ref: "#/$defs/RenderNode"
                     }
+                }, {
+                    type: "null"
                 }]
         },
         Props: {
@@ -159,6 +164,9 @@ export default recipe({
             properties: {
                 element: {
                     type: "string"
+                },
+                index: {
+                    type: "number"
                 },
                 params: {
                     type: "object",
@@ -227,10 +235,15 @@ export default recipe({
                             type: "object",
                             properties: {}
                         }, {
+                            type: "object",
+                            properties: {}
+                        }, {
                             type: "array",
                             items: {
                                 $ref: "#/$defs/RenderNode"
                             }
+                        }, {
+                            type: "null"
                         }]
                 },
                 Props: {
@@ -263,7 +276,7 @@ export default recipe({
                     }
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => <li key={item}>{item}</li>), {})}
+        } as const satisfies __ctHelpers.JSONSchema, ({ element: item, index, params: {} }) => <li key={index}>{item}</li>), {})}
         </ul>
       </div>),
     };

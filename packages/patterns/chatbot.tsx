@@ -77,7 +77,7 @@ type ChatOutput = {
   clearChat: Stream<void>;
   cancelGeneration: Stream<void>;
   title?: string;
-  pinnedCells: Array<PromptAttachment>;
+  pinnedCells: Array<{ path: string; name: string }>;
   tools: any;
   ui: {
     chatLog: VNode;
@@ -125,12 +125,12 @@ export const TitleGenerator = pattern<
 
 const listMentionable = pattern<
   { mentionable: Array<MentionableCharm> },
-  { result: Array<{ label: string; cell: Writable<unknown> }> }
+  { result: Array<{ label: string; charm: MentionableCharm }> }
 >(
   ({ mentionable }) => {
-    const result = mentionable.map((charm) => ({
-      label: charm[NAME]!,
-      cell: charm,
+    const result = mentionable.map((c) => ({
+      label: c[NAME]!,
+      charm: c,
     }));
     return { result };
   },
@@ -138,12 +138,12 @@ const listMentionable = pattern<
 
 const listRecent = pattern<
   { recentCharms: Array<MentionableCharm> },
-  { result: Array<{ label: string; cell: Writable<unknown> }> }
+  { result: Array<{ label: string; charm: MentionableCharm }> }
 >(
   ({ recentCharms }) => {
-    const namesList = recentCharms.map((charm) => ({
-      label: charm[NAME]!,
-      cell: charm,
+    const namesList = recentCharms.map((c) => ({
+      label: c[NAME]!,
+      charm: c,
     }));
     return { result: namesList };
   },

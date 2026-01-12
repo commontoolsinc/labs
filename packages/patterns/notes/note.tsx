@@ -8,6 +8,7 @@ import {
   navigateTo,
   pattern,
   patternTool,
+  type PatternToolResult,
   Stream,
   UI,
   type VNode,
@@ -53,14 +54,16 @@ type Input = {
 
 /** Represents a small #note a user took to remember some text. */
 type Output = {
+  [NAME]?: string;
+  [UI]: VNode;
   mentioned: Default<Array<MentionableCharm>, []>;
   backlinks: MentionableCharm[];
 
   content: Default<string, "">;
   isHidden: Default<boolean, false>;
   noteId: Default<string, "">;
-  grep: Stream<{ query: string }>;
-  translate: Stream<{ language: string }>;
+  grep: PatternToolResult<{ content: string }>;
+  translate: PatternToolResult<{ content: string }>;
   editContent: Stream<{ detail: { value: string } }>;
   /** Minimal UI for embedding in containers like Record. Use via ct-render variant="embedded". */
   embeddedUI: VNode;

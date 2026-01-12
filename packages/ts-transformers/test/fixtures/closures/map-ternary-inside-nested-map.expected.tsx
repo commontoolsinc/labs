@@ -139,6 +139,8 @@ export default pattern(({ items, showInactive }) => {
                             items: {
                                 $ref: "#/$defs/RenderNode"
                             }
+                        }, {
+                            type: "null"
                         }]
                 },
                 Props: {
@@ -222,6 +224,8 @@ export default pattern(({ items, showInactive }) => {
                             items: {
                                 $ref: "#/$defs/RenderNode"
                             }
+                        }, {
+                            type: "null"
                         }]
                 },
                 Props: {
@@ -316,6 +320,8 @@ export default pattern(({ items, showInactive }) => {
                             items: {
                                 $ref: "#/$defs/RenderNode"
                             }
+                        }, {
+                            type: "null"
                         }]
                 },
                 Props: {
@@ -453,10 +459,15 @@ export default pattern(({ items, showInactive }) => {
                             type: "object",
                             properties: {}
                         }, {
+                            type: "object",
+                            properties: {}
+                        }, {
                             type: "array",
                             items: {
                                 $ref: "#/$defs/RenderNode"
                             }
+                        }, {
+                            type: "null"
                         }]
                 },
                 Props: {
@@ -600,10 +611,15 @@ export default pattern(({ items, showInactive }) => {
                             type: "object",
                             properties: {}
                         }, {
+                            type: "object",
+                            properties: {}
+                        }, {
                             type: "array",
                             items: {
                                 $ref: "#/$defs/RenderNode"
                             }
+                        }, {
+                            type: "null"
                         }]
                 },
                 Props: {
@@ -766,10 +782,15 @@ export default pattern(({ items, showInactive }) => {
                                 type: "object",
                                 properties: {}
                             }, {
+                                type: "object",
+                                properties: {}
+                            }, {
                                 type: "array",
                                 items: {
                                     $ref: "#/$defs/RenderNode"
                                 }
+                            }, {
+                                type: "null"
                             }]
                     },
                     Props: {
@@ -965,10 +986,15 @@ export default pattern(({ items, showInactive }) => {
                     type: "object",
                     properties: {}
                 }, {
+                    type: "object",
+                    properties: {}
+                }, {
                     type: "array",
                     items: {
                         $ref: "#/$defs/RenderNode"
                     }
+                }, {
+                    type: "null"
                 }]
         },
         Props: {
