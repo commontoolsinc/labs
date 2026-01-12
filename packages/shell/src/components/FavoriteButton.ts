@@ -6,9 +6,8 @@ import { Task } from "@lit/task";
 /**
  * Favorite button component.
  *
- * NOTE: Favorites functionality is currently disabled while RuntimeClient
- * integration is in progress. The button renders but clicking has no effect.
- * TODO: Re-enable once favorites IPC is implemented.
+ * Allows users to add/remove charms from their favorites list.
+ * Favorites are stored in the user's home space defaultPattern.
  */
 export class XFavoriteButtonElement extends LitElement {
   static override styles = css`
@@ -26,10 +25,10 @@ export class XFavoriteButtonElement extends LitElement {
       font-size: 1rem;
     }
 
-    /* Disabled state */
-    x-button.emoji-button.disabled {
-      opacity: 0.3;
-      cursor: not-allowed;
+    /* Loading state */
+    x-button.emoji-button.loading {
+      opacity: 0.5;
+      cursor: wait;
     }
   `;
 
@@ -42,49 +41,82 @@ export class XFavoriteButtonElement extends LitElement {
   // Local state for favoriting, used when
   // modifying state inbetween server syncs.
   @state()
-  isFavorite: boolean | undefined = undefined;
+  private _localIsFavorite: boolean | undefined = undefined;
 
-  private handleFavoriteClick(e: Event) {
+  @state()
+  private _isLoading = false;
+
+  private async handleFavoriteClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
 
-    // TODO(runtime-worker-refactor)
-    console.warn(
-      "[FavoriteButton] Favorites functionality is disabled during RuntimeClient migration",
-    );
+    if (!this.rt || !this.charmId || this._isLoading) return;
+
+    const runtime = this.rt.runtime();
+    const currentlyFavorite = this.deriveIsFavorite();
+
+    this._isLoading = true;
+    try {
+      if (currentlyFavorite) {
+        await runtime.removeFavorite(this.charmId);
+        this._localIsFavorite = false;
+      } else {
+        await runtime.addFavorite(this.charmId);
+        this._localIsFavorite = true;
+      }
+      // Re-run the sync task to get fresh state
+      this.isFavoriteSync.run();
+    } catch (err) {
+      console.error("[FavoriteButton] Error toggling favorite:", err);
+    } finally {
+      this._isLoading = false;
+    }
   }
 
   protected override willUpdate(changedProperties: PropertyValues): void {
     if (changedProperties.has("charmId")) {
-      this.isFavorite = undefined;
+      this._localIsFavorite = undefined;
     }
   }
 
   private deriveIsFavorite(): boolean {
-    // Always return false since favorites are disabled
-    return false;
+    // Prefer local state if set (for optimistic updates)
+    if (this._localIsFavorite !== undefined) {
+      return this._localIsFavorite;
+    }
+    // Fall back to synced state from server
+    return this.isFavoriteSync.value ?? false;
   }
 
   isFavoriteSync = new Task(this, {
     task: async (
-      [_charmId, _rt],
+      [charmId, rt],
       { signal: _signal },
     ): Promise<boolean> => {
-      // TODO(runtime-worker-refactor)
-      return await false;
+      if (!rt || !charmId) return false;
+      try {
+        const result = await rt.runtime().isFavorite(charmId);
+        // Clear local state once we have server state
+        this._localIsFavorite = undefined;
+        return result;
+      } catch (err) {
+        console.error("[FavoriteButton] Error checking favorite status:", err);
+        return false;
+      }
     },
     args: () => [this.charmId, this.rt],
   });
 
   override render() {
     const isFavorite = this.deriveIsFavorite();
+    const isLoading = this._isLoading || this.isFavoriteSync.status === 1; // 1 = pending
 
     return html`
       <x-button
-        class="emoji-button disabled"
+        class="emoji-button ${isLoading ? "loading" : ""}"
         size="small"
         @click="${this.handleFavoriteClick}"
-        title="Favorites temporarily disabled"
+        title="${isFavorite ? "Remove from favorites" : "Add to favorites"}"
       >
         ${isFavorite ? "⭐" : "☆"}
       </x-button>

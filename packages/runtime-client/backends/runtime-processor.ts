@@ -24,6 +24,10 @@ import {
   type CellSetRequest,
   type CellSubscribeRequest,
   type CellUnsubscribeRequest,
+  type FavoriteAddRequest,
+  type FavoriteIsMemberRequest,
+  type FavoriteRemoveRequest,
+  FavoritesResponse,
   type GetCellRequest,
   GetGraphSnapshotRequest,
   type GetLoggerCountsRequest,
@@ -361,6 +365,131 @@ export class RuntimeProcessor {
     await this.charmManager.synced();
   }
 
+  /**
+   * Get the home space's defaultPattern which owns favorites.
+   * Favorites are always stored in the user's home space, regardless of
+   * which space the user is currently viewing.
+   */
+  private async getHomeDefaultPattern() {
+    const homeSpace = this.runtime.userIdentityDID;
+    const homeSpaceCell = this.runtime.getHomeSpaceCell();
+    await homeSpaceCell.sync();
+
+    const defaultPatternCell = homeSpaceCell.key("defaultPattern");
+    const defaultPattern = defaultPatternCell.get();
+    if (!defaultPattern) {
+      throw new Error(
+        "Home space defaultPattern not initialized. Visit home space first.",
+      );
+    }
+    return defaultPattern;
+  }
+
+  async handleFavoriteAdd(request: FavoriteAddRequest): Promise<void> {
+    const defaultPattern = await this.getHomeDefaultPattern();
+
+    // Get the addFavorite handler stream from the pattern
+    const addFavoriteStream = defaultPattern.key("addFavorite");
+
+    // Get the charm cell to add
+    const charmCell = this.runtime.getCellFromEntityId(this.space, {
+      "/": request.charmId,
+    });
+
+    // Send event to the handler within a transaction
+    const tx = this.runtime.edit();
+    addFavoriteStream.withTx(tx).send({
+      charm: charmCell,
+      tag: request.tag || "",
+    });
+    tx.commit();
+    await this.runtime.idle();
+  }
+
+  async handleFavoriteRemove(request: FavoriteRemoveRequest): Promise<void> {
+    const defaultPattern = await this.getHomeDefaultPattern();
+
+    // Get the removeFavorite handler stream from the pattern
+    const removeFavoriteStream = defaultPattern.key("removeFavorite");
+
+    // Get the charm cell to remove
+    const charmCell = this.runtime.getCellFromEntityId(this.space, {
+      "/": request.charmId,
+    });
+
+    // Send event to the handler within a transaction
+    const tx = this.runtime.edit();
+    removeFavoriteStream.withTx(tx).send({ charm: charmCell });
+    tx.commit();
+    await this.runtime.idle();
+  }
+
+  async handleFavoriteIsMember(
+    request: FavoriteIsMemberRequest,
+  ): Promise<BooleanResponse> {
+    const defaultPattern = await this.getHomeDefaultPattern();
+
+    // Get the favorites cell from the pattern
+    const favoritesCell = defaultPattern.key("favorites");
+    await favoritesCell.sync();
+
+    const favorites = favoritesCell.get() as
+      | Array<{ cell: unknown }>
+      | undefined;
+    if (!favorites || !Array.isArray(favorites)) {
+      return { value: false };
+    }
+
+    // Check if charm is in favorites by comparing entity IDs
+    const charmCell = this.runtime.getCellFromEntityId(this.space, {
+      "/": request.charmId,
+    });
+
+    const isMember = favorites.some((fav) => {
+      if (fav.cell && typeof fav.cell === "object" && "equals" in fav.cell) {
+        return (fav.cell as any).equals(charmCell);
+      }
+      return false;
+    });
+
+    return { value: isMember };
+  }
+
+  async handleFavoritesGetAll(): Promise<FavoritesResponse> {
+    const defaultPattern = await this.getHomeDefaultPattern();
+
+    // Get the favorites cell from the pattern
+    const favoritesCell = defaultPattern.key("favorites");
+    await favoritesCell.sync();
+
+    const favorites = favoritesCell.get() as
+      | Array<{
+        cell: { entityId?: { "/": string } };
+        tag: string;
+        userTags: { get?: () => string[] } | string[];
+      }>
+      | undefined;
+
+    if (!favorites || !Array.isArray(favorites)) {
+      return { favorites: [] };
+    }
+
+    // Convert to response format
+    const result = favorites.map((fav) => {
+      const charmId = fav.cell?.entityId?.["/"] || "";
+      const userTags = Array.isArray(fav.userTags)
+        ? fav.userTags
+        : (fav.userTags?.get?.() || []);
+      return {
+        charmId,
+        tag: fav.tag || "",
+        userTags,
+      };
+    });
+
+    return { favorites: result };
+  }
+
   getGraphSnapshot(_: GetGraphSnapshotRequest): GraphSnapshotResponse {
     return { snapshot: this.runtime.scheduler.getGraphSnapshot() };
   }
@@ -481,6 +610,14 @@ export class RuntimeProcessor {
         return this.setLoggerLevel(request);
       case RequestType.SetLoggerEnabled:
         return this.setLoggerEnabled(request);
+      case RequestType.FavoriteAdd:
+        return await this.handleFavoriteAdd(request);
+      case RequestType.FavoriteRemove:
+        return await this.handleFavoriteRemove(request);
+      case RequestType.FavoriteIsMember:
+        return await this.handleFavoriteIsMember(request);
+      case RequestType.FavoritesGetAll:
+        return await this.handleFavoritesGetAll();
       default:
         throw new Error(`Unknown message type: ${(request as any).type}`);
     }

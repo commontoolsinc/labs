@@ -47,6 +47,13 @@ export enum RequestType {
   PageStop = "page:stop",
   PageGetAll = "page:getAll",
   PageSynced = "page:synced",
+
+  // Favorites operations (main -> worker)
+  // Note: Favorites are stored in home space's defaultPattern
+  FavoriteAdd = "favorite:add",
+  FavoriteRemove = "favorite:remove",
+  FavoriteIsMember = "favorite:isMember",
+  FavoritesGetAll = "favorites:getAll",
 }
 
 export enum NotificationType {
@@ -239,6 +246,27 @@ export interface PageSyncedRequest extends BaseRequest {
   type: RequestType.PageSynced;
 }
 
+// Favorites requests
+export interface FavoriteAddRequest extends BaseRequest {
+  type: RequestType.FavoriteAdd;
+  charmId: string;
+  tag?: string;
+}
+
+export interface FavoriteRemoveRequest extends BaseRequest {
+  type: RequestType.FavoriteRemove;
+  charmId: string;
+}
+
+export interface FavoriteIsMemberRequest extends BaseRequest {
+  type: RequestType.FavoriteIsMember;
+  charmId: string;
+}
+
+export interface FavoritesGetAllRequest extends BaseRequest {
+  type: RequestType.FavoritesGetAll;
+}
+
 export type IPCClientRequest =
   | InitializeRequest
   | DisposeRequest
@@ -261,7 +289,11 @@ export type IPCClientRequest =
   | PageStartRequest
   | PageStopRequest
   | PageGetAllRequest
-  | PageSyncedRequest;
+  | PageSyncedRequest
+  | FavoriteAddRequest
+  | FavoriteRemoveRequest
+  | FavoriteIsMemberRequest
+  | FavoritesGetAllRequest;
 
 export type NullResponse = null;
 
@@ -324,6 +356,15 @@ export interface TelemetryNotification {
   marker: RuntimeTelemetryMarkerResult;
 }
 
+// Favorites response - returns array of favorite entries
+export interface FavoritesResponse {
+  favorites: Array<{
+    charmId: string;
+    tag: string;
+    userTags: string[];
+  }>;
+}
+
 export type RemoteResponse =
   | EmptyResponse
   | NullResponse
@@ -333,6 +374,8 @@ export type RemoteResponse =
   | GraphSnapshotResponse
   | LoggerCountsResponse
   | PageResponse;
+  | PageResponse
+  | FavoritesResponse;
 
 export type IPCRemoteNotification =
   | CellUpdateNotification
@@ -431,6 +474,23 @@ export type Commands = {
   [RequestType.GetSpaceRootPattern]: {
     request: PageGetSpaceDefault;
     response: PageResponse;
+  };
+  // Favorites requests
+  [RequestType.FavoriteAdd]: {
+    request: FavoriteAddRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.FavoriteRemove]: {
+    request: FavoriteRemoveRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.FavoriteIsMember]: {
+    request: FavoriteIsMemberRequest;
+    response: BooleanResponse;
+  };
+  [RequestType.FavoritesGetAll]: {
+    request: FavoritesGetAllRequest;
+    response: FavoritesResponse;
   };
 };
 

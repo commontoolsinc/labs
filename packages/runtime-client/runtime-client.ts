@@ -229,6 +229,20 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       type: RequestType.SetLoggerLevel,
       level,
       loggerName,
+  // ==================== Favorites API ====================
+  // Favorites are stored in the user's home space defaultPattern.
+  // These methods work regardless of which space is currently active.
+
+  /**
+   * Add a charm to favorites.
+   * @param charmId - The entity ID of the charm to add
+   * @param tag - Optional tag/category for the favorite
+   */
+  async addFavorite(charmId: string, tag?: string): Promise<void> {
+    await this.#conn.request<RequestType.FavoriteAdd>({
+      type: RequestType.FavoriteAdd,
+      charmId,
+      tag,
     });
   }
 
@@ -243,6 +257,42 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       enabled,
       loggerName,
     });
+  }
+
+   * Remove a charm from favorites.
+   * @param charmId - The entity ID of the charm to remove
+   */
+  async removeFavorite(charmId: string): Promise<void> {
+    await this.#conn.request<RequestType.FavoriteRemove>({
+      type: RequestType.FavoriteRemove,
+      charmId,
+    });
+  }
+
+  /**
+   * Check if a charm is in favorites.
+   * @param charmId - The entity ID of the charm to check
+   * @returns true if the charm is a favorite
+   */
+  async isFavorite(charmId: string): Promise<boolean> {
+    const res = await this.#conn.request<RequestType.FavoriteIsMember>({
+      type: RequestType.FavoriteIsMember,
+      charmId,
+    });
+    return res.value;
+  }
+
+  /**
+   * Get all favorites.
+   * @returns Array of favorite entries with charmId, tag, and userTags
+   */
+  async getFavorites(): Promise<
+    Array<{ charmId: string; tag: string; userTags: string[] }>
+  > {
+    const res = await this.#conn.request<RequestType.FavoritesGetAll>({
+      type: RequestType.FavoritesGetAll,
+    });
+    return res.favorites;
   }
 
   async dispose(): Promise<void> {
