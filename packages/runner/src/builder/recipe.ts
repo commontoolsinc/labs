@@ -235,7 +235,7 @@ function factoryFromRecipe<T, R>(
   // Capture selfRef before collectCellsAndNodes transforms inputs from OpaqueRef to Cell
   // (collectCellsAndNodes replaces OpaqueRef proxies with their underlying Cells,
   // and SELF access only works through the OpaqueRef proxy)
-  const selfRef = (inputs as any)[SELF] as OpaqueRef<any> | undefined;
+  const selfRef = (inputs as unknown as { [SELF]: OpaqueRef<any> })[SELF];
 
   // Traverse the value, collect all mentioned nodes and cells
   const allCells = new Set<OpaqueRef<any>>();
@@ -324,11 +324,11 @@ function factoryFromRecipe<T, R>(
   // Add the inputs default path
   paths.set(inputs, ["argument"]);
 
-  // Add path for self-reference (if present and used in outputs)
+  // Add path for self-reference if used in outputs
   // Note: selfRef is an OpaqueRef, but allCells contains Cells (after getCellOrThrow conversion)
   // So we need to get the underlying cell for comparison
-  const selfRefCell = selfRef ? getCellOrThrow(selfRef) : undefined;
-  if (selfRefCell && allCells.has(selfRefCell)) {
+  const selfRefCell = getCellOrThrow(selfRef);
+  if (allCells.has(selfRefCell)) {
     paths.set(selfRefCell, ["resultRef"]);
   }
 
