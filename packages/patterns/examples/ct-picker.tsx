@@ -55,7 +55,7 @@ export default recipe<Input, Result>(
               Next
             </ct-button>
             <div>
-              <ct-render $cell={selection} />
+              {selection}
             </div>
           </ct-card>
 

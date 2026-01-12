@@ -1,5 +1,13 @@
 /// <cts-enable />
-import { computed, Default, NAME, pattern, Stream, UI } from "commontools";
+import {
+  computed,
+  Default,
+  NAME,
+  pattern,
+  Stream,
+  UI,
+  type VNode,
+} from "commontools";
 import { decrement, increment, nth, previous } from "./counter-handlers.ts";
 
 interface RecipeState {
@@ -8,6 +16,8 @@ interface RecipeState {
 
 /** The output of a #counter */
 interface RecipeOutput {
+  [NAME]?: string;
+  [UI]: VNode;
   value: Default<number, 0>;
   increment: Stream<void>;
   decrement: Stream<void>;

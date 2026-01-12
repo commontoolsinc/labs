@@ -2086,6 +2086,7 @@ export type Props = {
 export type RenderNode =
   | InnerRenderNode
   | AnyBrandedCell<InnerRenderNode>
+  | AnyBrandedCell<UIRenderable>
   | Array<RenderNode>;
 
 type InnerRenderNode =
@@ -2095,6 +2096,11 @@ type InnerRenderNode =
   | boolean
   | undefined
   | null;
+
+/** An object that can be rendered via its [UI] property */
+type UIRenderable = {
+  [UI]: VNode;
+};
 
 /** A "virtual view node", e.g. a virtual DOM element */
 export type VNode = {
