@@ -16,6 +16,10 @@ export declare const TYPE: "$TYPE";
 export declare const NAME: "$NAME";
 export declare const UI: "$UI";
 
+// Symbol for accessing self-reference in patterns
+export declare const SELF: unique symbol;
+export type SELF = typeof SELF;
+
 // ============================================================================
 // Cell Brand System
 // ============================================================================
@@ -1382,7 +1386,7 @@ export interface BuiltInCompileAndRunState<T> {
 export type PatternFunction = {
   // Primary overload: T and R inferred from function
   <T, R>(
-    fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+    fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
   ): RecipeFactory<StripCell<T>, StripCell<R>>;
 
   // Single type param overload: T explicit, R inferred
@@ -1390,13 +1394,15 @@ export type PatternFunction = {
   // This is a TypeScript limitation - we recommend using pattern<T, R>()
   // for proper type safety when output types include Stream<>.
   <T>(
-    fn: (input: OpaqueRef<Required<T>>) => any,
+    fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<any> }) => any,
   ): RecipeFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
 
   // Schema-based overload with explicit argument and result schemas
   <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
     fn: (
-      input: OpaqueRef<Required<Schema<IS>>>,
+      input: OpaqueRef<Required<Schema<IS>>> & {
+        [SELF]: OpaqueRef<Schema<OS>>;
+      },
     ) => Opaque<Schema<OS>>,
     argumentSchema: IS,
     resultSchema: OS,
@@ -1407,45 +1413,59 @@ export type PatternFunction = {
 export type RecipeFunction = {
   // Function-only overload
   <T, R>(
-    fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+    fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
   ): RecipeFactory<StripCell<T>, StripCell<R>>;
 
   <T>(
-    fn: (input: OpaqueRef<Required<T>>) => any,
+    fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<any> }) => any,
   ): RecipeFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
 
   <S extends JSONSchema>(
     argumentSchema: S,
-    fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => any,
+    fn: (
+      input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
+        [SELF]: OpaqueRef<any>;
+      },
+    ) => any,
   ): RecipeFactory<SchemaWithoutCell<S>, StripCell<ReturnType<typeof fn>>>;
 
   <S extends JSONSchema, R>(
     argumentSchema: S,
-    fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => Opaque<R>,
+    fn: (
+      input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
+        [SELF]: OpaqueRef<R>;
+      },
+    ) => Opaque<R>,
   ): RecipeFactory<SchemaWithoutCell<S>, StripCell<R>>;
 
   <S extends JSONSchema, RS extends JSONSchema>(
     argumentSchema: S,
     resultSchema: RS,
     fn: (
-      input: OpaqueRef<Required<SchemaWithoutCell<S>>>,
+      input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
+        [SELF]: OpaqueRef<SchemaWithoutCell<RS>>;
+      },
     ) => Opaque<SchemaWithoutCell<RS>>,
   ): RecipeFactory<SchemaWithoutCell<S>, SchemaWithoutCell<RS>>;
 
   <T>(
     argumentSchema: string | JSONSchema,
-    fn: (input: OpaqueRef<Required<T>>) => any,
+    fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<any> }) => any,
   ): RecipeFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
 
   <T, R>(
     argumentSchema: string | JSONSchema,
-    fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+    fn: (
+      input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> },
+    ) => Opaque<R>,
   ): RecipeFactory<StripCell<T>, StripCell<R>>;
 
   <T, R>(
     argumentSchema: string | JSONSchema,
     resultSchema: JSONSchema,
-    fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+    fn: (
+      input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> },
+    ) => Opaque<R>,
   ): RecipeFactory<StripCell<T>, StripCell<R>>;
 };
 
