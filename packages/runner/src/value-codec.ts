@@ -23,7 +23,9 @@ export function isStorableValue(value: unknown): boolean {
     }
 
     case "number": {
-      if (Number.isFinite(value) && !Object.is(value, -0)) {
+      // Finite numbers are storable. Note: `-0` is accepted because it gets
+      // normalized to `0` during conversion (see `toStorableValue()`).
+      if (Number.isFinite(value)) {
         return true;
       }
       // TODO(@danfuzz): `NaN` isn't JSON-encodable; this case should return
@@ -71,8 +73,9 @@ export function toStorableValue(value: unknown): unknown {
     }
 
     case "number": {
-      if (Number.isFinite(value) && !Object.is(value, -0)) {
-        return value;
+      if (Number.isFinite(value)) {
+        // Normalize `-0` to `0` to avoid JSON serialization quirks.
+        return Object.is(value, -0) ? 0 : value;
       } else {
         if (Number.isNaN(value)) {
           // TODO(@danfuzz): This is allowed for now, even though it isn't
@@ -83,7 +86,7 @@ export function toStorableValue(value: unknown): unknown {
           // tweaked, and then this `if` statement should be removed.
           return null;
         }
-        throw new Error("Cannot store non-finite number or negative zero");
+        throw new Error("Cannot store non-finite number");
       }
     }
 
