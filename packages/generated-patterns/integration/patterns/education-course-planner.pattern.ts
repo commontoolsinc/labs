@@ -128,79 +128,86 @@ interface EducationCoursePlannerArgs {
   startWeek: Default<number, 1>;
 }
 
+const liftSanitizeModules = lift(sanitizeModules);
+const liftSanitizeStartWeek = lift(sanitizeStartWeek);
+
+const liftBuildTimeline = lift((inputs: {
+  modules: CourseModule[];
+  start: number;
+}) => buildTimeline(inputs.modules, inputs.start));
+
+const liftTotalDuration = lift((entries: CourseModule[] | undefined) => {
+  if (!Array.isArray(entries)) return 0;
+  return entries.reduce(
+    (sum, entry) => sum + sanitizeDuration(entry.durationWeeks),
+    0,
+  );
+});
+
+const liftModuleOrder = lift((entries: CourseModule[] | undefined) => {
+  if (!Array.isArray(entries)) return [] as string[];
+  return entries.map((entry) => entry.id);
+});
+
+const liftReorderCountView = lift((count: number | undefined) => {
+  if (typeof count !== "number" || !Number.isFinite(count)) return 0;
+  return Math.max(0, Math.trunc(count));
+});
+
+const liftTimelineSummary = lift((entries: TimelineEntry[] | undefined) =>
+  Array.isArray(entries) ? formatTimeline(entries) : "No modules scheduled"
+);
+
+const reorderModules = handler(
+  (
+    event: ReorderEvent | undefined,
+    manager: {
+      modules: Cell<CourseModule[]>;
+      reorderCount: Cell<number>;
+      lastAction: Cell<string>;
+    },
+  ) => {
+    const currentModules = sanitizeModules(manager.modules.get());
+    if (currentModules.length < 2) {
+      return;
+    }
+    const from = clampIndex(event?.from, currentModules.length);
+    const to = clampIndex(event?.to, currentModules.length);
+    if (from === to) return;
+    const updated = currentModules.slice();
+    const [moved] = updated.splice(from, 1);
+    updated.splice(to, 0, moved);
+    manager.modules.set(updated);
+    const count = (manager.reorderCount.get() ?? 0) + 1;
+    manager.reorderCount.set(count);
+    const position = to + 1;
+    manager.lastAction.set(`Moved ${moved.title} to position ${position}`);
+  },
+);
+
 export const educationCoursePlanner = recipe<EducationCoursePlannerArgs>(
   "Education Course Planner",
   ({ modules, startWeek }) => {
     const reorderCount = cell(0);
     const lastAction = cell("initialized");
 
-    const modulesView = lift(sanitizeModules)(modules);
-    const startWeekView = lift(sanitizeStartWeek)(startWeek);
+    const modulesView = liftSanitizeModules(modules);
+    const startWeekView = liftSanitizeStartWeek(startWeek);
 
-    const timeline = lift((inputs: {
-      modules: CourseModule[];
-      start: number;
-    }) => buildTimeline(inputs.modules, inputs.start))({
+    const timeline = liftBuildTimeline({
       modules: modulesView,
       start: startWeekView,
     });
 
-    const totalDuration = lift((entries: CourseModule[] | undefined) => {
-      if (!Array.isArray(entries)) return 0;
-      return entries.reduce(
-        (sum, entry) => sum + sanitizeDuration(entry.durationWeeks),
-        0,
-      );
-    })(modulesView);
+    const totalDuration = liftTotalDuration(modulesView);
 
-    const moduleOrder = lift((entries: CourseModule[] | undefined) => {
-      if (!Array.isArray(entries)) return [] as string[];
-      return entries.map((entry) => entry.id);
-    })(modulesView);
+    const moduleOrder = liftModuleOrder(modulesView);
 
-    const reorderCountView = lift((count: number | undefined) => {
-      if (typeof count !== "number" || !Number.isFinite(count)) return 0;
-      return Math.max(0, Math.trunc(count));
-    })(reorderCount);
+    const reorderCountView = liftReorderCountView(reorderCount);
 
-    const timelineSummary = lift((entries: TimelineEntry[] | undefined) =>
-      Array.isArray(entries) ? formatTimeline(entries) : "No modules scheduled"
-    )(timeline);
+    const timelineSummary = liftTimelineSummary(timeline);
 
     const label = str`Course timeline: ${timelineSummary}`;
-
-    const context = {
-      modules,
-      reorderCount,
-      lastAction,
-    } as const;
-
-    const reorderModules = handler(
-      (
-        event: ReorderEvent | undefined,
-        manager: {
-          modules: Cell<CourseModule[]>;
-          reorderCount: Cell<number>;
-          lastAction: Cell<string>;
-        },
-      ) => {
-        const currentModules = sanitizeModules(manager.modules.get());
-        if (currentModules.length < 2) {
-          return;
-        }
-        const from = clampIndex(event?.from, currentModules.length);
-        const to = clampIndex(event?.to, currentModules.length);
-        if (from === to) return;
-        const updated = currentModules.slice();
-        const [moved] = updated.splice(from, 1);
-        updated.splice(to, 0, moved);
-        manager.modules.set(updated);
-        const count = (manager.reorderCount.get() ?? 0) + 1;
-        manager.reorderCount.set(count);
-        const position = to + 1;
-        manager.lastAction.set(`Moved ${moved.title} to position ${position}`);
-      },
-    );
 
     return {
       modules,
@@ -213,7 +220,9 @@ export const educationCoursePlanner = recipe<EducationCoursePlannerArgs>(
       label,
       reorderCount: reorderCountView,
       lastAction,
-      reorder: reorderModules(context as never),
+      reorder: reorderModules({ modules, reorderCount, lastAction }),
     };
   },
 );
+
+export default educationCoursePlanner;

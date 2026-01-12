@@ -420,47 +420,112 @@ const updateSchedule = handler(
   },
 );
 
+const liftBaseSchedule = lift(
+  (input: {
+    entries: AssignmentInput[] | undefined;
+    slotList: SlotDefinition[];
+    agentList: AgentDefinition[];
+  }) => {
+    const sanitized = produceAssignments(
+      input.entries,
+      input.slotList,
+      input.agentList,
+    );
+    if (sanitized.length > 0) {
+      return sanitized;
+    }
+    const fallback = produceAssignments(
+      defaultAssignments,
+      input.slotList,
+      input.agentList,
+    );
+    if (fallback.length > 0) {
+      return fallback;
+    }
+    if (input.slotList.length > 0 && input.agentList.length > 0) {
+      const generated: AssignmentRecord[] = [];
+      for (let index = 0; index < input.slotList.length; index++) {
+        const agent = input.agentList[index % input.agentList.length];
+        if (!agent) break;
+        generated.push({
+          slot: input.slotList[index].id,
+          agent: agent.id,
+        });
+      }
+      return generated;
+    }
+    return [];
+  },
+);
+
+const liftSchedule = lift(
+  (input: { stored: AssignmentRecord[]; base: AssignmentRecord[] }) => {
+    const stored = Array.isArray(input.stored) ? input.stored : [];
+    if (stored.length > 0) {
+      return stored.map((entry) => ({ ...entry }));
+    }
+    const base = Array.isArray(input.base) ? input.base : [];
+    return base.map((entry) => ({ ...entry }));
+  },
+);
+
+const liftCoverage = lift(
+  (input: {
+    slotList: SlotDefinition[];
+    records: AssignmentRecord[];
+    agentList: AgentDefinition[];
+  }) => buildCoverageEntries(input.slotList, input.records, input.agentList),
+);
+
+const liftGapLabels = lift((entries: SlotCoverage[]) =>
+  entries.filter((entry) => entry.hasGap).map((entry) => entry.label)
+);
+
+const liftGapIds = lift((entries: SlotCoverage[]) =>
+  entries.filter((entry) => entry.hasGap).map((entry) => entry.slot)
+);
+
+const liftTotalSlots = lift((entries: SlotDefinition[]) => entries.length);
+
+const liftCoveredSlots = lift(
+  (entries: SlotCoverage[]) => entries.filter((entry) => !entry.hasGap).length,
+);
+
+const liftGapCount = lift(
+  (entries: SlotCoverage[]) => entries.filter((entry) => entry.hasGap).length,
+);
+
+const liftGapSummary = lift((labels: string[]) => {
+  if (!Array.isArray(labels) || labels.length === 0) {
+    return "All slots covered";
+  }
+  return `Coverage gaps: ${labels.join(", ")}`;
+});
+
+const liftRemainingAgents = lift((entries: SlotCoverage[]) =>
+  entries.reduce((sum, entry) => sum + entry.remaining, 0)
+);
+
+const liftHistoryView = lift((entries: string[] | undefined) => {
+  return Array.isArray(entries) ? [...entries] : [];
+});
+
+const liftLatestChangeView = lift(
+  (entry: LatestChange | null | undefined) => {
+    return entry ? { ...entry } : null;
+  },
+);
+
+const liftSanitizeSlots = lift(sanitizeSlots);
+const liftSanitizeAgents = lift(sanitizeAgents);
+
 export const callCenterSchedulePattern = recipe<CallCenterScheduleArgs>(
   "Call Center Schedule",
   ({ slots, agents, assignments }) => {
-    const slotsList = lift(sanitizeSlots)(slots);
-    const agentsList = lift(sanitizeAgents)(agents);
+    const slotsList = liftSanitizeSlots(slots);
+    const agentsList = liftSanitizeAgents(agents);
 
-    const baseSchedule = lift((input: {
-      entries: AssignmentInput[] | undefined;
-      slotList: SlotDefinition[];
-      agentList: AgentDefinition[];
-    }) => {
-      const sanitized = produceAssignments(
-        input.entries,
-        input.slotList,
-        input.agentList,
-      );
-      if (sanitized.length > 0) {
-        return sanitized;
-      }
-      const fallback = produceAssignments(
-        defaultAssignments,
-        input.slotList,
-        input.agentList,
-      );
-      if (fallback.length > 0) {
-        return fallback;
-      }
-      if (input.slotList.length > 0 && input.agentList.length > 0) {
-        const generated: AssignmentRecord[] = [];
-        for (let index = 0; index < input.slotList.length; index++) {
-          const agent = input.agentList[index % input.agentList.length];
-          if (!agent) break;
-          generated.push({
-            slot: input.slotList[index].id,
-            agent: agent.id,
-          });
-        }
-        return generated;
-      }
-      return [];
-    })({
+    const baseSchedule = liftBaseSchedule({
       entries: assignments,
       slotList: slotsList,
       agentList: agentsList,
@@ -468,76 +533,37 @@ export const callCenterSchedulePattern = recipe<CallCenterScheduleArgs>(
 
     const assignmentStore = cell<AssignmentRecord[]>([]);
 
-    const schedule = lift((input: {
-      stored: AssignmentRecord[];
-      base: AssignmentRecord[];
-    }) => {
-      const stored = Array.isArray(input.stored) ? input.stored : [];
-      if (stored.length > 0) {
-        return stored.map((entry) => ({ ...entry }));
-      }
-      const base = Array.isArray(input.base) ? input.base : [];
-      return base.map((entry) => ({ ...entry }));
-    })({
+    const schedule = liftSchedule({
       stored: assignmentStore,
       base: baseSchedule,
     });
 
-    const coverage = lift((input: {
-      slotList: SlotDefinition[];
-      records: AssignmentRecord[];
-      agentList: AgentDefinition[];
-    }) => buildCoverageEntries(input.slotList, input.records, input.agentList))(
-      {
-        slotList: slotsList,
-        records: schedule,
-        agentList: agentsList,
-      },
-    );
+    const coverage = liftCoverage({
+      slotList: slotsList,
+      records: schedule,
+      agentList: agentsList,
+    });
 
-    const gapLabels = lift((entries: SlotCoverage[]) =>
-      entries.filter((entry) => entry.hasGap).map((entry) => entry.label)
-    )(coverage);
+    const gapLabels = liftGapLabels(coverage);
 
-    const gapIds = lift((entries: SlotCoverage[]) =>
-      entries.filter((entry) => entry.hasGap).map((entry) => entry.slot)
-    )(coverage);
+    const gapIds = liftGapIds(coverage);
 
-    const totalSlots = lift((entries: SlotDefinition[]) => entries.length)(
-      slotsList,
-    );
-    const coveredSlots = lift((entries: SlotCoverage[]) =>
-      entries.filter((entry) => !entry.hasGap).length
-    )(coverage);
-    const gapCount = lift((entries: SlotCoverage[]) =>
-      entries.filter((entry) => entry.hasGap).length
-    )(coverage);
+    const totalSlots = liftTotalSlots(slotsList);
+    const coveredSlots = liftCoveredSlots(coverage);
+    const gapCount = liftGapCount(coverage);
 
     const coverageStatus =
       str`${coveredSlots}/${totalSlots} slots covered; open gaps ${gapCount}`;
 
-    const gapSummary = lift((labels: string[]) => {
-      if (!Array.isArray(labels) || labels.length === 0) {
-        return "All slots covered";
-      }
-      return `Coverage gaps: ${labels.join(", ")}`;
-    })(gapLabels);
+    const gapSummary = liftGapSummary(gapLabels);
 
-    const remainingAgents = lift((entries: SlotCoverage[]) =>
-      entries.reduce((sum, entry) => sum + entry.remaining, 0)
-    )(coverage);
+    const remainingAgents = liftRemainingAgents(coverage);
 
     const history = cell<string[]>([]);
     const latestChange = cell<LatestChange | null>(null);
     const sequence = cell(0);
-    const historyView = lift((entries: string[] | undefined) => {
-      return Array.isArray(entries) ? [...entries] : [];
-    })(history);
-    const latestChangeView = lift(
-      (entry: LatestChange | null | undefined) => {
-        return entry ? { ...entry } : null;
-      },
-    )(latestChange);
+    const historyView = liftHistoryView(history);
+    const latestChangeView = liftLatestChangeView(latestChange);
 
     const controls = {
       updateShift: updateSchedule({
@@ -566,3 +592,5 @@ export const callCenterSchedulePattern = recipe<CallCenterScheduleArgs>(
     };
   },
 );
+
+export default callCenterSchedulePattern;

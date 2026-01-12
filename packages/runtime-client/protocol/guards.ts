@@ -16,6 +16,7 @@ import {
   NavigateRequestNotification,
   NotificationType,
   RequestType,
+  TelemetryNotification,
 } from "./types.ts";
 export { JSONSchema, JSONValue, Program };
 
@@ -73,7 +74,7 @@ export function isIPCRemoteResponse(
 export function isIPCRemoteNotification(
   value: unknown,
 ): value is IPCRemoteNotification {
-  return isCellUpdateNotification(value) ||
+  return isTelemetryNotification(value) || isCellUpdateNotification(value) ||
     isConsoleNotification(value) ||
     isNavigateRequestNotification(value) || isErrorNotification(value);
 }
@@ -117,5 +118,15 @@ export function isErrorNotification(
     isRecord(value) &&
     value.type === NotificationType.ErrorReport &&
     typeof value.message === "string"
+  );
+}
+
+export function isTelemetryNotification(
+  value: unknown,
+): value is TelemetryNotification {
+  return (
+    isRecord(value) &&
+    value.type === NotificationType.Telemetry &&
+    typeof value.marker === "object"
   );
 }

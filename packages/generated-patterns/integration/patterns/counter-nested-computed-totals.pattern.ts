@@ -11,9 +11,9 @@ interface NestedComputedTotalsArgs {
 }
 
 interface SubtotalGroupArgs {
-  label: Default<string, "">;
-  values: Default<number[], []>;
-  index: Default<number, 0>;
+  label?: Default<string, "">;
+  values?: Default<number[], []>;
+  index?: Default<number, 0>;
 }
 
 interface AppendGroupValueEvent {
@@ -82,29 +82,39 @@ const replaceValuesList = handler(
   },
 );
 
+const liftNormalizedIndex = lift((value: number | undefined) => {
+  const candidate = sanitizeIndex(value);
+  return candidate >= 0 ? candidate : 0;
+});
+
+const liftItems = lift(sanitizeValues);
+
+const liftSubtotal = lift((entries: number[]) => {
+  return entries.reduce((sum, value) => sum + value, 0);
+});
+
+const liftItemCount = lift((entries: number[]) => entries.length);
+
+const liftResolvedLabel = lift(
+  (
+    state: { raw: string | undefined; idx: number },
+  ): string => {
+    return resolveLabel(state.raw, state.idx);
+  },
+);
+
 const subtotalGroup = recipe<SubtotalGroupArgs>(
   "Nested Totals Subgroup",
   ({ label, values, index }) => {
-    const normalizedIndex = lift((value: number | undefined) => {
-      const candidate = sanitizeIndex(value);
-      return candidate >= 0 ? candidate : 0;
-    })(index);
+    const normalizedIndex = liftNormalizedIndex(index);
 
-    const items = lift(sanitizeValues)(values);
+    const items = liftItems(values);
 
-    const subtotal = lift((entries: number[]) => {
-      return entries.reduce((sum, value) => sum + value, 0);
-    })(items);
+    const subtotal = liftSubtotal(items);
 
-    const itemCount = lift((entries: number[]) => entries.length)(items);
+    const itemCount = liftItemCount(items);
 
-    const resolvedLabel = lift(
-      (
-        state: { raw: string | undefined; idx: number },
-      ): string => {
-        return resolveLabel(state.raw, state.idx);
-      },
-    )({
+    const resolvedLabel = liftResolvedLabel({
       raw: label,
       idx: normalizedIndex,
     });
@@ -126,7 +136,7 @@ const subtotalGroup = recipe<SubtotalGroupArgs>(
 
 const instantiateGroups = lift<
   { groups: Cell<SubtotalGroupSeed[]> },
-  SubtotalGroupArgs[]
+  ReturnType<typeof subtotalGroup>[]
 >(
   ({ groups }) => {
     const raw = groups.get();
@@ -185,6 +195,67 @@ const appendToGroup = handler(
   },
 );
 
+const liftGroupTotals = lift((entries: unknown) => {
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+  return entries.map((entry) => {
+    const subtotal = (entry as { subtotal?: unknown }).subtotal;
+    return typeof subtotal === "number" ? subtotal : sanitizeNumber(subtotal);
+  });
+});
+
+const liftGrandTotal = lift((totals: number[]) => {
+  return totals.reduce((sum, value) => sum + value, 0);
+});
+
+const liftGroupLabels = lift((entries: unknown) => {
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+  return entries.map((entry, index) => {
+    const label = (entry as { label?: unknown }).label;
+    return typeof label === "string" ? label : resolveLabel(label, index);
+  });
+});
+
+const liftGroupSummaries = lift(
+  (
+    state: { labels: string[]; totals: number[] },
+  ): string[] => {
+    const limit = Math.min(state.labels.length, state.totals.length);
+    if (limit === 0) {
+      return ["none"];
+    }
+    const summaries: string[] = [];
+    for (let index = 0; index < limit; index++) {
+      const label = state.labels[index];
+      const value = state.totals[index];
+      summaries.push(`${label}: ${value}`);
+    }
+    return summaries;
+  },
+);
+
+const liftMainSummary = lift((state: { parts: string[]; total: number }) => {
+  const visible = state.parts.length > 0 ? state.parts.join(" | ") : "none";
+  return `${visible} => total ${state.total}`;
+});
+
+const liftGroupCount = lift((entries: unknown) => {
+  return Array.isArray(entries) ? entries.length : 0;
+});
+
+const liftTotalItems = lift((entries: { itemCount: number }[]) => {
+  if (!Array.isArray(entries)) {
+    return 0;
+  }
+  return entries.reduce((sum, entry) => {
+    const count = entry.itemCount;
+    return typeof count === "number" ? sum + count : sum;
+  }, 0);
+});
+
 export const counterWithNestedComputedTotals = recipe<
   NestedComputedTotalsArgs
 >(
@@ -192,68 +263,25 @@ export const counterWithNestedComputedTotals = recipe<
   ({ groups: groupSeeds }) => {
     const groups = instantiateGroups({ groups: groupSeeds });
 
-    const groupTotals = lift((entries: unknown) => {
-      if (!Array.isArray(entries)) {
-        return [];
-      }
-      return entries.map((entry) => {
-        const subtotal = (entry as { subtotal?: unknown }).subtotal;
-        return typeof subtotal === "number"
-          ? subtotal
-          : sanitizeNumber(subtotal);
-      });
-    })(groups);
+    const groupTotals = liftGroupTotals(groups);
 
-    const grandTotal = lift((totals: number[]) => {
-      return totals.reduce((sum, value) => sum + value, 0);
-    })(groupTotals);
+    const grandTotal = liftGrandTotal(groupTotals);
 
-    const groupLabels = lift((entries: unknown) => {
-      if (!Array.isArray(entries)) {
-        return [];
-      }
-      return entries.map((entry, index) => {
-        const label = (entry as { label?: unknown }).label;
-        return typeof label === "string" ? label : resolveLabel(label, index);
-      });
-    })(groups);
+    const groupLabels = liftGroupLabels(groups);
 
-    const groupSummaries = lift(
-      (
-        state: { labels: string[]; totals: number[] },
-      ): string[] => {
-        const limit = Math.min(state.labels.length, state.totals.length);
-        if (limit === 0) {
-          return ["none"];
-        }
-        const summaries: string[] = [];
-        for (let index = 0; index < limit; index++) {
-          const label = state.labels[index];
-          const value = state.totals[index];
-          summaries.push(`${label}: ${value}`);
-        }
-        return summaries;
-      },
-    )({ labels: groupLabels, totals: groupTotals });
+    const groupSummaries = liftGroupSummaries({
+      labels: groupLabels,
+      totals: groupTotals,
+    });
 
-    const summary = lift((state: { parts: string[]; total: number }) => {
-      const visible = state.parts.length > 0 ? state.parts.join(" | ") : "none";
-      return `${visible} => total ${state.total}`;
-    })({ parts: groupSummaries, total: grandTotal });
+    const summary = liftMainSummary({
+      parts: groupSummaries,
+      total: grandTotal,
+    });
 
-    const groupCount = lift((entries: unknown) => {
-      return Array.isArray(entries) ? entries.length : 0;
-    })(groups);
+    const groupCount = liftGroupCount(groups);
 
-    const totalItems = lift((entries: { itemCount: number }[]) => {
-      if (!Array.isArray(entries)) {
-        return 0;
-      }
-      return entries.reduce((sum, entry) => {
-        const count = entry.itemCount;
-        return typeof count === "number" ? sum + count : sum;
-      }, 0);
-    })(groups);
+    const totalItems = liftTotalItems(groups);
 
     return {
       seeds: groupSeeds,
@@ -269,3 +297,5 @@ export const counterWithNestedComputedTotals = recipe<
     };
   },
 );
+
+export default counterWithNestedComputedTotals;

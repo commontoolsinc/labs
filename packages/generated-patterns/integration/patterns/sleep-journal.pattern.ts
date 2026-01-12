@@ -237,37 +237,48 @@ const logSleepSession = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSessionLog = lift((
+  entries: readonly SleepSessionSeed[] | undefined,
+) => sanitizeSessionList(entries));
+
+const liftTagAverages = lift((entries: readonly SleepSessionEntry[]) =>
+  computeTagSummaries(entries)
+);
+
+const liftWeekdayAverages = lift((entries: readonly SleepSessionEntry[]) =>
+  computeWeekdaySummaries(entries)
+);
+
+const liftMetrics = lift((entries: readonly SleepSessionEntry[]) =>
+  computeMetrics(entries)
+);
+
+const liftSessionCount = lift((value: SleepMetrics) => value.sessionCount);
+const liftTotalHours = lift((value: SleepMetrics) => value.totalHours);
+const liftAverageHours = lift((value: SleepMetrics) => value.averageHours);
+
+const liftLatestView = lift((entries: readonly SleepSessionEntry[]) =>
+  entries.length === 0 ? null : entries[entries.length - 1]
+);
+
 export const sleepJournalPattern = recipe<SleepJournalArgs>(
   "Sleep Journal Pattern",
   ({ sessions }) => {
     const idSeed = cell(0);
 
-    const sessionLog = lift((
-      entries: readonly SleepSessionSeed[] | undefined,
-    ) => sanitizeSessionList(entries))(sessions);
-    const tagAverages = lift((entries: readonly SleepSessionEntry[]) =>
-      computeTagSummaries(entries)
-    )(sessionLog);
-    const weekdayAverages = lift((entries: readonly SleepSessionEntry[]) =>
-      computeWeekdaySummaries(entries)
-    )(sessionLog);
-    const metrics = lift((entries: readonly SleepSessionEntry[]) =>
-      computeMetrics(entries)
-    )(sessionLog);
-    const sessionCount = lift((value: SleepMetrics) => value.sessionCount)(
-      metrics,
-    );
-    const totalHours = lift((value: SleepMetrics) => value.totalHours)(metrics);
-    const averageHours = lift((value: SleepMetrics) => value.averageHours)(
-      metrics,
-    );
+    const sessionLog = liftSessionLog(sessions);
+    const tagAverages = liftTagAverages(sessionLog);
+    const weekdayAverages = liftWeekdayAverages(sessionLog);
+    const metrics = liftMetrics(sessionLog);
+    const sessionCount = liftSessionCount(metrics);
+    const totalHours = liftTotalHours(metrics);
+    const averageHours = liftAverageHours(metrics);
     const summary =
       str`${sessionCount} sessions averaging ${averageHours} hours`;
     const totalsLabel = str`${totalHours} total hours slept`;
 
-    const latestView = lift((entries: readonly SleepSessionEntry[]) =>
-      entries.length === 0 ? null : entries[entries.length - 1]
-    )(sessionLog);
+    const latestView = liftLatestView(sessionLog);
 
     return {
       sessionLog,
@@ -281,5 +292,7 @@ export const sleepJournalPattern = recipe<SleepJournalArgs>(
     };
   },
 );
+
+export default sleepJournalPattern;
 
 export type { SleepSessionEntry };

@@ -2,9 +2,11 @@ import type {
   JSONSchema,
   JSONValue,
   NormalizedFullLink,
+  SchedulerGraphSnapshot,
 } from "@commontools/runner/shared";
 import type { DID, KeyPairRaw } from "@commontools/identity";
 import { type Program } from "@commontools/js-compiler/interface";
+import { RuntimeTelemetryMarkerResult } from "@commontools/runtime-client";
 export type { JSONSchema, JSONValue, Program };
 
 export type MessageId = number;
@@ -32,6 +34,7 @@ export enum RequestType {
   // Runtime operations
   GetCell = "runtime:getCell",
   Idle = "runtime:idle",
+  GetGraphSnapshot = "runtime:getGraphSnapshot",
 
   // Page operations (main -> worker)
   GetSpaceRootPattern = "pattern:getSpaceRoot",
@@ -49,6 +52,7 @@ export enum NotificationType {
   ConsoleMessage = "callback:console",
   NavigateRequest = "callback:navigate",
   ErrorReport = "callback:error",
+  Telemetry = "callback:telemetry",
 }
 
 export interface IPCClientMessage {
@@ -133,6 +137,10 @@ export interface IdleRequest extends BaseRequest {
   type: RequestType.Idle;
 }
 
+export interface GetGraphSnapshotRequest extends BaseRequest {
+  type: RequestType.GetGraphSnapshot;
+}
+
 export interface PageCreateRequest extends BaseRequest {
   type: RequestType.PageCreate;
   source: {
@@ -187,6 +195,7 @@ export type IPCClientRequest =
   | CellSubscribeRequest
   | CellUnsubscribeRequest
   | GetCellRequest
+  | GetGraphSnapshotRequest
   | IdleRequest
   | PageCreateRequest
   | PageGetSpaceDefault
@@ -217,6 +226,10 @@ export interface PageResponse {
   page: PageRef;
 }
 
+export interface GraphSnapshotResponse {
+  snapshot: SchedulerGraphSnapshot;
+}
+
 export interface CellUpdateNotification {
   type: NotificationType.CellUpdate;
   cell: CellRef;
@@ -244,12 +257,18 @@ export interface ErrorNotification {
   spellId?: string;
 }
 
+export interface TelemetryNotification {
+  type: NotificationType.Telemetry;
+  marker: RuntimeTelemetryMarkerResult;
+}
+
 export type RemoteResponse =
   | EmptyResponse
   | NullResponse
   | BooleanResponse
   | JSONValueResponse
   | CellResponse
+  | GraphSnapshotResponse
   | PageResponse;
 
 export type IPCRemoteNotification =
@@ -275,6 +294,10 @@ export type Commands = {
   [RequestType.Idle]: {
     request: IdleRequest;
     response: EmptyResponse;
+  };
+  [RequestType.GetGraphSnapshot]: {
+    request: GetGraphSnapshotRequest;
+    response: GraphSnapshotResponse;
   };
   // Cell requests
   [RequestType.CellGet]: {

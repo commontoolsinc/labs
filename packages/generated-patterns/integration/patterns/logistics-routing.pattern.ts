@@ -262,6 +262,57 @@ const computeLoadMetrics = (
   });
 };
 
+// Module-scope lift definitions
+const liftSanitizeRoutes = lift(sanitizeRoutes);
+
+const liftBaseShipments = lift((input: {
+  entries: ShipmentInput[] | undefined;
+  routeList: RouteDefinition[];
+}) => sanitizeShipments(input.entries, input.routeList));
+
+const liftAssignmentList = lift((input: {
+  stored: ShipmentRecord[];
+  base: ShipmentRecord[];
+}) => {
+  const stored = Array.isArray(input.stored) ? input.stored : [];
+  if (stored.length > 0) {
+    return stored.map((entry) => ({ ...entry }));
+  }
+  const base = Array.isArray(input.base) ? input.base : [];
+  return base.map((entry) => ({ ...entry }));
+});
+
+const liftLoadMetrics = lift((input: {
+  routeList: RouteDefinition[];
+  shipmentsList: ShipmentRecord[];
+}) => computeLoadMetrics(input.routeList, input.shipmentsList));
+
+const liftAvailableRoutes = lift((entries: RouteLoadMetric[]) => {
+  return entries
+    .filter((entry) => entry.remaining > 0)
+    .map((entry) => entry.route)
+    .sort();
+});
+
+const liftOverloaded = lift((entries: RouteLoadMetric[]) => {
+  return entries
+    .filter((entry) => entry.isOverCapacity)
+    .map((entry) => entry.route)
+    .sort();
+});
+
+const liftShipmentCount = lift((entries: ShipmentRecord[]) => entries.length);
+const liftRouteCount = lift((entries: RouteDefinition[]) => entries.length);
+const liftOverloadedCount = lift((entries: string[]) => entries.length);
+
+const liftHistoryView = lift((entries: string[] | undefined) => {
+  return Array.isArray(entries) ? [...entries] : [];
+});
+
+const liftLastActionView = lift((value: string | undefined) => {
+  return typeof value === "string" && value.length > 0 ? value : "initialized";
+});
+
 const reassignShipment = handler(
   (
     event: AssignmentEvent | undefined,
@@ -341,63 +392,30 @@ const reassignShipment = handler(
 export const logisticsRouting = recipe<LogisticsRoutingArgs>(
   "Logistics Routing",
   ({ routes, shipments }) => {
-    const routesList = lift(sanitizeRoutes)(routes);
-    const baseShipments = lift((input: {
-      entries: ShipmentInput[] | undefined;
-      routeList: RouteDefinition[];
-    }) => sanitizeShipments(input.entries, input.routeList))({
+    const routesList = liftSanitizeRoutes(routes);
+    const baseShipments = liftBaseShipments({
       entries: shipments,
       routeList: routesList,
     });
 
     const shipmentStore = cell<ShipmentRecord[]>([]);
 
-    const assignmentList = lift((input: {
-      stored: ShipmentRecord[];
-      base: ShipmentRecord[];
-    }) => {
-      const stored = Array.isArray(input.stored) ? input.stored : [];
-      if (stored.length > 0) {
-        return stored.map((entry) => ({ ...entry }));
-      }
-      const base = Array.isArray(input.base) ? input.base : [];
-      return base.map((entry) => ({ ...entry }));
-    })({
+    const assignmentList = liftAssignmentList({
       stored: shipmentStore,
       base: baseShipments,
     });
 
-    const loadMetrics = lift((input: {
-      routeList: RouteDefinition[];
-      shipmentsList: ShipmentRecord[];
-    }) => computeLoadMetrics(input.routeList, input.shipmentsList))({
+    const loadMetrics = liftLoadMetrics({
       routeList: routesList,
       shipmentsList: assignmentList,
     });
 
-    const availableRoutes = lift((entries: RouteLoadMetric[]) => {
-      return entries
-        .filter((entry) => entry.remaining > 0)
-        .map((entry) => entry.route)
-        .sort();
-    })(loadMetrics);
+    const availableRoutes = liftAvailableRoutes(loadMetrics);
+    const overloaded = liftOverloaded(loadMetrics);
 
-    const overloaded = lift((entries: RouteLoadMetric[]) => {
-      return entries
-        .filter((entry) => entry.isOverCapacity)
-        .map((entry) => entry.route)
-        .sort();
-    })(loadMetrics);
-
-    const shipmentCount = lift((entries: ShipmentRecord[]) => entries.length)(
-      assignmentList,
-    );
-    const routeCount = lift((entries: RouteDefinition[]) => entries.length)(
-      routesList,
-    );
-    const overloadedCount = lift((entries: string[]) => entries.length)(
-      overloaded,
-    );
+    const shipmentCount = liftShipmentCount(assignmentList);
+    const routeCount = liftRouteCount(routesList);
+    const overloadedCount = liftOverloadedCount(overloaded);
 
     const status =
       str`${shipmentCount} shipments across ${routeCount} routes; overloaded ${overloadedCount}`;
@@ -406,14 +424,8 @@ export const logisticsRouting = recipe<LogisticsRoutingArgs>(
     const lastAction = cell("initialized");
     const sequence = cell(0);
 
-    const historyView = lift((entries: string[] | undefined) => {
-      return Array.isArray(entries) ? [...entries] : [];
-    })(history);
-    const lastActionView = lift((value: string | undefined) => {
-      return typeof value === "string" && value.length > 0
-        ? value
-        : "initialized";
-    })(lastAction);
+    const historyView = liftHistoryView(history);
+    const lastActionView = liftLastActionView(lastAction);
 
     const assignShipment = reassignShipment({
       shipments: shipmentStore,
@@ -439,3 +451,5 @@ export const logisticsRouting = recipe<LogisticsRoutingArgs>(
 );
 
 export type { RouteDefinition, RouteLoadMetric, ShipmentRecord };
+
+export default logisticsRouting;

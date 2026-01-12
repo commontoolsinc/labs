@@ -166,116 +166,131 @@ const calculatePercent = (value: number, total: number): number => {
   return Math.round(ratio * 100) / 100;
 };
 
+const liftSanitizeGroups = lift(sanitizeGroups);
+
+const liftGrandTotal = lift((entries: SanitizedContributionGroup[]) => {
+  return entries.reduce((sum, group) => sum + group.total, 0);
+});
+
+const liftGroupBreakdown = lift(
+  (
+    state: {
+      groups: SanitizedContributionGroup[];
+      total: number;
+    },
+  ) => {
+    const breakdown: Array<{
+      label: string;
+      total: number;
+      percentOfTotal: number;
+      items: Array<{
+        label: string;
+        value: number;
+        percentOfGroup: number;
+        percentOfTotal: number;
+      }>;
+    }> = [];
+    for (const group of state.groups) {
+      const percentOfTotal = calculatePercent(group.total, state.total);
+      const items: Array<{
+        label: string;
+        value: number;
+        percentOfGroup: number;
+        percentOfTotal: number;
+      }> = [];
+      for (const item of group.items) {
+        const percentOfGroup = calculatePercent(item.value, group.total);
+        const percentItemTotal = calculatePercent(item.value, state.total);
+        items.push({
+          label: item.label,
+          value: item.value,
+          percentOfGroup,
+          percentOfTotal: percentItemTotal,
+        });
+      }
+      breakdown.push({
+        label: group.label,
+        total: group.total,
+        percentOfTotal,
+        items,
+      });
+    }
+    return breakdown;
+  },
+);
+
+const liftGroupSummaries = lift(
+  (
+    state: {
+      groups: Array<{
+        label: string;
+        total: number;
+        percentOfTotal: number;
+      }>;
+    },
+  ) => {
+    if (state.groups.length === 0) {
+      return ["no groups"];
+    }
+    const summaries: string[] = [];
+    for (const group of state.groups) {
+      summaries.push(
+        `${group.label}: ${group.total} (${group.percentOfTotal}%)`,
+      );
+    }
+    return summaries;
+  },
+);
+
+const liftSummary = lift(
+  (state: { total: number; parts: string[] }): string => {
+    const visible = state.parts.length > 0
+      ? state.parts.join(" | ")
+      : "no groups";
+    return `Grand total ${state.total}: ${visible}`;
+  },
+);
+
+const liftHighlightedGroup = lift(
+  (
+    state: {
+      groups: Array<{
+        label: string;
+        percentOfTotal: number;
+      }>;
+    },
+  ) => {
+    if (state.groups.length === 0) {
+      return "none";
+    }
+    const sorted = [...state.groups].sort((left, right) => {
+      return right.percentOfTotal - left.percentOfTotal;
+    });
+    return `${sorted[0].label} is ${sorted[0].percentOfTotal}%`;
+  },
+);
+
 export const counterWithNestedComputedPercentages = recipe<
   NestedComputedPercentagesArgs
 >(
   "Counter With Nested Computed Percentages",
   ({ groups }) => {
-    const sanitizedGroups = lift(sanitizeGroups)(groups);
+    const sanitizedGroups = liftSanitizeGroups(groups);
 
-    const grandTotal = lift((entries: SanitizedContributionGroup[]) => {
-      return entries.reduce((sum, group) => sum + group.total, 0);
-    })(sanitizedGroups);
+    const grandTotal = liftGrandTotal(sanitizedGroups);
 
-    const groupBreakdown = lift(
-      (
-        state: {
-          groups: SanitizedContributionGroup[];
-          total: number;
-        },
-      ) => {
-        const breakdown: Array<{
-          label: string;
-          total: number;
-          percentOfTotal: number;
-          items: Array<{
-            label: string;
-            value: number;
-            percentOfGroup: number;
-            percentOfTotal: number;
-          }>;
-        }> = [];
-        for (const group of state.groups) {
-          const percentOfTotal = calculatePercent(group.total, state.total);
-          const items: Array<{
-            label: string;
-            value: number;
-            percentOfGroup: number;
-            percentOfTotal: number;
-          }> = [];
-          for (const item of group.items) {
-            const percentOfGroup = calculatePercent(item.value, group.total);
-            const percentItemTotal = calculatePercent(item.value, state.total);
-            items.push({
-              label: item.label,
-              value: item.value,
-              percentOfGroup,
-              percentOfTotal: percentItemTotal,
-            });
-          }
-          breakdown.push({
-            label: group.label,
-            total: group.total,
-            percentOfTotal,
-            items,
-          });
-        }
-        return breakdown;
-      },
-    )({ groups: sanitizedGroups, total: grandTotal });
+    const groupBreakdown = liftGroupBreakdown({
+      groups: sanitizedGroups,
+      total: grandTotal,
+    });
 
-    const groupSummaries = lift(
-      (
-        state: {
-          groups: Array<{
-            label: string;
-            total: number;
-            percentOfTotal: number;
-          }>;
-        },
-      ) => {
-        if (state.groups.length === 0) {
-          return ["no groups"];
-        }
-        const summaries: string[] = [];
-        for (const group of state.groups) {
-          summaries.push(
-            `${group.label}: ${group.total} (${group.percentOfTotal}%)`,
-          );
-        }
-        return summaries;
-      },
-    )({
+    const groupSummaries = liftGroupSummaries({
       groups: groupBreakdown,
     });
 
-    const summary = lift(
-      (state: { total: number; parts: string[] }): string => {
-        const visible = state.parts.length > 0
-          ? state.parts.join(" | ")
-          : "no groups";
-        return `Grand total ${state.total}: ${visible}`;
-      },
-    )({ total: grandTotal, parts: groupSummaries });
+    const summary = liftSummary({ total: grandTotal, parts: groupSummaries });
 
-    const highlightedGroup = lift(
-      (
-        state: {
-          groups: Array<{
-            label: string;
-            percentOfTotal: number;
-          }>;
-        },
-      ) => {
-        if (state.groups.length === 0) {
-          return "none";
-        }
-        const sorted = [...state.groups].sort((left, right) => {
-          return right.percentOfTotal - left.percentOfTotal;
-        });
-        return `${sorted[0].label} is ${sorted[0].percentOfTotal}%`;
-      },
-    )({ groups: groupBreakdown });
+    const highlightedGroup = liftHighlightedGroup({ groups: groupBreakdown });
 
     return {
       groups,
@@ -290,3 +305,5 @@ export const counterWithNestedComputedPercentages = recipe<
     };
   },
 );
+
+export default counterWithNestedComputedPercentages;

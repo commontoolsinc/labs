@@ -95,13 +95,14 @@ const computeLimits = lift(
   },
 );
 
+const liftToInteger = lift((input: number | undefined) => toInteger(input));
+const liftSanitizeHistory = lift(sanitizeHistory);
+
 export const counterWithDerivedMinMax = recipe<DerivedMinMaxArgs>(
   "Counter With Derived Min Max",
   ({ value, history }) => {
-    const currentValue = lift((input: number | undefined) => toInteger(input))(
-      value,
-    );
-    const historyValues = lift(sanitizeHistory)(history);
+    const currentValue = liftToInteger(value);
+    const historyValues = liftSanitizeHistory(history);
     const limits = computeLimits({
       values: historyValues,
       current: currentValue,
@@ -120,3 +121,5 @@ export const counterWithDerivedMinMax = recipe<DerivedMinMaxArgs>(
     };
   },
 );
+
+export default counterWithDerivedMinMax;

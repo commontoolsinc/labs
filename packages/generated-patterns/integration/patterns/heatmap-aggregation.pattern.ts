@@ -208,55 +208,84 @@ const updateDimensions = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeWidth = lift((value: number | undefined) =>
+  sanitizeDimension(value, 4)
+);
+const liftSanitizeHeight = lift((value: number | undefined) =>
+  sanitizeDimension(value, 3)
+);
+
+const liftBuckets = lift(
+  (
+    inputs: {
+      source: HeatmapInteractionInput[];
+      width: number;
+      height: number;
+    },
+  ): HeatmapBucket[] =>
+    sanitizeInteractions(
+      inputs.source,
+      inputs.width,
+      inputs.height,
+    ),
+);
+
+const liftBucketGrid = lift(
+  (
+    inputs: { width: number; height: number; buckets: HeatmapBucket[] },
+  ): number[][] => buildGrid(inputs.width, inputs.height, inputs.buckets),
+);
+
+const liftMaxIntensity = lift(findMaxIntensity);
+
+const liftNormalizedGrid = lift(
+  (inputs: { grid: number[][]; max: number }) =>
+    normalizeGrid(inputs.grid, inputs.max),
+);
+
+const liftPeaks = lift(
+  (inputs: { grid: number[][]; max: number }) =>
+    locatePeaks(inputs.grid, inputs.max),
+);
+
+const liftInteractionCount = lift((items: HeatmapBucket[]) => {
+  const total = items.reduce((sum, item) => sum + item.weight, 0);
+  return Math.round(total * 100) / 100;
+});
+
+const liftPeakSummary = lift(describePeaks);
+
 export const heatmapAggregation = recipe<HeatmapAggregationArgs>(
   "Heatmap Aggregation",
   ({ width, height, interactions }) => {
-    const sanitizedWidth = lift((value: number | undefined) =>
-      sanitizeDimension(value, 4)
-    )(width);
-    const sanitizedHeight = lift((value: number | undefined) =>
-      sanitizeDimension(value, 3)
-    )(height);
+    const sanitizedWidth = liftSanitizeWidth(width);
+    const sanitizedHeight = liftSanitizeHeight(height);
 
-    const buckets = lift(
-      (
-        inputs: {
-          source: HeatmapInteractionInput[];
-          width: number;
-          height: number;
-        },
-      ): HeatmapBucket[] =>
-        sanitizeInteractions(
-          inputs.source,
-          inputs.width,
-          inputs.height,
-        ),
-    )({ source: interactions, width: sanitizedWidth, height: sanitizedHeight });
+    const buckets = liftBuckets({
+      source: interactions,
+      width: sanitizedWidth,
+      height: sanitizedHeight,
+    });
 
-    const bucketGrid = lift(
-      (
-        inputs: { width: number; height: number; buckets: HeatmapBucket[] },
-      ): number[][] => buildGrid(inputs.width, inputs.height, inputs.buckets),
-    )({ buckets, width: sanitizedWidth, height: sanitizedHeight });
+    const bucketGrid = liftBucketGrid({
+      buckets,
+      width: sanitizedWidth,
+      height: sanitizedHeight,
+    });
 
-    const maxIntensity = lift(findMaxIntensity)(bucketGrid);
+    const maxIntensity = liftMaxIntensity(bucketGrid);
 
-    const normalizedGrid = lift(
-      (inputs: { grid: number[][]; max: number }) =>
-        normalizeGrid(inputs.grid, inputs.max),
-    )({ grid: bucketGrid, max: maxIntensity });
+    const normalizedGrid = liftNormalizedGrid({
+      grid: bucketGrid,
+      max: maxIntensity,
+    });
 
-    const peaks = lift(
-      (inputs: { grid: number[][]; max: number }) =>
-        locatePeaks(inputs.grid, inputs.max),
-    )({ grid: bucketGrid, max: maxIntensity });
+    const peaks = liftPeaks({ grid: bucketGrid, max: maxIntensity });
 
-    const interactionCount = lift((items: HeatmapBucket[]) => {
-      const total = items.reduce((sum, item) => sum + item.weight, 0);
-      return Math.round(total * 100) / 100;
-    })(buckets);
+    const interactionCount = liftInteractionCount(buckets);
 
-    const peakSummary = lift(describePeaks)(peaks);
+    const peakSummary = liftPeakSummary(peaks);
 
     const label = str`Peak intensity ${maxIntensity} at ${peakSummary}`;
 
@@ -279,3 +308,5 @@ export const heatmapAggregation = recipe<HeatmapAggregationArgs>(
     };
   },
 );
+
+export default heatmapAggregation;

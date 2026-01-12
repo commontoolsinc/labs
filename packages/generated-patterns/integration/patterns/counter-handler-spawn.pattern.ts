@@ -12,7 +12,7 @@ import {
 
 const childIncrement = handler(
   (
-    event: { amount?: number } | undefined,
+    event: { amount?: number },
     context: { value: Cell<number> },
   ) => {
     const amount = typeof event?.amount === "number" ? event.amount : 1;
@@ -83,3 +83,5 @@ export const counterWithHandlerSpawn = recipe<HandlerSpawnArgs>(
     };
   },
 );
+
+export default counterWithHandlerSpawn;

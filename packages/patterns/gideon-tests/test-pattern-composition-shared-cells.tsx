@@ -44,45 +44,46 @@ interface ShoppingItem {
   category: Default<string, "Uncategorized">;
 }
 
+// Handlers at module scope
+const removeItem = handler<
+  unknown,
+  {
+    items: Writable<Array<Writable<ShoppingItem>>>;
+    item: Writable<ShoppingItem>;
+  }
+>(
+  (_event, { items: itemsList, item }) => {
+    const current = itemsList.get();
+    const index = current.findIndex((el) => el.equals(item));
+    if (index >= 0) {
+      itemsList.set(current.toSpliced(index, 1));
+    }
+  },
+);
+
+const addItem = handler<
+  { detail: { message: string } },
+  { items: Writable<ShoppingItem[]> }
+>(
+  ({ detail }, { items: itemsList }) => {
+    const input = detail?.message?.trim();
+    if (input) {
+      const [title, category = "Uncategorized"] = input.split(":");
+      itemsList.push({
+        title: title.trim(),
+        done: false,
+        category: category.trim(),
+      });
+    }
+  },
+);
+
 // Sub-pattern 1: Basic list view
 interface BasicListInput {
   items: Writable<ShoppingItem[]>;
 }
 
 const BasicList = pattern<BasicListInput>(({ items }) => {
-  const removeItem = handler<
-    unknown,
-    {
-      items: Writable<Array<Writable<ShoppingItem>>>;
-      item: Writable<ShoppingItem>;
-    }
-  >(
-    (_event, { items: itemsList, item }) => {
-      const current = itemsList.get();
-      const index = current.findIndex((el) => el.equals(item));
-      if (index >= 0) {
-        itemsList.set(current.toSpliced(index, 1));
-      }
-    },
-  );
-
-  const addItem = handler<
-    { detail: { message: string } },
-    { items: Writable<ShoppingItem[]> }
-  >(
-    ({ detail }, { items: itemsList }) => {
-      const input = detail?.message?.trim();
-      if (input) {
-        const [title, category = "Uncategorized"] = input.split(":");
-        itemsList.push({
-          title: title.trim(),
-          done: false,
-          category: category.trim(),
-        });
-      }
-    },
-  );
-
   return {
     [NAME]: "Basic Shopping List",
     [UI]: (
@@ -138,22 +139,6 @@ const CategoryList = pattern<CategoryListInput>(({ items }) => {
         cats.add(item.category || "Uncategorized");
       }
       return Array.from(cats).sort();
-    },
-  );
-
-  const removeItem = handler<
-    unknown,
-    {
-      items: Writable<Array<Writable<ShoppingItem>>>;
-      item: Writable<ShoppingItem>;
-    }
-  >(
-    (_event, { items: itemsList, item }) => {
-      const current = itemsList.get();
-      const index = current.findIndex((el) => el.equals(item));
-      if (index >= 0) {
-        itemsList.set(current.toSpliced(index, 1));
-      }
     },
   );
 

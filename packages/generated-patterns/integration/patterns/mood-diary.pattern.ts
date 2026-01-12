@@ -315,37 +315,43 @@ const logMoodEntry = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeEntryList = lift((
+  value: readonly MoodEntrySeed[] | undefined,
+) => sanitizeEntryList(value));
+const liftMetrics = lift((items: readonly MoodEntry[]) =>
+  computeMetrics(items)
+);
+const liftTagSentiment = lift((items: readonly MoodEntry[]) =>
+  computeTagBreakdown(items)
+);
+const liftTimeSentiment = lift((items: readonly MoodEntry[]) =>
+  computeTimeBreakdown(items)
+);
+const liftEntryCount = lift((value: MoodMetrics) => value.entryCount);
+const liftAverageScore = lift((value: MoodMetrics) => value.averageScore);
+const liftPositivePercent = lift((value: MoodMetrics) =>
+  Math.round(value.positiveShare * 100)
+);
+const liftLatestEntry = lift((items: readonly MoodEntry[]) =>
+  items.length === 0 ? null : items[items.length - 1]
+);
+
 export const moodDiaryPattern = recipe<MoodDiaryArgs>(
   "Mood Diary Pattern",
   ({ entries }) => {
     const runtimeSeed = cell(0);
 
-    const entryLog = lift((value: readonly MoodEntrySeed[] | undefined) =>
-      sanitizeEntryList(value)
-    )(entries);
-    const metrics = lift((items: readonly MoodEntry[]) =>
-      computeMetrics(items)
-    )(entryLog);
-    const tagSentiment = lift((items: readonly MoodEntry[]) =>
-      computeTagBreakdown(items)
-    )(entryLog);
-    const timeSentiment = lift((items: readonly MoodEntry[]) =>
-      computeTimeBreakdown(items)
-    )(entryLog);
-    const entryCount = lift((value: MoodMetrics) => value.entryCount)(
-      metrics,
-    );
-    const averageScore = lift((value: MoodMetrics) => value.averageScore)(
-      metrics,
-    );
-    const positivePercent = lift((value: MoodMetrics) =>
-      Math.round(value.positiveShare * 100)
-    )(metrics);
+    const entryLog = liftSanitizeEntryList(entries);
+    const metrics = liftMetrics(entryLog);
+    const tagSentiment = liftTagSentiment(entryLog);
+    const timeSentiment = liftTimeSentiment(entryLog);
+    const entryCount = liftEntryCount(metrics);
+    const averageScore = liftAverageScore(metrics);
+    const positivePercent = liftPositivePercent(metrics);
     const sentimentSummary =
       str`${entryCount} moods logged avg ${averageScore} ${positivePercent}% positive`;
-    const latestEntry = lift((items: readonly MoodEntry[]) =>
-      items.length === 0 ? null : items[items.length - 1]
-    )(entryLog);
+    const latestEntry = liftLatestEntry(entryLog);
 
     return {
       entryLog,
@@ -360,3 +366,5 @@ export const moodDiaryPattern = recipe<MoodDiaryArgs>(
 );
 
 export type { MoodEntry, TagSentiment, TimeBucketSentiment };
+
+export default moodDiaryPattern;

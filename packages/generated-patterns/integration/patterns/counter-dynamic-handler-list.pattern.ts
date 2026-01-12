@@ -96,6 +96,64 @@ const appendValue = handler(
   },
 );
 
+const liftNormalizedValues = lift((entries: number[] | undefined) => {
+  if (!Array.isArray(entries)) return [] as number[];
+  return entries.map((item) => toInteger(item, 0));
+});
+const liftAverage = lift((entries: number[] | undefined) => {
+  const list = Array.isArray(entries) ? entries : [];
+  if (list.length === 0) return 0;
+  const sum = list.reduce((acc, value) => acc + value, 0);
+  const rawAverage = sum / list.length;
+  return Math.round(rawAverage * 100) / 100;
+});
+const liftSlots = lift(
+  toSchema<
+    {
+      values: Cell<number[]>;
+      view: Cell<number[]>;
+      lastAdjustment: Cell<AdjustmentRecord>;
+      history: Cell<AdjustmentRecord[]>;
+      sequence: Cell<number>;
+    }
+  >(),
+  toSchema<unknown>(),
+  ({ values, view, lastAdjustment, history, sequence }) => {
+    const snapshot = view.get();
+    const list = Array.isArray(snapshot) ? snapshot : [];
+    return list.map((rawValue, index) => {
+      const value = toInteger(rawValue, 0);
+      const name = `Slot ${index + 1}`;
+      return {
+        index,
+        value,
+        label: `${name}: ${value}`,
+        adjust: adjustValue({
+          values,
+          slotIndex: index,
+          lastAdjustment,
+          history,
+          sequence,
+        }),
+      };
+    });
+  },
+);
+const liftHandlers = lift((entries: unknown) => {
+  if (!Array.isArray(entries)) return [] as unknown[];
+  return entries.map((item: any) => item?.adjust);
+});
+const liftHistoryView = lift((entries: AdjustmentRecord[] | undefined) => {
+  return Array.isArray(entries) ? entries : [];
+});
+const liftLastAdjustmentView = lift(
+  (record: AdjustmentRecord | undefined) =>
+    record ?? { index: -1, amount: 0, nextValue: 0 },
+);
+const liftSequenceView = lift((count: number | undefined) =>
+  Math.max(0, toInteger(count, 0))
+);
+
 export const counterWithDynamicHandlerList = recipe<DynamicHandlerArgs>(
   "Counter With Dynamic Handler List",
   ({ values }) => {
@@ -107,56 +165,16 @@ export const counterWithDynamicHandlerList = recipe<DynamicHandlerArgs>(
     const history = cell<AdjustmentRecord[]>([]);
     const sequence = cell(0);
 
-    const normalizedValues = lift((entries: number[] | undefined) => {
-      if (!Array.isArray(entries)) return [] as number[];
-      return entries.map((item) => toInteger(item, 0));
-    })(values);
+    const normalizedValues = liftNormalizedValues(values);
 
     const count = derive(normalizedValues, (entries) => entries.length);
     const total = derive(
       normalizedValues,
       (entries) => entries.reduce((sum, value) => sum + value, 0),
     );
-    const average = lift((entries: number[] | undefined) => {
-      const list = Array.isArray(entries) ? entries : [];
-      if (list.length === 0) return 0;
-      const sum = list.reduce((acc, value) => acc + value, 0);
-      const rawAverage = sum / list.length;
-      return Math.round(rawAverage * 100) / 100;
-    })(normalizedValues);
+    const average = liftAverage(normalizedValues);
 
-    const slots = lift(
-      toSchema<
-        {
-          values: Cell<number[]>;
-          view: Cell<number[]>;
-          lastAdjustment: Cell<AdjustmentRecord>;
-          history: Cell<AdjustmentRecord[]>;
-          sequence: Cell<number>;
-        }
-      >(),
-      toSchema<unknown>(),
-      ({ values, view, lastAdjustment, history, sequence }) => {
-        const snapshot = view.get();
-        const list = Array.isArray(snapshot) ? snapshot : [];
-        return list.map((rawValue, index) => {
-          const value = toInteger(rawValue, 0);
-          const name = `Slot ${index + 1}`;
-          return {
-            index,
-            value,
-            label: `${name}: ${value}`,
-            adjust: adjustValue({
-              values,
-              slotIndex: index,
-              lastAdjustment,
-              history,
-              sequence,
-            }),
-          };
-        });
-      },
-    )({
+    const slots = liftSlots({
       values,
       view: normalizedValues,
       lastAdjustment,
@@ -164,21 +182,11 @@ export const counterWithDynamicHandlerList = recipe<DynamicHandlerArgs>(
       sequence,
     });
 
-    const handlers = lift((entries: unknown) => {
-      if (!Array.isArray(entries)) return [] as unknown[];
-      return entries.map((item: any) => item?.adjust);
-    })(slots);
+    const handlers = liftHandlers(slots);
 
-    const historyView = lift((entries: AdjustmentRecord[] | undefined) => {
-      return Array.isArray(entries) ? entries : [];
-    })(history);
-    const lastAdjustmentView = lift(
-      (record: AdjustmentRecord | undefined) =>
-        record ?? { index: -1, amount: 0, nextValue: 0 },
-    )(lastAdjustment);
-    const sequenceView = lift((count: number | undefined) =>
-      Math.max(0, toInteger(count, 0))
-    )(sequence);
+    const historyView = liftHistoryView(history);
+    const lastAdjustmentView = liftLastAdjustmentView(lastAdjustment);
+    const sequenceView = liftSequenceView(sequence);
 
     const summary = str`${count} counter slots total ${total}`;
     const averageLabel = str`Average ${average}`;
@@ -207,3 +215,5 @@ export const counterWithDynamicHandlerList = recipe<DynamicHandlerArgs>(
     };
   },
 );
+
+export default counterWithDynamicHandlerList;

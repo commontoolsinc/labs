@@ -1314,7 +1314,7 @@ const _addRestriction = handler<
 
 const removeRestriction = handler<
   unknown,
-  { restrictions: Writable<RestrictionEntry[]>; index: number }
+  { restrictions: Writable<RestrictionInput[]>; index: number }
 >((_event, { restrictions, index }) => {
   // Use raw index directly since UI iterates over raw restrictions array
   const current = restrictions.get() || [];
@@ -1348,7 +1348,7 @@ const _selectSuggestion = handler<
 const onSelectRestriction = handler<
   CustomEvent<{ value: string; label: string; isCustom?: boolean }>,
   {
-    restrictions: Writable<RestrictionEntry[]>;
+    restrictions: Writable<RestrictionInput[]>;
     selectedLevel: Writable<RestrictionLevel>;
   }
 >((event, { restrictions, selectedLevel }) => {
@@ -1375,6 +1375,26 @@ const LEVEL_PRIORITY: Record<RestrictionLevel, number> = {
   strict: 2,
   absolute: 3,
 };
+
+// Helper to get style config for a level - used in UI (module scope for transformer)
+const getLevelStyle = lift<RestrictionLevel | string, LevelConfig>(
+  (level) => {
+    const l = (level || "prefer") as RestrictionLevel;
+    return LEVEL_CONFIG[l] || LEVEL_CONFIG.prefer;
+  },
+);
+
+// Type for implied items array
+type ImpliedItemsArray = Array<{
+  name: string;
+  level: RestrictionLevel;
+  sources: string[];
+}>;
+
+// Check if implied items array has entries (module scope for transformer)
+const hasImpliedItems = lift<ImpliedItemsArray, boolean>(
+  (implied) => implied && implied.length > 0,
+);
 
 export const DietaryRestrictionsModule = recipe<
   DietaryRestrictionsInput,
@@ -1482,58 +1502,6 @@ export const DietaryRestrictionsModule = recipe<
     { value: "absolute", label: "Absolute" },
   ];
 
-  // Helper to get style config for a level - used in UI
-  const getLevelStyle = lift((level: RestrictionLevel | string) => {
-    const l = (level || "prefer") as RestrictionLevel;
-    return LEVEL_CONFIG[l] || LEVEL_CONFIG.prefer;
-  });
-
-  const impliedUI = lift(
-    (
-      implied: Array<{
-        name: string;
-        level: RestrictionLevel;
-        sources: string[];
-      }>,
-    ) => {
-      if (!implied || implied.length === 0) return null;
-
-      return (
-        <ct-vstack
-          gap="2"
-          style="padding-top: 8px; border-top: 1px solid #e5e7eb;"
-        >
-          <span style="font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase;">
-            What This Means (Avoid These)
-          </span>
-          <ct-hstack gap="1" wrap>
-            {implied.map(
-              (
-                item: {
-                  name: string;
-                  level: RestrictionLevel;
-                  sources: string[];
-                },
-                idx: number,
-              ) => {
-                const style = LEVEL_CONFIG[item.level];
-                return (
-                  <span
-                    key={idx}
-                    style={`display: inline-flex; align-items: center; gap: 4px; background: ${style.bg}; color: ${style.color}; border-radius: 12px; padding: 3px 8px; font-size: 12px;`}
-                    title={`From: ${item.sources.join(", ")}`}
-                  >
-                    {item.name}
-                  </span>
-                );
-              },
-            )}
-          </ct-hstack>
-        </ct-vstack>
-      );
-    },
-  );
-
   return {
     [NAME]: computed(() => `🍽️ Dietary: ${displayText}`),
     [UI]: (
@@ -1629,8 +1597,42 @@ export const DietaryRestrictionsModule = recipe<
           emptyState,
         )}
 
-        {/* Implied items - lift for display only */}
-        {impliedUI(impliedItems)}
+        {/* Implied items section */}
+        {ifElse(
+          hasImpliedItems(impliedItems),
+          <ct-vstack
+            gap="2"
+            style="padding-top: 8px; border-top: 1px solid #e5e7eb;"
+          >
+            <span style="font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase;">
+              What This Means (Avoid These)
+            </span>
+            <ct-hstack gap="1" wrap>
+              {impliedItems.map(
+                (
+                  item: {
+                    name: string;
+                    level: RestrictionLevel;
+                    sources: string[];
+                  },
+                  idx: number,
+                ) => {
+                  const style = getLevelStyle(item.level);
+                  return (
+                    <span
+                      key={idx}
+                      style={`display: inline-flex; align-items: center; gap: 4px; background: ${style.bg}; color: ${style.color}; border-radius: 12px; padding: 3px 8px; font-size: 12px;`}
+                      title={`From: ${item.sources.join(", ")}`}
+                    >
+                      {item.name}
+                    </span>
+                  );
+                },
+              )}
+            </ct-hstack>
+          </ct-vstack>,
+          null,
+        )}
       </ct-vstack>
     ),
     restrictions,

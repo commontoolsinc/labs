@@ -392,14 +392,65 @@ const toggleRolePermission = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizePermissionList = lift(sanitizePermissionList);
+
+const liftBaseRoles = lift((input: {
+  entries: RolePermissionInput[] | undefined;
+  permissionList: PermissionDefinition[];
+}) => sanitizeRoleList(input.entries, input.permissionList));
+
+const liftActiveRoles = lift((input: {
+  stored: RoleDefinition[];
+  base: RoleDefinition[];
+}) => {
+  const stored = Array.isArray(input.stored) ? input.stored : [];
+  if (stored.length > 0) {
+    return cloneRoleList(stored);
+  }
+  return cloneRoleList(input.base);
+});
+
+const liftMatrix = lift((input: {
+  roleList: RoleDefinition[];
+  permissionList: PermissionDefinition[];
+}) => matrixFromRoles(input.roleList, input.permissionList));
+
+const liftSummaries = lift((input: {
+  roleList: RoleDefinition[];
+  permissionList: PermissionDefinition[];
+}) => computeRoleSummaries(input.roleList, input.permissionList));
+
+const liftSummaryLabels = lift((entries: RoleSummary[]) =>
+  entries.map((entry) => entry.summary)
+);
+
+const liftTotalEnabled = lift((entries: RoleSummary[]) =>
+  entries.reduce((total, entry) => total + entry.enabledCount, 0)
+);
+
+const liftTotalRoles = lift((entries: RoleDefinition[]) => entries.length);
+
+const liftTotalPermissions = lift((entries: PermissionDefinition[]) =>
+  entries.length
+);
+
+const liftHistoryView = lift((entries: string[] | undefined) =>
+  Array.isArray(entries) ? entries : []
+);
+
+const liftLastChange = lift((entries: string[] | undefined) => {
+  if (Array.isArray(entries) && entries.length > 0) {
+    return entries[entries.length - 1];
+  }
+  return "No changes yet";
+});
+
 export const userPermissionMatrix = recipe<UserPermissionMatrixArgs>(
   "User Permission Matrix",
   ({ permissions, roles }) => {
-    const permissionsList = lift(sanitizePermissionList)(permissions);
-    const baseRoles = lift((input: {
-      entries: RolePermissionInput[] | undefined;
-      permissionList: PermissionDefinition[];
-    }) => sanitizeRoleList(input.entries, input.permissionList))({
+    const permissionsList = liftSanitizePermissionList(permissions);
+    const baseRoles = liftBaseRoles({
       entries: roles,
       permissionList: permissionsList,
     });
@@ -407,65 +458,35 @@ export const userPermissionMatrix = recipe<UserPermissionMatrixArgs>(
     const assignmentStore = cell<RoleDefinition[]>([]);
     const changeHistory = cell<string[]>([]);
 
-    const activeRoles = lift((input: {
-      stored: RoleDefinition[];
-      base: RoleDefinition[];
-    }) => {
-      const stored = Array.isArray(input.stored) ? input.stored : [];
-      if (stored.length > 0) {
-        return cloneRoleList(stored);
-      }
-      return cloneRoleList(input.base);
-    })({
+    const activeRoles = liftActiveRoles({
       stored: assignmentStore,
       base: baseRoles,
     });
 
-    const matrix = lift((input: {
-      roleList: RoleDefinition[];
-      permissionList: PermissionDefinition[];
-    }) => matrixFromRoles(input.roleList, input.permissionList))({
+    const matrix = liftMatrix({
       roleList: activeRoles,
       permissionList: permissionsList,
     });
 
-    const summaries = lift((input: {
-      roleList: RoleDefinition[];
-      permissionList: PermissionDefinition[];
-    }) => computeRoleSummaries(input.roleList, input.permissionList))({
+    const summaries = liftSummaries({
       roleList: activeRoles,
       permissionList: permissionsList,
     });
 
-    const summaryLabels = lift((entries: RoleSummary[]) =>
-      entries.map((entry) => entry.summary)
-    )(summaries);
+    const summaryLabels = liftSummaryLabels(summaries);
 
-    const totalEnabled = lift((entries: RoleSummary[]) =>
-      entries.reduce((total, entry) => total + entry.enabledCount, 0)
-    )(summaries);
+    const totalEnabled = liftTotalEnabled(summaries);
 
-    const totalRoles = lift((entries: RoleDefinition[]) => entries.length)(
-      activeRoles,
-    );
+    const totalRoles = liftTotalRoles(activeRoles);
 
-    const totalPermissions = lift((entries: PermissionDefinition[]) =>
-      entries.length
-    )(permissionsList);
+    const totalPermissions = liftTotalPermissions(permissionsList);
 
     const status =
       str`${totalEnabled} grants across ${totalRoles} roles and ${totalPermissions} permissions`;
 
-    const historyView = lift((entries: string[] | undefined) =>
-      Array.isArray(entries) ? entries : []
-    )(changeHistory);
+    const historyView = liftHistoryView(changeHistory);
 
-    const lastChange = lift((entries: string[] | undefined) => {
-      if (Array.isArray(entries) && entries.length > 0) {
-        return entries[entries.length - 1];
-      }
-      return "No changes yet";
-    })(changeHistory);
+    const lastChange = liftLastChange(changeHistory);
 
     return {
       permissions: permissionsList,
@@ -490,3 +511,5 @@ export const userPermissionMatrix = recipe<UserPermissionMatrixArgs>(
     };
   },
 );
+
+export default userPermissionMatrix;

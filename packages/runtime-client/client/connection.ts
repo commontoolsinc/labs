@@ -14,8 +14,10 @@ import {
   isIPCRemoteNotification,
   isIPCRemoteResponse,
   isNavigateRequestNotification,
+  isTelemetryNotification,
   NavigateRequestNotification,
   RequestType,
+  TelemetryNotification,
 } from "../protocol/mod.ts";
 import { RuntimeTransport } from "./transport.ts";
 import { EventEmitter } from "./emitter.ts";
@@ -37,6 +39,7 @@ export type RuntimeConnectionEvents = {
   console: [ConsoleNotification];
   navigaterequest: [NavigateRequestNotification];
   error: [ErrorNotification];
+  telemetry: [TelemetryNotification];
 };
 
 export interface InitializedRuntimeConnection extends RuntimeConnection {}
@@ -179,6 +182,8 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     if (isIPCRemoteNotification(message)) {
       if (isCellUpdateNotification(message)) {
         this._handleCellUpdate(message);
+      } else if (isTelemetryNotification(message)) {
+        this.emit("telemetry", message);
       } else if (isConsoleNotification(message)) {
         this.emit("console", message);
       } else if (isNavigateRequestNotification(message)) {

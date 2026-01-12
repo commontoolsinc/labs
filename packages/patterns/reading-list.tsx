@@ -49,6 +49,12 @@ const renderStars = lift((rating: number | null): string => {
   return "★".repeat(rating) + "☆".repeat(5 - rating);
 });
 
+const getTypeEmoji = lift((t: ItemType) => typeEmoji[t] || "📄");
+
+const getArrayLength = lift((arr: ReadingItem[]) => arr.length);
+
+const isZero = lift((count: number) => count === 0);
+
 export default pattern<Input, Output>(({ items }) => {
   const filterStatus = Writable.of<ItemStatus | "all">("all");
 
@@ -58,7 +64,7 @@ export default pattern<Input, Output>(({ items }) => {
 
   const totalCount = computed(() => items.get().length);
   const filteredItems = filterByStatus({ items, status: filterStatus });
-  const filteredCount = lift((arr: ReadingItem[]) => arr.length)(filteredItems);
+  const filteredCount = getArrayLength(filteredItems);
 
   return {
     [NAME]: "Reading List",
@@ -92,7 +98,7 @@ export default pattern<Input, Output>(({ items }) => {
               >
                 <ct-hstack gap="2" align="center">
                   <span style="font-size: 1.5rem;">
-                    {lift((t: ItemType) => typeEmoji[t] || "📄")(item.type)}
+                    {getTypeEmoji(item.type)}
                   </span>
                   <ct-vstack gap="0" style="flex: 1;">
                     <span style="font-weight: 500;">
@@ -131,7 +137,7 @@ export default pattern<Input, Output>(({ items }) => {
             ))}
 
             {ifElse(
-              lift((count: number) => count === 0)(filteredCount),
+              isZero(filteredCount),
               <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
                 No items yet. Add something to read!
               </div>,

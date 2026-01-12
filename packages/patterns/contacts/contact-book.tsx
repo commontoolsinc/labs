@@ -13,6 +13,15 @@ import {
 
 import ContactDetail, { type Contact } from "./contact-detail.tsx";
 
+const matchesSearch = (contact: Contact, query: string): boolean => {
+  if (!query) return true;
+  const q = query.toLowerCase();
+  const name = (contact.name || "").toLowerCase();
+  const email = (contact.email || "").toLowerCase();
+  const company = (contact.company || "").toLowerCase();
+  return name.includes(q) || email.includes(q) || company.includes(q);
+};
+
 interface Relationship {
   fromName: string;
   toName: string;
@@ -41,15 +50,6 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
     () =>
       contacts.map((c) => ({ label: c.name || "(unnamed)", value: c.name })),
   );
-
-  const matchesSearch = (contact: Contact, query: string): boolean => {
-    if (!query) return true;
-    const q = query.toLowerCase();
-    const name = (contact.name || "").toLowerCase();
-    const email = (contact.email || "").toLowerCase();
-    const company = (contact.company || "").toLowerCase();
-    return name.includes(q) || email.includes(q) || company.includes(q);
-  };
 
   return {
     [NAME]: "Contact Book",

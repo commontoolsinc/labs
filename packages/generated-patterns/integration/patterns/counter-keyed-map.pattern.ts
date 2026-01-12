@@ -18,18 +18,20 @@ const adjustKeyedCounter = handler(
   },
 );
 
+const liftKeys = lift((map: Record<string, number>) => Object.keys(map).sort());
+const liftTotal = lift((map: Record<string, number>) =>
+  Object.values(map).reduce((sum, value) => sum + value, 0)
+);
+const liftCount = lift((map: Record<string, number>) =>
+  Object.keys(map).length
+);
+
 export const counterMapByKey = recipe<KeyedMapArgs>(
   "Counter Map By Key",
   ({ counters }) => {
-    const keys = lift((map: Record<string, number>) => Object.keys(map).sort())(
-      counters,
-    );
-    const total = lift((map: Record<string, number>) =>
-      Object.values(map).reduce((sum, value) => sum + value, 0)
-    )(counters);
-    const count = lift((map: Record<string, number>) =>
-      Object.keys(map).length
-    )(counters);
+    const keys = liftKeys(counters);
+    const total = liftTotal(counters);
+    const count = liftCount(counters);
     const summary = str`${count} keys total ${total}`;
 
     return {
@@ -42,3 +44,5 @@ export const counterMapByKey = recipe<KeyedMapArgs>(
     };
   },
 );
+
+export default counterMapByKey;

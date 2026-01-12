@@ -522,6 +522,54 @@ const cancelHold = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeCatalogList = lift(sanitizeCatalogList);
+const liftCloneLoans = lift(cloneLoans);
+const liftCloneHolds = lift(cloneHolds);
+
+const liftAvailabilityRaw = lift(
+  (
+    input: {
+      catalog: LibraryItem[];
+      loans: LoanRecord[];
+      holds: HoldRecord[];
+    },
+  ) => computeAvailability(input.catalog, input.loans, input.holds),
+);
+
+const liftAvailability = lift((entries: ItemAvailability[]) =>
+  entries.map((entry) => ({ ...entry }))
+);
+
+const liftAvailabilitySignals = lift((entries: ItemAvailability[]) =>
+  entries.map((entry) =>
+    `${entry.id}|${entry.status}|${entry.availableCopies}|${entry.holdsQueued}`
+  )
+);
+
+const liftAvailableTitleCount = lift((entries: ItemAvailability[]) =>
+  entries.filter((entry) => entry.availableCopies > 0).length
+);
+
+const liftTotalTitles = lift((entries: ItemAvailability[]) => entries.length);
+
+const liftActiveLoanCount = lift((entries: LoanRecord[]) => entries.length);
+
+const liftPendingHoldCount = lift((entries: HoldRecord[]) => entries.length);
+
+const liftLoanSummary = lift((count: number) =>
+  formatCount(count, "active loan", "active loans")
+);
+
+const liftHoldSummary = lift((count: number) =>
+  formatCount(count, "hold queued", "holds queued")
+);
+
+const liftLastChangeLabel = lift((change: CirculationChange | null) => {
+  if (!change) return "No circulation changes yet";
+  return `${change.note} (#${change.sequence})`;
+});
+
 export const libraryCheckoutSystem = recipe<LibraryCheckoutArgs>(
   "Library Checkout System",
   ({ catalog }) => {
@@ -530,60 +578,31 @@ export const libraryCheckoutSystem = recipe<LibraryCheckoutArgs>(
     const loanState = cell<LoanRecord[]>(cloneLoans(defaultLoans));
     const holdState = cell<HoldRecord[]>(cloneHolds(defaultHolds));
 
-    const catalogView = lift(sanitizeCatalogList)(catalog);
+    const catalogView = liftSanitizeCatalogList(catalog);
 
-    const loanEntries = lift(cloneLoans)(loanState);
-    const holdEntries = lift(cloneHolds)(holdState);
+    const loanEntries = liftCloneLoans(loanState);
+    const holdEntries = liftCloneHolds(holdState);
 
-    const availabilityRaw = lift(
-      (
-        input: {
-          catalog: LibraryItem[];
-          loans: LoanRecord[];
-          holds: HoldRecord[];
-        },
-      ) => computeAvailability(input.catalog, input.loans, input.holds),
-    )({
+    const availabilityRaw = liftAvailabilityRaw({
       catalog: catalogView,
       loans: loanState,
       holds: holdState,
     });
-    const availability = lift((entries: ItemAvailability[]) =>
-      entries.map((entry) => ({ ...entry }))
-    )(availabilityRaw);
-    const availabilitySignals = lift((entries: ItemAvailability[]) =>
-      entries.map((entry) =>
-        `${entry.id}|${entry.status}|${entry.availableCopies}|${entry.holdsQueued}`
-      )
-    )(availability);
+    const availability = liftAvailability(availabilityRaw);
+    const availabilitySignals = liftAvailabilitySignals(availability);
 
-    const availableTitleCount = lift((entries: ItemAvailability[]) =>
-      entries.filter((entry) => entry.availableCopies > 0).length
-    )(availability);
-    const totalTitles = lift((entries: ItemAvailability[]) => entries.length)(
-      availability,
-    );
-    const activeLoanCount = lift((entries: LoanRecord[]) => entries.length)(
-      loanEntries,
-    );
-    const pendingHoldCount = lift((entries: HoldRecord[]) => entries.length)(
-      holdEntries,
-    );
+    const availableTitleCount = liftAvailableTitleCount(availability);
+    const totalTitles = liftTotalTitles(availability);
+    const activeLoanCount = liftActiveLoanCount(loanEntries);
+    const pendingHoldCount = liftPendingHoldCount(holdEntries);
 
-    const loanSummary = lift((count: number) =>
-      formatCount(count, "active loan", "active loans")
-    )(activeLoanCount);
-    const holdSummary = lift((count: number) =>
-      formatCount(count, "hold queued", "holds queued")
-    )(pendingHoldCount);
+    const loanSummary = liftLoanSummary(activeLoanCount);
+    const holdSummary = liftHoldSummary(pendingHoldCount);
 
     const availabilitySummary =
       str`${availableTitleCount}/${totalTitles} titles open · ${loanSummary} · ${holdSummary}`;
 
-    const lastChangeLabel = lift((change: CirculationChange | null) => {
-      if (!change) return "No circulation changes yet";
-      return `${change.note} (#${change.sequence})`;
-    })(lastChange);
+    const lastChangeLabel = liftLastChangeLabel(lastChange);
 
     const context = {
       catalog,
@@ -623,3 +642,5 @@ export type {
   LibraryItem,
   LoanRecord,
 };
+
+export default libraryCheckoutSystem;

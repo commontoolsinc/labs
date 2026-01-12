@@ -65,20 +65,26 @@ interface LinkedChildArgs {
   sharedStep: Default<number, 1>;
 }
 
+const liftSanitizeCount = lift(sanitizeCount);
+const liftSanitizeStep = lift(sanitizeStep);
+const liftNextPreview = lift(
+  (state: { current: number; step: number }) => state.current + state.step,
+);
+const liftParity = lift((value: number) => value % 2 === 0 ? "even" : "odd");
+const liftAlignment = lift(
+  (state: { parent: number; child: number }) => state.parent === state.child,
+);
+
 const childLinkedCounter = recipe<LinkedChildArgs>(
   "Child Counter Referencing Parent Cells",
   ({ sharedValue, sharedStep }) => {
-    const current = lift(sanitizeCount)(sharedValue);
-    const step = lift(sanitizeStep)(sharedStep);
-    const nextPreview = lift(
-      (state: { current: number; step: number }) => state.current + state.step,
-    )({
+    const current = liftSanitizeCount(sharedValue);
+    const step = liftSanitizeStep(sharedStep);
+    const nextPreview = liftNextPreview({
       current,
       step,
     });
-    const parity = lift((value: number) => value % 2 === 0 ? "even" : "odd")(
-      current,
-    );
+    const parity = liftParity(current);
     const label = str`Child sees ${current} (step ${step}) [${parity}]`;
 
     return {
@@ -101,11 +107,9 @@ interface ParentCellArgumentArgs {
 export const counterWithParentCellArguments = recipe<ParentCellArgumentArgs>(
   "Counter With Parent Cell Arguments",
   ({ value, step }) => {
-    const current = lift(sanitizeCount)(value);
-    const stepSize = lift(sanitizeStep)(step);
-    const parentPreview = lift(
-      (state: { current: number; step: number }) => state.current + state.step,
-    )({
+    const current = liftSanitizeCount(value);
+    const stepSize = liftSanitizeStep(step);
+    const parentPreview = liftNextPreview({
       current,
       step: stepSize,
     });
@@ -115,10 +119,7 @@ export const counterWithParentCellArguments = recipe<ParentCellArgumentArgs>(
       sharedStep: step,
     });
 
-    const alignment = lift(
-      (state: { parent: number; child: number }) =>
-        state.parent === state.child,
-    )({
+    const alignment = liftAlignment({
       parent: current,
       child: child.key("current"),
     });
@@ -140,3 +141,5 @@ export const counterWithParentCellArguments = recipe<ParentCellArgumentArgs>(
     };
   },
 );
+
+export default counterWithParentCellArguments;

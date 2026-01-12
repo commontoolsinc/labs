@@ -94,6 +94,21 @@ const incrementAndRecordUnique = handler(
   },
 );
 
+const liftUniqueInOrder = lift((entries: number[] | undefined) =>
+  uniqueInOrder(sanitizeNumberList(entries))
+);
+const liftSortedLabel = lift((entries: number[] | undefined) => {
+  const values = Array.isArray(entries) ? entries : [];
+  return values.length === 0 ? "none" : values.join(", ");
+});
+const liftToInteger = lift((input: number | undefined) => toInteger(input));
+const liftNonNegativeInteger = lift((count: number | undefined) =>
+  Math.max(0, toInteger(count))
+);
+const liftAudit = lift((record: DedupAudit | undefined) =>
+  record ?? { added: 0, skipped: 0 }
+);
+
 /** Pattern maintaining counter with deduplicated history and sorted view. */
 export const counterWithDeduplicatedList = recipe<DeduplicatedListArgs>(
   "Counter With Deduplicated List",
@@ -102,26 +117,13 @@ export const counterWithDeduplicatedList = recipe<DeduplicatedListArgs>(
     const duplicates = cell(0);
     const audit = cell<DedupAudit>({ added: 0, skipped: 0 });
 
-    const uniqueValuesView = lift((entries: number[] | undefined) =>
-      uniqueInOrder(sanitizeNumberList(entries))
-    )(uniqueValues);
+    const uniqueValuesView = liftUniqueInOrder(uniqueValues);
     const sortedUnique = derive(uniqueValuesView, sortAscending);
-    const sortedLabel = lift((entries: number[] | undefined) => {
-      const values = Array.isArray(entries) ? entries : [];
-      return values.length === 0 ? "none" : values.join(", ");
-    })(sortedUnique);
-    const currentValue = lift((input: number | undefined) => toInteger(input))(
-      value,
-    );
-    const additionsView = lift((count: number | undefined) =>
-      Math.max(0, toInteger(count))
-    )(additions);
-    const duplicatesView = lift((count: number | undefined) =>
-      Math.max(0, toInteger(count))
-    )(duplicates);
-    const auditView = lift((record: DedupAudit | undefined) =>
-      record ?? { added: 0, skipped: 0 }
-    )(audit);
+    const sortedLabel = liftSortedLabel(sortedUnique);
+    const currentValue = liftToInteger(value);
+    const additionsView = liftNonNegativeInteger(additions);
+    const duplicatesView = liftNonNegativeInteger(duplicates);
+    const auditView = liftAudit(audit);
 
     const add = incrementAndRecordUnique({
       value,
@@ -144,3 +146,5 @@ export const counterWithDeduplicatedList = recipe<DeduplicatedListArgs>(
     };
   },
 );
+
+export default counterWithDeduplicatedList;

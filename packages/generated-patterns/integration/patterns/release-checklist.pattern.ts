@@ -287,38 +287,51 @@ const updateTaskProgress = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeTaskList = lift(sanitizeTaskList);
+const liftAnalyzeTasks = lift(analyzeTasks);
+const liftReadyFlag = lift((info: ReleaseChecklistStats) => info.ready);
+const liftStatus = lift((info: ReleaseChecklistStats) => {
+  if (info.ready) return "ready";
+  if (info.blocked.length > 0) return "blocked";
+  return "pending";
+});
+const liftStatusCaps = lift((value: string) => value.toUpperCase());
+const liftRequiredTotal = lift((info: ReleaseChecklistStats) =>
+  info.requiredTotal
+);
+const liftCompletedRequired = lift((info: ReleaseChecklistStats) =>
+  info.completedRequired
+);
+const liftCompletedTotal = lift((info: ReleaseChecklistStats) =>
+  info.completedTotal
+);
+const liftTotalTasks = lift((info: ReleaseChecklistStats) => info.total);
+const liftBlockedCount = lift((info: ReleaseChecklistStats) =>
+  info.blocked.length
+);
+const liftRemainingRequired = lift((info: ReleaseChecklistStats) =>
+  info.pendingRequired
+);
+const liftBlockedTasks = lift((info: ReleaseChecklistStats) => info.blocked);
+const liftDescribeGating = lift(describeGating);
+
 export const releaseChecklist = recipe<ReleaseChecklistArgs>(
   "Release Checklist",
   ({ tasks }) => {
-    const sanitizedTasks = lift(sanitizeTaskList)(tasks);
-    const stats = lift(analyzeTasks)(sanitizedTasks);
-    const readyFlag = lift((info: ReleaseChecklistStats) => info.ready)(stats);
-    const status = lift((info: ReleaseChecklistStats) => {
-      if (info.ready) return "ready";
-      if (info.blocked.length > 0) return "blocked";
-      return "pending";
-    })(stats);
-    const statusCaps = lift((value: string) => value.toUpperCase())(status);
-    const requiredTotal = lift((info: ReleaseChecklistStats) =>
-      info.requiredTotal
-    )(stats);
-    const completedRequired = lift((info: ReleaseChecklistStats) =>
-      info.completedRequired
-    )(stats);
-    const completedTotal = lift((info: ReleaseChecklistStats) =>
-      info.completedTotal
-    )(stats);
-    const totalTasks = lift((info: ReleaseChecklistStats) => info.total)(stats);
-    const blockedCount = lift((info: ReleaseChecklistStats) =>
-      info.blocked.length
-    )(stats);
-    const remainingRequired = lift((info: ReleaseChecklistStats) =>
-      info.pendingRequired
-    )(stats);
-    const blockedTasks = lift((info: ReleaseChecklistStats) => info.blocked)(
-      stats,
-    );
-    const gatingNote = lift(describeGating)(stats);
+    const sanitizedTasks = liftSanitizeTaskList(tasks);
+    const stats = liftAnalyzeTasks(sanitizedTasks);
+    const readyFlag = liftReadyFlag(stats);
+    const status = liftStatus(stats);
+    const statusCaps = liftStatusCaps(status);
+    const requiredTotal = liftRequiredTotal(stats);
+    const completedRequired = liftCompletedRequired(stats);
+    const completedTotal = liftCompletedTotal(stats);
+    const totalTasks = liftTotalTasks(stats);
+    const blockedCount = liftBlockedCount(stats);
+    const remainingRequired = liftRemainingRequired(stats);
+    const blockedTasks = liftBlockedTasks(stats);
+    const gatingNote = liftDescribeGating(stats);
 
     const summary =
       str`${completedRequired}/${requiredTotal} required complete`;
@@ -344,3 +357,5 @@ export const releaseChecklist = recipe<ReleaseChecklistArgs>(
 );
 
 export type { ReleaseTask };
+
+export default releaseChecklist;

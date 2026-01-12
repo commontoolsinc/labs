@@ -94,6 +94,68 @@ const normalizeState = (
   return { value, step, history };
 };
 
+const liftNormalizeState = lift((raw: PersistedState | undefined) => {
+  const sanitized = normalizeState(raw);
+  return sanitized;
+});
+
+const liftNormalizeMetadata = lift((input: MetadataArgs | undefined) => {
+  const raw = typeof input?.label === "string" ? input.label.trim() : "";
+  const label = raw.length > 0 ? raw : "Persisted counter";
+  return { label };
+});
+
+const liftInitializationStatus = lift(
+  (
+    state: NormalizedState,
+  ): "default" | "restored" => {
+    const matchesDefault = state.value === DEFAULT_NORMALIZED_STATE.value &&
+      state.step === DEFAULT_NORMALIZED_STATE.step &&
+      state.history.length ===
+        DEFAULT_NORMALIZED_STATE.history.length &&
+      state.history[state.history.length - 1] ===
+        DEFAULT_NORMALIZED_STATE.value;
+    return matchesDefault ? "default" : "restored";
+  },
+);
+
+const liftHistoryPreview = lift((entries: number[]) =>
+  entries.map((value, index) => `${index}:${value}`).join(" | ")
+);
+
+const applyIncrement = handler(
+  (
+    event: IncrementEvent | undefined,
+    context: {
+      state: Cell<PersistedState>;
+      current: Cell<NormalizedState>;
+      lastChange: Cell<PersistedChange>;
+    },
+  ) => {
+    const current = context.current.get();
+    const step = sanitizeStep(event?.step, current.step);
+    const amount = isFiniteNumber(event?.amount)
+      ? event.amount as number
+      : step;
+    const nextValue = current.value + amount;
+    const nextHistory = [...current.history, nextValue];
+    const nextState: PersistedState = {
+      value: nextValue,
+      step,
+      history: nextHistory,
+    };
+    context.state.set(nextState);
+    context.lastChange.set({
+      reason: "increment",
+      previous: current.value,
+      next: nextValue,
+      amount,
+      step,
+      historyLength: nextHistory.length,
+    });
+  },
+);
+
 export const counterPersistenceViaInitialArguments = recipe<
   PersistenceInitialArgs
 >(
@@ -108,76 +170,22 @@ export const counterPersistenceViaInitialArguments = recipe<
       historyLength: DEFAULT_NORMALIZED_STATE.history.length,
     });
 
-    const normalizedState = lift((raw: PersistedState | undefined) => {
-      const sanitized = normalizeState(raw);
-      return sanitized;
-    })(state);
+    const normalizedState = liftNormalizeState(state);
 
-    const normalizedMetadata = lift((input: MetadataArgs | undefined) => {
-      const raw = typeof input?.label === "string" ? input.label.trim() : "";
-      const label = raw.length > 0 ? raw : "Persisted counter";
-      return { label };
-    })(metadata);
+    const normalizedMetadata = liftNormalizeMetadata(metadata);
 
     const currentValue = normalizedState.key("value");
     const currentStep = normalizedState.key("step");
     const historyView = normalizedState.key("history");
 
-    const initializationStatus = lift(
-      (
-        state: NormalizedState,
-      ): "default" | "restored" => {
-        const matchesDefault = state.value === DEFAULT_NORMALIZED_STATE.value &&
-          state.step === DEFAULT_NORMALIZED_STATE.step &&
-          state.history.length ===
-            DEFAULT_NORMALIZED_STATE.history.length &&
-          state.history[state.history.length - 1] ===
-            DEFAULT_NORMALIZED_STATE.value;
-        return matchesDefault ? "default" : "restored";
-      },
-    )(normalizedState);
+    const initializationStatus = liftInitializationStatus(normalizedState);
 
-    const historyPreview = lift((entries: number[]) =>
-      entries.map((value, index) => `${index}:${value}`).join(" | ")
-    )(historyView);
+    const historyPreview = liftHistoryPreview(historyView);
 
     const labelCell = normalizedMetadata.key("label");
     const summary =
       str`${labelCell}: value ${currentValue} (mode ${initializationStatus})`;
     const details = str`${summary} history ${historyPreview}`;
-
-    const applyIncrement = handler(
-      (
-        event: IncrementEvent | undefined,
-        context: {
-          state: Cell<PersistedState>;
-          current: Cell<NormalizedState>;
-          lastChange: Cell<PersistedChange>;
-        },
-      ) => {
-        const current = context.current.get();
-        const step = sanitizeStep(event?.step, current.step);
-        const amount = isFiniteNumber(event?.amount)
-          ? event.amount as number
-          : step;
-        const nextValue = current.value + amount;
-        const nextHistory = [...current.history, nextValue];
-        const nextState: PersistedState = {
-          value: nextValue,
-          step,
-          history: nextHistory,
-        };
-        context.state.set(nextState);
-        context.lastChange.set({
-          reason: "increment",
-          previous: current.value,
-          next: nextValue,
-          amount,
-          step,
-          historyLength: nextHistory.length,
-        });
-      },
-    );
 
     return {
       state,
@@ -199,3 +207,5 @@ export const counterPersistenceViaInitialArguments = recipe<
     };
   },
 );
+
+export default counterPersistenceViaInitialArguments;

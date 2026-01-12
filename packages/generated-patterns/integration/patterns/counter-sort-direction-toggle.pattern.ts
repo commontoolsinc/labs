@@ -26,6 +26,40 @@ const recordValue = handler(
   },
 );
 
+const liftSafeCount = lift((value: number | undefined) =>
+  typeof value === "number" ? value : 0
+);
+
+const liftSafeEntries = lift((values: number[] | undefined) =>
+  Array.isArray(values) ? values : []
+);
+
+const liftSafeDirection = lift((value: SortDirection | undefined) =>
+  value === "desc" ? "desc" : "asc"
+);
+
+const liftSortedValues = lift(
+  (input: { values: number[]; direction: SortDirection }) => {
+    const sorted = [...input.values].sort((left, right) =>
+      input.direction === "desc" ? right - left : left - right
+    );
+    return sorted;
+  },
+);
+
+const liftDirectionLabel = lift((value: SortDirection) =>
+  value === "desc" ? "descending" : "ascending"
+);
+
+const liftSortedValuesLabel = lift((values: number[]) =>
+  values.length === 0 ? "[]" : `[${values.join(", ")}]`
+);
+
+const liftDirectionHistoryView = lift(
+  (history: SortDirection[] | undefined) =>
+    Array.isArray(history) ? history : [],
+);
+
 const toggleSortDirection = handler(
   (
     event: { direction?: SortDirection } | undefined,
@@ -61,39 +95,22 @@ export const counterWithSortDirectionToggle = recipe<SortDirectionToggleArgs>(
   ({ count, entries, direction }) => {
     const directionHistory = cell<SortDirection[]>([]);
 
-    const safeCount = lift((value: number | undefined) =>
-      typeof value === "number" ? value : 0
-    )(count);
+    const safeCount = liftSafeCount(count);
 
-    const safeEntries = lift((values: number[] | undefined) =>
-      Array.isArray(values) ? values : []
-    )(entries);
+    const safeEntries = liftSafeEntries(entries);
 
-    const safeDirection = lift((value: SortDirection | undefined) =>
-      value === "desc" ? "desc" : "asc"
-    )(direction);
+    const safeDirection = liftSafeDirection(direction);
 
-    const sortedValues = lift(
-      (input: { values: number[]; direction: SortDirection }) => {
-        const sorted = [...input.values].sort((left, right) =>
-          input.direction === "desc" ? right - left : left - right
-        );
-        return sorted;
-      },
-    )({ values: safeEntries, direction: safeDirection });
+    const sortedValues = liftSortedValues({
+      values: safeEntries,
+      direction: safeDirection,
+    });
 
-    const directionLabel = lift((value: SortDirection) =>
-      value === "desc" ? "descending" : "ascending"
-    )(safeDirection);
+    const directionLabel = liftDirectionLabel(safeDirection);
 
-    const sortedValuesLabel = lift((values: number[]) =>
-      values.length === 0 ? "[]" : `[${values.join(", ")}]`
-    )(sortedValues);
+    const sortedValuesLabel = liftSortedValuesLabel(sortedValues);
 
-    const directionHistoryView = lift(
-      (history: SortDirection[] | undefined) =>
-        Array.isArray(history) ? history : [],
-    )(directionHistory);
+    const directionHistoryView = liftDirectionHistoryView(directionHistory);
 
     const toggleDirection = toggleSortDirection({
       direction,
@@ -116,3 +133,5 @@ export const counterWithSortDirectionToggle = recipe<SortDirectionToggleArgs>(
     };
   },
 );
+
+export default counterWithSortDirectionToggle;

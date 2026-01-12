@@ -495,6 +495,59 @@ function readSequence(value: unknown): number {
   return 0;
 }
 
+const liftSanitizeComponentDefinitions = lift((
+  value: ComponentSeed[] | undefined,
+) => sanitizeComponentDefinitions(value));
+
+const liftSanitizeRegistrationEntries = lift((inputs: {
+  entries: RecipeRegistrationEntry[] | undefined;
+  components: ComponentDefinition[];
+}) =>
+  Array.isArray(inputs.entries)
+    ? sanitizeRegistrationEntries(inputs.entries, inputs.components)
+    : []
+);
+
+const liftComputeComponentCoverage = lift((inputs: {
+  components: ComponentDefinition[];
+  registrations: RecipeRegistrationEntry[];
+}) => computeComponentCoverage(inputs.components, inputs.registrations));
+
+const liftComputePropCoverage = lift((inputs: {
+  components: ComponentDefinition[];
+  registrations: RecipeRegistrationEntry[];
+}) => computePropCoverage(inputs.components, inputs.registrations));
+
+const liftSummarizeCoverage = lift((inputs: {
+  components: ComponentCoverageView[];
+  props: PropCoverageView[];
+}) => summarizeCoverage(inputs.components, inputs.props));
+
+const liftAverageCoverageLabel = lift((value: number | undefined) => {
+  if (typeof value === "number") {
+    return `${value}% average coverage`;
+  }
+  return "0% average coverage";
+});
+
+const liftCategorySummary = lift((entries: ComponentDefinition[]) =>
+  computeCategorySummary(entries)
+);
+
+const liftRegistrationTrail = lift((entries: string[] | undefined) => {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return "No recipes registered yet";
+  }
+  return entries.join(" | ");
+});
+
+const liftLastRegistration = lift((entries: string[] | undefined) => {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return "none";
+  }
+  return entries[entries.length - 1];
+});
+
 const registerRecipe = handler(
   (
     event: RecipeRegistrationEvent | undefined,
@@ -575,42 +628,24 @@ export const componentLibraryCatalog = recipe<ComponentLibraryCatalogArgs>(
     const registrationLog = cell<string[]>([]);
     const registrationSequence = cell(0);
 
-    const componentList = lift((value: ComponentSeed[] | undefined) =>
-      sanitizeComponentDefinitions(value)
-    )(components);
+    const componentList = liftSanitizeComponentDefinitions(components);
 
-    const registrationList = lift((inputs: {
-      entries: RecipeRegistrationEntry[] | undefined;
-      components: ComponentDefinition[];
-    }) =>
-      Array.isArray(inputs.entries)
-        ? sanitizeRegistrationEntries(inputs.entries, inputs.components)
-        : []
-    )({
+    const registrationList = liftSanitizeRegistrationEntries({
       entries: registrations,
       components: componentList,
     });
 
-    const componentCoverage = lift((inputs: {
-      components: ComponentDefinition[];
-      registrations: RecipeRegistrationEntry[];
-    }) => computeComponentCoverage(inputs.components, inputs.registrations))({
+    const componentCoverage = liftComputeComponentCoverage({
       components: componentList,
       registrations: registrationList,
     });
 
-    const propCoverage = lift((inputs: {
-      components: ComponentDefinition[];
-      registrations: RecipeRegistrationEntry[];
-    }) => computePropCoverage(inputs.components, inputs.registrations))({
+    const propCoverage = liftComputePropCoverage({
       components: componentList,
       registrations: registrationList,
     });
 
-    const coverageTotals = lift((inputs: {
-      components: ComponentCoverageView[];
-      props: PropCoverageView[];
-    }) => summarizeCoverage(inputs.components, inputs.props))({
+    const coverageTotals = liftSummarizeCoverage({
       components: componentCoverage,
       props: propCoverage,
     });
@@ -632,30 +667,13 @@ export const componentLibraryCatalog = recipe<ComponentLibraryCatalogArgs>(
     const coverageSummary =
       str`${fullyCovered}/${componentCount} covered | props ${propsCovered}/${propCount}`;
 
-    const averageCoverageLabel = lift((value: number | undefined) => {
-      if (typeof value === "number") {
-        return `${value}% average coverage`;
-      }
-      return "0% average coverage";
-    })(averageCoverage);
+    const averageCoverageLabel = liftAverageCoverageLabel(averageCoverage);
 
-    const categorySummary = lift((entries: ComponentDefinition[]) =>
-      computeCategorySummary(entries)
-    )(componentList);
+    const categorySummary = liftCategorySummary(componentList);
 
-    const registrationTrail = lift((entries: string[] | undefined) => {
-      if (!Array.isArray(entries) || entries.length === 0) {
-        return "No recipes registered yet";
-      }
-      return entries.join(" | ");
-    })(registrationLog);
+    const registrationTrail = liftRegistrationTrail(registrationLog);
 
-    const lastRegistration = lift((entries: string[] | undefined) => {
-      if (!Array.isArray(entries) || entries.length === 0) {
-        return "none";
-      }
-      return entries[entries.length - 1];
-    })(registrationLog);
+    const lastRegistration = liftLastRegistration(registrationLog);
 
     return {
       components: componentList,
@@ -721,3 +739,5 @@ function sanitizeRegistrationEntries(
   });
   return list;
 }
+
+export default componentLibraryCatalog;

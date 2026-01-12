@@ -226,6 +226,18 @@ const setColumnValues = handler(
   },
 );
 
+const liftTotal = lift((rows: number[]) =>
+  rows.reduce((sum, value) => sum + value, 0)
+);
+
+const liftRowSummary = lift((rows: number[]) =>
+  rows.map((value, index) => `r${index}=${value}`).join(" | ")
+);
+
+const liftColumnSummary = lift((columns: number[]) =>
+  columns.map((value, index) => `c${index}=${value}`).join(" | ")
+);
+
 export const counterWithMatrixState = recipe<CounterMatrixStateArgs>(
   "Counter With Matrix State",
   ({ matrix }) => {
@@ -233,15 +245,9 @@ export const counterWithMatrixState = recipe<CounterMatrixStateArgs>(
     const rowTotals = derive(matrix, computeRowTotals);
     const columnTotals = derive(matrix, computeColumnTotals);
     const dimensions = derive(matrix, computeDimensions);
-    const total = lift((rows: number[]) =>
-      rows.reduce((sum, value) => sum + value, 0)
-    )(rowTotals);
-    const rowSummary = lift((rows: number[]) =>
-      rows.map((value, index) => `r${index}=${value}`).join(" | ")
-    )(rowTotals);
-    const columnSummary = lift((columns: number[]) =>
-      columns.map((value, index) => `c${index}=${value}`).join(" | ")
-    )(columnTotals);
+    const total = liftTotal(rowTotals);
+    const rowSummary = liftRowSummary(rowTotals);
+    const columnSummary = liftColumnSummary(columnTotals);
     const label =
       str`Rows ${rowSummary} | Cols ${columnSummary} | Total ${total}`;
 
@@ -261,3 +267,5 @@ export const counterWithMatrixState = recipe<CounterMatrixStateArgs>(
     };
   },
 );
+
+export default counterWithMatrixState;

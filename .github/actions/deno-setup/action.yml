@@ -8,10 +8,10 @@ runs:
   using: "composite"
   steps:
     # Keep in sync with `./tasks/check.sh` version
-    - name: 🦕 Setup Deno 2.5.2
+    - name: 🦕 Setup Deno 2.6.4
       uses: denoland/setup-deno@v2
       with:
-        deno-version: "2.5.2"
+        deno-version: "2.6.4"
 
     - name: 📦 Cache Deno dependencies
       if: inputs.cache

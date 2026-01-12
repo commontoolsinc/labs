@@ -300,6 +300,49 @@ const selectCategory = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeTemplateList = lift(sanitizeTemplateList);
+
+const liftTotalCount = lift((entries: TemplateCard[] | undefined) =>
+  Array.isArray(entries) ? entries.length : 0
+);
+
+const liftBuildCategoryFilters = lift(buildCategoryFilters);
+
+const liftCategoryKeys = lift((filters: CategoryFilter[]) =>
+  filters.map((filter) => filter.key)
+);
+
+const liftSelectedCategory = lift((inputs: {
+  category: string | undefined;
+  keys: string[];
+}) => sanitizeCategoryKey(inputs.category, inputs.keys));
+
+const liftVisibleTemplates = lift((inputs: {
+  templates: TemplateCard[];
+  category: string;
+}) => filterTemplates(inputs.templates, inputs.category));
+
+const liftVisibleCount = lift((entries: TemplateCard[] | undefined) =>
+  Array.isArray(entries) ? entries.length : 0
+);
+
+const liftActiveCategoryLabel = lift((inputs: {
+  key: string;
+  filters: CategoryFilter[];
+}) => resolveCategoryLabel(inputs.key, inputs.filters));
+
+const liftFeaturedTemplate = lift((entries: TemplateCard[]) =>
+  entries.length > 0 ? entries[0] : null
+);
+
+const liftSelectionTrail = lift((entries: string[] | undefined) => {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return "No selections yet";
+  }
+  return entries.join(" → ");
+});
+
 export const templateGallery = recipe<TemplateGalleryArgs>(
   "Template Gallery",
   ({ templates, category }) => {
@@ -307,42 +350,27 @@ export const templateGallery = recipe<TemplateGalleryArgs>(
     const selectionLabel = cell("initial load");
     const selectionHistory = cell<string[]>([]);
 
-    const templateList = lift(sanitizeTemplateList)(templates);
+    const templateList = liftSanitizeTemplateList(templates);
 
-    const totalCount = lift((entries: TemplateCard[] | undefined) =>
-      Array.isArray(entries) ? entries.length : 0
-    )(templateList);
+    const totalCount = liftTotalCount(templateList);
 
-    const categoryFilters = lift(buildCategoryFilters)(templateList);
+    const categoryFilters = liftBuildCategoryFilters(templateList);
 
-    const categoryKeys = lift((filters: CategoryFilter[]) =>
-      filters.map((filter) => filter.key)
-    )(categoryFilters);
+    const categoryKeys = liftCategoryKeys(categoryFilters);
 
-    const selectedCategory = lift((inputs: {
-      category: string | undefined;
-      keys: string[];
-    }) => sanitizeCategoryKey(inputs.category, inputs.keys))({
+    const selectedCategory = liftSelectedCategory({
       category,
       keys: categoryKeys,
     });
 
-    const visibleTemplates = lift((inputs: {
-      templates: TemplateCard[];
-      category: string;
-    }) => filterTemplates(inputs.templates, inputs.category))({
+    const visibleTemplates = liftVisibleTemplates({
       templates: templateList,
       category: selectedCategory,
     });
 
-    const visibleCount = lift((entries: TemplateCard[] | undefined) =>
-      Array.isArray(entries) ? entries.length : 0
-    )(visibleTemplates);
+    const visibleCount = liftVisibleCount(visibleTemplates);
 
-    const activeCategoryLabel = lift((inputs: {
-      key: string;
-      filters: CategoryFilter[];
-    }) => resolveCategoryLabel(inputs.key, inputs.filters))({
+    const activeCategoryLabel = liftActiveCategoryLabel({
       key: selectedCategory,
       filters: categoryFilters,
     });
@@ -350,16 +378,9 @@ export const templateGallery = recipe<TemplateGalleryArgs>(
     const summary =
       str`${visibleCount} of ${totalCount} templates in ${activeCategoryLabel}`;
 
-    const featuredTemplate = lift((entries: TemplateCard[]) =>
-      entries.length > 0 ? entries[0] : null
-    )(visibleTemplates);
+    const featuredTemplate = liftFeaturedTemplate(visibleTemplates);
 
-    const selectionTrail = lift((entries: string[] | undefined) => {
-      if (!Array.isArray(entries) || entries.length === 0) {
-        return "No selections yet";
-      }
-      return entries.join(" → ");
-    })(selectionHistory);
+    const selectionTrail = liftSelectionTrail(selectionHistory);
 
     const context = {
       category,
@@ -388,3 +409,5 @@ export const templateGallery = recipe<TemplateGalleryArgs>(
     };
   },
 );
+
+export default templateGallery;

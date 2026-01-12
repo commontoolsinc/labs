@@ -64,22 +64,26 @@ const buildReplicas = lift(
   },
 );
 
+const liftCount = lift((items: unknown) => {
+  return Array.isArray(items) ? items.length : 0;
+});
+
+const liftTotal = lift((items: unknown) => {
+  if (!Array.isArray(items)) return 0;
+  return items.reduce((sum, entry: any) => {
+    const value = typeof entry?.value === "number" ? entry.value : 0;
+    return sum + value;
+  }, 0);
+});
+
 export const counterReplicator = recipe<ReplicatorArgs>(
   "Counter Replicator",
   ({ seeds }) => {
     const replicas = buildReplicas({ seeds });
 
-    const count = lift((items: unknown) => {
-      return Array.isArray(items) ? items.length : 0;
-    })(replicas);
+    const count = liftCount(replicas);
 
-    const total = lift((items: unknown) => {
-      if (!Array.isArray(items)) return 0;
-      return items.reduce((sum, entry: any) => {
-        const value = typeof entry?.value === "number" ? entry.value : 0;
-        return sum + value;
-      }, 0);
-    })(replicas);
+    const total = liftTotal(replicas);
 
     const summary = str`Replicas ${count} total ${total}`;
 
@@ -92,3 +96,5 @@ export const counterReplicator = recipe<ReplicatorArgs>(
     };
   },
 );
+
+export default counterReplicator;

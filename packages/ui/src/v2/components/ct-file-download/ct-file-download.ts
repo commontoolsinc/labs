@@ -1,7 +1,40 @@
-import { css, html } from "lit";
+import { css, html, type PropertyValues } from "lit";
+import { state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { type CellHandle } from "@commontools/runtime-client";
 import { createStringCellController } from "../../core/cell-controller.ts";
+
+/**
+ * File System Access API types
+ * These are not yet in all TypeScript lib versions
+ */
+interface FileSystemWritableFileStream extends WritableStream {
+  write(data: BufferSource | Blob | string): Promise<void>;
+  close(): Promise<void>;
+}
+
+interface FileSystemFileHandle {
+  createWritable(): Promise<FileSystemWritableFileStream>;
+}
+
+interface FileSystemDirectoryHandle {
+  name: string;
+  getFileHandle(
+    name: string,
+    options?: { create?: boolean },
+  ): Promise<FileSystemFileHandle>;
+}
+
+declare global {
+  var showDirectoryPicker: () => Promise<FileSystemDirectoryHandle>;
+}
+
+/**
+ * Check if File System Access API is available
+ */
+const hasFileSystemAccess = (): boolean => {
+  return "showDirectoryPicker" in globalThis;
+};
 
 /**
  * MIME type to file extension mapping
@@ -40,11 +73,19 @@ const MIME_EXTENSIONS: Record<string, string> = {
  * @attr {boolean} disabled - Disable the button
  * @attr {number} feedback-duration - Success feedback duration in ms (default: 2000)
  * @attr {boolean} icon-only - Only show icon, no text (default: false)
+ * @attr {boolean} allow-autosave - Enable Option+click to activate auto-save mode (default: false)
  *
  * @fires ct-download-success - Fired when download succeeds
  *   Detail: { filename: string, size: number, mimeType: string }
  * @fires ct-download-error - Fired when download fails
  *   Detail: { error: Error, filename: string }
+ * @fires ct-autosave-enabled - Fired when auto-save mode is activated
+ *   Detail: { directoryName: string }
+ * @fires ct-autosave-disabled - Fired when auto-save mode is deactivated
+ * @fires ct-autosave-success - Fired when auto-save completes successfully
+ *   Detail: { filename: string, size: number }
+ * @fires ct-autosave-error - Fired when auto-save fails
+ *   Detail: { error: Error }
  *
  * @slot - Button label text (optional, defaults based on state)
  *
@@ -74,6 +115,11 @@ export class CTFileDownload extends BaseElement {
   static override styles = [
     BaseElement.baseStyles,
     css`
+      :host {
+        position: relative;
+        display: inline-block;
+      }
+
       /* Ensure icon-only buttons maintain square aspect ratio */
       :host([icon-only]) ct-button {
         min-width: 2.25rem;
@@ -84,6 +130,92 @@ export class CTFileDownload extends BaseElement {
       :host([icon-only]) ct-button::part(button) {
         aspect-ratio: 1;
         min-width: fit-content;
+      }
+
+      /* Autosave indicator dot */
+      .autosave-indicator {
+        position: absolute;
+        top: -2px;
+        right: -2px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        pointer-events: none;
+        z-index: 1;
+      }
+
+      .autosave-indicator.saved {
+        background-color: var(
+          --ct-theme-color-success,
+          var(--ct-colors-success, #22c55e)
+        );
+      }
+
+      .autosave-indicator.pending {
+        background-color: var(
+          --ct-theme-color-warning,
+          var(--ct-colors-warning, #f59e0b)
+        );
+        animation: gentle-pulse 2s ease-in-out infinite;
+      }
+
+      .autosave-indicator.saving {
+        background-color: var(
+          --ct-theme-color-primary,
+          var(--ct-colors-info, #3b82f6)
+        );
+      }
+
+      @keyframes gentle-pulse {
+        0%, 100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+
+      /* Shake animation for "not available" feedback */
+      @keyframes shake {
+        0%, 100% {
+          transform: translateX(0);
+        }
+        20%, 60% {
+          transform: translateX(-4px);
+        }
+        40%, 80% {
+          transform: translateX(4px);
+        }
+      }
+
+      :host(.shake) {
+        animation: shake 0.4s ease-in-out;
+      }
+
+      /* Tooltip for autosave status */
+      .autosave-tooltip {
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 4px 8px;
+        background: var(
+          --ct-theme-color-text,
+          var(--ct-colors-gray-900, rgba(0, 0, 0, 0.8))
+        );
+        color: var(--ct-theme-color-background, var(--ct-colors-gray-50, white));
+        font-size: 12px;
+        border-radius: 4px;
+        white-space: nowrap;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.2s;
+        margin-bottom: 4px;
+        z-index: 10;
+      }
+
+      :host(:hover) .autosave-tooltip {
+        opacity: 1;
       }
     `,
   ];
@@ -98,6 +230,11 @@ export class CTFileDownload extends BaseElement {
     disabled: { type: Boolean, reflect: true },
     feedbackDuration: { type: Number, attribute: "feedback-duration" },
     iconOnly: { type: Boolean, attribute: "icon-only", reflect: true },
+    allowAutosave: {
+      type: Boolean,
+      attribute: "allow-autosave",
+      reflect: true,
+    },
   };
 
   declare data: CellHandle<string> | string;
@@ -116,16 +253,47 @@ export class CTFileDownload extends BaseElement {
   declare disabled: boolean;
   declare feedbackDuration: number;
   declare iconOnly: boolean;
+  declare allowAutosave: boolean;
 
+  @state()
   private _downloaded = false;
+
+  @state()
   private _downloading = false;
+
   private _resetTimeout?: ReturnType<typeof setTimeout>;
+
+  // Autosave state
+  @state()
+  private _autosaveEnabled = false;
+
+  private _autosaveDirHandle: FileSystemDirectoryHandle | null = null;
+  private _autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  @state()
+  private _isDirty = false;
+
+  private _lastSavedData: string | null = null;
+
+  @state()
+  private _isSavingAutosave = false;
+
+  @state()
+  private _showNotAvailableTooltip = false;
+
+  @state()
+  private _notAvailableMessage = "";
+
+  private _notAvailableTooltipTimeout?: ReturnType<typeof setTimeout>;
 
   /** Maximum file size in bytes (100MB) */
   private static readonly MAX_FILE_SIZE = 100 * 1024 * 1024;
 
   /** Delay before revoking object URL to ensure download starts (ms) */
   private static readonly URL_REVOKE_DELAY = 100;
+
+  /** Auto-save interval in milliseconds (60 seconds) */
+  private static readonly AUTOSAVE_INTERVAL = 60_000;
 
   /** CellController for data property */
   private _dataController = createStringCellController(this, {
@@ -148,6 +316,7 @@ export class CTFileDownload extends BaseElement {
     this.disabled = false;
     this.feedbackDuration = 2000;
     this.iconOnly = false;
+    this.allowAutosave = false;
   }
 
   /**
@@ -205,9 +374,7 @@ export class CTFileDownload extends BaseElement {
     return new Blob([data], { type: this.mimeType });
   }
 
-  override willUpdate(
-    changedProperties: Map<string | number | symbol, unknown>,
-  ) {
+  override willUpdate(changedProperties: PropertyValues) {
     super.willUpdate(changedProperties);
 
     // Bind CellControllers when properties change
@@ -219,11 +386,224 @@ export class CTFileDownload extends BaseElement {
     }
   }
 
+  override updated(_changedProperties: PropertyValues) {
+    // Track data changes for autosave (side effect belongs in updated)
+    if (this._autosaveEnabled) {
+      const currentData = this._getDataValue();
+      if (currentData !== this._lastSavedData) {
+        this._isDirty = true;
+        this._scheduleAutosave();
+      }
+    }
+  }
+
+  override connectedCallback() {
+    super.connectedCallback();
+    // Add visibility change listener for auto-save on tab switch
+    document.addEventListener("visibilitychange", this._handleVisibilityChange);
+    globalThis.addEventListener("beforeunload", this._handleBeforeUnload);
+  }
+
   override disconnectedCallback() {
     super.disconnectedCallback();
     if (this._resetTimeout) {
       clearTimeout(this._resetTimeout);
     }
+    if (this._autosaveTimer) {
+      clearTimeout(this._autosaveTimer);
+    }
+    if (this._notAvailableTooltipTimeout) {
+      clearTimeout(this._notAvailableTooltipTimeout);
+    }
+    // Remove event listeners
+    document.removeEventListener(
+      "visibilitychange",
+      this._handleVisibilityChange,
+    );
+    globalThis.removeEventListener("beforeunload", this._handleBeforeUnload);
+  }
+
+  /**
+   * Handle visibility change - save immediately when tab becomes hidden
+   */
+  private _handleVisibilityChange = () => {
+    if (document.hidden && this._autosaveEnabled && this._isDirty) {
+      this._performAutosave();
+    }
+  };
+
+  /**
+   * Handle beforeunload - warn user if there are unsaved changes
+   */
+  private _handleBeforeUnload = (e: BeforeUnloadEvent) => {
+    if (this._autosaveEnabled && this._isDirty) {
+      // Attempt to save (may not complete)
+      this._performAutosave();
+      // Show browser's default "unsaved changes" dialog
+      e.preventDefault();
+      e.returnValue = "";
+    }
+  };
+
+  /**
+   * Enable autosave mode by prompting user for folder
+   */
+  private async _enableAutosave(): Promise<boolean> {
+    if (!hasFileSystemAccess()) {
+      this._showNotAvailableFeedback("Auto-save requires Chrome or Edge");
+      return false;
+    }
+
+    try {
+      // Prompt user to select a folder
+      const dirHandle = await globalThis.showDirectoryPicker();
+
+      this._autosaveDirHandle = dirHandle;
+      this._autosaveEnabled = true;
+      this._lastSavedData = this._getDataValue();
+      this._isDirty = false;
+
+      this.emit("ct-autosave-enabled", {
+        directoryName: dirHandle.name,
+      });
+
+      return true;
+    } catch (error) {
+      // User cancelled or permission denied
+      if ((error as Error).name !== "AbortError") {
+        this._showNotAvailableFeedback("Could not access folder");
+      }
+      return false;
+    }
+  }
+
+  /**
+   * Disable autosave mode
+   */
+  private _disableAutosave() {
+    this._autosaveEnabled = false;
+    this._autosaveDirHandle = null;
+    this._isDirty = false;
+    if (this._autosaveTimer) {
+      clearTimeout(this._autosaveTimer);
+      this._autosaveTimer = null;
+    }
+    this.emit("ct-autosave-disabled", {});
+  }
+
+  /**
+   * Perform the actual autosave to the selected folder
+   */
+  private async _performAutosave(): Promise<void> {
+    if (!this._autosaveDirHandle || this._isSavingAutosave) return;
+
+    const data = this._getDataValue();
+    if (!data) return;
+
+    this._isSavingAutosave = true;
+
+    try {
+      const blob = this._createBlob(data);
+
+      // Check file size limit to prevent hanging on huge files
+      if (blob.size > CTFileDownload.MAX_FILE_SIZE) {
+        throw new Error(
+          `File size (${
+            Math.round(blob.size / 1024 / 1024)
+          }MB) exceeds maximum allowed (${
+            Math.round(CTFileDownload.MAX_FILE_SIZE / 1024 / 1024)
+          }MB)`,
+        );
+      }
+
+      // Generate timestamped filename
+      const timestamp = new Date()
+        .toISOString()
+        .replace(/[:.]/g, "-")
+        .slice(0, 19);
+      const baseName = this._filenameController.getValue() || "backup";
+      const ext = MIME_EXTENSIONS[this.mimeType] || "bin";
+      const sanitizedBase = this._sanitizeFilename(
+        baseName.replace(/\.[^.]+$/, ""),
+      );
+      const filename = `${sanitizedBase}-${timestamp}.${ext}`;
+
+      // Write to file
+      const fileHandle = await this._autosaveDirHandle.getFileHandle(filename, {
+        create: true,
+      });
+      const writable = await fileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+
+      // Update state - check if data changed during save (race condition)
+      const currentData = this._getDataValue();
+      this._lastSavedData = data;
+      this._isSavingAutosave = false;
+
+      if (currentData !== data) {
+        // Data changed during save, keep dirty and reschedule
+        this._isDirty = true;
+        this._scheduleAutosave();
+      } else {
+        this._isDirty = false;
+        // Clear timer since we just saved and data is current
+        if (this._autosaveTimer) {
+          clearTimeout(this._autosaveTimer);
+          this._autosaveTimer = null;
+        }
+      }
+
+      this.emit("ct-autosave-success", {
+        filename,
+        size: blob.size,
+      });
+    } catch (error) {
+      this._isSavingAutosave = false;
+
+      // Check if permission was revoked
+      if ((error as Error).name === "NotAllowedError") {
+        this._disableAutosave();
+        this._showNotAvailableFeedback("Folder access revoked");
+      }
+
+      this.emit("ct-autosave-error", {
+        error: error as Error,
+      });
+    }
+  }
+
+  /**
+   * Start or reset the autosave timer
+   */
+  private _scheduleAutosave() {
+    if (!this._autosaveEnabled) return;
+
+    if (this._autosaveTimer) {
+      clearTimeout(this._autosaveTimer);
+    }
+
+    this._autosaveTimer = setTimeout(() => {
+      this._performAutosave();
+    }, CTFileDownload.AUTOSAVE_INTERVAL);
+  }
+
+  /**
+   * Show "not available" feedback with shake animation and tooltip
+   */
+  private _showNotAvailableFeedback(message: string) {
+    this._showNotAvailableTooltip = true;
+    this._notAvailableMessage = message;
+    this.classList.add("shake");
+
+    if (this._notAvailableTooltipTimeout) {
+      clearTimeout(this._notAvailableTooltipTimeout);
+    }
+
+    this._notAvailableTooltipTimeout = setTimeout(() => {
+      this._showNotAvailableTooltip = false;
+      this.classList.remove("shake");
+    }, 2000);
   }
 
   private _handleClick(e: Event) {
@@ -232,6 +612,34 @@ export class CTFileDownload extends BaseElement {
 
     // Guard against rapid clicks and disabled state
     if (this.disabled || this._downloading) return;
+
+    const mouseEvent = e as MouseEvent;
+    const isOptionClick = mouseEvent.altKey;
+
+    // Handle Option+click for autosave toggle
+    if (isOptionClick) {
+      if (!this.allowAutosave) {
+        // Show feedback that autosave is not available for this button
+        this._showNotAvailableFeedback(
+          "Auto-save not available for this download",
+        );
+        // Continue with normal download
+      } else if (this._autosaveEnabled) {
+        // Toggle off
+        this._disableAutosave();
+        return;
+      } else {
+        // Toggle on - prompt for folder
+        this._enableAutosave();
+        return;
+      }
+    }
+
+    // If autosave is enabled, save to folder instead of browser download
+    if (this._autosaveEnabled) {
+      this._performAutosave();
+      return;
+    }
 
     const data = this._getDataValue();
     const filename = this._getFilename();
@@ -247,7 +655,6 @@ export class CTFileDownload extends BaseElement {
 
     // Set downloading state to prevent rapid clicks
     this._downloading = true;
-    this.requestUpdate();
 
     try {
       // Create blob from data
@@ -283,7 +690,6 @@ export class CTFileDownload extends BaseElement {
       // Update state for visual feedback
       this._downloaded = true;
       this._downloading = false;
-      this.requestUpdate();
 
       this.emit("ct-download-success", {
         filename,
@@ -297,11 +703,9 @@ export class CTFileDownload extends BaseElement {
       }
       this._resetTimeout = setTimeout(() => {
         this._downloaded = false;
-        this.requestUpdate();
       }, this.feedbackDuration);
     } catch (error) {
       this._downloading = false;
-      this.requestUpdate();
       this.emit("ct-download-error", {
         error: error as Error,
         filename,
@@ -309,20 +713,88 @@ export class CTFileDownload extends BaseElement {
     }
   }
 
+  /**
+   * Get the autosave indicator state class
+   */
+  private _getAutosaveIndicatorClass(): string {
+    if (!this._autosaveEnabled) return "";
+    if (this._isSavingAutosave) return "saving";
+    if (this._isDirty) return "pending";
+    return "saved";
+  }
+
+  /**
+   * Get the tooltip text for autosave state
+   */
+  private _getAutosaveTooltip(): string {
+    if (this._showNotAvailableTooltip) {
+      return this._notAvailableMessage;
+    }
+    if (!this._autosaveEnabled) return "";
+    if (this._isSavingAutosave) return "Saving...";
+    if (this._isDirty) return "Auto-save on · Saving soon...";
+    return "Auto-save on · All changes saved";
+  }
+
   override render() {
-    const title = this._downloading
-      ? "Downloading..."
-      : this._downloaded
-      ? "Downloaded!"
-      : "Download file";
-    const ariaLabel = this._downloading
-      ? "Downloading file"
-      : this._downloaded
-      ? "File downloaded"
-      : "Download file";
     const hasData = !!this._getDataValue();
 
+    // Determine title and aria-label based on state
+    let title: string;
+    let ariaLabel: string;
+
+    if (this._autosaveEnabled) {
+      title = this._getAutosaveTooltip();
+      ariaLabel = title;
+    } else if (this._downloading) {
+      title = "Downloading...";
+      ariaLabel = "Downloading file";
+    } else if (this._downloaded) {
+      title = "Downloaded!";
+      ariaLabel = "File downloaded";
+    } else if (this.allowAutosave) {
+      title = "Download file · Option+click for auto-save";
+      ariaLabel = "Download file, option click to enable auto-save";
+    } else {
+      title = "Download file";
+      ariaLabel = "Download file";
+    }
+
+    // Determine icon
+    const icon = this._autosaveEnabled
+      ? "\uD83D\uDD04" // 🔄
+      : this._downloading
+      ? "\u23F3" // ⏳
+      : this._downloaded
+      ? "\u2713" // ✓
+      : "\u2B07"; // ⬇
+
+    // Determine button text
+    const buttonText = this._autosaveEnabled
+      ? this._isSavingAutosave
+        ? "\uD83D\uDD04 Saving..."
+        : "\uD83D\uDD04 Auto-save"
+      : this._downloading
+      ? "\u23F3 Downloading..."
+      : this._downloaded
+      ? "\u2713 Downloaded!"
+      : "\u2B07 Download";
+
+    const indicatorClass = this._getAutosaveIndicatorClass();
+    const tooltipText = this._showNotAvailableTooltip || this._autosaveEnabled
+      ? this._getAutosaveTooltip()
+      : "";
+
     return html`
+      ${indicatorClass
+        ? html`
+          <span class="autosave-indicator ${indicatorClass}"></span>
+        `
+        : null} ${tooltipText
+        ? html`
+          <span class="autosave-tooltip">${tooltipText}</span>
+        `
+        : null}
       <ct-button
         variant="${this.variant || "secondary"}"
         size="${this.size || "default"}"
@@ -333,18 +805,10 @@ export class CTFileDownload extends BaseElement {
       >
         ${this.iconOnly
           ? html`
-            ${this._downloading
-              ? "\u23F3"
-              : this._downloaded
-              ? "\u2713"
-              : "\u2B07"}
+            ${icon}
           `
           : html`
-            <slot> ${this._downloading
-              ? "\u23F3 Downloading..."
-              : this._downloaded
-              ? "\u2713 Downloaded!"
-              : "\u2B07 Download"} </slot>
+            <slot>${buttonText}</slot>
           `}
       </ct-button>
     `;

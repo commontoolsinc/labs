@@ -167,82 +167,84 @@ const adjustMilestoneWeight = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeMilestoneMap = lift(sanitizeMilestoneMap);
+
+const liftTotals = lift((records: MilestoneRecord): TotalsSnapshot => {
+  const entries = Object.values(records);
+  let total = 0;
+  let completed = 0;
+  for (const entry of entries) {
+    total += entry.weight;
+    if (entry.completed) {
+      completed += entry.weight;
+    }
+  }
+  const roundedTotal = roundToTwoDecimals(total);
+  const roundedCompleted = roundToTwoDecimals(completed);
+  const remaining = roundToTwoDecimals(roundedTotal - roundedCompleted);
+  const percent = roundedTotal === 0
+    ? 0
+    : roundToOneDecimal((roundedCompleted / roundedTotal) * 100);
+  return {
+    total: roundedTotal,
+    completed: roundedCompleted,
+    remaining,
+    percent,
+  };
+});
+
+const liftTotalWeight = lift((snapshot: TotalsSnapshot) => snapshot.total);
+const liftCompletedWeight = lift((snapshot: TotalsSnapshot) =>
+  snapshot.completed
+);
+const liftRemainingWeight = lift((snapshot: TotalsSnapshot) =>
+  snapshot.remaining
+);
+const liftCompletionPercent = lift((snapshot: TotalsSnapshot) =>
+  snapshot.percent
+);
+
+const liftMilestoneList = lift((inputs: {
+  records: MilestoneRecord;
+  total: number;
+}) => {
+  const entries = Object.entries(inputs.records).map(([id, data]) => {
+    const percentOfTotal = inputs.total === 0
+      ? 0
+      : roundToOneDecimal((data.weight / inputs.total) * 100);
+    const completedShare = data.completed ? percentOfTotal : 0;
+    return {
+      id,
+      label: data.label,
+      weight: data.weight,
+      completed: data.completed,
+      percentOfTotal,
+      completedShare,
+    };
+  });
+  entries.sort((left, right) => left.label.localeCompare(right.label));
+  return entries;
+});
+
+const liftFormattedPercent = lift((value: number) => value.toFixed(1));
+
 export const goalProgressTracker = recipe<GoalProgressArgs>(
   "Goal Progress Tracker",
   ({ milestones }) => {
-    const sanitized = lift(sanitizeMilestoneMap)(milestones);
+    const sanitized = liftSanitizeMilestoneMap(milestones);
+    const totals = liftTotals(sanitized);
+    const totalWeight = liftTotalWeight(totals);
+    const completedWeight = liftCompletedWeight(totals);
+    const remainingWeight = liftRemainingWeight(totals);
+    const completionPercent = liftCompletionPercent(totals);
 
-    const totals = lift((records: MilestoneRecord): TotalsSnapshot => {
-      const entries = Object.values(records);
-      let total = 0;
-      let completed = 0;
-      for (const entry of entries) {
-        total += entry.weight;
-        if (entry.completed) {
-          completed += entry.weight;
-        }
-      }
-      const roundedTotal = roundToTwoDecimals(total);
-      const roundedCompleted = roundToTwoDecimals(completed);
-      const remaining = roundToTwoDecimals(roundedTotal - roundedCompleted);
-      const percent = roundedTotal === 0
-        ? 0
-        : roundToOneDecimal((roundedCompleted / roundedTotal) * 100);
-      return {
-        total: roundedTotal,
-        completed: roundedCompleted,
-        remaining,
-        percent,
-      };
-    })(sanitized);
-
-    const totalWeight = lift((snapshot: TotalsSnapshot) => snapshot.total)(
-      totals,
-    );
-    const completedWeight = lift((snapshot: TotalsSnapshot) =>
-      snapshot.completed
-    )(
-      totals,
-    );
-    const remainingWeight = lift((snapshot: TotalsSnapshot) =>
-      snapshot.remaining
-    )(
-      totals,
-    );
-    const completionPercent = lift((snapshot: TotalsSnapshot) =>
-      snapshot.percent
-    )(
-      totals,
-    );
-
-    const milestoneList = lift((inputs: {
-      records: MilestoneRecord;
-      total: number;
-    }) => {
-      const entries = Object.entries(inputs.records).map(([id, data]) => {
-        const percentOfTotal = inputs.total === 0
-          ? 0
-          : roundToOneDecimal((data.weight / inputs.total) * 100);
-        const completedShare = data.completed ? percentOfTotal : 0;
-        return {
-          id,
-          label: data.label,
-          weight: data.weight,
-          completed: data.completed,
-          percentOfTotal,
-          completedShare,
-        };
-      });
-      entries.sort((left, right) => left.label.localeCompare(right.label));
-      return entries;
-    })({
+    const milestoneList = liftMilestoneList({
       records: sanitized,
       total: totalWeight,
     });
 
-    const formattedPercent = lift((value: number) => value.toFixed(1))(
-      completionPercent,
-    );
+    const formattedPercent = liftFormattedPercent(completionPercent);
 
     const summary =
       str`${formattedPercent}% complete (${completedWeight}/${totalWeight})`;
@@ -260,3 +262,5 @@ export const goalProgressTracker = recipe<GoalProgressArgs>(
     };
   },
 );
+
+export default goalProgressTracker;

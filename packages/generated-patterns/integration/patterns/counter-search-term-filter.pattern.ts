@@ -70,6 +70,27 @@ const resetSearchTerm = handler(
   },
 );
 
+const liftSearchDisplay = lift((term: string) =>
+  term.length > 0 ? term : "(all)"
+);
+
+const liftFilteredCounters = lift(
+  (input: { values: NamedCounter[]; term: string }): NamedCounter[] => {
+    const query = input.term.toLowerCase();
+    if (!query) return input.values;
+    return input.values.filter((item) =>
+      item.label.toLowerCase().includes(query)
+    );
+  },
+);
+
+const liftFilteredLabels = lift((entries: NamedCounter[]) =>
+  entries.map((entry) => `${entry.label} (${entry.value})`)
+);
+
+const liftSanitizeCounterList = lift(sanitizeCounterList);
+const liftSanitizeSearchTerm = lift(sanitizeSearchTerm);
+
 const updateCounterValue = handler(
   (
     event: CounterUpdateEvent | undefined,
@@ -113,36 +134,22 @@ const updateCounterValue = handler(
 export const counterWithSearchTermFilter = recipe<SearchFilterArgs>(
   "Counter With Search Term Filter",
   ({ counters, search }) => {
-    const sanitizedCounters = lift(sanitizeCounterList)(counters);
-    const searchTerm = lift(sanitizeSearchTerm)(search);
-    const searchDisplay = lift((term: string) =>
-      term.length > 0 ? term : "(all)"
-    )(searchTerm);
+    const sanitizedCounters = liftSanitizeCounterList(counters);
+    const searchTerm = liftSanitizeSearchTerm(search);
+    const searchDisplay = liftSearchDisplay(searchTerm);
 
     const filteringInputs = {
       values: sanitizedCounters,
       term: searchTerm,
     };
 
-    const filtered = lift(
-      (
-        input: { values: NamedCounter[]; term: string },
-      ): NamedCounter[] => {
-        const query = input.term.toLowerCase();
-        if (!query) return input.values;
-        return input.values.filter((item) =>
-          item.label.toLowerCase().includes(query)
-        );
-      },
-    )(filteringInputs);
+    const filtered = liftFilteredCounters(filteringInputs);
 
     const totalCount = derive(sanitizedCounters, (values) => values.length);
     const filteredCount = derive(filtered, (values) => values.length);
     const hasMatches = derive(filteredCount, (count) => count > 0);
 
-    const filteredLabels = lift((entries: NamedCounter[]) =>
-      entries.map((entry) => `${entry.label} (${entry.value})`)
-    )(filtered);
+    const filteredLabels = liftFilteredLabels(filtered);
 
     const summary =
       str`Matches ${filteredCount}/${totalCount} for ${searchDisplay}`;
@@ -165,3 +172,5 @@ export const counterWithSearchTermFilter = recipe<SearchFilterArgs>(
     };
   },
 );
+
+export default counterWithSearchTermFilter;

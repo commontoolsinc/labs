@@ -8,6 +8,7 @@ import {
   navigateTo,
   pattern,
   patternTool,
+  type PatternToolResult,
   Stream,
   UI,
   type VNode,
@@ -53,14 +54,16 @@ type Input = {
 
 /** Represents a small #note a user took to remember some text. */
 type Output = {
+  [NAME]?: string;
+  [UI]: VNode;
   mentioned: Default<Array<MentionableCharm>, []>;
   backlinks: MentionableCharm[];
 
   content: Default<string, "">;
   isHidden: Default<boolean, false>;
   noteId: Default<string, "">;
-  grep: Stream<{ query: string }>;
-  translate: Stream<{ language: string }>;
+  grep: PatternToolResult<{ content: string }>;
+  translate: PatternToolResult<{ content: string }>;
   editContent: Stream<{ detail: { value: string } }>;
   /** Minimal UI for embedding in containers like Record. Use via ct-render variant="embedded". */
   embeddedUI: VNode;
@@ -226,6 +229,57 @@ const goToParent = handler<void, { parent: Writable<NotebookCharm> }>(
   (_, { parent }) => navigateTo(parent),
 );
 
+// Handler that creates NoteMd dynamically when clicked (not during pattern construction)
+// This avoids the sub-recipe serialization issue with $pattern
+const goToViewer = handler<
+  void,
+  {
+    title: Writable<string>;
+    content: Writable<string>;
+    backlinks: Writable<MentionableCharm[]>;
+    noteId: Writable<string>;
+  }
+>((_, state) => {
+  return navigateTo(
+    NoteMd({
+      note: {
+        title: state.title,
+        content: state.content,
+        backlinks: state.backlinks,
+        noteId: state.noteId,
+      },
+    }),
+  );
+});
+
+// Grep function for patternTool - filters content lines by query
+const grepFn = (
+  { query, content }: { query: string; content: string },
+) => {
+  return computed(() => {
+    return content.split("\n").filter((c) => c.includes(query));
+  });
+};
+
+// Translate function for patternTool - translates content to specified language
+const translateFn = (
+  { language, content }: {
+    language: string;
+    content: string;
+  },
+) => {
+  const genResult = generateText({
+    system: computed(() => `Translate the content to ${language}.`),
+    prompt: computed(() => `<to_translate>${content}</to_translate>`),
+  });
+
+  return computed(() => {
+    if (genResult.pending) return undefined;
+    if (genResult.result == null) return "Error occurred";
+    return genResult.result;
+  });
+};
+
 // Menu: All Notes (find existing only - can't create due to circular imports)
 const menuAllNotebooks = handler<
   void,
@@ -348,29 +402,6 @@ const Note = pattern<Input, Output>(
         lineNumbers
       />
     );
-
-    // Handler that creates NoteMd dynamically when clicked (not during pattern construction)
-    // This avoids the sub-recipe serialization issue with $pattern
-    const goToViewer = handler<
-      void,
-      {
-        title: Writable<string>;
-        content: Writable<string>;
-        backlinks: Writable<MentionableCharm[]>;
-        noteId: Writable<string>;
-      }
-    >((_, state) => {
-      return navigateTo(
-        NoteMd({
-          note: {
-            title: state.title,
-            content: state.content,
-            backlinks: state.backlinks,
-            noteId: state.noteId,
-          },
-        }),
-      );
-    });
 
     return {
       [NAME]: computed(() => `📝 ${title.get()}`),
@@ -575,34 +606,8 @@ const Note = pattern<Input, Output>(
       backlinks,
       isHidden,
       noteId,
-      grep: patternTool(
-        ({ query, content }: { query: string; content: string }) => {
-          return computed(() => {
-            return content.split("\n").filter((c) => c.includes(query));
-          });
-        },
-        { content },
-      ),
-      translate: patternTool(
-        (
-          { language, content }: {
-            language: string;
-            content: string;
-          },
-        ) => {
-          const genResult = generateText({
-            system: computed(() => `Translate the content to ${language}.`),
-            prompt: computed(() => `<to_translate>${content}</to_translate>`),
-          });
-
-          return computed(() => {
-            if (genResult.pending) return undefined;
-            if (genResult.result == null) return "Error occured";
-            return genResult.result;
-          });
-        },
-        { content },
-      ),
+      grep: patternTool(grepFn, { content }),
+      translate: patternTool(translateFn, { content }),
       editContent: handleEditContent({ content }),
       // Minimal UI for embedding in containers (e.g., Record modules)
       embeddedUI: editorUI,

@@ -190,17 +190,23 @@ const recordGroupMeasurement = handler(
   },
 );
 
+const liftDefaultAmountValue = lift((value: number | undefined) => {
+  const sanitized = sanitizeNumber(value, 1);
+  return sanitized === 0 ? 1 : sanitized;
+});
+
+const liftEntryList = lift((value: GroupEntryInput[] | undefined) =>
+  sanitizeEntries(value)
+);
+
+const liftLabelPieces = lift(summaryLabelText);
+
 export const counterWithGroupedSummary = recipe<GroupedSummaryArgs>(
   "Counter With Grouped Summary",
   ({ entries, defaultAmount }) => {
-    const defaultAmountValue = lift((value: number | undefined) => {
-      const sanitized = sanitizeNumber(value, 1);
-      return sanitized === 0 ? 1 : sanitized;
-    })(defaultAmount);
+    const defaultAmountValue = liftDefaultAmountValue(defaultAmount);
 
-    const entryList = lift((value: GroupEntryInput[] | undefined) =>
-      sanitizeEntries(value)
-    )(entries);
+    const entryList = liftEntryList(entries);
     const summaries = derive(entryList, computeSummaries);
     const totals = derive(summaries, totalsRecord);
     const dominant = derive(summaries, dominantSummary);
@@ -209,7 +215,7 @@ export const counterWithGroupedSummary = recipe<GroupedSummaryArgs>(
       (items) => items.reduce((sum, entry) => sum + entry.total, 0),
     );
     const groupCount = derive(summaries, (items) => items.length);
-    const labelPieces = lift(summaryLabelText)(summaries);
+    const labelPieces = liftLabelPieces(summaries);
     const summaryLabel = str`Group totals ${labelPieces}`;
 
     return {
@@ -229,3 +235,5 @@ export const counterWithGroupedSummary = recipe<GroupedSummaryArgs>(
     };
   },
 );
+
+export default counterWithGroupedSummary;

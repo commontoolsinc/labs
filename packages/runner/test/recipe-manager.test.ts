@@ -43,9 +43,9 @@ describe("RecipeManager program persistence", () => {
           contents: [
             "import { recipe, lift } from 'commontools';",
             "import { double } from './util.ts';",
+            "const dbl = lift((x:number)=>double(x));",
             "export default recipe<{ value: number }>('Test', ({ value }) => {",
-            "  const dbl = lift((x:number)=>double(x))(value);",
-            "  return { result: dbl };",
+            "  return { result: dbl(value) };",
             "});",
           ].join("\n"),
         },

@@ -1,5 +1,12 @@
 /// <cts-enable />
-import { type Cell, Default, handler, lift, recipe, str } from "commontools";
+import {
+  type Cell,
+  computed,
+  Default,
+  handler,
+  recipe,
+  str,
+} from "commontools";
 
 interface OptionalBranch {
   counter?: number;
@@ -111,44 +118,34 @@ const clearNestedState = handler(
 export const counterWithNestedOptionalCells = recipe<NestedOptionalArgs>(
   "Counter With Nested Optional Cells",
   ({ state }) => {
-    const current = lift((value: NestedOptionalState | undefined) => {
-      const branch = getBranch(getNested(value));
-      return typeof branch?.counter === "number" ? branch.counter : 0;
-    })(state);
-    const history = lift((value: NestedOptionalState | undefined) => {
-      const branch = getBranch(getNested(value));
-      return normalizeHistory(branch?.history);
-    })(state);
-    const branchTitle = lift((value: NestedOptionalState | undefined) => {
-      const branch = getBranch(getNested(value));
-      const label = branch?.label;
+    const current = computed(() => {
+      const counter = state.nested?.branch?.counter;
+      return typeof counter === "number" ? counter : 0;
+    });
+    const history = computed(() => {
+      return normalizeHistory(state.nested?.branch?.history);
+    });
+    const branchTitle = computed(() => {
+      const label = state.nested?.branch?.label;
       if (typeof label === "string" && label.length > 0) {
         return label;
       }
       return "Unnamed branch";
-    })(state);
-    const hasNested = lift((value: NestedOptionalState | undefined) =>
-      getNested(value) !== undefined
-    )(state);
-    const hasBranch = lift((value: NestedOptionalState | undefined) =>
-      getBranch(getNested(value)) !== undefined
-    )(state);
-    const nestedIndicator = lift((present: boolean) => present ? "yes" : "no")(
-      hasNested,
-    );
-    const branchIndicator = lift((present: boolean) => present ? "yes" : "no")(
-      hasBranch,
-    );
-    const status = lift((info: {
-      count: number;
-      nested: string;
-      branch: string;
-    }) => `Count ${info.count} (nested:${info.nested} branch:${info.branch})`)(
-      {
-        count: current,
-        nested: nestedIndicator,
-        branch: branchIndicator,
-      },
+    });
+    const hasNested = computed(() => {
+      const nested = state.nested;
+      return isRecord(nested);
+    });
+    const hasBranch = computed(() => {
+      const nested = state.nested;
+      if (!isRecord(nested)) return false;
+      return isRecord(nested.branch);
+    });
+    const nestedIndicator = computed(() => hasNested ? "yes" : "no");
+    const branchIndicator = computed(() => hasBranch ? "yes" : "no");
+    const status = computed(
+      () =>
+        `Count ${current} (nested:${nestedIndicator} branch:${branchIndicator})`,
     );
     const label = str`${branchTitle} ${current}`;
 

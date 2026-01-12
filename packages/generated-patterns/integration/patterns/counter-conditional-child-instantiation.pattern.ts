@@ -2,9 +2,9 @@
 import {
   type Cell,
   cell,
+  computed,
   Default,
   handler,
-  lift,
   recipe,
   str,
 } from "commontools";
@@ -18,6 +18,19 @@ const resolveAmount = (value: number | undefined): number => {
   if (typeof value !== "number" || !Number.isFinite(value)) return 1;
   return Math.trunc(value);
 };
+
+const normalizeEnabled = (flag: boolean | undefined): boolean => flag === true;
+
+const formatActiveStatus = (flag: boolean): string => flag ? "active" : "idle";
+
+const formatChildStatus = (active: boolean): string =>
+  active ? "present" : "absent";
+
+const checkChildGuard = (state: {
+  active: boolean;
+  seed: number;
+  snapshot: ChildCounterState | undefined;
+}): boolean => state.active;
 
 const adjustParent = handler(
   (
@@ -41,7 +54,7 @@ const toggleEnabled = handler(
 
 const adjustChild = handler(
   (
-    event: { amount?: number } | undefined,
+    event: { amount?: number },
     context: { value: Cell<number> },
   ) => {
     const amount = resolveAmount(event?.amount);
@@ -63,7 +76,7 @@ const _conditionalChild = recipe<
 >(
   "Conditional Child Counter",
   ({ value }) => {
-    const current = lift(sanitizeCount)(value);
+    const current = computed(() => sanitizeCount(value));
     const label = str`Child value ${current}`;
     return {
       value,
@@ -84,30 +97,18 @@ export const counterWithConditionalChildInstantiation = recipe<
 >(
   "Counter With Conditional Child Instantiation",
   ({ value, enabled }) => {
-    const safeValue = lift(sanitizeCount)(value);
-    const isActive = lift((flag: boolean | undefined) => flag === true)(
-      enabled,
-    );
-    const activeStatus = lift((flag: boolean) => flag ? "active" : "idle")(
-      isActive,
-    );
+    const safeValue = computed(() => sanitizeCount(value));
+    const isActive = computed(() => normalizeEnabled(enabled));
+    const activeStatus = computed(() => formatActiveStatus(isActive));
     const childSlot = cell<ChildCounterState | undefined>(undefined);
-    const childGuard = lift(
-      (
-        state: {
-          active: boolean;
-          seed: number;
-          snapshot: ChildCounterState | undefined;
-        },
-      ) => {
-        return state.active;
-      },
-    )({ active: isActive, seed: safeValue, snapshot: childSlot });
-    const childStatus = lift((active: boolean) =>
-      active ? "present" : "absent"
-    )(
-      isActive,
+    const childGuard = computed(() =>
+      checkChildGuard({
+        active: isActive,
+        seed: safeValue,
+        snapshot: childSlot.get(),
+      })
     );
+    const childStatus = computed(() => formatChildStatus(isActive));
     const label =
       str`Parent ${safeValue} (${activeStatus}) child ${childStatus}`;
 
@@ -125,3 +126,5 @@ export const counterWithConditionalChildInstantiation = recipe<
     };
   },
 );
+
+export default counterWithConditionalChildInstantiation;

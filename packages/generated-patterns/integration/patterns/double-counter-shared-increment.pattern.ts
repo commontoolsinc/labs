@@ -19,13 +19,15 @@ const incrementBoth = handler(
   },
 );
 
+const liftTotal = lift((values: { left: number; right: number }) =>
+  values.left + values.right
+);
+
 export const doubleCounterWithSharedIncrement = recipe<DoubleCounterArgs>(
   "Double Counter With Shared Increment",
   ({ left, right }) => {
     const status = str`left ${left} • right ${right}`;
-    const total = lift((values: { left: number; right: number }) =>
-      values.left + values.right
-    )({ left, right });
+    const total = liftTotal({ left, right });
 
     return {
       left,
@@ -38,3 +40,5 @@ export const doubleCounterWithSharedIncrement = recipe<DoubleCounterArgs>(
     };
   },
 );
+
+export default doubleCounterWithSharedIncrement;

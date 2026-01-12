@@ -138,6 +138,37 @@ const buildOccupancy = (
   return occupancy;
 };
 
+// Module-scope lift definitions
+const liftSanitizeBins = lift(sanitizeBins);
+
+const liftRawItems = lift((value: ItemPlacement[] | undefined) =>
+  Array.isArray(value) ? value : []
+);
+
+const liftPlacements = lift((input: {
+  entries: ItemPlacement[];
+  binList: BinDefinition[];
+}) => sanitizePlacements(input.entries, input.binList));
+
+const liftOccupancy = lift((input: {
+  binList: BinDefinition[];
+  placements: ItemPlacement[];
+}) => buildOccupancy(input.binList, input.placements));
+
+const liftAvailableBins = lift((summary: Record<string, OccupancyEntry>) =>
+  Object.keys(summary).filter((id) => summary[id].available > 0)
+);
+
+const liftTotalItems = lift((list: ItemPlacement[]) => list.length);
+const liftBinCount = lift((list: BinDefinition[]) => list.length);
+
+const liftLastAction = lift((entries: string[]) => {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return "initialized";
+  }
+  return entries[entries.length - 1];
+});
+
 const relocateInventory = handler(
   (
     event: RelocateEvent | undefined,
@@ -195,43 +226,26 @@ const relocateInventory = handler(
 export const warehouseBinMap = recipe<WarehouseBinMapArgs>(
   "Warehouse Bin Map",
   ({ bins, items }) => {
-    const binsList = lift(sanitizeBins)(bins);
-    const rawItems = lift((value: ItemPlacement[] | undefined) =>
-      Array.isArray(value) ? value : []
-    )(items);
-    const placements = lift((input: {
-      entries: ItemPlacement[];
-      binList: BinDefinition[];
-    }) => sanitizePlacements(input.entries, input.binList))({
+    const binsList = liftSanitizeBins(bins);
+    const rawItems = liftRawItems(items);
+    const placements = liftPlacements({
       entries: rawItems,
       binList: binsList,
     });
 
-    const occupancy = lift((input: {
-      binList: BinDefinition[];
-      placements: ItemPlacement[];
-    }) => buildOccupancy(input.binList, input.placements))({
+    const occupancy = liftOccupancy({
       binList: binsList,
       placements,
     });
 
-    const availableBins = lift((summary: Record<string, OccupancyEntry>) =>
-      Object.keys(summary).filter((id) => summary[id].available > 0)
-    )(occupancy);
+    const availableBins = liftAvailableBins(occupancy);
 
-    const totalItems = lift((list: ItemPlacement[]) => list.length)(
-      placements,
-    );
-    const binCount = lift((list: BinDefinition[]) => list.length)(binsList);
+    const totalItems = liftTotalItems(placements);
+    const binCount = liftBinCount(binsList);
     const status = str`${totalItems} items across ${binCount} bins`;
 
     const history = cell<string[]>([]);
-    const lastAction = lift((entries: string[]) => {
-      if (!Array.isArray(entries) || entries.length === 0) {
-        return "initialized";
-      }
-      return entries[entries.length - 1];
-    })(history);
+    const lastAction = liftLastAction(history);
 
     const relocate = relocateInventory({
       items,
@@ -253,3 +267,5 @@ export const warehouseBinMap = recipe<WarehouseBinMapArgs>(
     };
   },
 );
+
+export default warehouseBinMap;

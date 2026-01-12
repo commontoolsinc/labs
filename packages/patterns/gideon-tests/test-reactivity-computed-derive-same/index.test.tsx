@@ -10,6 +10,39 @@
 import { Cell, computed, handler, pattern } from "commontools";
 import TestPattern from "./index.tsx";
 
+// 2. Define test actions at module scope (handlers with void event, hardcoded test data)
+
+const changeFirstName = handler<void, { firstName: Cell<string> }>(
+  (_event, { firstName }) => {
+    firstName.set("Alice");
+  },
+);
+
+const changeLastName = handler<void, { lastName: Cell<string> }>(
+  (_event, { lastName }) => {
+    lastName.set("Smith");
+  },
+);
+
+const changeAge = handler<void, { age: Cell<number> }>((_event, { age }) => {
+  age.set(25);
+});
+
+const changeAll = handler<
+  void,
+  { firstName: Cell<string>; lastName: Cell<string>; age: Cell<number> }
+>((_event, { firstName, lastName, age }) => {
+  firstName.set("Bob");
+  lastName.set("Johnson");
+  age.set(42);
+});
+
+const setEmptyFirstName = handler<void, { firstName: Cell<string> }>(
+  (_event, { firstName }) => {
+    firstName.set("");
+  },
+);
+
 export default pattern(() => {
   // 1. Instantiate the pattern under test with initial state
   const subject = TestPattern({
@@ -18,47 +51,20 @@ export default pattern(() => {
     age: Cell.of(30),
   });
 
-  // 2. Define test actions (handlers with void event, hardcoded test data)
-
-  const action_change_firstName = handler<
-    void,
-    { firstName: Cell<string> }
-  >((_event, { firstName }) => {
-    firstName.set("Alice");
-  })({ firstName: subject.firstName });
-
-  const action_change_lastName = handler<
-    void,
-    { lastName: Cell<string> }
-  >((_event, { lastName }) => {
-    lastName.set("Smith");
-  })({ lastName: subject.lastName });
-
-  const action_change_age = handler<void, { age: Cell<number> }>(
-    (_event, { age }) => {
-      age.set(25);
-    },
-  )({ age: subject.age });
-
-  const action_change_all = handler<
-    void,
-    { firstName: Cell<string>; lastName: Cell<string>; age: Cell<number> }
-  >((_event, { firstName, lastName, age }) => {
-    firstName.set("Bob");
-    lastName.set("Johnson");
-    age.set(42);
-  })({
+  // Bind handlers to subject cells
+  const action_change_firstName = changeFirstName({
+    firstName: subject.firstName,
+  });
+  const action_change_lastName = changeLastName({ lastName: subject.lastName });
+  const action_change_age = changeAge({ age: subject.age });
+  const action_change_all = changeAll({
     firstName: subject.firstName,
     lastName: subject.lastName,
     age: subject.age,
   });
-
-  const action_set_empty_firstName = handler<
-    void,
-    { firstName: Cell<string> }
-  >((_event, { firstName }) => {
-    firstName.set("");
-  })({ firstName: subject.firstName });
+  const action_set_empty_firstName = setEmptyFirstName({
+    firstName: subject.firstName,
+  });
 
   // 3. Define assertions as Cell<boolean>
 

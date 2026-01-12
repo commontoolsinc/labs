@@ -10,8 +10,6 @@ const { API_URL, SPACE_NAME } = env;
 
 describe("Compile all recipes", () => {
   const skippedPatterns = [
-    "chatbot-list-view.tsx",
-    "chatbot-note-composed.tsx",
     "system/link-tool.tsx", // Utility handlers, not a standalone pattern
   ];
 

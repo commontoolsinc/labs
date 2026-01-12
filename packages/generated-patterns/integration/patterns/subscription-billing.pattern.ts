@@ -220,45 +220,57 @@ const recordInvoice = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizePlanId = lift(sanitizePlanId);
+const liftResolvePlanDefinition = lift(resolvePlanDefinition);
+
+const liftCycleDays = lift((input: {
+  plan: PlanId;
+  override: number | null;
+}) => {
+  const definition = resolvePlanDefinition(input.plan);
+  if (input.override === null || input.override === undefined) {
+    return definition.cycleDays;
+  }
+  return sanitizeCycleDays(input.override, definition.cycleDays);
+});
+
+const liftNormalizedInvoice = lift((value: string | undefined) =>
+  sanitizeInvoiceDate(value, defaultLastInvoiceDate)
+);
+
+const liftComputeNextInvoiceDate = lift(computeNextInvoiceDate);
+
+const liftPlanName = lift((detail: PlanDefinition) => detail.name);
+const liftPriceLabel = lift((detail: PlanDefinition) =>
+  formatCurrency(detail.price)
+);
+const liftCycleLabel = lift((cycle: number) => `${cycle} days`);
+
 export const subscriptionBilling = recipe<SubscriptionBillingArgs>(
   "Subscription Billing",
   ({ plan, lastInvoiceDate }) => {
     const cycleOverride = cell<number | null>(null);
     const history = cell<string[]>([]);
 
-    const currentPlan = lift(sanitizePlanId)(plan);
-    const planDetails = lift(resolvePlanDefinition)(currentPlan);
+    const currentPlan = liftSanitizePlanId(plan);
+    const planDetails = liftResolvePlanDefinition(currentPlan);
 
-    const cycleDays = lift((input: {
-      plan: PlanId;
-      override: number | null;
-    }) => {
-      const definition = resolvePlanDefinition(input.plan);
-      if (input.override === null || input.override === undefined) {
-        return definition.cycleDays;
-      }
-      return sanitizeCycleDays(input.override, definition.cycleDays);
-    })({
+    const cycleDays = liftCycleDays({
       plan: currentPlan,
       override: cycleOverride,
     });
 
-    const normalizedInvoice = lift((value: string | undefined) =>
-      sanitizeInvoiceDate(value, defaultLastInvoiceDate)
-    )(lastInvoiceDate);
+    const normalizedInvoice = liftNormalizedInvoice(lastInvoiceDate);
 
-    const nextInvoiceDate = lift(computeNextInvoiceDate)({
+    const nextInvoiceDate = liftComputeNextInvoiceDate({
       lastInvoice: normalizedInvoice,
       cycleDays,
     });
 
-    const planName = lift((detail: PlanDefinition) => detail.name)(
-      planDetails,
-    );
-    const priceLabel = lift((detail: PlanDefinition) =>
-      formatCurrency(detail.price)
-    )(planDetails);
-    const cycleLabel = lift((cycle: number) => `${cycle} days`)(cycleDays);
+    const planName = liftPlanName(planDetails);
+    const priceLabel = liftPriceLabel(planDetails);
+    const cycleLabel = liftCycleLabel(cycleDays);
 
     const summary =
       str`${planName} plan renews on ${nextInvoiceDate} for ${priceLabel}`;
@@ -288,3 +300,5 @@ export const subscriptionBilling = recipe<SubscriptionBillingArgs>(
     };
   },
 );
+
+export default subscriptionBilling;

@@ -73,50 +73,58 @@ const updateSlot = handler(
   },
 );
 
+const liftNormalizedFallback = lift((value: number | undefined) =>
+  sanitizeNumber(value, 0)
+);
+
+const liftNormalizedExpected = lift((value: number | undefined) => {
+  if (isFiniteNumber(value) && value >= 0) {
+    return Math.floor(value);
+  }
+  return 0;
+});
+
+const liftDense = lift(
+  (input: {
+    raw: (number | undefined)[] | undefined;
+    fallback: number;
+    expected: number;
+  }) => {
+    const base = Array.isArray(input.raw) ? input.raw : [];
+    const length = Math.max(base.length, input.expected);
+    const result: number[] = [];
+    for (let index = 0; index < length; index++) {
+      result.push(sanitizeNumber(base[index], input.fallback));
+    }
+    return result;
+  },
+);
+
+const liftTotal = lift((entries: number[] | undefined) => {
+  if (!Array.isArray(entries) || entries.length === 0) return 0;
+  return entries.reduce((sum, value) => sum + value, 0);
+});
+
+const liftDensePreview = lift((entries: number[] | undefined) => {
+  if (!Array.isArray(entries) || entries.length === 0) return "empty";
+  return entries.join(", ");
+});
+
 export const counterWithFallbackDefaults = recipe<FallbackDefaultsArgs>(
   "Counter With Fallback Defaults",
   ({ slots, fallback, expectedLength }) => {
-    const normalizedFallback = lift((value: number | null) =>
-      sanitizeNumber(value, 0)
-    )(fallback);
-    const normalizedExpected = lift((value: number | null) => {
-      if (isFiniteNumber(value) && value >= 0) {
-        return Math.floor(value);
-      }
-      return 0;
-    })(expectedLength);
+    const normalizedFallback = liftNormalizedFallback(fallback);
+    const normalizedExpected = liftNormalizedExpected(expectedLength);
 
-    const dense = lift(
-      (
-        input: {
-          raw: (number | undefined)[] | undefined;
-          fallback: number;
-          expected: number;
-        },
-      ) => {
-        const base = Array.isArray(input.raw) ? input.raw : [];
-        const length = Math.max(base.length, input.expected);
-        const result: number[] = [];
-        for (let index = 0; index < length; index++) {
-          result.push(sanitizeNumber(base[index], input.fallback));
-        }
-        return result;
-      },
-    )({
+    const dense = liftDense({
       raw: slots,
       fallback: normalizedFallback,
       expected: normalizedExpected,
     });
 
-    const total = lift((entries: number[] | undefined) => {
-      if (!Array.isArray(entries) || entries.length === 0) return 0;
-      return entries.reduce((sum, value) => sum + value, 0);
-    })(dense);
+    const total = liftTotal(dense);
 
-    const densePreview = lift((entries: number[] | undefined) => {
-      if (!Array.isArray(entries) || entries.length === 0) return "empty";
-      return entries.join(", ");
-    })(dense);
+    const densePreview = liftDensePreview(dense);
 
     const label = str`Dense values [${densePreview}] total ${total}`;
 
@@ -139,3 +147,5 @@ export const counterWithFallbackDefaults = recipe<FallbackDefaultsArgs>(
     };
   },
 );
+
+export default counterWithFallbackDefaults;

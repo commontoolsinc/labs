@@ -429,25 +429,76 @@ const resetAllocations = handler(
   },
 );
 
+const liftSanitizedTotal = lift((value: number | undefined) =>
+  sanitizeTotalBudget(value)
+);
+
+const liftBaseState = lift(
+  toSchema<{
+    categories: Cell<BudgetCategoryInput[]>;
+    total: Cell<number>;
+  }>(),
+  toSchema<{
+    catalog: BudgetCategoryCatalog[];
+    allocations: AllocationRecord;
+  }>(),
+  ({ categories, total }) =>
+    sanitizeCategoryList(categories.get(), total.get()),
+);
+
+const liftSummary = lift(
+  toSchema<{
+    total: Cell<number>;
+    base: Cell<{
+      catalog: BudgetCategoryCatalog[];
+      allocations: AllocationRecord;
+    }>;
+    overrides: Cell<AllocationRecord | null>;
+  }>(),
+  toSchema<BudgetSummary>(),
+  ({ total, base, overrides }) => {
+    const baseStateValue = base.get();
+    const active = overrides.get() ?? baseStateValue.allocations;
+    return enforceAllocationLimits(
+      active,
+      baseStateValue.catalog,
+      sanitizeTotalBudget(total.get()),
+    );
+  },
+);
+
+const liftSummaryLabel = lift(
+  toSchema<{
+    total: Cell<number>;
+    summary: Cell<BudgetSummary>;
+  }>(),
+  toSchema<string>(),
+  ({ total, summary }) => {
+    const totalValue = sanitizeTotalBudget(total.get());
+    const state = summary.get();
+    return `Allocated ${formatAmount(state.totalAllocated)} of ` +
+      `${formatAmount(totalValue)} (${formatAmount(state.remaining)} ` +
+      "remaining)";
+  },
+);
+
+const liftStatusMessage = lift((state: BudgetSummary) => {
+  if (state.remaining <= 0.01) {
+    return "Budget balanced";
+  }
+  return `Remaining allocation ${formatAmount(state.remaining)}`;
+});
+
+const liftHistoryView = lift((entries: string[] | undefined) =>
+  Array.isArray(entries) ? entries.slice() : []
+);
+
 export const budgetPlanner = recipe<BudgetPlannerArgs>(
   "Budget Planner",
   ({ total, categories }) => {
-    const sanitizedTotal = lift((value: number | undefined) =>
-      sanitizeTotalBudget(value)
-    )(total);
+    const sanitizedTotal = liftSanitizedTotal(total);
 
-    const baseState = lift(
-      toSchema<{
-        categories: Cell<BudgetCategoryInput[]>;
-        total: Cell<number>;
-      }>(),
-      toSchema<{
-        catalog: BudgetCategoryCatalog[];
-        allocations: AllocationRecord;
-      }>(),
-      ({ categories, total }) =>
-        sanitizeCategoryList(categories.get(), total.get()),
-    )({ categories, total: sanitizedTotal });
+    const baseState = liftBaseState({ categories, total: sanitizedTotal });
 
     const categoryCatalog = derive(baseState, (state) => state.catalog);
     const overrides = cell<AllocationRecord | null>(null);
@@ -455,26 +506,11 @@ export const budgetPlanner = recipe<BudgetPlannerArgs>(
     const lastAction = cell("Budget initialized");
     const sequence = cell(0);
 
-    const summary = lift(
-      toSchema<{
-        total: Cell<number>;
-        base: Cell<{
-          catalog: BudgetCategoryCatalog[];
-          allocations: AllocationRecord;
-        }>;
-        overrides: Cell<AllocationRecord | null>;
-      }>(),
-      toSchema<BudgetSummary>(),
-      ({ total, base, overrides }) => {
-        const baseStateValue = base.get();
-        const active = overrides.get() ?? baseStateValue.allocations;
-        return enforceAllocationLimits(
-          active,
-          baseStateValue.catalog,
-          sanitizeTotalBudget(total.get()),
-        );
-      },
-    )({ total: sanitizedTotal, base: baseState, overrides });
+    const summary = liftSummary({
+      total: sanitizedTotal,
+      base: baseState,
+      overrides,
+    });
 
     const categorySummary = derive(summary, (state) => state.categories);
     const allocationView = derive(summary, (state) => state.allocations);
@@ -486,31 +522,11 @@ export const budgetPlanner = recipe<BudgetPlannerArgs>(
       (state) => state.remaining <= 0.01 && state.overflow === 0,
     );
 
-    const summaryLabel = lift(
-      toSchema<{
-        total: Cell<number>;
-        summary: Cell<BudgetSummary>;
-      }>(),
-      toSchema<string>(),
-      ({ total, summary }) => {
-        const totalValue = sanitizeTotalBudget(total.get());
-        const state = summary.get();
-        return `Allocated ${formatAmount(state.totalAllocated)} of ` +
-          `${formatAmount(totalValue)} (${formatAmount(state.remaining)} ` +
-          "remaining)";
-      },
-    )({ total: sanitizedTotal, summary });
+    const summaryLabel = liftSummaryLabel({ total: sanitizedTotal, summary });
 
-    const statusMessage = lift((state: BudgetSummary) => {
-      if (state.remaining <= 0.01) {
-        return "Budget balanced";
-      }
-      return `Remaining allocation ${formatAmount(state.remaining)}`;
-    })(summary);
+    const statusMessage = liftStatusMessage(summary);
 
-    const historyView = lift((entries: string[] | undefined) =>
-      Array.isArray(entries) ? entries.slice() : []
-    )(history);
+    const historyView = liftHistoryView(history);
 
     return {
       totalBudget: sanitizedTotal,
@@ -552,3 +568,5 @@ export const budgetPlanner = recipe<BudgetPlannerArgs>(
     };
   },
 );
+
+export default budgetPlanner;

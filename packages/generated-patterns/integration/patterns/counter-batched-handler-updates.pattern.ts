@@ -87,6 +87,14 @@ const applyBatchedIncrement = handler(
   },
 );
 
+const liftToNumber = lift((input: number | undefined) => toNumber(input, 0));
+const liftHistoryView = lift((input: number[] | undefined) =>
+  Array.isArray(input) ? input : []
+);
+const liftNoteView = lift((input: string | undefined) =>
+  typeof input === "string" && input.length > 0 ? input : "idle"
+);
+
 export const counterWithBatchedHandlerUpdates = recipe<BatchedCounterArgs>(
   "Counter With Batched Handler Updates",
   ({ value }) => {
@@ -95,23 +103,11 @@ export const counterWithBatchedHandlerUpdates = recipe<BatchedCounterArgs>(
     const history = cell<number[]>([]);
     const lastNote = cell("idle");
 
-    const currentValue = lift((input: number | undefined) =>
-      toNumber(input, 0)
-    )(
-      value,
-    );
-    const processed = lift((input: number | undefined) => toNumber(input, 0))(
-      processedIncrements,
-    );
-    const batches = lift((input: number | undefined) => toNumber(input, 0))(
-      batchCount,
-    );
-    const historyView = lift((input: number[] | undefined) =>
-      Array.isArray(input) ? input : []
-    )(history);
-    const noteView = lift((input: string | undefined) =>
-      typeof input === "string" && input.length > 0 ? input : "idle"
-    )(lastNote);
+    const currentValue = liftToNumber(value);
+    const processed = liftToNumber(processedIncrements);
+    const batches = liftToNumber(batchCount);
+    const historyView = liftHistoryView(history);
+    const noteView = liftNoteView(lastNote);
 
     const lastTotal = derive(
       { entries: historyView, current: currentValue },
@@ -145,3 +141,5 @@ export const counterWithBatchedHandlerUpdates = recipe<BatchedCounterArgs>(
     };
   },
 );
+
+export default counterWithBatchedHandlerUpdates;

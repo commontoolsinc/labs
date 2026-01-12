@@ -58,10 +58,12 @@ const clampToNumberArray = (entries: number[] | undefined) => {
   return entries.filter((item): item is number => typeof item === "number");
 };
 
+const liftClampToNumberArray = lift(clampToNumberArray);
+
 export const counterWithOpaqueRefMap = recipe<OpaqueMapArgs>(
   "Counter With OpaqueRef Map",
   ({ value, history, labelPrefix }) => {
-    const safeHistory = lift(clampToNumberArray)(history);
+    const safeHistory = liftClampToNumberArray(history);
     const labels = safeHistory.map((entry, index) => str`#${index}: ${entry}`);
 
     const count = derive(
@@ -87,3 +89,5 @@ export const counterWithOpaqueRefMap = recipe<OpaqueMapArgs>(
     };
   },
 );
+
+export default counterWithOpaqueRefMap;

@@ -141,9 +141,9 @@ export default pattern<Input>(({ items }) => {
         </div>
 
         <div style={{ marginTop: "20px" }}>
-          {sentimentAnalyses.map((item) => (
+          {sentimentAnalyses.map((item, i) => (
             <div
-              key={item.itemId}
+              key={i}
               style={{
                 border: "1px solid #ddd",
                 padding: "15px",

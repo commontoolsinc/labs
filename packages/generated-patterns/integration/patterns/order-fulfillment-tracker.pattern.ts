@@ -315,84 +315,96 @@ const reopenOrder = handler<ReopenOrderEvent, FulfillmentHandlerContext>(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeOrderList = lift(sanitizeOrderList);
+
+const liftStatusCounts = lift(
+  (entries: OrderRecord[]): FulfillmentStatusCounts => {
+    const counts = createEmptyCounts();
+    for (const entry of entries) counts[entry.status] += 1;
+    return counts;
+  },
+);
+
+const liftTotalOrders = lift((counts: FulfillmentStatusCounts) => {
+  let total = 0;
+  for (const status of fulfillmentStatuses) total += counts[status];
+  return total;
+});
+
+const liftActiveOrders = lift((counts: FulfillmentStatusCounts) => {
+  let total = 0;
+  for (const status of inFlightStatuses) total += counts[status];
+  return total;
+});
+
+const liftQueueSummary = lift((counts: FulfillmentStatusCounts) =>
+  `Pending ${counts.pending}, Picking ${counts.picking}, ` +
+  `Packed ${counts.packed}, Shipped ${counts.shipped}`
+);
+
+const liftStatusBuckets = lift(
+  (entries: OrderRecord[]): FulfillmentBucket[] => {
+    const buckets = fulfillmentStatuses.map((status) => ({
+      status,
+      label: statusLabels[status],
+      count: 0,
+      orders: [] as OrderSnapshot[],
+    }));
+    const lookup = new Map<FulfillmentStatus, FulfillmentBucket>();
+    for (const bucket of buckets) lookup.set(bucket.status, bucket);
+    for (const entry of entries) {
+      const bucket = lookup.get(entry.status);
+      if (!bucket) continue;
+      bucket.count += 1;
+      bucket.orders.push(toSnapshot(entry));
+    }
+    for (const bucket of buckets) {
+      bucket.orders.sort((left, right) => left.id.localeCompare(right.id));
+    }
+    return buckets;
+  },
+);
+
+const liftInFlightOrderIds = lift((entries: OrderRecord[]) =>
+  entries
+    .filter((entry) => inFlightStatuses.has(entry.status))
+    .map((entry) => entry.id)
+);
+
+const liftTransitionHistory = lift((entries: StatusChangeEntry[]) =>
+  entries.map((entry) => ({
+    sequence: entry.sequence,
+    orderId: entry.orderId,
+    customer: entry.customer,
+    from: statusLabels[entry.from],
+    to: statusLabels[entry.to],
+    message: entry.message,
+  }))
+);
+
+const liftTransitionMessages = lift((entries: StatusChangeEntry[]) =>
+  entries.map((entry) => entry.message)
+);
+
 export const orderFulfillmentTracker = recipe<OrderFulfillmentTrackerArgs>(
   "Order Fulfillment Tracker",
   ({ orders }) => {
     const transitionLog = cell<StatusChangeEntry[]>([]);
 
-    const ordersView = lift(sanitizeOrderList)(orders);
-
-    const statusCounts = lift(
-      (entries: OrderRecord[]): FulfillmentStatusCounts => {
-        const counts = createEmptyCounts();
-        for (const entry of entries) counts[entry.status] += 1;
-        return counts;
-      },
-    )(ordersView);
-
-    const totalOrders = lift((counts: FulfillmentStatusCounts) => {
-      let total = 0;
-      for (const status of fulfillmentStatuses) total += counts[status];
-      return total;
-    })(statusCounts);
-
-    const activeOrders = lift((counts: FulfillmentStatusCounts) => {
-      let total = 0;
-      for (const status of inFlightStatuses) total += counts[status];
-      return total;
-    })(statusCounts);
-
-    const queueSummary = lift((counts: FulfillmentStatusCounts) =>
-      `Pending ${counts.pending}, Picking ${counts.picking}, ` +
-      `Packed ${counts.packed}, Shipped ${counts.shipped}`
-    )(statusCounts);
+    const ordersView = liftSanitizeOrderList(orders);
+    const statusCounts = liftStatusCounts(ordersView);
+    const totalOrders = liftTotalOrders(statusCounts);
+    const activeOrders = liftActiveOrders(statusCounts);
+    const queueSummary = liftQueueSummary(statusCounts);
 
     const progressLabel =
       str`${activeOrders} active / ${totalOrders} total orders`;
 
-    const statusBuckets = lift(
-      (entries: OrderRecord[]): FulfillmentBucket[] => {
-        const buckets = fulfillmentStatuses.map((status) => ({
-          status,
-          label: statusLabels[status],
-          count: 0,
-          orders: [] as OrderSnapshot[],
-        }));
-        const lookup = new Map<FulfillmentStatus, FulfillmentBucket>();
-        for (const bucket of buckets) lookup.set(bucket.status, bucket);
-        for (const entry of entries) {
-          const bucket = lookup.get(entry.status);
-          if (!bucket) continue;
-          bucket.count += 1;
-          bucket.orders.push(toSnapshot(entry));
-        }
-        for (const bucket of buckets) {
-          bucket.orders.sort((left, right) => left.id.localeCompare(right.id));
-        }
-        return buckets;
-      },
-    )(ordersView);
-
-    const inFlightOrderIds = lift((entries: OrderRecord[]) =>
-      entries
-        .filter((entry) => inFlightStatuses.has(entry.status))
-        .map((entry) => entry.id)
-    )(ordersView);
-
-    const transitionHistory = lift((entries: StatusChangeEntry[]) =>
-      entries.map((entry) => ({
-        sequence: entry.sequence,
-        orderId: entry.orderId,
-        customer: entry.customer,
-        from: statusLabels[entry.from],
-        to: statusLabels[entry.to],
-        message: entry.message,
-      }))
-    )(transitionLog);
-
-    const transitionMessages = lift((entries: StatusChangeEntry[]) =>
-      entries.map((entry) => entry.message)
-    )(transitionLog);
+    const statusBuckets = liftStatusBuckets(ordersView);
+    const inFlightOrderIds = liftInFlightOrderIds(ordersView);
+    const transitionHistory = liftTransitionHistory(transitionLog);
+    const transitionMessages = liftTransitionMessages(transitionLog);
 
     return {
       orders,
@@ -424,3 +436,5 @@ export type {
   OrderSnapshot,
   StatusChangeEntry,
 };
+
+export default orderFulfillmentTracker;

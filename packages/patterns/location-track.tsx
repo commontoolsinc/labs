@@ -20,7 +20,6 @@ import {
   type Default,
   handler,
   ifElse,
-  lift,
   NAME,
   recipe,
   UI,
@@ -187,16 +186,13 @@ export const LocationTrackModule = recipe<
   const hasMultiplePoints = computed(() => (locations || []).length > 1);
 
   // Pre-compute filtered locations with indices for the list
-  // Using lift() instead of computed() so we can map over the result in JSX
   // IMPORTANT: We pre-compute index here because closures over index in .map() callbacks
   // don't work correctly with the reactive system
-  const validLocationsWithIndex = lift(
-    ({ locs }: { locs: LocationPoint[] }) => {
-      return (locs || [])
-        .map((point, index) => ({ point, index }))
-        .filter(({ point }) => point && typeof point.latitude === "number");
-    },
-  )({ locs: locations });
+  const validLocationsWithIndex = computed(() => {
+    return (locations || [])
+      .map((point, index) => ({ point, index }))
+      .filter(({ point }) => point && typeof point.latitude === "number");
+  });
 
   return {
     [NAME]: computed(() => `${MODULE_METADATA.icon} Track: ${displayText}`),

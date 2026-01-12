@@ -565,51 +565,67 @@ const buildHistoryEntry = (
   return `${task.label}: ${detail}`;
 };
 
+const liftMergeTasks = lift((input: {
+  defaults: ComplianceTask[];
+  overrides: TaskOverrideMap;
+}) => mergeTasks(input.defaults, input.overrides));
+
+const liftCoveragePercent = lift((snapshot: ComplianceInsights) =>
+  snapshot.coveragePercent
+);
+
+const liftGapCount = lift((snapshot: ComplianceInsights) =>
+  snapshot.gapList.length
+);
+
+const liftGapWord = lift((count: number) => (count === 1 ? "gap" : "gaps"));
+
+const liftComplianceState = lift((snapshot: ComplianceInsights) =>
+  formatStateLabel(snapshot.status)
+);
+
+const liftMandatorySummary = lift((snapshot: ComplianceInsights) => ({
+  total: snapshot.mandatoryTotal,
+  satisfied: snapshot.mandatorySatisfied,
+}));
+
+const liftAuditTrail = lift((entries: string[] | undefined) =>
+  Array.isArray(entries) ? entries : []
+);
+
+const liftSanitizeTaskList = lift(sanitizeTaskList);
+const liftComputeInsights = lift(computeInsights);
+const liftCloneTasks = lift(cloneTasks);
+
 export const complianceChecklist = recipe<ComplianceChecklistArgs>(
   "Compliance Checklist",
   ({ tasks }) => {
-    const canonicalDefaults = lift(sanitizeTaskList)(tasks);
+    const canonicalDefaults = liftSanitizeTaskList(tasks);
     const overrideStore = cell<TaskOverrideMap>({});
     const auditStore = cell<string[]>([]);
 
-    const currentTasks = lift((input: {
-      defaults: ComplianceTask[];
-      overrides: TaskOverrideMap;
-    }) => mergeTasks(input.defaults, input.overrides))({
+    const currentTasks = liftMergeTasks({
       defaults: canonicalDefaults,
       overrides: overrideStore,
     });
 
-    const insights = lift(computeInsights)(currentTasks);
+    const insights = liftComputeInsights(currentTasks);
 
-    const tasksView = lift(cloneTasks)(currentTasks);
+    const tasksView = liftCloneTasks(currentTasks);
     const categorySummaries = insights.categories;
     const gapDetails = insights.gapList;
 
-    const coveragePercent = lift((snapshot: ComplianceInsights) =>
-      snapshot.coveragePercent
-    )(insights);
-    const gapCount = lift((snapshot: ComplianceInsights) =>
-      snapshot.gapList.length
-    )(insights);
-    const gapWord = lift((count: number) => (count === 1 ? "gap" : "gaps"))(
-      gapCount,
-    );
-    const complianceState = lift((snapshot: ComplianceInsights) =>
-      formatStateLabel(snapshot.status)
-    )(insights);
+    const coveragePercent = liftCoveragePercent(insights);
+    const gapCount = liftGapCount(insights);
+    const gapWord = liftGapWord(gapCount);
+    const complianceState = liftComplianceState(insights);
 
     const statusLabel =
       str`${coveragePercent}% coverage (${complianceState}) with ${gapCount} ${gapWord}`;
 
-    const mandatorySummary = lift((snapshot: ComplianceInsights) => ({
-      total: snapshot.mandatoryTotal,
-      satisfied: snapshot.mandatorySatisfied,
-    }))(insights);
+    const mandatorySummary = liftMandatorySummary(insights);
 
-    const auditTrail = lift((entries: string[] | undefined) =>
-      Array.isArray(entries) ? entries : []
-    )(auditStore);
+    const auditTrail = liftAuditTrail(auditStore);
 
     return {
       tasks: tasksView,
@@ -641,3 +657,5 @@ export type {
   ComplianceTask,
   TaskProgressEvent,
 };
+
+export default complianceChecklist;

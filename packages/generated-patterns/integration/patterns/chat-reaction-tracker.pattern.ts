@@ -235,59 +235,75 @@ const recordMessageReaction = handler(
   },
 );
 
+const liftNormalizedMessages = lift(
+  (input: {
+    list: ReactionMessageInput[] | undefined;
+    catalog: string[];
+  }) => sanitizeMessages(input.list, input.catalog),
+);
+
+const liftMessagesView = lift((entries: NormalizedMessage[]) =>
+  entries.map((message) => {
+    const reactions = Object.entries(message.reactions)
+      .map(([reaction, count]) => ({ reaction, count }))
+      .sort((a, b) => {
+        if (a.reaction < b.reaction) return -1;
+        if (a.reaction > b.reaction) return 1;
+        return 0;
+      });
+    return { id: message.id, content: message.content, reactions };
+  })
+);
+
+const liftMessageTotals = lift((entries: NormalizedMessage[]) =>
+  entries.map((message) => ({
+    id: message.id,
+    content: message.content,
+    total: sumReactions(message.reactions),
+  }))
+);
+
+const liftReactionTotals = lift((entries: NormalizedMessage[]) => {
+  const totals = new Map<string, number>();
+  for (const message of entries) {
+    for (const [reaction, count] of Object.entries(message.reactions)) {
+      totals.set(reaction, (totals.get(reaction) ?? 0) + count);
+    }
+  }
+  return [...totals.entries()]
+    .sort((a, b) => {
+      if (a[0] < b[0]) return -1;
+      if (a[0] > b[0]) return 1;
+      return 0;
+    })
+    .map(([reaction, count]) => ({ reaction, count }));
+});
+
+const liftMessageCount = lift(
+  (entries: NormalizedMessage[]) => entries.length,
+);
+
+const liftTotalReactions = lift((entries: ReactionTotalEntry[]) =>
+  entries.reduce((sum, entry) => sum + entry.count, 0)
+);
+
+const liftSanitizeReactionCatalog = lift(sanitizeReactionCatalog);
+
 export const chatReactionTracker = recipe<ChatReactionTrackerArgs>(
   "Chat Reaction Tracker",
   ({ messages, reactionCatalog }) => {
-    const catalogView = lift(sanitizeReactionCatalog)(reactionCatalog);
+    const catalogView = liftSanitizeReactionCatalog(reactionCatalog);
 
-    const normalizedMessages = lift(
-      (
-        { list, catalog }: {
-          list: ReactionMessageInput[] | undefined;
-          catalog: string[];
-        },
-      ) => sanitizeMessages(list, catalog),
-    )({
+    const normalizedMessages = liftNormalizedMessages({
       list: messages,
       catalog: catalogView,
     });
 
-    const messagesView = lift((entries: NormalizedMessage[]) =>
-      entries.map((message) => {
-        const reactions = Object.entries(message.reactions)
-          .map(([reaction, count]) => ({ reaction, count }))
-          .sort((a, b) => {
-            if (a.reaction < b.reaction) return -1;
-            if (a.reaction > b.reaction) return 1;
-            return 0;
-          });
-        return { id: message.id, content: message.content, reactions };
-      })
-    )(normalizedMessages);
+    const messagesView = liftMessagesView(normalizedMessages);
 
-    const messageTotals = lift((entries: NormalizedMessage[]) =>
-      entries.map((message) => ({
-        id: message.id,
-        content: message.content,
-        total: sumReactions(message.reactions),
-      }))
-    )(normalizedMessages);
+    const messageTotals = liftMessageTotals(normalizedMessages);
 
-    const reactionTotals = lift((entries: NormalizedMessage[]) => {
-      const totals = new Map<string, number>();
-      for (const message of entries) {
-        for (const [reaction, count] of Object.entries(message.reactions)) {
-          totals.set(reaction, (totals.get(reaction) ?? 0) + count);
-        }
-      }
-      return [...totals.entries()]
-        .sort((a, b) => {
-          if (a[0] < b[0]) return -1;
-          if (a[0] > b[0]) return 1;
-          return 0;
-        })
-        .map(([reaction, count]) => ({ reaction, count }));
-    })(normalizedMessages);
+    const reactionTotals = liftReactionTotals(normalizedMessages);
 
     const reactionMatrix = derive(normalizedMessages, (entries) => {
       const rows: ReactionMatrixRow[] = [];
@@ -304,13 +320,9 @@ export const chatReactionTracker = recipe<ChatReactionTrackerArgs>(
       return rows;
     });
 
-    const messageCount = lift((entries: NormalizedMessage[]) => entries.length)(
-      normalizedMessages,
-    );
+    const messageCount = liftMessageCount(normalizedMessages);
 
-    const totalReactions = lift((entries: ReactionTotalEntry[]) =>
-      entries.reduce((sum, entry) => sum + entry.count, 0)
-    )(reactionTotals);
+    const totalReactions = liftTotalReactions(reactionTotals);
 
     const summary = str`${totalReactions} reactions across ${messageCount} \
 messages`;
@@ -328,3 +340,5 @@ messages`;
     };
   },
 );
+
+export default chatReactionTracker;

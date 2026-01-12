@@ -34,15 +34,17 @@ interface ComposedCounterArgs {
   right: Default<number, 0>;
 }
 
+const liftTotal = lift((values: { left: number; right: number }) =>
+  values.left + values.right
+);
+
 export const composedCounters = recipe<ComposedCounterArgs>(
   "Composed Counters",
   ({ left, right }) => {
     const leftCounter = childCounter({ value: left });
     const rightCounter = childCounter({ value: right });
 
-    const total = lift((values: { left: number; right: number }) =>
-      values.left + values.right
-    )({
+    const total = liftTotal({
       left: leftCounter.key("value"),
       right: rightCounter.key("value"),
     });
@@ -60,3 +62,5 @@ export const composedCounters = recipe<ComposedCounterArgs>(
     };
   },
 );
+
+export default composedCounters;

@@ -6,7 +6,11 @@
  */
 
 import type { DID, Identity } from "@commontools/identity";
-import type { JSONSchema } from "@commontools/runner/shared";
+import type {
+  JSONSchema,
+  RuntimeTelemetryMarkerResult,
+  SchedulerGraphSnapshot,
+} from "@commontools/runner/shared";
 import { Program } from "@commontools/js-compiler/interface";
 import { CellHandle } from "./cell-handle.ts";
 import {
@@ -17,6 +21,7 @@ import {
   JSONValue,
   NavigateRequestNotification,
   RequestType,
+  TelemetryNotification,
 } from "./protocol/mod.ts";
 import { NameSchema } from "@commontools/runner/schemas";
 import { RuntimeTransport } from "./client/transport.ts";
@@ -38,6 +43,7 @@ export type RuntimeClientEvents = {
   console: [ConsoleNotification];
   navigaterequest: [{ cell: CellHandle }];
   error: [ErrorNotification];
+  telemetry: [RuntimeTelemetryMarkerResult];
 };
 
 export const $conn = Symbol("$request");
@@ -57,6 +63,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     this.#conn.on("console", this._onConsole);
     this.#conn.on("navigaterequest", this._onNavigateRequest);
     this.#conn.on("error", this._onError);
+    this.#conn.on("telemetry", this._onTelemetry);
   }
 
   static async initialize(
@@ -185,6 +192,13 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     });
   }
 
+  async getGraphSnapshot(): Promise<SchedulerGraphSnapshot> {
+    const res = await this.#conn.request<RequestType.GetGraphSnapshot>({
+      type: RequestType.GetGraphSnapshot,
+    });
+    return res.snapshot;
+  }
+
   async dispose(): Promise<void> {
     await this.#conn.dispose();
   }
@@ -209,5 +223,9 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   private _onError = (data: ErrorNotification): void => {
     this.emit("error", data);
+  };
+
+  private _onTelemetry = (data: TelemetryNotification): void => {
+    this.emit("telemetry", data.marker);
   };
 }

@@ -129,10 +129,15 @@ export default recipe({
                     type: "object",
                     properties: {}
                 }, {
+                    type: "object",
+                    properties: {}
+                }, {
                     type: "array",
                     items: {
                         $ref: "#/$defs/RenderNode"
                     }
+                }, {
+                    type: "null"
                 }]
         },
         Props: {
@@ -281,10 +286,15 @@ export default recipe({
                                 type: "object",
                                 properties: {}
                             }, {
+                                type: "object",
+                                properties: {}
+                            }, {
                                 type: "array",
                                 items: {
                                     $ref: "#/$defs/RenderNode"
                                 }
+                            }, {
+                                type: "null"
                             }]
                     },
                     Props: {
@@ -358,4 +368,3 @@ export default recipe({
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
-

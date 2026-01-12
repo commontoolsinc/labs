@@ -27,6 +27,13 @@ export declare const UI: "$UI";
 export declare const CELL_BRAND: unique symbol;
 
 /**
+ * Symbol for phantom property that enables type inference from AnyBrandedCell.
+ * This property doesn't exist at runtime - it's purely for TypeScript's benefit.
+ * See packages/api/STRIPCELL_TYPE_INFERENCE_FIX.md for details.
+ */
+export declare const CELL_INNER_TYPE: unique symbol;
+
+/**
  * Minimal cell type with just the brand, no methods.
  * Used for type-level operations like unwrapping nested cells without
  * creating circular dependencies.
@@ -40,8 +47,14 @@ export type CellKind =
   | "writeonly";
 
 // `string` acts as `any`, e.g. when wanting to match any kind of cell
+// The [CELL_INNER_TYPE] property is a phantom property that enables TypeScript
+// to infer T when using `AnyBrandedCell<infer U>`. Without it, T is a phantom
+// type parameter and TypeScript produces `unknown` when trying to infer it.
+// The property must be non-optional so that plain types like `string[]` don't
+// accidentally match AnyBrandedCell.
 export type AnyBrandedCell<T, Kind extends string = string> = {
   [CELL_BRAND]: Kind;
+  readonly [CELL_INNER_TYPE]: T;
 };
 
 export type BrandedCell<T, Kind extends CellKind> = AnyBrandedCell<T, Kind>;
@@ -875,12 +888,29 @@ export declare const CELL_LIKE: unique symbol;
 /**
  * Helper type to transform Cell<T> to Opaque<T> in pattern/lift/handler inputs.
  * Preserves Stream<T> since Streams are callable interfaces (.send()), not data containers.
+ *
+ * Implementation is non-distributive by default to preserve union types like RenderNode
+ * that intentionally contain AnyBrandedCell as a data variant. However, for optional cell
+ * properties like `title?: Writable<string>` (which expand to `Writable<string> | undefined`),
+ * we extract the cell parts, strip them, and recombine with the non-cell parts.
+ *
+ * See packages/api/STRIPCELL_TYPE_INFERENCE_FIX.md for details.
  */
-export type StripCell<T> = T extends Stream<any> ? T // Preserve Stream<T> - it's a callable interface
-  : T extends AnyBrandedCell<infer U> ? StripCell<U>
-  : T extends ArrayBuffer | ArrayBufferView | URL | Date ? T
-  : T extends Array<infer U> ? StripCell<U>[]
-  : T extends object ? { [K in keyof T]: StripCell<T[K]> }
+export type StripCell<T> =
+  // Handle optional cell properties: "SomeCell | undefined" pattern
+  // Strip the cell part, preserve undefined only if it was present
+  [T] extends [AnyBrandedCell<any> | undefined]
+    ? StripCellInner<Exclude<T, undefined>> | Extract<T, undefined>
+    // Non-distributive for everything else (preserves unions like RenderNode)
+    : StripCellInner<T>;
+
+type StripCellInner<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - it's a callable interface
+  : [T] extends [AnyBrandedCell<infer U>] ? StripCell<U>
+  : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
+  : [T] extends [Array<infer U>] ? StripCell<U>[]
+  // deno-lint-ignore ban-types
+  : [T] extends [Function] ? T // Preserve function types
+  : [T] extends [object] ? { [K in keyof T]: StripCell<T[K]> }
   : T;
 
 /**
@@ -1221,7 +1251,7 @@ export interface ImageData {
 export type BuiltInLLMTool =
   & { description?: string }
   & (
-    | { pattern: Recipe; handler?: never }
+    | { pattern: Recipe; handler?: never; extraParams?: Record<string, any> }
     | { handler: Stream<any> | OpaqueRef<any>; pattern?: never }
   );
 
@@ -1247,7 +1277,7 @@ export interface BuiltInLLMParams {
    * Context cells to make available to the LLM.
    * These cells appear in the system prompt with their schemas and current values.
    */
-  context?: Record<string, Cell<any>>;
+  context?: Record<string, AnyCell<any>>;
 }
 
 export interface BuiltInLLMState {
@@ -1303,7 +1333,7 @@ export type BuiltInGenerateObjectParams =
 
 export type BuiltInGenerateTextParams =
   | {
-    prompt: string;
+    prompt: BuiltInLLMContent;
     messages?: never;
     context?: Record<string, any>;
     system?: string;
@@ -1419,13 +1449,23 @@ export type RecipeFunction = {
   ): RecipeFactory<StripCell<T>, StripCell<R>>;
 };
 
+/**
+ * Result of patternTool() - an LLM tool definition with a pattern and optional pre-filled params.
+ * This is the actual runtime return type, not a cast.
+ */
+export interface PatternToolResult<E = Record<PropertyKey, never>> {
+  pattern: Recipe;
+  extraParams: E;
+}
+
 export type PatternToolFunction = <
   T,
-  E extends Partial<T> = Record<PropertyKey, never>,
+  E extends object = Record<PropertyKey, never>,
 >(
   fnOrRecipe: ((input: OpaqueRef<Required<T>>) => any) | RecipeFactory<T, any>,
-  extraParams?: Opaque<E>,
-) => OpaqueRef<Omit<T, keyof E>>;
+  // Validate that E (after stripping cells) is a subset of T
+  extraParams?: StripCell<E> extends Partial<T> ? Opaque<E> : never,
+) => PatternToolResult<E>;
 
 export type LiftFunction = {
   <T extends JSONSchema = JSONSchema, R extends JSONSchema = JSONSchema>(
@@ -2046,6 +2086,7 @@ export type Props = {
 export type RenderNode =
   | InnerRenderNode
   | AnyBrandedCell<InnerRenderNode>
+  | AnyBrandedCell<UIRenderable>
   | Array<RenderNode>;
 
 type InnerRenderNode =
@@ -2053,7 +2094,13 @@ type InnerRenderNode =
   | string
   | number
   | boolean
-  | undefined;
+  | undefined
+  | null;
+
+/** An object that can be rendered via its [UI] property */
+type UIRenderable = {
+  [UI]: VNode;
+};
 
 /** A "virtual view node", e.g. a virtual DOM element */
 export type VNode = {

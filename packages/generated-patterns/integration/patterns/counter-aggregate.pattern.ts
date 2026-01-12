@@ -18,13 +18,17 @@ const adjustCounter = handler(
   },
 );
 
+const liftTotal = lift((values: number[]) =>
+  values.reduce((sum, value) => sum + value, 0)
+);
+
+const liftCount = lift((values: number[]) => values.length);
+
 export const counterAggregator = recipe<AggregatorArgs>(
   "Counter Aggregator",
   ({ counters }) => {
-    const total = lift((values: number[]) =>
-      values.reduce((sum, value) => sum + value, 0)
-    )(counters);
-    const count = lift((values: number[]) => values.length)(counters);
+    const total = liftTotal(counters);
+    const count = liftCount(counters);
     const summary = str`Total ${total} across ${count}`;
 
     return {
@@ -36,3 +40,5 @@ export const counterAggregator = recipe<AggregatorArgs>(
     };
   },
 );
+
+export default counterAggregator;

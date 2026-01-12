@@ -34,3 +34,5 @@ export const boundedCounter = recipe<BoundedCounterArgs>(
     };
   },
 );
+
+export default boundedCounter;

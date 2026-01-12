@@ -197,6 +197,53 @@ type CounterHandlerRecord = {
   setExact: ReturnType<typeof setExactCounter>;
 };
 
+const liftCountsLabel = lift((record: HandlerInvocationCounts | undefined) => {
+  const sanitized = sanitizeCounts(record);
+  return `inc:${sanitized.increment} dec:${sanitized.decrement} ` +
+    `set:${sanitized.setExact}`;
+});
+
+const liftLastChangeLabel = lift((change: CounterChange | undefined) => {
+  const sanitized = sanitizeChange(change);
+  return `${sanitized.action}:${sanitized.previous}->${sanitized.next}`;
+});
+
+const liftHandlerCatalog = lift(
+  toSchema<
+    {
+      counts: Cell<HandlerInvocationCounts>;
+      step: Cell<number>;
+    }
+  >(),
+  toSchema<HandlerDescriptor[]>(),
+  ({ counts, step }) => {
+    const record = sanitizeCounts(counts.get());
+    const stepValue = normalizeStep(step.get());
+    return [
+      {
+        key: "increment" as const,
+        label: `Increment by ${stepValue}`,
+        calls: record.increment,
+      },
+      {
+        key: "decrement" as const,
+        label: `Decrement by ${stepValue}`,
+        calls: record.decrement,
+      },
+      {
+        key: "setExact" as const,
+        label: "Set exact value",
+        calls: record.setExact,
+      },
+    ];
+  },
+);
+
+const liftNormalizeStep = lift(normalizeStep);
+const liftSanitizeCounts = lift(sanitizeCounts);
+const liftSanitizeHistory = lift(sanitizeHistory);
+const liftSanitizeChange = lift(sanitizeChange);
+
 export const counterWithTypedHandlerRecord = recipe<TypedHandlerRecordArgs>(
   "Counter With Typed Handler Record",
   ({ value, step }) => {
@@ -212,51 +259,15 @@ export const counterWithTypedHandlerRecord = recipe<TypedHandlerRecordArgs>(
       setExact: 0,
     });
     const snapshotId = cell(0);
-    const sanitizedStep = lift(normalizeStep)(step);
+    const sanitizedStep = liftNormalizeStep(step);
 
-    const countsView = lift(sanitizeCounts)(counts);
-    const historyView = lift(sanitizeHistory)(history);
-    const lastChangeView = lift(sanitizeChange)(lastChange);
-    const countsLabel = lift((record: HandlerInvocationCounts | undefined) => {
-      const sanitized = sanitizeCounts(record);
-      return `inc:${sanitized.increment} dec:${sanitized.decrement} ` +
-        `set:${sanitized.setExact}`;
-    })(counts);
-    const lastChangeLabel = lift((change: CounterChange | undefined) => {
-      const sanitized = sanitizeChange(change);
-      return `${sanitized.action}:${sanitized.previous}->${sanitized.next}`;
-    })(lastChange);
+    const countsView = liftSanitizeCounts(counts);
+    const historyView = liftSanitizeHistory(history);
+    const lastChangeView = liftSanitizeChange(lastChange);
+    const countsLabel = liftCountsLabel(counts);
+    const lastChangeLabel = liftLastChangeLabel(lastChange);
 
-    const handlerCatalog = lift(
-      toSchema<
-        {
-          counts: Cell<HandlerInvocationCounts>;
-          step: Cell<number>;
-        }
-      >(),
-      toSchema<HandlerDescriptor[]>(),
-      ({ counts, step }) => {
-        const record = sanitizeCounts(counts.get());
-        const stepValue = normalizeStep(step.get());
-        return [
-          {
-            key: "increment" as const,
-            label: `Increment by ${stepValue}`,
-            calls: record.increment,
-          },
-          {
-            key: "decrement" as const,
-            label: `Decrement by ${stepValue}`,
-            calls: record.decrement,
-          },
-          {
-            key: "setExact" as const,
-            label: "Set exact value",
-            calls: record.setExact,
-          },
-        ];
-      },
-    )({ counts, step: sanitizedStep });
+    const handlerCatalog = liftHandlerCatalog({ counts, step: sanitizedStep });
 
     const handlers: CounterHandlerRecord = {
       increment: incrementCounter({
@@ -299,3 +310,5 @@ export const counterWithTypedHandlerRecord = recipe<TypedHandlerRecordArgs>(
     };
   },
 );
+
+export default counterWithTypedHandlerRecord;

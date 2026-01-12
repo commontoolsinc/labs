@@ -60,6 +60,12 @@ function generateYearItems(): Array<{ value: string; label: string }> {
 }
 const YEAR_ITEMS = generateYearItems();
 
+// ===== Helper Functions =====
+const getMonthName = (month: string): string => {
+  const monthItem = MONTH_ITEMS.find((m) => m.value === month);
+  return monthItem?.label || month;
+};
+
 // ===== Types =====
 export interface BirthdayModuleInput {
   /** Birth month (1-12 as string) */
@@ -74,11 +80,6 @@ export interface BirthdayModuleInput {
 export const BirthdayModule = recipe<BirthdayModuleInput, BirthdayModuleInput>(
   "BirthdayModule",
   ({ birthMonth, birthDay, birthYear }) => {
-    const getMonthName = (month: string): string => {
-      const monthItem = MONTH_ITEMS.find((m) => m.value === month);
-      return monthItem?.label || month;
-    };
-
     // Compute display text for NAME
     const displayText = computed(() => {
       const month = birthMonth?.trim();

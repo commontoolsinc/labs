@@ -461,20 +461,27 @@ const adjustStageProbability = handler(
   },
 );
 
+const liftSanitizeStageConfigs = lift((value: StageConfigInput[] | undefined) =>
+  sanitizeStageConfigs(value)
+);
+
+const liftSanitizeDefaultAmount = lift((value: number | undefined) => {
+  const sanitized = sanitizeAmount(value, 1000);
+  return sanitized === 0 ? 1000 : sanitized;
+});
+
+const liftFormatCurrency = lift(formatCurrency);
+const liftFormatStageCount = lift(formatStageCount);
+
 export const crmPipeline = recipe<PipelineArgs>(
   "CRM Pipeline",
   ({ deals, stages, defaultAmount }) => {
     const lastAction = cell("none");
     const idSeed = cell(0);
 
-    const stageList = lift((value: StageConfigInput[] | undefined) =>
-      sanitizeStageConfigs(value)
-    )(stages);
+    const stageList = liftSanitizeStageConfigs(stages);
 
-    const defaultAmountValue = lift((value: number | undefined) => {
-      const sanitized = sanitizeAmount(value, 1000);
-      return sanitized === 0 ? 1000 : sanitized;
-    })(defaultAmount);
+    const defaultAmountValue = liftSanitizeDefaultAmount(defaultAmount);
 
     const dealView = derive(
       { deals, stages: stageList },
@@ -501,9 +508,9 @@ export const crmPipeline = recipe<PipelineArgs>(
     const stageCount = derive(stageStats, (stats) => stats.length);
     const dealCount = derive(dealView, (list) => list.length);
 
-    const formattedForecast = lift(formatCurrency)(totalForecast);
-    const formattedOpen = lift(formatCurrency)(openPipeline);
-    const formattedStageCount = lift(formatStageCount)(stageCount);
+    const formattedForecast = liftFormatCurrency(totalForecast);
+    const formattedOpen = liftFormatCurrency(openPipeline);
+    const formattedStageCount = liftFormatStageCount(stageCount);
     const summaryLabel =
       str`${formattedStageCount} forecast ${formattedForecast} open ${formattedOpen}`;
 
@@ -549,3 +556,5 @@ export const crmPipeline = recipe<PipelineArgs>(
 );
 
 export type { DealEvent, StageProbabilityEvent };
+
+export default crmPipeline;

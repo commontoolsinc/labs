@@ -321,96 +321,115 @@ const sanitizeAnchor = (value: number | undefined): number => {
   return Math.max(0, Math.floor(value));
 };
 
+// Module-scope lift definitions
+const liftSanitizeMilestoneList = lift(sanitizeMilestoneList);
+const liftAnchorView = lift((value: number | undefined) =>
+  sanitizeAnchor(value)
+);
+
+const liftTimeline = lift(
+  (
+    input: { entries: JourneyMilestone[]; anchor: number },
+  ): JourneyTimelineEntry[] => {
+    return buildTimeline(input.entries, input.anchor);
+  },
+);
+
+const liftStatusCounts = lift(
+  (entries: JourneyTimelineEntry[]): StatusCounts => {
+    const counts: StatusCounts = {
+      planned: 0,
+      in_progress: 0,
+      completed: 0,
+    };
+    for (const entry of entries) {
+      counts[entry.status] += 1;
+    }
+    return counts;
+  },
+);
+
+const liftProgress = lift((counts: StatusCounts) => {
+  const total = counts.planned + counts.in_progress + counts.completed;
+  if (total === 0) return 0;
+  return Math.round((counts.completed / total) * 100);
+});
+
+const liftSummaryMeta = lift((entries: JourneyTimelineEntry[]) => {
+  if (entries.length === 0) {
+    return { count: 0, start: 0, end: 0 };
+  }
+  const first = entries[0];
+  const last = entries[entries.length - 1];
+  return { count: entries.length, start: first.startDay, end: last.endDay };
+});
+
+const liftSummaryLabel = lift((input: SummaryComputationInput) => {
+  if (input.meta.count === 0) {
+    return "No milestones scheduled";
+  }
+  const { count, start, end } = input.meta;
+  const span = `${count} milestones from day ${start}`;
+  const completion = ` (${input.progress}% complete)`;
+  return `${span} to day ${end}${completion}`;
+});
+
+const liftChangeLogView = lift((entries: string[] | undefined) =>
+  Array.isArray(entries) ? entries : []
+);
+
+const updateJourney = handler(
+  (
+    event: JourneyUpdateEvent | undefined,
+    context: {
+      milestones: Cell<JourneyMilestone[]>;
+      changeLog: Cell<string[]>;
+      sequence: Cell<number>;
+      anchor: Cell<number>;
+    },
+  ) => {
+    const current = sanitizeMilestoneList(context.milestones.get());
+    const result = applyJourneyUpdate(current, event);
+    context.milestones.set(result.list);
+
+    const anchorValue = sanitizeAnchor(context.anchor.get());
+    const timelineEntries = buildTimeline(result.list, anchorValue);
+    const entry = timelineEntries[result.index] ?? timelineEntries[0];
+
+    const existingLog = context.changeLog.get();
+    const log = Array.isArray(existingLog) ? existingLog : [];
+    const label = `${entry.title}:${entry.startDay}-${entry.endDay}:` +
+      `${entry.status}`;
+    context.changeLog.set([...log, label]);
+
+    const sequenceValue = (context.sequence.get() ?? 0) + 1;
+    context.sequence.set(sequenceValue);
+  },
+);
+
 export const userJourneyMap = recipe<JourneyMapArgs>(
   "User Journey Map",
   ({ milestones, anchorDay }) => {
     const changeLog = cell<string[]>([]);
     const sequence = cell<number>(0);
 
-    const milestonesView = lift(sanitizeMilestoneList)(milestones);
-    const anchorView = lift((value: number | undefined) =>
-      sanitizeAnchor(value)
-    )(anchorDay);
+    const milestonesView = liftSanitizeMilestoneList(milestones);
+    const anchorView = liftAnchorView(anchorDay);
 
-    const timeline = lift(
-      (
-        input: { entries: JourneyMilestone[]; anchor: number },
-      ): JourneyTimelineEntry[] => {
-        return buildTimeline(input.entries, input.anchor);
-      },
-    )({ entries: milestonesView, anchor: anchorView });
+    const timeline = liftTimeline({
+      entries: milestonesView,
+      anchor: anchorView,
+    });
 
-    const statusCounts = lift(
-      (entries: JourneyTimelineEntry[]): StatusCounts => {
-        const counts: StatusCounts = {
-          planned: 0,
-          in_progress: 0,
-          completed: 0,
-        };
-        for (const entry of entries) {
-          counts[entry.status] += 1;
-        }
-        return counts;
-      },
-    )(timeline);
+    const statusCounts = liftStatusCounts(timeline);
 
-    const progress = lift((counts: StatusCounts) => {
-      const total = counts.planned + counts.in_progress + counts.completed;
-      if (total === 0) return 0;
-      return Math.round((counts.completed / total) * 100);
-    })(statusCounts);
+    const progress = liftProgress(statusCounts);
 
-    const summaryMeta = lift((entries: JourneyTimelineEntry[]) => {
-      if (entries.length === 0) {
-        return { count: 0, start: 0, end: 0 };
-      }
-      const first = entries[0];
-      const last = entries[entries.length - 1];
-      return { count: entries.length, start: first.startDay, end: last.endDay };
-    })(timeline);
+    const summaryMeta = liftSummaryMeta(timeline);
 
-    const summaryLabel = lift((input: SummaryComputationInput) => {
-      if (input.meta.count === 0) {
-        return "No milestones scheduled";
-      }
-      const { count, start, end } = input.meta;
-      const span = `${count} milestones from day ${start}`;
-      const completion = ` (${input.progress}% complete)`;
-      return `${span} to day ${end}${completion}`;
-    })({ meta: summaryMeta, progress });
+    const summaryLabel = liftSummaryLabel({ meta: summaryMeta, progress });
 
-    const changeLogView = lift((entries: string[] | undefined) =>
-      Array.isArray(entries) ? entries : []
-    )(changeLog);
-
-    const updateJourney = handler(
-      (
-        event: JourneyUpdateEvent | undefined,
-        context: {
-          milestones: Cell<JourneyMilestone[]>;
-          changeLog: Cell<string[]>;
-          sequence: Cell<number>;
-          anchor: Cell<number>;
-        },
-      ) => {
-        const current = sanitizeMilestoneList(context.milestones.get());
-        const result = applyJourneyUpdate(current, event);
-        context.milestones.set(result.list);
-
-        const anchorValue = sanitizeAnchor(context.anchor.get());
-        const timelineEntries = buildTimeline(result.list, anchorValue);
-        const entry = timelineEntries[result.index] ?? timelineEntries[0];
-
-        const existingLog = context.changeLog.get();
-        const log = Array.isArray(existingLog) ? existingLog : [];
-        const label = `${entry.title}:${entry.startDay}-${entry.endDay}:` +
-          `${entry.status}`;
-        context.changeLog.set([...log, label]);
-
-        const sequenceValue = (context.sequence.get() ?? 0) + 1;
-        context.sequence.set(sequenceValue);
-      },
-    );
+    const changeLogView = liftChangeLogView(changeLog);
 
     return {
       anchorDay: anchorView,
@@ -429,3 +448,5 @@ export const userJourneyMap = recipe<JourneyMapArgs>(
     };
   },
 );
+
+export default userJourneyMap;
