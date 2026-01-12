@@ -263,10 +263,12 @@ export class CTChatMessage extends BaseElement {
     // Extract tool calls and results from content array
     const contentArray = Array.isArray(this.content) ? this.content : [];
     const toolCalls = contentArray.filter(
-      (part): part is BuiltInLLMToolCallPart => part.type === "tool-call",
+      (part): part is BuiltInLLMToolCallPart =>
+        part != null && part.type === "tool-call",
     );
     const toolResults = contentArray.filter(
-      (part): part is BuiltInLLMToolResultPart => part.type === "tool-result",
+      (part): part is BuiltInLLMToolResultPart =>
+        part != null && part.type === "tool-result",
     );
 
     if (toolCalls.length === 0) {
@@ -299,7 +301,8 @@ export class CTChatMessage extends BaseElement {
       return this.content;
     } else if (Array.isArray(this.content)) {
       const textParts = this.content.filter(
-        (part): part is BuiltInLLMTextPart => part.type === "text",
+        (part): part is BuiltInLLMTextPart =>
+          part != null && part.type === "text",
       );
       return textParts.map((part) => part.text).join(" ");
     }
