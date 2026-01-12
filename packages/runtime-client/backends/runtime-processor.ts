@@ -370,9 +370,6 @@ export class RuntimeProcessor {
    * Get the home space's defaultPattern cell which owns favorites.
    * Favorites are always stored in the user's home space, regardless of
    * which space the user is currently viewing.
-   *
-   * Access pattern data via: homeSpaceCell.key("defaultPattern").key("propertyName")
-   * This matches how wish.ts resolves #favorites and #journal.
    */
   private async getHomeDefaultPattern() {
     const homeSpaceCell = this.runtime.getHomeSpaceCell();
@@ -389,15 +386,13 @@ export class RuntimeProcessor {
       );
     }
 
-    // Start the pattern to ensure handlers are active
-    const patternCell = defaultPatternCell.resolveAsCell();
-    if (patternCell) {
-      await this.runtime.start(patternCell);
+    // Start the pattern to ensure it's running
+    const charmCell = defaultPatternCell.resolveAsCell();
+    if (charmCell) {
+      await this.runtime.start(charmCell);
       await this.runtime.idle();
     }
 
-    // Return the defaultPatternCell - access properties via .key("propertyName")
-    // This matches how wish.ts accesses favorites: homeSpaceCell.key("defaultPattern").key("favorites")
     return defaultPatternCell;
   }
 
@@ -410,6 +405,22 @@ export class RuntimeProcessor {
     });
 
     // Get favorites cell and resolve it
+    // NOTE: Handler invocation doesn't work - the handler never gets triggered.
+    // Using direct cell modification instead.
+    // TODO: Investigate why handler streams aren't triggering from RuntimeProcessor
+    //
+    // Here's what we tried (handler in home.tsx never runs):
+    // ```
+    // const charmCell = defaultPattern.resolveAsCell();
+    // const sourceCell = charmCell?.getSourceCell();
+    // const resultCell = sourceCell?.key("resultRef");  // Don't use .resolveAsCell()!
+    // // resultCell.get() shows: {addFavorite: {...}, favorites: [...], ...}
+    // const addFavoriteStream = resultCell.key("addFavorite");
+    // // Tried both approaches:
+    // // 1. addFavoriteStream.withTx(tx).send({ charm, tag });
+    // // 2. this.runtime.scheduler.queueEvent(addFavoriteStream.getAsNormalizedFullLink(), { charm, tag });
+    // // Neither triggers the handler defined in home.tsx
+    // ```
     const favoritesCell = defaultPattern.key("favorites")
       .resolveAsCell()
       ?.asSchema(favoriteListSchema);
@@ -418,8 +429,6 @@ export class RuntimeProcessor {
       throw new Error("Could not resolve favorites cell");
     }
 
-    // Directly modify the favorites array
-    // TODO: Debug why handler invocation doesn't work
     const tx = this.runtime.edit();
     const current = favoritesCell.get() || [];
     const alreadyExists = current.some(
@@ -461,7 +470,6 @@ export class RuntimeProcessor {
       throw new Error("Could not resolve favorites cell");
     }
 
-    // Directly modify the favorites array
     const tx = this.runtime.edit();
     const current = favoritesCell.get() || [];
     const filtered = current.filter(
