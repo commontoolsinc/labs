@@ -10,9 +10,9 @@ export type MentionableCharm = {
   mentionable?: MentionableCharm[] | { get?: () => MentionableCharm[] };
 };
 
-export type WriteableBacklinks = {
-  mentioned: WriteableBacklinks[];
-  backlinks: Writable<WriteableBacklinks[]>;
+export type WritableBacklinks = {
+  mentioned?: WritableBacklinks[];
+  backlinks?: Writable<WritableBacklinks[]>;
 };
 
 type Input = {
@@ -24,7 +24,7 @@ type Output = {
 };
 
 const computeIndex = lift<
-  { allCharms: WriteableBacklinks[] },
+  { allCharms: WritableBacklinks[] },
   void
 >(
   ({ allCharms }) => {

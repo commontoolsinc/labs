@@ -1409,8 +1409,25 @@ export class SchemaObjectTraverser<V extends JSONValue>
     link?: NormalizedFullLink,
   ): V | JSONValue | undefined {
     this.trackNewLink(getTrackerKey(doc.address), this.selector);
-    //this.schemaTracker.add(getTrackerKey(doc.address), this.selector);
-    return this.traverseWithSelector(doc, this.selector, link);
+    const rv = this.traverseWithSelector(doc, this.selector, link);
+    if (rv === undefined) {
+      // This helps track down mismatched schemas
+      logger.debug("traverse", () => [
+        "Call to traverse returned undefined",
+        doc,
+        link,
+        // We can't just log these, since they can have cycles.
+        JSON.stringify(
+          this.traverseWithSelector(doc, {
+            ...this.selector,
+            schemaContext: { schema: true, rootSchema: true },
+          }),
+          getCircularReplacer(),
+          2,
+        ),
+      ]);
+    }
+    return rv;
   }
 
   /** Add to schemaTracker and record as newly discovered if not already tracked */
@@ -2266,4 +2283,21 @@ function mergeSchemaOption(
     : innerSchema
     ? outerSchema // innerSchema === true
     : false; // innerSchema === false
+}
+
+// Utility function used for debugging so we can convert proxy objects into
+// regular objects when there's circular references.
+function getCircularReplacer() {
+  const ancestors: object[] = [];
+  return function (_key: string, value: any) {
+    if (typeof value !== "object" || value === null) {
+      return value;
+    }
+    // Check if the value has been seen before in the current ancestry path
+    if (ancestors.includes(value)) {
+      return "[Circular]"; // Replace cyclic reference with a string
+    }
+    ancestors.push(value);
+    return value;
+  };
 }
