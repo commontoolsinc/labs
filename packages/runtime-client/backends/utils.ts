@@ -83,3 +83,8 @@ export function getCell(runtime: Runtime, ref: CellRef): Cell<unknown> {
   // contain all this information. Maybe the upstream function should change.
   return runtime.getCellFromLink(ref);
 }
+
+export function getPageResultCell(cell: Cell<any>): Cell<any> {
+  const processCell = cell.getSourceCell();
+  return processCell ? processCell.key("resultRef").resolveAsCell() : cell;
+}
