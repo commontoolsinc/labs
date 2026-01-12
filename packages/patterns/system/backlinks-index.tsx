@@ -24,7 +24,7 @@ type Output = {
 };
 
 const computeIndex = lift<
-  { allCharms: WritableBacklinks[] },
+  { allCharms: WritableBacklinks[] | undefined },
   void
 >(
   ({ allCharms }) => {
@@ -84,9 +84,7 @@ const computeMentionable = lift<
 });
 
 const BacklinksIndex = pattern<Input, Output>(({ allCharms }) => {
-  computeIndex({
-    allCharms,
-  });
+  computeIndex({ allCharms } as { allCharms: WritableBacklinks[] });
 
   // Compute mentionable list from allCharms reactively
   const mentionable = computeMentionable({ allCharms });
