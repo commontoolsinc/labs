@@ -289,6 +289,7 @@ export interface BuilderFunctionsAndConstants {
   // Constants
   ID: typeof ID;
   ID_FIELD: typeof ID_FIELD;
+  SELF: typeof SELF;
   TYPE: typeof TYPE;
   NAME: typeof NAME;
   UI: typeof UI;
