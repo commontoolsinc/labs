@@ -5,7 +5,7 @@ import {
   type WishTag,
 } from "@commontools/api";
 import { h } from "@commontools/html";
-import { favoriteListSchema, journalSchema } from "@commontools/home-schemas";
+import { favoriteListSchema } from "@commontools/home-schemas";
 import { HttpProgramResolver } from "@commontools/js-compiler";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
@@ -15,7 +15,6 @@ import type {
   MemorySpace,
 } from "../storage/interface.ts";
 import type { EntityId } from "../create-ref.ts";
-import { ALL_CHARMS_ID } from "./well-known.ts";
 import { type JSONSchema, type Recipe, UI } from "../builder/types.ts";
 import { getRecipeEnvironment } from "../env.ts";
 
@@ -36,9 +35,7 @@ type WishResolution = {
   path?: readonly string[];
 };
 
-const WISH_TARGETS: Partial<Record<WishTag, WishResolution>> = {
-  "#allCharms": { entityId: { "/": ALL_CHARMS_ID } },
-};
+const WISH_TARGETS: Partial<Record<WishTag, WishResolution>> = {};
 
 function resolveWishTarget(
   resolution: WishResolution,
@@ -143,31 +140,38 @@ function resolveBase(
         cell: getSpaceCell(ctx),
         pathPrefix: ["defaultPattern", "backlinksIndex", "mentionable"],
       }];
+    case "#allCharms":
+      return [{
+        cell: getSpaceCell(ctx),
+        pathPrefix: ["defaultPattern", "allCharms"],
+      }];
     case "#recent":
-      return [{ cell: getSpaceCell(ctx), pathPrefix: ["recentCharms"] }];
+      return [{
+        cell: getSpaceCell(ctx),
+        pathPrefix: ["defaultPattern", "recentCharms"],
+      }];
     case "#favorites": {
       // Favorites always come from the HOME space (user identity DID)
       const userDID = ctx.runtime.userIdentityDID;
       if (!userDID) {
         throw new WishError("User identity DID not available for #favorites");
       }
-      const homeSpaceCell = ctx.runtime.getCell(
-        userDID,
-        userDID,
-        undefined,
-        ctx.tx,
-      );
+      const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
 
-      // No path = return favorites list
+      // No path = return favorites list through defaultPattern
       if (parsed.path.length === 0) {
-        return [{ cell: homeSpaceCell, pathPrefix: ["favorites"] }];
+        return [{
+          cell: homeSpaceCell,
+          pathPrefix: ["defaultPattern", "favorites"],
+        }];
       }
 
       // Path provided = search by tag
       const searchTerm = parsed.path[0].toLowerCase();
-      const favoritesCell = homeSpaceCell.key("favorites").asSchema(
-        favoriteListSchema,
-      );
+      const favoritesCell = homeSpaceCell.key("defaultPattern").key("favorites")
+        .asSchema(
+          favoriteListSchema,
+        );
       const favorites = favoritesCell.get() || [];
 
       // Case-insensitive search in userTags or tag field.
@@ -228,11 +232,10 @@ function resolveBase(
         throw new WishError("User identity DID not available for #journal");
       }
 
-      const journal = ctx.runtime.getHomeSpaceCell(ctx.tx).key("journal")
-        .asSchema(journalSchema);
-      journal.sync();
-
-      return [{ cell: journal }];
+      return [{
+        cell: ctx.runtime.getHomeSpaceCell(ctx.tx),
+        pathPrefix: ["defaultPattern", "journal"],
+      }];
     }
     default: {
       // Check if it's a well-known target
@@ -258,9 +261,12 @@ function resolveBase(
         }
 
         const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
-        const favoritesCell = homeSpaceCell.key("favorites").asSchema(
-          favoriteListSchema,
-        );
+        const favoritesCell = homeSpaceCell.key("defaultPattern").key(
+          "favorites",
+        )
+          .asSchema(
+            favoriteListSchema,
+          );
         const favorites = favoritesCell.get() || [];
 
         // Match hash tags in userTags or tag field (the schema), all lowercase.

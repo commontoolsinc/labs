@@ -8,7 +8,6 @@ import {
   navigateTo,
   pattern,
   UI,
-  wish,
   Writable,
 } from "commontools";
 
@@ -143,8 +142,56 @@ const menuAllNotebooks = handler<
   return navigateTo(NotesImportExport({ importMarkdown: "" }));
 });
 
+// Handler: Add charm to allCharms if not already present
+const addCharm = handler<
+  { charm: Writable<unknown> },
+  { allCharms: Writable<MentionableCharm[]> }
+>(({ charm }, { allCharms }) => {
+  const current = allCharms.get();
+  if (!current.some((c) => equals(c, charm))) {
+    allCharms.push(charm as any);
+  }
+});
+
+// Handler: Track charm as recently used (add to front, maintain max 10)
+const trackRecent = handler<
+  { charm: Writable<unknown> },
+  { recentCharms: Writable<MentionableCharm[]> }
+>(({ charm }, { recentCharms }) => {
+  const current = recentCharms.get();
+  // Remove if already present
+  const filtered = current.filter((c) => !equals(c, charm));
+  // Add to front and limit to 10
+  const updated = [charm as any, ...filtered].slice(0, 10);
+  recentCharms.set(updated);
+});
+
+// Handler: Pin a charm
+const pin = handler<
+  { charm: Writable<unknown> },
+  { pinnedCharms: Writable<MentionableCharm[]> }
+>(({ charm }, { pinnedCharms }) => {
+  const current = pinnedCharms.get();
+  if (!current.some((c) => equals(c, charm))) {
+    pinnedCharms.push(charm as any);
+  }
+});
+
+// Handler: Unpin a charm
+const unpin = handler<
+  { charm: Writable<unknown> },
+  { pinnedCharms: Writable<MentionableCharm[]> }
+>(({ charm }, { pinnedCharms }) => {
+  const current = pinnedCharms.get();
+  const filtered = current.filter((c) => !equals(c, charm));
+  pinnedCharms.set(filtered);
+});
+
 export default pattern<CharmsListInput, CharmsListOutput>((_) => {
-  const { allCharms } = wish<{ allCharms: MentionableCharm[] }>("/");
+  // OWN the data cells (not from wish)
+  const allCharms = Writable.of<MentionableCharm[]>([]);
+  const recentCharms = Writable.of<MentionableCharm[]>([]);
+  const pinnedCharms = Writable.of<MentionableCharm[]>([]);
 
   // Dropdown menu state
   const menuOpen = Writable.of(false);
@@ -153,7 +200,7 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
   // (prevents transient hash-only pills during reactive updates)
   // NOTE: Use truthy check, not === true, because charm.isHidden is a proxy object
   const visibleCharms = computed(() =>
-    allCharms.filter((charm) => {
+    allCharms.get().filter((charm) => {
       if (charm.isHidden) return false;
       const name = (charm as any)?.[NAME];
       return typeof name === "string" && name.length > 0;
@@ -342,5 +389,16 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
     ),
     sidebarUI: undefined,
     fabUI: fab[UI],
+
+    // Exported data
+    allCharms,
+    recentCharms,
+    pinnedCharms,
+
+    // Exported handlers (bound to state cells for external callers)
+    addCharm: addCharm({ allCharms }),
+    trackRecent: trackRecent({ recentCharms }),
+    pin: pin({ pinnedCharms }),
+    unpin: unpin({ pinnedCharms }),
   };
 });

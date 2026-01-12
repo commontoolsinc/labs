@@ -6,6 +6,7 @@ import {
   type IExtendedStorageTransaction,
   isCell,
   isLink,
+  isStream,
   JSONSchema,
   type MemorySpace,
   Module,
@@ -14,10 +15,10 @@ import {
   Runtime,
   type Schema,
   type SpaceCellContents,
+  type Stream,
   TYPE,
   URI,
 } from "@commontools/runner";
-import * as favorites from "./favorites.ts";
 import { ALL_CHARMS_ID } from "../../runner/src/builtins/well-known.ts";
 import { type Session } from "@commontools/identity";
 import { isRecord } from "@commontools/utils/types";
@@ -29,7 +30,6 @@ import {
   nameSchema,
   processSchema,
 } from "@commontools/runner/schemas";
-import { type FavoriteList } from "@commontools/home-schemas";
 ensureNotRenderThread();
 
 /**
@@ -61,7 +61,6 @@ export class CharmManager {
   private space: MemorySpace;
 
   private charms: Cell<Cell<unknown>[]>;
-  private pinnedCharms: Cell<Cell<unknown>[]>;
   private recentCharms: Cell<Cell<unknown>[]>;
   private spaceCell: Cell<SpaceCellContents>;
 
@@ -83,11 +82,6 @@ export class CharmManager {
       [],
       charmListSchema,
     );
-    this.pinnedCharms = this.runtime.getCell(
-      this.space,
-      "pinned-charms",
-      charmListSchema,
-    );
     // Use the space DID as the cause - it's derived from the space name
     // and consistently available everywhere
     // For home space (where space DID = user identity DID), getHomeSpaceCellContents()
@@ -99,57 +93,41 @@ export class CharmManager {
 
     const syncSpaceCellContents = Promise.resolve(this.spaceCell.sync());
 
-    // Initialize the space cell structure by linking to existing cells
+    // Note: allCharms and recentCharms are now managed by the default pattern,
+    // not directly on the space cell. The space cell only contains a link to defaultPattern.
+    // Initialize recentCharms separately (not on space cell anymore)
+    this.recentCharms = this.runtime.getCellFromEntityId(
+      this.space,
+      { "/": "recentCharms" },
+      [],
+      charmListSchema,
+    );
+
     const linkSpaceCellContents = syncSpaceCellContents.then(() =>
       this.runtime.editWithRetry((tx) => {
-        const spaceCellWithTx = this.spaceCell.withTx(tx);
-
-        let existingSpace: Partial<SpaceCellContents> | undefined;
-        try {
-          existingSpace = spaceCellWithTx.get() ?? undefined;
-        } catch {
-          existingSpace = undefined;
-        }
-
-        const recentCharmsField = spaceCellWithTx
-          .key("recentCharms")
-          .asSchema(charmListSchema);
-
+        // Initialize recentCharms if empty
+        const recentCharmsWithTx = this.recentCharms.withTx(tx);
         let recentCharmsValue: unknown;
         try {
-          recentCharmsValue = recentCharmsField.get();
+          recentCharmsValue = recentCharmsWithTx.get();
         } catch {
           recentCharmsValue = undefined;
         }
 
         if (!Array.isArray(recentCharmsValue)) {
-          recentCharmsField.set([]);
+          recentCharmsWithTx.set([]);
         }
 
-        const nextSpaceValue: Partial<SpaceCellContents> = {
-          ...(existingSpace ?? {}),
-          // Set cells directly (not .get()) to create reactive links.
-          // The Cell system automatically converts cells to links via convertCellsToLinks().
-          // This ensures wish("/").allCharms stays in sync when charms are added/removed.
-          allCharms: this.charms.withTx(tx) as Cell<unknown[]>,
-          recentCharms: recentCharmsField.withTx(tx) as Cell<unknown[]>,
-        };
-
-        spaceCellWithTx.set(nextSpaceValue as SpaceCellContents);
-
-        // defaultPattern will be linked later when the default pattern is found
+        // Space cell structure is now minimal - defaultPattern will be linked later
       })
     );
 
-    this.recentCharms = this.spaceCell
-      .key("recentCharms")
-      .asSchema(charmListSchema);
-
     // Initialize all cells in parallel. linkSpaceCellContents already
     // depends on syncSpaceCellContents internally, so ordering is preserved.
+    // Note: Default pattern creation is handled by CharmsController.ensureDefaultPattern()
+    // which is called by CLI/shell entry points. CharmManager doesn't auto-create it.
     this.ready = Promise.all([
       this.syncCharms(this.charms),
-      this.syncCharms(this.pinnedCharms),
       this.syncCharms(this.recentCharms),
       linkSpaceCellContents,
     ]).then(() => {});
@@ -166,39 +144,6 @@ export class CharmManager {
   async synced(): Promise<void> {
     await this.ready;
     return await this.runtime.storageManager.synced();
-  }
-
-  async pin(charm: Cell<unknown>) {
-    await this.syncCharms(this.pinnedCharms);
-    // Check if already pinned
-    const resolvedCharm = charm.resolveAsCell();
-    const alreadyPinned = this.pinnedCharms.get().some((c) =>
-      c.resolveAsCell().equals(resolvedCharm)
-    );
-    if (!alreadyPinned) {
-      this.pinnedCharms.push(charm);
-      await this.runtime.idle();
-    }
-  }
-
-  async unpin(charm: Cell<unknown>) {
-    await this.syncCharms(this.pinnedCharms);
-    const { ok } = await this.runtime.editWithRetry((tx) => {
-      const pinnedCharms = this.pinnedCharms.withTx(tx);
-      const newPinnedCharms = filterOutCell(pinnedCharms, charm);
-      if (newPinnedCharms.length !== pinnedCharms.get().length) {
-        this.pinnedCharms.withTx(tx).set(newPinnedCharms);
-        return true;
-      } else {
-        return false;
-      }
-    });
-    return !!ok;
-  }
-
-  getPinned(): Cell<Cell<unknown>[]> {
-    this.syncCharms(this.pinnedCharms);
-    return this.pinnedCharms;
   }
 
   getSpaceCellContents(): Cell<SpaceCellContents> {
@@ -248,35 +193,6 @@ export class CharmManager {
     );
   }
 
-  /**
-   * Track a charm as recently viewed/interacted with.
-   * Maintains a list of up to 10 most recent charms.
-   * @param charm - The charm to track
-   */
-  async trackRecentCharm(charm: Cell<unknown>): Promise<void> {
-    const resolvedCharm = charm.resolveAsCell();
-
-    await this.runtime.editWithRetry((tx) => {
-      const recentCharmsWithTx = this.recentCharms.withTx(tx);
-      const recentCharms = recentCharmsWithTx.get() || [];
-
-      // Remove any existing instance of this charm to avoid duplicates
-      const filtered = recentCharms.filter((c) =>
-        !c.resolveAsCell().equals(resolvedCharm)
-      );
-
-      // Add charm to the beginning of the list
-      const updated = [charm, ...filtered];
-
-      // Trim to max 10 items
-      const trimmed = updated.slice(0, 10);
-
-      recentCharmsWithTx.set(trimmed);
-    });
-
-    await this.runtime.idle();
-  }
-
   // FIXME(ja): this says it returns a list of charm, but it isn't! you will
   // have to call .get() to get the actual charm (this is missing the schema)
   // how can we fix the type here?
@@ -300,17 +216,37 @@ export class CharmManager {
     });
   }
 
-  async add(newCharms: Cell<unknown>[], tx?: IExtendedStorageTransaction) {
-    await this.syncCharms(this.charms);
-    await this.runtime.idle();
-
-    if (tx) {
-      this.addCharms(newCharms, tx);
-    } else {
-      await this.runtime.editWithRetry((tx) => {
-        this.addCharms(newCharms, tx);
-      });
+  async add(newCharms: Cell<unknown>[]) {
+    // Get the default pattern
+    const defaultPattern = await this.getDefaultPattern();
+    if (!defaultPattern) {
+      console.warn("Default pattern not available, cannot add charms to list");
+      return;
     }
+
+    // Get the addCharm handler from the pattern
+    const cell = defaultPattern.asSchema({
+      type: "object",
+      properties: {
+        addCharm: { asStream: true },
+      },
+    });
+
+    const addCharmHandler = cell.key("addCharm") as unknown as Stream<
+      { charm: Cell<unknown> }
+    >;
+
+    if (!isStream(addCharmHandler)) {
+      console.warn("addCharm handler not found on default pattern");
+      return;
+    }
+
+    // Call the addCharm handler for each charm
+    for (const charm of newCharms) {
+      addCharmHandler.send({ charm });
+    }
+
+    await this.runtime.idle();
   }
 
   syncCharms(cell: Cell<Cell<unknown>[]>) {
@@ -813,12 +749,7 @@ export class CharmManager {
 
   // note: removing a charm doesn't clean up the charm's cells
   async remove(charm: Cell<unknown>) {
-    await Promise.all([
-      this.syncCharms(this.charms),
-      this.syncCharms(this.pinnedCharms),
-    ]);
-
-    await this.unpin(charm);
+    await this.syncCharms(this.charms);
 
     // Check if this is the default pattern and clear the link
     const defaultPattern = await this.getDefaultPattern();
@@ -850,14 +781,16 @@ export class CharmManager {
     inputs?: unknown,
     cause?: unknown,
     llmRequestId?: string,
-    options?: { start?: boolean },
+    options?: { start?: boolean; addToList?: boolean },
   ): Promise<Cell<T>> {
     const start = options?.start ?? true;
+    const addToList = options?.addToList ?? true;
     const charm = await this.setupPersistent<T>(
       recipe,
       inputs,
       cause,
       llmRequestId,
+      addToList,
     );
     if (start) {
       await this.startCharm(charm);
@@ -901,6 +834,7 @@ export class CharmManager {
     inputs?: unknown,
     cause?: unknown,
     llmRequestId?: string,
+    addToList: boolean = true,
   ): Promise<Cell<T>> {
     await this.runtime.idle();
     const charm = this.runtime.getCell<T>(
@@ -910,7 +844,11 @@ export class CharmManager {
     );
     this.runtime.setup(undefined, recipe, inputs ?? {}, charm);
     await this.syncRecipe(charm);
-    await this.add([charm]);
+
+    // Only add to list if requested (defaults to true for backward compatibility)
+    if (addToList) {
+      await this.add([charm]);
+    }
 
     if (llmRequestId) {
       this.runtime.editWithRetry((tx) => {
@@ -973,16 +911,13 @@ export class CharmManager {
     await entity.sync();
   }
 
-  // Returns the charm from one of our active charm lists if it is present,
+  // Returns the charm from our active charm list if it is present,
   // or undefined if it is not
   getActiveCharm(charmCell: Cell<unknown>) {
     const resolved = charmCell.resolveAsCell();
     return this.charms.get().find((charm) =>
       charm.resolveAsCell().equals(resolved)
-    ) ??
-      this.pinnedCharms.get().find((charm) =>
-        charm.resolveAsCell().equals(resolved)
-      );
+    );
   }
 
   async link(
@@ -1045,40 +980,6 @@ export class CharmManager {
     });
     await this.runtime.idle();
     await this.synced();
-  }
-
-  /**
-   * Add a charm to the user's favorites (in home space)
-   * @param charm - The charm to add to favorites
-   */
-  addFavorite(charm: Cell<unknown>): Promise<void> {
-    return favorites.addFavorite(this.runtime, charm);
-  }
-
-  /**
-   * Remove a charm from the user's favorites (in home space)
-   * @param charm - The charm to remove from favorites
-   * @returns true if the charm was removed, false if it wasn't in favorites
-   */
-  removeFavorite(charm: Cell<unknown>): Promise<boolean> {
-    return favorites.removeFavorite(this.runtime, charm);
-  }
-
-  /**
-   * Check if a charm is in the user's favorites (in home space)
-   * @param charm - The charm to check
-   * @returns true if the charm is favorited, false otherwise
-   */
-  isFavorite(charm: Cell<unknown>): boolean {
-    return favorites.isFavorite(this.runtime, charm);
-  }
-
-  /**
-   * Get the favorites cell from the home space
-   * @returns Cell containing the array of favorite entries with cell and tag
-   */
-  getFavorites(): Cell<FavoriteList> {
-    return favorites.getHomeFavorites(this.runtime);
   }
 }
 

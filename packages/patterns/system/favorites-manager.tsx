@@ -30,6 +30,7 @@ const onUpdateUserTags = handler<
 });
 
 export default pattern<Record<string, never>>((_) => {
+  // Use wish() to access favorites from home.tsx via defaultPattern
   const wishResult = wish<Array<Favorite>>({ query: "#favorites" });
 
   return {

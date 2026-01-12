@@ -219,12 +219,9 @@ export class CharmsController<T = unknown> {
       // Run pattern setup within same transaction
       this.#manager.runtime.run(tx, recipe, {}, charmCell);
 
-      // Add to charms list within same transaction
-      const charmsCell = this.#manager.getCharms().withTx(tx);
-      const currentCharms = charmsCell.get();
-      if (!currentCharms.some((c) => c.equals(charmCell))) {
-        charmsCell.push(charmCell);
-      }
+      // Note: We intentionally do NOT add the default pattern to allCharms.
+      // The default pattern owns allCharms - adding it to its own list creates
+      // a circular reference. It's a system pattern, not a user-created charm.
 
       // Link as default pattern within same transaction
       defaultPatternCell.set(charmCell.withTx(tx));

@@ -4,7 +4,6 @@ import {
   StaticCacheHTTP,
 } from "@commontools/static";
 import { RuntimeTelemetry } from "@commontools/runner";
-import { favoriteListSchema, journalSchema } from "@commontools/home-schemas";
 import type {
   AnyCell,
   JSONSchema,
@@ -83,14 +82,6 @@ export interface RuntimeOptions {
 export const spaceCellSchema: JSONSchema = {
   type: "object",
   properties: {
-    allCharms: {
-      type: "array",
-      items: { not: true, asCell: true },
-    },
-    recentCharms: {
-      type: "array",
-      items: { not: true, asCell: true },
-    },
     defaultPattern: { not: true, asCell: true },
   },
 } as JSONSchema;
@@ -98,44 +89,22 @@ export const spaceCellSchema: JSONSchema = {
 export const homeSpaceCellSchema: JSONSchema = {
   type: "object",
   properties: {
-    // Include all space cell properties
-    allCharms: {
-      type: "array",
-      items: { not: true, asCell: true },
-    },
-    recentCharms: {
-      type: "array",
-      items: { not: true, asCell: true },
-    },
     defaultPattern: { not: true, asCell: true },
-    // Plus home-space-specific properties
-    favorites: { ...favoriteListSchema, asCell: true },
-    journal: { ...journalSchema, asCell: true },
   },
 } as JSONSchema;
 
 export interface SpaceCellContents {
-  allCharms: Cell<unknown[]>;
-  recentCharms: Cell<unknown[]>;
   defaultPattern: Cell<unknown>;
 }
 
 /**
  * Contents of the home space cell (where space DID = user identity DID).
- * Home space contains user-specific data like favorites that persists across all spaces.
+ * Home space now has the same structure as regular space cells - all data
+ * (including favorites and journal) is managed by the default pattern.
  * See docs/common/HOME_SPACE.md for more details.
  */
 export interface HomeSpaceCellContents extends SpaceCellContents {
-  favorites: Cell<{ cell: Cell<unknown>; tag: string }[]>;
-  journal: Cell<{
-    timestamp: number;
-    eventType: string;
-    subject?: Cell<unknown>;
-    snapshot?: { name?: string; schemaTag?: string; valueExcerpt?: string };
-    narrative?: string;
-    tags?: string[];
-    space: string;
-  }[]>;
+  // No additional properties - all data is now in defaultPattern
 }
 
 /**
