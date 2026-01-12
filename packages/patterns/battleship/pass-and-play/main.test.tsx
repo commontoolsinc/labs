@@ -30,8 +30,8 @@
  *
  * Run: deno task ct test packages/patterns/battleship/pass-and-play/main.test.tsx --verbose
  */
-import { action, computed, handler, pattern, Stream } from "commontools";
-import Battleship, { type GameState, type SquareState } from "./main.tsx";
+import { action, computed, pattern } from "commontools";
+import Battleship, { type SquareState } from "./main.tsx";
 
 export default pattern(() => {
   // Instantiate the battleship pattern
@@ -61,21 +61,6 @@ export default pattern(() => {
     game.fireShot.send({ row: 9, col: 0 });
   });
 
-  // Fire at Player 2's carrier (row 1, col 2)
-  const action_fire_hit_carrier = action(() => {
-    game.fireShot.send({ row: 1, col: 2 });
-  });
-
-  // Fire at Player 2's destroyer (row 9, col 8) - first hit
-  const action_fire_hit_destroyer_1 = action(() => {
-    game.fireShot.send({ row: 9, col: 8 });
-  });
-
-  // Fire at Player 2's destroyer (row 9, col 9) - sink it!
-  const action_fire_hit_destroyer_2 = action(() => {
-    game.fireShot.send({ row: 9, col: 9 });
-  });
-
   // Player 2 fires at Player 1's carrier (row 0, col 0)
   const action_p2_fire_hit_carrier = action(() => {
     game.fireShot.send({ row: 0, col: 0 });
@@ -87,27 +72,27 @@ export default pattern(() => {
 
   // Initial state assertions
   const assert_initial_phase_playing = computed(
-    () => game.game.phase === "playing"
+    () => game.game.phase === "playing",
   );
   const assert_initial_turn_player1 = computed(
-    () => game.game.currentTurn === 1
+    () => game.game.currentTurn === 1,
   );
   const assert_initial_viewingAs_null = computed(
-    () => game.game.viewingAs === null
+    () => game.game.viewingAs === null,
   );
   const assert_initial_winner_null = computed(
-    () => game.game.winner === null
+    () => game.game.winner === null,
   );
   const assert_initial_not_awaiting_pass = computed(
-    () => game.game.awaitingPass === false
+    () => game.game.awaitingPass === false,
   );
 
   // After playerReady - Player 1 is now viewing
   const assert_viewingAs_player1 = computed(
-    () => game.game.viewingAs === 1
+    () => game.game.viewingAs === 1,
   );
   const assert_still_turn_player1 = computed(
-    () => game.game.currentTurn === 1
+    () => game.game.currentTurn === 1,
   );
 
   // After firing a miss
@@ -115,23 +100,23 @@ export default pattern(() => {
     return game.game.player2.shots[9][0] === "miss";
   });
   const assert_turn_switched_to_player2 = computed(
-    () => game.game.currentTurn === 2
+    () => game.game.currentTurn === 2,
   );
   const assert_awaiting_pass_after_shot = computed(
-    () => game.game.awaitingPass === true
+    () => game.game.awaitingPass === true,
   );
 
   // After passDevice
   const assert_viewingAs_null_after_pass = computed(
-    () => game.game.viewingAs === null
+    () => game.game.viewingAs === null,
   );
   const assert_not_awaiting_pass_after_pass = computed(
-    () => game.game.awaitingPass === false
+    () => game.game.awaitingPass === false,
   );
 
   // After player 2 ready
   const assert_viewingAs_player2 = computed(
-    () => game.game.viewingAs === 2
+    () => game.game.viewingAs === 2,
   );
 
   // After player 2 fires a hit
@@ -140,18 +125,18 @@ export default pattern(() => {
     return game.game.player1.shots[0][0] === "hit";
   });
   const assert_turn_back_to_player1 = computed(
-    () => game.game.currentTurn === 1
+    () => game.game.currentTurn === 1,
   );
 
   // After reset
   const assert_reset_phase_playing = computed(
-    () => game.game.phase === "playing"
+    () => game.game.phase === "playing",
   );
   const assert_reset_turn_player1 = computed(
-    () => game.game.currentTurn === 1
+    () => game.game.currentTurn === 1,
   );
   const assert_reset_viewingAs_null = computed(
-    () => game.game.viewingAs === null
+    () => game.game.viewingAs === null,
   );
   const assert_reset_shots_cleared = computed(() => {
     // All shots should be empty after reset
