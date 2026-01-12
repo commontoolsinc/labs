@@ -9,6 +9,7 @@
  * Key architecture:
  * - Receives ContainerCoordinationContext as INPUT
  * - Context's entries/trashedEntries are Cells that survive serialization
+ * - Context's linkPatternJson is a serializable string (no functions!)
  * - Can call .get() and .set() on context Cells from handlers
  * - Trashes itself after applying a template
  *
@@ -32,6 +33,7 @@ import {
   getTemplateList,
   type TemplateDefinition,
 } from "./record/template-registry.ts";
+import Note from "./notes/note.tsx";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
 
 // Filter function at module scope to avoid transformer errors
@@ -68,11 +70,10 @@ const applyTemplate = handler<
   {
     entries: Writable<SubCharmEntry[]>;
     trashedEntries: Writable<TrashedSubCharmEntry[]>;
-    // deno-lint-ignore no-explicit-any
-    createModule: any;
+    linkPatternJson: string | undefined;
     templateId: string;
   }
->((_event, { entries, trashedEntries, createModule, templateId }) => {
+>((_event, { entries, trashedEntries, linkPatternJson, templateId }) => {
   const current = entries.get() || [];
 
   // Find and keep the notes module (should be first)
@@ -85,8 +86,8 @@ const applyTemplate = handler<
   // Find self by type (there should only be one type-picker)
   const selfEntry = current.find((e) => e?.type === "type-picker");
 
-  // Create factory for Notes using context's createModule
-  const createNotesCharm = () => createModule("notes");
+  // Create factory for Notes that uses the linkPatternJson for wiki-links
+  const createNotesCharm = () => Note({ linkPattern: linkPatternJson });
 
   // Create template modules (skip notes since we keep existing one)
   const templateEntries = createTemplateModules(templateId, createNotesCharm);
@@ -142,7 +143,7 @@ const dismiss = handler<
 export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
   ({ context, dismissed }) => {
     // Extract context components for handlers
-    const { entries, trashedEntries, createModule } = context;
+    const { entries, trashedEntries, linkPatternJson } = context;
 
     // Get templates to display (excluding blank)
     const templates = getTemplateList().filter(isNotBlankTemplate);
@@ -181,7 +182,7 @@ export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
               }}
               title="Dismiss (can restore from trash)"
             >
-              ✕
+              {"\u2715"}
             </button>
           </div>
           <div
@@ -197,7 +198,7 @@ export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
                 onClick={applyTemplate({
                   entries,
                   trashedEntries,
-                  createModule,
+                  linkPatternJson,
                   templateId: template.id,
                 })}
                 style={{
