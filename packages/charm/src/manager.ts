@@ -61,7 +61,6 @@ export class CharmManager {
   private space: MemorySpace;
 
   private charms: Cell<Cell<unknown>[]>;
-  private recentCharms: Cell<Cell<unknown>[]>;
   private spaceCell: Cell<SpaceCellContents>;
 
   /**
@@ -95,29 +94,8 @@ export class CharmManager {
 
     // Note: allCharms and recentCharms are now managed by the default pattern,
     // not directly on the space cell. The space cell only contains a link to defaultPattern.
-    // Initialize recentCharms separately (not on space cell anymore)
-    this.recentCharms = this.runtime.getCellFromEntityId(
-      this.space,
-      { "/": "recentCharms" },
-      [],
-      charmListSchema,
-    );
-
     const linkSpaceCellContents = syncSpaceCellContents.then(() =>
-      this.runtime.editWithRetry((tx) => {
-        // Initialize recentCharms if empty
-        const recentCharmsWithTx = this.recentCharms.withTx(tx);
-        let recentCharmsValue: unknown;
-        try {
-          recentCharmsValue = recentCharmsWithTx.get();
-        } catch {
-          recentCharmsValue = undefined;
-        }
-
-        if (!Array.isArray(recentCharmsValue)) {
-          recentCharmsWithTx.set([]);
-        }
-
+      this.runtime.editWithRetry((_tx) => {
         // Space cell structure is now minimal - defaultPattern will be linked later
       })
     );
@@ -128,7 +106,6 @@ export class CharmManager {
     // which is called by CLI/shell entry points. CharmManager doesn't auto-create it.
     this.ready = Promise.all([
       this.syncCharms(this.charms),
-      this.syncCharms(this.recentCharms),
       linkSpaceCellContents,
     ]).then(() => {});
   }
