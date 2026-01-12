@@ -25,7 +25,7 @@ interface Output {
   updateData: Stream<void>;
 }
 
-const updateData = handler<unknown, WritableState>((_event, state) => {
+const updateData = handler<void, WritableState>((_event, state) => {
   const newCount = (state.counter.get() ?? 0) + 1;
   state.counter.set(newCount);
   state.data.set(`Updated data #${newCount} - ${new Date().toISOString()}`);
