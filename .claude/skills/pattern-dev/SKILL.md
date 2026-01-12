@@ -265,6 +265,53 @@ const totalAmount = computed(() => expenses.reduce((sum, e) => sum + e.amount, 0
 
 See `REACTIVITY.md` for details on frame-based execution, lift() limitations, and access patterns.
 
+### Self-Referential Types with SELF
+
+Use `SELF` to get a reference to the pattern's own output, useful for:
+- Adding self to a collection (e.g., registering in a list)
+- Creating children with a parent reference back to self
+
+```typescript
+import { Cell, SELF, pattern } from "commontools";
+
+interface Input {
+  label: string;
+  parent: Output | null;
+  registry: Writable<Output[]>;
+}
+interface Output {
+  label: string;
+  parent: Output | null;
+  children: Output[];
+}
+
+const Node = pattern<Input, Output>(({ label, parent, registry, [SELF]: self }) => {
+  const children = Cell.of<Output[]>([]);
+
+  return {
+    label,
+    parent,
+    children,
+    [UI]: (
+      <div>
+        <button onClick={() => children.push(Node({ label: "Child", parent: self, registry }))}>
+          Add Child
+        </button>
+        <button onClick={() => registry.push(self)}>
+          Add to Registry
+        </button>
+      </div>
+    ),
+  };
+});
+```
+
+**Key rules:**
+- **Both type params required:** Use `pattern<Input, Output>()` - single param `pattern<Input>()` will error if you access SELF
+- **`self` is typed as the output** - the instantiated charm itself, enabling recursive structures
+
+See `packages/patterns/self-reference-test.tsx` for a working example.
+
 ## Multi-File Patterns
 
 See Project Organization in Development Methodology above. Key points:
