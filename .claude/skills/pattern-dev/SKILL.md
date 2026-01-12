@@ -272,7 +272,7 @@ Use `SELF` to get a reference to the pattern's own output, useful for:
 - Creating children with a parent reference back to self
 
 ```typescript
-import { Cell, SELF, pattern } from "commontools";
+import { Writable, SELF, pattern } from "commontools";
 
 interface Input {
   label: string;
@@ -286,7 +286,7 @@ interface Output {
 }
 
 const Node = pattern<Input, Output>(({ label, parent, registry, [SELF]: self }) => {
-  const children = Cell.of<Output[]>([]);
+  const children = Writable.of<Output[]>([]);
 
   return {
     label,
