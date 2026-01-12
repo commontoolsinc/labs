@@ -172,7 +172,9 @@ const onStartTimeChange = handler<
     const newEndMin = timeToMinutes(newStart) + Math.max(60, duration);
     const h = Math.min(23, Math.floor(newEndMin / 60));
     const m = newEndMin % 60;
-    endTime.set(`${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`);
+    endTime.set(
+      `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`,
+    );
   }
 });
 
@@ -219,13 +221,32 @@ const handleSetNotes = handler<
 });
 
 // Color picker handlers - must be at module scope
-const setColor0 = handler<void, { color: Writable<string> }>((_, state) => state.color.set(COLORS[0]));
-const setColor1 = handler<void, { color: Writable<string> }>((_, state) => state.color.set(COLORS[1]));
-const setColor2 = handler<void, { color: Writable<string> }>((_, state) => state.color.set(COLORS[2]));
-const setColor3 = handler<void, { color: Writable<string> }>((_, state) => state.color.set(COLORS[3]));
-const setColor4 = handler<void, { color: Writable<string> }>((_, state) => state.color.set(COLORS[4]));
-const setColor5 = handler<void, { color: Writable<string> }>((_, state) => state.color.set(COLORS[5]));
-const colorHandlers = [setColor0, setColor1, setColor2, setColor3, setColor4, setColor5];
+const setColor0 = handler<void, { color: Writable<string> }>((_, state) =>
+  state.color.set(COLORS[0])
+);
+const setColor1 = handler<void, { color: Writable<string> }>((_, state) =>
+  state.color.set(COLORS[1])
+);
+const setColor2 = handler<void, { color: Writable<string> }>((_, state) =>
+  state.color.set(COLORS[2])
+);
+const setColor3 = handler<void, { color: Writable<string> }>((_, state) =>
+  state.color.set(COLORS[3])
+);
+const setColor4 = handler<void, { color: Writable<string> }>((_, state) =>
+  state.color.set(COLORS[4])
+);
+const setColor5 = handler<void, { color: Writable<string> }>((_, state) =>
+  state.color.set(COLORS[5])
+);
+const colorHandlers = [
+  setColor0,
+  setColor1,
+  setColor2,
+  setColor3,
+  setColor4,
+  setColor5,
+];
 
 // ============ PATTERN ============
 
@@ -437,7 +458,7 @@ const Event = pattern<Input, Output>(
       setColor: handleSetColor({ color }),
       setNotes: handleSetNotes({ notes }),
     };
-  }
+  },
 );
 
 export default Event;

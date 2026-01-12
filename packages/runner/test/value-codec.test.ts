@@ -22,6 +22,7 @@ describe("value-codec", () => {
 
       it("accepts finite numbers", () => {
         expect(isStorableValue(0)).toBe(true);
+        expect(isStorableValue(-0)).toBe(true);
         expect(isStorableValue(1)).toBe(true);
         expect(isStorableValue(-1)).toBe(true);
         expect(isStorableValue(3.14159)).toBe(true);
@@ -59,10 +60,6 @@ describe("value-codec", () => {
       it("rejects Infinity", () => {
         expect(isStorableValue(Infinity)).toBe(false);
         expect(isStorableValue(-Infinity)).toBe(false);
-      });
-
-      it("rejects negative zero", () => {
-        expect(isStorableValue(-0)).toBe(false);
       });
 
       it("rejects functions", () => {
@@ -106,6 +103,13 @@ describe("value-codec", () => {
         expect(toStorableValue(0)).toBe(0);
       });
 
+      it("converts negative zero to positive zero", () => {
+        const result = toStorableValue(-0);
+        expect(result).toBe(0);
+        expect(Object.is(result, -0)).toBe(false);
+        expect(Object.is(result, 0)).toBe(true);
+      });
+
       it("passes through null", () => {
         expect(toStorableValue(null)).toBe(null);
       });
@@ -135,16 +139,10 @@ describe("value-codec", () => {
     describe("throws for non-convertible values", () => {
       it("throws for Infinity", () => {
         expect(() => toStorableValue(Infinity)).toThrow(
-          "Cannot store non-finite number or negative zero",
+          "Cannot store non-finite number",
         );
         expect(() => toStorableValue(-Infinity)).toThrow(
-          "Cannot store non-finite number or negative zero",
-        );
-      });
-
-      it("throws for negative zero", () => {
-        expect(() => toStorableValue(-0)).toThrow(
-          "Cannot store non-finite number or negative zero",
+          "Cannot store non-finite number",
         );
       });
 
