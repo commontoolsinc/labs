@@ -37,8 +37,9 @@ export default pattern<Input>(({ label, [SELF]: self }) => {
         </div>
 
         <div style="margin-top: 8px; font-size: 12px; color: #666;">
-          Children: {children.length} | Self reference type:{" "}
-          {self ? typeof self : "undefined"}
+          Label via self: {self.label}
+          <br />
+          Label directly: {label}
         </div>
       </div>
     ),
