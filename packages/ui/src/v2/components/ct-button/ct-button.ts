@@ -66,7 +66,11 @@ export class CTButton extends BaseElement {
         font-weight: 500;
         font-family: var(--ct-theme-font-family, inherit);
         line-height: 1.25rem;
-        transition: all var(--ct-theme-animation-duration, 0.2s) ease;
+        transition:
+          opacity var(--ct-theme-animation-duration, 0.2s) ease,
+          transform var(--ct-theme-animation-duration, 0.2s) ease,
+          box-shadow var(--ct-theme-animation-duration, 0.2s) ease,
+          border-color var(--ct-theme-animation-duration, 0.2s) ease;
         cursor: pointer;
         user-select: none;
         border: 1px solid transparent;
