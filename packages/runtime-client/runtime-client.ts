@@ -107,6 +107,13 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return new CellHandle<T>(this, response.cell);
   }
 
+  async getHomeSpaceCell(): Promise<CellHandle<unknown>> {
+    const response = await this.#conn.request<RequestType.GetHomeSpaceCell>({
+      type: RequestType.GetHomeSpaceCell,
+    });
+    return new CellHandle(this, response.cell);
+  }
+
   // TODO(unused)
   async idle(): Promise<void> {
     await this.#conn.request<RequestType.Idle>({ type: RequestType.Idle });

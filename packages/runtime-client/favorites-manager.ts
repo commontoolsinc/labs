@@ -14,7 +14,7 @@ export class FavoritesManager {
   #rt: RuntimeClient;
   #homeSpaceDID: DID;
   #currentSpaceDID: DID;
-  #homeSpaceCell: CellHandle<{ defaultPattern?: unknown }>;
+  #homeSpaceCell: CellHandle<{ defaultPattern?: unknown }> | null = null;
 
   constructor(
     rt: RuntimeClient,
@@ -24,15 +24,6 @@ export class FavoritesManager {
     this.#rt = rt;
     this.#homeSpaceDID = homeSpaceDID;
     this.#currentSpaceDID = currentSpaceDID;
-
-    // Construct CellRef to home space cell
-    const homeSpaceCellRef: CellRef = {
-      id: `of:${homeSpaceDID}`,
-      space: homeSpaceDID,
-      path: [],
-      type: "application/json",
-    };
-    this.#homeSpaceCell = new CellHandle(rt, homeSpaceCellRef);
   }
 
   /**
@@ -155,15 +146,23 @@ export class FavoritesManager {
    */
   async #getDefaultPattern(): Promise<CellHandle<any> | null> {
     try {
-      await this.#homeSpaceCell.sync();
-      const homeSpaceValue = this.#homeSpaceCell.get();
+      // Lazily fetch the home space cell
+      if (!this.#homeSpaceCell) {
+        this.#homeSpaceCell = (await this.#rt.getHomeSpaceCell()) as CellHandle<
+          { defaultPattern?: unknown }
+        >;
+      }
+
+      const homeSpaceCell = this.#homeSpaceCell;
+      await homeSpaceCell.sync();
+      const homeSpaceValue = homeSpaceCell.get();
 
       if (!homeSpaceValue || !homeSpaceValue.defaultPattern) {
         return null;
       }
 
       // After sync, defaultPattern should be deserialized as a CellHandle
-      const defaultPatternCell = this.#homeSpaceCell.key("defaultPattern");
+      const defaultPatternCell = homeSpaceCell.key("defaultPattern");
       await defaultPatternCell.sync();
 
       const defaultPatternValue = defaultPatternCell.get();

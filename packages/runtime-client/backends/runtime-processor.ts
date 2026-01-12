@@ -26,6 +26,7 @@ import {
   type CellUnsubscribeRequest,
   type GetCellRequest,
   GetGraphSnapshotRequest,
+  type GetHomeSpaceCellRequest,
   type GetLoggerCountsRequest,
   GraphSnapshotResponse,
   type InitializationData,
@@ -291,6 +292,13 @@ export class RuntimeProcessor {
     };
   }
 
+  handleGetHomeSpaceCell(_request: GetHomeSpaceCellRequest): CellResponse {
+    const homeSpaceCell = this.runtime.getHomeSpaceCell();
+    return {
+      cell: createCellRef(homeSpaceCell),
+    };
+  }
+
   async handleIdle(): Promise<void> {
     await this.runtime.idle();
   }
@@ -469,6 +477,8 @@ export class RuntimeProcessor {
         return this.handleCellUnsubscribe(request);
       case RequestType.GetCell:
         return this.handleGetCell(request);
+      case RequestType.GetHomeSpaceCell:
+        return this.handleGetHomeSpaceCell(request);
       case RequestType.Idle:
         return await this.handleIdle();
       case RequestType.PageCreate:
