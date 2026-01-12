@@ -137,6 +137,26 @@ export class RuntimeProcessor {
           console.warn("Navigating cross-space, not adding to charms list.");
         } else {
           charmManager!.add([target]);
+
+          // Track as recently used (async, fire-and-forget)
+          (async () => {
+            try {
+              const defaultPattern = await charmManager!.getDefaultPattern();
+              if (defaultPattern) {
+                const cell = defaultPattern.asSchema({
+                  type: "object",
+                  properties: {
+                    trackRecent: { asStream: true },
+                  },
+                  required: ["trackRecent"],
+                });
+                const handler = cell.key("trackRecent");
+                handler.send({ charm: target });
+              }
+            } catch (e) {
+              console.warn("Failed to track recent charm:", e);
+            }
+          })();
         }
 
         self.postMessage({
