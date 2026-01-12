@@ -52,6 +52,7 @@ import {
   type SetPullModeRequest,
 } from "../protocol/mod.ts";
 import { HttpProgramResolver, Program } from "@commontools/js-compiler";
+import { favoriteListSchema } from "@commontools/home-schemas";
 import { setLLMUrl } from "@commontools/llm";
 import {
   createCellRef,
@@ -366,42 +367,79 @@ export class RuntimeProcessor {
   }
 
   /**
-   * Get the home space's defaultPattern which owns favorites.
+   * Get the home space's defaultPattern cell which owns favorites.
    * Favorites are always stored in the user's home space, regardless of
    * which space the user is currently viewing.
+   *
+   * Access pattern data via: homeSpaceCell.key("defaultPattern").key("propertyName")
+   * This matches how wish.ts resolves #favorites and #journal.
    */
   private async getHomeDefaultPattern() {
-    const homeSpace = this.runtime.userIdentityDID;
     const homeSpaceCell = this.runtime.getHomeSpaceCell();
     await homeSpaceCell.sync();
 
     const defaultPatternCell = homeSpaceCell.key("defaultPattern");
-    const defaultPattern = defaultPatternCell.get();
-    if (!defaultPattern) {
+    await defaultPatternCell.sync();
+
+    // Check that defaultPattern exists
+    const patternLink = defaultPatternCell.get();
+    if (!patternLink) {
       throw new Error(
         "Home space defaultPattern not initialized. Visit home space first.",
       );
     }
-    return defaultPattern;
+
+    // Start the pattern to ensure handlers are active
+    const patternCell = defaultPatternCell.resolveAsCell();
+    if (patternCell) {
+      await this.runtime.start(patternCell);
+      await this.runtime.idle();
+    }
+
+    // Return the defaultPatternCell - access properties via .key("propertyName")
+    // This matches how wish.ts accesses favorites: homeSpaceCell.key("defaultPattern").key("favorites")
+    return defaultPatternCell;
   }
 
   async handleFavoriteAdd(request: FavoriteAddRequest): Promise<void> {
     const defaultPattern = await this.getHomeDefaultPattern();
-
-    // Get the addFavorite handler stream from the pattern
-    const addFavoriteStream = defaultPattern.key("addFavorite");
 
     // Get the charm cell to add
     const charmCell = this.runtime.getCellFromEntityId(this.space, {
       "/": request.charmId,
     });
 
-    // Send event to the handler within a transaction
+    // Get favorites cell and resolve it
+    const favoritesCell = defaultPattern.key("favorites")
+      .resolveAsCell()
+      ?.asSchema(favoriteListSchema);
+
+    if (!favoritesCell) {
+      throw new Error("Could not resolve favorites cell");
+    }
+
+    // Directly modify the favorites array
+    // TODO: Debug why handler invocation doesn't work
     const tx = this.runtime.edit();
-    addFavoriteStream.withTx(tx).send({
-      charm: charmCell,
-      tag: request.tag || "",
-    });
+    const current = favoritesCell.get() || [];
+    const alreadyExists = current.some(
+      (f: any) =>
+        f.cell &&
+        typeof f.cell.equals === "function" &&
+        f.cell.equals(charmCell),
+    );
+
+    if (!alreadyExists) {
+      favoritesCell.withTx(tx).set([
+        ...current,
+        {
+          cell: charmCell,
+          tag: request.tag || "",
+          userTags: [],
+        },
+      ]);
+    }
+
     tx.commit();
     await this.runtime.idle();
   }
@@ -409,17 +447,33 @@ export class RuntimeProcessor {
   async handleFavoriteRemove(request: FavoriteRemoveRequest): Promise<void> {
     const defaultPattern = await this.getHomeDefaultPattern();
 
-    // Get the removeFavorite handler stream from the pattern
-    const removeFavoriteStream = defaultPattern.key("removeFavorite");
-
     // Get the charm cell to remove
     const charmCell = this.runtime.getCellFromEntityId(this.space, {
       "/": request.charmId,
     });
 
-    // Send event to the handler within a transaction
+    // Get favorites cell and resolve it
+    const favoritesCell = defaultPattern.key("favorites")
+      .resolveAsCell()
+      ?.asSchema(favoriteListSchema);
+
+    if (!favoritesCell) {
+      throw new Error("Could not resolve favorites cell");
+    }
+
+    // Directly modify the favorites array
     const tx = this.runtime.edit();
-    removeFavoriteStream.withTx(tx).send({ charm: charmCell });
+    const current = favoritesCell.get() || [];
+    const filtered = current.filter(
+      (f: any) =>
+        !(
+          f.cell &&
+          typeof f.cell.equals === "function" &&
+          f.cell.equals(charmCell)
+        ),
+    );
+
+    favoritesCell.withTx(tx).set(filtered);
     tx.commit();
     await this.runtime.idle();
   }
@@ -429,13 +483,18 @@ export class RuntimeProcessor {
   ): Promise<BooleanResponse> {
     const defaultPattern = await this.getHomeDefaultPattern();
 
-    // Get the favorites cell from the pattern
-    const favoritesCell = defaultPattern.key("favorites");
-    await favoritesCell.sync();
+    // Get favorites cell and resolve it
+    const favoritesCell = defaultPattern.key("favorites")
+      .resolveAsCell()
+      ?.asSchema(favoriteListSchema);
 
-    const favorites = favoritesCell.get() as
-      | Array<{ cell: unknown }>
-      | undefined;
+    if (!favoritesCell) {
+      return { value: false };
+    }
+
+    await favoritesCell.sync();
+    const favorites = favoritesCell.get();
+
     if (!favorites || !Array.isArray(favorites)) {
       return { value: false };
     }
@@ -445,12 +504,12 @@ export class RuntimeProcessor {
       "/": request.charmId,
     });
 
-    const isMember = favorites.some((fav) => {
-      if (fav.cell && typeof fav.cell === "object" && "equals" in fav.cell) {
-        return (fav.cell as any).equals(charmCell);
-      }
-      return false;
-    });
+    const isMember = favorites.some(
+      (fav: any) =>
+        fav.cell &&
+        typeof fav.cell.equals === "function" &&
+        fav.cell.equals(charmCell),
+    );
 
     return { value: isMember };
   }
@@ -458,24 +517,24 @@ export class RuntimeProcessor {
   async handleFavoritesGetAll(): Promise<FavoritesResponse> {
     const defaultPattern = await this.getHomeDefaultPattern();
 
-    // Get the favorites cell from the pattern
-    const favoritesCell = defaultPattern.key("favorites");
-    await favoritesCell.sync();
+    // Get favorites cell and resolve it
+    const favoritesCell = defaultPattern.key("favorites")
+      .resolveAsCell()
+      ?.asSchema(favoriteListSchema);
 
-    const favorites = favoritesCell.get() as
-      | Array<{
-        cell: { entityId?: { "/": string } };
-        tag: string;
-        userTags: { get?: () => string[] } | string[];
-      }>
-      | undefined;
+    if (!favoritesCell) {
+      return { favorites: [] };
+    }
+
+    await favoritesCell.sync();
+    const favorites = favoritesCell.get();
 
     if (!favorites || !Array.isArray(favorites)) {
       return { favorites: [] };
     }
 
     // Convert to response format
-    const result = favorites.map((fav) => {
+    const result = favorites.map((fav: any) => {
       const charmId = fav.cell?.entityId?.["/"] || "";
       const userTags = Array.isArray(fav.userTags)
         ? fav.userTags
