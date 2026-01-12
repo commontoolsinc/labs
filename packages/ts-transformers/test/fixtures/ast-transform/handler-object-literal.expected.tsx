@@ -2,10 +2,7 @@ import * as __ctHelpers from "commontools";
 import { Cell, handler, recipe } from "commontools";
 interface State {
     value: Cell<number>;
-    // TODO(CT-1171): Optional Cell properties (name?: Cell<string>) cause type errors
-    // due to StripCell not handling Cell<T> | undefined unions correctly.
-    // Making this required as a workaround.
-    name: Cell<string>;
+    name?: Cell<string>;
 }
 const myHandler = handler(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
@@ -19,7 +16,7 @@ const myHandler = handler(false as const satisfies __ctHelpers.JSONSchema, {
             asCell: true
         }
     },
-    required: ["value", "name"]
+    required: ["value"]
 } as const satisfies __ctHelpers.JSONSchema, (_, state: State) => {
     state.value.set(state.value.get() + 1);
 });
@@ -29,6 +26,7 @@ export default recipe({
         value: { type: "number", asCell: true },
         name: { type: "string", asCell: true },
     },
+    required: ["value"],
 }, {
     type: "object",
     properties: {
