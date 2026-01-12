@@ -1390,12 +1390,11 @@ export type PatternFunction = {
   ): RecipeFactory<StripCell<T>, StripCell<R>>;
 
   // Single type param overload: T explicit, R inferred
-  // NOTE: Using `any` return in signature causes ReturnType to be `any`.
-  // This is a TypeScript limitation - we recommend using pattern<T, R>()
-  // for proper type safety when output types include Stream<>.
+  // SELF is typed as `never` - using it will produce a type error
+  // Use pattern<T, R>() with both type params for typed SELF access
   <T>(
-    fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<any> }) => any,
-  ): RecipeFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
+    fn: (input: OpaqueRef<Required<T>> & { [SELF]: never }) => any,
+  ): RecipeFactory<StripCell<T>, any>;
 
   // Schema-based overload with explicit argument and result schemas
   <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(

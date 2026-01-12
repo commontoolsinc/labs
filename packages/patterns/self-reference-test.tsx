@@ -8,10 +8,10 @@ import { Default, NAME, pattern, SELF, UI } from "commontools";
  * recursive data structures like trees where children are the same type
  * as the parent.
  *
- * Usage:
- *   const Node = pattern<Input>(({ name, [SELF]: self }) => ({
+ * Usage (both type params required for SELF):
+ *   const Node = pattern<Input, Output>(({ name, [SELF]: self }) => ({
  *     name,
- *     children: [] as typeof self[],  // self is OpaqueRef<Output>
+ *     children: [] as (typeof self)[],  // self is OpaqueRef<Output>
  *   }));
  */
 
@@ -19,7 +19,13 @@ interface Input {
   label: Default<string, "Node">;
 }
 
-export default pattern<Input>(({ label, [SELF]: self }) => {
+interface Output {
+  label: string;
+  children: Output[];
+  self: Output;
+}
+
+export default pattern<Input, Output>(({ label, [SELF]: self }) => {
   // `self` is typed as OpaqueRef<Output> - same type as what this pattern returns
   // This enables type-safe self-referential structures
 
