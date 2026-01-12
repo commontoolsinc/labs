@@ -54,7 +54,7 @@ const toggleEnabled = handler(
 
 const adjustChild = handler(
   (
-    event: { amount?: number } | undefined,
+    event: { amount?: number },
     context: { value: Cell<number> },
   ) => {
     const amount = resolveAmount(event?.amount);
