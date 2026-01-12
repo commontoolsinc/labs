@@ -9,8 +9,15 @@ import {
   type Cell,
   type JSONSchema,
   type Schema,
+  SELF,
 } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+
+// Import types from public API for compile-time type tests
+import {
+  type OpaqueRef as ApiOpaqueRef,
+  type PatternFunction,
+} from "@commontools/api";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
 import { isCell, isStream } from "../src/cell.ts";
@@ -1862,9 +1869,6 @@ describe("Recipe Runner", () => {
   });
 
   it("should provide SELF reference in pattern for self-referential types", async () => {
-    // Import SELF symbol
-    const { SELF } = await import("../src/builder/types.ts");
-
     // Define schemas using JSON schema notation
     const InputSchema = {
       type: "object",
@@ -1932,9 +1936,7 @@ describe("Recipe Runner", () => {
     expect(value.children).toEqual([]);
   });
 
-  it("should serialize SELF reference to resultRef path", async () => {
-    const { SELF } = await import("../src/builder/types.ts");
-
+  it("should serialize SELF reference to resultRef path", () => {
     const InputSchema = {
       type: "object",
       properties: {
@@ -1971,8 +1973,6 @@ describe("Recipe Runner", () => {
   });
 
   it("should allow SELF in recipe function as well as pattern", async () => {
-    const { SELF } = await import("../src/builder/types.ts");
-
     const InputSchema = {
       type: "object",
       properties: {
@@ -2018,6 +2018,46 @@ describe("Recipe Runner", () => {
 
     expect(value.selfAvailable).toBe(true);
     expect(value.value).toBe(42);
+  });
+
+  it("should correctly infer SELF type (TypeScript types, compile-time check)", () => {
+    // This test verifies SELF type inference using the PUBLIC API types from @commontools/api
+    // The @ts-expect-error directives verify that SELF is NOT typed as `any`
+    // If SELF were `any`, the "wrong type" assignments would succeed,
+    // making @ts-expect-error unused - which is itself a compile error
+
+    // Cast pattern to the public API's PatternFunction type to test those type declarations
+    const apiPattern: PatternFunction = pattern;
+
+    interface TreeNode {
+      name: string;
+      children: TreeNode[];
+    }
+
+    const treePattern = apiPattern<{ name: string }, TreeNode>(
+      ({ name, [SELF]: self }) => {
+        // Positive type tests: these assignments SHOULD work
+        const _correctType: ApiOpaqueRef<TreeNode> = self;
+        const _correctChildren: ApiOpaqueRef<TreeNode[]> = self.children;
+        const _correctName: ApiOpaqueRef<string> = self.name;
+
+        // Negative type tests: these should NOT work (verified by @ts-expect-error)
+        // If self were ApiOpaqueRef<any>, these would succeed, making @ts-expect-error unused
+        // @ts-expect-error - self should not be assignable to ApiOpaqueRef<{ wrong: true }>
+        const _wrongType: ApiOpaqueRef<{ wrong: true }> = self;
+        // @ts-expect-error - children should not be assignable to ApiOpaqueRef<string[]>
+        const _wrongChildren: ApiOpaqueRef<string[]> = self.children;
+
+        // Use self in the return type
+        const children: (typeof self)[] = [];
+
+        return { name, children };
+      },
+    );
+
+    // Verify it's a valid pattern at runtime
+    expect(treePattern).toBeDefined();
+    expect(typeof treePattern).toBe("function");
   });
 
   it("should run dynamically instantiated recipes before reading their outputs", async () => {
