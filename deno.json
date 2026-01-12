@@ -78,6 +78,7 @@
         "no-external-import"
       ],
       "exclude": [
+        "jsx-key",
         "jsx-no-useless-fragment",
         "no-explicit-any",
         "require-yield"
