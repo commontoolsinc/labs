@@ -16,7 +16,7 @@ import type {
   SchemaContext,
   SchemaPathSelector,
 } from "@commontools/memory/interface";
-import { deepEqual } from "./path-utils.ts";
+import { deepEqual } from "@commontools/utils/deep-equal";
 import { isPrimitiveCellLink, parseLink } from "./link-utils.ts";
 import { fromURI } from "./uri-utils.ts";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";

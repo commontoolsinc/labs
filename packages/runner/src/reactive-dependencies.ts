@@ -1,5 +1,6 @@
 import { isRecord } from "@commontools/utils/types";
-import { arrayEqual, deepEqual } from "./path-utils.ts";
+import { deepEqual } from "@commontools/utils/deep-equal";
+import { arrayEqual } from "./path-utils.ts";
 import type { JSONValue } from "./builder/types.ts";
 import type { Action, SpaceAndURI } from "./scheduler.ts";
 import type {

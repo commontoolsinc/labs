@@ -133,4 +133,5 @@ export {
 
 // Utility functions (split from utils.ts)
 export { createJsonSchema } from "./builder/json-utils.ts";
-export { deepEqual, getValueAtPath, setValueAtPath } from "./path-utils.ts";
+export { deepEqual } from "@commontools/utils/deep-equal";
+export { getValueAtPath, setValueAtPath } from "./path-utils.ts";
