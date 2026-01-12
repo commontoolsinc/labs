@@ -1,10 +1,10 @@
 /// <cts-enable />
-import { pattern, SELF, UI, Writable, Default } from "commontools";
+import { Default, pattern, SELF, UI, Writable } from "commontools";
 
 interface Input {
   label: Default<string, "Untitled">;
   parent: Default<Output | null, null>;
-  registry: Default<Writable<Output[]>, []>;
+  registry: Writable<Default<Output[], []>>;
 }
 interface Output {
   label: string;
