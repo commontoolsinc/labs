@@ -86,7 +86,7 @@ describe("Conflict Reproduction", () => {
     const conflictRepro = recipe<{ items: Item[] }>(
       "Conflict Repro",
       ({ items }) => {
-        const sequence = cell<number>();
+        const sequence = cell(0);
 
         // Minimal repro: Removing the lift and the map removes the conflict
         lift((item: Item[]) => item.map((_) => ({})))(items);
@@ -114,22 +114,22 @@ describe("Conflict Reproduction", () => {
 
     await runtime.idle();
 
-    // This tests the condition that caused the conflict
-    expect(result.get().sequence).toBe(undefined);
+    // Verify initial state
+    expect(result.get().sequence).toBe(0);
 
     // Trigger the handler
     result.key("action").send({});
     await runtime.idle();
 
-    // This tests the condition that caused the conflict
-    expect(result.get().sequence).toBe(null);
+    // After handler: sequence should be incremented to 1
+    expect(result.get().sequence).toBe(1);
 
     // Give time for async conflict notifications to be processed
     // The conflict happens during the optimistic transaction retry,
     // which completes asynchronously after runtime.idle()
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    // Verify that conflicts were NOT captured (fixed by normalizing NaN to null)
+    // Verify that conflicts were NOT captured
     expect(conflictErrors.length).toBe(0);
   });
 
@@ -159,7 +159,7 @@ describe("Conflict Reproduction", () => {
     const conflictReproNoLift = recipe<{ items: Item[] }>(
       "Conflict Repro No Lift",
       ({ items }) => {
-        const sequence = cell<number>();
+        const sequence = cell(0);
 
         // NO lift - this should eliminate conflicts
 
@@ -186,15 +186,15 @@ describe("Conflict Reproduction", () => {
 
     await runtime.idle();
 
-    // This tests the condition that caused the conflict
-    expect(result.get().sequence).toBe(undefined);
+    // Verify initial state
+    expect(result.get().sequence).toBe(0);
 
     // Trigger the handler
     result.key("action").send({});
     await runtime.idle();
 
-    // This tests the condition that caused the conflict
-    expect(result.get().sequence).toBe(null);
+    // After handler: sequence should be incremented to 1
+    expect(result.get().sequence).toBe(1);
 
     // Give time for async conflict notifications
     await new Promise((resolve) => setTimeout(resolve, 100));
