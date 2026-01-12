@@ -167,6 +167,8 @@ export default pattern((state) => {
                     items: {
                         $ref: "#/$defs/RenderNode"
                     }
+                }, {
+                    type: "null"
                 }]
         },
         Props: {

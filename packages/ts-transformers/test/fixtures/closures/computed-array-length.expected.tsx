@@ -171,6 +171,8 @@ export default pattern(() => {
                                 items: {
                                     $ref: "#/$defs/RenderNode"
                                 }
+                            }, {
+                                type: "null"
                             }]
                     },
                     Props: {
@@ -285,6 +287,8 @@ export default pattern(() => {
                     items: {
                         $ref: "#/$defs/RenderNode"
                     }
+                }, {
+                    type: "null"
                 }]
         },
         Props: {

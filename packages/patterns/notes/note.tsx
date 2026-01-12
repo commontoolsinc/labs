@@ -55,6 +55,7 @@ type Input = {
 /** Represents a small #note a user took to remember some text. */
 type Output = {
   [NAME]?: string;
+  [UI]?: VNode;
   mentioned: Default<Array<MentionableCharm>, []>;
   backlinks: MentionableCharm[];
 

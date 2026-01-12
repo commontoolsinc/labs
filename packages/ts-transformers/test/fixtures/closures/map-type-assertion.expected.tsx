@@ -91,6 +91,8 @@ export default recipe({
                     items: {
                         $ref: "#/$defs/RenderNode"
                     }
+                }, {
+                    type: "null"
                 }]
         },
         Props: {
@@ -232,6 +234,8 @@ export default recipe({
                                 items: {
                                     $ref: "#/$defs/RenderNode"
                                 }
+                            }, {
+                                type: "null"
                             }]
                     },
                     Props: {

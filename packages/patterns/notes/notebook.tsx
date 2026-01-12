@@ -9,6 +9,7 @@ import {
   pattern,
   Stream,
   UI,
+  type VNode,
   wish,
   Writable,
 } from "commontools";
@@ -48,6 +49,7 @@ interface Input {
 
 interface Output {
   [NAME]?: string;
+  [UI]?: VNode;
   title: string;
   notes: NoteCharm[];
   noteCount: number;

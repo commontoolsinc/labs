@@ -133,6 +133,8 @@ export default pattern((cell) => {
                     items: {
                         $ref: "#/$defs/RenderNode"
                     }
+                }, {
+                    type: "null"
                 }]
         },
         Props: {
