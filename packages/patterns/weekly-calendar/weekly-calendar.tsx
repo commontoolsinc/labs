@@ -529,7 +529,6 @@ export default pattern<Input, Output>(({ appointments }) => {
                 {/* Day Columns */}
                 {COLUMN_INDICES.map((colIdx) => {
                   // Computed values for this column
-                  const columnDate = computed(() => weekDates[colIdx] || "");
                   const isToday = computed(() =>
                     weekDates[colIdx] === todayDate
                   );
