@@ -208,8 +208,11 @@ const bindChildren = (
       const key = rawKey + "-" + count;
       newKeyOrder.push(key);
       if (keyedChildren.has(key)) {
-        // Reuse an existing rendered node.
-        newMapping.set(key, keyedChildren.get(key)!);
+        // Reuse an existing rendered node, but update it with the new child
+        // in case the child contains different Cell references.
+        const existingNode = keyedChildren.get(key)!;
+        existingNode.update(child);
+        newMapping.set(key, existingNode);
         keyedChildren.delete(key);
       } else {
         newMapping.set(
@@ -319,12 +322,37 @@ class VdomChildNode {
     this.options = options;
     this.visited = visited;
 
+    this.setupEffect(child);
+  }
+
+  private setupEffect(child: RenderNode) {
     // Check for cell cycle before setting up effect (using .equals() for comparison)
-    if (isCellHandle(child) && hasVisitedCell(visited, child)) {
-      this._element = createCyclePlaceholder(this.document);
+    if (isCellHandle(child) && hasVisitedCell(this.visited, child)) {
+      const placeholder = createCyclePlaceholder(this.document);
+      if (this._element) {
+        this._element.replaceWith(placeholder);
+      }
+      this._element = placeholder;
+      this.cancel = undefined;
       return;
     }
     this.cancel = effect<RenderNode>(child, this.onEffect);
+  }
+
+  /**
+   * Update this node with a new child. This is called when the parent
+   * re-renders and produces a new child value that matches this node's key.
+   * We need to cancel the old subscription and set up a new one.
+   */
+  update(newChild: RenderNode) {
+    // Cancel old effect/subscription
+    if (this.cancel) {
+      this.cancel();
+      this.cancel = undefined;
+    }
+
+    // Set up new effect with the new child
+    this.setupEffect(newChild);
   }
 
   onEffect = (childValue: RenderNode): Cancel | undefined => {
@@ -333,10 +361,13 @@ class VdomChildNode {
     if (isCellHandle(childValue)) {
       throw new Error("child node cell resolved to another cell.");
     } else if (isVNodeish(childValue)) {
+      // Create a fresh copy of visited for each effect invocation to avoid
+      // false cycle detection when the same VNode structure is re-rendered.
+      // This mirrors the behavior in renderNode when handling CellHandle nodes.
       const [childElement, childCancel] = renderNode(
         childValue,
         this.options,
-        this.visited,
+        new Set(this.visited),
       );
       element = childElement;
       cancel = childCancel;
