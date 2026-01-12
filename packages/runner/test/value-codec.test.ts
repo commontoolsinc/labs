@@ -46,17 +46,17 @@ describe("value-codec", () => {
         expect(isStorableValue([{ a: 1 }, { b: 2 }])).toBe(true);
       });
 
-      // TODO(@danfuzz): These should return false once the TODOs are resolved
+      // TODO(@danfuzz): This should return false once the TODO is resolved
       it("accepts undefined (TODO: should be false)", () => {
         expect(isStorableValue(undefined)).toBe(true);
-      });
-
-      it("accepts NaN (TODO: should be false)", () => {
-        expect(isStorableValue(NaN)).toBe(true);
       });
     });
 
     describe("returns false for non-JSON-encodable values", () => {
+      it("rejects NaN", () => {
+        expect(isStorableValue(NaN)).toBe(false);
+      });
+
       it("rejects Infinity", () => {
         expect(isStorableValue(Infinity)).toBe(false);
         expect(isStorableValue(-Infinity)).toBe(false);
@@ -130,13 +130,13 @@ describe("value-codec", () => {
       });
     });
 
-    describe("converts NaN to null (TODO: should throw)", () => {
-      it("converts NaN to null", () => {
-        expect(toStorableValue(NaN)).toBe(null);
-      });
-    });
-
     describe("throws for non-convertible values", () => {
+      it("throws for NaN", () => {
+        expect(() => toStorableValue(NaN)).toThrow(
+          "Cannot store non-finite number",
+        );
+      });
+
       it("throws for Infinity", () => {
         expect(() => toStorableValue(Infinity)).toThrow(
           "Cannot store non-finite number",

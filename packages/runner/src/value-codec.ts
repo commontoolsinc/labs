@@ -25,15 +25,8 @@ export function isStorableValue(value: unknown): boolean {
     case "number": {
       // Finite numbers are storable. Note: `-0` is accepted because it gets
       // normalized to `0` during conversion (see `toStorableValue()`).
-      if (Number.isFinite(value)) {
-        return true;
-      }
-      // TODO(@danfuzz): `NaN` isn't JSON-encodable; this case should return
-      // `false`. See the related TODO item in `toStorableValue()` below.
-      if (Number.isNaN(value)) {
-        return true;
-      }
-      return false;
+      // `NaN` and `Infinity` are not JSON-encodable and thus not storable.
+      return Number.isFinite(value);
     }
 
     case "object": {
@@ -77,15 +70,6 @@ export function toStorableValue(value: unknown): unknown {
         // Normalize `-0` to `0` to avoid JSON serialization quirks.
         return Object.is(value, -0) ? 0 : value;
       } else {
-        if (Number.isNaN(value)) {
-          // TODO(@danfuzz): This is allowed for now, even though it isn't
-          // JSON-encodable, specifically because there is a test which
-          // explicitly expects `NaN` to become `null`. To be clear, this _does_
-          // match the behavior of `JSON.stringify()`, however in the spirit of
-          // "Death before confusion!" I think the test in question should get
-          // tweaked, and then this `if` statement should be removed.
-          return null;
-        }
         throw new Error("Cannot store non-finite number");
       }
     }
