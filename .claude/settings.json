@@ -17,6 +17,10 @@
         "hooks": [
           {
             "type": "command",
+            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/block-git-amend.ts\""
+          },
+          {
+            "type": "command",
             "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/block-node.ts\""
           },
           {
