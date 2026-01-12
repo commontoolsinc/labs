@@ -3,15 +3,17 @@
  * TypePicker Module - Controller pattern for selecting record type
  *
  * This is a "controller module" - it doesn't just store data, it ACTS on
- * the parent container's state. It uses the ContainerCoordinationContext
- * protocol to modify the parent's entries list.
+ * the parent container's state by receiving parent Cells as top-level inputs.
  *
  * Key architecture:
- * - Receives ContainerCoordinationContext as INPUT
- * - Context's entries/trashedEntries are Cells that survive serialization
- * - Context's linkPatternJson is a serializable string (no functions!)
- * - Can call .get() and .set() on context Cells from handlers
+ * - Receives Cells (entries, trashedEntries) as TOP-LEVEL pattern inputs
+ * - CTS handles Cell serialization correctly when they're top-level props
+ * - linkPatternJson is a serializable string (no functions!)
+ * - Can call .get() and .set() on input Cells from handlers
  * - Trashes itself after applying a template
+ *
+ * IMPORTANT: Cells must be top-level props, not nested in a context object!
+ * When nested inside a plain object, CTS serialization fails.
  *
  * See: community-docs/superstitions/2025-12-19-auto-init-use-two-lift-pattern.md
  */
@@ -24,10 +26,7 @@ import {
   UI,
   Writable,
 } from "commontools";
-import type {
-  ContainerCoordinationContext,
-  ModuleMetadata,
-} from "./container-protocol.ts";
+import type { ModuleMetadata } from "./container-protocol.ts";
 import {
   createTemplateModules,
   getTemplateList,
@@ -50,8 +49,11 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 
 interface TypePickerInput {
-  // Container coordination context - passed from parent
-  context: ContainerCoordinationContext<SubCharmEntry>;
+  // Cells at top level - CTS handles these correctly for serialization
+  // (When nested inside a plain object, serialization fails)
+  entries: Writable<SubCharmEntry[]>;
+  trashedEntries: Writable<TrashedSubCharmEntry[]>;
+  linkPatternJson?: string;
   // Internal state
   dismissed?: Default<boolean, false>;
 }
@@ -141,9 +143,8 @@ const dismiss = handler<
 // ===== The Pattern =====
 
 export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
-  ({ context, dismissed }) => {
-    // Extract context components for handlers
-    const { entries, trashedEntries, linkPatternJson } = context;
+  ({ entries, trashedEntries, linkPatternJson, dismissed }) => {
+    // Props are now at top level - CTS handles Cell serialization correctly
 
     // Get templates to display (excluding blank)
     const templates = getTemplateList().filter(isNotBlankTemplate);

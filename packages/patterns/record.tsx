@@ -37,7 +37,6 @@ import { inferTypeFromModules } from "./record/template-registry.ts";
 import { TypePickerModule } from "./type-picker.tsx";
 import { ExtractorModule } from "./record/extraction/extractor-module.tsx";
 import { getResultSchema } from "./record/extraction/schema-utils.ts";
-import type { ContainerCoordinationContext } from "./container-protocol.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
 
 // ===== Standard Labels for Smart Defaults =====
@@ -163,26 +162,17 @@ const initializeRecord = lift(
       // Pass recordPatternJson so [[wiki-links]] create Record charms instead of Note charms
       const notesCharm = Note({ linkPattern: recordPatternJson });
 
-      // Build ContainerCoordinationContext for TypePicker
-      const context: ContainerCoordinationContext<SubCharmEntry> = {
-        entries: subCharms,
-        trashedEntries: trashedSubCharms as Writable<
-          (SubCharmEntry & { trashedAt: string })[]
-        >,
-        createModule: (type: string) => {
-          if (type === "notes") {
-            return Note({ linkPattern: recordPatternJson });
-          }
-          return createSubCharm(type);
-        },
-      };
-
       // Capture schema for dynamic discovery
       const notesSchema = getResultSchema(notesCharm);
 
-      // TypePicker uses the ContainerCoordinationContext protocol
+      // TypePicker receives Cells as top-level props (CTS handles serialization correctly)
+      // NOTE: Cells must be top-level, not nested in a context object!
       // deno-lint-ignore no-explicit-any
-      const typePickerCharm = TypePickerModule({ context } as any);
+      const typePickerCharm = TypePickerModule({
+        entries: subCharms,
+        trashedEntries: trashedSubCharms,
+        linkPatternJson: recordPatternJson,
+      } as any);
 
       // Capture schema for dynamic discovery
       const typePickerSchema = getResultSchema(typePickerCharm);
