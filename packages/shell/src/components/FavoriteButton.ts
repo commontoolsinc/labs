@@ -52,16 +52,15 @@ export class XFavoriteButtonElement extends LitElement {
 
     if (!this.rt || !this.charmId || this._isLoading) return;
 
-    const runtime = this.rt.runtime();
     const currentlyFavorite = this.deriveIsFavorite();
 
     this._isLoading = true;
     try {
       if (currentlyFavorite) {
-        await runtime.removeFavorite(this.charmId);
+        await this.rt.favorites().removeFavorite(this.charmId);
         this._localIsFavorite = false;
       } else {
-        await runtime.addFavorite(this.charmId);
+        await this.rt.favorites().addFavorite(this.charmId);
         this._localIsFavorite = true;
       }
       // Re-run the sync task to get fresh state
@@ -95,7 +94,7 @@ export class XFavoriteButtonElement extends LitElement {
     ): Promise<boolean> => {
       if (!rt || !charmId) return false;
       try {
-        const result = await rt.runtime().isFavorite(charmId);
+        const result = await rt.favorites().isFavorite(charmId);
         // Clear local state once we have server state
         this._localIsFavorite = undefined;
         return result;

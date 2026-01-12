@@ -24,10 +24,6 @@ import {
   type CellSetRequest,
   type CellSubscribeRequest,
   type CellUnsubscribeRequest,
-  type FavoriteAddRequest,
-  type FavoriteIsMemberRequest,
-  type FavoriteRemoveRequest,
-  FavoritesResponse,
   type GetCellRequest,
   GetGraphSnapshotRequest,
   type GetLoggerCountsRequest,
@@ -52,7 +48,6 @@ import {
   type SetPullModeRequest,
 } from "../protocol/mod.ts";
 import { HttpProgramResolver, Program } from "@commontools/js-compiler";
-import { favoriteListSchema } from "@commontools/home-schemas";
 import { setLLMUrl } from "@commontools/llm";
 import {
   createCellRef,
@@ -386,163 +381,6 @@ export class RuntimeProcessor {
     await this.charmManager.synced();
   }
 
-  /**
-   * Get the home space's defaultPattern cell which owns favorites.
-   * Favorites are always stored in the user's home space, regardless of
-   * which space the user is currently viewing.
-   */
-  private async getHomeDefaultPattern() {
-    const homeSpaceCell = this.runtime.getHomeSpaceCell();
-    await homeSpaceCell.sync();
-
-    const defaultPatternCell = homeSpaceCell.key("defaultPattern");
-    await defaultPatternCell.sync();
-
-    // Check that defaultPattern exists
-    const patternLink = defaultPatternCell.get();
-    if (!patternLink) {
-      throw new Error(
-        "Home space defaultPattern not initialized. Visit home space first.",
-      );
-    }
-
-    // Start the pattern to ensure it's running
-    const charmCell = defaultPatternCell.resolveAsCell();
-    if (charmCell) {
-      await this.runtime.start(charmCell);
-      await this.runtime.idle();
-    }
-
-    return defaultPatternCell;
-  }
-
-  async handleFavoriteAdd(request: FavoriteAddRequest): Promise<void> {
-    const defaultPattern = await this.getHomeDefaultPattern();
-
-    // Get the charm cell to add
-    const charmCell = this.runtime.getCellFromEntityId(this.space, {
-      "/": request.charmId,
-    });
-
-    // Get the charm cell with schema marking addFavorite as a stream
-    // Key insight: Must use .asSchema({ asStream: true }) to mark as stream,
-    // then .send() will use scheduler.queueEvent() internally
-    const patternCharm = defaultPattern.resolveAsCell();
-    if (!patternCharm) {
-      throw new Error("Could not resolve home pattern");
-    }
-
-    const cell = patternCharm.asSchema({
-      type: "object",
-      properties: {
-        addFavorite: { asStream: true },
-      },
-      required: ["addFavorite"],
-    });
-
-    const handlerStream = cell.key("addFavorite");
-    handlerStream.send({ charm: charmCell, tag: request.tag || "" });
-    await this.runtime.idle();
-  }
-
-  async handleFavoriteRemove(request: FavoriteRemoveRequest): Promise<void> {
-    const defaultPattern = await this.getHomeDefaultPattern();
-
-    // Get the charm cell to remove
-    const charmCell = this.runtime.getCellFromEntityId(this.space, {
-      "/": request.charmId,
-    });
-
-    // Get the charm cell with schema marking removeFavorite as a stream
-    const patternCharm = defaultPattern.resolveAsCell();
-    if (!patternCharm) {
-      throw new Error("Could not resolve home pattern");
-    }
-
-    const cell = patternCharm.asSchema({
-      type: "object",
-      properties: {
-        removeFavorite: { asStream: true },
-      },
-      required: ["removeFavorite"],
-    });
-
-    const handlerStream = cell.key("removeFavorite");
-    handlerStream.send({ charm: charmCell });
-    await this.runtime.idle();
-  }
-
-  async handleFavoriteIsMember(
-    request: FavoriteIsMemberRequest,
-  ): Promise<BooleanResponse> {
-    const defaultPattern = await this.getHomeDefaultPattern();
-
-    // Get favorites cell and resolve it
-    const favoritesCell = defaultPattern.key("favorites")
-      .resolveAsCell()
-      ?.asSchema(favoriteListSchema);
-
-    if (!favoritesCell) {
-      return { value: false };
-    }
-
-    await favoritesCell.sync();
-    const favorites = favoritesCell.get();
-
-    if (!favorites || !Array.isArray(favorites)) {
-      return { value: false };
-    }
-
-    // Check if charm is in favorites by comparing entity IDs
-    const charmCell = this.runtime.getCellFromEntityId(this.space, {
-      "/": request.charmId,
-    });
-
-    const isMember = favorites.some(
-      (fav: any) =>
-        fav.cell &&
-        typeof fav.cell.equals === "function" &&
-        fav.cell.equals(charmCell),
-    );
-
-    return { value: isMember };
-  }
-
-  async handleFavoritesGetAll(): Promise<FavoritesResponse> {
-    const defaultPattern = await this.getHomeDefaultPattern();
-
-    // Get favorites cell and resolve it
-    const favoritesCell = defaultPattern.key("favorites")
-      .resolveAsCell()
-      ?.asSchema(favoriteListSchema);
-
-    if (!favoritesCell) {
-      return { favorites: [] };
-    }
-
-    await favoritesCell.sync();
-    const favorites = favoritesCell.get();
-
-    if (!favorites || !Array.isArray(favorites)) {
-      return { favorites: [] };
-    }
-
-    // Convert to response format
-    const result = favorites.map((fav: any) => {
-      const charmId = fav.cell?.entityId?.["/"] || "";
-      const userTags = Array.isArray(fav.userTags)
-        ? fav.userTags
-        : (fav.userTags?.get?.() || []);
-      return {
-        charmId,
-        tag: fav.tag || "",
-        userTags,
-      };
-    });
-
-    return { favorites: result };
-  }
-
   getGraphSnapshot(_: GetGraphSnapshotRequest): GraphSnapshotResponse {
     return { snapshot: this.runtime.scheduler.getGraphSnapshot() };
   }
@@ -663,14 +501,6 @@ export class RuntimeProcessor {
         return this.setLoggerLevel(request);
       case RequestType.SetLoggerEnabled:
         return this.setLoggerEnabled(request);
-      case RequestType.FavoriteAdd:
-        return await this.handleFavoriteAdd(request);
-      case RequestType.FavoriteRemove:
-        return await this.handleFavoriteRemove(request);
-      case RequestType.FavoriteIsMember:
-        return await this.handleFavoriteIsMember(request);
-      case RequestType.FavoritesGetAll:
-        return await this.handleFavoritesGetAll();
       default:
         throw new Error(`Unknown message type: ${(request as any).type}`);
     }

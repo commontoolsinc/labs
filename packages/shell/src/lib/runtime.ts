@@ -2,6 +2,7 @@ import { createSession, DID, Identity, Session } from "@commontools/identity";
 import { NameSchema } from "@commontools/runner/schemas";
 import {
   CellHandle,
+  FavoritesManager,
   JSONValue,
   PageHandle,
   Program,
@@ -33,6 +34,8 @@ export class RuntimeInternals extends EventTarget {
   #space: DID;
   #spaceName?: string;
   #isHomeSpace: boolean;
+  #homeSpaceDID: DID;
+  #favorites: FavoritesManager;
   #spaceRootPattern?: Promise<PageHandle<NameSchema>>;
   #patternCache: Map<string, Promise<PageHandle<NameSchema>>> = new Map();
   // TODO(runtime-worker-refactor)
@@ -43,12 +46,15 @@ export class RuntimeInternals extends EventTarget {
     space: DID,
     spaceName: string | undefined,
     isHomeSpace: boolean,
+    homeSpaceDID: DID,
   ) {
     super();
     this.#client = client;
     this.#space = space;
     this.#spaceName = spaceName;
     this.#isHomeSpace = isHomeSpace;
+    this.#homeSpaceDID = homeSpaceDID;
+    this.#favorites = new FavoritesManager(client, homeSpaceDID, space);
     this.#client.on("console", this.#onConsole);
     this.#client.on("navigaterequest", this.#onNavigateRequest);
     this.#client.on("error", this.#onError);
@@ -73,6 +79,15 @@ export class RuntimeInternals extends EventTarget {
 
   isHomeSpace(): boolean {
     return this.#isHomeSpace;
+  }
+
+  homeSpaceDID(): DID {
+    return this.#homeSpaceDID;
+  }
+
+  favorites(): FavoritesManager {
+    this.#check();
+    return this.#favorites;
   }
 
   async createCharm<T>(
@@ -244,6 +259,7 @@ export class RuntimeInternals extends EventTarget {
       session.space,
       session.spaceName,
       isHomeSpace,
+      identity.did(), // homeSpaceDID is always identity.did()
     );
   }
 }
