@@ -166,32 +166,10 @@ const trackRecent = handler<
   recentCharms.set(updated);
 });
 
-// Handler: Pin a charm
-const pin = handler<
-  { charm: Writable<unknown> },
-  { pinnedCharms: Writable<MentionableCharm[]> }
->(({ charm }, { pinnedCharms }) => {
-  const current = pinnedCharms.get();
-  if (!current.some((c) => equals(c, charm))) {
-    pinnedCharms.push(charm as any);
-  }
-});
-
-// Handler: Unpin a charm
-const unpin = handler<
-  { charm: Writable<unknown> },
-  { pinnedCharms: Writable<MentionableCharm[]> }
->(({ charm }, { pinnedCharms }) => {
-  const current = pinnedCharms.get();
-  const filtered = current.filter((c) => !equals(c, charm));
-  pinnedCharms.set(filtered);
-});
-
 export default pattern<CharmsListInput, CharmsListOutput>((_) => {
   // OWN the data cells (not from wish)
   const allCharms = Writable.of<MentionableCharm[]>([]);
   const recentCharms = Writable.of<MentionableCharm[]>([]);
-  const pinnedCharms = Writable.of<MentionableCharm[]>([]);
 
   // Dropdown menu state
   const menuOpen = Writable.of(false);
@@ -393,12 +371,9 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
     // Exported data
     allCharms,
     recentCharms,
-    pinnedCharms,
 
     // Exported handlers (bound to state cells for external callers)
     addCharm: addCharm({ allCharms }),
     trackRecent: trackRecent({ recentCharms }),
-    pin: pin({ pinnedCharms }),
-    unpin: unpin({ pinnedCharms }),
   };
 });
