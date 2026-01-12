@@ -47,6 +47,7 @@ interface Input {
 }
 
 interface Output {
+  [NAME]?: string;
   title: string;
   notes: NoteCharm[];
   noteCount: number;
@@ -173,8 +174,8 @@ const removeFromNotebook = handler<
 
 // Handler for dropping a charm onto this notebook
 const _handleCharmDrop = handler<
-  { detail: { sourceCell: Writable<unknown> } },
-  { notes: Writable<any[]> }
+  { detail: { sourceCell: Writable<NoteCharm> } },
+  { notes: Writable<NoteCharm[]> }
 >((event, { notes }) => {
   const sourceCell = event.detail.sourceCell;
   const notesList = notes.get() ?? [];
@@ -794,7 +795,7 @@ const createNotebookFromPrompt = handler<
     pendingNotebookAction: Writable<"add" | "move" | "">;
     selectedNoteIndices: Writable<number[]>;
     notes: Writable<NoteCharm[]>;
-    allCharms: Writable<any[]>;
+    allCharms: Writable<MinimalCharm[]>;
     notebooks: Writable<NotebookCharm[]>;
   }
 >((_, state) => {

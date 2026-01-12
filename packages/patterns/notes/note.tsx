@@ -54,6 +54,7 @@ type Input = {
 
 /** Represents a small #note a user took to remember some text. */
 type Output = {
+  [NAME]?: string;
   mentioned: Default<Array<MentionableCharm>, []>;
   backlinks: MentionableCharm[];
 
@@ -107,7 +108,7 @@ const handleNewBacklink = handler<
   },
   {
     mentionable: Writable<MentionableCharm[]>;
-    allCharms: Writable<any[]>;
+    allCharms: Writable<MinimalCharm[]>;
   }
 >(({ detail }, { mentionable, allCharms }) => {
   console.log("new charm", detail.text, detail.charmId);
@@ -182,7 +183,7 @@ const closeMenu = handler<void, { menuOpen: Writable<boolean> }>(
 const createNewNote = handler<
   void,
   {
-    allCharms: Writable<any[]>;
+    allCharms: Writable<MinimalCharm[]>;
     parentNotebook: Writable<NotebookCharm | null>;
   }
 >((_, { allCharms, parentNotebook }) => {
@@ -281,7 +282,7 @@ const translateFn = (
 // Menu: All Notes (find existing only - can't create due to circular imports)
 const menuAllNotebooks = handler<
   void,
-  { menuOpen: Writable<boolean>; allCharms: Writable<any[]> }
+  { menuOpen: Writable<boolean>; allCharms: Writable<MinimalCharm[]> }
 >((_, { menuOpen, allCharms }) => {
   menuOpen.set(false);
   const charms = allCharms.get();
