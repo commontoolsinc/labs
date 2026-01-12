@@ -404,52 +404,24 @@ export class RuntimeProcessor {
       "/": request.charmId,
     });
 
-    // Get favorites cell and resolve it
-    // NOTE: Handler invocation doesn't work - the handler never gets triggered.
-    // Using direct cell modification instead.
-    // TODO(ben): Investigate why handler streams aren't triggering from RuntimeProcessor
-    //
-    // Here's what we tried (handler in home.tsx never runs):
-    // ```
-    // const charmCell = defaultPattern.resolveAsCell();
-    // const sourceCell = charmCell?.getSourceCell();
-    // const resultCell = sourceCell?.key("resultRef");  // Don't use .resolveAsCell()!
-    // // resultCell.get() shows: {addFavorite: {...}, favorites: [...], ...}
-    // const addFavoriteStream = resultCell.key("addFavorite");
-    // // Tried both approaches:
-    // // 1. addFavoriteStream.withTx(tx).send({ charm, tag });
-    // // 2. this.runtime.scheduler.queueEvent(addFavoriteStream.getAsNormalizedFullLink(), { charm, tag });
-    // // Neither triggers the handler defined in home.tsx
-    // ```
-    const favoritesCell = defaultPattern.key("favorites")
-      .resolveAsCell()
-      ?.asSchema(favoriteListSchema);
-
-    if (!favoritesCell) {
-      throw new Error("Could not resolve favorites cell");
+    // Get the charm cell with schema marking addFavorite as a stream
+    // Key insight: Must use .asSchema({ asStream: true }) to mark as stream,
+    // then .send() will use scheduler.queueEvent() internally
+    const patternCharm = defaultPattern.resolveAsCell();
+    if (!patternCharm) {
+      throw new Error("Could not resolve home pattern");
     }
 
-    const tx = this.runtime.edit();
-    const current = favoritesCell.get() || [];
-    const alreadyExists = current.some(
-      (f: any) =>
-        f.cell &&
-        typeof f.cell.equals === "function" &&
-        f.cell.equals(charmCell),
-    );
+    const cell = patternCharm.asSchema({
+      type: "object",
+      properties: {
+        addFavorite: { asStream: true },
+      },
+      required: ["addFavorite"],
+    });
 
-    if (!alreadyExists) {
-      favoritesCell.withTx(tx).set([
-        ...current,
-        {
-          cell: charmCell,
-          tag: request.tag || "",
-          userTags: [],
-        },
-      ]);
-    }
-
-    tx.commit();
+    const handlerStream = cell.key("addFavorite");
+    handlerStream.send({ charm: charmCell, tag: request.tag || "" });
     await this.runtime.idle();
   }
 
@@ -461,28 +433,22 @@ export class RuntimeProcessor {
       "/": request.charmId,
     });
 
-    // Get favorites cell and resolve it
-    const favoritesCell = defaultPattern.key("favorites")
-      .resolveAsCell()
-      ?.asSchema(favoriteListSchema);
-
-    if (!favoritesCell) {
-      throw new Error("Could not resolve favorites cell");
+    // Get the charm cell with schema marking removeFavorite as a stream
+    const patternCharm = defaultPattern.resolveAsCell();
+    if (!patternCharm) {
+      throw new Error("Could not resolve home pattern");
     }
 
-    const tx = this.runtime.edit();
-    const current = favoritesCell.get() || [];
-    const filtered = current.filter(
-      (f: any) =>
-        !(
-          f.cell &&
-          typeof f.cell.equals === "function" &&
-          f.cell.equals(charmCell)
-        ),
-    );
+    const cell = patternCharm.asSchema({
+      type: "object",
+      properties: {
+        removeFavorite: { asStream: true },
+      },
+      required: ["removeFavorite"],
+    });
 
-    favoritesCell.withTx(tx).set(filtered);
-    tx.commit();
+    const handlerStream = cell.key("removeFavorite");
+    handlerStream.send({ charm: charmCell });
     await this.runtime.idle();
   }
 
