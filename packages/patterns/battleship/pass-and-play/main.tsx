@@ -203,9 +203,7 @@ const fireShotHandler = handler<
   // Check if hit
   const hitShip = findShipAt(targetBoard.ships, { row, col });
   const newShots = shots.map((r, ri) =>
-    r.map((c, ci) =>
-      ri === row && ci === col ? (hitShip ? "hit" : "miss") : c
-    )
+    r.map((c, ci) => ri === row && ci === col ? (hitShip ? "hit" : "miss") : c)
   );
 
   const newTargetBoard = { ...targetBoard, shots: newShots };
