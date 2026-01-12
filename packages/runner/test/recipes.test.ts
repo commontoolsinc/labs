@@ -1861,6 +1861,165 @@ describe("Recipe Runner", () => {
     expect(lift2Runs).toBe(1);
   });
 
+  it("should provide SELF reference in pattern for self-referential types", async () => {
+    // Import SELF symbol
+    const { SELF } = await import("../src/builder/types.ts");
+
+    // Define schemas using JSON schema notation
+    const InputSchema = {
+      type: "object",
+      properties: {
+        label: { type: "string", default: "Node" },
+      },
+    } as const satisfies JSONSchema;
+
+    const OutputSchema = {
+      type: "object",
+      properties: {
+        label: { type: "string" },
+        children: {
+          type: "array",
+          items: { type: "object" }, // Self-referential
+          default: [],
+        },
+        hasSelf: { type: "boolean" },
+      },
+    } as const satisfies JSONSchema;
+
+    // Create a pattern that uses SELF
+    const treeNodePattern = pattern(
+      (input: any) => {
+        const label = input.label;
+        const self = input[SELF];
+
+        // children typed as array of self
+        const children = [] as (typeof self)[];
+
+        return {
+          label,
+          children,
+          hasSelf: self !== undefined,
+        };
+      },
+      InputSchema,
+      OutputSchema,
+    );
+
+    const resultCell = runtime.getCell<{
+      label: string;
+      children: any[];
+      hasSelf: boolean;
+    }>(
+      space,
+      "should provide SELF reference in pattern",
+      OutputSchema,
+      tx,
+    );
+
+    const result = runtime.run(
+      tx,
+      treeNodePattern,
+      { label: "Root" },
+      resultCell,
+    );
+    tx.commit();
+
+    const value = await result.pull();
+
+    // Verify SELF was available
+    expect(value.hasSelf).toBe(true);
+    expect(value.label).toBe("Root");
+    expect(value.children).toEqual([]);
+  });
+
+  it("should serialize SELF reference to resultRef path", async () => {
+    const { SELF } = await import("../src/builder/types.ts");
+
+    const InputSchema = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+      },
+    } as const satisfies JSONSchema;
+
+    const OutputSchema = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        self: { type: "object" },
+      },
+    } as const satisfies JSONSchema;
+
+    // Pattern that exposes self in output
+    const selfRefPattern = pattern(
+      (input: any) => {
+        const self = input[SELF];
+        return {
+          name: input.name,
+          self, // Expose the self reference
+        };
+      },
+      InputSchema,
+      OutputSchema,
+    );
+
+    // Check the serialized recipe structure
+    const serialized = JSON.parse(JSON.stringify(selfRefPattern));
+
+    // The self field in the result should be an alias to resultRef
+    expect(serialized.result.self.$alias.path).toEqual(["resultRef"]);
+  });
+
+  it("should allow SELF in recipe function as well as pattern", async () => {
+    const { SELF } = await import("../src/builder/types.ts");
+
+    const InputSchema = {
+      type: "object",
+      properties: {
+        value: { type: "number", default: 0 },
+      },
+    } as const satisfies JSONSchema;
+
+    const OutputSchema = {
+      type: "object",
+      properties: {
+        value: { type: "number" },
+        selfAvailable: { type: "boolean" },
+      },
+    } as const satisfies JSONSchema;
+
+    // Recipe (not pattern) that uses SELF
+    const selfRecipe = recipe(
+      InputSchema,
+      OutputSchema,
+      (input: any) => {
+        const self = input[SELF];
+        return {
+          value: input.value,
+          selfAvailable: self !== undefined,
+        };
+      },
+    );
+
+    const resultCell = runtime.getCell<{
+      value: number;
+      selfAvailable: boolean;
+    }>(
+      space,
+      "should allow SELF in recipe function",
+      OutputSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, selfRecipe, { value: 42 }, resultCell);
+    tx.commit();
+
+    const value = await result.pull();
+
+    expect(value.selfAvailable).toBe(true);
+    expect(value.value).toBe(42);
+  });
+
   it("should run dynamically instantiated recipes before reading their outputs", async () => {
     // This test reproduces a bug where:
     // 1. A lift dynamically instantiates recipes and pushes them to an array

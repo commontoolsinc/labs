@@ -3,7 +3,6 @@
  */
 import type {
   BuilderFunctionsAndConstants,
-  RecipeFunction,
   ToSchemaFunction,
 } from "./types.ts";
 import {
@@ -80,7 +79,7 @@ export const createBuilder = (): {
   return {
     commontools: {
       // Recipe creation
-      recipe: recipe as RecipeFunction,
+      recipe,
       patternTool,
 
       // Module creation
