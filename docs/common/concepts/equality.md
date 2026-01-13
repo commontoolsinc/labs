@@ -30,3 +30,19 @@ const removeItem = handler(({ item }: { item: Writable<Item> }, { items }: { ite
   }
 });
 ```
+
+### Why Not Use Custom `id` Properties?
+
+A common pattern in traditional JavaScript is adding `id` properties to objects for tracking:
+
+```typescript
+// AVOID - Custom id properties cause problems
+interface Deck {
+  id: string;  // Don't do this
+  name: string;
+}
+```
+
+This fails because when you access `deck.id` inside a `.map()` callback, you get a Cell, not a plain string. Use `equals()` instead for object identity comparison.
+
+See [Custom `id` Property Pitfall](../../development/debugging/gotchas/custom-id-property-pitfall.md) for the full explanation and workarounds.
