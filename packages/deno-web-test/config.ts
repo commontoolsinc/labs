@@ -21,12 +21,23 @@ export type Config = {
   esbuildConfig?: Parameters<typeof build>[0];
 };
 
-export const applyDefaults = (config: object): Config => {
-  return Object.assign({
+// Check if running in Claude Code remote environment (runs as root)
+const isClaudeCodeRemote = Deno.env.get("CLAUDE_CODE_REMOTE") === "true";
+
+export const applyDefaults = (config: Config): Config => {
+  const result: Config = {
     headless: true,
-    devtools: false,
     pipeConsole: true,
-  }, config);
+    ...config,
+  };
+
+  // When running in Claude Code remote environment, we run as root
+  // and Chromium requires --no-sandbox to run as root
+  if (isClaudeCodeRemote) {
+    result.args = ["--no-sandbox", ...(result.args ?? [])];
+  }
+
+  return result;
 };
 
 export const extractAstralConfig = (config: Config): LaunchOptions => {
