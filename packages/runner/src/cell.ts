@@ -980,8 +980,6 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
         kind = "stream";
       } else if (childSchema.asCell) {
         kind = "cell";
-      } else if (childSchema.asOpaque) {
-        kind = "opaque";
       }
     }
 
