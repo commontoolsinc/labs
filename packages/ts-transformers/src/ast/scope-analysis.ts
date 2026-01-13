@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { isFunctionLikeExpression } from "./function-predicates.ts";
+import { detectCallKind } from "./call-kind.ts";
 
 /**
  * Check if a declaration is at module scope (top-level of source file).
@@ -42,7 +43,18 @@ export function isFunctionDeclaration(
     }
 
     // For call expressions, use type system to determine if result is a function
+    // BUT: CommonTools builder calls (action, handler, computed, etc.) return
+    // callable factories that ARE meant to be captured and passed through the
+    // reactive system. These should NOT be treated as plain functions.
     if (checker && ts.isCallExpression(init)) {
+      // Check if this is a CommonTools builder call - these return reactive
+      // values that should be captured, not skipped as functions
+      const callKind = detectCallKind(init, checker);
+      if (callKind?.kind === "builder") {
+        // action(), handler(), computed(), etc. - NOT a plain function
+        return false;
+      }
+
       const type = checker.getTypeAtLocation(init);
       // Check if the type has call signatures (making it a function type)
       const signatures = type.getCallSignatures();
