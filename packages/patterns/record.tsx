@@ -20,6 +20,7 @@ import {
   lift,
   NAME,
   pattern,
+  SELF,
   str,
   toSchema,
   UI,
@@ -90,6 +91,8 @@ interface RecordOutput {
   title?: Default<string, "">;
   subCharms?: Default<SubCharmEntry[], []>;
   trashedSubCharms?: Default<TrashedSubCharmEntry[], []>;
+  /** Self-reference for sub-charms to access their parent Record */
+  parentRecord?: RecordOutput | null;
 }
 
 // ===== Auto-Initialize Notes + TypePicker (Two-Lift Pattern) =====
@@ -840,7 +843,7 @@ function getDisplayInfo(
 
 // ===== The Record Pattern =====
 const Record = pattern<RecordInput, RecordOutput>(
-  ({ title, subCharms, trashedSubCharms }) => {
+  ({ title, subCharms, trashedSubCharms, [SELF]: self }) => {
     // Local state
     const selectedAddType = Writable.of<string>("");
     const trashExpanded = Writable.of(false);
@@ -2262,6 +2265,9 @@ const Record = pattern<RecordInput, RecordOutput>(
       title,
       subCharms,
       trashedSubCharms,
+      // Self-reference for sub-charms to access their parent Record
+      // Enables cleaner parent-child relationships than ContainerCoordinationContext
+      parentRecord: self,
       "#record": true,
       // LLM-callable streams for Omnibot integration
       // Omnibot can invoke these via: invoke({ "@link": "/of:record-id/getSummary" }, {})

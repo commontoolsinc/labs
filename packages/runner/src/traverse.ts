@@ -2,6 +2,14 @@ import { refer } from "@commontools/memory/reference";
 import { SchemaAll } from "@commontools/memory/schema";
 import { MIME } from "@commontools/memory/interface";
 import type { JSONSchemaObj, Writable } from "@commontools/api";
+import type {
+  MemorySpace,
+  Result,
+  SchemaContext,
+  SchemaPathSelector,
+  Unit,
+} from "@commontools/memory/interface";
+import { deepEqual } from "@commontools/utils/deep-equal";
 // TODO(@ubik2): Ideally this would use the following, but rollup has issues
 //import { isNumber, isObject, isString } from "@commontools/utils/types";
 import {
@@ -15,14 +23,6 @@ import {
 import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { JSONObject, JSONSchema, JSONValue } from "./builder/types.ts";
-import type {
-  MemorySpace,
-  Result,
-  SchemaContext,
-  SchemaPathSelector,
-  Unit,
-} from "@commontools/memory/interface";
-import { deepEqual } from "./path-utils.ts";
 import {
   createDataCellURI,
   isPrimitiveCellLink,
@@ -49,6 +49,7 @@ import type {
   WriterError,
 } from "./storage/interface.ts";
 import { resolve } from "./storage/transaction/attestation.ts";
+
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 

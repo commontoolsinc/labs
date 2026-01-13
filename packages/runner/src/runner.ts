@@ -42,7 +42,7 @@ import {
   type NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
-import { deepEqual } from "./path-utils.ts";
+import { deepEqual } from "@commontools/utils/deep-equal";
 import { sendValueToBinding } from "./recipe-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { LINK_V1_TAG, SigilLink } from "./sigil-types.ts";

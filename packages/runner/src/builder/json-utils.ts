@@ -14,7 +14,7 @@ import {
   unsafe_originalRecipe,
 } from "./types.ts";
 import { getTopFrame } from "./recipe.ts";
-import { deepEqual } from "../path-utils.ts";
+import { deepEqual } from "@commontools/utils/deep-equal";
 import { Runtime } from "../runtime.ts";
 import {
   isCellLink,
