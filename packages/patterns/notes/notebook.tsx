@@ -40,6 +40,18 @@ type MinimalCharm = {
   [NAME]?: string;
 };
 
+// Helper to safely get notes array from a notebook (handles Cell/Writable or plain array)
+function getNotebookNotesArray(notebook: unknown): unknown[] {
+  const notes = (notebook as any)?.notes;
+  if (!notes) return [];
+  // Check if it's a Cell/Writable with .get() method
+  if (typeof notes.get === "function") {
+    return notes.get() ?? [];
+  }
+  // Plain array
+  return Array.isArray(notes) ? notes : [];
+}
+
 interface Input {
   title?: Default<string, "Notebook">;
   notes?: Default<NoteCharm[], []>;
@@ -1102,74 +1114,75 @@ const Notebook = pattern<Input, Output>(
     // State for expanded note previews (tracks which note indices have full content shown)
     const _expandedPreviews = Writable.of<number[]>([]);
 
-    // Filter to find all notebooks (using 📓 prefix in NAME)
+    // Filter to find all notebooks: have title but NO content property
+    // (notes have both title AND content, notebooks only have title)
+    // Note: [NAME] symbol doesn't work reliably through wish("/") proxy
     const notebooks = computed(() =>
-      allCharms.filter((charm: any) => {
-        const name = charm?.[NAME];
-        return typeof name === "string" && name.startsWith("📓");
-      })
+      allCharms.filter((charm: any) =>
+        charm?.title !== undefined && charm?.content === undefined
+      )
     );
 
-    // Find parent notebooks (notebooks that contain this notebook in their notes)
-    // This creates breadcrumb navigation
-    const parentNotebooks = computed(() => {
+    // COMBINED computed for ALL notebook relationships to avoid nested computed access issues
+    // Returns parents, children, siblings, and their boolean flags all in one place
+    const notebookRelationships = computed(() => {
       const currentTitle = title;
-      return notebooks.filter((nb: any) => {
-        // Skip self
-        const nbName = nb?.[NAME];
-        if (typeof nbName === "string" && nbName.includes(currentTitle)) {
-          return false;
-        }
-        // Check if this notebook's notes contain the current notebook
-        const nbNotes = nb?.notes ?? [];
-        return nbNotes.some((n: any) => {
-          const noteName = n?.[NAME];
-          return typeof noteName === "string" &&
-            noteName.includes(currentTitle);
-        });
-      });
-    });
+      const nbCount = notebooks.length;
 
-    // Child notebooks (notebooks that are in this notebook's notes)
-    // Use isNotebook property (not [NAME] which doesn't work on nested refs)
-    const childNotebooks = computed(() => {
-      // Get titles of notebooks in our notes list (use isNotebook property, not [NAME])
-      const childTitles = (notes ?? [])
+      // Find parent notebooks (notebooks that contain this notebook)
+      const parents: any[] = [];
+      for (let i = 0; i < nbCount; i++) {
+        const nb = notebooks[i];
+        const nbTitle = nb?.title;
+        const isSelf = nbTitle === currentTitle;
+        const nbNotes = getNotebookNotesArray(nb);
+        const containsMe = nbNotes.some((n: any) => n?.title === currentTitle);
+
+        if (!isSelf && containsMe) {
+          parents.push(nb);
+        }
+      }
+
+      // Find child notebooks (notebooks in our notes list)
+      const notesList = notes ?? [];
+      const childTitles = (Array.isArray(notesList) ? notesList : [])
         .filter((n: any) => n?.isNotebook === true)
         .map((n: any) => n?.title)
         .filter((t: any) => typeof t === "string");
-      // Find matching notebooks from allCharms by title
-      return notebooks.filter((nb: any) => {
-        const nbTitle = nb?.title;
-        return typeof nbTitle === "string" && childTitles.includes(nbTitle);
-      });
-    });
 
-    // Sibling notebooks (other notebooks from space, excluding current, parents, and children)
-    const siblingNotebooks = computed(() => {
-      // Use title property for matching (works on nested refs)
-      const parentTitles = parentNotebooks
-        .map((p: any) => p?.title)
-        .filter((t: any) => typeof t === "string");
-      const childTitles = childNotebooks
-        .map((c: any) => c?.title)
-        .filter((t: any) => typeof t === "string");
-      return notebooks.filter((nb: any) => {
+      const children: any[] = [];
+      for (let i = 0; i < nbCount; i++) {
+        const nb = notebooks[i];
         const nbTitle = nb?.title;
-        if (typeof nbTitle !== "string") return false;
-        // Skip current notebook
-        if (nbTitle === title) return false;
-        // Skip parent notebooks
-        if (parentTitles.includes(nbTitle)) return false;
-        // Skip child notebooks (they're shown in their own section)
-        if (childTitles.includes(nbTitle)) return false;
-        return true;
-      });
-    });
+        if (typeof nbTitle === "string" && childTitles.includes(nbTitle)) {
+          children.push(nb);
+        }
+      }
 
-    // Use computed() for proper reactive tracking of notebook list lengths
-    const hasParentNotebooks = computed(() => parentNotebooks.length > 0);
-    const hasSiblingNotebooks = computed(() => siblingNotebooks.length > 0);
+      // Find sibling notebooks (excluding self, parents, and children)
+      const parentTitles = parents.map((p: any) => p?.title).filter((t: any) =>
+        typeof t === "string"
+      );
+      const siblings: any[] = [];
+      for (let i = 0; i < nbCount; i++) {
+        const nb = notebooks[i];
+        const nbTitle = nb?.title;
+        if (typeof nbTitle !== "string") continue;
+        if (nbTitle === currentTitle) continue; // Skip self
+        if (parentTitles.includes(nbTitle)) continue; // Skip parents
+        if (childTitles.includes(nbTitle)) continue; // Skip children
+        siblings.push(nb);
+      }
+
+      return {
+        parents,
+        hasParents: parents.length > 0,
+        children,
+        hasChildren: children.length > 0,
+        siblings,
+        hasSiblings: siblings.length > 0,
+      };
+    });
 
     // Check if "All Notes" charm exists in the space
     const allNotesCharm = computed(() =>
@@ -1227,7 +1240,7 @@ const Notebook = pattern<Input, Output>(
                 <div
                   style={{
                     display: computed(() =>
-                      hasParentNotebooks ? "flex" : "none"
+                      notebookRelationships.hasParents ? "flex" : "none"
                     ),
                     alignItems: "center",
                     gap: "4px",
@@ -1235,7 +1248,9 @@ const Notebook = pattern<Input, Output>(
                 >
                   <ct-button
                     variant="ghost"
-                    onClick={goToParent({ parent: parentNotebooks[0] })}
+                    onClick={goToParent({
+                      parent: notebookRelationships.parents[0],
+                    })}
                     style={{
                       padding: "4px",
                       fontSize: "16px",
@@ -1247,14 +1262,14 @@ const Notebook = pattern<Input, Output>(
                   <ct-drop-zone
                     accept="note,notebook"
                     onct-drop={handleDropOntoNotebook({
-                      targetNotebook: parentNotebooks[0] as any,
+                      targetNotebook: notebookRelationships.parents[0] as any,
                       currentNotes: notes,
                       selectedNoteIndices,
                       notebooks,
                     })}
                   >
-                    <ct-cell-context $cell={parentNotebooks[0]}>
-                      <ct-cell-link $cell={parentNotebooks[0]} />
+                    <ct-cell-context $cell={notebookRelationships.parents[0]}>
+                      <ct-cell-link $cell={notebookRelationships.parents[0]} />
                     </ct-cell-context>
                   </ct-drop-zone>
                 </div>
@@ -1262,7 +1277,7 @@ const Notebook = pattern<Input, Output>(
                 <div
                   style={{
                     display: computed(() =>
-                      hasParentNotebooks ? "none" : "block"
+                      notebookRelationships.hasParents ? "none" : "block"
                     ),
                   }}
                 />
@@ -1515,7 +1530,8 @@ const Notebook = pattern<Input, Output>(
                       {/* Checkbox column (32px + 4px padding) */}
                       <div style={{ width: "32px", padding: "0 4px" }}>
                         <ct-checkbox
-                          checked={computed(() => notes.length > 0 &&
+                          checked={computed(() =>
+                            notes.length > 0 &&
                             selectedNoteIndices.get().length === notes.length
                           )}
                           onct-change={computed(() =>
@@ -1607,7 +1623,7 @@ const Notebook = pattern<Input, Output>(
                 gap="2"
                 style={{
                   display: computed(() =>
-                    hasSiblingNotebooks ? "flex" : "none"
+                    notebookRelationships.hasSiblings ? "flex" : "none"
                   ),
                   marginTop: "16px",
                   paddingTop: "16px",
@@ -1624,7 +1640,7 @@ const Notebook = pattern<Input, Output>(
                   Other notebooks:
                 </span>
                 <ct-vstack gap="1">
-                  {siblingNotebooks.map((notebook) => (
+                  {notebookRelationships.siblings.map((notebook) => (
                     <ct-hstack
                       gap="1"
                       style={{ alignItems: "center" }}
