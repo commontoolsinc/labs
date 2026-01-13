@@ -32,6 +32,7 @@ import {
   type OpaqueRef,
   type RecipeFactory,
   type Schema,
+  SELF,
   type Stream,
   TYPE,
 } from "./builder/types.ts";
@@ -222,6 +223,9 @@ declare module "@commontools/api" {
 
     // TODO(seefeld): Remove once default schemas are properly propagated
     setInitialValue(value: T): void;
+
+    /** Set the self-reference for SELF symbol support in patterns */
+    setSelfRef(selfRef: OpaqueRef<any>): void;
   }
 
   interface ICreatable<C extends AnyBrandedCell<any>> {
@@ -269,6 +273,8 @@ const cellMethods = new Set<keyof ICell<unknown>>([
   "connect",
   "export",
   "getAsOpaqueRefProxy",
+  "setInitialValue",
+  "setSelfRef",
 ]);
 
 export function createCell<T>(
@@ -326,6 +332,9 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   private _frame: Frame | undefined;
 
   private _kind: CellKind;
+
+  // Self-reference for pattern SELF symbol support
+  private _selfRef?: OpaqueRef<any>;
 
   constructor(
     public readonly runtime: Runtime,
@@ -1333,6 +1342,14 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   }
 
   /**
+   * Set the self-reference for pattern SELF symbol support.
+   * This allows patterns to access their own output via the SELF symbol.
+   */
+  setSelfRef(selfRef: OpaqueRef<any>): void {
+    this._selfRef = selfRef;
+  }
+
+  /**
    * Wrap this cell in a proxy that provides OpaqueRef behavior.
    * The proxy adds Symbol.iterator, Symbol.toPrimitive, and toCell support,
    * and recursively wraps child cells accessed via property access.
@@ -1366,6 +1383,9 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
           return () => self;
         } else if (prop === isOpaqueRefMarker) {
           return true;
+        } else if (prop === SELF) {
+          // Return the self-reference if set (for pattern SELF symbol support)
+          return (self as unknown as CellImpl<T>)._selfRef;
         } else if (typeof prop === "string" || typeof prop === "number") {
           // Recursive property access - wrap the child cell
           const nestedCell = self.key(prop) as Cell<T>;

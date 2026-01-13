@@ -43,6 +43,7 @@ import type {
   RecipeFunction,
   Schema,
   schema as schemaFunction,
+  SELF as SELFSymbol,
   StreamDataFunction,
   StrFunction,
   UnlessFunction,
@@ -69,6 +70,9 @@ export const ID_FIELD: typeof IDFieldSymbol = Symbol(
 export const TYPE = "$TYPE";
 export const NAME = "$NAME";
 export const UI = "$UI";
+
+// Symbol for accessing self-reference in patterns
+export const SELF: typeof SELFSymbol = Symbol("SELF") as any;
 
 export const schema: typeof schemaFunction = (schema) => schema;
 
@@ -112,6 +116,7 @@ export type {
   Props,
   Recipe,
   RecipeFactory,
+  RecipeFunction,
   RenderNode,
   Schema,
   SchemaWithoutCell,
@@ -284,6 +289,7 @@ export interface BuilderFunctionsAndConstants {
   // Constants
   ID: typeof ID;
   ID_FIELD: typeof ID_FIELD;
+  SELF: typeof SELF;
   TYPE: typeof TYPE;
   NAME: typeof NAME;
   UI: typeof UI;
