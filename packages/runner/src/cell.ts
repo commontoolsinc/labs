@@ -733,11 +733,10 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   }
 
   send(
-    event?: AnyCellWrapping<T>,
+    event: AnyCellWrapping<T>,
     onCommit?: (tx: IExtendedStorageTransaction) => void,
   ): void {
-    // For void streams, send {} instead of undefined to match UI event behavior
-    this.set((event ?? {}) as AnyCellWrapping<T>, onCommit);
+    this.set(event, onCommit);
   }
 
   update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(

@@ -1221,7 +1221,7 @@ export class Runner {
       // Register as event handler for the stream
       const handler = (tx: IExtendedStorageTransaction, event: any) => {
         // TODO(seefeld): Scheduler has to create the transaction instead
-        if (event.preventDefault) event.preventDefault();
+        if (event?.preventDefault) event.preventDefault();
         const eventInputs = mergeEventIntoInputs(event);
         const cause = { ...(inputs as Record<string, any>) };
         for (const key in cause) {

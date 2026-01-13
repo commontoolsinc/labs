@@ -18,7 +18,7 @@
  */
 
 import { Identity } from "@commontools/identity";
-import { Engine, isCell, isStream, Runtime } from "@commontools/runner";
+import { Engine, Runtime } from "@commontools/runner";
 import type { Cell, Recipe, Stream } from "@commontools/runner";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { basename } from "@std/path";
