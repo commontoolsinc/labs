@@ -86,25 +86,8 @@ export const spaceCellSchema: JSONSchema = {
   },
 } as JSONSchema;
 
-export const homeSpaceCellSchema: JSONSchema = {
-  type: "object",
-  properties: {
-    defaultPattern: { not: true, asCell: true },
-  },
-} as JSONSchema;
-
 export interface SpaceCellContents {
   defaultPattern: Cell<unknown>;
-}
-
-/**
- * Contents of the home space cell (where space DID = user identity DID).
- * Home space now has the same structure as regular space cells - all data
- * (including favorites and journal) is managed by the default pattern.
- * See docs/common/HOME_SPACE.md for more details.
- */
-export interface HomeSpaceCellContents extends SpaceCellContents {
-  // No additional properties - all data is now in defaultPattern
 }
 
 /**
@@ -447,13 +430,13 @@ export class Runtime {
 
   getHomeSpaceCell(
     tx?: IExtendedStorageTransaction,
-  ): Cell<HomeSpaceCellContents> {
+  ): Cell<SpaceCellContents> {
     return this.getCell(
       this.userIdentityDID,
       this.userIdentityDID,
-      homeSpaceCellSchema,
+      spaceCellSchema,
       tx,
-    ) as Cell<HomeSpaceCellContents>;
+    ) as Cell<SpaceCellContents>;
   }
 
   // Convenience methods that delegate to the runner

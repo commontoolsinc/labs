@@ -83,8 +83,6 @@ export class CharmManager {
     );
     // Use the space DID as the cause - it's derived from the space name
     // and consistently available everywhere
-    // For home space (where space DID = user identity DID), getHomeSpaceCellContents()
-    // uses homeSpaceCellContentsSchema which includes favorites for proper sync/query behavior.
     const isHomeSpace = this.space === this.runtime.userIdentityDID;
     this.spaceCell = isHomeSpace
       ? this.runtime.getHomeSpaceCell()

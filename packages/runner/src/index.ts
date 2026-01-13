@@ -3,7 +3,6 @@ export type {
   ConsoleHandler,
   ErrorHandler,
   ErrorWithContext as RuntimeErrorWithContext,
-  HomeSpaceCellContents,
   RuntimeOptions,
   SpaceCellContents,
 } from "./runtime.ts";
