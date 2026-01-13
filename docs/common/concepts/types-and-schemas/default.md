@@ -18,20 +18,20 @@ interface Input {
 }
 ```
 
-### Cell<> with Default<>
+### Writable<> with Default<>
 
-When you need write access on a pattern input with a default value, wrap `Default<>` in `Cell<>`:
+When you need **both** a default value **and** write access (`.push()`, `.set()`, `.get()`), wrap `Default<>` inside `Writable<>`:
 
 ```typescript
-import { Default, Cell } from 'commontools';
+import { Default, Writable } from 'commontools';
 
-// ❌ No write access - .get()/.set() won't work in handlers
-interface ReadOnlyInput {
-  rating: Default<number | null, null>;
-}
-
-// ✅ Write access - .get()/.set() work in handlers
-interface WritableInput {
-  rating: Cell<Default<number | null, null>>;
+interface Board {
+  title: Default<string, "My Board">;
+  // ❌ Writable<Column[]> - no default, will be undefined at runtime
+  // ❌ Default<Column[], []> - has default but no .push()/.set() methods
+  // ✅ Writable<Default<...>> - has both default AND write methods
+  columns: Writable<Default<Column[], []>>;
 }
 ```
+
+This is the most common pattern for mutable arrays in schemas.

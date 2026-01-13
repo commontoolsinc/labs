@@ -122,7 +122,7 @@ touch packages/patterns/[name]/schemas.tsx
 
 ```tsx
 // schemas.tsx
-import { Default } from "commontools";
+import { Default, Writable } from "commontools";
 
 interface Ingredient {
   name: string;                         // Required - no default
@@ -132,8 +132,20 @@ interface Ingredient {
 
 interface Recipe {
   title: string;
-  ingredients: Default<Ingredient[], []>;  // Defaults to empty array
+  ingredients: Default<Ingredient[], []>;  // Read-only array with default
   rating: Default<number | null, null>;    // Defaults to null
+}
+```
+
+**When you need BOTH a default AND write access (`.push()`, `.set()`)**, wrap `Default<>` inside `Writable<>`:
+
+```tsx
+interface Board {
+  title: Default<string, "My Board">;
+  // ❌ WRONG: Writable<Column[]> - no default, will be undefined
+  // ❌ WRONG: Default<Column[], []> - has default but no .push()/.set()
+  // ✅ RIGHT: Writable<Default<...>> - has both default AND write methods
+  columns: Writable<Default<Column[], []>>;
 }
 ```
 
@@ -367,6 +379,15 @@ deno task ct --help
 deno task ct charm --help
 deno task ct test --help
 ```
+
+**Before deploying, find your identity key:**
+
+```bash
+# Check for .key files in common locations
+ls -la *.key 2>/dev/null || ls -la ~/.claude/*.key 2>/dev/null || find . -name "*.key" -maxdepth 2 2>/dev/null
+```
+
+Use the `--identity` flag with the path to your key file when deploying.
 
 Common commands:
 - `deno task ct dev pattern.tsx --no-run` - Check syntax without deploying
