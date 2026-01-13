@@ -22,16 +22,12 @@ export class Checker {
     const errors = this.sources().reduce((output, sourceFile) => {
       const diagnostics = this.program.getSemanticDiagnostics(sourceFile);
       for (const diagnostic of diagnostics) {
-        output.push({
-          diagnostic,
-          source: sourceFile.text,
-          messageTransformer: this.messageTransformer,
-        });
+        output.push({ diagnostic, source: sourceFile.text });
       }
       return output;
     }, [] as ErrorDetails[]);
     if (errors.length) {
-      throw new CompilerError(errors);
+      throw new CompilerError(errors, this.messageTransformer);
     }
   }
 
@@ -39,16 +35,12 @@ export class Checker {
     const errors = this.sources().reduce((output, sourceFile) => {
       const diagnostics = this.program.getDeclarationDiagnostics(sourceFile);
       for (const diagnostic of diagnostics) {
-        output.push({
-          diagnostic,
-          source: sourceFile.text,
-          messageTransformer: this.messageTransformer,
-        });
+        output.push({ diagnostic, source: sourceFile.text });
       }
       return output;
     }, [] as ErrorDetails[]);
     if (errors.length) {
-      throw new CompilerError(errors);
+      throw new CompilerError(errors, this.messageTransformer);
     }
   }
 
@@ -56,10 +48,10 @@ export class Checker {
     if (!diagnostics || diagnostics.length === 0) {
       return;
     }
-    throw new CompilerError(diagnostics.map((diagnostic) => ({
-      diagnostic,
-      messageTransformer: this.messageTransformer,
-    })));
+    throw new CompilerError(
+      diagnostics.map((diagnostic) => ({ diagnostic })),
+      this.messageTransformer,
+    );
   }
 
   private sources() {

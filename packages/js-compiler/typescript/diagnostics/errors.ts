@@ -17,7 +17,6 @@ export interface DiagnosticMessageTransformer {
 export interface ErrorDetails {
   readonly diagnostic: Diagnostic;
   source?: string;
-  messageTransformer?: DiagnosticMessageTransformer;
 }
 
 /**
@@ -45,7 +44,10 @@ export class CompilationError {
   message: string;
   type: CompilationErrorType;
 
-  constructor({ diagnostic, source, messageTransformer }: ErrorDetails) {
+  constructor(
+    { diagnostic, source }: ErrorDetails,
+    messageTransformer?: DiagnosticMessageTransformer,
+  ) {
     const { file, start } = diagnostic;
     const { message, type } = this.parseMessage(
       diagnostic.messageText,
@@ -123,8 +125,13 @@ export class CompilationError {
 export class CompilerError extends Error {
   override name = "CompilerError";
   #errors: CompilationError[];
-  constructor(errorDetails: ErrorDetails[]) {
-    const errors = errorDetails.map((d) => new CompilationError(d));
+  constructor(
+    errorDetails: ErrorDetails[],
+    messageTransformer?: DiagnosticMessageTransformer,
+  ) {
+    const errors = errorDetails.map((d) =>
+      new CompilationError(d, messageTransformer)
+    );
     const message = errors.map((error) => error.displayInline()).join("\n");
     super(message);
     this.#errors = errors;
