@@ -116,6 +116,29 @@ touch packages/patterns/[name]/schemas.tsx
 
 **Define all types in `schemas.tsx` before writing any pattern code.** This file is the anchor - all other files import from it.
 
+### Use Default<> for All Optional Fields
+
+**Always use `Default<T, value>` for fields that will be displayed in UI or used in computations.** Without defaults, fields are `undefined` at runtime until explicitly set, causing errors when your pattern tries to render or compute.
+
+```tsx
+// schemas.tsx
+import { Default } from "commontools";
+
+interface Ingredient {
+  name: string;                         // Required - no default
+  amount: Default<string, "">;          // Defaults to empty string
+  optional: Default<boolean, false>;    // Defaults to false
+}
+
+interface Recipe {
+  title: string;
+  ingredients: Default<Ingredient[], []>;  // Defaults to empty array
+  rating: Default<number | null, null>;    // Defaults to null
+}
+```
+
+See `docs/common/concepts/types-and-schemas/default.md` for full documentation.
+
 ### Decompose into Sub-Patterns
 
 **Always decompose patterns into focused sub-patterns.** Avoid monolithic `main.tsx` files. Each schema type that has its own display or behavior should be its own sub-pattern.
@@ -427,6 +450,7 @@ When using an API feature for the first time in a session, read the relevant doc
 
 | First time using... | Read this first |
 |---------------------|-----------------|
+| `Default<>` | `docs/common/concepts/types-and-schemas/default.md` |
 | `computed()` | `docs/common/concepts/computed/computed.md` |
 | `lift()` | `docs/common/concepts/lift.md` |
 | `Writable<>` | `docs/common/concepts/types-and-schemas/writable.md` |
@@ -459,6 +483,7 @@ After drafting code, cross-check against docs for the features you used to verif
 ## Remember
 
 - Define types in `schemas.tsx` first
+- **Use `Default<>` for all optional fields** - prevents undefined errors at runtime
 - **Consult docs when using an API feature for the first time**
 - Build and test in layers (data → actions → CLI verify → tests → UI)
 - **Verify interactively with CLI before writing tests** (Layer 3)
