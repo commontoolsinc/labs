@@ -114,7 +114,7 @@ mkdir -p packages/patterns/[name]
 touch packages/patterns/[name]/schemas.tsx
 ```
 
-**Define all types in `schemas.tsx` before writing any pattern code.** This file is the anchor - all other files import from it.
+**Define all types in `schemas.tsx` before writing any pattern code.** This file is the anchor - all other files import from it. For each field, consider: will any pattern need to write to this field? If so, use `Writable<>`.
 
 ### Use Default<> for All Optional Fields
 
