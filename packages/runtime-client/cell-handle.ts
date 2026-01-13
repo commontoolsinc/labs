@@ -426,13 +426,9 @@ function parseAsCellRef(
 ): CellRef | undefined {
   if (isSigilLink(value)) {
     const linkData = value["/"][LINK_V1_TAG];
-    if (!linkData.id) {
-      console.warn("Missing id in link.");
-      return;
-    }
 
     return {
-      id: linkData.id,
+      id: linkData.id ?? from.id,
       space: linkData.space ?? from.space,
       path: (linkData.path ?? []).map((p) => p.toString()),
       type: "application/json",
