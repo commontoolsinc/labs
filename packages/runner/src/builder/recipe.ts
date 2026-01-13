@@ -14,6 +14,7 @@ import {
   type Recipe,
   type RecipeFactory,
   type SchemaWithoutCell,
+  SELF,
   type toJSON,
   type UnsafeBinding,
 } from "./types.ts";
@@ -50,6 +51,12 @@ export const pattern: PatternFunction = (
   const frame = pushFrame();
 
   const inputs = opaqueRef(undefined, argumentSchema);
+
+  // Create self reference - will be mapped to resultRef path during serialization
+  const selfRef = opaqueRef(undefined, resultSchema);
+
+  // Attach SELF to the underlying cell so the proxy can return it
+  getCellOrThrow(inputs).setSelfRef(selfRef);
 
   let result: RecipeFactory<any, any>;
   try {
@@ -95,45 +102,57 @@ export const pattern: PatternFunction = (
 
 export function recipe<S extends JSONSchema>(
   argumentSchema: S,
-  fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => any,
+  fn: (
+    input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
+      [SELF]: OpaqueRef<any>;
+    },
+  ) => any,
 ): RecipeFactory<SchemaWithoutCell<S>, ReturnType<typeof fn>>;
 export function recipe<S extends JSONSchema, R>(
   argumentSchema: S,
-  fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => Opaque<R>,
+  fn: (
+    input: OpaqueRef<Required<SchemaWithoutCell<S>>> & { [SELF]: OpaqueRef<R> },
+  ) => Opaque<R>,
 ): RecipeFactory<SchemaWithoutCell<S>, R>;
 export function recipe<S extends JSONSchema, RS extends JSONSchema>(
   argumentSchema: S,
   resultSchema: RS,
   fn: (
-    input: OpaqueRef<Required<SchemaWithoutCell<S>>>,
+    input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
+      [SELF]: OpaqueRef<SchemaWithoutCell<RS>>;
+    },
   ) => Opaque<SchemaWithoutCell<RS>>,
 ): RecipeFactory<SchemaWithoutCell<S>, SchemaWithoutCell<RS>>;
 export function recipe<T>(
   argumentSchema: string | JSONSchema,
-  fn: (input: OpaqueRef<Required<T>>) => any,
+  fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<any> }) => any,
 ): RecipeFactory<T, ReturnType<typeof fn>>;
 export function recipe<T, R>(
   argumentSchema: string | JSONSchema,
-  fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+  fn: (
+    input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> },
+  ) => Opaque<R>,
 ): RecipeFactory<T, R>;
 export function recipe<T, R>(
   argumentSchema: string | JSONSchema,
   resultSchema: JSONSchema,
-  fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+  fn: (
+    input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> },
+  ) => Opaque<R>,
 ): RecipeFactory<T, R>;
 // Function-only overload - must come after schema-based overloads
 export function recipe<T, R>(
-  fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+  fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
 ): RecipeFactory<T, R>;
 export function recipe<T, R>(
   argumentSchema:
     | string
     | JSONSchema
-    | ((input: OpaqueRef<Required<T>>) => Opaque<R>),
+    | ((input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>),
   resultSchema?:
     | JSONSchema
-    | ((input: OpaqueRef<Required<T>>) => Opaque<R>),
-  fn?: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+    | ((input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>),
+  fn?: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
 ): RecipeFactory<T, R> {
   // Cover the overload that just provides a function
   if (typeof argumentSchema === "function") {
@@ -158,6 +177,15 @@ export function recipe<T, R>(
       : argumentSchema as JSONSchema | undefined,
   );
 
+  // Create self reference - will be mapped to resultRef path during serialization
+  const selfRef = opaqueRef(
+    undefined,
+    resultSchema as JSONSchema | undefined,
+  );
+
+  // Attach SELF to the underlying cell so the proxy can return it
+  getCellOrThrow(inputs).setSelfRef(selfRef);
+
   let result;
   try {
     const outputs = fn!(inputs);
@@ -180,7 +208,7 @@ export function recipe<T, R>(
 export function recipeFromFrame<T, R>(
   argumentSchema: string | JSONSchema | undefined,
   resultSchema: JSONSchema | undefined,
-  fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+  fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
 ): RecipeFactory<T, R> {
   const inputs = opaqueRef(
     undefined,
@@ -188,6 +216,13 @@ export function recipeFromFrame<T, R>(
       ? undefined
       : argumentSchema as JSONSchema | undefined,
   );
+
+  // Create self reference - will be mapped to resultRef path during serialization
+  const selfRef = opaqueRef(undefined, resultSchema);
+
+  // Attach SELF to the underlying cell so the proxy can return it
+  getCellOrThrow(inputs).setSelfRef(selfRef);
+
   const outputs = fn(inputs);
   return factoryFromRecipe<T, R>(argumentSchema, resultSchema, inputs, outputs);
 }
@@ -198,6 +233,11 @@ function factoryFromRecipe<T, R>(
   inputs: OpaqueRef<Required<T>>,
   outputs: Opaque<R>,
 ): RecipeFactory<T, R> {
+  // Capture selfRef before collectCellsAndNodes transforms inputs from OpaqueRef to Cell
+  // (collectCellsAndNodes replaces OpaqueRef proxies with their underlying Cells,
+  // and SELF access only works through the OpaqueRef proxy)
+  const selfRef = (inputs as unknown as { [SELF]: OpaqueRef<any> })[SELF];
+
   // Traverse the value, collect all mentioned nodes and cells
   const allCells = new Set<ICell<unknown>>();
   const allNodes = new Set<NodeRef>();
@@ -284,6 +324,14 @@ function factoryFromRecipe<T, R>(
 
   // Add the inputs default path
   paths.set(inputs, ["argument"]);
+
+  // Add path for self-reference if used in outputs
+  // Note: selfRef is an OpaqueRef, but allCells contains Cells (after getCellOrThrow conversion)
+  // So we need to get the underlying cell for comparison
+  const selfRefCell = getCellOrThrow(selfRef);
+  if (allCells.has(selfRefCell)) {
+    paths.set(selfRefCell, ["resultRef"]);
+  }
 
   // Add paths for all the internal cells
   // TODO(seefeld): Infer more stable identifiers

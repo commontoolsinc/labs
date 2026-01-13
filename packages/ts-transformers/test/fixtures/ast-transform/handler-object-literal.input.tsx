@@ -3,10 +3,7 @@ import { Cell, handler, recipe } from "commontools";
 
 interface State {
   value: Cell<number>;
-  // TODO(CT-1171): Optional Cell properties (name?: Cell<string>) cause type errors
-  // due to StripCell not handling Cell<T> | undefined unions correctly.
-  // Making this required as a workaround.
-  name: Cell<string>;
+  name?: Cell<string>;
 }
 
 const myHandler = handler((_, state: State) => {
@@ -19,6 +16,7 @@ export default recipe({
     value: { type: "number", asCell: true },
     name: { type: "string", asCell: true },
   },
+  required: ["value"],
 }, (state) => {
   return {
     // Test case 1: Object literal with all properties from state

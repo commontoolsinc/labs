@@ -18,6 +18,7 @@ import {
   isRecipe,
   NAME,
   schema,
+  SELF,
   TYPE,
   UI,
 } from "./types.ts";
@@ -131,6 +132,7 @@ export const createBuilder = (): {
       // Constants
       ID,
       ID_FIELD,
+      SELF,
       TYPE,
       NAME,
       UI,

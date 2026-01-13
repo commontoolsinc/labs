@@ -241,7 +241,7 @@ export class PatternContextValidationTransformer extends Transformer {
       type: "pattern-context:function-creation",
       message: `Function creation is not allowed in pattern context. ` +
         `Move this function to module scope and add explicit type parameters. ` +
-        `Example: const myFn = (price: number) => price * 2;`,
+        `Note: callbacks inside computed(), action(), and .map() are allowed.`,
       node,
     });
   }
@@ -334,7 +334,8 @@ export class PatternContextValidationTransformer extends Transformer {
         type: "pattern-context:builder-placement",
         message:
           `${builderName}() should be defined at module scope, not inside a pattern. ` +
-          `Move this ${builderName}() call outside the pattern/recipe and add explicit type parameters.`,
+          `Move this ${builderName}() call outside the pattern/recipe and add explicit type parameters. ` +
+          `Note: computed(), action(), and .map() callbacks are allowed inside patterns.`,
         node,
       });
     }

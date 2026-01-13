@@ -2,46 +2,84 @@
 /**
  * Weekly Calendar Pattern
  *
- * A configurable weekly calendar view showing days side-by-side
- * with hourly time slots and colored appointment blocks.
+ * A weekly calendar that manages Event patterns (event.tsx) similar to how
+ * notebook.tsx manages note.tsx patterns. Events are independent charms that
+ * can be viewed, edited, and created from this calendar.
  *
  * Features:
  * - Day/Week view toggle
- * - Drag to move appointments between days/times
- * - Drag to resize appointment duration
- * - Click time slots to create new appointments
- * - Color-coded appointments
+ * - Drag to move events between days/times
+ * - Drag to resize event duration
+ * - Click time slots to create new events
+ * - Color-coded events
+ * - Events are separate charms that can be opened and edited
  */
 import {
   action,
   Cell,
   computed,
   Default,
+  handler,
   ifElse,
   NAME,
+  navigateTo,
   pattern,
+  Stream,
   UI,
+  wish,
   Writable,
 } from "commontools";
 
+import Event, { COLORS, generateId } from "./event.tsx";
+
 // ============ TYPES ============
 
-interface Appointment {
-  id: string;
-  title: string;
-  date: string; // YYYY-MM-DD
-  startTime: Default<string, "">; // HH:MM
-  endTime: Default<string, "">; // HH:MM
-  color: Default<string, "#fef08a">;
-  notes: Default<string, "">;
-}
+type EventCharm = {
+  [NAME]?: string;
+  title?: string;
+  date?: string;
+  startTime?: string;
+  endTime?: string;
+  color?: string;
+  notes?: string;
+  isHidden?: boolean;
+  eventId?: string;
+};
+
+type MinimalCharm = {
+  [NAME]?: string;
+};
+
+// Type for backlinks
+type MentionableCharm = {
+  [NAME]?: string;
+  isHidden?: boolean;
+  mentioned: MentionableCharm[];
+  backlinks: MentionableCharm[];
+};
 
 interface Input {
-  appointments: Writable<Default<Appointment[], []>>;
+  title?: Default<string, "Weekly Calendar">;
+  events: Writable<Default<EventCharm[], []>>;
+  isCalendar?: Default<boolean, true>; // Marker for identification
+  isHidden?: Default<boolean, false>;
 }
 
 interface Output {
-  appointments: Writable<Appointment[]>;
+  title: string;
+  events: EventCharm[];
+  eventCount: number;
+  isCalendar: boolean;
+  isHidden: boolean;
+  backlinks: MentionableCharm[];
+  // LLM-callable streams
+  createEvent: Stream<{
+    title: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+  }>;
+  setTitle: Stream<{ newTitle: string }>;
 }
 
 // ============ CONSTANTS ============
@@ -51,15 +89,6 @@ const DAY_START = 6;
 const DAY_END = 22;
 const RESIZE_HANDLE_HEIGHT = 14;
 const SLOT_HEIGHT = HOUR_HEIGHT / 2;
-
-const COLORS: string[] = [
-  "#fef08a", // yellow
-  "#bbf7d0", // green
-  "#bfdbfe", // blue
-  "#fbcfe8", // pink
-  "#fed7aa", // orange
-  "#ddd6fe", // purple
-];
 
 // ============ STYLES ============
 
@@ -168,8 +197,6 @@ const addMinutesToTime = (time: string, minutes: number): string =>
 const addHoursToTime = (time: string, hours: number): string =>
   addMinutesToTime(time, hours * 60);
 
-const generateId = (): string => Math.random().toString(36).substring(2, 10);
-
 // ============ HOUR DATA (Static - computed once) ============
 
 const buildHours = (): Array<
@@ -189,693 +216,1063 @@ const HOURS = buildHours();
 const GRID_HEIGHT = (DAY_END - DAY_START) * HOUR_HEIGHT;
 const COLUMN_INDICES = [0, 1, 2, 3, 4, 5, 6] as const;
 
+// ============ MODULE-SCOPE HANDLERS (for LLM-callable streams) ============
+
+// Handler to show the new event modal
+const showNewEventModal = handler<
+  void,
+  { showNewEventPrompt: Writable<boolean> }
+>((_, { showNewEventPrompt }) => showNewEventPrompt.set(true));
+
+// Handler to create event and close modal (stays on calendar)
+const createEventHandler = handler<
+  void,
+  {
+    newEventTitle: Writable<string>;
+    newEventDate: Writable<string>;
+    newEventStartTime: Writable<string>;
+    newEventEndTime: Writable<string>;
+    newEventColor: Writable<string>;
+    showNewEventPrompt: Writable<boolean>;
+    events: Writable<EventCharm[]>;
+    allCharms: Writable<EventCharm[]>;
+  }
+>((
+  _,
+  {
+    newEventTitle,
+    newEventDate,
+    newEventStartTime,
+    newEventEndTime,
+    newEventColor,
+    showNewEventPrompt,
+    events,
+    allCharms,
+  },
+) => {
+  const title = newEventTitle.get() || "New Event";
+  const newEvent = Event({
+    title,
+    date: newEventDate.get(),
+    startTime: newEventStartTime.get(),
+    endTime: newEventEndTime.get(),
+    color: newEventColor.get(),
+    notes: "",
+    isHidden: false,
+    eventId: generateId(),
+  });
+  allCharms.push(newEvent);
+  events.push(newEvent);
+
+  // Reset modal state and stay on calendar
+  showNewEventPrompt.set(false);
+  newEventTitle.set("");
+});
+
+// Handler to create event and stay in modal
+const createEventAndContinue = handler<
+  void,
+  {
+    newEventTitle: Writable<string>;
+    newEventDate: Writable<string>;
+    newEventStartTime: Writable<string>;
+    newEventEndTime: Writable<string>;
+    newEventColor: Writable<string>;
+    events: Writable<EventCharm[]>;
+    allCharms: Writable<EventCharm[]>;
+    usedCreateAnother: Writable<boolean>;
+  }
+>((
+  _,
+  {
+    newEventTitle,
+    newEventDate,
+    newEventStartTime,
+    newEventEndTime,
+    newEventColor,
+    events,
+    allCharms,
+    usedCreateAnother,
+  },
+) => {
+  const title = newEventTitle.get() || "New Event";
+  const newEvent = Event({
+    title,
+    date: newEventDate.get(),
+    startTime: newEventStartTime.get(),
+    endTime: newEventEndTime.get(),
+    color: newEventColor.get(),
+    notes: "",
+    isHidden: false,
+    eventId: generateId(),
+  });
+  allCharms.push(newEvent);
+  events.push(newEvent);
+  usedCreateAnother.set(true);
+  newEventTitle.set("");
+});
+
+// Handler to cancel new event prompt
+const cancelNewEventPrompt = handler<
+  void,
+  {
+    showNewEventPrompt: Writable<boolean>;
+    newEventTitle: Writable<string>;
+    usedCreateAnother: Writable<boolean>;
+  }
+>((_, { showNewEventPrompt, newEventTitle, usedCreateAnother }) => {
+  showNewEventPrompt.set(false);
+  newEventTitle.set("");
+  usedCreateAnother.set(false);
+});
+
+// Handler for clicking on a backlink
+const handleBacklinkClick = handler<
+  void,
+  { charm: Writable<MentionableCharm> }
+>((_, { charm }) => navigateTo(charm));
+
+// LLM-callable handler: Create a single event
+const handleCreateEvent = handler<
+  { title: string; date: string; startTime: string; endTime: string },
+  { events: Writable<EventCharm[]>; allCharms: Writable<EventCharm[]> }
+>(({ title, date, startTime, endTime }, { events, allCharms }) => {
+  const newEvent = Event({
+    title,
+    date,
+    startTime,
+    endTime,
+    color: COLORS[0],
+    notes: "",
+    isHidden: false,
+    eventId: generateId(),
+  });
+  allCharms.push(newEvent);
+  events.push(newEvent);
+  return newEvent;
+});
+
+// LLM-callable handler: Rename the calendar
+const handleSetTitle = handler<
+  { newTitle: string },
+  { title: Writable<string> }
+>(({ newTitle }, { title }) => {
+  title.set(newTitle);
+  return newTitle;
+});
+
 // ============ PATTERN ============
 
-export default pattern<Input, Output>(({ appointments }) => {
-  // ===== Navigation State =====
-  const startDate = Cell.of(getWeekStart(getTodayDate()));
-  const visibleDays = Cell.of(7);
+const WeeklyCalendar = pattern<Input, Output>(
+  ({ title, events, isCalendar, isHidden }) => {
+    const { allCharms } = wish<{ allCharms: EventCharm[] }>("/");
 
-  // ===== Form State =====
-  const showForm = Cell.of(false);
-  const formTitle = Cell.of("");
-  const formDate = Cell.of(getTodayDate());
-  const formStartTime = Cell.of("09:00");
-  const formEndTime = Cell.of("10:00");
-  const formColor = Cell.of(COLORS[0]);
-  const editingId = Cell.of<string | null>(null);
+    // Navigation State
+    const startDate = Cell.of(getWeekStart(getTodayDate()));
+    const visibleDays = Cell.of(7);
 
-  // Track last drop time to prevent click firing after drag
-  const lastDropTime = Cell.of(0);
+    // Create Form State
+    const showNewEventPrompt = Writable.of<boolean>(false);
+    const newEventTitle = Writable.of<string>("");
+    const newEventDate = Writable.of<string>(getTodayDate());
+    const newEventStartTime = Writable.of<string>("09:00");
+    const newEventEndTime = Writable.of<string>("10:00");
+    const newEventColor = Writable.of<string>(COLORS[0]);
+    const usedCreateAnother = Writable.of<boolean>(false);
 
-  // ===== Computed Values =====
-  const appointmentCount = computed(() => appointments.get().length);
-  const weekDates = computed(() => getWeekDates(startDate.get(), 7));
-  const todayDate = getTodayDate();
+    // Edit Form State
+    const showEditModal = Writable.of<boolean>(false);
+    const editingEventIndex = Writable.of<number>(-1);
+    const editEventTitle = Writable.of<string>("");
+    const editEventDate = Writable.of<string>("");
+    const editEventStartTime = Writable.of<string>("09:00");
+    const editEventEndTime = Writable.of<string>("10:00");
+    const editEventColor = Writable.of<string>(COLORS[0]);
 
-  // ===== Navigation Actions =====
-  const goPrev = action(() => {
-    startDate.set(addDays(startDate.get(), -visibleDays.get()));
-  });
+    // Track last drop time to prevent click firing after drag
+    const lastDropTime = Cell.of(0);
 
-  const goNext = action(() => {
-    startDate.set(addDays(startDate.get(), visibleDays.get()));
-  });
+    // Backlinks
+    const backlinks = Writable.of<MentionableCharm[]>([]);
 
-  const goToday = action(() => {
-    const today = getTodayDate();
-    startDate.set(visibleDays.get() === 1 ? today : getWeekStart(today));
-  });
+    // Computed Values
+    const eventCount = computed(() => events.get().length);
+    const weekDates = computed(() => getWeekDates(startDate.get(), 7));
+    const todayDate = getTodayDate();
 
-  // ===== View Mode Actions =====
-  const setDayView = action(() => visibleDays.set(1));
-  const setWeekView = action(() => visibleDays.set(7));
+    // Navigation Actions (using action for internal logic)
+    const goPrev = action(() => {
+      startDate.set(addDays(startDate.get(), -visibleDays.get()));
+    });
 
-  // ===== Form Actions =====
-  const openNewForm = action(() => {
-    editingId.set(null);
-    formTitle.set("");
-    formDate.set(getTodayDate());
-    formStartTime.set("09:00");
-    formEndTime.set("10:00");
-    formColor.set(COLORS[0]);
-    showForm.set(true);
-  });
+    const goNext = action(() => {
+      startDate.set(addDays(startDate.get(), visibleDays.get()));
+    });
 
-  const closeForm = action(() => showForm.set(false));
+    const goToday = action(() => {
+      const today = getTodayDate();
+      startDate.set(visibleDays.get() === 1 ? today : getWeekStart(today));
+    });
 
-  const saveAppointment = action(() => {
-    const title = formTitle.get().trim() || "Untitled";
-    const apt: Appointment = {
-      id: editingId.get() || generateId(),
-      title,
-      date: formDate.get(),
-      startTime: formStartTime.get(),
-      endTime: formEndTime.get(),
-      color: formColor.get(),
-      notes: "",
-    };
-    const current = appointments.get();
-    const existingIdx = current.findIndex((a) => a.id === apt.id);
-    if (existingIdx >= 0) {
-      const updated = [...current];
-      updated[existingIdx] = apt;
-      appointments.set(updated);
-    } else {
-      appointments.set([...current, apt]);
-    }
-    showForm.set(false);
-  });
+    // View Mode Actions
+    const setDayView = action(() => visibleDays.set(1));
+    const setWeekView = action(() => visibleDays.set(7));
 
-  const deleteAppointment = action(() => {
-    const id = editingId.get();
-    if (!id) return;
-    appointments.set(appointments.get().filter((a) => a.id !== id));
-    showForm.set(false);
-  });
+    // Form helpers
+    const onStartTimeChange = action((e: { detail: { value: string } }) => {
+      const newStart = e?.detail?.value;
+      if (newStart) {
+        newEventEndTime.set(addHoursToTime(newStart, 1));
+      }
+    });
 
-  const onStartTimeChange = action((e: { detail: { value: string } }) => {
-    const newStart = e?.detail?.value || formStartTime.get();
-    if (newStart) {
-      formEndTime.set(addHoursToTime(newStart, 1));
-    }
-  });
+    // Color selection actions (for create modal)
+    const colorActions = COLORS.map((color) =>
+      action(() => newEventColor.set(color))
+    );
 
-  // ===== Dynamic Color Selection (replaces 6 separate handlers) =====
-  const colorActions = COLORS.map((color) =>
-    action(() => formColor.set(color))
-  );
+    // Color selection actions (for edit modal)
+    const editColorActions = COLORS.map((color) =>
+      action(() => editEventColor.set(color))
+    );
 
-  // ===== Computed Styles for View Toggle =====
-  const dayButtonStyle = computed(() => ({
-    ...STYLES.button.base,
-    backgroundColor: visibleDays.get() === 1 ? "#3b82f6" : "#fff",
-    color: visibleDays.get() === 1 ? "#fff" : "#374151",
-  }));
+    // Edit form helpers
+    const onEditStartTimeChange = action((e: { detail: { value: string } }) => {
+      const newStart = e?.detail?.value;
+      if (newStart) {
+        editEventEndTime.set(addHoursToTime(newStart, 1));
+      }
+    });
 
-  const weekButtonStyle = computed(() => ({
-    ...STYLES.button.base,
-    backgroundColor: visibleDays.get() === 7 ? "#3b82f6" : "#fff",
-    color: visibleDays.get() === 7 ? "#fff" : "#374151",
-  }));
+    // Close edit modal
+    const closeEditModal = action(() => {
+      showEditModal.set(false);
+      editingEventIndex.set(-1);
+    });
 
-  // ===== Render =====
-  return {
-    [NAME]: "Weekly Calendar",
-    [UI]: (
-      <ct-screen>
-        {/* Header */}
-        <div
-          slot="header"
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            padding: "8px 0",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ fontWeight: "600", fontSize: "1.1rem" }}>
-              Calendar
-            </span>
-            <span style={{ fontSize: "0.75rem", color: "#6b7280" }}>
-              ({appointmentCount} events)
-            </span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            {/* View Mode Buttons */}
-            <div style={{ display: "flex", gap: "4px" }}>
-              <button type="button" style={dayButtonStyle} onClick={setDayView}>
-                Day
-              </button>
-              <button
-                type="button"
-                style={weekButtonStyle}
-                onClick={setWeekView}
-              >
-                Week
-              </button>
-            </div>
-            {/* Navigation Buttons */}
-            <div style={{ display: "flex", gap: "4px" }}>
-              <button type="button" style={STYLES.button.base} onClick={goPrev}>
-                &lt;
-              </button>
-              <button
-                type="button"
-                style={STYLES.button.base}
-                onClick={goToday}
-              >
-                Today
-              </button>
-              <button type="button" style={STYLES.button.base} onClick={goNext}>
-                &gt;
-              </button>
-            </div>
-            {/* Add Button */}
-            <button
-              type="button"
-              style={STYLES.button.primary}
-              onClick={openNewForm}
-            >
-              + Add
-            </button>
-          </div>
-        </div>
+    // Save edited event
+    const saveEditedEvent = action(() => {
+      const idx = editingEventIndex.get();
+      if (idx < 0) return;
 
-        {/* Main Calendar Area */}
-        <div
-          style={{
-            display: "flex",
-            flex: "1",
-            overflow: "hidden",
-            position: "relative",
-          }}
-        >
-          {/* Form Modal */}
-          <ct-modal
-            $open={showForm}
-            dismissable
-            size="sm"
-            label="Appointment Form"
+      const eventCell = events.key(idx);
+      eventCell.key("title").set(editEventTitle.get());
+      eventCell.key("date").set(editEventDate.get());
+      eventCell.key("startTime").set(editEventStartTime.get());
+      eventCell.key("endTime").set(editEventEndTime.get());
+      eventCell.key("color").set(editEventColor.get());
+
+      showEditModal.set(false);
+      editingEventIndex.set(-1);
+    });
+
+    // Delete event
+    const deleteEvent = action(() => {
+      const idx = editingEventIndex.get();
+      if (idx < 0) return;
+
+      const currentEvents = events.get();
+      const updated = [...currentEvents];
+      updated.splice(idx, 1);
+      events.set(updated);
+
+      showEditModal.set(false);
+      editingEventIndex.set(-1);
+    });
+
+    // Computed Styles for View Toggle
+    const dayButtonStyle = computed(() => ({
+      ...STYLES.button.base,
+      backgroundColor: visibleDays.get() === 1 ? "#3b82f6" : "#fff",
+      color: visibleDays.get() === 1 ? "#fff" : "#374151",
+    }));
+
+    const weekButtonStyle = computed(() => ({
+      ...STYLES.button.base,
+      backgroundColor: visibleDays.get() === 7 ? "#3b82f6" : "#fff",
+      color: visibleDays.get() === 7 ? "#fff" : "#374151",
+    }));
+
+    // ===== Render =====
+    return {
+      [NAME]: computed(() => `${title} (${eventCount})`),
+      [UI]: (
+        <ct-screen>
+          {/* Header */}
+          <div
+            slot="header"
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "8px 0",
+            }}
           >
-            <span slot="header">
-              {ifElse(
-                computed(() => editingId.get() != null),
-                "Edit",
-                "New",
-              )} Appointment
-            </span>
-
-            <div
-              style={{ display: "flex", flexDirection: "column", gap: "12px" }}
-            >
-              {/* Title Input */}
-              <div>
-                <label style={STYLES.label}>Title</label>
-                <ct-input
-                  $value={formTitle}
-                  placeholder="Title..."
-                  style={{ width: "100%" }}
-                  onct-submit={saveAppointment}
-                />
-              </div>
-
-              {/* Date Input */}
-              <div>
-                <label style={STYLES.label}>Date</label>
-                <ct-input
-                  $value={formDate}
-                  type="date"
-                  style={{ width: "100%" }}
-                />
-              </div>
-
-              {/* Time Inputs */}
-              <div style={{ display: "flex", gap: "8px" }}>
-                <div style={{ flex: 1 }}>
-                  <label style={STYLES.label}>Start</label>
-                  <ct-input
-                    $value={formStartTime}
-                    type="time"
-                    style={{ width: "100%" }}
-                    onct-change={onStartTimeChange}
-                  />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={STYLES.label}>End</label>
-                  <ct-input
-                    $value={formEndTime}
-                    type="time"
-                    style={{ width: "100%" }}
-                  />
-                </div>
-              </div>
-
-              {/* Color Picker - now using dynamic colorActions */}
-              <div>
-                <label style={STYLES.label}>Color</label>
-                <div style={{ display: "flex", gap: "6px" }}>
-                  {COLORS.map((c, idx) => (
-                    <div
-                      style={{
-                        ...STYLES.colorSwatch,
-                        backgroundColor: c,
-                        border: ifElse(
-                          computed(() => formColor.get() === c),
-                          "2px solid #111",
-                          "2px solid transparent",
-                        ),
-                      }}
-                      onClick={colorActions[idx]}
-                    />
-                  ))}
-                </div>
-              </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ fontWeight: "600", fontSize: "1.1rem" }}>
+                {title}
+              </span>
+              <span style={{ fontSize: "0.75rem", color: "#6b7280" }}>
+                ({eventCount} events)
+              </span>
             </div>
-
-            {/* Modal Footer */}
-            <div
-              slot="footer"
-              style={{
-                display: "flex",
-                gap: "8px",
-                justifyContent: "flex-end",
-                width: "100%",
-              }}
-            >
-              {ifElse(
-                computed(() => editingId.get() != null),
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              {/* View Mode Buttons */}
+              <div style={{ display: "flex", gap: "4px" }}>
                 <button
                   type="button"
-                  style={STYLES.button.danger}
-                  onClick={deleteAppointment}
+                  style={dayButtonStyle}
+                  onClick={setDayView}
                 >
-                  Delete
-                </button>,
-                null,
-              )}
-              <div style={{ flex: 1 }} />
-              <button
-                type="button"
-                style={STYLES.button.base}
-                onClick={closeForm}
-              >
-                Cancel
-              </button>
+                  Day
+                </button>
+                <button
+                  type="button"
+                  style={weekButtonStyle}
+                  onClick={setWeekView}
+                >
+                  Week
+                </button>
+              </div>
+              {/* Navigation Buttons */}
+              <div style={{ display: "flex", gap: "4px" }}>
+                <button
+                  type="button"
+                  style={STYLES.button.base}
+                  onClick={goPrev}
+                >
+                  &lt;
+                </button>
+                <button
+                  type="button"
+                  style={STYLES.button.base}
+                  onClick={goToday}
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  style={STYLES.button.base}
+                  onClick={goNext}
+                >
+                  &gt;
+                </button>
+              </div>
+              {/* Add Button */}
               <button
                 type="button"
                 style={STYLES.button.primary}
-                onClick={saveAppointment}
+                onClick={showNewEventModal({ showNewEventPrompt })}
               >
-                Save
+                + Add
               </button>
             </div>
-          </ct-modal>
+          </div>
 
-          {/* Calendar Grid */}
+          {/* Main Calendar Area */}
           <div
             style={{
-              flex: "1",
               display: "flex",
-              flexDirection: "column",
+              flex: "1",
               overflow: "hidden",
-              userSelect: "none",
+              position: "relative",
             }}
           >
-            <ct-vscroll flex showScrollbar fadeEdges>
+            {/* New Event Modal */}
+            <ct-modal
+              $open={showNewEventPrompt}
+              dismissable
+              size="sm"
+              label="New Event"
+            >
+              <span slot="header">New Event</span>
+
               <div
-                style={{ display: "flex", minHeight: `${GRID_HEIGHT + 60}px` }}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "12px",
+                }}
               >
-                {/* Time Labels Column */}
-                <div
-                  style={{ width: "50px", flexShrink: "0", paddingTop: "50px" }}
-                >
-                  {HOURS.map((hour) => (
-                    <div
-                      style={{
-                        height: `${HOUR_HEIGHT}px`,
-                        fontSize: "0.65rem",
-                        color: "#6b7280",
-                        textAlign: "right",
-                        paddingRight: "8px",
-                      }}
-                    >
-                      {hour.label}
-                    </div>
-                  ))}
+                {/* Title Input */}
+                <div>
+                  <label style={STYLES.label}>Title</label>
+                  <ct-input
+                    $value={newEventTitle}
+                    placeholder="Event title..."
+                    style={{ width: "100%" }}
+                  />
                 </div>
 
-                {/* Day Columns */}
-                {COLUMN_INDICES.map((colIdx) => {
-                  // Computed values for this column
-                  const isToday = computed(() =>
-                    weekDates[colIdx] === todayDate
-                  );
-                  const dateHeader = computed(() => {
-                    const d = weekDates[colIdx];
-                    return d ? formatDateHeader(d) : "";
-                  });
-                  const displayStyle = computed(() =>
-                    colIdx < visibleDays.get() ? "flex" : "none"
-                  );
-                  const headerBg = computed(() =>
-                    weekDates[colIdx] === todayDate ? "#eff6ff" : "transparent"
-                  );
-                  const headerColor = computed(() =>
-                    weekDates[colIdx] === todayDate ? "#2563eb" : "#374151"
-                  );
+                {/* Date Input */}
+                <div>
+                  <label style={STYLES.label}>Date</label>
+                  <ct-input
+                    $value={newEventDate}
+                    type="date"
+                    style={{ width: "100%" }}
+                  />
+                </div>
 
-                  // Drop handler for moving/resizing appointments
-                  const handleDayDrop = action((e: {
-                    detail: {
-                      sourceCell: Cell<Appointment>;
-                      pointerY?: number;
-                      dropZoneRect?: { top: number };
-                      type?: string;
-                    };
-                  }) => {
-                    const apt = e.detail.sourceCell.get();
-                    const { pointerY, dropZoneRect, type: dragType } = e.detail;
+                {/* Time Inputs */}
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={STYLES.label}>Start</label>
+                    <ct-input
+                      $value={newEventStartTime}
+                      type="time"
+                      style={{ width: "100%" }}
+                      onct-change={onStartTimeChange}
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={STYLES.label}>End</label>
+                    <ct-input
+                      $value={newEventEndTime}
+                      type="time"
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+                </div>
 
-                    if (pointerY === undefined || !dropZoneRect) return;
-
-                    const relativeY = pointerY - dropZoneRect.top;
-                    const slotIdx = Math.max(
-                      0,
-                      Math.floor(relativeY / SLOT_HEIGHT),
-                    );
-                    const newHour = DAY_START + Math.floor(slotIdx / 2);
-                    const newMin = (slotIdx % 2) * 30;
-                    const newTime = minutesToTime(
-                      Math.min(DAY_END - 1, Math.max(DAY_START, newHour)) * 60 +
-                        newMin,
-                    );
-
-                    const current = appointments.get();
-                    const aptIdx = current.findIndex((a) => a.id === apt.id);
-                    if (aptIdx < 0) return;
-
-                    const updated = [...current];
-                    const dateVal = getWeekDates(startDate.get(), 7)[colIdx];
-
-                    if (dragType === "appointment-resize") {
-                      const adjustedY = relativeY + SLOT_HEIGHT / 2;
-                      const resizeSlotIdx = Math.max(
-                        0,
-                        Math.floor(adjustedY / SLOT_HEIGHT),
-                      );
-                      const resizeHour = DAY_START +
-                        Math.floor(resizeSlotIdx / 2);
-                      const resizeMin = (resizeSlotIdx % 2) * 30;
-                      const startMin = timeToMinutes(apt.startTime || "09:00");
-                      const newEndMin = Math.max(
-                        startMin + 30,
-                        resizeHour * 60 + resizeMin,
-                      );
-                      updated[aptIdx] = {
-                        ...apt,
-                        endTime: minutesToTime(
-                          Math.min(DAY_END * 60, newEndMin),
-                        ),
-                      };
-                    } else {
-                      const duration = timeToMinutes(apt.endTime || "10:00") -
-                        timeToMinutes(apt.startTime || "09:00");
-                      updated[aptIdx] = {
-                        ...apt,
-                        date: dateVal,
-                        startTime: newTime,
-                        endTime: addMinutesToTime(newTime, duration),
-                      };
-                    }
-
-                    appointments.set(updated);
-                    lastDropTime.set(Date.now());
-                  });
-
-                  // Click handlers for creating appointments at specific hours
-                  const hourClickActions = HOURS.map((hour) =>
-                    action(() => {
-                      if (Date.now() - lastDropTime.get() < 300) return;
-                      editingId.set(null);
-                      formTitle.set("");
-                      formDate.set(getWeekDates(startDate.get(), 7)[colIdx]);
-                      formStartTime.set(hour.startTime);
-                      formEndTime.set(addHoursToTime(hour.startTime, 1));
-                      formColor.set(COLORS[0]);
-                      showForm.set(true);
-                    })
-                  );
-
-                  return (
-                    <div
-                      style={{
-                        flex: "1",
-                        minWidth: "100px",
-                        borderRight: "1px solid #e5e7eb",
-                        boxSizing: "border-box",
-                        display: displayStyle,
-                        flexDirection: "column",
-                      }}
-                    >
-                      {/* Date Header */}
+                {/* Color Picker */}
+                <div>
+                  <label style={STYLES.label}>Color</label>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    {COLORS.map((c, idx) => (
                       <div
                         style={{
-                          height: "50px",
-                          padding: "8px 4px",
-                          textAlign: "center",
-                          borderBottom: "1px solid #e5e7eb",
-                          boxSizing: "border-box",
-                          backgroundColor: headerBg,
+                          ...STYLES.colorSwatch,
+                          backgroundColor: c,
+                          border: computed(() =>
+                            newEventColor.get() === c
+                              ? "2px solid #111"
+                              : "2px solid transparent"
+                          ),
+                        }}
+                        onClick={colorActions[idx]}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div
+                slot="footer"
+                style={{
+                  display: "flex",
+                  gap: "8px",
+                  justifyContent: "flex-end",
+                  width: "100%",
+                }}
+              >
+                <button
+                  type="button"
+                  style={STYLES.button.base}
+                  onClick={cancelNewEventPrompt({
+                    showNewEventPrompt,
+                    newEventTitle,
+                    usedCreateAnother,
+                  })}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  style={STYLES.button.base}
+                  onClick={createEventAndContinue({
+                    newEventTitle,
+                    newEventDate,
+                    newEventStartTime,
+                    newEventEndTime,
+                    newEventColor,
+                    events,
+                    allCharms,
+                    usedCreateAnother,
+                  })}
+                >
+                  Create Another
+                </button>
+                <button
+                  type="button"
+                  style={STYLES.button.primary}
+                  onClick={createEventHandler({
+                    newEventTitle,
+                    newEventDate,
+                    newEventStartTime,
+                    newEventEndTime,
+                    newEventColor,
+                    showNewEventPrompt,
+                    events,
+                    allCharms,
+                  })}
+                >
+                  Create
+                </button>
+              </div>
+            </ct-modal>
+
+            {/* Edit Event Modal */}
+            <ct-modal
+              $open={showEditModal}
+              dismissable
+              size="sm"
+              label="Edit Event"
+            >
+              <span slot="header">Edit Event</span>
+
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "12px",
+                }}
+              >
+                {/* Title Input */}
+                <div>
+                  <label style={STYLES.label}>Title</label>
+                  <ct-input
+                    $value={editEventTitle}
+                    placeholder="Event title..."
+                    style={{ width: "100%" }}
+                  />
+                </div>
+
+                {/* Date Input */}
+                <div>
+                  <label style={STYLES.label}>Date</label>
+                  <ct-input
+                    $value={editEventDate}
+                    type="date"
+                    style={{ width: "100%" }}
+                  />
+                </div>
+
+                {/* Time Inputs */}
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={STYLES.label}>Start</label>
+                    <ct-input
+                      $value={editEventStartTime}
+                      type="time"
+                      style={{ width: "100%" }}
+                      onct-change={onEditStartTimeChange}
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={STYLES.label}>End</label>
+                    <ct-input
+                      $value={editEventEndTime}
+                      type="time"
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+                </div>
+
+                {/* Color Picker */}
+                <div>
+                  <label style={STYLES.label}>Color</label>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    {COLORS.map((c, idx) => (
+                      <div
+                        style={{
+                          ...STYLES.colorSwatch,
+                          backgroundColor: c,
+                          border: computed(() =>
+                            editEventColor.get() === c
+                              ? "2px solid #111"
+                              : "2px solid transparent"
+                          ),
+                        }}
+                        onClick={editColorActions[idx]}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div
+                slot="footer"
+                style={{
+                  display: "flex",
+                  gap: "8px",
+                  justifyContent: "flex-end",
+                  width: "100%",
+                }}
+              >
+                <button
+                  type="button"
+                  style={STYLES.button.danger}
+                  onClick={deleteEvent}
+                >
+                  Delete
+                </button>
+                <div style={{ flex: 1 }} />
+                <button
+                  type="button"
+                  style={STYLES.button.base}
+                  onClick={closeEditModal}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  style={STYLES.button.primary}
+                  onClick={saveEditedEvent}
+                >
+                  Save
+                </button>
+              </div>
+            </ct-modal>
+
+            {/* Calendar Grid */}
+            <div
+              style={{
+                flex: "1",
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                userSelect: "none",
+              }}
+            >
+              <ct-vscroll flex showScrollbar fadeEdges>
+                <div
+                  style={{
+                    display: "flex",
+                    minHeight: `${GRID_HEIGHT + 60}px`,
+                  }}
+                >
+                  {/* Time Labels Column */}
+                  <div
+                    style={{
+                      width: "50px",
+                      flexShrink: "0",
+                      paddingTop: "50px",
+                    }}
+                  >
+                    {HOURS.map((hour) => (
+                      <div
+                        style={{
+                          height: `${HOUR_HEIGHT}px`,
+                          fontSize: "0.65rem",
+                          color: "#6b7280",
+                          textAlign: "right",
+                          paddingRight: "8px",
                         }}
                       >
+                        {hour.label}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Day Columns */}
+                  {COLUMN_INDICES.map((colIdx) => {
+                    // Computed values for this column
+                    const columnDate = computed(() => weekDates[colIdx] || "");
+                    const isToday = computed(() =>
+                      weekDates[colIdx] === todayDate
+                    );
+                    const dateHeader = computed(() => {
+                      const d = weekDates[colIdx];
+                      return d ? formatDateHeader(d) : "";
+                    });
+                    const displayStyle = computed(() =>
+                      colIdx < visibleDays.get() ? "flex" : "none"
+                    );
+                    const headerBg = computed(() =>
+                      weekDates[colIdx] === todayDate
+                        ? "#eff6ff"
+                        : "transparent"
+                    );
+                    const headerColor = computed(() =>
+                      weekDates[colIdx] === todayDate ? "#2563eb" : "#374151"
+                    );
+
+                    // Drop handler for moving/resizing events (using action)
+                    const handleDayDrop = action((e: {
+                      detail: {
+                        sourceCell: Cell<EventCharm>;
+                        pointerY?: number;
+                        dropZoneRect?: { top: number };
+                        type?: string;
+                      };
+                    }) => {
+                      const evt = e.detail.sourceCell.get();
+                      const { pointerY, dropZoneRect, type: dragType } =
+                        e.detail;
+
+                      if (pointerY === undefined || !dropZoneRect) return;
+
+                      const relativeY = pointerY - dropZoneRect.top;
+                      const slotIdx = Math.max(
+                        0,
+                        Math.floor(relativeY / SLOT_HEIGHT),
+                      );
+                      const newHour = DAY_START + Math.floor(slotIdx / 2);
+                      const newMin = (slotIdx % 2) * 30;
+                      const newTime = minutesToTime(
+                        Math.min(DAY_END - 1, Math.max(DAY_START, newHour)) *
+                            60 +
+                          newMin,
+                      );
+
+                      const current = events.get();
+                      const evtId = (evt as any)?.eventId;
+                      const evtIdx = current.findIndex(
+                        (a: any) => a?.eventId === evtId,
+                      );
+                      if (evtIdx < 0) return;
+
+                      const dateVal = weekDates[colIdx];
+                      const eventCell = events.key(evtIdx);
+
+                      if (dragType === "event-resize") {
+                        const adjustedY = relativeY + SLOT_HEIGHT / 2;
+                        const resizeSlotIdx = Math.max(
+                          0,
+                          Math.floor(adjustedY / SLOT_HEIGHT),
+                        );
+                        const resizeHour = DAY_START +
+                          Math.floor(resizeSlotIdx / 2);
+                        const resizeMin = (resizeSlotIdx % 2) * 30;
+                        const startMin = timeToMinutes(
+                          evt.startTime || "09:00",
+                        );
+                        const newEndMin = Math.max(
+                          startMin + 30,
+                          resizeHour * 60 + resizeMin,
+                        );
+                        eventCell
+                          .key("endTime")
+                          .set(
+                            minutesToTime(Math.min(DAY_END * 60, newEndMin)),
+                          );
+                      } else {
+                        const duration = timeToMinutes(evt.endTime || "10:00") -
+                          timeToMinutes(evt.startTime || "09:00");
+                        eventCell.key("date").set(dateVal);
+                        eventCell.key("startTime").set(newTime);
+                        eventCell
+                          .key("endTime")
+                          .set(addMinutesToTime(newTime, duration));
+                      }
+
+                      lastDropTime.set(Date.now());
+                    });
+
+                    // Click handlers for creating events at specific hours (using action)
+                    const hourClickActions = HOURS.map((hour) =>
+                      action(() => {
+                        if (Date.now() - lastDropTime.get() < 300) return;
+                        newEventTitle.set("");
+                        newEventDate.set(columnDate);
+                        newEventStartTime.set(hour.startTime);
+                        newEventEndTime.set(addHoursToTime(hour.startTime, 1));
+                        newEventColor.set(COLORS[0]);
+                        showNewEventPrompt.set(true);
+                      })
+                    );
+
+                    return (
+                      <div
+                        style={{
+                          flex: "1",
+                          minWidth: "100px",
+                          borderRight: "1px solid #e5e7eb",
+                          boxSizing: "border-box",
+                          display: displayStyle,
+                          flexDirection: "column",
+                        }}
+                      >
+                        {/* Date Header */}
                         <div
                           style={{
-                            fontSize: "0.75rem",
-                            fontWeight: "600",
-                            color: headerColor,
+                            height: "50px",
+                            padding: "8px 4px",
+                            textAlign: "center",
+                            borderBottom: "1px solid #e5e7eb",
+                            boxSizing: "border-box",
+                            backgroundColor: headerBg,
                           }}
                         >
-                          {dateHeader}
-                        </div>
-                        {ifElse(
-                          isToday,
-                          <div style={{ fontSize: "0.6rem", color: "#3b82f6" }}>
-                            Today
-                          </div>,
-                          null,
-                        )}
-                      </div>
-
-                      {/* Time Grid with Drop Zone */}
-                      <ct-drop-zone
-                        accept="appointment,appointment-resize"
-                        onct-drop={handleDayDrop}
-                        style={{ position: "relative", flex: "1" }}
-                      >
-                        {HOURS.map((hour, hourIdx) => (
                           <div
                             style={{
-                              position: "absolute",
-                              top: `${hour.idx * HOUR_HEIGHT}px`,
-                              left: "0",
-                              right: "0",
-                              height: `${HOUR_HEIGHT}px`,
-                              borderTop: "1px solid #e5e7eb",
-                              cursor: "pointer",
+                              fontSize: "0.75rem",
+                              fontWeight: "600",
+                              color: headerColor,
                             }}
-                            onClick={hourClickActions[hourIdx]}
-                          />
-                        ))}
-                      </ct-drop-zone>
-                    </div>
-                  );
-                })}
+                          >
+                            {dateHeader}
+                          </div>
+                          {ifElse(
+                            isToday,
+                            <div
+                              style={{ fontSize: "0.6rem", color: "#3b82f6" }}
+                            >
+                              Today
+                            </div>,
+                            null,
+                          )}
+                        </div>
 
-                {/* Appointment Blocks */}
-                {appointments.map((apt) => {
-                  // Compute position and visibility
-                  const styles = computed(() => {
-                    const weekStart = startDate.get();
-                    const visibleCount = visibleDays.get();
-                    const aptDate = apt.date;
-
-                    const hidden = {
-                      top: "0",
-                      height: "0",
-                      left: "0",
-                      width: "0",
-                      display: "none" as const,
-                    };
-
-                    if (!aptDate || !weekStart) return hidden;
-
-                    const startMs = new Date(weekStart + "T00:00:00").getTime();
-                    const aptMs = new Date(aptDate + "T00:00:00").getTime();
-                    if (isNaN(startMs) || isNaN(aptMs)) return hidden;
-
-                    const dayOffset = Math.floor(
-                      (aptMs - startMs) / (24 * 60 * 60 * 1000),
-                    );
-                    if (dayOffset < 0 || dayOffset >= visibleCount) {
-                      return hidden;
-                    }
-
-                    const startMin = timeToMinutes(apt.startTime || "09:00") -
-                      DAY_START * 60;
-                    const endMin = timeToMinutes(apt.endTime || "10:00") -
-                      DAY_START * 60;
-                    const top = (startMin / 60) * HOUR_HEIGHT;
-                    const height = Math.max(
-                      30,
-                      ((endMin - startMin) / 60) * HOUR_HEIGHT,
-                    );
-
-                    return {
-                      top: `${50 + top}px`,
-                      height: `${height}px`,
-                      left:
-                        `calc(50px + (100% - 50px) * ${dayOffset} / ${visibleCount} + 2px)`,
-                      width: `calc((100% - 50px) / ${visibleCount} - 4px)`,
-                      display: "block" as const,
-                    };
-                  });
-
-                  // Edit handler for this appointment
-                  const openEdit = action(() => {
-                    if (Date.now() - lastDropTime.get() < 300) return;
-                    editingId.set(apt.id);
-                    formTitle.set(apt.title || "");
-                    formDate.set(apt.date);
-                    formStartTime.set(apt.startTime || "09:00");
-                    formEndTime.set(apt.endTime || "10:00");
-                    formColor.set(apt.color || COLORS[0]);
-                    showForm.set(true);
-                  });
-
-                  // Workaround: Use computed() with apt.id dependency for static children
-                  const resizeHandleLines = computed(() => {
-                    const _id = apt.id;
-                    return (
-                      <div
-                        style={{
-                          width: "20px",
-                          height: "4px",
-                          borderTop: "1px solid rgba(0,0,0,0.2)",
-                          borderBottom: "1px solid rgba(0,0,0,0.2)",
-                          pointerEvents: "none",
-                        }}
-                      />
-                    );
-                  });
-
-                  const dragAreaContent = computed(() => {
-                    const _id = apt.id;
-                    return (
-                      <div
-                        style={{
-                          width: "100%",
-                          minHeight: "200px",
-                          touchAction: "none",
-                        }}
-                      />
-                    );
-                  });
-
-                  return (
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: styles.top,
-                        left: styles.left,
-                        width: styles.width,
-                        height: styles.height,
-                        minHeight: styles.height,
-                        zIndex: "2",
-                        backgroundColor: apt.color || COLORS[0],
-                        borderRadius: "4px",
-                        borderLeft: "3px solid rgba(0,0,0,0.2)",
-                        overflow: "hidden",
-                        display: styles.display,
-                      }}
-                    >
-                      {/* Title */}
-                      <div
-                        style={{
-                          padding: "4px",
-                          fontSize: "0.7rem",
-                          fontWeight: "500",
-                          overflow: "hidden",
-                          pointerEvents: "none",
-                        }}
-                      >
-                        {apt.title || "(untitled)"}
+                        {/* Time Grid with Drop Zone */}
+                        <ct-drop-zone
+                          accept="event,event-resize"
+                          onct-drop={handleDayDrop}
+                          style={{ position: "relative", flex: "1" }}
+                        >
+                          {HOURS.map((hour, hourIdx) => (
+                            <div
+                              style={{
+                                position: "absolute",
+                                top: `${hour.idx * HOUR_HEIGHT}px`,
+                                left: "0",
+                                right: "0",
+                                height: `${HOUR_HEIGHT}px`,
+                                borderTop: "1px solid #e5e7eb",
+                                cursor: "pointer",
+                              }}
+                              onClick={hourClickActions[hourIdx]}
+                            />
+                          ))}
+                        </ct-drop-zone>
                       </div>
+                    );
+                  })}
 
-                      {/* Drag Source for Moving */}
-                      <ct-drag-source
-                        $cell={apt}
-                        type="appointment"
-                        onClick={openEdit}
+                  {/* Event Blocks */}
+                  {events.map((evt, evtIndex) => {
+                    // Compute position and visibility
+                    const styles = computed(() => {
+                      const weekStart = startDate.get();
+                      const visibleCount = visibleDays.get();
+                      const evtDate = evt.date;
+
+                      const hidden = {
+                        top: "0",
+                        height: "0",
+                        left: "0",
+                        width: "0",
+                        display: "none" as const,
+                      };
+
+                      if (!evtDate || !weekStart) return hidden;
+
+                      const startMs = new Date(weekStart + "T00:00:00")
+                        .getTime();
+                      const evtMs = new Date(evtDate + "T00:00:00").getTime();
+                      if (isNaN(startMs) || isNaN(evtMs)) return hidden;
+
+                      const dayOffset = Math.floor(
+                        (evtMs - startMs) / (24 * 60 * 60 * 1000),
+                      );
+                      if (dayOffset < 0 || dayOffset >= visibleCount) {
+                        return hidden;
+                      }
+
+                      const startMin = timeToMinutes(evt.startTime || "09:00") -
+                        DAY_START * 60;
+                      const endMin = timeToMinutes(evt.endTime || "10:00") -
+                        DAY_START * 60;
+                      const top = (startMin / 60) * HOUR_HEIGHT;
+                      const height = Math.max(
+                        30,
+                        ((endMin - startMin) / 60) * HOUR_HEIGHT,
+                      );
+
+                      return {
+                        top: `${50 + top}px`,
+                        height: `${height}px`,
+                        left:
+                          `calc(50px + (100% - 50px) * ${dayOffset} / ${visibleCount} + 2px)`,
+                        width: `calc((100% - 50px) / ${visibleCount} - 4px)`,
+                        display: "block" as const,
+                      };
+                    });
+
+                    // Click action to open edit modal
+                    const openEvent = action(() => {
+                      if (Date.now() - lastDropTime.get() < 300) return;
+                      // Populate edit form with event data
+                      editingEventIndex.set(evtIndex);
+                      editEventTitle.set(evt.title || "");
+                      editEventDate.set(evt.date || "");
+                      editEventStartTime.set(evt.startTime || "09:00");
+                      editEventEndTime.set(evt.endTime || "10:00");
+                      editEventColor.set(evt.color || COLORS[0]);
+                      showEditModal.set(true);
+                    });
+
+                    // Workaround: Use computed() with evt.eventId dependency for static children
+                    const resizeHandleLines = computed(() => {
+                      const _id = evt.eventId;
+                      return (
+                        <div
+                          style={{
+                            width: "20px",
+                            height: "4px",
+                            borderTop: "1px solid rgba(0,0,0,0.2)",
+                            borderBottom: "1px solid rgba(0,0,0,0.2)",
+                            pointerEvents: "none",
+                          }}
+                        />
+                      );
+                    });
+
+                    const dragAreaContent = computed(() => {
+                      const _id = evt.eventId;
+                      return (
+                        <div
+                          style={{
+                            width: "100%",
+                            minHeight: "200px",
+                            touchAction: "none",
+                          }}
+                        />
+                      );
+                    });
+
+                    return (
+                      <div
                         style={{
                           position: "absolute",
-                          top: "0",
-                          left: "0",
-                          right: "0",
-                          bottom: `${RESIZE_HANDLE_HEIGHT}px`,
-                          cursor: "grab",
-                          zIndex: "1",
+                          top: styles.top,
+                          left: styles.left,
+                          width: styles.width,
+                          height: styles.height,
+                          minHeight: styles.height,
+                          zIndex: "2",
+                          backgroundColor: evt.color || COLORS[0],
+                          borderRadius: "4px",
+                          borderLeft: "3px solid rgba(0,0,0,0.2)",
+                          overflow: "hidden",
+                          display: styles.display,
                         }}
                       >
-                        {dragAreaContent}
-                      </ct-drag-source>
+                        {/* Title */}
+                        <div
+                          style={{
+                            padding: "4px",
+                            fontSize: "0.7rem",
+                            fontWeight: "500",
+                            overflow: "hidden",
+                            pointerEvents: "none",
+                          }}
+                        >
+                          {evt.title || "(untitled)"}
+                        </div>
 
-                      {/* Resize Drag Source */}
-                      <ct-drag-source
-                        $cell={apt}
-                        type="appointment-resize"
-                        style={{
-                          position: "absolute",
-                          bottom: "0",
-                          left: "0",
-                          right: "0",
-                          height: `${RESIZE_HANDLE_HEIGHT}px`,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          cursor: "ns-resize",
-                          zIndex: "10",
-                        }}
-                      >
-                        {resizeHandleLines}
-                      </ct-drag-source>
-                    </div>
-                  );
-                })}
-              </div>
-            </ct-vscroll>
+                        {/* Drag Source for Moving */}
+                        <ct-drag-source
+                          $cell={evt}
+                          type="event"
+                          onClick={openEvent}
+                          style={{
+                            position: "absolute",
+                            top: "0",
+                            left: "0",
+                            right: "0",
+                            bottom: `${RESIZE_HANDLE_HEIGHT}px`,
+                            cursor: "grab",
+                            zIndex: "1",
+                          }}
+                        >
+                          {dragAreaContent}
+                        </ct-drag-source>
+
+                        {/* Resize Drag Source */}
+                        <ct-drag-source
+                          $cell={evt}
+                          type="event-resize"
+                          style={{
+                            position: "absolute",
+                            bottom: "0",
+                            left: "0",
+                            right: "0",
+                            height: `${RESIZE_HANDLE_HEIGHT}px`,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            cursor: "ns-resize",
+                            zIndex: "10",
+                          }}
+                        >
+                          {resizeHandleLines}
+                        </ct-drag-source>
+                      </div>
+                    );
+                  })}
+                </div>
+              </ct-vscroll>
+            </div>
           </div>
-        </div>
 
-        {/* Empty State */}
-        {ifElse(
-          computed(() => appointments.get().length === 0),
-          <div
+          {/* Empty State */}
+          {ifElse(
+            computed(() => events.get().length === 0),
+            <div
+              slot="footer"
+              style={{
+                textAlign: "center",
+                padding: "16px",
+                color: "#6b7280",
+                fontSize: "0.875rem",
+              }}
+            >
+              No events yet. Click "+ Add" or click on a time slot.
+            </div>,
+            null,
+          )}
+
+          {/* Backlinks footer */}
+          <ct-hstack
             slot="footer"
+            gap="2"
+            padding="3"
             style={{
-              textAlign: "center",
-              padding: "16px",
-              color: "#6b7280",
-              fontSize: "0.875rem",
+              display: computed(() =>
+                backlinks.get().length > 0 ? "flex" : "none"
+              ),
+              alignItems: "center",
+              borderTop: "1px solid var(--ct-color-border, #e5e5e7)",
+              flexWrap: "wrap",
             }}
           >
-            No appointments yet. Click "+ Add" or click on a time slot.
-          </div>,
-          null,
-        )}
-      </ct-screen>
-    ),
-    appointments,
-  };
-});
+            <span
+              style={{
+                fontSize: "12px",
+                lineHeight: "28px",
+                color: "var(--ct-color-text-secondary, #666)",
+              }}
+            >
+              Linked from:
+            </span>
+            {backlinks.map((charm) => (
+              <ct-button
+                variant="ghost"
+                size="sm"
+                onClick={handleBacklinkClick({ charm })}
+                style={{ fontSize: "12px" }}
+              >
+                {charm?.[NAME]}
+              </ct-button>
+            ))}
+          </ct-hstack>
+        </ct-screen>
+      ),
+      title,
+      events,
+      eventCount,
+      isCalendar,
+      isHidden,
+      backlinks,
+      // LLM-callable streams
+      createEvent: handleCreateEvent({ events, allCharms }),
+      setTitle: handleSetTitle({ title }),
+    };
+  },
+);
+
+export default WeeklyCalendar;

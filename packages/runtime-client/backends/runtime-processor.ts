@@ -1,6 +1,6 @@
 import { DID, Identity } from "@commontools/identity";
 import { CharmManager } from "@commontools/charm";
-import { CharmController, CharmsController } from "@commontools/charm/ops";
+import { CharmsController } from "@commontools/charm/ops";
 import {
   type Cancel,
   convertCellsToLinks,
@@ -45,6 +45,7 @@ import {
   createCellRef,
   createPageRef,
   getCell,
+  getPageResultCell,
   mapCellRefsToSigilLinks,
   unwrapProxy,
 } from "./utils.ts";
@@ -321,9 +322,10 @@ export class RuntimeProcessor {
       input: request.argument as object | undefined,
       start: request.run ?? true,
     }, request.cause);
-    const result = await charm.result.getCell();
+    const cell = charm.getCell();
+    const result = getPageResultCell(cell);
     return {
-      page: createPageRef(charm.getCell(), result),
+      page: createPageRef(cell, result),
     };
   }
 
@@ -331,32 +333,30 @@ export class RuntimeProcessor {
     _: PatternGetSpaceRoot,
   ): Promise<PageResponse> {
     const charm = await this.cc.ensureDefaultPattern();
-    const result = await charm.result.getCell();
+    const cell = charm.getCell();
+    const result = getPageResultCell(cell);
     return {
-      page: createPageRef(charm.getCell(), result),
+      page: createPageRef(cell, result),
     };
   }
 
   // TODO(runtime-worker-refactor): Can this fail? What if the cell
   // is not a page cell?
-  async handlePageGet(
+  handlePageGet(
     request: PageGetRequest,
-  ): Promise<PageResponse> {
-    const cell = this.runtime.getCellFromEntityId(this.space, {
+  ): PageResponse {
+    let cell = this.runtime.getCellFromEntityId(this.space, {
       "/": request.pageId,
     });
-    const controller = new CharmController(
-      this.charmManager,
-      cell.asSchema(nameSchema),
-    );
+    cell = cell.asSchema(nameSchema);
+    const result = getPageResultCell(cell);
 
     if (request.runIt) {
       this.runtime.start(cell).catch(console.error);
     }
 
-    const result = await controller.result.getCell();
     return {
-      page: createPageRef(controller.getCell(), result),
+      page: createPageRef(cell, result),
     };
   }
 
@@ -436,7 +436,7 @@ export class RuntimeProcessor {
           request,
         );
       case RequestType.PageGet:
-        return await this.handlePageGet(request);
+        return this.handlePageGet(request);
       case RequestType.PageRemove:
         return await this.handlePageRemove(request);
       case RequestType.PageStart:
