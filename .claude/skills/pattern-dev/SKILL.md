@@ -111,11 +111,22 @@ mkdir -p packages/patterns/[name]
 touch packages/patterns/[name]/schemas.tsx
 ```
 
-**Define all types in `schemas.tsx` before writing any pattern code.** This file is the anchor - all other files import from it. For each field, consider: will any pattern need to write to this field? If so, use `Writable<>`.
+**Define all types in `schemas.tsx` before writing any pattern code.** This file is the anchor - all other files import from it.
 
-### Schema Type Rules
+### Always Define Input AND Output Types
 
-For each field in your schemas, decide:
+**Every pattern must have explicit `Input` and `Output` interface types.** Use `pattern<Input, Output>(...)`.
+
+The Output type must include:
+- All data fields returned from the pattern
+- All `Writable<>` cells returned
+- **All actions/handlers returned** as `Stream<void>` (or `Stream<EventType>`)
+
+Without explicit Output types, the schema generator won't know the types of exported actions, and tests calling `.send()` on them will fail at runtime.
+
+### Schema Field Rules
+
+For each field in your data schemas, decide:
 
 1. **Will it be edited via UI** (`$value`, `$checked`)? → Use `Writable<>`
 2. **Could it be undefined initially?** → Use `Default<T, value>`
@@ -137,44 +148,78 @@ Benefits of decomposition:
 
 ### Example: Recipe Manager
 
-**Step 1: Write schemas.tsx FIRST** (decide Writable<> for each field):
+**Step 1: Write schemas.tsx FIRST** (data types, Input/Output types for each pattern):
 
 ```tsx
 // schemas.tsx
-import { Default, Writable } from "commontools";
+import { Default, Stream, Writable } from "commontools";
 
-interface Ingredient {
-  name: Writable<Default<string, "">>;          // Editable via $value - needs Writable
-  amount: Writable<Default<string, "">>;        // Editable via $value - needs Writable
-  optional: Writable<Default<boolean, false>>;  // Editable via $checked - needs Writable
+// ============ DATA TYPES ============
+
+export interface Ingredient {
+  name: Writable<Default<string, "">>;
+  amount: Writable<Default<string, "">>;
+  optional: Writable<Default<boolean, false>>;
 }
 
-interface Recipe {
-  title: Writable<Default<string, "Untitled">>;      // Editable via $value - needs Writable
-  ingredients: Writable<Default<Ingredient[], []>>;  // Will .push() - needs Writable + Default
-  instructions: Writable<Default<string, "">>;       // Editable via $value - needs Writable
+export interface Recipe {
+  title: Writable<Default<string, "Untitled">>;
+  ingredients: Writable<Default<Ingredient[], []>>;
+  instructions: Writable<Default<string, "">>;
 }
 
-interface RecipeBook {
-  recipes: Writable<Default<Recipe[], []>>;  // Will .push() - needs Writable + Default
+export interface RecipeBook {
+  recipes: Writable<Default<Recipe[], []>>;
+}
+
+// ============ PATTERN INPUT/OUTPUT TYPES ============
+// Define these for each sub-pattern. Output must include all returned actions as Stream<void>.
+
+export interface IngredientInput {
+  ingredient: Ingredient;
+}
+
+export interface IngredientOutput {
+  ingredient: Ingredient;
+  isEditing: Writable<boolean>;
+  startEditing: Stream<void>;  // Actions must be Stream<void>
+  stopEditing: Stream<void>;
+}
+
+export interface RecipeInput {
+  recipe: Recipe;
+}
+
+export interface RecipeOutput {
+  recipe: Recipe;
+  addIngredient: Stream<void>;
 }
 ```
 
-**Step 2: Write ingredient.tsx**
+**Step 2: Write ingredient.tsx** (import Input/Output from schemas)
 
 ```tsx
-import { pattern, UI } from "commontools";
-import type { Ingredient } from "./schemas.tsx";
+import { action, pattern, UI, Writable } from "commontools";
+import type { IngredientInput, IngredientOutput } from "./schemas.tsx";
 
-export default pattern<{ ingredient: Ingredient }>(({ ingredient }) => ({
-  [UI]: (
-    <div>
-      <input $value={ingredient.name} />
-      <input $value={ingredient.amount} />
-    </div>
-  ),
-  ingredient,
-}));
+export default pattern<IngredientInput, IngredientOutput>(({ ingredient }) => {
+  const isEditing = Writable.of(false);
+  const startEditing = action(() => isEditing.set(true));
+  const stopEditing = action(() => isEditing.set(false));
+
+  return {
+    [UI]: (
+      <div>
+        <input $value={ingredient.name} />
+        <input $value={ingredient.amount} />
+      </div>
+    ),
+    ingredient,
+    isEditing,
+    startEditing,
+    stopEditing,
+  };
+});
 ```
 
 **Step 3: Write ingredient.test.tsx → RUN TESTS → FIX until passing**
@@ -185,22 +230,30 @@ deno task ct test packages/patterns/recipe-manager/ingredient.test.tsx
 
 See `docs/common/workflows/pattern-testing.md` for test file format. **Do NOT continue until tests pass.**
 
-**Step 4: Write recipe.tsx**
+**Step 4: Write recipe.tsx** (import Input/Output from schemas)
 
 ```tsx
-import { pattern, UI } from "commontools";
-import type { Recipe } from "./schemas.tsx";
+import { action, pattern, UI } from "commontools";
+import type { RecipeInput, RecipeOutput } from "./schemas.tsx";
 import Ingredient from "./ingredient.tsx";
 
-export default pattern<{ recipe: Recipe }>(({ recipe }) => ({
-  [UI]: (
-    <div>
-      <input $value={recipe.title} />
-      {recipe.ingredients.map((ing) => Ingredient({ ingredient: ing }))}
-    </div>
-  ),
-  recipe,
-}));
+export default pattern<RecipeInput, RecipeOutput>(({ recipe }) => {
+  const addIngredient = action(() => {
+    recipe.ingredients.push({ name: "", amount: "", optional: false });
+  });
+
+  return {
+    [UI]: (
+      <div>
+        <input $value={recipe.title} />
+        {recipe.ingredients.map((ing) => Ingredient({ ingredient: ing }))}
+        <button onClick={addIngredient}>Add Ingredient</button>
+      </div>
+    ),
+    recipe,
+    addIngredient,
+  };
+});
 ```
 
 **Step 5: Write recipe.test.tsx → RUN TESTS → FIX until passing**
@@ -399,7 +452,8 @@ After drafting code, cross-check against docs for the features you used to verif
 ## Remember
 
 - **Write and run tests for each sub-pattern before writing the next one** - this is the most important rule
-- Define types in `schemas.tsx` first, use `Writable<Default<>>` for editable fields
+- Define ALL types in `schemas.tsx`: data types, Input/Output types for each pattern
+- **Output types must include actions as `Stream<void>`** - tests will fail without this
+- Use `Writable<Default<>>` for editable fields
 - Work from leaf patterns → container patterns → main.tsx
 - Only build polished UI after all tests pass
-- Consult docs when using an API feature for the first time
