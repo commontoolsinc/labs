@@ -58,6 +58,7 @@ export class CompilationError {
     // Detect .get() called on OpaqueCell/OpaqueRef types
     // TypeScript error: "Property 'get' does not exist on type 'OpaqueCell<...> & ...'"
     // Replace with a clear, actionable message (suppress the confusing type error)
+    // Use CT_VERBOSE_ERRORS=1 to show the original TypeScript error as well
     {
       const match = message.match(
         /^Property 'get' does not exist on type '(OpaqueCell<[^']*>)/,
@@ -68,6 +69,19 @@ export class CompilationError {
           `Reactive values passed to pattern (except Writable<T> and Stream<T>) ` +
           `and results from computed() and lift() don't need .get(). ` +
           `Only Writable<T> requires .get() to read values.`;
+        // Check if verbose errors are enabled (for debugging)
+        // deno-lint-ignore no-explicit-any
+        const verbose =
+          (globalThis as any).Deno?.env?.get("CT_VERBOSE_ERRORS") === "1" ||
+          // deno-lint-ignore no-explicit-any
+          (globalThis as any).process?.env?.CT_VERBOSE_ERRORS === "1";
+        if (verbose) {
+          return {
+            type: "ERROR",
+            message:
+              `${clarification}\n\nOriginal TypeScript error: ${message}`,
+          };
+        }
         return { type: "ERROR", message: clarification };
       }
     }

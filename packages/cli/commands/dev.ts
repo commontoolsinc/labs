@@ -37,8 +37,16 @@ export const dev = new Command()
     "--main-export <export:string>",
     'Named export from entry for recipe definition. Defaults to "default".',
   )
+  .option(
+    "--verbose-errors",
+    "Show original TypeScript error messages in addition to simplified hints.",
+  )
   .arguments("<main:string>")
   .action(async (options, main) => {
+    // Set environment variable for verbose error messages
+    if (options.verboseErrors) {
+      Deno.env.set("CT_VERBOSE_ERRORS", "1");
+    }
     const mainPath = isAbsolute(main) ? main : join(Deno.cwd(), main);
 
     const { main: exports } = await process({
