@@ -18,6 +18,24 @@ Use this skill when:
 
 For ct CLI commands, run `deno task ct --help`.
 
+## Prerequisites
+
+Before starting pattern development:
+
+1. **Know the ct CLI** - Run `deno task ct --help` to learn available commands
+2. **Read the core documentation** - See `docs/common/` for concepts and patterns
+3. **Check example patterns** - Look in `packages/patterns/` for working examples
+
+## Quick Decision Tree
+
+**What do you want to do?**
+
+→ **Create a new pattern** → Go to "Starting a New Pattern"
+→ **Modify existing pattern** → Go to "Modifying Patterns"
+→ **Write tests for a pattern** → Go to "Automated Pattern Tests"
+→ **Understand a concept** → Check `docs/common/concepts/`
+→ **Debug an error** → Check `docs/development/debugging/`
+
 ## Key Principles
 
 ### Object Graph, Not Database
@@ -61,24 +79,6 @@ Bind handlers inside the pattern: `onClick={myHandler({ state })}`
 
 See `docs/development/debugging/gotchas/handler-inside-pattern.md` for details and error messages.
 
-## Prerequisites
-
-Before starting pattern development:
-
-1. **Know the ct CLI** - Run `deno task ct --help` to learn available commands
-2. **Read the core documentation** - See `docs/common/` for concepts and patterns
-3. **Check example patterns** - Look in `packages/patterns/` for working examples
-
-## Quick Decision Tree
-
-**What do you want to do?**
-
-→ **Create a new pattern** → Go to "Starting a New Pattern"
-→ **Modify existing pattern** → Go to "Modifying Patterns"
-→ **Write tests for a pattern** → Go to "Automated Pattern Tests"
-→ **Understand a concept** → Check `docs/common/concepts/`
-→ **Debug an error** → Check `docs/development/debugging/`
-
 ## Starting a New Pattern
 
 Always use multi-file composition. Create the folder structure first:
@@ -88,56 +88,18 @@ mkdir -p packages/patterns/[name]
 touch packages/patterns/[name]/schemas.tsx
 ```
 
-### Data Modeling
-
-Data modeling in CommonTools is different from React and traditional web development. Follow these steps:
-
-**Step 1: Read the identity docs**
-
-Before defining any types, read `docs/common/concepts/identity.md` to understand how object identity works in CommonTools.
-
-**Step 2: Design types WITHOUT `id` properties**
-
-**DO NOT add `id`, `*Id`, or any identifier properties to your interfaces.** This is the most common mistake when coming from React/traditional web development. The runtime tracks object identity automatically - you never need to generate or track IDs yourself.
-
-```tsx
-// WRONG - React/database thinking
-interface Recipe {
-  id: string;              // DO NOT add id properties
-  categoryId: string;      // DO NOT use foreign keys
-  name: string;
-}
-
-// CORRECT - CommonTools graph thinking
-interface Recipe {
-  name: string;
-  ingredients: Ingredient[];  // Direct reference
-}
-
-interface Cookbook {
-  title: string;
-  recipes: Recipe[];          // Direct reference, no IDs needed
-}
-```
-
-**Step 3: Use `equals()` and array indices for identity**
-
-- Use `equals(a, b)` to compare objects by identity
-- Use array indices from `.map((item, index) => ...)` to reference items
-- Use direct object references instead of foreign keys
-
-### Define Types in `schemas.tsx`
-
-This file is the anchor - all other pattern files import from it. Define all your types here first before writing pattern code.
+**Define all types in `schemas.tsx` before writing any pattern code.** This file is the anchor - all other files import from it.
 
 ### Project Structure
 
+Here's a simple example:
+
 ```
-packages/patterns/my-pattern/
+packages/patterns/expense-tracker/
 ├── schemas.tsx           # Shared types (create FIRST)
 ├── data-view.tsx         # Sub-pattern: computeds + display
-├── input-form.tsx        # Sub-pattern: form + actions
-└── main.tsx              # Composes sub-patterns, passes shared state
+├── expense-form.tsx      # Sub-pattern: form + handlers
+└── main.tsx              # Composes sub-patterns, passes shared Writable/Cell-like objects
 ```
 
 Each sub-pattern imports from `schemas.tsx` and can be deployed independently for testing.
