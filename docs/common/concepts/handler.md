@@ -6,7 +6,7 @@ import { pattern, UI, Stream, handler, Cell, Writable } from "commontools";
 interface EventType {}
 interface StateType {}
 
-const myHandler = handler<EventType, StateType>((event, state) => { 
+const myHandler = handler<EventType, StateType>((event, state) => {
   return;
 });
 //                        ^^^^^^^^^  ^^^^^^^^^
@@ -14,6 +14,34 @@ const myHandler = handler<EventType, StateType>((event, state) => {
 ```
 
 **Type annotations are required** - without them, handler parameters become `any`.
+
+## Module Scope Requirement
+
+The pattern transformer requires that `handler()` be defined **outside** the pattern body (at module scope). Only the *binding* (passing state) happens inside the pattern:
+
+```typescript
+// CORRECT - Define at module scope, bind inside pattern
+const addItem = handler<{ title: string }, { items: Writable<Item[]> }>(
+  ({ title }, { items }) => items.push({ title, done: false })
+);
+
+export default pattern<Input, Input>(({ items }) => ({
+  [UI]: (
+    <div>
+      <ct-button onClick={addItem({ items })}>Add</ct-button>  {/* Bind here */}
+    </div>
+  ),
+  items,
+}));
+
+// WRONG - Defined inside pattern body (will cause transformer error)
+export default pattern<Input, Input>(({ items }) => {
+  const addItem = handler(...);  // Error: handler() must be at module scope
+  return { ... };
+});
+```
+
+**Why:** The CTS transformer processes patterns at compile time and cannot handle closures over pattern-scoped variables in handlers.
 
 ```tsx
 import { pattern, UI, Stream, handler, Cell, Writable } from "commontools";

@@ -5,24 +5,34 @@
 Patterns run in a sandboxed environment. DOM APIs don't work:
 
 ```typescript
-// Won't work
+// Won't work - DOM APIs not available in sandbox
 const addItem = handler((_, { items }) => {
-  const input = document.getElementById('item-input');
-  const value = input.value;
-  items.push({ title: value });
+  const input = document.getElementById('item-input');  // Error!
+  items.push({ title: input.value });
 });
 
-// Use cells to capture state
-const itemTitle = Cell.of("");
-
-<ct-input $value={itemTitle} />
-
-const addItem = handler((_, { items, itemTitle }) => {
-  const value = itemTitle.get();
-  if (value.trim()) {
-    items.push({ title: value });
-    itemTitle.set("");
+// Use cells to capture state (handler at module scope)
+const addItem = handler<unknown, { items: Writable<Item[]>; itemTitle: Writable<string> }>(
+  (_, { items, itemTitle }) => {
+    const value = itemTitle.get();
+    if (value.trim()) {
+      items.push({ title: value });
+      itemTitle.set("");
+    }
   }
+);
+
+export default pattern<Input, Input>(({ items }) => {
+  const itemTitle = Cell.of("");
+  return {
+    [UI]: (
+      <div>
+        <ct-input $value={itemTitle} />
+        <ct-button onClick={addItem({ items, itemTitle })}>Add</ct-button>
+      </div>
+    ),
+    items,
+  };
 });
 ```
 
@@ -31,7 +41,7 @@ const addItem = handler((_, { items, itemTitle }) => {
 Using `await` in handlers blocks the entire UI:
 
 ```typescript
-// Blocks UI
+// Blocks UI - async handlers block the entire UI
 const handleFetch = handler(async (_, { url, result }) => {
   const response = await fetch(url.get());  // BLOCKS!
   const data = await response.json();
@@ -39,16 +49,16 @@ const handleFetch = handler(async (_, { url, result }) => {
 });
 
 // Use fetchData - reactive, non-blocking
+// Handler at module scope - just updates the query
+const handleSearch = handler<{ detail: { message: string } }, { searchQuery: Writable<string> }>(
+  ({ detail }, { searchQuery }) => searchQuery.set(detail.message)
+);
+
 export default pattern(({ searchQuery }) => {
   const searchUrl = computed(() =>
     searchQuery ? `/api/search?q=${encodeURIComponent(searchQuery)}` : ""
   );
   const { result, error, loading } = fetchData({ url: searchUrl });
-
-  // Handler just updates the query, fetchData handles the rest
-  const handleSearch = handler<{ detail: { message: string } }, { searchQuery: Writable<string> }>(
-    ({ detail }, { searchQuery }) => searchQuery.set(detail.message)
-  );
 
   return {
     [UI]: (
@@ -63,7 +73,7 @@ export default pattern(({ searchQuery }) => {
 });
 ```
 
-**Rule:** Handlers should be synchronous state changes. Use `fetchData` for async operations.
+**Rule:** Handlers should be synchronous state changes defined at module scope. Use `fetchData` for async operations.
 
 ## See Also
 
