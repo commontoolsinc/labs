@@ -376,6 +376,19 @@ describe("value-codec", () => {
         const result = toDeepStorableValue({ outer: { date } });
         expect(result).toEqual({ outer: { date: "2024-01-15T12:00:00.000Z" } });
       });
+
+      it("omits undefined properties (matches JSON.stringify behavior)", () => {
+        const result = toDeepStorableValue({ a: 1, b: undefined, c: 3 });
+        expect(result).toEqual({ a: 1, c: 3 });
+        expect("b" in (result as object)).toBe(false);
+      });
+
+      it("omits nested undefined properties", () => {
+        const result = toDeepStorableValue({
+          outer: { keep: 1, drop: undefined },
+        });
+        expect(result).toEqual({ outer: { keep: 1 } });
+      });
     });
 
     describe("handles shared references (same object from multiple places)", () => {

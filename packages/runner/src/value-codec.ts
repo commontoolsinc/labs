@@ -213,6 +213,10 @@ export function toDeepStorableValue(
       // Cache the primitive result for the original object (e.g., from toJSON).
       converted.set(original, value);
     }
+    // `undefined` at non-top-level should be omitted (matches JSON.stringify).
+    if (value === undefined && converted.size > 0) {
+      return OMIT;
+    }
     return value;
   }
 
