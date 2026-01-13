@@ -43,7 +43,7 @@ const deleteTask = action((task: Task) => {
 ))}
 ```
 
-See `docs/common/concepts/equality.md` for the full mental model.
+See `docs/common/concepts/identity.md` for the full mental model.
 
 ### Scoping Rules
 
@@ -90,19 +90,25 @@ touch packages/patterns/[name]/schemas.tsx
 
 ### Data Modeling
 
-**Before defining types, understand how data modeling differs in CommonTools.**
+Data modeling in CommonTools is different from React and traditional web development. Follow these steps:
 
-Traditional web development models data like database tables with ID foreign keys. CommonTools uses an in-memory object graph with direct references.
+**Step 1: Read the identity docs**
+
+Before defining any types, read `docs/common/concepts/identity.md` to understand how object identity works in CommonTools.
+
+**Step 2: Design types WITHOUT `id` properties**
+
+**DO NOT add `id`, `*Id`, or any identifier properties to your interfaces.** This is the most common mistake when coming from React/traditional web development. The runtime tracks object identity automatically - you never need to generate or track IDs yourself.
 
 ```tsx
-// Traditional (database thinking) - DON'T do this
+// WRONG - React/database thinking
 interface Recipe {
-  id: string;              // Don't add IDs for tracking
-  categoryId: string;      // Don't use foreign keys
+  id: string;              // DO NOT add id properties
+  categoryId: string;      // DO NOT use foreign keys
   name: string;
 }
 
-// CommonTools (graph thinking) - DO this
+// CORRECT - CommonTools graph thinking
 interface Recipe {
   name: string;
   ingredients: Ingredient[];  // Direct reference
@@ -114,13 +120,11 @@ interface Cookbook {
 }
 ```
 
-**Key differences from React/traditional patterns:**
-- **No `id` properties** - the runtime tracks identity automatically
-- **No foreign keys** - use direct object references or array indices
-- **Use `equals(a, b)`** to compare objects by identity
-- **Use array indices** from `.map((item, index) => ...)` when you need to reference items
+**Step 3: Use `equals()` and array indices for identity**
 
-See `docs/common/concepts/equality.md` for the full explanation.
+- Use `equals(a, b)` to compare objects by identity
+- Use array indices from `.map((item, index) => ...)` to reference items
+- Use direct object references instead of foreign keys
 
 ### Define Types in `schemas.tsx`
 
@@ -311,7 +315,7 @@ When using an API feature for the first time in a session, read the relevant doc
 | `Writable<>` | `docs/common/concepts/types-and-schemas/writable.md` |
 | `action()` | `docs/common/concepts/action.md` |
 | `handler()` | `docs/common/concepts/handler.md` |
-| `equals()` / object identity | `docs/common/concepts/equality.md` |
+| `equals()` / object identity | `docs/common/concepts/identity.md` |
 | `ifElse` / conditionals | `docs/common/patterns/conditional.md` |
 | `$value` bindings | `docs/common/patterns/two-way-binding.md` |
 | UI components (`ct-*`) | `docs/common/components/COMPONENTS.md` |

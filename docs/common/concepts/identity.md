@@ -1,10 +1,18 @@
 # Object Identity and Equality
 
+## DO NOT Use `id` Properties
+
+**This is the most important rule when coming from React or traditional web development:**
+
+**DO NOT add `id`, `*Id`, or any identifier properties to your data types.** The CommonTools runtime tracks object identity automatically. You never need to generate or track IDs yourself.
+
+If you find yourself writing `id: string` in an interface, stop and read this document.
+
 ## The Mental Model: Object Graph, Not Database
 
-In traditional web development, you often model data like a database: objects have `id` fields, and you look things up by ID. This works because you're constantly serializing and deserializing data—fetching from APIs, storing in localStorage, passing through JSON.
+In traditional web development, you model data like a database: objects have `id` fields, and you look things up by ID. This works because you're constantly serializing and deserializing data—fetching from APIs, storing in localStorage, passing through JSON.
 
-**Common Tools works differently.** The reactive fabric is an in-memory object graph with direct references (pointers), not a database with keyed records. When you have a reference to an object, you *have* that object—you don't need an ID to find it later.
+**CommonTools works differently.** The reactive fabric is an in-memory object graph with direct references (pointers), not a database with keyed records. When you have a reference to an object, you *have* that object—you don't need an ID to find it later.
 
 ```tsx
 // Database thinking (avoid this)
