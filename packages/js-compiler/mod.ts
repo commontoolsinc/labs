@@ -11,6 +11,7 @@ export {
   CompilationError,
   type CompilationErrorType,
   CompilerError,
+  enableVerboseErrors,
   formatTransformerDiagnostic,
   type TransformerDiagnosticInfo,
   TransformerError,

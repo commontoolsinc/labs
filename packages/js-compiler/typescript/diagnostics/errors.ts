@@ -1,6 +1,20 @@
 import ts, { type Diagnostic, DiagnosticMessageChain } from "typescript";
 import { renderInline } from "./render.ts";
 
+/**
+ * Global flag to enable verbose error messages.
+ * When enabled, shows original TypeScript errors alongside simplified hints.
+ * Set via --verbose-errors flag in CLI.
+ */
+let verboseErrorsEnabled = false;
+
+/**
+ * Enable verbose error messages (shows original TypeScript errors).
+ */
+export function enableVerboseErrors(): void {
+  verboseErrorsEnabled = true;
+}
+
 export interface ErrorDetails {
   readonly diagnostic: Diagnostic;
   source?: string;
@@ -58,7 +72,7 @@ export class CompilationError {
     // Detect .get() called on OpaqueCell/OpaqueRef types
     // TypeScript error: "Property 'get' does not exist on type 'OpaqueCell<...> & ...'"
     // Replace with a clear, actionable message (suppress the confusing type error)
-    // Use CT_VERBOSE_ERRORS=1 to show the original TypeScript error as well
+    // Use --verbose-errors flag to show the original TypeScript error as well
     {
       const match = message.match(
         /^Property 'get' does not exist on type '(OpaqueCell<[^']*>)/,
@@ -69,13 +83,7 @@ export class CompilationError {
           `Reactive values passed to pattern (except Writable<T> and Stream<T>) ` +
           `and results from computed() and lift() don't need .get(). ` +
           `Only Writable<T> requires .get() to read values.`;
-        // Check if verbose errors are enabled (for debugging)
-        // deno-lint-ignore no-explicit-any
-        const verbose =
-          (globalThis as any).Deno?.env?.get("CT_VERBOSE_ERRORS") === "1" ||
-          // deno-lint-ignore no-explicit-any
-          (globalThis as any).process?.env?.CT_VERBOSE_ERRORS === "1";
-        if (verbose) {
+        if (verboseErrorsEnabled) {
           return {
             type: "ERROR",
             message:

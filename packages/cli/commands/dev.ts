@@ -1,5 +1,6 @@
 import { Command } from "@cliffy/command";
 import { isAbsolute, join } from "@std/path";
+import { enableVerboseErrors } from "@commontools/js-compiler";
 import { render } from "../lib/render.ts";
 import { process } from "../lib/dev.ts";
 import { isRecord } from "@commontools/utils/types";
@@ -43,9 +44,9 @@ export const dev = new Command()
   )
   .arguments("<main:string>")
   .action(async (options, main) => {
-    // Set environment variable for verbose error messages
+    // Enable verbose error messages if requested
     if (options.verboseErrors) {
-      Deno.env.set("CT_VERBOSE_ERRORS", "1");
+      enableVerboseErrors();
     }
     const mainPath = isAbsolute(main) ? main : join(Deno.cwd(), main);
 
