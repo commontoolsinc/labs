@@ -1,16 +1,30 @@
-Use `ifElse()` for conditional logic in reactive contexts:
+## Ternaries in JSX
+
+Use regular ternary operators in JSX - the transformer automatically converts them to `ifElse()`:
+
+```tsx
+// ✅ Just use ternaries - they're transformed automatically
+{show ? <div>Content</div> : null}
+{user.isActive ? "Active" : "Inactive"}
+{count > 10 ? "High" : "Low"}
+
+// ✅ Nested ternaries work too
+{score >= 90 ? "A" : score >= 80 ? "B" : "C"}
+```
+
+You don't need to use `ifElse()` explicitly in JSX.
+
+## Using ifElse() Directly
+
+You can use `ifElse()` explicitly outside JSX when needed:
 
 ```typescript
-// ✅ Use ifElse for conditional rendering
 const message = ifElse(
   user.isLoggedIn,
   str`Welcome back, ${user.name}!`,
   "Please log in"
 );
 
-<div>{message}</div>
-
-// ✅ Use ifElse in data transformations
 const processedItems = items.map(item =>
   ifElse(
     item.isValid,
@@ -18,17 +32,4 @@ const processedItems = items.map(item =>
     () => ({ ...item, error: "Invalid" })
   )
 );
-```
-
-### Conditional Rendering
-
-```typescript
-// ❌ Ternary for elements doesn't work
-{show ? <div>Content</div> : null}
-
-// ✅ Use ifElse()
-{ifElse(show, <div>Content</div>, null)}
-
-// ✅ Ternary IS fine for attributes
-<span style={done ? { textDecoration: "line-through" } : {}}>
 ```
