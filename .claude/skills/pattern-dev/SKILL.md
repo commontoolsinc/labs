@@ -5,21 +5,25 @@ description: Guide for developing CommonTools patterns (TypeScript modules that 
 
 # Pattern Development
 
-## STOP - Read This First
+## Read This First
 
-**You MUST test each sub-pattern before writing the next one.**
+**You MUST write and run tests for each sub-pattern before writing the next one.**
 
 The #1 mistake is writing all the code first, then testing. This wastes hours debugging cascading errors. Instead:
 
 ```
-schemas.tsx → ingredient.tsx → TEST → recipe.tsx → TEST → main.tsx → TEST
+schemas.tsx → ingredient.tsx → ingredient.test.tsx → RUN TESTS → recipe.tsx → recipe.test.tsx → RUN TESTS → main.tsx
 ```
+
+Run tests with: `deno task ct test packages/patterns/[name]/ingredient.test.tsx`
+
+See `docs/common/workflows/pattern-testing.md` for test file format.
 
 **First pass = minimal UI.** Just basic inputs/buttons to verify data and actions work. No styling, no polish. Read COMPONENTS.md only during the final UI polish step, not at the start.
 
 ## Overview
 
-Patterns are TypeScript/JSX programs that define reactive data transformations with UIs. Use the `ct` CLI to deploy and test them.
+Patterns are TypeScript/JSX programs that define reactive data transformations with UIs. Use the `ct` CLI to deploy and interactively test them; `deno task ct --help` has comprehensive details on how to do so.
 
 ## Quick Start
 
@@ -31,7 +35,7 @@ Patterns are TypeScript/JSX programs that define reactive data transformations w
 
 ### Object Graph, Not Database
 
-The reactive fabric uses direct references between objects. When you have a reference to an object, you *have* that object—use `equals()` for identity comparison:
+The reactive fabric uses direct references between objects. When you have a reference to an object, you *have* that object. Use `equals()` for identity comparison:
 
 ```tsx
 interface Task {
@@ -72,8 +76,10 @@ See `docs/development/debugging/gotchas/handler-inside-pattern.md` for details a
 
 ### Action vs Handler
 
+In most cases, `action` defined inside the pattern body is preferred:
+
 - **Use `action()`** when the handler closes over local state created in the pattern body
-- **Use `handler()`** when the same logic needs different bindings (e.g., per-item operations in a list)
+- **Use `handler()`** only when the same logic needs different bindings (e.g., per-item operations in a list)
 
 ```tsx
 // action() - closes over local `inputValue`
@@ -107,38 +113,13 @@ touch packages/patterns/[name]/schemas.tsx
 
 **Define all types in `schemas.tsx` before writing any pattern code.** This file is the anchor - all other files import from it. For each field, consider: will any pattern need to write to this field? If so, use `Writable<>`.
 
-### Use Default<> for All Optional Fields
+### Schema Type Rules
 
-**Always use `Default<T, value>` for fields that will be displayed in UI or used in computations.** Without defaults, fields are `undefined` at runtime until explicitly set, causing errors when your pattern tries to render or compute.
+For each field in your schemas, decide:
 
-```tsx
-// schemas.tsx
-import { Default, Writable } from "commontools";
-
-interface Ingredient {
-  name: string;                         // Required - no default
-  amount: Default<string, "">;          // Defaults to empty string
-  optional: Default<boolean, false>;    // Defaults to false
-}
-
-interface Recipe {
-  title: string;
-  ingredients: Default<Ingredient[], []>;  // Read-only array with default
-  rating: Default<number | null, null>;    // Defaults to null
-}
-```
-
-**When you need BOTH a default AND write access (`.push()`, `.set()`)**, wrap `Default<>` inside `Writable<>`:
-
-```tsx
-interface Board {
-  title: Default<string, "My Board">;
-  // ❌ WRONG: Writable<Column[]> - no default, will be undefined
-  // ❌ WRONG: Default<Column[], []> - has default but no .push()/.set()
-  // ✅ RIGHT: Writable<Default<...>> - has both default AND write methods
-  columns: Writable<Default<Column[], []>>;
-}
-```
+1. **Will it be edited via UI** (`$value`, `$checked`)? → Use `Writable<>`
+2. **Could it be undefined initially?** → Use `Default<T, value>`
+3. **Both?** → Use `Writable<Default<T, value>>`
 
 See `docs/common/concepts/types-and-schemas/default.md` for full documentation.
 
@@ -156,110 +137,93 @@ Benefits of decomposition:
 
 ### Example: Recipe Manager
 
-Given these schemas:
+**Step 1: Write schemas.tsx FIRST** (decide Writable<> for each field):
 
 ```tsx
 // schemas.tsx
+import { Default, Writable } from "commontools";
+
 interface Ingredient {
-  name: string;
-  amount: string;
-  optional: boolean;
+  name: Writable<Default<string, "">>;          // Editable via $value - needs Writable
+  amount: Writable<Default<string, "">>;        // Editable via $value - needs Writable
+  optional: Writable<Default<boolean, false>>;  // Editable via $checked - needs Writable
 }
 
 interface Recipe {
-  title: string;
-  ingredients: Ingredient[];
-  instructions: string;
+  title: Writable<Default<string, "Untitled">>;      // Editable via $value - needs Writable
+  ingredients: Writable<Default<Ingredient[], []>>;  // Will .push() - needs Writable + Default
+  instructions: Writable<Default<string, "">>;       // Editable via $value - needs Writable
 }
 
 interface RecipeBook {
-  recipes: Recipe[];
+  recipes: Writable<Default<Recipe[], []>>;  // Will .push() - needs Writable + Default
 }
 ```
 
-Create sub-patterns for each level:
+**Step 2: Write ingredient.tsx**
 
-```
-packages/patterns/recipe-manager/
-├── schemas.tsx           # Types above (create FIRST)
-├── ingredient.tsx        # Sub-pattern: single ingredient display/edit
-├── ingredient.test.tsx   # Tests for ingredient
-├── recipe.tsx            # Sub-pattern: single recipe (composes ingredients)
-├── recipe.test.tsx       # Tests for recipe
-└── main.tsx              # Recipe book (composes recipes, minimal logic)
-```
-
-**ingredient.tsx** handles display/editing of one ingredient:
 ```tsx
 import { pattern, UI } from "commontools";
 import type { Ingredient } from "./schemas.tsx";
 
-export default pattern<{ ingredient: Ingredient }>(({ ingredient }) => {
-  return {
-    [UI]: (
-      <ct-hstack>
-        <ct-input $value={ingredient.amount} />
-        <ct-input $value={ingredient.name} />
-        <ct-checkbox $checked={ingredient.optional}>Optional</ct-checkbox>
-      </ct-hstack>
-    ),
-    ingredient,
-  };
-});
+export default pattern<{ ingredient: Ingredient }>(({ ingredient }) => ({
+  [UI]: (
+    <div>
+      <input $value={ingredient.name} />
+      <input $value={ingredient.amount} />
+    </div>
+  ),
+  ingredient,
+}));
 ```
 
-**recipe.tsx** composes ingredient patterns:
+**Step 3: Write ingredient.test.tsx → RUN TESTS → FIX until passing**
+
+```bash
+deno task ct test packages/patterns/recipe-manager/ingredient.test.tsx
+```
+
+See `docs/common/workflows/pattern-testing.md` for test file format. **Do NOT continue until tests pass.**
+
+**Step 4: Write recipe.tsx**
+
 ```tsx
 import { pattern, UI } from "commontools";
 import type { Recipe } from "./schemas.tsx";
 import Ingredient from "./ingredient.tsx";
 
-export default pattern<{ recipe: Recipe }>(({ recipe }) => {
-  return {
-    [UI]: (
-      <ct-card>
-        <ct-input $value={recipe.title} slot="header" />
-        {recipe.ingredients.map((ing) => Ingredient({ ingredient: ing }))}
-        <ct-textarea $value={recipe.instructions} />
-      </ct-card>
-    ),
-    recipe,
-  };
-});
+export default pattern<{ recipe: Recipe }>(({ recipe }) => ({
+  [UI]: (
+    <div>
+      <input $value={recipe.title} />
+      {recipe.ingredients.map((ing) => Ingredient({ ingredient: ing }))}
+    </div>
+  ),
+  recipe,
+}));
 ```
 
-**main.tsx** composes recipe patterns with minimal logic:
-```tsx
-import { pattern, UI, NAME } from "commontools";
-import type { RecipeBook } from "./schemas.tsx";
-import Recipe from "./recipe.tsx";
+**Step 5: Write recipe.test.tsx → RUN TESTS → FIX until passing**
 
-export default pattern<{ book: RecipeBook }>(({ book }) => {
-  return {
-    [NAME]: "Recipe Manager",
-    [UI]: (
-      <ct-screen>
-        {book.recipes.map((recipe) => Recipe({ recipe }))}
-      </ct-screen>
-    ),
-    book,
-  };
-});
+```bash
+deno task ct test packages/patterns/recipe-manager/recipe.test.tsx
 ```
 
-### Project Structure Summary
+**Do NOT continue until tests pass.**
+
+**Step 6: Write main.tsx → TEST IT**
+
+Only after ingredient and recipe tests are passing.
+
+### Project Structure
 
 ```
 packages/patterns/[name]/
-├── schemas.tsx           # Shared types (create FIRST)
-├── [item].tsx            # Sub-pattern for leaf-level items
-├── [item].test.tsx       # Tests for item sub-pattern
-├── [container].tsx       # Sub-pattern that composes items
-├── [container].test.tsx  # Tests for container sub-pattern
-└── main.tsx              # Top-level composition (minimal logic)
+├── schemas.tsx           # Types with Writable<>/Default<> (create FIRST)
+├── [leaf].tsx            # Leaf sub-pattern → TEST before continuing
+├── [container].tsx       # Container sub-pattern → TEST before continuing
+└── main.tsx              # Top-level composition → TEST
 ```
-
-Each sub-pattern imports from `schemas.tsx` and can be deployed and tested independently. The `main.tsx` should primarily compose sub-patterns, not contain significant logic itself.
 
 ## Development Methodology
 
@@ -274,24 +238,23 @@ Work from leaf patterns up to main.tsx. For each sub-pattern:
 3. **Fix** any issues until it works correctly
 4. **Then** move to the next sub-pattern that composes it
 
-**Do NOT write multiple sub-patterns before testing.** Test each one as you complete it.
+**Do NOT write multiple sub-patterns before testing.** Write tests and run them for each sub-pattern as you complete it.
 
-### Testing Options
+### Pattern Tests
 
-**Option A: Interactive CLI testing** (quick verification)
-```bash
-deno task ct charm new packages/patterns/[name]/ingredient.tsx  # Deploy
-deno task ct charm inspect                                       # Check state
-deno task ct charm call <action-name>                           # Trigger action
-deno task ct charm step                                          # Process
-```
+For each sub-pattern, write a corresponding `.test.tsx` file:
 
-**Option B: Automated pattern tests** (thorough verification)
 ```bash
 deno task ct test packages/patterns/[name]/ingredient.test.tsx
 ```
 
 See `docs/common/workflows/pattern-testing.md` for test file format.
+
+**Alternative: Interactive CLI testing** (for quick debugging)
+```bash
+deno task ct charm new packages/patterns/[name]/ingredient.tsx  # Deploy
+deno task ct charm inspect                                       # Check state
+```
 
 ### UI Polish (Final Step)
 
@@ -435,9 +398,8 @@ After drafting code, cross-check against docs for the features you used to verif
 
 ## Remember
 
-- **Test each sub-pattern before moving to the next** - this is the most important rule
-- Define types in `schemas.tsx` first, use `Default<>` for optional fields
+- **Write and run tests for each sub-pattern before writing the next one** - this is the most important rule
+- Define types in `schemas.tsx` first, use `Writable<Default<>>` for editable fields
 - Work from leaf patterns → container patterns → main.tsx
-- Only build UI after data and actions are tested
+- Only build polished UI after all tests pass
 - Consult docs when using an API feature for the first time
-- Use `deno task ct --help` to explore CLI commands
