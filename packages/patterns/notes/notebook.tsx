@@ -66,6 +66,33 @@ interface Output {
   }>;
 }
 
+// ============ STYLES ============
+
+const STYLES = {
+  modalOverlay: {
+    position: "fixed" as const,
+    inset: "0",
+    background: "rgba(0,0,0,0.5)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: "9999",
+  },
+  modalCard: {
+    minWidth: "320px",
+    padding: "24px",
+  },
+  sectionLabel: {
+    fontSize: "13px",
+    fontWeight: "500",
+    color: "var(--ct-color-text-secondary, #6e6e73)",
+  },
+  dragHandle: {
+    cursor: "grab",
+    padding: "4px",
+    opacity: 0.5,
+  },
+} as const;
+
 // Handler to show the new note modal
 const showNewNoteModal = handler<
   void,
@@ -172,25 +199,6 @@ const removeFromNotebook = handler<
   }
   // Make it visible in the space again
   note.key("isHidden").set(false);
-});
-
-// Handler for dropping a charm onto this notebook
-const _handleCharmDrop = handler<
-  { detail: { sourceCell: Writable<NoteCharm> } },
-  { notes: Writable<NoteCharm[]> }
->((event, { notes }) => {
-  const sourceCell = event.detail.sourceCell;
-  const notesList = notes.get() ?? [];
-
-  // Prevent duplicates using Writable.equals
-  const alreadyExists = notesList.some((n) => equals(sourceCell, n as any));
-  if (alreadyExists) return;
-
-  // Hide from Pages list
-  sourceCell.key("isHidden").set(true);
-
-  // Add to notebook - push cell reference, not value, to maintain charm identity
-  notes.push(sourceCell);
 });
 
 // Handler for dropping items onto the current notebook's card
@@ -899,22 +907,6 @@ const cancelNewNotebookPrompt = handler<
   state.selectedMoveNotebook.set("");
 });
 
-// Handler to toggle visibility of all selected notes
-const _toggleSelectedVisibility = handler<
-  { detail: { checked: boolean } },
-  { notes: Writable<NoteCharm[]>; selectedNoteIndices: Writable<number[]> }
->((event, { notes, selectedNoteIndices }) => {
-  const selected = selectedNoteIndices.get();
-  const makeVisible = event.detail?.checked ?? false;
-  for (const idx of selected) {
-    const noteCell = notes.key(idx);
-    if (noteCell) {
-      noteCell.key("isHidden").set(!makeVisible);
-    }
-  }
-  selectedNoteIndices.set([]);
-});
-
 // Handler to start editing title
 const startEditingTitle = handler<
   Record<string, never>,
@@ -938,19 +930,6 @@ const handleTitleKeydown = handler<
 >((event, { isEditingTitle }) => {
   if (event?.key === "Enter") {
     isEditingTitle.set(false);
-  }
-});
-
-// Handler to toggle preview expansion for a note
-const _togglePreviewExpansion = handler<
-  Record<string, never>,
-  { index: number; expandedPreviews: Writable<number[]> }
->((_, { index, expandedPreviews }) => {
-  const current = expandedPreviews.get();
-  if (current.includes(index)) {
-    expandedPreviews.set(current.filter((i) => i !== index));
-  } else {
-    expandedPreviews.set([...current, index]);
   }
 });
 
@@ -1098,9 +1077,6 @@ const Notebook = pattern<Input, Output>(
 
     // State for inline title editing
     const isEditingTitle = Writable.of<boolean>(false);
-
-    // State for expanded note previews (tracks which note indices have full content shown)
-    const _expandedPreviews = Writable.of<number[]>([]);
 
     // Filter to find all notebooks (using 📓 prefix in NAME)
     const notebooks = computed(() =>
@@ -1402,15 +1378,7 @@ const Notebook = pattern<Input, Output>(
                         {notes.map((note, index) => {
                           const dragHandle = (
                             <ct-drag-source $cell={note} type="note">
-                              <span
-                                style={{
-                                  cursor: "grab",
-                                  padding: "4px",
-                                  opacity: 0.5,
-                                }}
-                              >
-                                ⠿
-                              </span>
+                              <span style={STYLES.dragHandle}>⠿</span>
                             </ct-drag-source>
                           );
 
@@ -1614,15 +1582,7 @@ const Notebook = pattern<Input, Output>(
                   borderTop: "1px solid var(--ct-color-border, #e5e5e7)",
                 }}
               >
-                <span
-                  style={{
-                    fontSize: "13px",
-                    fontWeight: "500",
-                    color: "var(--ct-color-text-secondary, #6e6e73)",
-                  }}
-                >
-                  Other notebooks:
-                </span>
+                <span style={STYLES.sectionLabel}>Other notebooks:</span>
                 <ct-vstack gap="1">
                   {siblingNotebooks.map((notebook) => (
                     <ct-hstack
@@ -1631,15 +1591,7 @@ const Notebook = pattern<Input, Output>(
                     >
                       {/* Sibling notebooks use "sibling" type - can only drop on main card */}
                       <ct-drag-source $cell={notebook} type="sibling">
-                        <span
-                          style={{
-                            cursor: "grab",
-                            padding: "4px",
-                            opacity: 0.5,
-                          }}
-                        >
-                          ⠿
-                        </span>
+                        <span style={STYLES.dragHandle}>⠿</span>
                       </ct-drag-source>
                       {/* Drop zone receives items from notes list above */}
                       <ct-drop-zone
@@ -1665,18 +1617,13 @@ const Notebook = pattern<Input, Output>(
           {/* New Notebook Prompt Modal - Use CSS display to keep DOM alive for reactivity */}
           <div
             style={{
+              ...STYLES.modalOverlay,
               display: computed(() =>
                 showNewNotebookPrompt.get() ? "flex" : "none"
               ),
-              position: "fixed",
-              inset: "0",
-              background: "rgba(0,0,0,0.5)",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: "9999",
             }}
           >
-            <ct-card style={{ minWidth: "320px", padding: "24px" }}>
+            <ct-card style={STYLES.modalCard}>
               <ct-vstack gap="4">
                 <h3 style={{ margin: 0 }}>New Notebook</h3>
                 <ct-input
@@ -1718,18 +1665,13 @@ const Notebook = pattern<Input, Output>(
           {/* New Note Prompt Modal */}
           <div
             style={{
+              ...STYLES.modalOverlay,
               display: computed(() =>
                 showNewNotePrompt.get() ? "flex" : "none"
               ),
-              position: "fixed",
-              inset: "0",
-              background: "rgba(0,0,0,0.5)",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: "9999",
             }}
           >
-            <ct-card style={{ minWidth: "320px", padding: "24px" }}>
+            <ct-card style={STYLES.modalCard}>
               <ct-vstack gap="4">
                 <h3 style={{ margin: 0 }}>New Note</h3>
                 <ct-input
@@ -1778,18 +1720,13 @@ const Notebook = pattern<Input, Output>(
           {/* New Nested Notebook Prompt Modal */}
           <div
             style={{
+              ...STYLES.modalOverlay,
               display: computed(() =>
                 showNewNestedNotebookPrompt.get() ? "flex" : "none"
               ),
-              position: "fixed",
-              inset: "0",
-              background: "rgba(0,0,0,0.5)",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: "9999",
             }}
           >
-            <ct-card style={{ minWidth: "320px", padding: "24px" }}>
+            <ct-card style={STYLES.modalCard}>
               <ct-vstack gap="4">
                 <h3 style={{ margin: 0 }}>New Notebook</h3>
                 <ct-input
