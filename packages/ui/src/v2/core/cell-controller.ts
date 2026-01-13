@@ -1,5 +1,9 @@
 import { ReactiveController, ReactiveControllerHost } from "lit";
-import { type CellHandle, isCellHandle } from "@commontools/runtime-client";
+import {
+  CellHandle,
+  isCellHandle,
+  type JSONSchema,
+} from "@commontools/runtime-client";
 import {
   InputTimingController,
   type InputTimingOptions,
@@ -136,10 +140,14 @@ export class CellController<T> implements ReactiveController {
   /**
    * Set the current value reference and set up subscriptions
    */
-  bind(value: CellHandle<T> | T): void {
+  bind(value: CellHandle<T> | T, schema?: JSONSchema): void {
     if (this._currentValue !== value) {
       this._cleanupCellSubscription();
-      this._currentValue = value;
+      if (schema !== undefined && value instanceof CellHandle) {
+        this._currentValue = value.asSchema<T>(schema);
+      } else {
+        this._currentValue = value;
+      }
       this._setupCellSubscription();
     }
   }
