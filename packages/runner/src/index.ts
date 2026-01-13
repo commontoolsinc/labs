@@ -53,6 +53,7 @@ export {
   parseLink,
   parseLinkOrThrow,
   parseLLMFriendlyLink,
+  sanitizeSchemaForLinks,
 } from "./link-utils.ts";
 export * from "./recipe-manager.ts";
 

@@ -19,11 +19,11 @@ import {
   mergeWithDefaultTheme,
   themeContext,
 } from "../theme-context.ts";
-import { LLMMessageSchema } from "@commontools/runner";
+import { LLMMessageSchema, sanitizeSchemaForLinks } from "@commontools/runner";
 
 const BuiltInLLMMessagesArraySchema = {
   type: "array",
-  items: LLMMessageSchema,
+  items: sanitizeSchemaForLinks(LLMMessageSchema), // strips asCell by default
 } as const satisfies JSONSchema;
 
 /**
