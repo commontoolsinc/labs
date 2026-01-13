@@ -131,6 +131,12 @@ export {
   type SchedulerGraphSnapshot,
 } from "./telemetry.ts";
 
+export {
+  LLMMessageSchema,
+  LLMParamsSchema,
+  LLMToolSchema,
+} from "./builtins/llm-schemas.ts";
+
 // Utility functions (split from utils.ts)
 export { createJsonSchema } from "./builder/json-utils.ts";
 export { deepEqual, getValueAtPath, setValueAtPath } from "./path-utils.ts";
