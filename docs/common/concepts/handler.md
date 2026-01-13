@@ -75,3 +75,7 @@ export default pattern<Input, Output>(({ items }) => {
   }
 });
 ```
+
+## CLI Testing
+
+Export handlers in the return object to test them via CLI during development. See [Testing Handlers via CLI](../workflows/handlers-cli-testing.md).
