@@ -728,11 +728,19 @@ export function getAtPath(
     part = remaining.shift()
   ) {
     if (Array.isArray(curDoc.value)) {
-      curDoc = {
-        ...curDoc,
-        address: { ...curDoc.address, path: [...curDoc.address.path, part] },
-        value: elementAt(curDoc.value, part),
-      };
+      if (part === "length") {
+        curDoc = {
+          ...curDoc,
+          address: { ...curDoc.address, path: [...curDoc.address.path, part] },
+          value: curDoc.value.length,
+        };
+      } else {
+        curDoc = {
+          ...curDoc,
+          address: { ...curDoc.address, path: [...curDoc.address.path, part] },
+          value: elementAt(curDoc.value, part),
+        };
+      }
     } else if (
       isObject(curDoc.value) && part in (curDoc.value as Immutable<JSONObject>)
     ) {
