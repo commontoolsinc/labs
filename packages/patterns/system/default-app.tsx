@@ -148,29 +148,25 @@ const menuAllNotebooks = handler<
 
 // Handler: Add charm to allCharms if not already present
 const addCharm = handler<
-  { charm: Writable<unknown> },
+  { charm: MentionableCharm },
   { allCharms: Writable<MentionableCharm[]> }
 >(({ charm }, { allCharms }) => {
   const current = allCharms.get();
-  // External callers pass CellRefs that become proxies - type can't be verified at compile time
-  const typedCharm = charm as unknown as MentionableCharm;
-  if (!current.some((c) => equals(c, typedCharm))) {
-    allCharms.push(typedCharm);
+  if (!current.some((c) => equals(c, charm))) {
+    allCharms.push(charm);
   }
 });
 
 // Handler: Track charm as recently used (add to front, maintain max)
 const trackRecent = handler<
-  { charm: Writable<unknown> },
+  { charm: MentionableCharm },
   { recentCharms: Writable<MentionableCharm[]> }
 >(({ charm }, { recentCharms }) => {
   const current = recentCharms.get();
-  // External callers pass CellRefs that become proxies - type can't be verified at compile time
-  const typedCharm = charm as unknown as MentionableCharm;
   // Remove if already present
-  const filtered = current.filter((c) => !equals(c, typedCharm));
+  const filtered = current.filter((c) => !equals(c, charm));
   // Add to front and limit to max
-  const updated = [typedCharm, ...filtered].slice(0, MAX_RECENT_CHARMS);
+  const updated = [charm, ...filtered].slice(0, MAX_RECENT_CHARMS);
   recentCharms.set(updated);
 });
 
