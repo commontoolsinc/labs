@@ -3,8 +3,9 @@ export {
   CompilationError,
   type CompilationErrorType,
   CompilerError,
-  enableVerboseErrors,
+  type DiagnosticMessageTransformer,
   formatTransformerDiagnostic,
+  setDiagnosticMessageTransformer,
   type TransformerDiagnosticInfo,
   TransformerError,
 } from "./errors.ts";

@@ -16,3 +16,9 @@ export {
 } from "./transformers/mod.ts";
 export { ClosureTransformer } from "./closures/transformer.ts";
 export { CommonToolsTransformerPipeline } from "./ct-pipeline.ts";
+export {
+  CompositeDiagnosticTransformer,
+  type DiagnosticMessageTransformer,
+  OpaqueRefErrorTransformer,
+  type OpaqueRefErrorTransformerOptions,
+} from "./diagnostics/mod.ts";

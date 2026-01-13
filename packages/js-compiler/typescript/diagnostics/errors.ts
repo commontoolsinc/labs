@@ -2,17 +2,33 @@ import ts, { type Diagnostic, DiagnosticMessageChain } from "typescript";
 import { renderInline } from "./render.ts";
 
 /**
- * Global flag to enable verbose error messages.
- * When enabled, shows original TypeScript errors alongside simplified hints.
- * Set via --verbose-errors flag in CLI.
+ * Interface for transforming diagnostic error messages.
+ * Implementations can convert confusing TypeScript errors into clearer messages.
  */
-let verboseErrorsEnabled = false;
+export interface DiagnosticMessageTransformer {
+  /**
+   * Transform a diagnostic message.
+   * @param message The original TypeScript diagnostic message
+   * @returns Transformed message, or null if no transformation applies
+   */
+  transform(message: string): string | null;
+}
 
 /**
- * Enable verbose error messages (shows original TypeScript errors).
+ * Global diagnostic message transformer.
+ * Set via setDiagnosticMessageTransformer() before compilation.
  */
-export function enableVerboseErrors(): void {
-  verboseErrorsEnabled = true;
+let globalMessageTransformer: DiagnosticMessageTransformer | undefined;
+
+/**
+ * Set the global diagnostic message transformer.
+ * This transformer will be used to transform TypeScript error messages
+ * into more user-friendly messages.
+ */
+export function setDiagnosticMessageTransformer(
+  transformer: DiagnosticMessageTransformer | undefined,
+): void {
+  globalMessageTransformer = transformer;
 }
 
 export interface ErrorDetails {
@@ -69,28 +85,11 @@ export class CompilationError {
   ): { type: CompilationErrorType; message: string } {
     const message = ts.flattenDiagnosticMessageText(input, "\n");
 
-    // Detect .get() called on OpaqueCell/OpaqueRef types
-    // TypeScript error: "Property 'get' does not exist on type 'OpaqueCell<...> & ...'"
-    // Replace with a clear, actionable message (suppress the confusing type error)
-    // Use --verbose-errors flag to show the original TypeScript error as well
-    {
-      const match = message.match(
-        /^Property 'get' does not exist on type '(OpaqueCell<[^']*>)/,
-      );
-      if (match) {
-        const clarification = `Unnecessary .get() call on a reactive value. ` +
-          `This value can be accessed directly - remove .get(). ` +
-          `Reactive values passed to pattern (except Writable<T> and Stream<T>) ` +
-          `and results from computed() and lift() don't need .get(). ` +
-          `Only Writable<T> requires .get() to read values.`;
-        if (verboseErrorsEnabled) {
-          return {
-            type: "ERROR",
-            message:
-              `${clarification}\n\nOriginal TypeScript error: ${message}`,
-          };
-        }
-        return { type: "ERROR", message: clarification };
+    // Apply custom message transformer if configured
+    if (globalMessageTransformer) {
+      const transformed = globalMessageTransformer.transform(message);
+      if (transformed !== null) {
+        return { type: "ERROR", message: transformed };
       }
     }
 

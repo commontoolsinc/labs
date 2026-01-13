@@ -1,6 +1,7 @@
 import { Command } from "@cliffy/command";
 import { isAbsolute, join } from "@std/path";
-import { enableVerboseErrors } from "@commontools/js-compiler";
+import { setDiagnosticMessageTransformer } from "@commontools/js-compiler";
+import { OpaqueRefErrorTransformer } from "@commontools/ts-transformers";
 import { render } from "../lib/render.ts";
 import { process } from "../lib/dev.ts";
 import { isRecord } from "@commontools/utils/types";
@@ -44,10 +45,10 @@ export const dev = new Command()
   )
   .arguments("<main:string>")
   .action(async (options, main) => {
-    // Enable verbose error messages if requested
-    if (options.verboseErrors) {
-      enableVerboseErrors();
-    }
+    // Set up diagnostic message transformer for clearer error messages
+    setDiagnosticMessageTransformer(
+      new OpaqueRefErrorTransformer({ verbose: options.verboseErrors }),
+    );
     const mainPath = isAbsolute(main) ? main : join(Deno.cwd(), main);
 
     const { main: exports } = await process({
