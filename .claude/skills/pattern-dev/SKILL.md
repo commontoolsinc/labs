@@ -121,19 +121,40 @@ Key points:
 - ct bundles all dependencies automatically on deployment
 - Export shared schemas to avoid type mismatches between linked patterns
 
+## Consult Docs on First Use
+
+When using an API feature for the first time in a session, read the relevant documentation before proceeding. This prevents subtle mistakes that examples alone won't catch.
+
+| First time using... | Read this first |
+|---------------------|-----------------|
+| `computed()` | `docs/common/concepts/computed/computed.md` |
+| `lift()` | `docs/common/concepts/lift.md` |
+| `Writable<>` | `docs/common/concepts/types-and-schemas/writable.md` |
+| `handler` | `docs/common/concepts/handler.md` |
+| `ifElse` / conditionals | `docs/common/patterns/conditional.md` |
+| `$value` bindings | `docs/common/patterns/two-way-binding.md` |
+| UI components (`ct-*`) | `docs/common/components/COMPONENTS.md` |
+| Pattern composition | `docs/common/patterns/composition.md` |
+| LLM integration | `docs/common/capabilities/llm.md` |
+
+After drafting code, cross-check against docs for the features you used to verify correct usage.
+
 ## Documentation Map
 
 | Topic | Location |
 |-------|----------|
-| Concepts (handler, computed, reactivity) | `docs/common/concepts/` |
-| UI components and binding | `docs/common/components/` |
-| Common patterns (conditionals, composition) | `docs/common/patterns/` |
-| Debugging and errors | `docs/development/debugging/` |
+| Introduction | `docs/common/INTRODUCTION.md` |
+| Core concepts | `docs/common/concepts/` |
+| UI components | `docs/common/components/` |
+| Common patterns | `docs/common/patterns/` |
+| Capabilities (LLM, side-effects) | `docs/common/capabilities/` |
+| Workflows (dev, linking) | `docs/common/workflows/` |
 | Working examples | `packages/patterns/` |
 
 ## Remember
 
 - Define types in `schemas.tsx` first
+- **Consult docs when using an API feature for the first time**
 - Build and test in layers (data → handlers → UI)
 - Test with CLI before browser
 - Check `packages/patterns/` for working examples
