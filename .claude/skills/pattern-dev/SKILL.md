@@ -116,19 +116,29 @@ touch packages/patterns/[name]/schemas.tsx
 
 **Define all types in `schemas.tsx` before writing any pattern code.** This file is the anchor - all other files import from it.
 
-### Project Structure
+### Decompose into Sub-Patterns
 
-Here's a simple example:
+**Always decompose patterns into focused sub-patterns.** Avoid monolithic `main.tsx` files. Each logical unit should be its own pattern file.
+
+Benefits of decomposition:
+- **Testability**: Each sub-pattern can be tested independently
+- **Reusability**: Sub-patterns can be composed in different ways
+- **Maintainability**: Smaller files are easier to understand and modify
+- **Parallel development**: Different sub-patterns can be worked on separately
+
+### Project Structure
 
 ```
 packages/patterns/expense-tracker/
 ├── schemas.tsx           # Shared types (create FIRST)
 ├── data-view.tsx         # Sub-pattern: computeds + display
 ├── expense-form.tsx      # Sub-pattern: form + actions
-└── main.tsx              # Composes sub-patterns, passes shared Writable/Cell-like objects
+├── data-view.test.tsx    # Tests for data-view
+├── expense-form.test.tsx # Tests for expense-form
+└── main.tsx              # Composes sub-patterns (minimal logic here)
 ```
 
-Each sub-pattern imports from `schemas.tsx` and can be deployed independently for testing.
+Each sub-pattern imports from `schemas.tsx` and can be deployed and tested independently. The `main.tsx` should primarily compose sub-patterns, not contain significant logic itself.
 
 ## Development Methodology
 
@@ -147,9 +157,9 @@ Build in layers rather than all at once. This makes each piece independently tes
 3. **Export actions in the return object** for testing
 4. Write automated tests to verify action behavior
 
-### Layer 2.5: Automated Tests
+### Layer 3: Automated Tests (REQUIRED before UI)
 
-After implementing actions, write a test file to verify behavior:
+**Do not proceed to Layer 4 (UI) until tests pass.** Write tests for each sub-pattern:
 
 ```bash
 touch packages/patterns/[name]/main.test.tsx
@@ -184,7 +194,7 @@ Run tests: `deno task ct test packages/patterns/[name]/main.test.tsx`
 
 See `docs/common/workflows/pattern-testing.md` for the full guide.
 
-### Layer 3: Build UI
+### Layer 4: Build UI
 
 **Before writing UI code:**
 1. Read `docs/common/components/COMPONENTS.md` for available components
@@ -334,6 +344,6 @@ After drafting code, cross-check against docs for the features you used to verif
 - Define types in `schemas.tsx` first
 - **Consult docs when using an API feature for the first time**
 - Build and test in layers (data → actions → tests → UI)
-- **Write automated tests after implementing actions** (Layer 2.5)
+- **Write automated tests before building UI** (Layer 3 before Layer 4)
 - Use `deno task ct --help` to explore CLI commands
 - Check `packages/patterns/` for working examples
