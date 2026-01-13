@@ -260,7 +260,7 @@ export class RuntimeProcessor {
       const converted = convertCellsToLinks(value, {
         includeSchema: true,
         keepAsCell: true,
-        doNotConvertCellResults: true,
+        doNotConvertCellResults: false,
       });
 
       // `.sink` fires synchronously on invocation. Trigger the notification
