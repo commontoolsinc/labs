@@ -482,8 +482,8 @@ function getNormalizedLink(
     id,
     type,
     path: path.slice(1),
-    ...(schema && { schema }),
-    ...(rootSchema && { rootSchema }),
+    ...(schema !== undefined && { schema }),
+    ...(rootSchema !== undefined && { rootSchema }),
   };
 }
 
