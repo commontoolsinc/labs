@@ -1,6 +1,7 @@
 import {
   type VNode,
   type WishParams,
+  type WishScope,
   type WishState,
   type WishTag,
 } from "@commontools/api";
@@ -18,6 +19,14 @@ import type { EntityId } from "../create-ref.ts";
 import { ALL_CHARMS_ID } from "./well-known.ts";
 import { type JSONSchema, type Recipe, UI } from "../builder/types.ts";
 import { getRecipeEnvironment } from "../env.ts";
+import {
+  collectMatches,
+  findMatchingCells,
+  schemaMatchesTag,
+  traverseForTag,
+  type TraversalMatch,
+  type TraversalOptions,
+} from "./wish-traversal.ts";
 
 const WISH_TSX_PATH = getRecipeEnvironment().apiUrl +
   "api/patterns/system/wish.tsx";
@@ -94,6 +103,12 @@ type WishContext = {
   tx: IExtendedStorageTransaction;
   parentCell: Cell<any>;
   spaceCell?: Cell<unknown>;
+  /** Search scope - undefined means search favorites (default) */
+  scope?: WishScope;
+  /** Max traversal depth. 0 = only root level (backward compat), 10 = default for scoped */
+  maxDepth: number;
+  /** Max results to return. 1 = default, 0 = unlimited */
+  limit: number;
 };
 
 type BaseResolution = {
@@ -127,6 +142,216 @@ function resolvePath(
 function formatTarget(parsed: ParsedWishTarget): string {
   return parsed.key +
     (parsed.path.length > 0 ? "/" + parsed.path.join("/") : "");
+}
+
+/**
+ * Search for a tag in favorites.
+ * This is the default/backward-compatible search mode.
+ *
+ * When maxDepth > 0, also traverses into each favorite's subtree.
+ */
+function searchFavorites(
+  ctx: WishContext,
+  tag: string,
+  parsed: ParsedWishTarget,
+): BaseResolution[] {
+  const userDID = ctx.runtime.userIdentityDID;
+  if (!userDID) {
+    throw new WishError("User identity DID not available for favorites search");
+  }
+
+  const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
+  const favoritesCell = homeSpaceCell.key("favorites").asSchema(
+    favoriteListSchema,
+  );
+  const favorites = favoritesCell.get() || [];
+
+  // First: find favorites that match the tag directly (depth 0)
+  const searchTermWithoutHash = tag.toLowerCase();
+  const directMatches = favorites.filter((entry) => {
+    // Check userTags first (stored without # prefix)
+    const userTags = entry.userTags ?? [];
+    for (const t of userTags) {
+      if (t.toLowerCase() === searchTermWithoutHash) return true;
+    }
+
+    // Fall back to schema-based hashtag search
+    let schemaTag = entry.tag;
+
+    // Fallback: compute tag lazily if not stored
+    if (!schemaTag) {
+      try {
+        const { schema } = entry.cell.asSchemaFromLinks()
+          .getAsNormalizedFullLink();
+        if (schema !== undefined) {
+          schemaTag = JSON.stringify(schema);
+        }
+      } catch {
+        // Schema not available yet
+      }
+    }
+
+    const hashtags = schemaTag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ?? [];
+    return [...hashtags].some((m) => m[1] === searchTermWithoutHash);
+  });
+
+  // If maxDepth is 0 (backward compat), only return direct matches
+  if (ctx.maxDepth === 0) {
+    if (directMatches.length === 0) {
+      throw new WishError(`No favorite found matching "#${tag}"`);
+    }
+    return directMatches.map((match) => ({
+      cell: match.cell,
+      pathPrefix: parsed.path,
+    }));
+  }
+
+  // With maxDepth > 0, traverse into favorites to find nested matches
+  const favoriteCells = favorites.map((entry) => entry.cell as Cell<unknown>);
+  const options: TraversalOptions = {
+    tag: searchTermWithoutHash,
+    maxDepth: ctx.maxDepth,
+    limit: ctx.limit,
+    runtime: ctx.runtime,
+    tx: ctx.tx,
+  };
+
+  const matches = findMatchingCells(favoriteCells, options);
+
+  if (matches.length === 0 && directMatches.length === 0) {
+    throw new WishError(`No favorite found matching "#${tag}"`);
+  }
+
+  // Combine direct matches and traversal matches
+  // Direct matches come first, then traversal results
+  const results: BaseResolution[] = directMatches.map((match) => ({
+    cell: match.cell,
+    pathPrefix: parsed.path,
+  }));
+
+  for (const match of matches) {
+    // Skip if already in direct matches (avoid duplicates)
+    const isDuplicate = results.some((r) =>
+      r.cell.sourceURI === match.cell.sourceURI
+    );
+    if (!isDuplicate) {
+      results.push({
+        cell: match.cell,
+        pathPrefix: [...match.path, ...parsed.path],
+      });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Search for a tag in allCharms of specified spaces + subtree.
+ */
+function searchSpaces(
+  ctx: WishContext,
+  spaces: (string)[],
+  tag: string,
+  parsed: ParsedWishTarget,
+): BaseResolution[] {
+  const searchTermWithoutHash = tag.toLowerCase();
+  const allCells: Cell<unknown>[] = [];
+
+  for (const spaceSpec of spaces) {
+    let spaceId: MemorySpace;
+
+    if (spaceSpec === "~") {
+      // Home space
+      const userDID = ctx.runtime.userIdentityDID;
+      if (!userDID) {
+        throw new WishError("User identity DID not available for ~ space");
+      }
+      spaceId = userDID;
+    } else if (spaceSpec === ".") {
+      // Current space
+      spaceId = ctx.parentCell.space;
+    } else {
+      // Explicit DID
+      spaceId = spaceSpec as MemorySpace;
+    }
+
+    // Get allCharms for this space
+    const allCharmsCell = ctx.runtime.getCellFromEntityId(
+      spaceId,
+      { "/": ALL_CHARMS_ID },
+      undefined,
+      undefined,
+      ctx.tx,
+    );
+
+    if (allCharmsCell) {
+      const allCharms = allCharmsCell.get();
+      if (Array.isArray(allCharms)) {
+        for (let i = 0; i < allCharms.length; i++) {
+          const charmCell = allCharmsCell.key(i) as Cell<unknown>;
+          allCells.push(charmCell);
+        }
+      }
+    }
+  }
+
+  if (allCells.length === 0) {
+    throw new WishError("No charms found in specified spaces");
+  }
+
+  const options: TraversalOptions = {
+    tag: searchTermWithoutHash,
+    maxDepth: ctx.maxDepth,
+    limit: ctx.limit,
+    runtime: ctx.runtime,
+    tx: ctx.tx,
+  };
+
+  const matches = findMatchingCells(allCells, options);
+
+  if (matches.length === 0) {
+    throw new WishError(`No cell found matching "#${tag}" in specified spaces`);
+  }
+
+  return matches.map((match) => ({
+    cell: match.cell,
+    pathPrefix: [...match.path, ...parsed.path],
+  }));
+}
+
+/**
+ * Search for a tag in specific cells + subtree.
+ */
+function searchCells(
+  ctx: WishContext,
+  cells: Cell<unknown>[],
+  tag: string,
+  parsed: ParsedWishTarget,
+): BaseResolution[] {
+  const searchTermWithoutHash = tag.toLowerCase();
+
+  if (cells.length === 0) {
+    throw new WishError("No cells provided for search");
+  }
+
+  const options: TraversalOptions = {
+    tag: searchTermWithoutHash,
+    maxDepth: ctx.maxDepth,
+    limit: ctx.limit,
+    runtime: ctx.runtime,
+    tx: ctx.tx,
+  };
+
+  const matches = findMatchingCells(cells, options);
+
+  if (matches.length === 0) {
+    throw new WishError(`No cell found matching "#${tag}" in provided cells`);
+  }
+
+  return matches.map((match) => ({
+    cell: match.cell,
+    pathPrefix: [...match.path, ...parsed.path],
+  }));
 }
 
 function resolveBase(
@@ -247,62 +472,26 @@ function resolveBase(
         return [{ cell: baseCell }];
       }
 
-      // Hash tag: Look for exact matches in favorites.
+      // Hash tag: dispatch based on scope
       if (parsed.key.startsWith("#")) {
-        // Unknown tag = search favorites by tag
-        const userDID = ctx.runtime.userIdentityDID;
-        if (!userDID) {
-          throw new WishError(
-            "User identity DID not available for favorites search",
-          );
+        const tag = parsed.key.slice(1); // Remove # prefix
+        const scope = ctx.scope;
+
+        // No scope = search favorites (default/backward-compatible)
+        if (!scope) {
+          return searchFavorites(ctx, tag, parsed);
         }
 
-        const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
-        const favoritesCell = homeSpaceCell.key("favorites").asSchema(
-          favoriteListSchema,
-        );
-        const favorites = favoritesCell.get() || [];
-
-        // Match hash tags in userTags or tag field (the schema), all lowercase.
-        // If tag is empty, try to compute it lazily from the cell's schema.
-        // This handles existing favorites that were saved before schema was synced.
-        const searchTerm = parsed.key.toLowerCase(); // e.g., "#my-tag"
-        const searchTermWithoutHash = searchTerm.slice(1); // e.g., "my-tag"
-        const matches = favorites.filter((entry) => {
-          // Check userTags first (stored without # prefix)
-          const userTags = entry.userTags ?? [];
-          for (const t of userTags) {
-            if (t.toLowerCase() === searchTermWithoutHash) return true;
-          }
-
-          // Fall back to tag field (schema-based hashtag search)
-          let tag = entry.tag;
-
-          // Fallback: compute tag lazily if not stored
-          if (!tag) {
-            try {
-              const { schema } = entry.cell.asSchemaFromLinks()
-                .getAsNormalizedFullLink();
-              if (schema !== undefined) {
-                tag = JSON.stringify(schema);
-              }
-            } catch {
-              // Schema not available yet
-            }
-          }
-
-          const hashtags = tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ?? [];
-          return [...hashtags].some((m) => m[1] === searchTermWithoutHash);
-        });
-
-        if (matches.length === 0) {
-          throw new WishError(`No favorite found matching "${searchTerm}"`);
+        // Scope with spaces = search allCharms in those spaces
+        if ("spaces" in scope) {
+          return searchSpaces(ctx, scope.spaces, tag, parsed);
         }
 
-        return matches.map((match) => ({
-          cell: match.cell,
-          pathPrefix: parsed.path,
-        }));
+        // Scope with cells = search those specific cells
+        // Cast through unknown since asCell: true in schema gives us Cell at runtime
+        if ("cells" in scope) {
+          return searchCells(ctx, scope.cells as unknown as Cell<unknown>[], tag, parsed);
+        }
       }
 
       throw new WishError(`Wish target "${parsed.key}" is not recognized.`);
@@ -381,7 +570,27 @@ const TARGET_SCHEMA = {
       query: { type: "string" },
       path: { type: "array", items: { type: "string" } },
       context: { type: "object", additionalProperties: { asCell: true } },
-      scope: { type: "array", items: { type: "string" } },
+      schema: { type: "object" },
+      scope: {
+        anyOf: [
+          {
+            type: "object",
+            properties: {
+              spaces: { type: "array", items: { type: "string" } },
+            },
+            required: ["spaces"],
+          },
+          {
+            type: "object",
+            properties: {
+              cells: { type: "array", items: { asCell: true } },
+            },
+            required: ["cells"],
+          },
+        ],
+      },
+      maxDepth: { type: "number" },
+      limit: { type: "number" },
     },
     required: ["query"],
   }],
@@ -516,7 +725,8 @@ export function wish(
       }
       try {
         const parsed = parseWishTarget(wishTarget);
-        const ctx: WishContext = { runtime, tx, parentCell };
+        // Legacy string mode: no scope, maxDepth=0 for backward compat
+        const ctx: WishContext = { runtime, tx, parentCell, maxDepth: 0, limit: 1 };
         const baseResolutions = resolveBase(parsed, ctx);
 
         // Just use the first result (if there aren't any, the above throws)
@@ -558,8 +768,15 @@ export function wish(
       }
       return;
     } else if (typeof targetValue === "object") {
-      const { query, path, schema, context, scope: _scope } =
-        targetValue as WishParams;
+      const {
+        query,
+        path,
+        schema,
+        context,
+        scope,
+        maxDepth: maxDepthParam,
+        limit: limitParam,
+      } = targetValue as WishParams;
 
       if (query === undefined || query === null || query === "") {
         const errorMsg = `Wish target "${
@@ -572,6 +789,12 @@ export function wish(
         return;
       }
 
+      // Determine maxDepth: use provided value, or default based on scope
+      // - If scope is undefined (favorites): maxDepth defaults to 0 (backward compat)
+      // - If scope is provided: maxDepth defaults to 10
+      const maxDepth = maxDepthParam ?? (scope ? 10 : 0);
+      const limit = limitParam ?? 1;
+
       // If the query is a path or a hash tag, resolve it directly
       if (query.startsWith("/") || /^#[a-zA-Z0-9-]+$/.test(query)) {
         try {
@@ -579,7 +802,7 @@ export function wish(
             key: query as WishTag,
             path: path ?? [],
           };
-          const ctx: WishContext = { runtime, tx, parentCell };
+          const ctx: WishContext = { runtime, tx, parentCell, scope, maxDepth, limit };
           const baseResolutions = resolveBase(parsed, ctx);
           const resultCells = baseResolutions.map((baseResolution) => {
             const combinedPath = baseResolution.pathPrefix
