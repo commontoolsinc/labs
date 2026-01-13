@@ -200,13 +200,13 @@ export class CellHandle<T = unknown> {
   /**
    * Create a new CellHandle with a different schema.
    */
-  asSchema<S extends JSONSchema>(schema: S): CellHandle<unknown> {
+  asSchema<U = unknown>(schema: JSONSchema): CellHandle<U> {
     const newCell = new CellHandle(this.#rt, {
       ...this.#ref,
       schema,
     });
     newCell.#value = this.#value;
-    return newCell;
+    return newCell as CellHandle<U>;
   }
 
   private _extendPath(key: string): CellRef {
