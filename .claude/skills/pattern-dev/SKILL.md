@@ -90,7 +90,7 @@ touch packages/patterns/[name]/schemas.tsx
 
 **Define all types in `schemas.tsx` before writing any pattern code.** This file is the anchor - all other files import from it.
 
-When designing types, don't add `id` properties for tracking objects—use `equals()` or array indices instead (see Key Principles above).
+**IMPORTANT: No `id` properties in your types.** The reactive fabric tracks object identity automatically. Use `equals()` or array indices to reference objects (see Key Principles above).
 
 ### Project Structure
 
