@@ -40,19 +40,52 @@ describe("value-codec", () => {
         expect(isStorableValue({ nested: { object: true } })).toBe(true);
       });
 
-      it("accepts arrays", () => {
+      it("accepts dense arrays", () => {
         expect(isStorableValue([])).toBe(true);
         expect(isStorableValue([1, 2, 3])).toBe(true);
         expect(isStorableValue([{ a: 1 }, { b: 2 }])).toBe(true);
+        expect(isStorableValue([null, "test", null])).toBe(true);
+      });
+    });
+
+    describe("returns false for non-storable arrays", () => {
+      it("rejects arrays with undefined elements", () => {
+        expect(isStorableValue([1, undefined, 3])).toBe(false);
+        expect(isStorableValue([undefined])).toBe(false);
       });
 
-      // TODO(@danfuzz): This should return false once the TODO is resolved
-      it("accepts undefined (TODO: should be false)", () => {
+      it("rejects sparse arrays (arrays with holes)", () => {
+        const sparse: unknown[] = [];
+        sparse[0] = 1;
+        sparse[2] = 3; // hole at index 1
+        expect(isStorableValue(sparse)).toBe(false);
+      });
+
+      it("rejects arrays with extra non-numeric properties", () => {
+        const arr = [1, 2, 3] as unknown[] & { foo?: string };
+        arr.foo = "bar";
+        expect(isStorableValue(arr)).toBe(false);
+      });
+
+      it("rejects sparse arrays even when extra properties balance the count", () => {
+        // This array has length 3, hole at index 1, but extra property "foo"
+        // So Object.keys() returns ["0", "2", "foo"] which has length 3
+        // But it should still be rejected because indices aren't all present
+        const sparse = [] as unknown[] & { foo?: string };
+        sparse[0] = 1;
+        sparse[2] = 3;
+        sparse.foo = "bar";
+        expect(isStorableValue(sparse)).toBe(false);
+      });
+    });
+
+    describe("returns true for storable-but-not-JSON-encodable values", () => {
+      it("accepts undefined", () => {
         expect(isStorableValue(undefined)).toBe(true);
       });
     });
 
-    describe("returns false for non-JSON-encodable values", () => {
+    describe("returns false for non-storable values", () => {
       it("rejects NaN", () => {
         expect(isStorableValue(NaN)).toBe(false);
       });
@@ -119,14 +152,57 @@ describe("value-codec", () => {
         expect(toStorableValue(obj)).toBe(obj);
       });
 
-      it("passes through arrays", () => {
+      it("passes through dense arrays", () => {
         const arr = [1, 2, 3];
         expect(toStorableValue(arr)).toBe(arr);
       });
 
-      // TODO(@danfuzz): This should throw once the TODO is resolved
-      it("passes through undefined (TODO: should throw)", () => {
+      it("passes through undefined", () => {
         expect(toStorableValue(undefined)).toBe(undefined);
+      });
+    });
+
+    describe("handles sparse arrays and undefined elements", () => {
+      it("densifies sparse arrays by filling holes with null", () => {
+        const sparse: unknown[] = [];
+        sparse[0] = 1;
+        sparse[2] = 3; // hole at index 1
+        const result = toStorableValue(sparse);
+        expect(result).not.toBe(sparse); // returns a new array
+        expect(result).toEqual([1, null, 3]);
+      });
+
+      it("densifies arrays with multiple holes", () => {
+        const sparse: unknown[] = [];
+        sparse[0] = "a";
+        sparse[3] = "b"; // holes at indices 1 and 2
+        sparse[5] = "c"; // hole at index 4
+        const result = toStorableValue(sparse);
+        expect(result).toEqual(["a", null, null, "b", null, "c"]);
+      });
+
+      it("converts undefined elements to null", () => {
+        const result = toStorableValue([1, undefined, 3]);
+        expect(result).toEqual([1, null, 3]);
+      });
+
+      it("throws for arrays with named properties", () => {
+        const arr = [1, 2, 3] as unknown[] & { foo?: string };
+        arr.foo = "bar";
+        expect(() => toStorableValue(arr)).toThrow(
+          "Cannot store array with enumerable named properties",
+        );
+      });
+
+      it("throws for sparse arrays with named properties", () => {
+        // Even if the sparse array could be densified, named props are not allowed
+        const sparse = [] as unknown[] & { foo?: string };
+        sparse[0] = 1;
+        sparse[2] = 3;
+        sparse.foo = "bar";
+        expect(() => toStorableValue(sparse)).toThrow(
+          "Cannot store array with enumerable named properties",
+        );
       });
     });
 
@@ -212,7 +288,7 @@ describe("value-codec", () => {
           }
         }
         expect(() => toStorableValue(new BadToJSON())).toThrow(
-          "`toJSON()` on object returned something other than a `JSONValue`",
+          "`toJSON()` on object returned something other than a storable value",
         );
       });
 
@@ -223,7 +299,7 @@ describe("value-codec", () => {
           }
         }
         expect(() => toStorableValue(new ReturnsFunction())).toThrow(
-          "`toJSON()` on object returned something other than a `JSONValue`",
+          "`toJSON()` on object returned something other than a storable value",
         );
       });
 
@@ -234,7 +310,7 @@ describe("value-codec", () => {
           }
         }
         expect(() => toStorableValue(new ReturnsInstance())).toThrow(
-          "`toJSON()` on object returned something other than a `JSONValue`",
+          "`toJSON()` on object returned something other than a storable value",
         );
       });
     });
@@ -300,6 +376,19 @@ describe("value-codec", () => {
         const result = toDeepStorableValue({ outer: { date } });
         expect(result).toEqual({ outer: { date: "2024-01-15T12:00:00.000Z" } });
       });
+
+      it("omits undefined properties (matches JSON.stringify behavior)", () => {
+        const result = toDeepStorableValue({ a: 1, b: undefined, c: 3 });
+        expect(result).toEqual({ a: 1, c: 3 });
+        expect("b" in (result as object)).toBe(false);
+      });
+
+      it("omits nested undefined properties", () => {
+        const result = toDeepStorableValue({
+          outer: { keep: 1, drop: undefined },
+        });
+        expect(result).toEqual({ outer: { keep: 1 } });
+      });
     });
 
     describe("handles shared references (same object from multiple places)", () => {
@@ -315,6 +404,39 @@ describe("value-codec", () => {
         const obj = { a: shared, b: shared };
         const result = toDeepStorableValue(obj);
         expect(result).toEqual({ a: [1, 2, 3], b: [1, 2, 3] });
+      });
+
+      it("only calls toJSON() once per shared object", () => {
+        let callCount = 0;
+        const shared = {
+          toJSON() {
+            callCount++;
+            return { converted: true };
+          },
+        };
+        const obj = { first: shared, second: shared, third: shared };
+        const result = toDeepStorableValue(obj);
+        expect(result).toEqual({
+          first: { converted: true },
+          second: { converted: true },
+          third: { converted: true },
+        });
+        expect(callCount).toBe(1);
+      });
+
+      it("returns same result for shared sparse arrays", () => {
+        const sparse: unknown[] = [];
+        sparse[0] = 1;
+        sparse[2] = 3;
+        const obj = { a: sparse, b: sparse };
+        const result = toDeepStorableValue(obj) as {
+          a: unknown[];
+          b: unknown[];
+        };
+        expect(result.a).toEqual([1, null, 3]);
+        expect(result.b).toEqual([1, null, 3]);
+        // Both should reference the same converted array
+        expect(result.a).toBe(result.b);
       });
     });
 
@@ -341,6 +463,23 @@ describe("value-codec", () => {
         a.b = b;
         b.a = a;
         expect(() => toDeepStorableValue(a)).toThrow(
+          "Cannot store circular reference",
+        );
+      });
+
+      it("throws when sparse array references itself", () => {
+        const arr: any[] = [];
+        arr[0] = 1;
+        arr[2] = arr; // sparse array with circular reference at index 2
+        expect(() => toDeepStorableValue(arr)).toThrow(
+          "Cannot store circular reference",
+        );
+      });
+
+      it("throws when array with undefined references itself", () => {
+        const arr: any[] = [1, undefined, null];
+        arr[3] = arr; // array with undefined element + circular reference
+        expect(() => toDeepStorableValue(arr)).toThrow(
           "Cannot store circular reference",
         );
       });
@@ -399,6 +538,75 @@ describe("value-codec", () => {
         // This must throw, not return an internal symbol or other non-JSON value.
         expect(() => toDeepStorableValue(() => {})).toThrow(
           "Cannot store function per se",
+        );
+      });
+    });
+
+    describe("handles sparse arrays and undefined elements", () => {
+      it("densifies top-level sparse arrays with null", () => {
+        const sparse: unknown[] = [];
+        sparse[0] = 1;
+        sparse[2] = 3; // hole at index 1
+        const result = toDeepStorableValue(sparse);
+        expect(result).toEqual([1, null, 3]);
+      });
+
+      it("densifies nested sparse arrays with null", () => {
+        const sparse: unknown[] = [];
+        sparse[0] = "a";
+        sparse[2] = "c";
+        const result = toDeepStorableValue({ arr: sparse });
+        expect(result).toEqual({ arr: ["a", null, "c"] });
+      });
+
+      it("densifies sparse arrays inside arrays with null", () => {
+        const sparse: unknown[] = [];
+        sparse[0] = 1;
+        sparse[2] = 3;
+        const result = toDeepStorableValue([[sparse]]);
+        expect(result).toEqual([[[1, null, 3]]]);
+      });
+
+      it("converts undefined elements to null", () => {
+        const result = toDeepStorableValue([1, undefined, 3]);
+        expect(result).toEqual([1, null, 3]);
+      });
+
+      it("recursively processes elements after densifying", () => {
+        const sparse: unknown[] = [];
+        sparse[0] = new Date("2024-01-15T12:00:00.000Z");
+        sparse[2] = { nested: true };
+        const result = toDeepStorableValue(sparse);
+        expect(result).toEqual(["2024-01-15T12:00:00.000Z", null, {
+          nested: true,
+        }]);
+      });
+    });
+
+    describe("throws for arrays with named properties", () => {
+      it("throws for top-level array with named properties", () => {
+        const arr = [1, 2, 3] as unknown[] & { foo?: string };
+        arr.foo = "bar";
+        expect(() => toDeepStorableValue(arr)).toThrow(
+          "Cannot store array with enumerable named properties",
+        );
+      });
+
+      it("throws for nested array with named properties", () => {
+        const arr = [1, 2] as unknown[] & { extra?: number };
+        arr.extra = 42;
+        expect(() => toDeepStorableValue({ data: arr })).toThrow(
+          "Cannot store array with enumerable named properties",
+        );
+      });
+
+      it("throws for sparse array with named properties", () => {
+        const sparse = [] as unknown[] & { name?: string };
+        sparse[0] = 1;
+        sparse[2] = 3;
+        sparse.name = "test";
+        expect(() => toDeepStorableValue(sparse)).toThrow(
+          "Cannot store array with enumerable named properties",
         );
       });
     });
