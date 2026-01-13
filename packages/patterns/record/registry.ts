@@ -113,6 +113,10 @@ export interface SubCharmDefinition {
   fieldMapping?: string[];
   // If true, this module exports a settingsUI for configuration
   hasSettings?: boolean;
+  // If true, this module exports embeddedUI for container rendering
+  // Only modules with this flag should use ct-render variant="embedded"
+  // (using variant triggers waiting in ct-render which is expensive)
+  hasEmbeddedUI?: boolean;
   // If true, always include schema in extraction even with no instances
   alwaysExtract?: boolean;
   // Extraction mode: "single" (default) or "array" (each array item creates a module instance)
@@ -163,6 +167,8 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
       },
     },
     fieldMapping: ["content", "notes"],
+    // Notes exports embeddedUI for streamlined container rendering
+    hasEmbeddedUI: true,
   },
 
   // Data modules - imported from peer patterns

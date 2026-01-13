@@ -37,6 +37,7 @@ import { inferTypeFromModules } from "./record/template-registry.ts";
 import { TypePickerModule } from "./type-picker.tsx";
 import { ExtractorModule } from "./record/extraction/extractor-module.tsx";
 import { getResultSchema } from "./record/extraction/schema-utils.ts";
+import type { ContainerCoordinationContext } from "./container-protocol.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
 
 // ===== Standard Labels for Smart Defaults =====
@@ -162,17 +163,26 @@ const initializeRecord = lift(
       // Pass recordPatternJson so [[wiki-links]] create Record charms instead of Note charms
       const notesCharm = Note({ linkPattern: recordPatternJson });
 
+      // Build ContainerCoordinationContext for TypePicker
+      const context: ContainerCoordinationContext<SubCharmEntry> = {
+        entries: subCharms,
+        trashedEntries: trashedSubCharms as Writable<
+          (SubCharmEntry & { trashedAt: string })[]
+        >,
+        createModule: (type: string) => {
+          if (type === "notes") {
+            return Note({ linkPattern: recordPatternJson });
+          }
+          return createSubCharm(type);
+        },
+      };
+
       // Capture schema for dynamic discovery
       const notesSchema = getResultSchema(notesCharm);
 
-      // TypePicker receives Cells as top-level props (CTS handles serialization correctly)
-      // NOTE: Cells must be top-level, not nested in a context object!
+      // TypePicker uses the ContainerCoordinationContext protocol
       // deno-lint-ignore no-explicit-any
-      const typePickerCharm = TypePickerModule({
-        entries: subCharms,
-        trashedEntries: trashedSubCharms,
-        linkPatternJson: recordPatternJson,
-      } as any);
+      const typePickerCharm = TypePickerModule({ context } as any);
 
       // Capture schema for dynamic discovery
       const typePickerSchema = getResultSchema(typePickerCharm);
@@ -823,21 +833,6 @@ const createSibling = handler<
   sc.set(updated);
 });
 
-// ===== Module-scope helper function =====
-// Plain helper to get display info - NOT a lift function
-// This is called inside computed() blocks after values are accessed
-function getDisplayInfo(
-  type: string,
-  charmLabel?: string,
-): { icon: string; label: string; allowMultiple: boolean } {
-  const def = getDefinition(type);
-  return {
-    icon: def?.icon || "📋",
-    label: charmLabel || def?.label || type,
-    allowMultiple: def?.allowMultiple || false,
-  };
-}
-
 // ===== The Record Pattern =====
 const Record = pattern<RecordInput, RecordOutput>(
   ({ title, subCharms, trashedSubCharms }) => {
@@ -887,65 +882,69 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // Entry with index for rendering - preserves charm references (no spreading!)
     // isExpanded is pre-computed to avoid closure issues inside .map() callbacks
-    // displayInfo is computed using module-scope lift() that properly unwraps Cell values
+    // displayInfo is pre-computed to avoid calling getModuleDisplay inside .map() JSX
     type EntryWithIndex = {
       entry: SubCharmEntry;
       index: number;
       isExpanded: boolean;
-      displayInfo: { icon: string; label: string; allowMultiple: boolean };
+      displayInfo: { icon: string; label: string };
       isPinned: boolean;
-      allowMultiple: boolean;
     };
 
     // Pre-compute entries with their indices AND expanded state for stable reference during render
     // IMPORTANT: We do NOT spread entry properties - that breaks charm rendering
     // IMPORTANT: isExpanded must be computed here, not inside .map() - closures over cells in .map() don't work correctly
-    // IMPORTANT: displayInfo uses getDisplayInfo (plain helper) - this works because
-    //   computed() transforms .map() callbacks to properly unwrap reactive values
-    const allEntriesWithIndex = computed(() => {
+    // IMPORTANT: displayInfo must be computed here to avoid calling lift inside .map() JSX
+    const {
+      pinnedEntries,
+      unpinnedEntries,
+      allEntries,
+      pinnedCount,
+      hasUnpinned,
+      hasExpandedModule,
+    } = computed(() => {
+      const sc = subCharms;
       const expandedIdx = expandedIndex.get();
-      // Note: Don't use fallback (|| []) as it breaks CTS transformer's mapWithPattern
-      // subCharms is guaranteed to be an array by the Default type
-      return subCharms.map((entry, index) => {
-        // Get display info using plain helper function
-        // This works because CTS transforms .map() to properly unwrap reactive values
-        const displayInfo = getDisplayInfo(
-          entry.type,
-          // deno-lint-ignore no-explicit-any
-          (entry.charm as any)?.label,
-        );
+      const entries = (sc || []).map((entry, index) => {
+        // Compute displayInfo inline (same logic as getModuleDisplay)
+        const def = getDefinition(entry.type);
+        // deno-lint-ignore no-explicit-any
+        const charmLabel = (entry.charm as any)?.label;
+        const displayInfo = {
+          icon: def?.icon || "📋",
+          label: charmLabel || def?.label || entry.type,
+        };
         return {
           entry,
           index,
           isExpanded: expandedIdx === index,
           displayInfo,
           isPinned: entry.pinned || false,
-          allowMultiple: displayInfo.allowMultiple,
         };
       });
+      const pinned = entries.filter((item) => item.entry?.pinned);
+      const unpinned = entries.filter((item) => !item.entry?.pinned);
+      return {
+        pinnedEntries: pinned,
+        unpinnedEntries: unpinned,
+        allEntries: entries,
+        pinnedCount: pinned.length,
+        hasUnpinned: unpinned.length > 0,
+        hasExpandedModule: expandedIdx !== undefined,
+      };
     });
-
-    // Separate pinned from unpinned entries
-    const pinnedEntries = computed(() =>
-      allEntriesWithIndex.filter((item) => item.entry?.pinned)
-    );
-    const unpinnedEntries = computed(() =>
-      allEntriesWithIndex.filter((item) => !item.entry?.pinned)
-    );
-    const pinnedCount = computed(() => pinnedEntries.length);
-    const hasUnpinned = computed(() => unpinnedEntries.length > 0);
-    const hasExpandedModule = computed(() => expandedIndex.get() !== undefined);
-    const allEntries = allEntriesWithIndex;
 
     // Check if there are any module types available to add
     // (always true unless registry is empty - multiple of same type allowed)
     const hasTypesToAdd = getAddableTypes().length > 0;
 
     // Build dropdown items from registry, separating new types from existing ones
-    // Note: Don't use fallback (|| []) as it breaks CTS transformer's mapWithPattern
     const addSelectItems = computed(() => {
-      const types = [...new Set(subCharms.map((e) => e?.type).filter(Boolean))];
-      const existingTypes = new Set<string>(types);
+      // Extract module types inline to avoid Cell type issues
+      const moduleTypes = [
+        ...new Set((subCharms || []).map((e) => e?.type).filter(Boolean)),
+      ];
+      const existingTypes = new Set<string>(moduleTypes);
       const allTypes = getAddableTypes();
 
       const newTypes = allTypes.filter((def) =>
@@ -977,21 +976,29 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // Infer record type from modules (data-up philosophy)
     const inferredType = computed(() => {
-      const types = subCharms.map((e) => e?.type).filter(Boolean) as string[];
-      return inferTypeFromModules(types);
+      const types = (subCharms || []).map((e) => e?.type).filter(Boolean);
+      return inferTypeFromModules(types as string[]);
     });
 
     // Check for manual icon override from record-icon module
-    // Note: Don't use fallback (|| []) as it breaks CTS transformer's method replacement
     const manualIcon = computed(() => {
-      const iconModule = subCharms.find((e) => e?.type === "record-icon");
+      const iconModule = (subCharms || []).find((e) =>
+        e?.type === "record-icon"
+      );
       if (!iconModule) return null;
-      // deno-lint-ignore no-explicit-any
-      const iconValue = (iconModule.charm as any)?.icon;
-      if (!iconValue) return null;
-      return typeof iconValue === "string" && iconValue.trim()
-        ? iconValue.trim()
-        : null;
+
+      try {
+        // Access the icon field from the charm pattern output
+        // deno-lint-ignore no-explicit-any
+        const charm = iconModule.charm as any;
+        const iconValue = charm?.icon;
+        // Return the icon if it's a non-empty string, otherwise null
+        return typeof iconValue === "string" && iconValue.trim()
+          ? iconValue.trim()
+          : null;
+      } catch {
+        return null;
+      }
     });
 
     // Extract icon: manual icon takes precedence over inferred type
@@ -1002,19 +1009,21 @@ const Record = pattern<RecordInput, RecordOutput>(
     });
 
     // Extract nicknames from nickname modules for display in NAME
-    // Note: Don't use fallback (|| []) as it breaks CTS transformer's method replacement
     const nicknamesList = computed(() => {
-      const nicknameModules = subCharms.filter((e) => e?.type === "nickname");
+      const sc = subCharms;
+      const nicknameModules = (sc || []).filter((e) => e?.type === "nickname");
       const nicknames: string[] = [];
       for (const mod of nicknameModules) {
         try {
+          // Access the nickname field from the charm pattern output
           // deno-lint-ignore no-explicit-any
-          const nicknameValue = (mod.charm as any)?.nickname;
+          const charm = mod.charm as any;
+          const nicknameValue = charm?.nickname;
           if (typeof nicknameValue === "string" && nicknameValue.trim()) {
             nicknames.push(nicknameValue.trim());
           }
         } catch {
-          // Ignore errors
+          // Ignore errors from charms without nickname field
         }
       }
       return nicknames;
@@ -1031,16 +1040,18 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // ===== Trash Section Computed Values =====
 
-    // Pre-compute trashed entries with displayInfo using getDisplayInfo helper
-    // Note: Don't use fallback (|| []) as it breaks CTS transformer's mapWithPattern
+    // Pre-compute trashed entries with displayInfo to avoid calling getModuleDisplay in .map() JSX
     const trashedEntriesWithDisplay = computed(() => {
-      return trashedSubCharms.map((entry, trashIndex) => {
-        // Get display info using plain helper function
-        const displayInfo = getDisplayInfo(
-          entry.type,
-          // deno-lint-ignore no-explicit-any
-          (entry.charm as any)?.label,
-        );
+      const t = trashedSubCharms;
+      return (t || []).map((entry, trashIndex) => {
+        // Compute displayInfo inline (same logic as getModuleDisplay)
+        const def = getDefinition(entry.type);
+        // deno-lint-ignore no-explicit-any
+        const charmLabel = (entry.charm as any)?.label;
+        const displayInfo = {
+          icon: def?.icon || "📋",
+          label: charmLabel || def?.label || entry.type,
+        };
         return { entry, trashIndex, displayInfo };
       });
     });
@@ -1056,9 +1067,11 @@ const Record = pattern<RecordInput, RecordOutput>(
     // Get the settings UI for the currently selected module (if any)
     const currentSettingsUI = computed(() => {
       const idx = settingsModuleIndex.get();
+      const sc = subCharms;
       if (idx === undefined) return null;
-      const entry = subCharms[idx];
+      const entry = sc?.[idx];
       if (!entry) return null;
+      // Access settingsUI from the charm output
       // deno-lint-ignore no-explicit-any
       return (entry.charm as any)?.settingsUI || null;
     });
@@ -1066,15 +1079,17 @@ const Record = pattern<RecordInput, RecordOutput>(
     // Get display info for the module whose settings are open
     const settingsModuleDisplay = computed(() => {
       const idx = settingsModuleIndex.get();
+      const sc = subCharms;
       if (idx === undefined) return { icon: "", label: "Settings" };
-      const entry = subCharms[idx];
+      const entry = sc?.[idx];
       if (!entry) return { icon: "", label: "Settings" };
-      // Use plain helper function to get display info
-      return getDisplayInfo(
-        entry.type,
-        // deno-lint-ignore no-explicit-any
-        (entry.charm as any)?.label,
-      );
+      const def = getDefinition(entry.type);
+      // deno-lint-ignore no-explicit-any
+      const charmLabel = (entry.charm as any)?.label;
+      return {
+        icon: def?.icon || "📋",
+        label: charmLabel || def?.label || entry.type,
+      };
     });
 
     // ===== Main UI =====
@@ -1137,16 +1152,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                   }}
                 >
                   {pinnedEntries.map(
-                    (
-                      {
-                        entry,
-                        index,
-                        isExpanded,
-                        displayInfo,
-                        isPinned,
-                        allowMultiple,
-                      },
-                    ) => {
+                    ({ entry, index, isExpanded, displayInfo, isPinned }) => {
                       return (
                         <div
                           style={isExpanded
@@ -1244,7 +1250,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 }}
                               >
                                 {ifElse(
-                                  allowMultiple,
+                                  getDefinition(entry.type)?.allowMultiple,
                                   <button
                                     type="button"
                                     onClick={createSibling({
@@ -1402,12 +1408,13 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 minHeight: isExpanded ? "0" : "auto",
                               }}
                             >
-                              {computed(() => {
-                                const charm = entry.charm as any;
-                                // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
-                                return charm?.embeddedUI ??
-                                  <ct-render $cell={entry.charm} />;
-                              })}
+                              <ct-render
+                                $cell={entry.charm}
+                                variant={getDefinition(entry.type)
+                                    ?.hasEmbeddedUI
+                                  ? "embedded"
+                                  : undefined}
+                              />
                             </div>,
                             null,
                           )}
@@ -1428,16 +1435,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                     }}
                   >
                     {unpinnedEntries.map(
-                      (
-                        {
-                          entry,
-                          index,
-                          isExpanded,
-                          displayInfo,
-                          isPinned,
-                          allowMultiple,
-                        },
-                      ) => {
+                      ({ entry, index, isExpanded, displayInfo, isPinned }) => {
                         return (
                           <div
                             style={isExpanded
@@ -1538,7 +1536,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   }}
                                 >
                                   {ifElse(
-                                    allowMultiple,
+                                    getDefinition(entry.type)?.allowMultiple,
                                     <button
                                       type="button"
                                       onClick={createSibling({
@@ -1696,12 +1694,13 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   minHeight: isExpanded ? "0" : "auto",
                                 }}
                               >
-                                {computed(() => {
-                                  const charm = entry.charm as any;
-                                  // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
-                                  return charm?.embeddedUI ??
-                                    <ct-render $cell={entry.charm} />;
-                                })}
+                                <ct-render
+                                  $cell={entry.charm}
+                                  variant={getDefinition(entry.type)
+                                      ?.hasEmbeddedUI
+                                    ? "embedded"
+                                    : undefined}
+                                />
                               </div>,
                               null,
                             )}
@@ -1722,16 +1721,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                 }}
               >
                 {allEntries.map(
-                  (
-                    {
-                      entry,
-                      index,
-                      isExpanded,
-                      displayInfo,
-                      isPinned,
-                      allowMultiple,
-                    },
-                  ) => {
+                  ({ entry, index, isExpanded, displayInfo, isPinned }) => {
                     return (
                       <div
                         style={isExpanded
@@ -1828,7 +1818,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                               }}
                             >
                               {ifElse(
-                                allowMultiple,
+                                getDefinition(entry.type)?.allowMultiple,
                                 <button
                                   type="button"
                                   onClick={createSibling({ subCharms, index })}
@@ -1983,12 +1973,12 @@ const Record = pattern<RecordInput, RecordOutput>(
                               minHeight: isExpanded ? "0" : "auto",
                             }}
                           >
-                            {computed(() => {
-                              const charm = entry.charm as any;
-                              // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
-                              return charm?.embeddedUI ??
-                                <ct-render $cell={entry.charm} />;
-                            })}
+                            <ct-render
+                              $cell={entry.charm}
+                              variant={getDefinition(entry.type)?.hasEmbeddedUI
+                                ? "embedded"
+                                : undefined}
+                            />
                           </div>,
                           null,
                         )}

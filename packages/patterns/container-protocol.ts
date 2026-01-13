@@ -15,9 +15,6 @@ import type { Writable } from "commontools";
  * - TypePicker: applies templates by adding modules to parent
  * - Future: AI agents that dynamically configure containers
  *
- * Note: This interface uses serializable data only (no functions) to avoid
- * "Cannot store function per se" errors when the context is stored as pattern input.
- *
  * @template TEntry - The type of entries in the container's list
  */
 export interface ContainerCoordinationContext<TEntry = unknown> {
@@ -27,8 +24,8 @@ export interface ContainerCoordinationContext<TEntry = unknown> {
   /** Container's trash for soft-deleted entries */
   trashedEntries: Writable<(TEntry & { trashedAt: string })[]>;
 
-  /** JSON string of the parent pattern for creating linked modules (e.g., Notes with wiki-links) */
-  linkPatternJson?: string;
+  /** Factory to create modules with correct container context */
+  createModule: (type: string) => unknown;
 }
 
 /**

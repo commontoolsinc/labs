@@ -434,8 +434,6 @@ export function validateAndTransform(
         const cfc = runtime.cfc;
         let newSchema;
         if (parsedLink.schema !== undefined) {
-          rootSchema = parsedLink.rootSchema;
-
           newSchema = cfc.getSchemaAtPath(
             parsedLink.schema,
             extraPath.map((key) => key.toString()),

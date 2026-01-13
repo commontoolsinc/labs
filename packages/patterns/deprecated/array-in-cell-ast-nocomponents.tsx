@@ -34,7 +34,10 @@ export default recipe<InputSchema>(({ title, items }) => {
         <h3>{title}</h3>
         <p>Super Simple Array</p>
         <ul>
-          {items.map((item) => <li>{item.text}</li>)}
+          {
+            // deno-lint-ignore jsx-key
+            items.map((item) => <li>{item.text}</li>)
+          }
         </ul>
         <ct-message-input
           name="Send"
