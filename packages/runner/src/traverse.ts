@@ -470,14 +470,21 @@ export function mergeAnyOfMatches<T>(
  */
 function getNormalizedLink(
   address: IMemorySpaceAddress,
-  schema: JSONSchema | undefined,
-  rootSchema: JSONSchema | undefined,
+  schema?: JSONSchema,
+  rootSchema?: JSONSchema,
 ): NormalizedFullLink {
   if (address.path.length === 0 || address.path[0] !== "value") {
     throw new Error("Unable to create link to non-value address");
   }
   const { space, id, path, type } = address;
-  return { space, id, type, path: path.slice(1), schema, rootSchema };
+  return {
+    space,
+    id,
+    type,
+    path: path.slice(1),
+    ...(schema && { schema }),
+    ...(rootSchema && { rootSchema }),
+  };
 }
 
 // Value traversed must be a DAG, though it may have aliases or cell links
@@ -520,7 +527,10 @@ export abstract class BaseObjectTraverser<
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
-      return this.objectCreator.applyDefault(doc.address, defaultValue);
+      return this.objectCreator.applyDefault(
+        getNormalizedLink(doc.address),
+        defaultValue,
+      );
     } else if (isPrimitive(doc.value)) {
       return doc.value;
     } else if (Array.isArray(doc.value)) {
