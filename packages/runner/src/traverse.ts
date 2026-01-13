@@ -1,7 +1,7 @@
 import { refer } from "@commontools/memory/reference";
 import { SchemaAll } from "@commontools/memory/schema";
 import { MIME } from "@commontools/memory/interface";
-import { JSONSchemaObj } from "@commontools/api";
+import type { JSONSchemaObj, Writable } from "@commontools/api";
 // TODO(@ubik2): Ideally this would use the following, but rollup has issues
 //import { isNumber, isObject, isString } from "@commontools/utils/types";
 import {
@@ -349,7 +349,11 @@ interface OptJSONObject {
 export interface IObjectCreator<T> {
   // When we have multiple matches, we may need to do something special to
   // combine them (for example, merging properties)
-  mergeMatches(matches: T[]): T | undefined;
+  mergeMatches(
+    matches: T[],
+    schema?: JSONSchema,
+    rootSchema?: JSONSchema,
+  ): T | undefined;
   // In the SchemaObjectTraverser system, we'll copy the object's value into
   // the new version
   // In the validateAndTransform system, we'll skip these properties
@@ -382,7 +386,11 @@ export interface IObjectCreator<T> {
  * queries. We don't need to do anything special here.
  */
 class StandardObjectCreator implements IObjectCreator<JSONValue> {
-  mergeMatches(matches: JSONValue[]): JSONValue | undefined {
+  mergeMatches(
+    matches: JSONValue[],
+    _schema?: JSONSchema,
+    _rootSchema?: JSONSchema,
+  ): JSONValue | undefined {
     // These value objects should be merged. While this isn't JSONSchema
     // spec, when we have an anyOf with branches where name is set in one
     // schema, but the address is ignored, and a second option where
@@ -1415,16 +1423,8 @@ export class SchemaObjectTraverser<V extends JSONValue>
       logger.debug("traverse", () => [
         "Call to traverse returned undefined",
         doc,
-        link,
-        // We can't just log these, since they can have cycles.
-        JSON.stringify(
-          this.traverseWithSelector(doc, {
-            ...this.selector,
-            schemaContext: { schema: true, rootSchema: true },
-          }),
-          getCircularReplacer(),
-          2,
-        ),
+        JSON.stringify(this.selector?.schemaContext, undefined, 2),
+        this.getDebugValue(doc),
       ]);
     }
     return rv;
@@ -1566,7 +1566,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
           ),
           ...anyOf.filter(SchemaObjectTraverser.asCellOrStream),
         ];
-        const matches = [];
+        const matches: (JSONValue | Writable<unknown>)[] = [];
         for (const optionSchema of sortedAnyOf) {
           if (ContextualFlowControl.isFalseSchema(optionSchema)) {
             continue;
@@ -1585,14 +1585,23 @@ export class SchemaObjectTraverser<V extends JSONValue>
             matches.push(val);
           }
         }
-        const merged = this.objectCreator.mergeMatches(matches);
+        const merged = this.objectCreator.mergeMatches(
+          matches as JSONValue[],
+          schemaContext.schema,
+          schemaContext.rootSchema,
+        );
         if (merged !== undefined) {
           return merged;
         }
         // None of the anyOf patterns matched
         logger.debug(
           "traverse",
-          () => ["No matching anyOf", doc, sortedAnyOf],
+          () => [
+            "No matching anyOf",
+            doc,
+            sortedAnyOf,
+            this.getDebugValue(doc),
+          ],
         );
         return undefined;
       } else if (schemaContext.schema.allOf) {
@@ -2239,6 +2248,20 @@ export class SchemaObjectTraverser<V extends JSONValue>
       return this.objectCreator.applyDefault(link, schema.default);
     }
     return undefined;
+  }
+
+  private getDebugValue(doc: IMemorySpaceAttestation) {
+    if (doc.value === undefined) {
+      return "undefined";
+    }
+    return JSON.stringify(
+      this.traverseWithSelector(doc, {
+        path: doc.address.path,
+        schemaContext: { schema: true, rootSchema: true },
+      }),
+      getCircularReplacer(),
+      2,
+    );
   }
 }
 

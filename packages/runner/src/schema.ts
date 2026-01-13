@@ -460,7 +460,11 @@ class TransformObjectCreator
   ) {
   }
 
-  mergeMatches<T>(matches: T[]): T | Record<string, T> | undefined {
+  mergeMatches<T>(
+    matches: T[],
+    schema?: JSONSchema,
+    rootSchema?: JSONSchema,
+  ): T | Record<string, T> | undefined {
     // These value objects should be merged. While this isn't JSONSchema
     // spec, when we have an anyOf with branches where name is set in one
     // schema, but the address is ignored, and a second option where
@@ -471,7 +475,12 @@ class TransformObjectCreator
       // anymore.
       const cellMatch = matches.find((v) => isCell(v));
       if (cellMatch !== undefined) {
-        return cellMatch;
+        if (typeof schema === "object") {
+          const { asCell: _, ...restSchema } = schema;
+          return cellMatch.asSchema(restSchema, rootSchema) as any;
+        } else {
+          return cellMatch.asSchema(schema, rootSchema) as any;
+        }
       }
     }
     return mergeAnyOfMatches(matches);
