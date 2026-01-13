@@ -9,7 +9,7 @@ import { html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { styles } from "./styles.ts";
 import * as L from "leaflet";
-import { type Cell, isCell } from "@commontools/runner";
+import { type CellHandle, isCellHandle } from "@commontools/runtime-client";
 import { CellController } from "../../core/cell-controller.ts";
 import type {
   Bounds,
@@ -89,10 +89,10 @@ export class CTMap extends BaseElement {
     interactive: { type: Boolean },
   };
 
-  declare value: Cell<MapValue> | MapValue;
-  declare center: Cell<LatLng> | LatLng;
-  declare zoom: Cell<number> | number;
-  declare bounds: Cell<Bounds> | Bounds;
+  declare value: CellHandle<MapValue> | MapValue;
+  declare center: CellHandle<LatLng> | LatLng;
+  declare zoom: CellHandle<number> | number;
+  declare bounds: CellHandle<Bounds> | Bounds;
   declare fitToBounds: boolean;
   declare interactive: boolean;
 
@@ -132,19 +132,16 @@ export class CTMap extends BaseElement {
   private _centerController = new CellController<LatLng>(this, {
     timing: { strategy: "immediate" },
     triggerUpdate: false,
-    changeGroup: this._changeGroup,
   });
 
   private _zoomController = new CellController<number>(this, {
     timing: { strategy: "immediate" },
     triggerUpdate: false,
-    changeGroup: this._changeGroup,
   });
 
   private _boundsController = new CellController<Bounds>(this, {
     timing: { strategy: "immediate" },
     triggerUpdate: false,
-    changeGroup: this._changeGroup,
   });
 
   // Bound event handler for cleanup
@@ -413,15 +410,14 @@ export class CTMap extends BaseElement {
       this._valueUnsubscribe = null;
     }
 
-    if (isCell(this.value)) {
-      this._valueUnsubscribe = this.value.sink(
+    if (isCellHandle(this.value)) {
+      this._valueUnsubscribe = (this.value as CellHandle<MapValue>).subscribe(
         () => {
           this._renderFeatures();
           if (this.fitToBounds) {
             this._fitMapToBounds();
           }
         },
-        { changeGroup: this._changeGroup },
       );
     }
   }
@@ -432,12 +428,13 @@ export class CTMap extends BaseElement {
       this._centerUnsubscribe = null;
     }
 
-    if (isCell(this.center)) {
-      this._centerUnsubscribe = this.center.sink(
+    if (isCellHandle(this.center)) {
+      this._centerUnsubscribe = (this.center as CellHandle<LatLng>).subscribe(
         () => {
-          this._updateMapCenter();
+          if (!this._isUpdatingFromCell) {
+            this._updateMapCenter();
+          }
         },
-        { changeGroup: this._changeGroup },
       );
     }
   }
@@ -448,12 +445,13 @@ export class CTMap extends BaseElement {
       this._zoomUnsubscribe = null;
     }
 
-    if (isCell(this.zoom)) {
-      this._zoomUnsubscribe = this.zoom.sink(
+    if (isCellHandle(this.zoom)) {
+      this._zoomUnsubscribe = (this.zoom as CellHandle<number>).subscribe(
         () => {
-          this._updateMapZoom();
+          if (!this._isUpdatingFromCell) {
+            this._updateMapZoom();
+          }
         },
-        { changeGroup: this._changeGroup },
       );
     }
   }
@@ -464,12 +462,13 @@ export class CTMap extends BaseElement {
       this._boundsUnsubscribe = null;
     }
 
-    if (isCell(this.bounds)) {
-      this._boundsUnsubscribe = this.bounds.sink(
+    if (isCellHandle(this.bounds)) {
+      this._boundsUnsubscribe = (this.bounds as CellHandle<Bounds>).subscribe(
         () => {
-          this._updateMapFromBounds();
+          if (!this._isUpdatingFromCell) {
+            this._updateMapFromBounds();
+          }
         },
-        { changeGroup: this._changeGroup },
       );
     }
   }
@@ -477,63 +476,72 @@ export class CTMap extends BaseElement {
   // === Value Getters ===
 
   private _getValue(): MapValue {
-    if (isCell(this.value)) {
-      return this.value.get() || {};
+    if (isCellHandle(this.value)) {
+      return (this.value as CellHandle<MapValue>).get() || {};
     }
-    return this.value || {};
+    return (this.value as MapValue) || {};
   }
 
   private _getCenter(): LatLng {
     let center: LatLng;
-    if (isCell(this.center)) {
-      center = this.center.get() || DEFAULT_CENTER;
+    if (isCellHandle(this.center)) {
+      center = (this.center as CellHandle<LatLng>).get() || DEFAULT_CENTER;
     } else {
-      center = this.center || DEFAULT_CENTER;
+      center = (this.center as LatLng) || DEFAULT_CENTER;
     }
     return this._validateLatLng(center);
   }
 
   private _getZoom(): number {
     let zoom: number;
-    if (isCell(this.zoom)) {
-      zoom = this.zoom.get() ?? DEFAULT_ZOOM;
+    if (isCellHandle(this.zoom)) {
+      zoom = (this.zoom as CellHandle<number>).get() ?? DEFAULT_ZOOM;
     } else {
-      zoom = this.zoom ?? DEFAULT_ZOOM;
+      zoom = (this.zoom as number) ?? DEFAULT_ZOOM;
     }
     return this._clampZoom(zoom);
   }
 
   private _getBounds(): Bounds | null {
-    if (isCell(this.bounds)) {
-      return this.bounds.get() || null;
+    if (isCellHandle(this.bounds)) {
+      return (this.bounds as CellHandle<Bounds>).get() || null;
     }
-    return this.bounds || null;
+    return (this.bounds as Bounds) || null;
   }
 
   // === Cell Updates (bidirectional) ===
 
   private _updateCenterCell(center: LatLng): void {
-    if (!isCell(this.center)) return;
+    if (!isCellHandle(this.center)) return;
 
-    const tx = this.center.runtime.edit({ changeGroup: this._changeGroup });
-    this.center.withTx(tx).set(center);
-    tx.commit();
+    this._isUpdatingFromCell = true;
+    try {
+      (this.center as CellHandle<LatLng>).set(center);
+    } finally {
+      this._isUpdatingFromCell = false;
+    }
   }
 
   private _updateZoomCell(zoom: number): void {
-    if (!isCell(this.zoom)) return;
+    if (!isCellHandle(this.zoom)) return;
 
-    const tx = this.zoom.runtime.edit({ changeGroup: this._changeGroup });
-    this.zoom.withTx(tx).set(zoom);
-    tx.commit();
+    this._isUpdatingFromCell = true;
+    try {
+      (this.zoom as CellHandle<number>).set(zoom);
+    } finally {
+      this._isUpdatingFromCell = false;
+    }
   }
 
   private _updateBoundsCell(bounds: Bounds): void {
-    if (!isCell(this.bounds)) return;
+    if (!isCellHandle(this.bounds)) return;
 
-    const tx = this.bounds.runtime.edit({ changeGroup: this._changeGroup });
-    this.bounds.withTx(tx).set(bounds);
-    tx.commit();
+    this._isUpdatingFromCell = true;
+    try {
+      (this.bounds as CellHandle<Bounds>).set(bounds);
+    } finally {
+      this._isUpdatingFromCell = false;
+    }
   }
 
   // === Map Updates ===

@@ -3963,12 +3963,12 @@ interface CTMapValue {
 interface CTMapAttributes<T> extends CTHTMLAttributes<T> {
   "value"?: CTMapValue | CellLike<CTMapValue>;
   "$value"?: CTMapValue | CellLike<CTMapValue>;
-  "center"?: CTMapLatLng | CellLike<CTMapLatLng>;
-  "$center"?: CTMapLatLng | CellLike<CTMapLatLng>;
-  "zoom"?: number | CellLike<number>;
-  "$zoom"?: number | CellLike<number>;
-  "bounds"?: CTMapBounds | CellLike<CTMapBounds>;
-  "$bounds"?: CTMapBounds | CellLike<CTMapBounds>;
+  "center"?: CTMapLatLng | CellLike<CTMapLatLng | null> | null;
+  "$center"?: CTMapLatLng | CellLike<CTMapLatLng | null> | null;
+  "zoom"?: number | CellLike<number | null> | null;
+  "$zoom"?: number | CellLike<number | null> | null;
+  "bounds"?: CTMapBounds | CellLike<CTMapBounds | null> | null;
+  "$bounds"?: CTMapBounds | CellLike<CTMapBounds | null> | null;
   "fitToBounds"?: boolean | CellLike<boolean>;
   "interactive"?: boolean | CellLike<boolean>;
   "onct-click"?: (event: CustomEvent<{ lat: number; lng: number }>) => void;
