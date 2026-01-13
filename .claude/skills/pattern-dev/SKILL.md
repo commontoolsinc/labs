@@ -77,6 +77,12 @@ Build in layers rather than all at once. This makes each piece independently tes
 
 ### Layer 3: Build UI
 
+**Before writing UI code:**
+1. Read `docs/common/components/COMPONENTS.md` for available components
+2. Search `packages/patterns/` for similar UI patterns (e.g., grep for `ct-tabs`, `ct-card`, layout patterns)
+3. Check example patterns for layout structures (ct-screen, ct-hstack, ct-vstack with flex)
+
+**Then implement:**
 1. Create UI to display and interact with the data and handlers
 2. Bidirectional bindings connect to already-verified reactive objects
 
