@@ -74,22 +74,18 @@ export class XFavoriteButtonElement extends LitElement {
 
     // Re-setup subscription when rt changes
     if (changedProperties.has("rt")) {
+      // Reset cached state for new runtime
+      this._serverFavorites = [];
+      this._localIsFavorite = undefined;
       this._cleanupSubscription();
       this._setupSubscription();
     }
   }
 
   private _setupSubscription(): void {
-    console.log("[FavoriteButton] _setupSubscription, rt:", this.rt);
     if (!this.rt) return;
 
     this._unsubscribe = this.rt.favorites().subscribeFavorites((favorites) => {
-      console.log(
-        "[FavoriteButton] subscription callback, favorites:",
-        favorites,
-        "charmId:",
-        this.charmId,
-      );
       this._serverFavorites = favorites;
       // Clear local state once we have fresh server state
       this._localIsFavorite = undefined;
@@ -111,13 +107,7 @@ export class XFavoriteButtonElement extends LitElement {
     }
     // Fall back to server state
     if (!this.charmId) return false;
-    const match = this._serverFavorites.some((f) => f.charmId === this.charmId);
-    console.log("[FavoriteButton] _deriveIsFavorite:", {
-      charmId: this.charmId,
-      serverFavoriteIds: this._serverFavorites.map((f) => f.charmId),
-      match,
-    });
-    return match;
+    return this._serverFavorites.some((f) => f.charmId === this.charmId);
   }
 
   private async _handleFavoriteClick(e: Event) {
