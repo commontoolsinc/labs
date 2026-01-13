@@ -9,6 +9,9 @@ import { Page } from "./page.ts";
 
 const DEFAULT_ASTRAL_TIMEOUT = 60_000;
 
+// Check if running in Claude Code remote environment (runs as root)
+const isClaudeCodeRemote = Deno.env.get("CLAUDE_CODE_REMOTE") === "true";
+
 // Wrapper around `@astral/astral`'s `Browser`.
 export class Browser {
   private browser: AstralBrowser | null;
@@ -26,8 +29,14 @@ export class Browser {
     config?: { timeout?: number; headless?: boolean; args?: string[] },
   ): Promise<Browser> {
     const headless = config?.headless ?? true;
-    const args = config?.args ?? [];
+    let args = config?.args ?? [];
     const timeout = config?.timeout ?? DEFAULT_ASTRAL_TIMEOUT;
+
+    // When running in Claude Code remote environment, we run as root
+    // and Chromium requires --no-sandbox to run as root
+    if (isClaudeCodeRemote) {
+      args = ["--no-sandbox", ...args];
+    }
 
     const browser = await launch({
       args,
