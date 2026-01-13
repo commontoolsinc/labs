@@ -1,23 +1,24 @@
 import { isInstance, isRecord } from "@commontools/utils/types";
 
 /**
- * Determines if the given value is JSON-encodable per se (without conversion),
- * but without taking into consideration the contents of values (that is, it
- * doesn't iterate over array or object contents to make its determination).
+ * Determines if the given value is considered "storable" by the system per se
+ * (without invoking any conversions such as `.toJSON()`), but without taking
+ * into consideration the contents of values (that is, it doesn't iterate over
+ * array or object contents to make its determination).
+ *
+ * For the purposes of this system, storable values are values which are
+ * JSON-encodable, _plus_ `undefined`. On the latter: A top-level `undefined`
+ * indicates that the salient stored value is to be deleted. `undefined` at an
+ * array index is treated as `null`. `undefined` as an object property value is
+ * treated as if it were absent.
  *
  * @param value - The value to check.
- * @returns `true` if the value is JSON-encodable per se, `false` otherwise.
+ * @returns `true` if the value is storable per se, `false` otherwise.
  */
 export function isStorableValue(value: unknown): boolean {
   switch (typeof value) {
     case "boolean":
-    case "string": {
-      return true;
-    }
-
-    // TODO(@danfuzz): `undefined` isn't JSON-encodable; this case should be
-    // moved to the `false` block below. See the related TODO item in
-    // `toStorableValue()` below.
+    case "string":
     case "undefined": {
       return true;
     }
@@ -66,7 +67,8 @@ export function toStorableValue(value: unknown): unknown {
 
   switch (typeName) {
     case "boolean":
-    case "string": {
+    case "string":
+    case "undefined": {
       return value;
     }
 
@@ -118,15 +120,6 @@ export function toStorableValue(value: unknown): unknown {
       } else {
         return valueObj;
       }
-    }
-
-    // TODO(@danfuzz): This is allowed for now, even though it isn't
-    // JSON-encodable, specifically because many tests try to store `undefined`
-    // in `Cell`s. I believe the right answer is to stop doing that and then
-    // make this case be part of the error block below.
-    case "undefined": {
-      return undefined;
-      // throw new Error(`Cannot store ${typeName}`);
     }
 
     case "bigint":

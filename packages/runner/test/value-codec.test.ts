@@ -74,14 +74,13 @@ describe("value-codec", () => {
       });
     });
 
-    describe("returns true for edge cases", () => {
-      // TODO(@danfuzz): This should return false once the TODO is resolved
-      it("accepts undefined (TODO: should be false)", () => {
+    describe("returns true for storable-but-not-JSON-encodable values", () => {
+      it("accepts undefined", () => {
         expect(isStorableValue(undefined)).toBe(true);
       });
     });
 
-    describe("returns false for non-JSON-encodable values", () => {
+    describe("returns false for non-storable values", () => {
       it("rejects NaN", () => {
         expect(isStorableValue(NaN)).toBe(false);
       });
@@ -153,8 +152,7 @@ describe("value-codec", () => {
         expect(toStorableValue(arr)).toBe(arr);
       });
 
-      // TODO(@danfuzz): This should throw once the TODO is resolved
-      it("passes through undefined (TODO: should throw)", () => {
+      it("passes through undefined", () => {
         expect(toStorableValue(undefined)).toBe(undefined);
       });
     });
