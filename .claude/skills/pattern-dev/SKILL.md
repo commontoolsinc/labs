@@ -88,20 +88,52 @@ mkdir -p packages/patterns/[name]
 touch packages/patterns/[name]/schemas.tsx
 ```
 
-**Define all types in `schemas.tsx` before writing any pattern code.** This file is the anchor - all other files import from it.
+### Data Modeling
 
-**IMPORTANT: No `id` properties in your types.** The reactive fabric tracks object identity automatically. Use `equals()` or array indices to reference objects (see Key Principles above).
+**Before defining types, understand how data modeling differs in CommonTools.**
+
+Traditional web development models data like database tables with ID foreign keys. CommonTools uses an in-memory object graph with direct references.
+
+```tsx
+// Traditional (database thinking) - DON'T do this
+interface Recipe {
+  id: string;              // Don't add IDs for tracking
+  categoryId: string;      // Don't use foreign keys
+  name: string;
+}
+
+// CommonTools (graph thinking) - DO this
+interface Recipe {
+  name: string;
+  ingredients: Ingredient[];  // Direct reference
+}
+
+interface Cookbook {
+  title: string;
+  recipes: Recipe[];          // Direct reference, no IDs needed
+}
+```
+
+**Key differences from React/traditional patterns:**
+- **No `id` properties** - the runtime tracks identity automatically
+- **No foreign keys** - use direct object references or array indices
+- **Use `equals(a, b)`** to compare objects by identity
+- **Use array indices** from `.map((item, index) => ...)` when you need to reference items
+
+See `docs/common/concepts/equality.md` for the full explanation.
+
+### Define Types in `schemas.tsx`
+
+This file is the anchor - all other pattern files import from it. Define all your types here first before writing pattern code.
 
 ### Project Structure
 
-Here's a simple example:
-
 ```
-packages/patterns/expense-tracker/
+packages/patterns/my-pattern/
 ├── schemas.tsx           # Shared types (create FIRST)
 ├── data-view.tsx         # Sub-pattern: computeds + display
-├── expense-form.tsx      # Sub-pattern: form + handlers
-└── main.tsx              # Composes sub-patterns, passes shared Writable/Cell-like objects
+├── input-form.tsx        # Sub-pattern: form + actions
+└── main.tsx              # Composes sub-patterns, passes shared state
 ```
 
 Each sub-pattern imports from `schemas.tsx` and can be deployed independently for testing.
