@@ -155,11 +155,22 @@ Build in layers rather than all at once. This makes each piece independently tes
 1. Define action event types in `schemas.tsx` if needed
 2. Add actions one at a time
 3. **Export actions in the return object** for testing
-4. Write automated tests to verify action behavior
 
-### Layer 3: Automated Tests (REQUIRED before UI)
+### Layer 3: Interactive CLI Verification
 
-**Do not proceed to Layer 4 (UI) until tests pass.** Write tests for each sub-pattern:
+Before writing automated tests, deploy and verify interactively:
+
+1. **Learn the CLI**: Run `deno task ct --help` and `deno task ct charm --help`
+2. **Deploy**: `deno task ct charm new packages/patterns/[name]/main.tsx`
+3. **Inspect state**: `deno task ct charm inspect`
+4. **Test actions**: Use `deno task ct charm call` to invoke exported actions, then `deno task ct charm step` to process
+5. **Verify outputs**: Check computed values update correctly
+
+This hands-on verification builds CLI familiarity and catches issues before formalizing tests.
+
+### Layer 4: Automated Tests (REQUIRED before UI)
+
+**Do not proceed to Layer 5 (UI) until tests pass.** Write tests for each sub-pattern:
 
 ```bash
 touch packages/patterns/[name]/main.test.tsx
@@ -194,7 +205,7 @@ Run tests: `deno task ct test packages/patterns/[name]/main.test.tsx`
 
 See `docs/common/workflows/pattern-testing.md` for the full guide.
 
-### Layer 4: Build UI
+### Layer 5: Build UI
 
 **Before writing UI code:**
 1. Read `docs/common/components/COMPONENTS.md` for available components
@@ -343,7 +354,8 @@ After drafting code, cross-check against docs for the features you used to verif
 
 - Define types in `schemas.tsx` first
 - **Consult docs when using an API feature for the first time**
-- Build and test in layers (data → actions → tests → UI)
-- **Write automated tests before building UI** (Layer 3 before Layer 4)
+- Build and test in layers (data → actions → CLI verify → tests → UI)
+- **Verify interactively with CLI before writing tests** (Layer 3)
+- **Write automated tests before building UI** (Layer 4 before Layer 5)
 - Use `deno task ct --help` to explore CLI commands
 - Check `packages/patterns/` for working examples
