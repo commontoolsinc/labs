@@ -7,6 +7,7 @@ import type {
   CellLike,
   Props,
   RenderNode,
+  Stream,
   VNode,
 } from "commontools";
 
@@ -2842,7 +2843,8 @@ type CTEvent<T> = {
 type EventHandler<T> =
   | CellLike<CTEvent<T> | T>
   | ((event: CTEvent<T>) => void)
-  | (() => void);
+  | (() => void)
+  | Stream<any>;
 
 // `Charm` is not a recipe type.
 type Charm = any;
