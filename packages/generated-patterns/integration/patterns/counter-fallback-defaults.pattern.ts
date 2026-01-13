@@ -86,7 +86,7 @@ const liftNormalizedExpected = lift((value: number | undefined) => {
 
 const liftDense = lift(
   (input: {
-    raw: (number | undefined)[] | undefined;
+    raw: (number | null)[] | undefined;
     fallback: number;
     expected: number;
   }) => {
