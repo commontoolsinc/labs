@@ -1,6 +1,22 @@
 import { isInstance, isRecord } from "@commontools/utils/types";
 
 /**
+ * Checks whether a value has a callable `toJSON()` method.
+ *
+ * @param value - The value to check.
+ * @returns `true` if the value has a `toJSON` method that is a function.
+ */
+function hasToJSONMethod(
+  value: unknown,
+): value is { toJSON: () => unknown } {
+  return (
+    value !== null &&
+    "toJSON" in (value as object) &&
+    typeof (value as { toJSON: unknown }).toJSON === "function"
+  );
+}
+
+/**
  * Determines if the given value is considered "storable" by the system per se
  * (without invoking any conversions such as `.toJSON()`). This function does
  * not recursively validate nested values in arrays or objects.
@@ -89,7 +105,7 @@ export function toStorableValue(value: unknown): unknown {
 
       const valueObj = value as object;
 
-      if ("toJSON" in valueObj && typeof valueObj.toJSON === "function") {
+      if (hasToJSONMethod(valueObj)) {
         const converted = valueObj.toJSON();
 
         if (!isStorableValue(converted)) {
@@ -183,10 +199,7 @@ export function toDeepStorableValue(
   // Handle functions without `toJSON()`: At top level, throw. In arrays,
   // convert to `null`. In objects, omit the property. This matches
   // `JSON.stringify()` behavior.
-  if (
-    typeof value === "function" &&
-    !("toJSON" in value && typeof value.toJSON === "function")
-  ) {
+  if (typeof value === "function" && !hasToJSONMethod(value)) {
     if (inArray) {
       return null;
     } else if (converted.size > 0) {
