@@ -118,7 +118,9 @@ touch packages/patterns/[name]/schemas.tsx
 
 ### Decompose into Sub-Patterns
 
-**Always decompose patterns into focused sub-patterns.** Avoid monolithic `main.tsx` files. Each logical unit should be its own pattern file.
+**Always decompose patterns into focused sub-patterns.** Avoid monolithic `main.tsx` files. Each schema type that has its own display or behavior should be its own sub-pattern.
+
+**Rule of thumb:** If you have a schema like `Project` containing `Task[]`, create both a `project.tsx` sub-pattern AND a `task.tsx` sub-pattern. The project pattern composes task patterns for each item.
 
 Benefits of decomposition:
 - **Testability**: Each sub-pattern can be tested independently
@@ -126,16 +128,109 @@ Benefits of decomposition:
 - **Maintainability**: Smaller files are easier to understand and modify
 - **Parallel development**: Different sub-patterns can be worked on separately
 
-### Project Structure
+### Example: Recipe Manager
+
+Given these schemas:
+
+```tsx
+// schemas.tsx
+interface Ingredient {
+  name: string;
+  amount: string;
+  optional: boolean;
+}
+
+interface Recipe {
+  title: string;
+  ingredients: Ingredient[];
+  instructions: string;
+}
+
+interface RecipeBook {
+  recipes: Recipe[];
+}
+```
+
+Create sub-patterns for each level:
 
 ```
-packages/patterns/expense-tracker/
+packages/patterns/recipe-manager/
+├── schemas.tsx           # Types above (create FIRST)
+├── ingredient.tsx        # Sub-pattern: single ingredient display/edit
+├── ingredient.test.tsx   # Tests for ingredient
+├── recipe.tsx            # Sub-pattern: single recipe (composes ingredients)
+├── recipe.test.tsx       # Tests for recipe
+└── main.tsx              # Recipe book (composes recipes, minimal logic)
+```
+
+**ingredient.tsx** handles display/editing of one ingredient:
+```tsx
+import { pattern, UI } from "commontools";
+import type { Ingredient } from "./schemas.tsx";
+
+export default pattern<{ ingredient: Ingredient }>(({ ingredient }) => {
+  return {
+    [UI]: (
+      <ct-hstack>
+        <ct-input $value={ingredient.amount} />
+        <ct-input $value={ingredient.name} />
+        <ct-checkbox $checked={ingredient.optional}>Optional</ct-checkbox>
+      </ct-hstack>
+    ),
+    ingredient,
+  };
+});
+```
+
+**recipe.tsx** composes ingredient patterns:
+```tsx
+import { pattern, UI } from "commontools";
+import type { Recipe } from "./schemas.tsx";
+import Ingredient from "./ingredient.tsx";
+
+export default pattern<{ recipe: Recipe }>(({ recipe }) => {
+  return {
+    [UI]: (
+      <ct-card>
+        <ct-input $value={recipe.title} slot="header" />
+        {recipe.ingredients.map((ing) => Ingredient({ ingredient: ing }))}
+        <ct-textarea $value={recipe.instructions} />
+      </ct-card>
+    ),
+    recipe,
+  };
+});
+```
+
+**main.tsx** composes recipe patterns with minimal logic:
+```tsx
+import { pattern, UI, NAME } from "commontools";
+import type { RecipeBook } from "./schemas.tsx";
+import Recipe from "./recipe.tsx";
+
+export default pattern<{ book: RecipeBook }>(({ book }) => {
+  return {
+    [NAME]: "Recipe Manager",
+    [UI]: (
+      <ct-screen>
+        {book.recipes.map((recipe) => Recipe({ recipe }))}
+      </ct-screen>
+    ),
+    book,
+  };
+});
+```
+
+### Project Structure Summary
+
+```
+packages/patterns/[name]/
 ├── schemas.tsx           # Shared types (create FIRST)
-├── data-view.tsx         # Sub-pattern: computeds + display
-├── expense-form.tsx      # Sub-pattern: form + actions
-├── data-view.test.tsx    # Tests for data-view
-├── expense-form.test.tsx # Tests for expense-form
-└── main.tsx              # Composes sub-patterns (minimal logic here)
+├── [item].tsx            # Sub-pattern for leaf-level items
+├── [item].test.tsx       # Tests for item sub-pattern
+├── [container].tsx       # Sub-pattern that composes items
+├── [container].test.tsx  # Tests for container sub-pattern
+└── main.tsx              # Top-level composition (minimal logic)
 ```
 
 Each sub-pattern imports from `schemas.tsx` and can be deployed and tested independently. The `main.tsx` should primarily compose sub-patterns, not contain significant logic itself.
