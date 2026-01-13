@@ -1,10 +1,10 @@
 /// <cts-enable />
 /**
- * Regression test: action() with explicit computed() in same ternary branch
+ * Regression test: action() referenced inside explicit computed() in JSX
  *
  * Variation where the pattern author uses computed() explicitly inside JSX
- * (not encouraged, but should still work). The action must be captured in
- * the derive wrapper created for the computed.
+ * (not encouraged, but should still work). The action is referenced INSIDE
+ * the computed expression, so it must be captured in the derive wrapper.
  */
 import { action, Cell, computed, pattern, UI } from "commontools";
 
@@ -32,12 +32,14 @@ export default pattern<Input>(({ card }) => {
         ) : (
           <div>
             <span>{card.title}</span>
-            {/* Explicit computed() in JSX - not encouraged but should work */}
-            {computed(() => card.description.length > 0) ? (
-              <span>{card.description}</span>
-            ) : null}
-            {/* Action in SAME branch - must be captured */}
-            <ct-button onClick={startEditing}>Edit</ct-button>
+            {/* Explicit computed() wrapping JSX that references the action */}
+            {/* The action must be captured in the derive created for this computed */}
+            {computed(() => (
+              <div>
+                <span>{card.description}</span>
+                <ct-button onClick={startEditing}>Edit</ct-button>
+              </div>
+            ))}
           </div>
         )}
       </ct-card>

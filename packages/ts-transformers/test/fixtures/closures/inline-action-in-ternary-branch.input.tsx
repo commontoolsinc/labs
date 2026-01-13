@@ -1,11 +1,11 @@
 /// <cts-enable />
 /**
- * Regression test: inline arrow function action in ternary branch with computed
+ * Regression test: inline arrow function inside explicit computed() in JSX
  *
- * Variation where the action is defined as an inline arrow function in the
- * onClick handler. The transformer will convert this to a handler, and the
- * Cell reference (state.isEditing) must be properly captured in the derive
- * wrapper alongside the computed value (hasDescription).
+ * Variation where an inline arrow function handler is wrapped inside an
+ * explicit computed() in JSX. The transformer will convert the arrow function
+ * to a handler, and the Cell reference (state.isEditing) must be properly
+ * captured in the derive wrapper created for the computed.
  */
 import { Cell, computed, pattern, UI } from "commontools";
 
@@ -20,11 +20,6 @@ interface State {
 }
 
 export default pattern<State>((state) => {
-  const hasDescription = computed(() => {
-    const desc = state.card.description;
-    return desc && desc.length > 0;
-  });
-
   return {
     [UI]: (
       <ct-card>
@@ -33,11 +28,11 @@ export default pattern<State>((state) => {
         ) : (
           <div>
             <span>{state.card.title}</span>
-            {/* Nested ternary with computed - triggers derive wrapper */}
-            {hasDescription ? <span>{state.card.description}</span> : null}
-            {/* Inline arrow function - gets transformed to handler */}
-            {/* state.isEditing Cell must be captured in the derive for the branch */}
-            <ct-button onClick={() => state.isEditing.set(true)}>Edit</ct-button>
+            {/* Explicit computed() wrapping a button with inline handler */}
+            {/* The Cell ref in the handler must be captured in the derive */}
+            {computed(() => (
+              <ct-button onClick={() => state.isEditing.set(true)}>Edit</ct-button>
+            ))}
           </div>
         )}
       </ct-card>
