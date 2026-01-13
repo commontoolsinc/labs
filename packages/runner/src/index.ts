@@ -53,7 +53,6 @@ export {
   parseLink,
   parseLinkOrThrow,
   parseLLMFriendlyLink,
-  sanitizeSchemaForLinks,
 } from "./link-utils.ts";
 export * from "./recipe-manager.ts";
 
@@ -131,12 +130,6 @@ export {
   type SchedulerGraphNode,
   type SchedulerGraphSnapshot,
 } from "./telemetry.ts";
-
-export {
-  LLMMessageSchema,
-  LLMParamsSchema,
-  LLMToolSchema,
-} from "./builtins/llm-schemas.ts";
 
 // Utility functions (split from utils.ts)
 export { createJsonSchema } from "./builder/json-utils.ts";
