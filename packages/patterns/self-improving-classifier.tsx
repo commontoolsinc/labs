@@ -21,6 +21,7 @@ import {
   computed,
   type Default,
   generateObject,
+  handler,
   ifElse,
   lift,
   NAME,
@@ -232,7 +233,7 @@ function calculateF1(rule: ClassificationRule): number {
  * - Tier 3: Self-driving (auto with undo) - F1 >= 0.85, 10+ evals
  * - Tier 4: Automatic (fully auto) - F1 >= 0.95, 20+ evals
  */
-function calculateTier(rule: ClassificationRule): Tier {
+function _calculateTier(rule: ClassificationRule): Tier {
   const f1 = calculateF1(rule);
   const evals = rule.evaluationCount;
 
@@ -241,18 +242,6 @@ function calculateTier(rule: ClassificationRule): Tier {
   if (evals >= 5 && f1 >= 0.70) return 2;
   if (evals >= 3 && f1 >= 0.50) return 1;
   return 0;
-}
-
-/**
- * Update a rule's tier based on its current metrics
- * Returns the rule with updated tier (or same rule if no change needed)
- */
-function updateRuleTier(rule: ClassificationRule): ClassificationRule {
-  const newTier = calculateTier(rule);
-  if (newTier !== rule.tier) {
-    return { ...rule, tier: newTier };
-  }
-  return rule;
 }
 
 /**
@@ -292,6 +281,97 @@ function getTierColor(tier: Tier): string {
 }
 
 // =============================================================================
+// MODULE-SCOPED HANDLERS FOR BUTTON CLICKS IN .map()
+// These handlers receive inputId as a parameter at render time (in reactive context)
+// so they don't need to access reactive proxies in the callback
+// =============================================================================
+
+/** Confirm a pending classification (user agrees with the prediction) */
+const confirmPendingClassification = handler<
+  unknown,
+  {
+    inputId: string;
+    examples: Writable<LabeledExample[]>;
+    pendingClassifications: Writable<PendingClassification[]>;
+  }
+>((_event, { inputId, examples, pendingClassifications }) => {
+  const pendingList = pendingClassifications.get();
+  const idx = pendingList.findIndex((p) => p.input.id === inputId);
+  if (idx < 0) return;
+
+  const item = pendingList[idx];
+  const result = item.result;
+
+  const example: LabeledExample = {
+    input: item.input,
+    label: result.classification,
+    decidedBy: "suggestion-accepted",
+    reasoning: result.reasoning,
+    confidence: result.confidence,
+    labeledAt: Date.now(),
+    wasCorrection: false,
+    isInteresting: result.confidence < 0.7,
+    interestingReason: result.confidence < 0.7
+      ? "Low confidence, user confirmed"
+      : undefined,
+  };
+
+  examples.push(example);
+  pendingClassifications.set(
+    pendingList.filter((p) => p.input.id !== inputId),
+  );
+});
+
+/** Correct a pending classification (user disagrees with the prediction) */
+const correctPendingClassification = handler<
+  unknown,
+  {
+    inputId: string;
+    examples: Writable<LabeledExample[]>;
+    pendingClassifications: Writable<PendingClassification[]>;
+  }
+>((_event, { inputId, examples, pendingClassifications }) => {
+  const pendingList = pendingClassifications.get();
+  const idx = pendingList.findIndex((p) => p.input.id === inputId);
+  if (idx < 0) return;
+
+  const item = pendingList[idx];
+  const correctLabel = !item.result.classification;
+
+  const example: LabeledExample = {
+    input: item.input,
+    label: correctLabel,
+    decidedBy: "user",
+    reasoning: "User correction",
+    confidence: 1.0,
+    labeledAt: Date.now(),
+    wasCorrection: true,
+    originalPrediction: item.result.classification,
+    isInteresting: true,
+    interestingReason: "User corrected classification",
+  };
+
+  examples.push(example);
+  pendingClassifications.set(
+    pendingList.filter((p) => p.input.id !== inputId),
+  );
+});
+
+/** Dismiss a pending classification without recording it */
+const dismissPendingClassification = handler<
+  unknown,
+  {
+    inputId: string;
+    pendingClassifications: Writable<PendingClassification[]>;
+  }
+>((_event, { inputId, pendingClassifications }) => {
+  const pendingList = pendingClassifications.get();
+  pendingClassifications.set(
+    pendingList.filter((p) => p.input.id !== inputId),
+  );
+});
+
+// =============================================================================
 // PATTERN
 // =============================================================================
 
@@ -311,15 +391,17 @@ export default pattern<ClassifierInput>(
 
     /** Submit a new item for classification */
     const submitItem = action((e: { fields: Record<string, string> }) => {
+      // Spread fields to ensure we get a plain copy, not a reactive proxy
+      const fieldsCopy = { ...e.fields };
       const input: ClassifiableInput = {
         id: generateId(),
         receivedAt: Date.now(),
-        fields: e.fields,
+        fields: fieldsCopy,
       };
       currentItem.set(input);
     });
 
-    /** Confirm an LLM classification (user agrees) */
+    /** Confirm an LLM classification (user agrees) - for API use */
     const confirmClassification = action((e: { inputId: string }) => {
       const pending = pendingClassifications.get();
       const itemIndex = pending.findIndex((p) => p.input.id === e.inputId);
@@ -328,7 +410,6 @@ export default pattern<ClassifierInput>(
       const item = pending[itemIndex];
       const result = item.result;
 
-      // Create labeled example
       const example: LabeledExample = {
         input: item.input,
         label: result.classification,
@@ -344,51 +425,12 @@ export default pattern<ClassifierInput>(
       };
 
       examples.push(example);
-
-      // Update rule metrics for correct predictions (TP or TN) and tier
-      if (result.matchedRules.length > 0) {
-        const currentRules = rules.get();
-        const confirmedLabel = result.classification;
-
-        const updatedRules = currentRules.map((rule) => {
-          if (!result.matchedRules.includes(rule.name)) return rule;
-
-          // Rule made a prediction - update its metrics
-          if (rule.predicts === confirmedLabel) {
-            // Rule correctly predicted - true positive or true negative
-            let updatedRule: ClassificationRule;
-            if (confirmedLabel) {
-              const tp = rule.truePositives + 1;
-              const fp = rule.falsePositives;
-              updatedRule = {
-                ...rule,
-                truePositives: tp,
-                precision: tp + fp > 0 ? tp / (tp + fp) : 0.5,
-                evaluationCount: rule.evaluationCount + 1,
-              };
-            } else {
-              const tn = rule.trueNegatives + 1;
-              updatedRule = {
-                ...rule,
-                trueNegatives: tn,
-                evaluationCount: rule.evaluationCount + 1,
-              };
-            }
-            // Apply tier promotion/demotion
-            return updateRuleTier(updatedRule);
-          }
-          return rule;
-        });
-
-        rules.set(updatedRules);
-      }
-
       pendingClassifications.set(
         pending.filter((p) => p.input.id !== e.inputId),
       );
     });
 
-    /** Correct a classification (user disagrees) */
+    /** Correct a classification (user disagrees) - for API use */
     const correctClassification = action(
       (e: { inputId: string; correctLabel: boolean; reasoning?: string }) => {
         const pending = pendingClassifications.get();
@@ -396,9 +438,7 @@ export default pattern<ClassifierInput>(
         if (itemIndex < 0) return;
 
         const item = pending[itemIndex];
-        const originalPrediction = item.result.classification;
 
-        // Create labeled example marked as correction
         const example: LabeledExample = {
           input: item.input,
           label: e.correctLabel,
@@ -406,65 +446,20 @@ export default pattern<ClassifierInput>(
           reasoning: e.reasoning || "User correction",
           confidence: 1.0,
           labeledAt: Date.now(),
-          wasCorrection: originalPrediction !== e.correctLabel,
-          originalPrediction,
+          wasCorrection: true,
+          originalPrediction: item.result.classification,
           isInteresting: true,
           interestingReason: "User corrected classification",
         };
 
         examples.push(example);
-
-        // Update rule metrics if there were matched rules and apply tier changes
-        if (item.result.matchedRules.length > 0) {
-          const currentRules = rules.get();
-          const wrongPrediction = item.result.classification;
-
-          const updatedRules = currentRules.map((rule) => {
-            if (!item.result.matchedRules.includes(rule.name)) return rule;
-
-            let updatedRule: ClassificationRule | null = null;
-
-            if (rule.predicts === wrongPrediction) {
-              if (wrongPrediction && !e.correctLabel) {
-                // False positive - predicted YES but was NO
-                const fp = rule.falsePositives + 1;
-                const tp = rule.truePositives;
-                updatedRule = {
-                  ...rule,
-                  falsePositives: fp,
-                  precision: tp + fp > 0 ? tp / (tp + fp) : 0.5,
-                  evaluationCount: rule.evaluationCount + 1,
-                };
-              } else if (!wrongPrediction && e.correctLabel) {
-                // False negative - predicted NO but was YES
-                const fn = rule.falseNegatives + 1;
-                const tp = rule.truePositives;
-                updatedRule = {
-                  ...rule,
-                  falseNegatives: fn,
-                  recall: tp + fn > 0 ? tp / (tp + fn) : 0.5,
-                  evaluationCount: rule.evaluationCount + 1,
-                };
-              }
-            }
-
-            // Apply tier demotion if metrics got worse
-            if (updatedRule) {
-              return updateRuleTier(updatedRule);
-            }
-            return rule;
-          });
-
-          rules.set(updatedRules);
-        }
-
         pendingClassifications.set(
           pending.filter((p) => p.input.id !== e.inputId),
         );
       },
     );
 
-    /** Dismiss a classification without recording it */
+    /** Dismiss a classification without recording it - for API use */
     const dismissClassification = action((e: { inputId: string }) => {
       const pending = pendingClassifications.get();
       pendingClassifications.set(
@@ -517,19 +512,18 @@ export default pattern<ClassifierInput>(
       }
     });
 
-    /** Remove field from new item */
-    const removeFieldFromNewItem = action((e: { key: string }) => {
-      const current = newItemFields.get();
-      const updated = { ...current };
-      delete updated[e.key];
-      newItemFields.set(updated);
-    });
-
     /** Submit the new item for classification */
     const submitNewItem = action(() => {
       const fields = newItemFields.get();
       if (Object.keys(fields).length > 0) {
-        submitItem({ fields });
+        // Inline the submitItem logic to avoid action-calling-action issue
+        const fieldsCopy = { ...fields };
+        const input: ClassifiableInput = {
+          id: generateId(),
+          receivedAt: Date.now(),
+          fields: fieldsCopy,
+        };
+        currentItem.set(input);
         newItemFields.set({});
       }
     });
@@ -694,7 +688,10 @@ Respond with:
       }
 
       // Add to pending and clear current
-      pendingClassifications.push({ input: item, result: classification });
+      // Deep clone to ensure no reactive proxies leak in
+      const plainInput = JSON.parse(JSON.stringify(item));
+      const plainResult = JSON.parse(JSON.stringify(classification));
+      pendingClassifications.push({ input: plainInput, result: plainResult });
       currentItem.set(null);
 
       return classification;
@@ -815,24 +812,6 @@ Each suggestion should have:
     // Force evaluation
     const _ruleSuggestions = processRuleSuggestions;
 
-    /** Accept a suggested rule */
-    const acceptSuggestedRule = action((e: { index: number }) => {
-      const suggestions = suggestedRules.get();
-      if (e.index < 0 || e.index >= suggestions.length) return;
-
-      const suggestion = suggestions[e.index];
-      addRule(suggestion);
-
-      // Remove from suggestions
-      suggestedRules.set(suggestions.filter((_, i) => i !== e.index));
-    });
-
-    /** Reject a suggested rule */
-    const rejectSuggestedRule = action((e: { index: number }) => {
-      const suggestions = suggestedRules.get();
-      suggestedRules.set(suggestions.filter((_, i) => i !== e.index));
-    });
-
     /** Clear all suggestions (to request new ones) */
     const refreshSuggestions = action(() => {
       suggestedRules.set([]);
@@ -947,7 +926,12 @@ Each suggestion should have:
                             </span>
                             <ct-button
                               variant="ghost"
-                              onClick={removeFieldFromNewItem({ key })}
+                              onClick={() => {
+                                const current = newItemFields.get();
+                                const updated = { ...current };
+                                delete updated[key];
+                                newItemFields.set(updated);
+                              }}
                             >
                               x
                             </ct-button>
@@ -1013,7 +997,9 @@ Each suggestion should have:
                       <ct-card style="background: var(--ct-color-gray-50);">
                         <ct-vstack gap="2">
                           <pre style="font-size: 0.75rem; overflow: auto; max-height: 100px; margin: 0;">
-                            {computed(() => JSON.stringify(pending.input.fields, null, 2))}
+                            {computed(() =>
+                              JSON.stringify(pending.input.fields, null, 2)
+                            )}
                           </pre>
 
                           <ct-hstack gap="2" align="center">
@@ -1047,17 +1033,20 @@ Each suggestion should have:
                           <ct-hstack gap="2">
                             <ct-button
                               variant="primary"
-                              onClick={confirmClassification({
+                              onClick={confirmPendingClassification({
                                 inputId: pending.input.id,
+                                examples,
+                                pendingClassifications,
                               })}
                             >
                               Confirm
                             </ct-button>
                             <ct-button
                               variant="secondary"
-                              onClick={correctClassification({
+                              onClick={correctPendingClassification({
                                 inputId: pending.input.id,
-                                correctLabel: !pending.result.classification,
+                                examples,
+                                pendingClassifications,
                               })}
                             >
                               Actually {ifElse(
@@ -1068,8 +1057,9 @@ Each suggestion should have:
                             </ct-button>
                             <ct-button
                               variant="ghost"
-                              onClick={dismissClassification({
+                              onClick={dismissPendingClassification({
                                 inputId: pending.input.id,
+                                pendingClassifications,
                               })}
                             >
                               Dismiss
@@ -1132,7 +1122,14 @@ Each suggestion should have:
                         </ct-vstack>
                         <ct-button
                           variant="ghost"
-                          onClick={removeRule({ ruleId: rule.id })}
+                          onClick={() => {
+                            const currentRules = rules.get();
+                            rules.set(
+                              currentRules.filter(
+                                (r) => !Cell.equals(r, rule),
+                              ),
+                            );
+                          }}
                         >
                           x
                         </ct-button>
@@ -1173,13 +1170,54 @@ Each suggestion should have:
                             <ct-hstack gap="2">
                               <ct-button
                                 variant="primary"
-                                onClick={acceptSuggestedRule({ index })}
+                                onClick={() => {
+                                  const suggestions = suggestedRules.get();
+                                  if (
+                                    index < 0 || index >= suggestions.length
+                                  ) {
+                                    return;
+                                  }
+
+                                  const s = suggestions[index];
+                                  // Add rule
+                                  const newRule: ClassificationRule = {
+                                    id: generateId(),
+                                    name: s.name,
+                                    targetField: s.targetField,
+                                    pattern: s.pattern,
+                                    caseInsensitive: true,
+                                    predicts: s.predicts,
+                                    precision: 0.5,
+                                    recall: 0.5,
+                                    tier: 0,
+                                    evaluationCount: 0,
+                                    truePositives: 0,
+                                    falsePositives: 0,
+                                    trueNegatives: 0,
+                                    falseNegatives: 0,
+                                    createdAt: Date.now(),
+                                    isShared: false,
+                                  };
+                                  rules.push(newRule);
+
+                                  // Remove from suggestions
+                                  suggestedRules.set(
+                                    suggestions.filter((_, i) =>
+                                      i !== index
+                                    ),
+                                  );
+                                }}
                               >
                                 Accept
                               </ct-button>
                               <ct-button
                                 variant="ghost"
-                                onClick={rejectSuggestedRule({ index })}
+                                onClick={() => {
+                                  const suggestions = suggestedRules.get();
+                                  suggestedRules.set(
+                                    suggestions.filter((_, i) => i !== index),
+                                  );
+                                }}
                               >
                                 Reject
                               </ct-button>
