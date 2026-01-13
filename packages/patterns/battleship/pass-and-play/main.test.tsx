@@ -43,17 +43,17 @@ export default pattern(() => {
 
   // Player ready action - transitions from transition screen to game view
   const action_player_ready = action(() => {
-    game.playerReady.send(undefined);
+    game.playerReady.send();
   });
 
   // Pass device action
   const action_pass_device = action(() => {
-    game.passDevice.send(undefined);
+    game.passDevice.send();
   });
 
   // Reset game action
   const action_reset_game = action(() => {
-    game.resetGame.send(undefined);
+    game.resetGame.send();
   });
 
   // Fire at a miss location (row 9, col 0 - empty for Player 2's board)
