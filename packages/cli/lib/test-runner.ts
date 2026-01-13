@@ -5,7 +5,16 @@
  * 1. Import and instantiate the pattern under test
  * 2. Define test actions as handlers (Stream<void>)
  * 3. Define assertions as Cell<boolean>
- * 4. Return { tests: [...] } array processed sequentially
+ * 4. Return { tests: { assertions, actions, sequence } } object
+ *
+ * The structured format keeps Cell and Stream types separate to avoid
+ * TypeScript declaration emit issues with unique symbols:
+ *
+ * tests: {
+ *   assertions: { initialPhase: computed(...), shotRecorded: computed(...) },
+ *   actions: { playerReady: action(...), fireShot: action(...) },
+ *   sequence: ['initialPhase', 'playerReady', 'shotRecorded', ...],
+ * }
  */
 
 import { Identity } from "@commontools/identity";
@@ -108,48 +117,89 @@ export async function runTestPattern(
     // Keep the pattern reactive - store cancel function for cleanup
     sinkCancel = patternResult.sink(() => {});
 
-    // 4. Get the tests array from pattern output
+    // 4. Get the tests object from pattern output
     // Use .key() to get sub-cells without unwrapping
-    const testsCell = patternResult.key("tests") as Cell<unknown[]>;
+    const testsCell = patternResult.key("tests") as Cell<unknown>;
+    const testsValue = testsCell.get() as {
+      assertions?: Record<string, unknown>;
+      actions?: Record<string, unknown>;
+      sequence?: string[];
+    };
 
-    // Get the length of the tests array to iterate
-    const testsValue = testsCell.get();
-    if (!Array.isArray(testsValue)) {
+    // Validate structured format
+    if (
+      typeof testsValue !== "object" ||
+      testsValue === null ||
+      !("sequence" in testsValue)
+    ) {
       throw new Error(
-        "Test pattern must return { tests: [...] }. Got: " +
+        "Test pattern must return { tests: { assertions, actions, sequence } }. Got: " +
           JSON.stringify(typeof testsValue),
       );
     }
 
-    const testCount = testsValue.length;
-
-    if (options.verbose) {
-      console.log(`  Found ${testCount} test items`);
+    const { sequence } = testsValue;
+    if (!Array.isArray(sequence)) {
+      throw new Error(
+        "tests.sequence must be an array of step names. Got: " +
+          JSON.stringify(typeof sequence),
+      );
     }
 
-    // 5. Process tests in order
+    // Get the assertions and actions objects via .key() to preserve Cell/Stream types
+    const assertionsCell = testsCell.key("assertions") as Cell<
+      Record<string, unknown>
+    >;
+    const actionsCell = testsCell.key("actions") as Cell<
+      Record<string, unknown>
+    >;
+
+    // Check for duplicate keys between assertions and actions
+    const assertionKeys = new Set(Object.keys(testsValue.assertions ?? {}));
+    const actionKeys = new Set(Object.keys(testsValue.actions ?? {}));
+    const duplicates = [...assertionKeys].filter((k) => actionKeys.has(k));
+    if (duplicates.length > 0) {
+      throw new Error(
+        `Duplicate keys found in both assertions and actions: ${
+          duplicates.join(", ")
+        }`,
+      );
+    }
+
+    if (options.verbose) {
+      console.log(`  Found ${sequence.length} test steps`);
+    }
+
+    // 5. Process tests in sequence order
     const results: TestResult[] = [];
     let lastActionName: string | null = null;
-    let assertionIndex = 0;
-    let actionIndex = 0;
 
-    for (let i = 0; i < testCount; i++) {
-      // Use .key() to get the item as a Cell/Stream without unwrapping
-      const testItem = testsCell.key(i);
+    for (const stepKey of sequence) {
       const itemStart = performance.now();
+      const isAssertion = assertionKeys.has(stepKey);
+      const isAction = actionKeys.has(stepKey);
 
-      if (isStream(testItem)) {
+      if (!isAssertion && !isAction) {
+        throw new Error(
+          `Unknown test step "${stepKey}" - not found in assertions or actions`,
+        );
+      }
+
+      if (isAction) {
         // It's an action - invoke it
-        actionIndex++;
-        lastActionName = `action_${actionIndex}`;
+        lastActionName = stepKey;
 
         if (options.verbose) {
-          console.log(`  → Running ${lastActionName}...`);
+          console.log(`  → Running ${stepKey}...`);
         }
 
+        // Get the action stream via .key()
+        const actionStream = actionsCell.key(stepKey) as unknown as Stream<
+          unknown
+        >;
+
         // Send empty object - handlers may expect event-like object
-        // Cast needed because .key() returns Cell which overlaps with Stream
-        (testItem as unknown as Stream<unknown>).send({});
+        actionStream.send({});
 
         // Wait for idle with timeout
         try {
@@ -157,12 +207,12 @@ export async function runTestPattern(
             runtime.idle(),
             timeout(
               TIMEOUT,
-              `Action ${lastActionName} timed out after ${TIMEOUT}ms`,
+              `Action "${stepKey}" timed out after ${TIMEOUT}ms`,
             ),
           ]);
         } catch (err) {
           results.push({
-            name: lastActionName,
+            name: stepKey,
             passed: false,
             afterAction: null,
             error: err instanceof Error ? err.message : String(err),
@@ -170,16 +220,15 @@ export async function runTestPattern(
           });
           // Continue to next test item
         }
-      } else if (isCell(testItem)) {
+      } else {
         // It's an assertion - check the boolean value
-        assertionIndex++;
-        const assertName = `assert_${assertionIndex}`;
+        const assertCell = assertionsCell.key(stepKey) as Cell<unknown>;
 
         let passed = false;
         let error: string | undefined;
 
         try {
-          const value = testItem.get();
+          const value = assertCell.get();
           passed = value === true;
           if (!passed) {
             error = `Expected true, got ${JSON.stringify(value)}`;
@@ -192,7 +241,7 @@ export async function runTestPattern(
         }
 
         results.push({
-          name: assertName,
+          name: stepKey,
           passed,
           afterAction: lastActionName,
           error,
@@ -202,12 +251,7 @@ export async function runTestPattern(
         if (options.verbose) {
           const status = passed ? "✓" : "✗";
           const suffix = lastActionName ? ` (after ${lastActionName})` : "";
-          console.log(`  ${status} ${assertName}${suffix}`);
-        }
-      } else {
-        // Unknown type - skip with warning
-        if (options.verbose) {
-          console.log(`  ? Skipping unknown test item at index ${i}`);
+          console.log(`  ${status} ${stepKey}${suffix}`);
         }
       }
     }

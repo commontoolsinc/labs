@@ -733,10 +733,11 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   }
 
   send(
-    event: AnyCellWrapping<T>,
+    event?: AnyCellWrapping<T>,
     onCommit?: (tx: IExtendedStorageTransaction) => void,
   ): void {
-    this.set(event, onCommit);
+    // For void streams, send {} instead of undefined to match UI event behavior
+    this.set((event ?? {}) as AnyCellWrapping<T>, onCommit);
   }
 
   update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(
@@ -934,10 +935,11 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
    */
   key(...keys: PropertyKey[]): Cell<any> {
     let currentLink = this._link;
+    let childSchema: JSONSchema | undefined;
 
     for (const key of keys) {
       // Get child schema if we have one
-      const childSchema = currentLink.schema
+      childSchema = currentLink.schema
         ? this.runtime.cfc.getSchemaAtPath(
           currentLink.schema,
           [key.toString()],
@@ -958,13 +960,25 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       };
     }
 
+    // Determine the kind based on schema flags
+    let kind: CellKind = this._kind;
+    if (isObject(childSchema)) {
+      if (childSchema.asStream) {
+        kind = "stream";
+      } else if (childSchema.asCell) {
+        kind = "cell";
+      } else if (childSchema.asOpaque) {
+        kind = "opaque";
+      }
+    }
+
     return new CellImpl(
       this.runtime,
       this.tx,
       currentLink,
       this.synced,
       this._causeContainer,
-      this._kind,
+      kind,
     ) as unknown as Cell<any>;
   }
 

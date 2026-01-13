@@ -128,7 +128,10 @@ export interface IWritable<T, C extends AnyBrandedCell<any>> {
  * Streamable cells can send events.
  */
 export interface IStreamable<T> {
-  send(event: AnyCellWrapping<T>): void;
+  send(
+    event?: AnyCellWrapping<T>,
+    onCommit?: (tx: unknown) => void,
+  ): void;
 }
 
 // Lightweight HKT, so we can pass cell types to IKeyable<>.
