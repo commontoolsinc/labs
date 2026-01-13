@@ -54,7 +54,7 @@ export class RuntimeInternals extends EventTarget {
     this.#spaceName = spaceName;
     this.#isHomeSpace = isHomeSpace;
     this.#homeSpaceDID = homeSpaceDID;
-    this.#favorites = new FavoritesManager(client, homeSpaceDID, space);
+    this.#favorites = new FavoritesManager(client, space);
     this.#client.on("console", this.#onConsole);
     this.#client.on("navigaterequest", this.#onNavigateRequest);
     this.#client.on("error", this.#onError);

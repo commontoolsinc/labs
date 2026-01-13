@@ -136,24 +136,16 @@ export class RuntimeProcessor {
           charmManager!.add([target]);
 
           // Track as recently used (async, fire-and-forget)
-          (async () => {
-            try {
-              const defaultPattern = await charmManager!.getDefaultPattern();
-              if (defaultPattern) {
-                const cell = defaultPattern.asSchema({
-                  type: "object",
-                  properties: {
-                    trackRecent: { asStream: true },
-                  },
-                  required: ["trackRecent"],
-                });
-                const handler = cell.key("trackRecent");
-                handler.send({ charm: target });
-              }
-            } catch (e) {
-              console.warn("Failed to track recent charm:", e);
-            }
-          })();
+          RuntimeProcessor.trackRecentCharm(charmManager!, target).catch(
+            (e: unknown) => {
+              console.error(
+                "[RuntimeProcessor] Failed to track recent charm:",
+                {
+                  error: e instanceof Error ? e.message : e,
+                },
+              );
+            },
+          );
         }
 
         self.postMessage({
@@ -493,6 +485,24 @@ export class RuntimeProcessor {
       marker,
     });
   };
+
+  private static async trackRecentCharm(
+    charmManager: CharmManager,
+    target: unknown,
+  ): Promise<void> {
+    const defaultPattern = await charmManager.getDefaultPattern();
+    if (!defaultPattern) return;
+
+    const cell = defaultPattern.asSchema({
+      type: "object",
+      properties: {
+        trackRecent: { asStream: true },
+      },
+      required: ["trackRecent"],
+    });
+    const handler = cell.key("trackRecent");
+    handler.send({ charm: target });
+  }
 
   async handleRequest(
     request: IPCClientRequest,

@@ -16,6 +16,10 @@ import { default as Note } from "../notes/note.tsx";
 // Simple random ID generator (crypto.randomUUID not available in pattern env)
 const generateId = () =>
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
+
+// Maximum number of recent charms to track
+const MAX_RECENT_CHARMS = 10;
+
 import BacklinksIndex, { type MentionableCharm } from "./backlinks-index.tsx";
 import OmniboxFAB from "./omnibox-fab.tsx";
 import Notebook from "../notes/notebook.tsx";
@@ -148,21 +152,25 @@ const addCharm = handler<
   { allCharms: Writable<MentionableCharm[]> }
 >(({ charm }, { allCharms }) => {
   const current = allCharms.get();
-  if (!current.some((c) => equals(c, charm))) {
-    allCharms.push(charm as any);
+  // External callers pass CellRefs that become proxies - type can't be verified at compile time
+  const typedCharm = charm as unknown as MentionableCharm;
+  if (!current.some((c) => equals(c, typedCharm))) {
+    allCharms.push(typedCharm);
   }
 });
 
-// Handler: Track charm as recently used (add to front, maintain max 10)
+// Handler: Track charm as recently used (add to front, maintain max)
 const trackRecent = handler<
   { charm: Writable<unknown> },
   { recentCharms: Writable<MentionableCharm[]> }
 >(({ charm }, { recentCharms }) => {
   const current = recentCharms.get();
+  // External callers pass CellRefs that become proxies - type can't be verified at compile time
+  const typedCharm = charm as unknown as MentionableCharm;
   // Remove if already present
-  const filtered = current.filter((c) => !equals(c, charm));
-  // Add to front and limit to 10
-  const updated = [charm as any, ...filtered].slice(0, 10);
+  const filtered = current.filter((c) => !equals(c, typedCharm));
+  // Add to front and limit to max
+  const updated = [typedCharm, ...filtered].slice(0, MAX_RECENT_CHARMS);
   recentCharms.set(updated);
 });
 
@@ -180,7 +188,7 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
   const visibleCharms = computed(() =>
     allCharms.get().filter((charm) => {
       if (charm.isHidden) return false;
-      const name = (charm as any)?.[NAME];
+      const name = charm[NAME];
       return typeof name === "string" && name.length > 0;
     })
   );

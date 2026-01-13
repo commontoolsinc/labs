@@ -17,14 +17,22 @@ export type FavoriteEntry = {
   userTags: string[];
 };
 
+/** Expected shape of the home pattern's exported properties */
+type HomePatternExports = {
+  favorites: unknown[];
+  addFavorite: unknown;
+  removeFavorite: unknown;
+};
+
+type HandlerName = "addFavorite" | "removeFavorite";
+
 export class FavoritesManager {
   #rt: RuntimeClient;
   #currentSpaceDID: DID;
-  #homePatternCell: CellHandle<unknown> | null = null;
+  #homePatternCell: CellHandle<HomePatternExports> | null = null;
 
   constructor(
     rt: RuntimeClient,
-    _homeSpaceDID: DID,
     currentSpaceDID: DID,
   ) {
     this.#rt = rt;
@@ -68,9 +76,6 @@ export class FavoritesManager {
    */
   async getFavorites(): Promise<FavoriteEntry[]> {
     const defaultPattern = await this.#getDefaultPattern();
-    if (!defaultPattern) {
-      return [];
-    }
 
     const favoritesCell = defaultPattern.key("favorites");
     await favoritesCell.sync();
@@ -84,10 +89,12 @@ export class FavoritesManager {
    * Callback is called immediately with current favorites (may be empty if not ready),
    * and again whenever favorites change.
    * @param callback - Function called with current favorites array
+   * @param onError - Optional callback for errors during subscription or transform
    * @returns Unsubscribe function
    */
   subscribeFavorites(
     callback: (favorites: FavoriteEntry[]) => void,
+    onError?: (error: Error) => void,
   ): () => void {
     let unsubscribeFavorites: (() => void) | undefined;
     let isDisposed = false;
@@ -97,45 +104,58 @@ export class FavoritesManager {
 
       // Use ensureHomePatternRunning to get the resolved, running pattern cell
       if (!this.#homePatternCell) {
-        this.#homePatternCell = await this.#rt.ensureHomePatternRunning();
+        // Type boundary: ensureHomePatternRunning returns unknown, we cast to expected shape
+        const cell = await this.#rt.ensureHomePatternRunning();
+        this.#homePatternCell = cell as CellHandle<HomePatternExports>;
       }
 
-      const patternCell = this.#homePatternCell as CellHandle<{
-        favorites?: unknown[];
-      }>;
-      await patternCell.sync();
+      await this.#homePatternCell.sync();
 
       if (isDisposed) return;
 
       // Subscribe to the favorites property
-      const favoritesCell = patternCell.key("favorites");
-      unsubscribeFavorites = favoritesCell.subscribe((favoritesValue) => {
-        if (isDisposed) return;
+      const favoritesCell = this.#homePatternCell.key("favorites");
+      unsubscribeFavorites = favoritesCell.subscribe(
+        (favoritesValue: unknown) => {
+          if (isDisposed) return;
 
-        // Transform entries - need to sync each CellHandle first
-        this.#transformFavoritesToEntriesAsync(favoritesValue)
-          .then((entries: FavoriteEntry[]) => {
-            if (isDisposed) return;
-            callback(entries);
-          })
-          .catch((error) => {
-            console.warn(
-              "[FavoritesManager] favorites transform failed:",
-              error instanceof Error ? error.message : error,
-            );
-            if (!isDisposed) {
-              callback([]);
-            }
-          });
-      });
+          // Transform entries - need to sync each CellHandle first
+          this.#transformFavoritesToEntriesAsync(favoritesValue)
+            .then((entries: FavoriteEntry[]) => {
+              if (isDisposed) return;
+              callback(entries);
+            })
+            .catch((error) => {
+              const err = error instanceof Error
+                ? error
+                : new Error(String(error));
+              if (onError) {
+                onError(err);
+              } else {
+                console.error(
+                  "[FavoritesManager] favorites transform failed:",
+                  err,
+                );
+              }
+              if (!isDisposed) {
+                callback([]);
+              }
+            });
+        },
+      );
     };
 
     // Start the subscription process
     setupSubscription().catch((error) => {
-      console.warn(
-        "[FavoritesManager] Failed to setup favorites subscription:",
-        error instanceof Error ? error.message : error,
-      );
+      const err = error instanceof Error ? error : new Error(String(error));
+      if (onError) {
+        onError(err);
+      } else {
+        console.error(
+          "[FavoritesManager] Failed to setup favorites subscription:",
+          err,
+        );
+      }
       if (!isDisposed) {
         callback([]);
       }
@@ -168,7 +188,12 @@ export class FavoritesManager {
     const entries: FavoriteEntry[] = [];
 
     for (const favItem of favoritesValue) {
-      if (!isCellHandle(favItem)) continue;
+      if (!isCellHandle(favItem)) {
+        console.warn(
+          "[FavoritesManager] Skipping non-CellHandle item in favorites",
+        );
+        continue;
+      }
 
       // Sync the CellHandle to get the favorite entry value
       await favItem.sync();
@@ -176,7 +201,13 @@ export class FavoritesManager {
         | { cell?: unknown; tag?: string; userTags?: unknown }
         | undefined;
 
-      if (!favValue || typeof favValue !== "object") continue;
+      if (!favValue || typeof favValue !== "object") {
+        console.warn(
+          "[FavoritesManager] Skipping invalid favorite entry:",
+          favValue,
+        );
+        continue;
+      }
 
       // Extract charmId from the cell reference
       // CellHandle.id() already strips the "of:" prefix
@@ -203,31 +234,30 @@ export class FavoritesManager {
 
   /**
    * Get the home space's defaultPattern cell.
-   * Returns null if defaultPattern doesn't exist yet.
+   * Throws if defaultPattern can't be initialized.
    */
-  async #getDefaultPattern(): Promise<CellHandle<any> | null> {
+  async #getDefaultPattern(): Promise<CellHandle<HomePatternExports>> {
     // Use ensureHomePatternRunning which:
     // 1. Gets the home space cell
     // 2. Resolves the defaultPattern cell reference
     // 3. Starts the pattern if needed
     // 4. Returns the resolved, running pattern cell
     if (!this.#homePatternCell) {
-      this.#homePatternCell = await this.#rt.ensureHomePatternRunning();
+      // Type boundary: ensureHomePatternRunning returns unknown, we cast to expected shape
+      const cell = await this.#rt.ensureHomePatternRunning();
+      this.#homePatternCell = cell as CellHandle<HomePatternExports>;
     }
 
     await this.#homePatternCell.sync();
-    return this.#homePatternCell as CellHandle<any>;
+    return this.#homePatternCell;
   }
 
   /**
    * Get a handler from the defaultPattern with the correct schema.
    * @param handlerName - Name of the handler (e.g., "addFavorite")
    */
-  async #getHandler(handlerName: string): Promise<CellHandle<any>> {
+  async #getHandler(handlerName: HandlerName): Promise<CellHandle<unknown>> {
     const defaultPattern = await this.#getDefaultPattern();
-    if (!defaultPattern) {
-      throw new Error("Home space defaultPattern not initialized");
-    }
 
     // Apply schema to mark the handler as a stream
     const patternWithSchema = defaultPattern.asSchema({
@@ -236,9 +266,9 @@ export class FavoritesManager {
         [handlerName]: { asStream: true },
       },
       required: [handlerName],
-    }) as CellHandle<Record<string, any>>;
+    }) as CellHandle<Record<HandlerName, unknown>>;
 
-    return patternWithSchema.key(handlerName as any);
+    return patternWithSchema.key(handlerName);
   }
 
   /**

@@ -15,7 +15,6 @@ import {
   Runtime,
   type Schema,
   type SpaceCellContents,
-  type Stream,
   TYPE,
   URI,
 } from "@commontools/runner";
@@ -191,15 +190,12 @@ export class CharmManager {
     });
   }
 
-  async add(newCharms: Cell<unknown>[]) {
-    // Get the default pattern
+  async add(newCharms: Cell<unknown>[]): Promise<void> {
     const defaultPattern = await this.getDefaultPattern();
     if (!defaultPattern) {
-      console.warn("Default pattern not available, cannot add charms to list");
-      return;
+      throw new Error("Cannot add charms: default pattern not available");
     }
 
-    // Get the addCharm handler from the pattern
     const cell = defaultPattern.asSchema({
       type: "object",
       properties: {
@@ -207,16 +203,13 @@ export class CharmManager {
       },
     });
 
-    const addCharmHandler = cell.key("addCharm") as unknown as Stream<
-      { charm: Cell<unknown> }
-    >;
-
+    const addCharmHandler = cell.key("addCharm").get();
     if (!isStream(addCharmHandler)) {
-      console.warn("addCharm handler not found on default pattern");
-      return;
+      throw new Error(
+        "Cannot add charms: addCharm handler not found on default pattern",
+      );
     }
 
-    // Call the addCharm handler for each charm
     for (const charm of newCharms) {
       addCharmHandler.send({ charm });
     }
