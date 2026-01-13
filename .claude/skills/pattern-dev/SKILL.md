@@ -32,6 +32,7 @@ Before starting pattern development:
 
 → **Create a new pattern** → Go to "Starting a New Pattern"
 → **Modify existing pattern** → Go to "Modifying Patterns"
+→ **Write tests for a pattern** → Go to "Automated Pattern Tests"
 → **Understand a concept** → Check `docs/common/concepts/`
 → **Debug an error** → Check `docs/development/debugging/`
 
@@ -110,6 +111,50 @@ Use the ct CLI to verify each layer before touching the browser:
 
 To learn more about using the ct CLI, run `deno task ct --help`.
 
+### Automated Pattern Tests
+
+For patterns with complex state transitions or logic you want to verify automatically, write a test pattern:
+
+```bash
+# Create test file alongside your pattern
+touch packages/patterns/[name]/main.test.tsx
+```
+
+Test patterns use `action()` to trigger events and `computed()` for assertions:
+
+```tsx
+/// <cts-enable />
+import { Cell, action, computed, pattern } from "commontools";
+import MyPattern from "./main.tsx";
+
+export default pattern(() => {
+  const subject = MyPattern({ /* initial state */ });
+
+  const action_do_something = action(() => {
+    subject.someHandler.send();
+  });
+
+  const assert_initial_state = computed(() => subject.value === 0);
+  const assert_after_action = computed(() => subject.value === 1);
+
+  return {
+    tests: [
+      { assertion: assert_initial_state },
+      { action: action_do_something },
+      { assertion: assert_after_action },
+    ],
+  };
+});
+```
+
+Run with: `deno task ct test packages/patterns/[name]/main.test.tsx`
+
+See `docs/common/workflows/pattern-testing.md` for the full guide.
+
+**When to use automated tests vs CLI testing:**
+- **CLI testing**: Quick iteration, exploring behavior, one-off verification
+- **Automated tests**: Complex state machines, regression prevention, documenting expected behavior
+
 ## Modifying Patterns
 
 ### Getting Pattern Source
@@ -187,11 +232,13 @@ When using an API feature for the first time in a session, read the relevant doc
 | `computed()` | `docs/common/concepts/computed/computed.md` |
 | `lift()` | `docs/common/concepts/lift.md` |
 | `Writable<>` | `docs/common/concepts/types-and-schemas/writable.md` |
-| `handler` | `docs/common/concepts/handler.md` |
+| `action()` | `docs/common/concepts/action.md` |
+| `handler()` | `docs/common/concepts/handler.md` |
 | `ifElse` / conditionals | `docs/common/patterns/conditional.md` |
 | `$value` bindings | `docs/common/patterns/two-way-binding.md` |
 | UI components (`ct-*`) | `docs/common/components/COMPONENTS.md` |
 | Pattern composition | `docs/common/patterns/composition.md` |
+| Pattern testing | `docs/common/workflows/pattern-testing.md` |
 | LLM integration | `docs/common/capabilities/llm.md` |
 
 After drafting code, cross-check against docs for the features you used to verify correct usage.
@@ -205,7 +252,8 @@ After drafting code, cross-check against docs for the features you used to verif
 | UI components | `docs/common/components/` |
 | Common patterns | `docs/common/patterns/` |
 | Capabilities (LLM, side-effects) | `docs/common/capabilities/` |
-| Workflows (dev, linking) | `docs/common/workflows/` |
+| Workflows (dev, linking, testing) | `docs/common/workflows/` |
+| Pattern testing | `docs/common/workflows/pattern-testing.md` |
 | Working examples | `packages/patterns/` |
 
 ## Remember
