@@ -2844,7 +2844,7 @@ type EventHandler<T> =
   | CellLike<CTEvent<T> | T>
   | ((event: CTEvent<T>) => void)
   | (() => void)
-  | Stream<any>;
+  | Stream<void>;
 
 // `Charm` is not a recipe type.
 type Charm = any;
