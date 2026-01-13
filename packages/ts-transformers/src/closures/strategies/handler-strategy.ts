@@ -11,10 +11,10 @@ import { SchemaFactory } from "../utils/schema-factory.ts";
 export class HandlerStrategy implements ClosureTransformationStrategy {
   canTransform(
     node: ts.Node,
-    _context: TransformationContext,
+    context: TransformationContext,
   ): boolean {
     if (ts.isJsxAttribute(node)) {
-      return isEventHandlerJsxAttribute(node.name);
+      return isEventHandlerJsxAttribute(node.name, context.checker);
     }
     return false;
   }

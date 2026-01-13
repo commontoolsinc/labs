@@ -56,7 +56,7 @@ function transform(context: TransformationContext): ts.SourceFile {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
-      if (isEventHandlerJsxAttribute(node)) {
+      if (isEventHandlerJsxAttribute(node, checker)) {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
