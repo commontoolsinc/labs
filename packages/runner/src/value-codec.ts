@@ -102,27 +102,19 @@ export function toStorableValue(value: unknown): unknown {
           `Cannot store ${typeName} per se (needs to have a \`toJSON()\` method)`,
         );
       } else if (Array.isArray(valueObj)) {
-        if (!isStorableArray(valueObj)) {
-          // We accept arrays that are non-storable by virtue of simply having
-          // holes -- which we fill in -- but we do not accept arrays that are
-          // non-storable by virtue of having any additional properties. Note
-          // that if the original `value` had a `toJSON()` method, that would
-          // have triggered the `toJSON` clause above and so we won't end up
-          // here.
-          const densified = [...valueObj];
-          const len = densified.length;
-          const hasNamedProps = Object.keys(valueObj).some((k) => {
-            const n = Number(k);
-            return !Number.isInteger(n) || n < 0 || n >= len;
-          });
-          if (hasNamedProps) {
-            throw new Error(
-              "Cannot store array with enumerable named properties.",
-            );
-          }
-          return densified;
+        // Note that if the original `value` had a `toJSON()` method, that would
+        // have triggered the `toJSON` clause above and so we won't end up here.
+        if (isStorableArray(valueObj)) {
+          return valueObj;
+        } else if (isArrayWithOnlyIndexProperties(valueObj)) {
+          // `valueObj` is non-storable only because it is sparse. Just densify
+          // it.
+          return [...valueObj];
+        } else {
+          throw new Error(
+            "Cannot store array with enumerable named properties.",
+          );
         }
-        return valueObj;
       } else {
         return valueObj;
       }
@@ -230,7 +222,31 @@ export function toDeepStorableValue(
 }
 
 /**
- * Helper for {@link isStorableValue}, which accepts an array and checks to
+ * Helper which accepts an array and checks to see whether all of its enumerable
+ * own properties are numeric indices (that is, it has no named properties).
+ * Unlike {@link isStorableArray}, this returns `true` even for sparse arrays.
+ *
+ * @param array The array to check.
+ * @returns `true` if the array has only numeric properties, `false` otherwise.
+ */
+function isArrayWithOnlyIndexProperties(array: unknown[]): boolean {
+  const len = array.length;
+  const keys = Object.keys(array);
+
+  // Quick check: more keys than length means there must be named properties.
+  if (keys.length > len) {
+    return false;
+  }
+
+  // Verify all keys are valid indices (non-negative integers < length).
+  return !keys.some((k) => {
+    const n = Number(k);
+    return !Number.isInteger(n) || n < 0 || n >= len;
+  });
+}
+
+/**
+ * Helper for other functions in this file, which accepts an array and checks to
  * see whether or not it in storable form. To be in storable form, an array must
  * have all numeric keys from `0` through `.length - 1`, and it must have no
  * other (enumerable own) properties.
