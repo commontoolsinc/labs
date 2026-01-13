@@ -199,7 +199,7 @@ export function toDeepStorableValue(
       if (inArray) {
         return null;
       } else if (converted.size > 0) {
-        // We're inside an object (converted contains ancestors) - omit property.
+        // We're in a nested context (not top level) - omit this property.
         return OMIT;
       }
       // At top level - let the error propagate.
