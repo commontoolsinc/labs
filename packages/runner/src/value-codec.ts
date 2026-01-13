@@ -133,10 +133,8 @@ export function toStorableValue(value: unknown): unknown {
   }
 }
 
-// TODO(@danfuzz): This sentinel is used to indicate a property should be
-// omitted, matching `JSON.stringify()` behavior for functions. Once the
-// codebase is tightened up to not store function properties, this sentinel and
-// the code that uses it can be removed.
+// Sentinel value used to indicate that a property should be omitted during
+// conversion in `toDeepStorableValue()`.
 const OMIT = Symbol("OMIT");
 
 // Sentinel value used in the `converted` map to indicate an object is currently
@@ -228,10 +226,6 @@ export function toDeepStorableValue(
       toDeepStorableValue(element, converted, true)
     );
   } else {
-    // TODO(@danfuzz): The OMIT check here is part of the temporary
-    // `JSON.stringify()` compatibility behavior for functions. Once tightened
-    // up, this can be simplified back to a plain
-    // `Object.fromEntries(Object.entries(...).map(...))`.
     const entries: [string, unknown][] = [];
     for (const [key, val] of Object.entries(value)) {
       const convertedVal = toDeepStorableValue(val, converted, false);
