@@ -200,13 +200,13 @@ export class CellHandle<T = unknown> {
   /**
    * Create a new CellHandle with a different schema.
    */
-  asSchema<S extends JSONSchema>(schema: S): CellHandle<unknown> {
+  asSchema<U = unknown>(schema: JSONSchema): CellHandle<U> {
     const newCell = new CellHandle(this.#rt, {
       ...this.#ref,
       schema,
     });
     newCell.#value = this.#value;
-    return newCell;
+    return newCell as CellHandle<U>;
   }
 
   private _extendPath(key: string): CellRef {
@@ -426,13 +426,9 @@ function parseAsCellRef(
 ): CellRef | undefined {
   if (isSigilLink(value)) {
     const linkData = value["/"][LINK_V1_TAG];
-    if (!linkData.id) {
-      console.warn("Missing id in link.");
-      return;
-    }
 
     return {
-      id: linkData.id,
+      id: linkData.id ?? from.id,
       space: linkData.space ?? from.space,
       path: (linkData.path ?? []).map((p) => p.toString()),
       type: "application/json",
