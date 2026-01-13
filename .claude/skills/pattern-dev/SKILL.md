@@ -18,24 +18,6 @@ Use this skill when:
 
 For ct CLI commands, run `deno task ct --help`.
 
-## Prerequisites
-
-Before starting pattern development:
-
-1. **Know the ct CLI** - Run `deno task ct --help` to learn available commands
-2. **Read the core documentation** - See `docs/common/` for concepts and patterns
-3. **Check example patterns** - Look in `packages/patterns/` for working examples
-
-## Quick Decision Tree
-
-**What do you want to do?**
-
-→ **Create a new pattern** → Go to "Starting a New Pattern"
-→ **Modify existing pattern** → Go to "Modifying Patterns"
-→ **Write tests for a pattern** → Go to "Automated Pattern Tests"
-→ **Understand a concept** → Check `docs/common/concepts/`
-→ **Debug an error** → Check `docs/development/debugging/`
-
 ## Key Principles
 
 ### Object Graph, Not Database
@@ -79,6 +61,24 @@ Bind handlers inside the pattern: `onClick={myHandler({ state })}`
 
 See `docs/development/debugging/gotchas/handler-inside-pattern.md` for details and error messages.
 
+## Prerequisites
+
+Before starting pattern development:
+
+1. **Know the ct CLI** - Run `deno task ct --help` to learn available commands
+2. **Read the core documentation** - See `docs/common/` for concepts and patterns
+3. **Check example patterns** - Look in `packages/patterns/` for working examples
+
+## Quick Decision Tree
+
+**What do you want to do?**
+
+→ **Create a new pattern** → Go to "Starting a New Pattern"
+→ **Modify existing pattern** → Go to "Modifying Patterns"
+→ **Write tests for a pattern** → Go to "Automated Pattern Tests"
+→ **Understand a concept** → Check `docs/common/concepts/`
+→ **Debug an error** → Check `docs/development/debugging/`
+
 ## Starting a New Pattern
 
 Always use multi-file composition. Create the folder structure first:
@@ -89,6 +89,8 @@ touch packages/patterns/[name]/schemas.tsx
 ```
 
 **Define all types in `schemas.tsx` before writing any pattern code.** This file is the anchor - all other files import from it.
+
+When designing types, don't add `id` properties for tracking objects—use `equals()` or array indices instead (see Key Principles above).
 
 ### Project Structure
 
