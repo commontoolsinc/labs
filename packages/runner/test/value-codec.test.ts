@@ -243,8 +243,68 @@ describe("value-codec", () => {
       it("throws for class instances without toJSON", () => {
         class NoToJSON {}
         expect(() => toStorableValue(new NoToJSON())).toThrow(
-          "Cannot store object per se",
+          "Cannot store instance per se",
         );
+      });
+    });
+
+    describe("converts Error instances to @Error wrapper", () => {
+      it("converts basic Error with name, message, and stack", () => {
+        const error = new Error("test message");
+        const result = toStorableValue(error) as {
+          "@Error": Record<string, unknown>;
+        };
+
+        expect(result).toHaveProperty("@Error");
+        expect(result["@Error"].name).toBe("Error");
+        expect(result["@Error"].message).toBe("test message");
+        expect(typeof result["@Error"].stack).toBe("string");
+      });
+
+      it("preserves Error subclass name", () => {
+        const error = new TypeError("type error message");
+        const result = toStorableValue(error) as {
+          "@Error": Record<string, unknown>;
+        };
+
+        expect(result["@Error"].name).toBe("TypeError");
+        expect(result["@Error"].message).toBe("type error message");
+      });
+
+      it("preserves custom enumerable properties on Error", () => {
+        const error = new Error("with extras") as Error & {
+          code: number;
+          detail: string;
+        };
+        error.code = 404;
+        error.detail = "Not Found";
+        const result = toStorableValue(error) as {
+          "@Error": Record<string, unknown>;
+        };
+
+        expect(result["@Error"].message).toBe("with extras");
+        expect(result["@Error"].code).toBe(404);
+        expect(result["@Error"].detail).toBe("Not Found");
+      });
+
+      it("converts RangeError", () => {
+        const error = new RangeError("out of range");
+        const result = toStorableValue(error) as {
+          "@Error": Record<string, unknown>;
+        };
+
+        expect(result["@Error"].name).toBe("RangeError");
+        expect(result["@Error"].message).toBe("out of range");
+      });
+
+      it("converts SyntaxError", () => {
+        const error = new SyntaxError("invalid syntax");
+        const result = toStorableValue(error) as {
+          "@Error": Record<string, unknown>;
+        };
+
+        expect(result["@Error"].name).toBe("SyntaxError");
+        expect(result["@Error"].message).toBe("invalid syntax");
       });
     });
 
@@ -518,13 +578,75 @@ describe("value-codec", () => {
       it("throws for instance property in object", () => {
         class NoToJSON {}
         expect(() => toDeepStorableValue({ a: 1, inst: new NoToJSON() }))
-          .toThrow("Cannot store object per se");
+          .toThrow("Cannot store instance per se");
       });
 
       it("throws for instance element in array", () => {
         class NoToJSON {}
         expect(() => toDeepStorableValue([1, new NoToJSON(), 3]))
-          .toThrow("Cannot store object per se");
+          .toThrow("Cannot store instance per se");
+      });
+    });
+
+    describe("converts nested Error instances to @Error wrapper", () => {
+      it("converts Error property in object", () => {
+        const error = new Error("nested error");
+        const result = toDeepStorableValue({ status: "failed", error }) as {
+          status: string;
+          error: { "@Error": Record<string, unknown> };
+        };
+
+        expect(result.status).toBe("failed");
+        expect(result.error).toHaveProperty("@Error");
+        expect(result.error["@Error"].message).toBe("nested error");
+      });
+
+      it("converts Error element in array", () => {
+        const result = toDeepStorableValue([
+          new Error("first"),
+          "middle",
+          new Error("last"),
+        ]) as unknown[];
+
+        expect(
+          (result[0] as { "@Error": Record<string, unknown> })["@Error"]
+            .message,
+        ).toBe("first");
+        expect(result[1]).toBe("middle");
+        expect(
+          (result[2] as { "@Error": Record<string, unknown> })["@Error"]
+            .message,
+        ).toBe("last");
+      });
+
+      it("converts deeply nested Error", () => {
+        const result = toDeepStorableValue({
+          outer: {
+            inner: {
+              error: new TypeError("deep error"),
+            },
+          },
+        }) as {
+          outer: { inner: { error: { "@Error": Record<string, unknown> } } };
+        };
+
+        expect(result.outer.inner.error["@Error"].name).toBe("TypeError");
+        expect(result.outer.inner.error["@Error"].message).toBe("deep error");
+      });
+
+      it("converts Error with another Error as a custom property", () => {
+        const cause = new Error("root cause");
+        const outer = new Error("outer error") as Error & { cause: Error };
+        outer.cause = cause;
+
+        const result = toDeepStorableValue(outer) as {
+          "@Error": Record<string, unknown> & {
+            cause: { "@Error": Record<string, unknown> };
+          };
+        };
+
+        expect(result["@Error"].message).toBe("outer error");
+        expect(result["@Error"].cause["@Error"].message).toBe("root cause");
       });
     });
 

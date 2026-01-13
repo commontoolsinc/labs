@@ -1,6 +1,38 @@
 import { isInstance, isRecord } from "@commontools/utils/types";
 
 /**
+ * Converts specially-recognized class instances to their designated storable
+ * form. Returns `null` if the value is not one of the recognized types.
+ *
+ * Currently recognized types:
+ * - `Error` (and subclasses) → `{"@Error": {name, message, stack, ...}}`
+ *
+ * @param value - The value to check and potentially convert.
+ * @returns The storable form of the instance, or `null` if not recognized.
+ */
+function specialInstanceToStorableValue(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (Error.isError(value)) {
+    const error = value as Error;
+    // Return a single-key object using the `@` prefix convention established
+    // elsewhere in the system. The spread captures any custom enumerable
+    // properties, followed by explicit assignment of the standard (but
+    // non-enumerable) Error properties.
+    return {
+      "@Error": {
+        ...error,
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+      },
+    };
+  }
+
+  return null;
+}
+
+/**
  * Checks whether a value has a callable `toJSON()` method.
  *
  * @param value - The value to check.
@@ -115,9 +147,17 @@ export function toStorableValue(value: unknown): unknown {
         }
 
         return converted;
-      } else if (typeof valueObj === "function" || isInstance(valueObj)) {
+      } else if (typeof valueObj === "function") {
         throw new Error(
-          `Cannot store ${typeName} per se (needs to have a \`toJSON()\` method)`,
+          "Cannot store function per se (needs to have a `toJSON()` method)",
+        );
+      } else if (isInstance(valueObj)) {
+        const special = specialInstanceToStorableValue(valueObj);
+        if (special !== null) {
+          return special;
+        }
+        throw new Error(
+          "Cannot store instance per se (needs to have a `toJSON()` method)",
         );
       } else if (Array.isArray(valueObj)) {
         // Note that if the original `value` had a `toJSON()` method, that would
