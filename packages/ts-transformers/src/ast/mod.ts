@@ -12,6 +12,7 @@ export {
 export * from "./normalize.ts";
 export {
   isEventHandlerJsxAttribute,
+  isEventHandlerType,
   isSafeEventHandlerCall,
 } from "./event-handlers.ts";
 export { isFunctionLikeExpression } from "./function-predicates.ts";
