@@ -274,9 +274,11 @@ Each sub-pattern imports from `schemas.tsx` and can be deployed and tested indep
 
 **The core rule: Write one sub-pattern → Test it → Move to the next. Never skip testing.**
 
+**First pass: Data and logic only.** Use minimal stub UI (basic inputs/buttons) just to verify data flow and actions work. Don't spend time on layout, styling, or UI polish—that comes later. Most bugs are in data/actions, not UI.
+
 Work from leaf patterns up to main.tsx. For each sub-pattern:
 
-1. **Write** the sub-pattern (e.g., `ingredient.tsx`)
+1. **Write** the sub-pattern with minimal UI (e.g., `ingredient.tsx`)
 2. **Test** it using CLI commands OR automated tests (see below)
 3. **Fix** any issues until it works correctly
 4. **Then** move to the next sub-pattern that composes it
@@ -300,9 +302,9 @@ deno task ct test packages/patterns/[name]/ingredient.test.tsx
 
 See `docs/common/workflows/pattern-testing.md` for test file format.
 
-### UI Development
+### UI Polish (Final Step)
 
-Only build UI after data and actions are tested. Before writing UI:
+Only after ALL sub-patterns have working data and actions, go back and build the full UI. Before writing UI:
 1. Read `docs/common/components/COMPONENTS.md` for available components
 2. Search `packages/patterns/` for similar UI patterns
 
