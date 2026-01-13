@@ -72,8 +72,12 @@ Build in layers rather than all at once. This makes each piece independently tes
 
 ### Layer 2: Mutation Handlers
 
-1. Add handlers one at a time
-2. Test each handler via `deno task ct charm call` and `deno task ct charm step` before adding more
+1. Define handler event types in `schemas.tsx`
+2. Add handlers one at a time
+3. **Export handlers in the return object** for CLI testing
+4. Test each handler via `deno task ct charm call` and `deno task ct charm step`
+
+See `docs/common/workflows/handlers-cli-testing.md` for the full workflow.
 
 ### Layer 3: Build UI
 
