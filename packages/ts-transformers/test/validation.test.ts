@@ -809,3 +809,131 @@ Deno.test("Pattern Context Validation - Builder Placement", async (t) => {
     assertEquals(errors.length, 0, "derive() inside pattern should be allowed");
   });
 });
+
+Deno.test("OpaqueRef .get() Validation", async (t) => {
+  await t.step(
+    "errors on .get() called on computed result",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, computed } from "commontools";
+
+      export default pattern<{ foo: number }>(({ foo }) => {
+        const bar = computed(() => foo + 1);
+        const baz = computed(() => bar.get() + 1);
+        return { result: baz };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "opaque-get:invalid-call");
+      assertEquals(
+        errors[0]!.message.includes("bar"),
+        true,
+        "Error should mention the receiver name",
+      );
+      assertEquals(
+        errors[0]!.message.includes("bar.get()"),
+        true,
+        "Error should show the full .get() call",
+      );
+      assertEquals(
+        errors[0]!.message.includes("reactive value"),
+        true,
+        "Error should explain it's a reactive value",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on .get() called on pattern input without Writable",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, computed } from "commontools";
+
+      export default pattern<{ items: string[] }>(({ items }) => {
+        const count = computed(() => items.get().length);
+        return { count };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertEquals(errors[0]!.type, "opaque-get:invalid-call");
+    },
+  );
+
+  await t.step(
+    "allows .get() on Writable pattern input",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, computed, Writable } from "commontools";
+
+      export default pattern<{ count: Writable<number> }>(({ count }) => {
+        const doubled = computed(() => count.get() * 2);
+        return { doubled };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        ".get() on Writable should be allowed",
+      );
+    },
+  );
+
+  await t.step(
+    "allows .get() on Cell pattern input",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, computed, Cell } from "commontools";
+
+      export default pattern<{ count: Cell<number> }>(({ count }) => {
+        const doubled = computed(() => count.get() * 2);
+        return { doubled };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        ".get() on Cell should be allowed",
+      );
+    },
+  );
+
+  await t.step(
+    "allows direct access on computed result (correct usage)",
+    async () => {
+      const source = `/// <cts-enable />
+      import { pattern, computed } from "commontools";
+
+      export default pattern<{ foo: number }>(({ foo }) => {
+        const bar = computed(() => foo + 1);
+        const baz = computed(() => bar + 1);
+        return { result: baz };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONTOOLS_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Direct access on computed result should be allowed",
+      );
+    },
+  );
+});

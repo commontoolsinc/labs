@@ -54,6 +54,24 @@ export class CompilationError {
     input: string | DiagnosticMessageChain,
   ): { type: CompilationErrorType; message: string } {
     const message = ts.flattenDiagnosticMessageText(input, "\n");
+
+    // Detect .get() called on OpaqueCell/OpaqueRef types
+    // TypeScript error: "Property 'get' does not exist on type 'OpaqueCell<...> & ...'"
+    {
+      const match = message.match(
+        /^Property 'get' does not exist on type '(OpaqueCell<[^']*>)/,
+      );
+      if (match) {
+        const hint =
+          `This is a reactive value that can be accessed directly without .get(). ` +
+          `Reactive values passed to pattern (except Writable<T> and Stream<T>) ` +
+          `and results from computed() and lift() don't need .get() to read them. ` +
+          `Only Writable<T> requires .get() to read values.`;
+        return { type: "ERROR", message: `${message}\n\nHint: ${hint}` };
+      }
+    }
+
+    // Detect module not found errors
     {
       const match = message.match(/^(Cannot find module '[^\']*'.)/);
       if (match && match.length >= 2) {
