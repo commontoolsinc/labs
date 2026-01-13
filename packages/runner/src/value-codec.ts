@@ -180,27 +180,31 @@ export function toDeepStorableValue(
     converted.set(original, PROCESSING);
   }
 
+  // Handle functions without `toJSON()`: At top level, throw. In arrays,
+  // convert to `null`. In objects, omit the property. This matches
+  // `JSON.stringify()` behavior.
+  if (
+    typeof value === "function" &&
+    !("toJSON" in value && typeof value.toJSON === "function")
+  ) {
+    if (inArray) {
+      return null;
+    } else if (converted.size > 0) {
+      // We're in a nested context (not top level) - omit this property.
+      return OMIT;
+    }
+    throw new Error(
+      "Cannot store function per se (needs to have a `toJSON()` method)",
+    );
+  }
+
   // Try to convert the top level to storable form.
   try {
     value = toStorableValue(value);
   } catch (e) {
-    // Clean up converted map before propagating error or returning early.
+    // Clean up converted map before propagating error.
     if (isOriginalRecord) {
       converted.delete(original);
-    }
-
-    // TODO(@danfuzz): This block matches `JSON.stringify()` behavior where
-    // functions without `toJSON()` become `null` in arrays or get omitted from
-    // objects. Once the codebase is tightened up to not pass such values to
-    // `setRaw()`, this block should be removed (letting the error propagate).
-    if (e instanceof Error && e.message.includes("function per se")) {
-      if (inArray) {
-        return null;
-      } else if (converted.size > 0) {
-        // We're in a nested context (not top level) - omit this property.
-        return OMIT;
-      }
-      // At top level - let the error propagate.
     }
     throw e;
   }

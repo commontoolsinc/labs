@@ -518,10 +518,9 @@ describe("value-codec", () => {
       });
     });
 
-    // TODO(@danfuzz): These tests verify the temporary JSON.stringify-compatible
-    // behavior for functions. Once the codebase is tightened up, these tests
-    // should be updated to expect throws instead of drops/nulls.
-    describe("drops function values like JSON.stringify (TODO: should throw)", () => {
+    // Nested functions without `toJSON()` are handled like `JSON.stringify()`:
+    // converted to `null` in arrays, omitted from objects.
+    describe("handles nested functions like JSON.stringify", () => {
       it("omits function properties from objects", () => {
         const result = toDeepStorableValue({ a: 1, fn: () => {}, b: 2 });
         expect(result).toEqual({ a: 1, b: 2 });
