@@ -50,7 +50,6 @@ import type {
 } from "./storage/interface.ts";
 import { resolve } from "./storage/transaction/attestation.ts";
 
-
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
 export type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
