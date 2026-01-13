@@ -124,7 +124,7 @@ Here's a simple example:
 packages/patterns/expense-tracker/
 ├── schemas.tsx           # Shared types (create FIRST)
 ├── data-view.tsx         # Sub-pattern: computeds + display
-├── expense-form.tsx      # Sub-pattern: form + handlers
+├── expense-form.tsx      # Sub-pattern: form + actions
 └── main.tsx              # Composes sub-patterns, passes shared Writable/Cell-like objects
 ```
 
@@ -140,56 +140,20 @@ Build in layers rather than all at once. This makes each piece independently tes
 2. Build computed values (derived data)
 3. Test via CLI: set inputs, verify computed outputs
 
-### Layer 2: Mutation Handlers
+### Layer 2: Actions
 
-1. Define handler event types in `schemas.tsx`
-2. Add handlers one at a time
-3. **Export handlers in the return object** for CLI testing
-4. Test each handler via `deno task ct charm call` and `deno task ct charm step`
+1. Define action event types in `schemas.tsx` if needed
+2. Add actions one at a time
+3. **Export actions in the return object** for testing
+4. Write automated tests to verify action behavior
 
-See `docs/common/workflows/handlers-cli-testing.md` for the full workflow.
+### Layer 2.5: Automated Tests
 
-### Layer 3: Build UI
-
-**Before writing UI code:**
-1. Read `docs/common/components/COMPONENTS.md` for available components
-2. Search `packages/patterns/` for similar UI patterns (e.g., grep for `ct-tabs`, `ct-card`, layout patterns)
-3. Check example patterns for layout structures (ct-screen, ct-hstack, ct-vstack with flex)
-
-**Then implement:**
-1. Create UI to display and interact with the data and handlers
-2. Bidirectional bindings connect to already-verified reactive objects
-
-### Debug Visibility
-
-Include temporary debug UI element(s) showing all computed values during development. This makes reactivity visible - you can see which computed values update when inputs change. Strip debug UI when moving to production.
-
-### Version Control
-
-- Create a new git branch: `git checkout -b pattern/[name]`
-- Commit after each successful layer (verified via CLI)
-- Each commit should represent a working state
-
-### CLI-First Testing
-
-Use the ct CLI to verify each layer before touching the browser:
-- `deno task ct charm new` to deploy
-- `deno task ct charm setsrc` to update
-- `deno task ct charm get/set/call` to test data and handlers
-- `deno task ct charm inspect` to view full state
-
-To learn more about using the ct CLI, run `deno task ct --help`.
-
-### Automated Pattern Tests
-
-For patterns with complex state transitions or logic you want to verify automatically, write a test pattern:
+After implementing actions, write a test file to verify behavior:
 
 ```bash
-# Create test file alongside your pattern
 touch packages/patterns/[name]/main.test.tsx
 ```
-
-Test patterns use `action()` to trigger events and `computed()` for assertions:
 
 ```tsx
 /// <cts-enable />
@@ -216,13 +180,51 @@ export default pattern(() => {
 });
 ```
 
-Run with: `deno task ct test packages/patterns/[name]/main.test.tsx`
+Run tests: `deno task ct test packages/patterns/[name]/main.test.tsx`
 
 See `docs/common/workflows/pattern-testing.md` for the full guide.
 
-**When to use automated tests vs CLI testing:**
-- **CLI testing**: Quick iteration, exploring behavior, one-off verification
-- **Automated tests**: Complex state machines, regression prevention, documenting expected behavior
+### Layer 3: Build UI
+
+**Before writing UI code:**
+1. Read `docs/common/components/COMPONENTS.md` for available components
+2. Search `packages/patterns/` for similar UI patterns (e.g., grep for `ct-tabs`, `ct-card`, layout patterns)
+3. Check example patterns for layout structures (ct-screen, ct-hstack, ct-vstack with flex)
+
+**Then implement:**
+1. Create UI to display and interact with the data and actions
+2. Bidirectional bindings connect to already-verified reactive objects
+
+### Debug Visibility
+
+Include temporary debug UI element(s) showing all computed values during development. This makes reactivity visible - you can see which computed values update when inputs change. Strip debug UI when moving to production.
+
+### Version Control
+
+- Create a new git branch: `git checkout -b pattern/[name]`
+- Commit after each successful layer (verified via CLI)
+- Each commit should represent a working state
+
+### Using the ct CLI
+
+When deploying and interacting with patterns, explore the CLI documentation thoroughly:
+
+```bash
+# Learn available commands
+deno task ct --help
+
+# Get help for specific subcommands
+deno task ct charm --help
+deno task ct test --help
+```
+
+Common commands:
+- `deno task ct dev pattern.tsx --no-run` - Check syntax without deploying
+- `deno task ct charm new` - Deploy a new pattern
+- `deno task ct charm inspect` - View pattern state
+- `deno task ct test` - Run automated tests
+
+See `docs/development/LOCAL_DEV_SERVERS.md` for local development setup.
 
 ## Modifying Patterns
 
@@ -331,6 +333,7 @@ After drafting code, cross-check against docs for the features you used to verif
 
 - Define types in `schemas.tsx` first
 - **Consult docs when using an API feature for the first time**
-- Build and test in layers (data → handlers → UI)
-- Test with CLI before browser
+- Build and test in layers (data → actions → tests → UI)
+- **Write automated tests after implementing actions** (Layer 2.5)
+- Use `deno task ct --help` to explore CLI commands
 - Check `packages/patterns/` for working examples

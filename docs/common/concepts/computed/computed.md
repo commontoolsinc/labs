@@ -51,7 +51,21 @@ export default pattern<Input, Input>(({ items }) => {
 
 ### When to Use computed()
 
-Use `computed()` **outside of JSX** for reactive transformations:
+Use `computed()` **outside of JSX** for reactive transformations.
+
+**Never wrap JSX in `computed()`** - the transformer automatically handles reactivity in JSX expressions:
+
+```tsx
+// ❌ WRONG - Don't wrap JSX in computed()
+{computed(() => (
+  <div style={{ background: headerColor }}>...</div>
+))}
+
+// ✅ RIGHT - Just use the value directly in JSX
+<div style={{ background: headerColor }}>...</div>
+```
+
+Example of correct usage:
 
 ```tsx
 import { computed, UI, Cell } from 'commontools';
