@@ -272,100 +272,39 @@ Each sub-pattern imports from `schemas.tsx` and can be deployed and tested indep
 
 ## Development Methodology
 
-Build in layers rather than all at once. This makes each piece independently testable.
+**The core rule: Write one sub-pattern → Test it → Move to the next. Never skip testing.**
 
-### Layer 1: Data Model + Computed Values
+Work from leaf patterns up to main.tsx. For each sub-pattern:
 
-1. Define types in `schemas.tsx`
-2. Build computed values (derived data)
-3. Test via CLI: set inputs, verify computed outputs
+1. **Write** the sub-pattern (e.g., `ingredient.tsx`)
+2. **Test** it using CLI commands OR automated tests (see below)
+3. **Fix** any issues until it works correctly
+4. **Then** move to the next sub-pattern that composes it
 
-### Layer 2: Actions
+**Do NOT write multiple sub-patterns before testing.** Test each one as you complete it.
 
-1. Define action event types in `schemas.tsx` if needed
-2. Add actions one at a time
-3. **Export actions in the return object** for testing
+### Testing Options
 
-### Layer 3: Interactive CLI Verification
-
-**Do this for EACH sub-pattern as you build it, not just main.tsx.**
-
-Before writing automated tests, deploy and verify interactively:
-
-1. **Learn the CLI**: Run `deno task ct --help` and `deno task ct charm --help`
-2. **Deploy the sub-pattern**: `deno task ct charm new packages/patterns/[name]/ingredient.tsx`
-3. **Inspect state**: `deno task ct charm inspect`
-4. **Test actions**: Use `deno task ct charm call` to invoke exported actions, then `deno task ct charm step` to process
-5. **Verify outputs**: Check computed values update correctly
-
-Repeat for each sub-pattern (e.g., `ingredient.tsx`, then `recipe.tsx`, then `main.tsx`). This catches issues early and builds CLI familiarity.
-
-### Layer 4: Automated Tests (REQUIRED before UI)
-
-**Build and test sub-patterns one at a time.** The workflow is:
-
-1. Write `ingredient.tsx` → Write `ingredient.test.tsx` → **Run tests, fix until passing**
-2. Write `recipe.tsx` → Write `recipe.test.tsx` → **Run tests, fix until passing**
-3. Write `main.tsx` → Write `main.test.tsx` → **Run tests, fix until passing**
-
-**Do NOT move to the next sub-pattern until the current one's tests pass.** This prevents cascading errors and makes debugging easier.
-
+**Option A: Interactive CLI testing** (quick verification)
 ```bash
-# Create test files for each sub-pattern
-touch packages/patterns/[name]/ingredient.test.tsx
-touch packages/patterns/[name]/recipe.test.tsx
-touch packages/patterns/[name]/main.test.tsx
+deno task ct charm new packages/patterns/[name]/ingredient.tsx  # Deploy
+deno task ct charm inspect                                       # Check state
+deno task ct charm call <action-name>                           # Trigger action
+deno task ct charm step                                          # Process
 ```
 
-```tsx
-/// <cts-enable />
-import { Cell, action, computed, pattern } from "commontools";
-import MyPattern from "./main.tsx";
-
-export default pattern(() => {
-  const subject = MyPattern({ /* initial state */ });
-
-  const action_do_something = action(() => {
-    subject.someHandler.send();
-  });
-
-  const assert_initial_state = computed(() => subject.value === 0);
-  const assert_after_action = computed(() => subject.value === 1);
-
-  return {
-    tests: [
-      { assertion: assert_initial_state },
-      { action: action_do_something },
-      { assertion: assert_after_action },
-    ],
-  };
-});
+**Option B: Automated pattern tests** (thorough verification)
+```bash
+deno task ct test packages/patterns/[name]/ingredient.test.tsx
 ```
 
-Run tests: `deno task ct test packages/patterns/[name]/main.test.tsx`
+See `docs/common/workflows/pattern-testing.md` for test file format.
 
-See `docs/common/workflows/pattern-testing.md` for the full guide.
+### UI Development
 
-### Layer 5: Build UI
-
-**Before writing UI code:**
+Only build UI after data and actions are tested. Before writing UI:
 1. Read `docs/common/components/COMPONENTS.md` for available components
-2. Search `packages/patterns/` for similar UI patterns (e.g., grep for `ct-tabs`, `ct-card`, layout patterns)
-3. Check example patterns for layout structures (ct-screen, ct-hstack, ct-vstack with flex)
-
-**Then implement:**
-1. Create UI to display and interact with the data and actions
-2. Bidirectional bindings connect to already-verified reactive objects
-
-### Debug Visibility
-
-Include temporary debug UI element(s) showing all computed values during development. This makes reactivity visible - you can see which computed values update when inputs change. Strip debug UI when moving to production.
-
-### Version Control
-
-- Create a new git branch: `git checkout -b pattern/[name]`
-- Commit after each successful layer (verified via CLI)
-- Each commit should represent a working state
+2. Search `packages/patterns/` for similar UI patterns
 
 ### Using the ct CLI
 
@@ -503,11 +442,9 @@ After drafting code, cross-check against docs for the features you used to verif
 
 ## Remember
 
-- Define types in `schemas.tsx` first
-- **Use `Default<>` for all optional fields** - prevents undefined errors at runtime
-- **Consult docs when using an API feature for the first time**
-- Build and test in layers (data → actions → CLI verify → tests → UI)
-- **Verify interactively with CLI before writing tests** (Layer 3)
-- **Write automated tests before building UI** (Layer 4 before Layer 5)
+- **Test each sub-pattern before moving to the next** - this is the most important rule
+- Define types in `schemas.tsx` first, use `Default<>` for optional fields
+- Work from leaf patterns → container patterns → main.tsx
+- Only build UI after data and actions are tested
+- Consult docs when using an API feature for the first time
 - Use `deno task ct --help` to explore CLI commands
-- Check `packages/patterns/` for working examples
