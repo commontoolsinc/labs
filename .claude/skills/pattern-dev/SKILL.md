@@ -36,6 +36,49 @@ Before starting pattern development:
 → **Understand a concept** → Check `docs/common/concepts/`
 → **Debug an error** → Check `docs/development/debugging/`
 
+## Key Principles
+
+### Object Graph, Not Database
+
+The reactive fabric uses direct references between objects. When you have a reference to an object, you *have* that object—use `equals()` for identity comparison:
+
+```tsx
+interface Task {
+  title: string;
+  done: boolean;
+}
+
+// Use equals() to find/remove items by reference
+const deleteTask = action((task: Task) => {
+  tasks.set(tasks.get().filter(t => !equals(task, t)));
+});
+
+// Or use the index from .map()
+{tasks.map((task, index) => (
+  <ct-button onClick={() => tasks.set(tasks.get().toSpliced(index, 1))}>
+    Delete
+  </ct-button>
+))}
+```
+
+See `docs/common/concepts/equality.md` for the full mental model.
+
+### Scoping Rules
+
+**Define at module scope:**
+- Helper functions
+- `handler()` definitions
+- `lift()` definitions
+
+**Define inside pattern body:**
+- `action()` callbacks
+- `computed()` callbacks
+- `.map()` callbacks
+
+Bind handlers inside the pattern: `onClick={myHandler({ state })}`
+
+See `docs/development/debugging/gotchas/handler-inside-pattern.md` for details and error messages.
+
 ## Starting a New Pattern
 
 Always use multi-file composition. Create the folder structure first:
@@ -234,6 +277,7 @@ When using an API feature for the first time in a session, read the relevant doc
 | `Writable<>` | `docs/common/concepts/types-and-schemas/writable.md` |
 | `action()` | `docs/common/concepts/action.md` |
 | `handler()` | `docs/common/concepts/handler.md` |
+| `equals()` / object identity | `docs/common/concepts/equality.md` |
 | `ifElse` / conditionals | `docs/common/patterns/conditional.md` |
 | `$value` bindings | `docs/common/patterns/two-way-binding.md` |
 | UI components (`ct-*`) | `docs/common/components/COMPONENTS.md` |
