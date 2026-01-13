@@ -392,6 +392,39 @@ describe("value-codec", () => {
         const result = toDeepStorableValue(obj);
         expect(result).toEqual({ a: [1, 2, 3], b: [1, 2, 3] });
       });
+
+      it("only calls toJSON() once per shared object", () => {
+        let callCount = 0;
+        const shared = {
+          toJSON() {
+            callCount++;
+            return { converted: true };
+          },
+        };
+        const obj = { first: shared, second: shared, third: shared };
+        const result = toDeepStorableValue(obj);
+        expect(result).toEqual({
+          first: { converted: true },
+          second: { converted: true },
+          third: { converted: true },
+        });
+        expect(callCount).toBe(1);
+      });
+
+      it("returns same result for shared sparse arrays", () => {
+        const sparse: unknown[] = [];
+        sparse[0] = 1;
+        sparse[2] = 3;
+        const obj = { a: sparse, b: sparse };
+        const result = toDeepStorableValue(obj) as {
+          a: unknown[];
+          b: unknown[];
+        };
+        expect(result.a).toEqual([1, null, 3]);
+        expect(result.b).toEqual([1, null, 3]);
+        // Both should reference the same converted array
+        expect(result.a).toBe(result.b);
+      });
     });
 
     describe("throws for circular references", () => {
@@ -417,6 +450,23 @@ describe("value-codec", () => {
         a.b = b;
         b.a = a;
         expect(() => toDeepStorableValue(a)).toThrow(
+          "Cannot store circular reference",
+        );
+      });
+
+      it("throws when sparse array references itself", () => {
+        const arr: any[] = [];
+        arr[0] = 1;
+        arr[2] = arr; // sparse array with circular reference at index 2
+        expect(() => toDeepStorableValue(arr)).toThrow(
+          "Cannot store circular reference",
+        );
+      });
+
+      it("throws when array with undefined references itself", () => {
+        const arr: any[] = [1, undefined, null];
+        arr[3] = arr; // array with undefined element + circular reference
+        expect(() => toDeepStorableValue(arr)).toThrow(
           "Cannot store circular reference",
         );
       });

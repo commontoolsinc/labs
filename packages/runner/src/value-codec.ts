@@ -139,26 +139,58 @@ export function toStorableValue(value: unknown): unknown {
 // the code that uses it can be removed.
 const OMIT = Symbol("OMIT");
 
+// Sentinel value used in the `converted` map to indicate an object is currently
+// being processed (i.e., it's an ancestor in the tree). If we encounter this
+// while recursing, we have a circular reference.
+const PROCESSING = Symbol("PROCESSING");
+
 /**
  * Recursively converts a value to storable (JSON-encodable) form. Like
  * `toStorableValue()` but also recursively processes array elements and object
  * properties.
  *
  * @param value - The value to convert.
- * @param seen - Set for circularity detection (internal use).
+ * @param converted - Map of original→result for caching and cycle detection.
  * @param inArray - Whether we're processing an array element (internal use).
  * @returns The storable value (original or converted).
  * @throws Error if the value (or any nested value) can't be converted.
  */
 export function toDeepStorableValue(
   value: unknown,
-  seen: Set<object> = new Set(),
+  converted: Map<object, unknown> = new Map(),
   inArray: boolean = false,
 ): unknown {
+  // Track the original value for cycle detection and caching. This is important
+  // because `toStorableValue()` may return a different object (e.g., for sparse
+  // arrays or values with `toJSON()`), but circular references and shared
+  // references point to the original.
+  const original = value;
+  const isOriginalRecord = isRecord(original);
+
+  if (isOriginalRecord) {
+    const cached = converted.get(original);
+    if (cached === PROCESSING) {
+      throw new Error("Cannot store circular reference");
+    }
+    if (cached !== undefined) {
+      // Already converted this object; return cached result. This handles
+      // shared references efficiently and ensures consistent results since
+      // `toJSON()` could return different values on repeated calls.
+      return cached;
+    }
+    // Mark as currently processing (ancestor) before converting.
+    converted.set(original, PROCESSING);
+  }
+
   // Try to convert the top level to storable form.
   try {
     value = toStorableValue(value);
   } catch (e) {
+    // Clean up converted map before propagating error or returning early.
+    if (isOriginalRecord) {
+      converted.delete(original);
+    }
+
     // TODO(@danfuzz): This block matches `JSON.stringify()` behavior where
     // functions without `toJSON()` become `null` in arrays or get omitted from
     // objects. Once the codebase is tightened up to not pass such values to
@@ -166,8 +198,8 @@ export function toDeepStorableValue(
     if (e instanceof Error && e.message.includes("function per se")) {
       if (inArray) {
         return null;
-      } else if (seen.size > 0) {
-        // We're inside an object (seen contains ancestors) - omit this property.
+      } else if (converted.size > 0) {
+        // We're inside an object (converted contains ancestors) - omit property.
         return OMIT;
       }
       // At top level - let the error propagate.
@@ -177,22 +209,20 @@ export function toDeepStorableValue(
 
   // Primitives and null don't need recursion.
   if (!isRecord(value)) {
+    if (isOriginalRecord) {
+      // Cache the primitive result for the original object (e.g., from toJSON).
+      converted.set(original, value);
+    }
     return value;
   }
-
-  // Check for circular references. We only keep current ancestors in `seen`,
-  // so finding a value there means we have a true cycle (not just a shared
-  // reference).
-  if (seen.has(value)) {
-    throw new Error("Cannot store circular reference");
-  }
-  seen.add(value);
 
   let result: unknown;
 
   // Recursively process arrays and objects.
   if (Array.isArray(value)) {
-    result = value.map((element) => toDeepStorableValue(element, seen, true));
+    result = value.map((element) =>
+      toDeepStorableValue(element, converted, true)
+    );
   } else {
     // TODO(@danfuzz): The OMIT check here is part of the temporary
     // `JSON.stringify()` compatibility behavior for functions. Once tightened
@@ -200,16 +230,18 @@ export function toDeepStorableValue(
     // `Object.fromEntries(Object.entries(...).map(...))`.
     const entries: [string, unknown][] = [];
     for (const [key, val] of Object.entries(value)) {
-      const converted = toDeepStorableValue(val, seen, false);
-      if (converted !== OMIT) {
-        entries.push([key, converted]);
+      const convertedVal = toDeepStorableValue(val, converted, false);
+      if (convertedVal !== OMIT) {
+        entries.push([key, convertedVal]);
       }
     }
     result = Object.fromEntries(entries);
   }
 
-  // Remove from seen after processing - only ancestors should be in the set.
-  seen.delete(value);
+  // Cache the result for the original object.
+  if (isOriginalRecord) {
+    converted.set(original, result);
+  }
 
   return result;
 }
