@@ -10,7 +10,6 @@ export {
   CompilerError,
   type DiagnosticMessageTransformer,
   formatTransformerDiagnostic,
-  setDiagnosticMessageTransformer,
   type TransformerDiagnosticInfo,
   TransformerError,
 } from "./diagnostics/mod.ts";

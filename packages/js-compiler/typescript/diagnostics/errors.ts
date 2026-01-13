@@ -14,26 +14,10 @@ export interface DiagnosticMessageTransformer {
   transform(message: string): string | null;
 }
 
-/**
- * Global diagnostic message transformer.
- * Set via setDiagnosticMessageTransformer() before compilation.
- */
-let globalMessageTransformer: DiagnosticMessageTransformer | undefined;
-
-/**
- * Set the global diagnostic message transformer.
- * This transformer will be used to transform TypeScript error messages
- * into more user-friendly messages.
- */
-export function setDiagnosticMessageTransformer(
-  transformer: DiagnosticMessageTransformer | undefined,
-): void {
-  globalMessageTransformer = transformer;
-}
-
 export interface ErrorDetails {
   readonly diagnostic: Diagnostic;
   source?: string;
+  messageTransformer?: DiagnosticMessageTransformer;
 }
 
 /**
@@ -61,9 +45,12 @@ export class CompilationError {
   message: string;
   type: CompilationErrorType;
 
-  constructor({ diagnostic, source }: ErrorDetails) {
+  constructor({ diagnostic, source, messageTransformer }: ErrorDetails) {
     const { file, start } = diagnostic;
-    const { message, type } = this.parseMessage(diagnostic.messageText);
+    const { message, type } = this.parseMessage(
+      diagnostic.messageText,
+      messageTransformer,
+    );
 
     this.source = source;
     this.message = message;
@@ -82,12 +69,13 @@ export class CompilationError {
 
   private parseMessage(
     input: string | DiagnosticMessageChain,
+    messageTransformer?: DiagnosticMessageTransformer,
   ): { type: CompilationErrorType; message: string } {
     const message = ts.flattenDiagnosticMessageText(input, "\n");
 
     // Apply custom message transformer if configured
-    if (globalMessageTransformer) {
-      const transformed = globalMessageTransformer.transform(message);
+    if (messageTransformer) {
+      const transformed = messageTransformer.transform(message);
       if (transformed !== null) {
         return { type: "ERROR", message: transformed };
       }

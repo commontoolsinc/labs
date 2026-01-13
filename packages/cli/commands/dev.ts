@@ -1,7 +1,5 @@
 import { Command } from "@cliffy/command";
 import { isAbsolute, join } from "@std/path";
-import { setDiagnosticMessageTransformer } from "@commontools/js-compiler";
-import { OpaqueRefErrorTransformer } from "@commontools/ts-transformers";
 import { render } from "../lib/render.ts";
 import { process } from "../lib/dev.ts";
 import { isRecord } from "@commontools/utils/types";
@@ -45,10 +43,6 @@ export const dev = new Command()
   )
   .arguments("<main:string>")
   .action(async (options, main) => {
-    // Set up diagnostic message transformer for clearer error messages
-    setDiagnosticMessageTransformer(
-      new OpaqueRefErrorTransformer({ verbose: options.verboseErrors }),
-    );
     const mainPath = isAbsolute(main) ? main : join(Deno.cwd(), main);
 
     const { main: exports } = await process({
@@ -60,6 +54,7 @@ export const dev = new Command()
       filename: options.filename,
       showTransformed: options.showTransformed,
       mainExport: options.mainExport,
+      verboseErrors: options.verboseErrors,
     });
     // If --show-transformed is used, the transformed source is already printed to stdout
     // and we don't want to print the JSON output

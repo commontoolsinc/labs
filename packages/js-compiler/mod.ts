@@ -13,7 +13,6 @@ export {
   CompilerError,
   type DiagnosticMessageTransformer,
   formatTransformerDiagnostic,
-  setDiagnosticMessageTransformer,
   type TransformerDiagnosticInfo,
   TransformerError,
   type TransformerPipelineResult,

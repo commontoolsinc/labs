@@ -5,7 +5,6 @@ export {
   CompilerError,
   type DiagnosticMessageTransformer,
   formatTransformerDiagnostic,
-  setDiagnosticMessageTransformer,
   type TransformerDiagnosticInfo,
   TransformerError,
 } from "./errors.ts";

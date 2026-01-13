@@ -1,17 +1,32 @@
 import { type Diagnostic, type Program } from "typescript";
-import { CompilerError, ErrorDetails } from "./errors.ts";
+import {
+  CompilerError,
+  type DiagnosticMessageTransformer,
+  ErrorDetails,
+} from "./errors.ts";
+
+export interface CheckerOptions {
+  messageTransformer?: DiagnosticMessageTransformer;
+}
 
 export class Checker {
   private program: Program;
-  constructor(program: Program) {
+  private messageTransformer?: DiagnosticMessageTransformer;
+
+  constructor(program: Program, options: CheckerOptions = {}) {
     this.program = program;
+    this.messageTransformer = options.messageTransformer;
   }
 
   typeCheck() {
     const errors = this.sources().reduce((output, sourceFile) => {
       const diagnostics = this.program.getSemanticDiagnostics(sourceFile);
       for (const diagnostic of diagnostics) {
-        output.push({ diagnostic, source: sourceFile.text });
+        output.push({
+          diagnostic,
+          source: sourceFile.text,
+          messageTransformer: this.messageTransformer,
+        });
       }
       return output;
     }, [] as ErrorDetails[]);
@@ -24,7 +39,11 @@ export class Checker {
     const errors = this.sources().reduce((output, sourceFile) => {
       const diagnostics = this.program.getDeclarationDiagnostics(sourceFile);
       for (const diagnostic of diagnostics) {
-        output.push({ diagnostic, source: sourceFile.text });
+        output.push({
+          diagnostic,
+          source: sourceFile.text,
+          messageTransformer: this.messageTransformer,
+        });
       }
       return output;
     }, [] as ErrorDetails[]);
@@ -39,6 +58,7 @@ export class Checker {
     }
     throw new CompilerError(diagnostics.map((diagnostic) => ({
       diagnostic,
+      messageTransformer: this.messageTransformer,
     })));
   }
 
