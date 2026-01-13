@@ -36,8 +36,12 @@ const Node = pattern<Input, Output>(
             Add to Registry
           </button>
           <div>{parent ? <ct-cell-link $cell={parent} /> : "No parent"}</div>
-          <div>Registry: {registry.map((node) => <ct-cell-link $cell={node} />)}</div>
-          <div>Children: {children.map((node) => <ct-cell-link $cell={node} />)}</div>
+          <div>
+            Registry: {registry.map((node) => <ct-cell-link $cell={node} />)}
+          </div>
+          <div>
+            Children: {children.map((node) => <ct-cell-link $cell={node} />)}
+          </div>
         </div>
       ),
     };
