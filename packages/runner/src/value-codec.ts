@@ -1,6 +1,22 @@
 import { isInstance, isRecord } from "@commontools/utils/types";
 
 /**
+ * Checks whether a value has a callable `toJSON()` method.
+ *
+ * @param value - The value to check.
+ * @returns `true` if the value has a `toJSON` method that is a function.
+ */
+function hasToJSONMethod(
+  value: unknown,
+): value is { toJSON: () => unknown } {
+  return (
+    value !== null &&
+    "toJSON" in (value as object) &&
+    typeof (value as { toJSON: unknown }).toJSON === "function"
+  );
+}
+
+/**
  * Determines if the given value is considered "storable" by the system per se
  * (without invoking any conversions such as `.toJSON()`). This function does
  * not recursively validate nested values in arrays or objects.
@@ -89,7 +105,7 @@ export function toStorableValue(value: unknown): unknown {
 
       const valueObj = value as object;
 
-      if ("toJSON" in valueObj && typeof valueObj.toJSON === "function") {
+      if (hasToJSONMethod(valueObj)) {
         const converted = valueObj.toJSON();
 
         if (!isStorableValue(converted)) {
@@ -133,10 +149,8 @@ export function toStorableValue(value: unknown): unknown {
   }
 }
 
-// TODO(@danfuzz): This sentinel is used to indicate a property should be
-// omitted, matching `JSON.stringify()` behavior for functions. Once the
-// codebase is tightened up to not store function properties, this sentinel and
-// the code that uses it can be removed.
+// Sentinel value used to indicate that a property should be omitted during
+// conversion in `toDeepStorableValue()`.
 const OMIT = Symbol("OMIT");
 
 // Sentinel value used in the `converted` map to indicate an object is currently
@@ -182,27 +196,28 @@ export function toDeepStorableValue(
     converted.set(original, PROCESSING);
   }
 
+  // Handle functions without `toJSON()`: At top level, throw. In arrays,
+  // convert to `null`. In objects, omit the property. This matches
+  // `JSON.stringify()` behavior.
+  if (typeof value === "function" && !hasToJSONMethod(value)) {
+    if (inArray) {
+      return null;
+    } else if (converted.size > 0) {
+      // We're in a nested context (not top level) - omit this property.
+      return OMIT;
+    }
+    throw new Error(
+      "Cannot store function per se (needs to have a `toJSON()` method)",
+    );
+  }
+
   // Try to convert the top level to storable form.
   try {
     value = toStorableValue(value);
   } catch (e) {
-    // Clean up converted map before propagating error or returning early.
+    // Clean up converted map before propagating error.
     if (isOriginalRecord) {
       converted.delete(original);
-    }
-
-    // TODO(@danfuzz): This block matches `JSON.stringify()` behavior where
-    // functions without `toJSON()` become `null` in arrays or get omitted from
-    // objects. Once the codebase is tightened up to not pass such values to
-    // `setRaw()`, this block should be removed (letting the error propagate).
-    if (e instanceof Error && e.message.includes("function per se")) {
-      if (inArray) {
-        return null;
-      } else if (converted.size > 0) {
-        // We're in a nested context (not top level) - omit this property.
-        return OMIT;
-      }
-      // At top level - let the error propagate.
     }
     throw e;
   }
@@ -228,10 +243,6 @@ export function toDeepStorableValue(
       toDeepStorableValue(element, converted, true)
     );
   } else {
-    // TODO(@danfuzz): The OMIT check here is part of the temporary
-    // `JSON.stringify()` compatibility behavior for functions. Once tightened
-    // up, this can be simplified back to a plain
-    // `Object.fromEntries(Object.entries(...).map(...))`.
     const entries: [string, unknown][] = [];
     for (const [key, val] of Object.entries(value)) {
       const convertedVal = toDeepStorableValue(val, converted, false);

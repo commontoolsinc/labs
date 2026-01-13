@@ -1745,6 +1745,7 @@ export function convertCellsToLinks(
     includeSchema?: boolean;
     keepStreams?: boolean;
     keepAsCell?: boolean;
+    doNotConvertCellResults?: boolean;
   } = {},
   path: string[] = [],
   seen: Map<any, string[]> = new Map(),
@@ -1759,7 +1760,15 @@ export function convertCellsToLinks(
 
   // Early-return cases
   if (isCellResultForDereferencing(value)) {
-    return getCellOrThrow(value).getAsLink(options);
+    const cell = getCellOrThrow(value);
+    // If there is no schema, then this was a query result proxy, and for now we
+    // still convert that to a link to avoid recursing too deeply.
+
+    // TODO(seefeld,jsantell): Remove this once everything in main thread sends
+    // a schema and we enforce that.
+    if (!options.doNotConvertCellResults || cell.schema === undefined) {
+      return cell.getAsLink(options);
+    }
   } else if (isCell(value)) {
     return value.getAsLink(options);
   } else if (!(isRecord(value) || isFunction(value))) {

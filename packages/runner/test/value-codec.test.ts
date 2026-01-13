@@ -281,6 +281,12 @@ describe("value-codec", () => {
         expect(result).toEqual({ exposed: true });
       });
 
+      it("converts arrays with toJSON", () => {
+        const arr = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
+        arr.toJSON = () => "custom array";
+        expect(toStorableValue(arr)).toBe("custom array");
+      });
+
       it("throws if toJSON returns a non-storable value", () => {
         class BadToJSON {
           toJSON() {
@@ -333,6 +339,10 @@ describe("value-codec", () => {
 
       it("passes through null", () => {
         expect(toDeepStorableValue(null)).toBe(null);
+      });
+
+      it("passes through undefined at top level", () => {
+        expect(toDeepStorableValue(undefined)).toBe(undefined);
       });
     });
 
@@ -518,10 +528,9 @@ describe("value-codec", () => {
       });
     });
 
-    // TODO(@danfuzz): These tests verify the temporary JSON.stringify-compatible
-    // behavior for functions. Once the codebase is tightened up, these tests
-    // should be updated to expect throws instead of drops/nulls.
-    describe("drops function values like JSON.stringify (TODO: should throw)", () => {
+    // Nested functions without `toJSON()` are handled like `JSON.stringify()`:
+    // converted to `null` in arrays, omitted from objects.
+    describe("handles nested functions like JSON.stringify", () => {
       it("omits function properties from objects", () => {
         const result = toDeepStorableValue({ a: 1, fn: () => {}, b: 2 });
         expect(result).toEqual({ a: 1, b: 2 });
@@ -530,6 +539,22 @@ describe("value-codec", () => {
       it("converts function elements in arrays to null", () => {
         const result = toDeepStorableValue([1, () => {}, 3]);
         expect(result).toEqual([1, null, 3]);
+      });
+
+      it("converts nested function with toJSON via its toJSON method", () => {
+        const fn = () => {};
+        (fn as unknown as { toJSON: () => unknown }).toJSON = () =>
+          "function with toJSON";
+        const result = toDeepStorableValue({ a: 1, fn, b: 2 });
+        expect(result).toEqual({ a: 1, fn: "function with toJSON", b: 2 });
+      });
+
+      it("converts function with toJSON in array via its toJSON method", () => {
+        const fn = () => {};
+        (fn as unknown as { toJSON: () => unknown }).toJSON = () =>
+          "converted fn";
+        const result = toDeepStorableValue([1, fn, 3]);
+        expect(result).toEqual([1, "converted fn", 3]);
       });
     });
 
