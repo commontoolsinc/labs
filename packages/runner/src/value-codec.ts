@@ -30,8 +30,13 @@ export function isStorableValue(value: unknown): boolean {
     }
 
     case "object": {
-      // `null`, plain objects, and arrays are storable. Instances are not.
-      return !isInstance(value);
+      if (value === null) {
+        return true;
+      } else if (Array.isArray(value)) {
+        return isStorableArray(value);
+      } else {
+        return !isInstance(value);
+      }
     }
 
     case "function":
@@ -87,7 +92,7 @@ export function toStorableValue(value: unknown): unknown {
 
         if (!isStorableValue(converted)) {
           throw new Error(
-            `\`toJSON()\` on ${typeName} returned something other than a \`JSONValue\``,
+            `\`toJSON()\` on ${typeName} returned something other than a storable value`,
           );
         }
 
@@ -200,4 +205,33 @@ export function toDeepStorableValue(
   seen.delete(value);
 
   return result;
+}
+
+/**
+ * Helper for {@link isStorableValue}, which accepts an array and checks to
+ * see whether or not it in storable form. To be in storable form, an array must
+ * have all numeric keys from `0` through `.length - 1`, and it must have no
+ * other (enumerable own) properties.
+ *
+ * @param array The array to check.
+ * @returns `true` if the array is in storable form, `false` otherwise.
+ */
+function isStorableArray(array: unknown[]): boolean {
+  const len = array.length;
+
+  // Quick check: key count must equal length. This fails if there are holes
+  // (sparse array) or extra non-numeric properties.
+  if (Object.keys(array).length !== len) {
+    return false;
+  }
+
+  // Verify all indices from 0 through length-1 exist (no holes). This catches
+  // the edge case where holes and extra properties balance out the count.
+  for (let i = 0; i < len; i++) {
+    if (!(i in array)) {
+      return false;
+    }
+  }
+
+  return true;
 }

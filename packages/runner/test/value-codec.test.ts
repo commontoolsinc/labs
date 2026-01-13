@@ -40,12 +40,41 @@ describe("value-codec", () => {
         expect(isStorableValue({ nested: { object: true } })).toBe(true);
       });
 
-      it("accepts arrays", () => {
+      it("accepts dense arrays", () => {
         expect(isStorableValue([])).toBe(true);
         expect(isStorableValue([1, 2, 3])).toBe(true);
         expect(isStorableValue([{ a: 1 }, { b: 2 }])).toBe(true);
+        expect(isStorableValue([null, undefined, null])).toBe(true);
+      });
+    });
+
+    describe("returns false for non-storable arrays", () => {
+      it("rejects sparse arrays (arrays with holes)", () => {
+        const sparse: unknown[] = [];
+        sparse[0] = 1;
+        sparse[2] = 3; // hole at index 1
+        expect(isStorableValue(sparse)).toBe(false);
       });
 
+      it("rejects arrays with extra non-numeric properties", () => {
+        const arr = [1, 2, 3] as unknown[] & { foo?: string };
+        arr.foo = "bar";
+        expect(isStorableValue(arr)).toBe(false);
+      });
+
+      it("rejects sparse arrays even when extra properties balance the count", () => {
+        // This array has length 3, hole at index 1, but extra property "foo"
+        // So Object.keys() returns ["0", "2", "foo"] which has length 3
+        // But it should still be rejected because indices aren't all present
+        const sparse = [] as unknown[] & { foo?: string };
+        sparse[0] = 1;
+        sparse[2] = 3;
+        sparse.foo = "bar";
+        expect(isStorableValue(sparse)).toBe(false);
+      });
+    });
+
+    describe("returns true for edge cases", () => {
       // TODO(@danfuzz): This should return false once the TODO is resolved
       it("accepts undefined (TODO: should be false)", () => {
         expect(isStorableValue(undefined)).toBe(true);
