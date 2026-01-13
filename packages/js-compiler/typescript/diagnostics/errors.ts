@@ -57,17 +57,18 @@ export class CompilationError {
 
     // Detect .get() called on OpaqueCell/OpaqueRef types
     // TypeScript error: "Property 'get' does not exist on type 'OpaqueCell<...> & ...'"
+    // Replace with a clear, actionable message (suppress the confusing type error)
     {
       const match = message.match(
         /^Property 'get' does not exist on type '(OpaqueCell<[^']*>)/,
       );
       if (match) {
-        const hint =
-          `This is a reactive value that can be accessed directly without .get(). ` +
+        const clarification = `Unnecessary .get() call on a reactive value. ` +
+          `This value can be accessed directly - remove .get(). ` +
           `Reactive values passed to pattern (except Writable<T> and Stream<T>) ` +
-          `and results from computed() and lift() don't need .get() to read them. ` +
+          `and results from computed() and lift() don't need .get(). ` +
           `Only Writable<T> requires .get() to read values.`;
-        return { type: "ERROR", message: `${message}\n\nHint: ${hint}` };
+        return { type: "ERROR", message: clarification };
       }
     }
 
