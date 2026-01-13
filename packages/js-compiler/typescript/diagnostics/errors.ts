@@ -1,6 +1,19 @@
 import ts, { type Diagnostic, DiagnosticMessageChain } from "typescript";
 import { renderInline } from "./render.ts";
 
+/**
+ * Interface for transforming diagnostic error messages.
+ * Implementations can convert confusing TypeScript errors into clearer messages.
+ */
+export interface DiagnosticMessageTransformer {
+  /**
+   * Transform a diagnostic message.
+   * @param message The original TypeScript diagnostic message
+   * @returns Transformed message, or null if no transformation applies
+   */
+  transform(message: string): string | null;
+}
+
 export interface ErrorDetails {
   readonly diagnostic: Diagnostic;
   source?: string;
@@ -31,9 +44,15 @@ export class CompilationError {
   message: string;
   type: CompilationErrorType;
 
-  constructor({ diagnostic, source }: ErrorDetails) {
+  constructor(
+    { diagnostic, source }: ErrorDetails,
+    messageTransformer?: DiagnosticMessageTransformer,
+  ) {
     const { file, start } = diagnostic;
-    const { message, type } = this.parseMessage(diagnostic.messageText);
+    const { message, type } = this.parseMessage(
+      diagnostic.messageText,
+      messageTransformer,
+    );
 
     this.source = source;
     this.message = message;
@@ -52,8 +71,19 @@ export class CompilationError {
 
   private parseMessage(
     input: string | DiagnosticMessageChain,
+    messageTransformer?: DiagnosticMessageTransformer,
   ): { type: CompilationErrorType; message: string } {
     const message = ts.flattenDiagnosticMessageText(input, "\n");
+
+    // Apply custom message transformer if configured
+    if (messageTransformer) {
+      const transformed = messageTransformer.transform(message);
+      if (transformed !== null) {
+        return { type: "ERROR", message: transformed };
+      }
+    }
+
+    // Detect module not found errors
     {
       const match = message.match(/^(Cannot find module '[^\']*'.)/);
       if (match && match.length >= 2) {
@@ -95,8 +125,13 @@ export class CompilationError {
 export class CompilerError extends Error {
   override name = "CompilerError";
   #errors: CompilationError[];
-  constructor(errorDetails: ErrorDetails[]) {
-    const errors = errorDetails.map((d) => new CompilationError(d));
+  constructor(
+    errorDetails: ErrorDetails[],
+    messageTransformer?: DiagnosticMessageTransformer,
+  ) {
+    const errors = errorDetails.map((d) =>
+      new CompilationError(d, messageTransformer)
+    );
     const message = errors.map((error) => error.displayInline()).join("\n");
     super(message);
     this.#errors = errors;

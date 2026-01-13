@@ -1,10 +1,21 @@
 import { type Diagnostic, type Program } from "typescript";
-import { CompilerError, ErrorDetails } from "./errors.ts";
+import {
+  CompilerError,
+  type DiagnosticMessageTransformer,
+  ErrorDetails,
+} from "./errors.ts";
+
+export interface CheckerOptions {
+  messageTransformer?: DiagnosticMessageTransformer;
+}
 
 export class Checker {
   private program: Program;
-  constructor(program: Program) {
+  private messageTransformer?: DiagnosticMessageTransformer;
+
+  constructor(program: Program, options: CheckerOptions = {}) {
     this.program = program;
+    this.messageTransformer = options.messageTransformer;
   }
 
   typeCheck() {
@@ -16,7 +27,7 @@ export class Checker {
       return output;
     }, [] as ErrorDetails[]);
     if (errors.length) {
-      throw new CompilerError(errors);
+      throw new CompilerError(errors, this.messageTransformer);
     }
   }
 
@@ -29,7 +40,7 @@ export class Checker {
       return output;
     }, [] as ErrorDetails[]);
     if (errors.length) {
-      throw new CompilerError(errors);
+      throw new CompilerError(errors, this.messageTransformer);
     }
   }
 
@@ -37,9 +48,10 @@ export class Checker {
     if (!diagnostics || diagnostics.length === 0) {
       return;
     }
-    throw new CompilerError(diagnostics.map((diagnostic) => ({
-      diagnostic,
-    })));
+    throw new CompilerError(
+      diagnostics.map((diagnostic) => ({ diagnostic })),
+      this.messageTransformer,
+    );
   }
 
   private sources() {

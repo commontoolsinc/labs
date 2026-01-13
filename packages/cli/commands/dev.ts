@@ -37,6 +37,10 @@ export const dev = new Command()
     "--main-export <export:string>",
     'Named export from entry for recipe definition. Defaults to "default".',
   )
+  .option(
+    "--verbose-errors",
+    "Show original TypeScript error messages in addition to simplified hints.",
+  )
   .arguments("<main:string>")
   .action(async (options, main) => {
     const mainPath = isAbsolute(main) ? main : join(Deno.cwd(), main);
@@ -50,6 +54,7 @@ export const dev = new Command()
       filename: options.filename,
       showTransformed: options.showTransformed,
       mainExport: options.mainExport,
+      verboseErrors: options.verboseErrors,
     });
     // If --show-transformed is used, the transformed source is already printed to stdout
     // and we don't want to print the JSON output

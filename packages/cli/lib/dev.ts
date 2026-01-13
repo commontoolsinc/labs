@@ -26,6 +26,7 @@ export interface ProcessOptions {
   filename?: string;
   showTransformed?: boolean;
   mainExport?: string;
+  verboseErrors?: boolean;
 }
 
 export async function process(
@@ -51,6 +52,7 @@ export async function process(
     noRun: !options.run,
     filename,
     getTransformedProgram,
+    verboseErrors: options.verboseErrors,
   });
 
   if (options.output) {

@@ -26,6 +26,7 @@ import { parseSourceMap } from "../source-map.ts";
 import { resolveProgram } from "./resolver.ts";
 import {
   Checker,
+  type DiagnosticMessageTransformer,
   TransformerDiagnosticInfo,
   TransformerError,
 } from "./diagnostics/mod.ts";
@@ -264,6 +265,9 @@ export interface TypeScriptCompilerOptions {
   //     { main: Record<string, any>, exportMap: Record<string, Record<string, any>> }`
   // ```
   bundleExportAll?: true;
+  // Optional transformer for diagnostic error messages.
+  // Allows converting confusing TypeScript errors into clearer messages.
+  diagnosticMessageTransformer?: DiagnosticMessageTransformer;
 }
 
 export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
@@ -324,7 +328,9 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       host,
     );
 
-    const checker = new Checker(tsProgram);
+    const checker = new Checker(tsProgram, {
+      messageTransformer: inputOptions.diagnosticMessageTransformer,
+    });
     if (!noCheck) {
       checker.typeCheck();
     }
