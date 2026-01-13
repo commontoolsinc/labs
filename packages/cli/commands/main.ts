@@ -2,6 +2,7 @@ import { Command } from "@cliffy/command";
 import { HelpCommand } from "@cliffy/command/help";
 import { acl } from "./acl.ts";
 import { dev } from "./dev.ts";
+import { doc } from "./doc.ts";
 import { init } from "./init.ts";
 import { charm } from "./charm.ts";
 import { identity } from "./identity.ts";
@@ -13,6 +14,7 @@ QUICK START:
   ct dev ./pattern.tsx              # Type-check and test locally
   ct charm new ./pattern.tsx ...    # Deploy to a space
   ct charm --help                   # Help for deployed patterns (with tips)
+  ct doc search "computed"          # Search documentation
 
 FIRST TIME SETUP:
   ct id new > claude.key            # Create identity key
@@ -45,6 +47,8 @@ export const main = new Command()
   // @ts-ignore for the above type issue
   .command("charm", charm)
   .command("dev", dev)
+  // @ts-ignore for the above type issue
+  .command("doc", doc)
   .command("id", identity)
   .command("init", init)
   .command("test", test);
