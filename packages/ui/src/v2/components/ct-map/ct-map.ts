@@ -9,8 +9,8 @@ import { html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { styles } from "./styles.ts";
 import * as L from "leaflet";
-import { type CellHandle, isCellHandle } from "@commontools/runtime-client";
-import { CellController } from "../../core/cell-controller.ts";
+import { type CellHandle } from "@commontools/runtime-client";
+import { createCellController } from "../../core/cell-controller.ts";
 import type {
   Bounds,
   CtBoundsChangeDetail,
@@ -46,6 +46,13 @@ const MAX_LNG = 180;
 
 // Keyboard navigation constants
 const PAN_AMOUNT = 100; // pixels to pan per arrow key press
+
+// Cached emoji regex for performance (compiled once at module load)
+const EMOJI_REGEX =
+  /[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]/u;
+
+// ResizeObserver debounce delay in milliseconds
+const RESIZE_DEBOUNCE_MS = 150;
 
 /**
  * CTMap - Interactive map component with markers, circles, and polylines
@@ -116,32 +123,52 @@ export class CTMap extends BaseElement {
   // ResizeObserver for automatic map resize when container changes
   private _resizeObserver: ResizeObserver | null = null;
 
-  // Change group for internal edits to avoid echo loops
-  private _changeGroup = crypto.randomUUID();
+  // Timeout ID for debounced resize handling
+  private _resizeTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
   // Flag to prevent echo loops during programmatic updates
   private _isUpdatingFromCell = false;
 
-  // Cell subscriptions for cleanup
-  private _valueUnsubscribe: (() => void) | null = null;
-  private _centerUnsubscribe: (() => void) | null = null;
-  private _zoomUnsubscribe: (() => void) | null = null;
-  private _boundsUnsubscribe: (() => void) | null = null;
-
-  // Cell controllers for bidirectional bindings
-  private _centerController = new CellController<LatLng>(this, {
+  // Cell controllers for reactive data binding
+  // These manage subscriptions automatically via Lit's ReactiveController lifecycle
+  private _valueController = createCellController<MapValue>(this, {
     timing: { strategy: "immediate" },
-    triggerUpdate: false,
+    onChange: () => {
+      this._renderFeatures();
+      if (this.fitToBounds) {
+        this._fitMapToBounds();
+      }
+    },
   });
 
-  private _zoomController = new CellController<number>(this, {
+  private _centerController = createCellController<LatLng>(this, {
     timing: { strategy: "immediate" },
     triggerUpdate: false,
+    onChange: () => {
+      if (!this._isUpdatingFromCell) {
+        this._updateMapCenter();
+      }
+    },
   });
 
-  private _boundsController = new CellController<Bounds>(this, {
+  private _zoomController = createCellController<number>(this, {
     timing: { strategy: "immediate" },
     triggerUpdate: false,
+    onChange: () => {
+      if (!this._isUpdatingFromCell) {
+        this._updateMapZoom();
+      }
+    },
+  });
+
+  private _boundsController = createCellController<Bounds>(this, {
+    timing: { strategy: "immediate" },
+    triggerUpdate: false,
+    onChange: () => {
+      if (!this._isUpdatingFromCell) {
+        this._updateMapFromBounds();
+      }
+    },
   });
 
   // Bound event handler for cleanup
@@ -173,8 +200,14 @@ export class CTMap extends BaseElement {
 
   protected override firstUpdated(_changedProperties: PropertyValues): void {
     super.firstUpdated(_changedProperties);
+
+    // Bind all controllers to their initial values
+    this._valueController.bind(this.value);
+    this._centerController.bind(this.center);
+    this._zoomController.bind(this.zoom);
+    this._boundsController.bind(this.bounds);
+
     this._initializeMap();
-    this._setupCellSubscriptions();
     this._renderFeatures();
 
     if (this.fitToBounds) {
@@ -185,33 +218,30 @@ export class CTMap extends BaseElement {
   protected override updated(changedProperties: PropertyValues): void {
     super.updated(changedProperties);
 
-    // Handle value changes
+    // Handle value changes - rebind controller when property changes
     if (changedProperties.has("value")) {
-      this._setupValueSubscription();
+      this._valueController.bind(this.value);
       this._renderFeatures();
       if (this.fitToBounds) {
         this._fitMapToBounds();
       }
     }
 
-    // Handle center changes
+    // Handle center changes - rebind controller when property changes
     if (changedProperties.has("center")) {
       this._centerController.bind(this.center);
-      this._setupCenterSubscription();
       this._updateMapCenter();
     }
 
-    // Handle zoom changes
+    // Handle zoom changes - rebind controller when property changes
     if (changedProperties.has("zoom")) {
       this._zoomController.bind(this.zoom);
-      this._setupZoomSubscription();
       this._updateMapZoom();
     }
 
-    // Handle bounds changes
+    // Handle bounds changes - rebind controller when property changes
     if (changedProperties.has("bounds")) {
       this._boundsController.bind(this.bounds);
-      this._setupBoundsSubscription();
     }
 
     // Handle interactive changes
@@ -342,8 +372,15 @@ export class CTMap extends BaseElement {
 
     // Set up ResizeObserver to handle container size changes
     // This handles responsive layouts, tab switching, accordion panels, etc.
+    // Debounce to prevent excessive layout thrashing on every pixel change
     this._resizeObserver = new ResizeObserver(() => {
-      this._map?.invalidateSize();
+      if (this._resizeTimeoutId !== null) {
+        clearTimeout(this._resizeTimeoutId);
+      }
+      this._resizeTimeoutId = setTimeout(() => {
+        this._map?.invalidateSize();
+        this._resizeTimeoutId = null;
+      }, RESIZE_DEBOUNCE_MS);
     });
     this._resizeObserver.observe(container);
   }
@@ -388,157 +425,63 @@ export class CTMap extends BaseElement {
       };
       this.emit("ct-bounds-change", detail);
 
-      // Update Cell values (bidirectional)
+      // Update Cell values (bidirectional) using controllers
       this._updateCenterCell(centerData);
       this._updateZoomCell(zoom);
       this._updateBoundsCell(boundsData);
     });
   }
 
-  // === Cell Subscriptions ===
-
-  private _setupCellSubscriptions(): void {
-    this._setupValueSubscription();
-    this._setupCenterSubscription();
-    this._setupZoomSubscription();
-    this._setupBoundsSubscription();
-  }
-
-  private _setupValueSubscription(): void {
-    if (this._valueUnsubscribe) {
-      this._valueUnsubscribe();
-      this._valueUnsubscribe = null;
-    }
-
-    if (isCellHandle(this.value)) {
-      this._valueUnsubscribe = (this.value as CellHandle<MapValue>).subscribe(
-        () => {
-          this._renderFeatures();
-          if (this.fitToBounds) {
-            this._fitMapToBounds();
-          }
-        },
-      );
-    }
-  }
-
-  private _setupCenterSubscription(): void {
-    if (this._centerUnsubscribe) {
-      this._centerUnsubscribe();
-      this._centerUnsubscribe = null;
-    }
-
-    if (isCellHandle(this.center)) {
-      this._centerUnsubscribe = (this.center as CellHandle<LatLng>).subscribe(
-        () => {
-          if (!this._isUpdatingFromCell) {
-            this._updateMapCenter();
-          }
-        },
-      );
-    }
-  }
-
-  private _setupZoomSubscription(): void {
-    if (this._zoomUnsubscribe) {
-      this._zoomUnsubscribe();
-      this._zoomUnsubscribe = null;
-    }
-
-    if (isCellHandle(this.zoom)) {
-      this._zoomUnsubscribe = (this.zoom as CellHandle<number>).subscribe(
-        () => {
-          if (!this._isUpdatingFromCell) {
-            this._updateMapZoom();
-          }
-        },
-      );
-    }
-  }
-
-  private _setupBoundsSubscription(): void {
-    if (this._boundsUnsubscribe) {
-      this._boundsUnsubscribe();
-      this._boundsUnsubscribe = null;
-    }
-
-    if (isCellHandle(this.bounds)) {
-      this._boundsUnsubscribe = (this.bounds as CellHandle<Bounds>).subscribe(
-        () => {
-          if (!this._isUpdatingFromCell) {
-            this._updateMapFromBounds();
-          }
-        },
-      );
-    }
-  }
-
-  // === Value Getters ===
+  // === Value Getters (using CellControllers) ===
 
   private _getValue(): MapValue {
-    if (isCellHandle(this.value)) {
-      return (this.value as CellHandle<MapValue>).get() || {};
-    }
-    return (this.value as MapValue) || {};
+    return this._valueController.getValue() || {};
   }
 
   private _getCenter(): LatLng {
-    let center: LatLng;
-    if (isCellHandle(this.center)) {
-      center = (this.center as CellHandle<LatLng>).get() || DEFAULT_CENTER;
-    } else {
-      center = (this.center as LatLng) || DEFAULT_CENTER;
-    }
+    const center = this._centerController.getValue() || DEFAULT_CENTER;
     return this._validateLatLng(center);
   }
 
   private _getZoom(): number {
-    let zoom: number;
-    if (isCellHandle(this.zoom)) {
-      zoom = (this.zoom as CellHandle<number>).get() ?? DEFAULT_ZOOM;
-    } else {
-      zoom = (this.zoom as number) ?? DEFAULT_ZOOM;
-    }
+    const zoom = this._zoomController.getValue() ?? DEFAULT_ZOOM;
     return this._clampZoom(zoom);
   }
 
   private _getBounds(): Bounds | null {
-    if (isCellHandle(this.bounds)) {
-      return (this.bounds as CellHandle<Bounds>).get() || null;
-    }
-    return (this.bounds as Bounds) || null;
+    return this._boundsController.getValue() || null;
   }
 
-  // === Cell Updates (bidirectional) ===
+  // === Cell Updates (bidirectional, using CellControllers) ===
 
   private _updateCenterCell(center: LatLng): void {
-    if (!isCellHandle(this.center)) return;
+    if (!this._centerController.hasCell()) return;
 
     this._isUpdatingFromCell = true;
     try {
-      (this.center as CellHandle<LatLng>).set(center);
+      this._centerController.setValue(center);
     } finally {
       this._isUpdatingFromCell = false;
     }
   }
 
   private _updateZoomCell(zoom: number): void {
-    if (!isCellHandle(this.zoom)) return;
+    if (!this._zoomController.hasCell()) return;
 
     this._isUpdatingFromCell = true;
     try {
-      (this.zoom as CellHandle<number>).set(zoom);
+      this._zoomController.setValue(zoom);
     } finally {
       this._isUpdatingFromCell = false;
     }
   }
 
   private _updateBoundsCell(bounds: Bounds): void {
-    if (!isCellHandle(this.bounds)) return;
+    if (!this._boundsController.hasCell()) return;
 
     this._isUpdatingFromCell = true;
     try {
-      (this.bounds as CellHandle<Bounds>).set(bounds);
+      this._boundsController.setValue(bounds);
     } finally {
       this._isUpdatingFromCell = false;
     }
@@ -622,6 +565,15 @@ export class CTMap extends BaseElement {
   }
 
   private _clearLayers(): void {
+    // Remove event listeners from tracked markers before clearing to prevent memory leaks
+    // Leaflet's clearLayers() removes DOM nodes but doesn't remove .on() listeners
+    for (const marker of this._leafletMarkers) {
+      marker.off();
+    }
+    for (const circle of this._leafletCircles) {
+      circle.off();
+    }
+
     this._markerLayer?.clearLayers();
     this._circleLayer?.clearLayers();
     this._polylineLayer?.clearLayers();
@@ -634,7 +586,14 @@ export class CTMap extends BaseElement {
 
     // Use traditional for loop to avoid reactive proxy forEach issues
     // (reactive proxies can throw when iterating over partially loaded data)
-    const length = markers.length;
+    // Access .length inside try-catch since reactive proxies can throw on property access
+    let length: number;
+    try {
+      length = markers.length;
+    } catch (e) {
+      this._logWarn("Error accessing markers.length:", e);
+      return;
+    }
     for (let i = 0; i < length; i++) {
       const index = i;
 
@@ -779,7 +738,14 @@ export class CTMap extends BaseElement {
     if (!this._circleLayer) return;
 
     // Use traditional for loop to avoid reactive proxy forEach issues
-    const length = circles.length;
+    // Access .length inside try-catch since reactive proxies can throw on property access
+    let length: number;
+    try {
+      length = circles.length;
+    } catch (e) {
+      this._logWarn("Error accessing circles.length:", e);
+      return;
+    }
     for (let i = 0; i < length; i++) {
       const index = i;
 
@@ -870,7 +836,14 @@ export class CTMap extends BaseElement {
     if (!this._polylineLayer) return;
 
     // Use traditional for loop to avoid reactive proxy forEach issues
-    const length = polylines.length;
+    // Access .length inside try-catch since reactive proxies can throw on property access
+    let length: number;
+    try {
+      length = polylines.length;
+    } catch (e) {
+      this._logWarn("Error accessing polylines.length:", e);
+      return;
+    }
     for (let i = 0; i < length; i++) {
       const polyline = polylines[i];
       const index = i;
@@ -1076,9 +1049,8 @@ export class CTMap extends BaseElement {
 
   private _isEmoji(str: string): boolean {
     // Simple emoji detection - checks for emoji unicode ranges
-    const emojiRegex =
-      /[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]/u;
-    return emojiRegex.test(str);
+    // Uses module-level cached regex for performance
+    return EMOJI_REGEX.test(str);
   }
 
   // === Coordinate Validation ===
@@ -1184,28 +1156,16 @@ export class CTMap extends BaseElement {
       this._rafId = null;
     }
 
+    // Clear pending resize debounce timeout
+    if (this._resizeTimeoutId !== null) {
+      clearTimeout(this._resizeTimeoutId);
+      this._resizeTimeoutId = null;
+    }
+
     // Disconnect ResizeObserver
     if (this._resizeObserver) {
       this._resizeObserver.disconnect();
       this._resizeObserver = null;
-    }
-
-    // Unsubscribe from Cells
-    if (this._valueUnsubscribe) {
-      this._valueUnsubscribe();
-      this._valueUnsubscribe = null;
-    }
-    if (this._centerUnsubscribe) {
-      this._centerUnsubscribe();
-      this._centerUnsubscribe = null;
-    }
-    if (this._zoomUnsubscribe) {
-      this._zoomUnsubscribe();
-      this._zoomUnsubscribe = null;
-    }
-    if (this._boundsUnsubscribe) {
-      this._boundsUnsubscribe();
-      this._boundsUnsubscribe = null;
     }
 
     // Destroy map
@@ -1221,10 +1181,10 @@ export class CTMap extends BaseElement {
     this._leafletMarkers = [];
     this._leafletCircles = [];
 
-    // Note: CellControllers (_centerController, _zoomController, _boundsController)
-    // are automatically cleaned up by Lit's reactive controller system.
-    // They implement ReactiveController with hostDisconnected() callbacks that
-    // are automatically invoked when the host element disconnects.
+    // Note: CellControllers are automatically cleaned up by Lit's reactive
+    // controller system. They implement ReactiveController with
+    // hostDisconnected() callbacks that are automatically invoked when
+    // the host element disconnects.
   }
 
   // === Public API ===
