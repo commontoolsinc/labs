@@ -267,7 +267,13 @@ Repeat for each sub-pattern (e.g., `ingredient.tsx`, then `recipe.tsx`, then `ma
 
 ### Layer 4: Automated Tests (REQUIRED before UI)
 
-**Do not proceed to Layer 5 (UI) until tests pass.** Write tests for EACH sub-pattern AND main.tsx:
+**Build and test sub-patterns one at a time.** The workflow is:
+
+1. Write `ingredient.tsx` → Write `ingredient.test.tsx` → **Run tests, fix until passing**
+2. Write `recipe.tsx` → Write `recipe.test.tsx` → **Run tests, fix until passing**
+3. Write `main.tsx` → Write `main.test.tsx` → **Run tests, fix until passing**
+
+**Do NOT move to the next sub-pattern until the current one's tests pass.** This prevents cascading errors and makes debugging easier.
 
 ```bash
 # Create test files for each sub-pattern
