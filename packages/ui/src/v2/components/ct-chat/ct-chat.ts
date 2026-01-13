@@ -19,11 +19,37 @@ import {
   mergeWithDefaultTheme,
   themeContext,
 } from "../theme-context.ts";
-import { LLMMessageSchema, sanitizeSchemaForLinks } from "@commontools/runner";
 
 const BuiltInLLMMessagesArraySchema = {
   type: "array",
-  items: sanitizeSchemaForLinks(LLMMessageSchema), // strips asCell by default
+  items: {
+    type: "object",
+    properties: {
+      role: { type: "string" },
+      content: {
+        anyOf: [{
+          type: "array",
+          items: {
+            anyOf: [{
+              type: "object",
+              properties: {
+                // This should be anyOf with const values for type
+                type: { type: "string" },
+                text: { type: "string" },
+                image: { type: "string" },
+                toolCallId: { type: "string" },
+                toolName: { type: "string" },
+                input: { type: "object" },
+                output: {},
+              },
+              required: ["type"],
+            }, { type: "string" }],
+          },
+        }, { type: "string" }],
+      },
+    },
+    required: ["role", "content"],
+  },
 } as const satisfies JSONSchema;
 
 /**
