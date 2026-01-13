@@ -20,6 +20,7 @@ import {
   Cell,
   computed,
   type Default,
+  equals,
   generateObject,
   handler,
   ifElse,
@@ -282,21 +283,22 @@ function getTierColor(tier: Tier): string {
 
 // =============================================================================
 // MODULE-SCOPED HANDLERS FOR BUTTON CLICKS IN .map()
-// These handlers receive inputId as a parameter at render time (in reactive context)
-// so they don't need to access reactive proxies in the callback
+// These handlers receive the pending item as a parameter at render time (in reactive context)
+// so they don't need to access reactive proxies in the callback.
+// Uses equals() for idiomatic cell reference comparison.
 // =============================================================================
 
 /** Confirm a pending classification (user agrees with the prediction) */
 const confirmPendingClassification = handler<
   unknown,
   {
-    inputId: string;
+    pending: PendingClassification;
     examples: Writable<LabeledExample[]>;
     pendingClassifications: Writable<PendingClassification[]>;
   }
->((_event, { inputId, examples, pendingClassifications }) => {
+>((_event, { pending, examples, pendingClassifications }) => {
   const pendingList = pendingClassifications.get();
-  const idx = pendingList.findIndex((p) => p.input.id === inputId);
+  const idx = pendingList.findIndex((p) => equals(pending, p));
   if (idx < 0) return;
 
   const item = pendingList[idx];
@@ -318,7 +320,7 @@ const confirmPendingClassification = handler<
 
   examples.push(example);
   pendingClassifications.set(
-    pendingList.filter((p) => p.input.id !== inputId),
+    pendingList.filter((p) => !equals(pending, p)),
   );
 });
 
@@ -326,13 +328,13 @@ const confirmPendingClassification = handler<
 const correctPendingClassification = handler<
   unknown,
   {
-    inputId: string;
+    pending: PendingClassification;
     examples: Writable<LabeledExample[]>;
     pendingClassifications: Writable<PendingClassification[]>;
   }
->((_event, { inputId, examples, pendingClassifications }) => {
+>((_event, { pending, examples, pendingClassifications }) => {
   const pendingList = pendingClassifications.get();
-  const idx = pendingList.findIndex((p) => p.input.id === inputId);
+  const idx = pendingList.findIndex((p) => equals(pending, p));
   if (idx < 0) return;
 
   const item = pendingList[idx];
@@ -353,7 +355,7 @@ const correctPendingClassification = handler<
 
   examples.push(example);
   pendingClassifications.set(
-    pendingList.filter((p) => p.input.id !== inputId),
+    pendingList.filter((p) => !equals(pending, p)),
   );
 });
 
@@ -361,13 +363,13 @@ const correctPendingClassification = handler<
 const dismissPendingClassification = handler<
   unknown,
   {
-    inputId: string;
+    pending: PendingClassification;
     pendingClassifications: Writable<PendingClassification[]>;
   }
->((_event, { inputId, pendingClassifications }) => {
+>((_event, { pending, pendingClassifications }) => {
   const pendingList = pendingClassifications.get();
   pendingClassifications.set(
-    pendingList.filter((p) => p.input.id !== inputId),
+    pendingList.filter((p) => !equals(pending, p)),
   );
 });
 
@@ -1034,7 +1036,7 @@ Each suggestion should have:
                             <ct-button
                               variant="primary"
                               onClick={confirmPendingClassification({
-                                inputId: pending.input.id,
+                                pending,
                                 examples,
                                 pendingClassifications,
                               })}
@@ -1044,7 +1046,7 @@ Each suggestion should have:
                             <ct-button
                               variant="secondary"
                               onClick={correctPendingClassification({
-                                inputId: pending.input.id,
+                                pending,
                                 examples,
                                 pendingClassifications,
                               })}
@@ -1058,7 +1060,7 @@ Each suggestion should have:
                             <ct-button
                               variant="ghost"
                               onClick={dismissPendingClassification({
-                                inputId: pending.input.id,
+                                pending,
                                 pendingClassifications,
                               })}
                             >
