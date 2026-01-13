@@ -25,3 +25,25 @@ export default pattern<Props, { combined: number }>(({
 ```
 
 Typically it's unusual to use `lift()` directly. It is almost always better to use `computed()`.
+
+## Module Scope Requirement
+
+Like `handler()`, the pattern transformer requires that `lift()` be defined **outside** the pattern body (at module scope) if you need to use it at all:
+
+```typescript
+// CORRECT - define at module scope
+const getByDate = lift((args: { grouped: Record<string, Item[]>; date: string }) =>
+  args.grouped[args.date]
+);
+
+// Then use inside pattern:
+const result = getByDate({ grouped, date });
+
+// WRONG - lift defined and immediately invoked inside pattern
+const result = lift((args) => args.grouped[args.date])({ grouped, date });
+
+// BETTER - use computed() instead of lift for inline use
+const result = computed(() => grouped[date]);
+```
+
+**Why:** The CTS transformer processes patterns at compile time and cannot handle closures over pattern-scoped variables in lifted functions.
