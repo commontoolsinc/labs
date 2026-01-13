@@ -1,5 +1,5 @@
 import { Command } from "@cliffy/command";
-import { join } from "@std/path";
+import { isAbsolute, join } from "@std/path";
 import { render } from "../lib/render.ts";
 import { process } from "../lib/dev.ts";
 import { isRecord } from "@commontools/utils/types";
@@ -39,10 +39,11 @@ export const dev = new Command()
   )
   .arguments("<main:string>")
   .action(async (options, main) => {
-    const mainPath = join(Deno.cwd(), main);
+    const mainPath = isAbsolute(main) ? main : join(Deno.cwd(), main);
 
     const { main: exports } = await process({
       main: mainPath,
+      rootPath: Deno.cwd(),
       check: options.check,
       run: options.run,
       output: options.output,
