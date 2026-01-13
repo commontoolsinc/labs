@@ -79,6 +79,32 @@ Bind handlers inside the pattern: `onClick={myHandler({ state })}`
 
 See `docs/development/debugging/gotchas/handler-inside-pattern.md` for details and error messages.
 
+### Action vs Handler
+
+- **Use `action()`** when the handler closes over local state created in the pattern body
+- **Use `handler()`** when the same logic needs different bindings (e.g., per-item operations in a list)
+
+```tsx
+// action() - closes over local `inputValue`
+const inputValue = Cell.of("");
+const submit = action(() => {
+  items.push({ text: inputValue.get() });
+  inputValue.set("");
+});
+
+// handler() - reused with different bindings per item
+const deleteItem = handler<unknown, { items: Writable<Item[]>; index: number }>(
+  (_, { items, index }) => items.set(items.get().toSpliced(index, 1))
+);
+
+// In JSX:
+{items.map((item, index) => (
+  <ct-button onClick={deleteItem({ items, index })}>Delete</ct-button>
+))}
+```
+
+See `docs/common/concepts/action.md` and `docs/common/concepts/handler.md` for details.
+
 ## Starting a New Pattern
 
 Always use multi-file composition. Create the folder structure first:
@@ -278,6 +304,7 @@ When using an API feature for the first time in a session, read the relevant doc
 | `action()` | `docs/common/concepts/action.md` |
 | `handler()` | `docs/common/concepts/handler.md` |
 | `equals()` / object identity | `docs/common/concepts/identity.md` |
+| `pattern<Input, Output>()` | `docs/common/concepts/pattern.md` |
 | `ifElse` / conditionals | `docs/common/patterns/conditional.md` |
 | `$value` bindings | `docs/common/patterns/two-way-binding.md` |
 | UI components (`ct-*`) | `docs/common/components/COMPONENTS.md` |
