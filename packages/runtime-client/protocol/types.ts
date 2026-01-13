@@ -32,6 +32,7 @@ export enum RequestType {
   // Runtime operations
   GetCell = "runtime:getCell",
   GetHomeSpaceCell = "runtime:getHomeSpaceCell",
+  EnsureHomePatternRunning = "runtime:ensureHomePatternRunning",
   Idle = "runtime:idle",
   GetGraphSnapshot = "runtime:getGraphSnapshot",
   SetPullMode = "runtime:setPullMode",
@@ -138,6 +139,10 @@ export interface GetCellRequest extends BaseRequest {
 
 export interface GetHomeSpaceCellRequest extends BaseRequest {
   type: RequestType.GetHomeSpaceCell;
+}
+
+export interface EnsureHomePatternRunningRequest extends BaseRequest {
+  type: RequestType.EnsureHomePatternRunning;
 }
 
 export interface IdleRequest extends BaseRequest {
@@ -254,6 +259,7 @@ export type IPCClientRequest =
   | CellUnsubscribeRequest
   | GetCellRequest
   | GetHomeSpaceCellRequest
+  | EnsureHomePatternRunningRequest
   | GetGraphSnapshotRequest
   | SetPullModeRequest
   | GetLoggerCountsRequest
@@ -362,6 +368,10 @@ export type Commands = {
   };
   [RequestType.GetHomeSpaceCell]: {
     request: GetHomeSpaceCellRequest;
+    response: CellResponse;
+  };
+  [RequestType.EnsureHomePatternRunning]: {
+    request: EnsureHomePatternRunningRequest;
     response: CellResponse;
   };
   [RequestType.Idle]: {

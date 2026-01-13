@@ -24,6 +24,7 @@ import {
   type CellSetRequest,
   type CellSubscribeRequest,
   type CellUnsubscribeRequest,
+  type EnsureHomePatternRunningRequest,
   type GetCellRequest,
   GetGraphSnapshotRequest,
   type GetHomeSpaceCellRequest,
@@ -299,6 +300,40 @@ export class RuntimeProcessor {
     };
   }
 
+  /**
+   * Ensure the home space's default pattern is running and return a CellRef to it.
+   * This is needed for favorites operations which require the pattern to be active.
+   */
+  async handleEnsureHomePatternRunning(
+    _request: EnsureHomePatternRunningRequest,
+  ): Promise<CellResponse> {
+    const homeSpaceCell = this.runtime.getHomeSpaceCell();
+    await homeSpaceCell.sync();
+
+    const defaultPatternCell = homeSpaceCell.key("defaultPattern");
+    await defaultPatternCell.sync();
+
+    // Check that defaultPattern exists
+    const patternLink = defaultPatternCell.get();
+    if (!patternLink) {
+      throw new Error(
+        "Home space defaultPattern not initialized. Visit home space first.",
+      );
+    }
+
+    // Resolve and start the pattern to ensure it's running
+    const charmCell = defaultPatternCell.resolveAsCell();
+    if (charmCell) {
+      await this.runtime.start(charmCell);
+      await this.runtime.idle();
+    }
+
+    // Return the resolved pattern cell
+    return {
+      cell: createCellRef(charmCell || defaultPatternCell),
+    };
+  }
+
   async handleIdle(): Promise<void> {
     await this.runtime.idle();
   }
@@ -479,6 +514,8 @@ export class RuntimeProcessor {
         return this.handleGetCell(request);
       case RequestType.GetHomeSpaceCell:
         return this.handleGetHomeSpaceCell(request);
+      case RequestType.EnsureHomePatternRunning:
+        return await this.handleEnsureHomePatternRunning(request);
       case RequestType.Idle:
         return await this.handleIdle();
       case RequestType.PageCreate:

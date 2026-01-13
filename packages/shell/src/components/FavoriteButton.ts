@@ -1,13 +1,16 @@
 import { css, html, LitElement, PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import { RuntimeInternals } from "../lib/runtime.ts";
-import { Task } from "@lit/task";
+import type { FavoriteEntry } from "@commontools/runtime-client";
 
 /**
  * Favorite button component.
  *
  * Allows users to add/remove charms from their favorites list.
  * Favorites are stored in the user's home space defaultPattern.
+ *
+ * Uses reactive subscription to favorites so the button updates
+ * when favorites change, even if home.tsx hasn't initialized yet.
  */
 export class XFavoriteButtonElement extends LitElement {
   static override styles = css`
@@ -38,21 +41,92 @@ export class XFavoriteButtonElement extends LitElement {
   @property({ attribute: false })
   charmId?: string;
 
-  // Local state for favoriting, used when
-  // modifying state inbetween server syncs.
+  // Server favorites from subscription
+  @state()
+  private _serverFavorites: FavoriteEntry[] = [];
+
+  // Local state for favoriting, used for optimistic updates
+  // between user click and server sync
   @state()
   private _localIsFavorite: boolean | undefined = undefined;
 
   @state()
   private _isLoading = false;
 
-  private async handleFavoriteClick(e: Event) {
+  // Subscription cleanup function
+  private _unsubscribe: (() => void) | undefined;
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    this._setupSubscription();
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this._cleanupSubscription();
+  }
+
+  protected override willUpdate(changedProperties: PropertyValues): void {
+    // Reset local state when charmId changes
+    if (changedProperties.has("charmId")) {
+      this._localIsFavorite = undefined;
+    }
+
+    // Re-setup subscription when rt changes
+    if (changedProperties.has("rt")) {
+      this._cleanupSubscription();
+      this._setupSubscription();
+    }
+  }
+
+  private _setupSubscription(): void {
+    console.log("[FavoriteButton] _setupSubscription, rt:", this.rt);
+    if (!this.rt) return;
+
+    this._unsubscribe = this.rt.favorites().subscribeFavorites((favorites) => {
+      console.log(
+        "[FavoriteButton] subscription callback, favorites:",
+        favorites,
+        "charmId:",
+        this.charmId,
+      );
+      this._serverFavorites = favorites;
+      // Clear local state once we have fresh server state
+      this._localIsFavorite = undefined;
+      this.requestUpdate();
+    });
+  }
+
+  private _cleanupSubscription(): void {
+    if (this._unsubscribe) {
+      this._unsubscribe();
+      this._unsubscribe = undefined;
+    }
+  }
+
+  private _deriveIsFavorite(): boolean {
+    // Prefer local state if set (for optimistic updates)
+    if (this._localIsFavorite !== undefined) {
+      return this._localIsFavorite;
+    }
+    // Fall back to server state
+    if (!this.charmId) return false;
+    const match = this._serverFavorites.some((f) => f.charmId === this.charmId);
+    console.log("[FavoriteButton] _deriveIsFavorite:", {
+      charmId: this.charmId,
+      serverFavoriteIds: this._serverFavorites.map((f) => f.charmId),
+      match,
+    });
+    return match;
+  }
+
+  private async _handleFavoriteClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
 
     if (!this.rt || !this.charmId || this._isLoading) return;
 
-    const currentlyFavorite = this.deriveIsFavorite();
+    const currentlyFavorite = this._deriveIsFavorite();
 
     this._isLoading = true;
     try {
@@ -63,61 +137,27 @@ export class XFavoriteButtonElement extends LitElement {
         await this.rt.favorites().addFavorite(this.charmId);
         this._localIsFavorite = true;
       }
-      // Re-run the sync task to get fresh state
-      this.isFavoriteSync.run();
+      // Server state will update via subscription
     } catch (err) {
       console.error("[FavoriteButton] Error toggling favorite:", err);
+      // Reset local state on error
+      this._localIsFavorite = undefined;
     } finally {
       this._isLoading = false;
     }
   }
 
-  protected override willUpdate(changedProperties: PropertyValues): void {
-    if (changedProperties.has("charmId")) {
-      this._localIsFavorite = undefined;
-    }
-  }
-
-  private deriveIsFavorite(): boolean {
-    // Prefer local state if set (for optimistic updates)
-    if (this._localIsFavorite !== undefined) {
-      return this._localIsFavorite;
-    }
-    // Fall back to synced state from server
-    return this.isFavoriteSync.value ?? false;
-  }
-
-  isFavoriteSync = new Task(this, {
-    task: async (
-      [charmId, rt],
-      { signal: _signal },
-    ): Promise<boolean> => {
-      if (!rt || !charmId) return false;
-      try {
-        const result = await rt.favorites().isFavorite(charmId);
-        // Clear local state once we have server state
-        this._localIsFavorite = undefined;
-        return result;
-      } catch (err) {
-        console.error("[FavoriteButton] Error checking favorite status:", err);
-        return false;
-      }
-    },
-    args: () => [this.charmId, this.rt],
-  });
-
   override render() {
-    const isFavorite = this.deriveIsFavorite();
-    const isLoading = this._isLoading || this.isFavoriteSync.status === 1; // 1 = pending
+    const isFavorite = this._deriveIsFavorite();
 
     return html`
       <x-button
-        class="emoji-button ${isLoading ? "loading" : ""}"
+        class="emoji-button ${this._isLoading ? "loading" : ""}"
         size="small"
-        @click="${this.handleFavoriteClick}"
+        @click="${this._handleFavoriteClick}"
         title="${isFavorite ? "Remove from favorites" : "Add to favorites"}"
       >
-        ${isFavorite ? "⭐" : "☆"}
+        ${isFavorite ? "\u2b50" : "\u2606"}
       </x-button>
     `;
   }

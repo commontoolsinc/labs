@@ -114,6 +114,19 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return new CellHandle(this, response.cell);
   }
 
+  /**
+   * Ensure the home space's default pattern is running and return a CellHandle to it.
+   * This starts the pattern if needed and waits for it to be ready.
+   */
+  async ensureHomePatternRunning(): Promise<CellHandle<unknown>> {
+    const response = await this.#conn.request<
+      RequestType.EnsureHomePatternRunning
+    >({
+      type: RequestType.EnsureHomePatternRunning,
+    });
+    return new CellHandle(this, response.cell);
+  }
+
   // TODO(unused)
   async idle(): Promise<void> {
     await this.#conn.request<RequestType.Idle>({ type: RequestType.Idle });
