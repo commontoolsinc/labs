@@ -53,7 +53,9 @@ export default pattern<Input, Input>(({ items }) => {
 
 Use `computed()` **outside of JSX** for reactive transformations.
 
-**Never wrap JSX in `computed()`** - the transformer automatically handles reactivity in JSX expressions:
+**Never wrap JSX in `computed()`** - the transformer automatically handles reactivity in JSX expressions. The compiler analyzes your JSX and wraps reactive expressions in `derive()` calls behind the scenes, so explicit `computed()` is unnecessary and can cause issues.
+
+Similarly, ternaries in JSX are automatically converted to `ifElse()` - see `docs/common/patterns/conditional.md`.
 
 ```tsx
 // ❌ WRONG - Don't wrap JSX in computed()
