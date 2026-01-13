@@ -1,13 +1,13 @@
 /// <cts-enable />
-import { handler, NAME, pattern, UI, Writable } from "commontools";
+import { equals, handler, NAME, pattern, UI, Writable } from "commontools";
 import FavoritesManager from "./favorites-manager.tsx";
 import Journal from "./journal.tsx";
 
 // Types from favorites-manager.tsx and journal.tsx
 type Favorite = {
-  cell: Writable<{ [NAME]?: string }>;
+  cell: { [NAME]?: string };
   tag: string;
-  userTags: Writable<string[]>;
+  userTags: string[];
 };
 
 type JournalEntry = {
@@ -30,11 +30,10 @@ const addFavorite = handler<
   { favorites: Writable<Favorite[]> }
 >(({ charm, tag }, { favorites }) => {
   const current = favorites.get();
-  const resolvedCharm = charm;
-  if (!current.some((f) => f.cell.equals(resolvedCharm))) {
+  if (!current.some((f) => equals(f.cell, charm))) {
     favorites.set([
       ...current,
-      { cell: charm, tag: tag || "", userTags: Writable.of([]) },
+      { cell: charm, tag: tag || "", userTags: [] },
     ]);
   }
 });
@@ -45,7 +44,7 @@ const removeFavorite = handler<
   { favorites: Writable<Favorite[]> }
 >(({ charm }, { favorites }) => {
   favorites.set([
-    ...favorites.get().filter((f: Favorite) => !f.cell.equals(charm)),
+    ...favorites.get().filter((f: Favorite) => !equals(f.cell, charm)),
   ]);
 });
 
