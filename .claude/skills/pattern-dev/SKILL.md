@@ -253,21 +253,26 @@ Build in layers rather than all at once. This makes each piece independently tes
 
 ### Layer 3: Interactive CLI Verification
 
+**Do this for EACH sub-pattern as you build it, not just main.tsx.**
+
 Before writing automated tests, deploy and verify interactively:
 
 1. **Learn the CLI**: Run `deno task ct --help` and `deno task ct charm --help`
-2. **Deploy**: `deno task ct charm new packages/patterns/[name]/main.tsx`
+2. **Deploy the sub-pattern**: `deno task ct charm new packages/patterns/[name]/ingredient.tsx`
 3. **Inspect state**: `deno task ct charm inspect`
 4. **Test actions**: Use `deno task ct charm call` to invoke exported actions, then `deno task ct charm step` to process
 5. **Verify outputs**: Check computed values update correctly
 
-This hands-on verification builds CLI familiarity and catches issues before formalizing tests.
+Repeat for each sub-pattern (e.g., `ingredient.tsx`, then `recipe.tsx`, then `main.tsx`). This catches issues early and builds CLI familiarity.
 
 ### Layer 4: Automated Tests (REQUIRED before UI)
 
-**Do not proceed to Layer 5 (UI) until tests pass.** Write tests for each sub-pattern:
+**Do not proceed to Layer 5 (UI) until tests pass.** Write tests for EACH sub-pattern AND main.tsx:
 
 ```bash
+# Create test files for each sub-pattern
+touch packages/patterns/[name]/ingredient.test.tsx
+touch packages/patterns/[name]/recipe.test.tsx
 touch packages/patterns/[name]/main.test.tsx
 ```
 
