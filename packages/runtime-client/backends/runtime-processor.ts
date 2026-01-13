@@ -192,7 +192,7 @@ export class RuntimeProcessor {
     const converted = convertCellsToLinks(rawValue, {
       includeSchema: true,
       keepAsCell: true,
-      doNotConvertCellResults: true,
+      doNotConvertCellResults: false,
     });
     return { value: converted };
   }
