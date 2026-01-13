@@ -477,5 +477,69 @@ describe("value-codec", () => {
         );
       });
     });
+
+    describe("handles sparse arrays", () => {
+      it("densifies top-level sparse arrays", () => {
+        const sparse: unknown[] = [];
+        sparse[0] = 1;
+        sparse[2] = 3; // hole at index 1
+        const result = toDeepStorableValue(sparse);
+        expect(result).toEqual([1, undefined, 3]);
+      });
+
+      it("densifies nested sparse arrays", () => {
+        const sparse: unknown[] = [];
+        sparse[0] = "a";
+        sparse[2] = "c";
+        const result = toDeepStorableValue({ arr: sparse });
+        expect(result).toEqual({ arr: ["a", undefined, "c"] });
+      });
+
+      it("densifies sparse arrays inside arrays", () => {
+        const sparse: unknown[] = [];
+        sparse[0] = 1;
+        sparse[2] = 3;
+        const result = toDeepStorableValue([[sparse]]);
+        expect(result).toEqual([[[1, undefined, 3]]]);
+      });
+
+      it("recursively processes elements after densifying", () => {
+        const sparse: unknown[] = [];
+        sparse[0] = new Date("2024-01-15T12:00:00.000Z");
+        sparse[2] = { nested: true };
+        const result = toDeepStorableValue(sparse);
+        expect(result).toEqual(["2024-01-15T12:00:00.000Z", undefined, {
+          nested: true,
+        }]);
+      });
+    });
+
+    describe("throws for arrays with named properties", () => {
+      it("throws for top-level array with named properties", () => {
+        const arr = [1, 2, 3] as unknown[] & { foo?: string };
+        arr.foo = "bar";
+        expect(() => toDeepStorableValue(arr)).toThrow(
+          "Cannot store array with enumerable named properties",
+        );
+      });
+
+      it("throws for nested array with named properties", () => {
+        const arr = [1, 2] as unknown[] & { extra?: number };
+        arr.extra = 42;
+        expect(() => toDeepStorableValue({ data: arr })).toThrow(
+          "Cannot store array with enumerable named properties",
+        );
+      });
+
+      it("throws for sparse array with named properties", () => {
+        const sparse = [] as unknown[] & { name?: string };
+        sparse[0] = 1;
+        sparse[2] = 3;
+        sparse.name = "test";
+        expect(() => toDeepStorableValue(sparse)).toThrow(
+          "Cannot store array with enumerable named properties",
+        );
+      });
+    });
   });
 });
