@@ -5,35 +5,26 @@ description: Guide for developing CommonTools patterns (TypeScript modules that 
 
 # Pattern Development
 
+## STOP - Read This First
+
+**You MUST test each sub-pattern before writing the next one.**
+
+The #1 mistake is writing all the code first, then testing. This wastes hours debugging cascading errors. Instead:
+
+```
+schemas.tsx → ingredient.tsx → TEST → recipe.tsx → TEST → main.tsx → TEST
+```
+
+**First pass = minimal UI.** Just basic inputs/buttons to verify data and actions work. No styling, no polish. Read COMPONENTS.md only during the final UI polish step, not at the start.
+
 ## Overview
 
-Develop CommonTools patterns using the `ct` CLI and the reactive pattern framework. Patterns are TypeScript/JSX programs that define data transformations with interactive UIs. They can be deployed and linked together for complex workflows.
+Patterns are TypeScript/JSX programs that define reactive data transformations with UIs. Use the `ct` CLI to deploy and test them.
 
-## When to Use This Skill
+## Quick Start
 
-Use this skill when:
-- Building new patterns from scratch
-- Modifying existing patterns
-- Working with multi-file pattern structures
-
-For ct CLI commands, run `deno task ct --help`.
-
-## Prerequisites
-
-Before starting pattern development:
-
-1. **Know the ct CLI** - Run `deno task ct --help` to learn available commands
-2. **Read the core documentation** - See `docs/common/` for concepts and patterns
-3. **Check example patterns** - Look in `packages/patterns/` for working examples
-
-## Quick Decision Tree
-
-**What do you want to do?**
-
-→ **Create a new pattern** → Go to "Starting a New Pattern"
-→ **Modify existing pattern** → Go to "Modifying Patterns"
-→ **Write tests for a pattern** → Go to "Automated Pattern Tests"
-→ **Understand a concept** → Check `docs/common/concepts/`
+→ **Create a new pattern** → See "Starting a New Pattern"
+→ **Modify existing pattern** → See "Modifying Patterns"
 → **Debug an error** → Check `docs/development/debugging/`
 
 ## Key Principles
