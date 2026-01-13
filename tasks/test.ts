@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-read --allow-run
+#!/usr/bin/env -S deno run --allow-read --allow-run --allow-env
 import * as path from "@std/path";
 import { decode, encode } from "@commontools/utils/encoding";
 
@@ -6,6 +6,23 @@ export const ALL_DISABLED = [
   "background-charm-service", // no tests yet
   "vendor-astral", // no tests yet
 ];
+
+// Check if running in Claude Code remote environment
+const isClaudeCodeRemote = Deno.env.get("CLAUDE_CODE_REMOTE") === "true";
+
+// Build environment for test subprocesses
+function getTestEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  // When running in Claude Code remote environment, bypass proxy for localhost
+  // to allow WebSocket connections to local test servers
+  if (isClaudeCodeRemote) {
+    env["NO_PROXY"] = "localhost,127.0.0.1,0.0.0.0";
+    env["no_proxy"] = "localhost,127.0.0.1,0.0.0.0";
+  }
+
+  return env;
+}
 
 export async function testPackage(
   packagePath: string,
@@ -17,6 +34,7 @@ export async function testPackage(
         args: ["task", "test"],
         cwd: packagePath,
         stdout: "piped",
+        env: { ...Deno.env.toObject(), ...getTestEnv() },
       }).output(),
     };
   } catch (e) {
