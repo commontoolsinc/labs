@@ -691,7 +691,8 @@ export class ContextualFlowControl {
   // We don't need to check ID and ID_FIELD, since they won't be included
   // in Object.keys return values.
   static isInternalSchemaKey(key: string): boolean {
-    return key === "ifc" || key === "asCell" || key === "asStream";
+    return key === "ifc" || key === "asCell" || key === "asStream" ||
+      key === "asOpaque";
   }
 
   static isFalseSchema(schema: JSONSchema): boolean {
