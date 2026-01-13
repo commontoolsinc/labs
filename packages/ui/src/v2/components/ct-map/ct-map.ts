@@ -9,7 +9,11 @@ import { html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { styles } from "./styles.ts";
 import * as L from "leaflet";
-import { type CellHandle } from "@commontools/runtime-client";
+import {
+  type CellHandle,
+  isCellHandle,
+  useCancelGroup,
+} from "@commontools/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 import type {
   Bounds,
@@ -25,9 +29,6 @@ import type {
   MapValue,
 } from "./types.ts";
 import "../ct-render/ct-render.ts";
-
-// Set to true to enable debug logging
-const DEBUG_LOGGING = false;
 
 // Default map configuration
 const DEFAULT_CENTER: LatLng = { lat: 37.7749, lng: -122.4194 }; // San Francisco
@@ -53,6 +54,29 @@ const EMOJI_REGEX =
 
 // ResizeObserver debounce delay in milliseconds
 const RESIZE_DEBOUNCE_MS = 150;
+
+// No-op function for effect cleanup
+const noop = () => {};
+
+// Cancel function type
+type Cancel = () => void;
+
+/**
+ * Effect that runs a callback when the value changes. The callback is also
+ * called immediately. CellHandle version of Reactivity features.
+ * Adapted from @commontools/html/render-utils.
+ */
+const effect = <T>(
+  value: CellHandle<T> | T,
+  callback: (value: T | undefined) => Cancel | undefined | void,
+): Cancel => {
+  if (isCellHandle<T>(value)) {
+    return value.subscribe(callback);
+  } else {
+    const cancel = callback(value as T);
+    return typeof cancel === "function" && cancel.length === 0 ? cancel : noop;
+  }
+};
 
 /**
  * CTMap - Interactive map component with markers, circles, and polylines
@@ -129,16 +153,21 @@ export class CTMap extends BaseElement {
   // Flag to prevent echo loops during programmatic updates
   private _isUpdatingFromCell = false;
 
+  // Track nested cell subscriptions for cleanup
+  private _nestedCellUnsubscribes: (() => void)[] = [];
+
+  // Cached resolved data - populated by nested effect callbacks
+  // This avoids re-traversing the cell tree on each render
+  private _resolvedMarkers: MapMarker[] = [];
+  private _resolvedCircles: MapCircle[] = [];
+  private _resolvedPolylines: MapPolyline[] = [];
+
   // Cell controllers for reactive data binding
   // These manage subscriptions automatically via Lit's ReactiveController lifecycle
+  // Note: Feature rendering is handled in updated() to catch both property changes
+  // and cell subscription updates
   private _valueController = createCellController<MapValue>(this, {
     timing: { strategy: "immediate" },
-    onChange: () => {
-      this._renderFeatures();
-      if (this.fitToBounds) {
-        this._fitMapToBounds();
-      }
-    },
   });
 
   private _centerController = createCellController<LatLng>(this, {
@@ -174,10 +203,263 @@ export class CTMap extends BaseElement {
   // Bound event handler for cleanup
   private _boundHandleKeydown = this._handleKeydown.bind(this);
 
-  // Debug helper - only logs when DEBUG_LOGGING is true
-  private _logWarn(...args: unknown[]): void {
-    if (DEBUG_LOGGING) {
-      console.warn("[ct-map]", ...args);
+  /**
+   * Check if a value looks like a CellHandle using duck-typing.
+   * This is necessary because `instanceof CellHandle` fails across JavaScript realms
+   * (e.g., when CellHandle comes from a web worker or iframe).
+   */
+  private _isCellHandleLike(value: unknown): boolean {
+    if (!value || typeof value !== "object") return false;
+    const obj = value as Record<string, unknown>;
+    // Check for CellHandle's characteristic methods
+    return (
+      typeof obj.get === "function" &&
+      typeof obj.set === "function" &&
+      typeof obj.key === "function" &&
+      typeof obj.ref === "function"
+    );
+  }
+
+  /**
+   * Subscribe to nested cells within the value object using the effect pattern.
+   *
+   * The key insight: each effect callback receives the ALREADY-RESOLVED value,
+   * so we cache those resolved values instead of re-traversing the cell tree.
+   * This avoids the "proxy identity mismatch" problem where each .get() call
+   * returns a new proxy object with different nested CellHandle instances.
+   */
+  private _subscribeToNestedCells(): void {
+    const value = this._getValue();
+    if (!value) return;
+
+    // Clean up old subscriptions first
+    this._cleanupNestedCellSubscriptions();
+
+    const [cancelGroup, addCancel] = useCancelGroup();
+
+    // Set up effect for markers array
+    if (value.markers) {
+      addCancel(
+        effect(
+          value.markers as CellHandle<unknown[]> | unknown[],
+          (markersArray) => {
+            if (!Array.isArray(markersArray)) {
+              this._resolvedMarkers = [];
+              this._renderFeaturesFromCache();
+              return;
+            }
+            // Set up effects for each marker element
+            return this._setupArrayElementEffects(
+              markersArray,
+              "markers",
+              (resolved) => {
+                this._resolvedMarkers = resolved as MapMarker[];
+                this._renderFeaturesFromCache();
+              },
+            );
+          },
+        ),
+      );
+    }
+
+    // Set up effect for circles array
+    if (value.circles) {
+      addCancel(
+        effect(
+          value.circles as CellHandle<unknown[]> | unknown[],
+          (circlesArray) => {
+            if (!Array.isArray(circlesArray)) {
+              this._resolvedCircles = [];
+              this._renderFeaturesFromCache();
+              return;
+            }
+            return this._setupArrayElementEffects(
+              circlesArray,
+              "circles",
+              (resolved) => {
+                this._resolvedCircles = resolved as MapCircle[];
+                this._renderFeaturesFromCache();
+              },
+            );
+          },
+        ),
+      );
+    }
+
+    // Set up effect for polylines array
+    if (value.polylines) {
+      addCancel(
+        effect(
+          value.polylines as CellHandle<unknown[]> | unknown[],
+          (polylinesArray) => {
+            if (!Array.isArray(polylinesArray)) {
+              this._resolvedPolylines = [];
+              this._renderFeaturesFromCache();
+              return;
+            }
+            return this._setupArrayElementEffects(
+              polylinesArray,
+              "polylines",
+              (resolved) => {
+                this._resolvedPolylines = resolved as MapPolyline[];
+                this._renderFeaturesFromCache();
+              },
+            );
+          },
+        ),
+      );
+    }
+
+    this._nestedCellUnsubscribes.push(cancelGroup);
+  }
+
+  /**
+   * Set up effects for array elements and their nested properties.
+   * Returns a cancel function that cleans up all element effects.
+   */
+  private _setupArrayElementEffects(
+    array: unknown[],
+    name: string,
+    onResolved: (resolved: unknown[]) => void,
+  ): Cancel {
+    const [cancelGroup, addCancel] = useCancelGroup();
+    const resolvedElements: unknown[] = new Array(array.length).fill(undefined);
+
+    const checkAllResolved = () => {
+      // Call onResolved with resolved elements (skip undefined)
+      const fullyResolved = resolvedElements.filter((el) => el !== undefined);
+      onResolved(fullyResolved);
+    };
+
+    for (let i = 0; i < array.length; i++) {
+      const element = array[i];
+
+      if (this._isCellHandleLike(element)) {
+        // Element is a CellHandle - set up effect
+        addCancel(
+          effect(element as CellHandle<unknown>, (resolvedElement) => {
+            if (resolvedElement === undefined) {
+              resolvedElements[i] = undefined;
+              checkAllResolved();
+              return;
+            }
+
+            // Set up effects for nested properties (position, center, points)
+            return this._setupPropertyEffects(
+              resolvedElement,
+              `${name}[${i}]`,
+              (fullyResolvedElement) => {
+                resolvedElements[i] = fullyResolvedElement;
+                checkAllResolved();
+              },
+            );
+          }),
+        );
+      } else {
+        // Element is already resolved - still need to check nested properties
+        addCancel(
+          this._setupPropertyEffects(
+            element,
+            `${name}[${i}]`,
+            (fullyResolvedElement) => {
+              resolvedElements[i] = fullyResolvedElement;
+              checkAllResolved();
+            },
+          ),
+        );
+      }
+    }
+
+    // Handle empty arrays
+    if (array.length === 0) {
+      onResolved([]);
+    }
+
+    return cancelGroup;
+  }
+
+  /**
+   * Set up effects for nested property CellHandles (position, center, points).
+   * Calls onResolved with the fully resolved element when all properties are loaded.
+   */
+  private _setupPropertyEffects(
+    element: unknown,
+    _name: string,
+    onResolved: (resolved: unknown) => void,
+  ): Cancel {
+    if (!element || typeof element !== "object") {
+      onResolved(element);
+      return noop;
+    }
+
+    const obj = element as Record<string, unknown>;
+    const propertyNames = ["position", "center", "points"];
+    const [cancelGroup, addCancel] = useCancelGroup();
+    const resolvedProps: Record<string, unknown> = { ...obj };
+    let hasCellHandleProps = false;
+
+    for (const prop of propertyNames) {
+      const propValue = obj[prop];
+      if (this._isCellHandleLike(propValue)) {
+        hasCellHandleProps = true;
+        addCancel(
+          effect(propValue as CellHandle<unknown>, (resolvedProp) => {
+            resolvedProps[prop] = resolvedProp;
+            // Only call onResolved if the property actually loaded
+            if (resolvedProp !== undefined) {
+              onResolved(resolvedProps);
+            }
+          }),
+        );
+      }
+    }
+
+    // If no CellHandle properties, element is already fully resolved
+    if (!hasCellHandleProps) {
+      onResolved(element);
+    }
+
+    return cancelGroup;
+  }
+
+  /**
+   * Clean up nested cell subscriptions.
+   */
+  private _cleanupNestedCellSubscriptions(): void {
+    for (const unsub of this._nestedCellUnsubscribes) {
+      unsub();
+    }
+    this._nestedCellUnsubscribes = [];
+    // Clear cached resolved data
+    this._resolvedMarkers = [];
+    this._resolvedCircles = [];
+    this._resolvedPolylines = [];
+  }
+
+  /**
+   * Render features using cached resolved data.
+   * This avoids re-traversing the cell tree.
+   */
+  private _renderFeaturesFromCache(): void {
+    if (!this._map) return;
+
+    // Clear existing layers
+    this._clearLayers();
+
+    // Render from cached resolved data
+    if (this._resolvedMarkers.length > 0) {
+      this._renderMarkers(this._resolvedMarkers);
+    }
+    if (this._resolvedCircles.length > 0) {
+      this._renderCircles(this._resolvedCircles);
+    }
+    if (this._resolvedPolylines.length > 0) {
+      this._renderPolylines(this._resolvedPolylines);
+    }
+
+    // Handle fitToBounds
+    if (this.fitToBounds) {
+      this._fitMapToBounds();
     }
   }
 
@@ -208,10 +490,11 @@ export class CTMap extends BaseElement {
     this._boundsController.bind(this.bounds);
 
     this._initializeMap();
-    this._renderFeatures();
 
-    if (this.fitToBounds) {
-      this._fitMapToBounds();
+    // Subscribe to nested cells (for deeply nested CellHandles in computed values)
+    // The effects will call _renderFeaturesFromCache when data is resolved
+    if (this._valueController.hasCell()) {
+      this._subscribeToNestedCells();
     }
   }
 
@@ -221,11 +504,15 @@ export class CTMap extends BaseElement {
     // Handle value changes - rebind controller when property changes
     if (changedProperties.has("value")) {
       this._valueController.bind(this.value);
-      this._renderFeatures();
-      if (this.fitToBounds) {
-        this._fitMapToBounds();
+      // Only re-subscribe to nested cells when the value property actually changes
+      // Don't re-subscribe on every render (that would clear subscriptions before they fire with data)
+      if (this._valueController.hasCell()) {
+        this._subscribeToNestedCells();
       }
     }
+
+    // Note: Feature rendering is handled by the effect system via _renderFeaturesFromCache
+    // Effects fire when nested cells resolve and automatically call the render method
 
     // Handle center changes - rebind controller when property changes
     if (changedProperties.has("center")) {
@@ -539,31 +826,6 @@ export class CTMap extends BaseElement {
 
   // === Feature Rendering ===
 
-  private _renderFeatures(): void {
-    if (!this._map) return;
-
-    const value = this._getValue();
-
-    // Clear existing layers
-    this._clearLayers();
-
-    // Render markers - iterate directly to avoid reactive proxy deep-access issues
-    // (spread operator [...arr] triggers proxy copy which accesses all properties)
-    if (value.markers && value.markers.length > 0) {
-      this._renderMarkers(value.markers);
-    }
-
-    // Render circles - iterate directly to avoid reactive proxy deep-access issues
-    if (value.circles && value.circles.length > 0) {
-      this._renderCircles(value.circles);
-    }
-
-    // Render polylines - iterate directly to avoid reactive proxy deep-access issues
-    if (value.polylines && value.polylines.length > 0) {
-      this._renderPolylines(value.polylines);
-    }
-  }
-
   private _clearLayers(): void {
     // Remove event listeners from tracked markers before clearing to prevent memory leaks
     // Leaflet's clearLayers() removes DOM nodes but doesn't remove .on() listeners
@@ -581,17 +843,14 @@ export class CTMap extends BaseElement {
     this._leafletCircles = [];
   }
 
-  private _renderMarkers(markers: MapMarker[]): void {
+  private _renderMarkers(markers: readonly MapMarker[]): void {
     if (!this._markerLayer) return;
 
-    // Use traditional for loop to avoid reactive proxy forEach issues
-    // (reactive proxies can throw when iterating over partially loaded data)
-    // Access .length inside try-catch since reactive proxies can throw on property access
+    // Access length inside try-catch since reactive proxies can throw on property access
     let length: number;
     try {
       length = markers.length;
-    } catch (e) {
-      this._logWarn("Error accessing markers.length:", e);
+    } catch {
       return;
     }
     for (let i = 0; i < length; i++) {
@@ -614,21 +873,15 @@ export class CTMap extends BaseElement {
           continue;
         }
 
+        // Marker is resolved by the effect system
         const position = marker.position;
         if (!position) {
-          this._logWarn(
-            `Skipping marker at index ${index} - missing position`,
-          );
           continue;
         }
 
         lat = position.lat;
         lng = position.lng;
         if (typeof lat !== "number" || typeof lng !== "number") {
-          this._logWarn(
-            `Skipping marker at index ${index} - invalid position:`,
-            { lat, lng },
-          );
           continue;
         }
 
@@ -638,12 +891,8 @@ export class CTMap extends BaseElement {
         icon = marker.icon;
         popup = marker.popup;
         draggable = marker.draggable;
-      } catch (e) {
-        // Reactive proxy threw during property access - skip this marker
-        this._logWarn(
-          `Skipping marker at index ${index} - error accessing properties:`,
-          e,
-        );
+      } catch {
+        // Skip markers that throw during property access
         continue;
       }
 
@@ -734,22 +983,20 @@ export class CTMap extends BaseElement {
     }
   }
 
-  private _renderCircles(circles: MapCircle[]): void {
+  private _renderCircles(circles: readonly MapCircle[]): void {
     if (!this._circleLayer) return;
 
-    // Use traditional for loop to avoid reactive proxy forEach issues
-    // Access .length inside try-catch since reactive proxies can throw on property access
+    // Access length inside try-catch since reactive proxies can throw on property access
     let length: number;
     try {
       length = circles.length;
-    } catch (e) {
-      this._logWarn("Error accessing circles.length:", e);
+    } catch {
       return;
     }
     for (let i = 0; i < length; i++) {
       const index = i;
 
-      // Extract all circle properties within try-catch to handle reactive proxy edge cases
+      // Extract all circle properties within try-catch
       let circle: MapCircle;
       let lat: number;
       let lng: number;
@@ -766,21 +1013,15 @@ export class CTMap extends BaseElement {
           continue;
         }
 
+        // Circle is resolved by the effect system
         const center = circle.center;
         if (!center) {
-          this._logWarn(
-            `Skipping circle at index ${index} - missing center`,
-          );
           continue;
         }
 
         lat = center.lat;
         lng = center.lng;
         if (typeof lat !== "number" || typeof lng !== "number") {
-          this._logWarn(
-            `Skipping circle at index ${index} - invalid center:`,
-            { lat, lng },
-          );
           continue;
         }
 
@@ -791,12 +1032,8 @@ export class CTMap extends BaseElement {
         strokeWidth = circle.strokeWidth;
         popup = circle.popup;
         title = circle.title;
-      } catch (e) {
-        // Reactive proxy threw during property access - skip this circle
-        this._logWarn(
-          `Skipping circle at index ${index} - error accessing properties:`,
-          e,
-        );
+      } catch {
+        // Skip circles that throw during property access
         continue;
       }
 
@@ -832,50 +1069,42 @@ export class CTMap extends BaseElement {
     }
   }
 
-  private _renderPolylines(polylines: MapPolyline[]): void {
+  private _renderPolylines(polylines: readonly MapPolyline[]): void {
     if (!this._polylineLayer) return;
 
-    // Use traditional for loop to avoid reactive proxy forEach issues
-    // Access .length inside try-catch since reactive proxies can throw on property access
+    // Access length inside try-catch since reactive proxies can throw on property access
     let length: number;
     try {
       length = polylines.length;
-    } catch (e) {
-      this._logWarn("Error accessing polylines.length:", e);
+    } catch {
       return;
     }
     for (let i = 0; i < length; i++) {
       const polyline = polylines[i];
-      const index = i;
 
       // Skip polylines without valid points array
       if (!polyline) {
         continue;
       }
 
+      // Polyline is resolved by the effect system
       const points = polyline.points;
       if (!points || !Array.isArray(points)) {
-        this._logWarn(
-          `Skipping polyline at index ${index} - invalid points:`,
-          points,
-        );
         continue;
       }
 
-      const { color, strokeWidth, dashArray } = polyline;
+      // Extract style properties
+      const color = polyline.color;
+      const strokeWidth = polyline.strokeWidth;
+      const dashArray = polyline.dashArray;
 
       // Convert to Leaflet format, filtering out invalid points
-      // Use traditional for loop to avoid reactive proxy issues
       const latLngs: L.LatLngExpression[] = [];
       const pointsLength = points.length;
       for (let j = 0; j < pointsLength; j++) {
         const p = points[j];
-        if (p) {
-          const pLat = p.lat;
-          const pLng = p.lng;
-          if (typeof pLat === "number" && typeof pLng === "number") {
-            latLngs.push([pLat, pLng]);
-          }
+        if (p && typeof p.lat === "number" && typeof p.lng === "number") {
+          latLngs.push([p.lat, p.lng]);
         }
       }
 
@@ -1109,7 +1338,6 @@ export class CTMap extends BaseElement {
       !Number.isFinite(east) ||
       !Number.isFinite(west)
     ) {
-      this._logWarn("Invalid bounds - values must be finite numbers:", bounds);
       return null;
     }
 
@@ -1120,7 +1348,6 @@ export class CTMap extends BaseElement {
       south < MIN_LAT ||
       south > MAX_LAT
     ) {
-      this._logWarn("Invalid bounds - latitude must be in [-90, 90]:", bounds);
       return null;
     }
 
@@ -1131,16 +1358,11 @@ export class CTMap extends BaseElement {
       west < MIN_LNG ||
       west > MAX_LNG
     ) {
-      this._logWarn(
-        "Invalid bounds - longitude must be in [-180, 180]:",
-        bounds,
-      );
       return null;
     }
 
     // Check that south <= north
     if (south > north) {
-      this._logWarn("Invalid bounds - south must be <= north:", bounds);
       return null;
     }
 
@@ -1180,6 +1402,9 @@ export class CTMap extends BaseElement {
     this._polylineLayer = null;
     this._leafletMarkers = [];
     this._leafletCircles = [];
+
+    // Clean up nested cell subscriptions
+    this._cleanupNestedCellSubscriptions();
 
     // Note: CellControllers are automatically cleaned up by Lit's reactive
     // controller system. They implement ReactiveController with

@@ -181,6 +181,12 @@ const addAreaHandler = handler<
   });
 });
 
+// Format coordinates for display (handles undefined during reactive updates)
+const formatCoord = (
+  val: number | undefined | null,
+  decimals = 4,
+): string => val != null ? val.toFixed(decimals) : "N/A";
+
 // Handler to initialize demo data
 const initHandler = handler<
   void,
@@ -263,12 +269,6 @@ export default pattern<Input, Output>(
 
       return { markers, circles, polylines };
     });
-
-    // Format coordinates for display (handles undefined during reactive updates)
-    const formatCoord = (
-      val: number | undefined | null,
-      decimals = 4,
-    ): string => val != null ? val.toFixed(decimals) : "N/A";
 
     return {
       [NAME]: computed(() => `Trip Planner: ${tripName}`),
