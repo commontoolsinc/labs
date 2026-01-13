@@ -128,44 +128,27 @@ export default pattern(() => {
     );
   });
 
-  // 4. Return tests object - processed in sequence order
+  // 4. Return tests array - processed sequentially
   return {
-    tests: {
-      assertions: {
-        initialValuesIdentical: assert_initial_values_identical,
-        firstNameChangePropagates: assert_firstName_change_propagates,
-        lastNameChangePropagates: assert_lastName_change_propagates,
-        ageChangePropagates: assert_age_change_propagates,
-        allChangesPropagates: assert_all_changes_propagate,
-        emptyStringHandled: assert_empty_string_handled,
-      },
-      actions: {
-        changeFirstName: action_change_firstName,
-        changeLastName: action_change_lastName,
-        changeAge: action_change_age,
-        changeAll: action_change_all,
-        setEmptyFirstName: action_set_empty_firstName,
-      },
-      sequence: [
-        // Test 1: Initial values are identical
-        "initialValuesIdentical",
-        // Test 2: firstName change propagates to all three
-        "changeFirstName",
-        "firstNameChangePropagates",
-        // Test 3: lastName change propagates to all three
-        "changeLastName",
-        "lastNameChangePropagates",
-        // Test 4: age change propagates to all three
-        "changeAge",
-        "ageChangePropagates",
-        // Test 5: Multiple changes propagate
-        "changeAll",
-        "allChangesPropagates",
-        // Test 6: Empty string handled correctly
-        "setEmptyFirstName",
-        "emptyStringHandled",
-      ],
-    },
+    tests: [
+      // Test 1: Initial values are identical
+      { assertion: assert_initial_values_identical },
+      // Test 2: firstName change propagates to all three
+      { action: action_change_firstName },
+      { assertion: assert_firstName_change_propagates },
+      // Test 3: lastName change propagates to all three
+      { action: action_change_lastName },
+      { assertion: assert_lastName_change_propagates },
+      // Test 4: age change propagates to all three
+      { action: action_change_age },
+      { assertion: assert_age_change_propagates },
+      // Test 5: Multiple changes propagate
+      { action: action_change_all },
+      { assertion: assert_all_changes_propagate },
+      // Test 6: Empty string handled correctly
+      { action: action_set_empty_firstName },
+      { assertion: assert_empty_string_handled },
+    ],
     // Expose subject for debugging when deployed as charm
     subject,
   };

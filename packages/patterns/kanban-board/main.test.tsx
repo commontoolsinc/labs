@@ -97,26 +97,13 @@ export default pattern(() => {
 
   // ============ TEST SEQUENCE ============
   return {
-    tests: {
-      assertions: {
-        initialZeroCards: assert_initial_zero_cards,
-        oneCard: assert_one_card,
-        twoCards: assert_two_cards,
-      },
-      actions: {
-        // Run approach 2 first (action closure) - shows "send is not a function" error
-        viaClosure: action_via_closure,
-        // Run approach 1 (handler state) - also shows "send is not a function" error
-        viaState: action_via_state,
-      },
-      sequence: [
-        "initialZeroCards",
-        "viaClosure",
-        "oneCard",
-        "viaState",
-        "twoCards",
-      ],
-    },
+    tests: [
+      { assertion: assert_initial_zero_cards },
+      { action: action_via_closure },
+      { assertion: assert_one_card },
+      { action: action_via_state },
+      { assertion: assert_two_cards },
+    ],
     board,
     columnsCell,
   };

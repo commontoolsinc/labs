@@ -150,81 +150,44 @@ export default pattern(() => {
   });
 
   // ==========================================================================
-  // Test Sequence
+  // Test Sequence - array of { assertion } or { action } objects
   // ==========================================================================
   return {
-    tests: {
-      assertions: {
-        // Initial state assertions
-        initialPhasePlaying: assert_initial_phase_playing,
-        initialTurnPlayer1: assert_initial_turn_player1,
-        initialViewingAsNull: assert_initial_viewingAs_null,
-        initialWinnerNull: assert_initial_winner_null,
-        initialNotAwaitingPass: assert_initial_not_awaiting_pass,
-        // After playerReady
-        viewingAsPlayer1: assert_viewingAs_player1,
-        stillTurnPlayer1: assert_still_turn_player1,
-        // After firing a miss
-        shotRecordedMiss: assert_shot_recorded_miss,
-        turnSwitchedToPlayer2: assert_turn_switched_to_player2,
-        awaitingPassAfterShot: assert_awaiting_pass_after_shot,
-        // After passDevice
-        viewingAsNullAfterPass: assert_viewingAs_null_after_pass,
-        notAwaitingPassAfterPass: assert_not_awaiting_pass_after_pass,
-        // After player 2 ready
-        viewingAsPlayer2: assert_viewingAs_player2,
-        // After player 2 fires a hit
-        shotRecordedHit: assert_shot_recorded_hit,
-        turnBackToPlayer1: assert_turn_back_to_player1,
-        // After reset
-        resetPhasePlaying: assert_reset_phase_playing,
-        resetTurnPlayer1: assert_reset_turn_player1,
-        resetViewingAsNull: assert_reset_viewingAs_null,
-        resetShotsCleared: assert_reset_shots_cleared,
-      },
-      actions: {
-        playerReady: action_player_ready,
-        passDevice: action_pass_device,
-        resetGame: action_reset_game,
-        fireMiss: action_fire_miss,
-        p2FireHitCarrier: action_p2_fire_hit_carrier,
-      },
-      sequence: [
-        // === Test 1: Initial state ===
-        "initialPhasePlaying",
-        "initialTurnPlayer1",
-        "initialViewingAsNull",
-        "initialWinnerNull",
-        "initialNotAwaitingPass",
-        // === Test 2: Player 1 ready ===
-        "playerReady",
-        "viewingAsPlayer1",
-        "stillTurnPlayer1",
-        // === Test 3: Player 1 fires a miss ===
-        "fireMiss",
-        "shotRecordedMiss",
-        "turnSwitchedToPlayer2",
-        "awaitingPassAfterShot",
-        // === Test 4: Pass device ===
-        "passDevice",
-        "viewingAsNullAfterPass",
-        "notAwaitingPassAfterPass",
-        // === Test 5: Player 2 ready ===
-        "playerReady",
-        "viewingAsPlayer2",
-        // === Test 6: Player 2 fires a hit ===
-        "p2FireHitCarrier",
-        "shotRecordedHit",
-        "turnBackToPlayer1",
-        // === Test 7: Pass and reset ===
-        "passDevice",
-        "resetGame",
-        "resetPhasePlaying",
-        "resetTurnPlayer1",
-        "resetViewingAsNull",
-        "resetShotsCleared",
-      ],
-    },
+    tests: [
+      // === Test 1: Initial state ===
+      { assertion: assert_initial_phase_playing },
+      { assertion: assert_initial_turn_player1 },
+      { assertion: assert_initial_viewingAs_null },
+      { assertion: assert_initial_winner_null },
+      { assertion: assert_initial_not_awaiting_pass },
+      // === Test 2: Player 1 ready ===
+      { action: action_player_ready },
+      { assertion: assert_viewingAs_player1 },
+      { assertion: assert_still_turn_player1 },
+      // === Test 3: Player 1 fires a miss ===
+      { action: action_fire_miss },
+      { assertion: assert_shot_recorded_miss },
+      { assertion: assert_turn_switched_to_player2 },
+      { assertion: assert_awaiting_pass_after_shot },
+      // === Test 4: Pass device ===
+      { action: action_pass_device },
+      { assertion: assert_viewingAs_null_after_pass },
+      { assertion: assert_not_awaiting_pass_after_pass },
+      // === Test 5: Player 2 ready ===
+      { action: action_player_ready },
+      { assertion: assert_viewingAs_player2 },
+      // === Test 6: Player 2 fires a hit ===
+      { action: action_p2_fire_hit_carrier },
+      { assertion: assert_shot_recorded_hit },
+      { assertion: assert_turn_back_to_player1 },
+      // === Test 7: Pass and reset ===
+      { action: action_pass_device },
+      { action: action_reset_game },
+      { assertion: assert_reset_phase_playing },
+      { assertion: assert_reset_turn_player1 },
+      { assertion: assert_reset_viewingAs_null },
+      { assertion: assert_reset_shots_cleared },
+    ],
     game,
   };
 });

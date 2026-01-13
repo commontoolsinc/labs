@@ -3,26 +3,39 @@
  *
  * Test patterns (.test.tsx) are patterns that:
  * 1. Import and instantiate the pattern under test
- * 2. Define test actions as handlers (Stream<void>)
- * 3. Define assertions as Cell<boolean>
- * 4. Return { tests: { assertions, actions, sequence } } object
+ * 2. Define test steps as an array of { assertion } or { action } objects
+ * 3. Return { tests: TestStep[] }
  *
- * The structured format keeps Cell and Stream types separate to avoid
- * TypeScript declaration emit issues with unique symbols:
+ * TestStep is a discriminated union:
+ * - { assertion: OpaqueRef<boolean> } from computed(() => condition)
+ * - { action: Stream<void> } from action(() => sideEffect)
  *
- * tests: {
- *   assertions: { initialPhase: computed(...), shotRecorded: computed(...) },
- *   actions: { playerReady: action(...), fireShot: action(...) },
- *   sequence: ['initialPhase', 'playerReady', 'shotRecorded', ...],
- * }
+ * The discriminated union avoids TypeScript declaration emit issues
+ * that occur when mixing Cell and Stream types in the same array.
+ *
+ * Example:
+ * tests: [
+ *   { assertion: computed(() => game.phase === "playing") },
+ *   { action: action(() => game.start.send(undefined)) },
+ *   { assertion: computed(() => game.phase === "started") },
+ * ]
  */
 
 import { Identity } from "@commontools/identity";
 import { Engine, Runtime } from "@commontools/runner";
 import type { Cell, Recipe, Stream } from "@commontools/runner";
+import type { OpaqueRef } from "@commontools/api";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { basename } from "@std/path";
 import { timeout } from "@commontools/utils/sleep";
+
+/**
+ * A test step is an object with either an 'assertion' or 'action' property.
+ * This discriminated union avoids TypeScript trying to unify incompatible Cell/Stream types.
+ */
+export type TestStep =
+  | { assertion: OpaqueRef<boolean> }
+  | { action: Stream<void> };
 
 export interface TestResult {
   name: string;
@@ -117,89 +130,64 @@ export async function runTestPattern(
     // Keep the pattern reactive - store cancel function for cleanup
     sinkCancel = patternResult.sink(() => {});
 
-    // 4. Get the tests object from pattern output
-    // Use .key() to get sub-cells without unwrapping
+    // 4. Get the tests array from pattern output
     const testsCell = patternResult.key("tests") as Cell<unknown>;
-    const testsValue = testsCell.get() as {
-      assertions?: Record<string, unknown>;
-      actions?: Record<string, unknown>;
-      sequence?: string[];
-    };
+    const testsValue = testsCell.get();
 
-    // Validate structured format
-    if (
-      typeof testsValue !== "object" ||
-      testsValue === null ||
-      !("sequence" in testsValue)
-    ) {
+    // Validate it's an array
+    if (!Array.isArray(testsValue)) {
       throw new Error(
-        "Test pattern must return { tests: { assertions, actions, sequence } }. Got: " +
+        "Test pattern must return { tests: TestStep[] }. Got: " +
           JSON.stringify(typeof testsValue),
       );
     }
 
-    const { sequence } = testsValue;
-    if (!Array.isArray(sequence)) {
-      throw new Error(
-        "tests.sequence must be an array of step names. Got: " +
-          JSON.stringify(typeof sequence),
-      );
-    }
-
-    // Get the assertions and actions objects via .key() to preserve Cell/Stream types
-    const assertionsCell = testsCell.key("assertions") as Cell<
-      Record<string, unknown>
-    >;
-    const actionsCell = testsCell.key("actions") as Cell<
-      Record<string, unknown>
-    >;
-
-    // Check for duplicate keys between assertions and actions
-    const assertionKeys = new Set(Object.keys(testsValue.assertions ?? {}));
-    const actionKeys = new Set(Object.keys(testsValue.actions ?? {}));
-    const duplicates = [...assertionKeys].filter((k) => actionKeys.has(k));
-    if (duplicates.length > 0) {
-      throw new Error(
-        `Duplicate keys found in both assertions and actions: ${
-          duplicates.join(", ")
-        }`,
-      );
-    }
-
     if (options.verbose) {
-      console.log(`  Found ${sequence.length} test steps`);
+      console.log(`  Found ${testsValue.length} test steps`);
     }
 
-    // 5. Process tests in sequence order
+    // 5. Process tests sequentially
     const results: TestResult[] = [];
-    let lastActionName: string | null = null;
+    let lastActionIndex: number | null = null;
+    let assertionCount = 0;
+    let actionCount = 0;
 
-    for (const stepKey of sequence) {
+    for (let i = 0; i < testsValue.length; i++) {
       const itemStart = performance.now();
-      const isAssertion = assertionKeys.has(stepKey);
-      const isAction = actionKeys.has(stepKey);
+      const stepValue = testsValue[i] as {
+        action?: unknown;
+        assertion?: unknown;
+      };
 
-      if (!isAssertion && !isAction) {
+      // Check if this step has 'action' or 'assertion' key
+      const isAction = "action" in stepValue;
+      const isAssertion = "assertion" in stepValue;
+
+      if (!isAction && !isAssertion) {
         throw new Error(
-          `Unknown test step "${stepKey}" - not found in assertions or actions`,
+          `Test step at index ${i} must have either 'action' or 'assertion' key. Got: ${
+            JSON.stringify(Object.keys(stepValue))
+          }`,
         );
       }
 
       if (isAction) {
         // It's an action - invoke it
-        lastActionName = stepKey;
+        actionCount++;
+        lastActionIndex = i;
+        const actionName = `action_${actionCount}`;
 
         if (options.verbose) {
-          console.log(`  → Running ${stepKey}...`);
+          console.log(`  → Running ${actionName}...`);
         }
 
         // Get the action stream via .key()
-        const actionStream = actionsCell.key(stepKey) as unknown as Stream<
-          unknown
-        >;
+        const actionStream = testsCell.key(i).key(
+          "action",
+        ) as unknown as Stream<unknown>;
 
-        // Send empty object - handlers may expect event-like object
-        actionStream.send({});
+        // Send undefined for void streams
+        actionStream.send(undefined);
 
         // Wait for idle with timeout
         try {
@@ -207,27 +195,29 @@ export async function runTestPattern(
             runtime.idle(),
             timeout(
               TIMEOUT,
-              `Action "${stepKey}" timed out after ${TIMEOUT}ms`,
+              `Action at index ${i} timed out after ${TIMEOUT}ms`,
             ),
           ]);
         } catch (err) {
           results.push({
-            name: stepKey,
+            name: actionName,
             passed: false,
             afterAction: null,
             error: err instanceof Error ? err.message : String(err),
             durationMs: performance.now() - itemStart,
           });
-          // Continue to next test item
         }
       } else {
         // It's an assertion - check the boolean value
-        const assertCell = assertionsCell.key(stepKey) as Cell<unknown>;
+        assertionCount++;
+        const assertionName = `assertion_${assertionCount}`;
 
         let passed = false;
         let error: string | undefined;
 
         try {
+          // Get the assertion cell via .key()
+          const assertCell = testsCell.key(i).key("assertion") as Cell<unknown>;
           const value = assertCell.get();
           passed = value === true;
           if (!passed) {
@@ -241,17 +231,21 @@ export async function runTestPattern(
         }
 
         results.push({
-          name: stepKey,
+          name: assertionName,
           passed,
-          afterAction: lastActionName,
+          afterAction: lastActionIndex !== null
+            ? `action_${actionCount}`
+            : null,
           error,
           durationMs: performance.now() - itemStart,
         });
 
         if (options.verbose) {
           const status = passed ? "✓" : "✗";
-          const suffix = lastActionName ? ` (after ${lastActionName})` : "";
-          console.log(`  ${status} ${stepKey}${suffix}`);
+          const suffix = lastActionIndex !== null
+            ? ` (after action_${actionCount})`
+            : "";
+          console.log(`  ${status} ${assertionName}${suffix}`);
         }
       }
     }
