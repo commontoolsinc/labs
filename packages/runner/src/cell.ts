@@ -1752,6 +1752,7 @@ export function convertCellsToLinks(
     includeSchema?: boolean;
     keepStreams?: boolean;
     keepAsCell?: boolean;
+    doNotConvertCellResults?: boolean;
   } = {},
   path: string[] = [],
   seen: Map<any, string[]> = new Map(),
@@ -1765,7 +1766,9 @@ export function convertCellsToLinks(
   }
 
   // Early-return cases
-  if (isCellResultForDereferencing(value)) {
+  if (
+    !options.doNotConvertCellResults && isCellResultForDereferencing(value)
+  ) {
     return getCellOrThrow(value).getAsLink(options);
   } else if (isCell(value)) {
     return value.getAsLink(options);

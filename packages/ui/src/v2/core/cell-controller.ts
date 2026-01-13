@@ -141,7 +141,11 @@ export class CellController<T> implements ReactiveController {
    * Set the current value reference and set up subscriptions
    */
   bind(value: CellHandle<T> | T, schema?: JSONSchema): void {
-    if (this._currentValue !== value) {
+    if (
+      this._currentValue !== value &&
+      !(this._currentValue instanceof CellHandle &&
+        this._currentValue.equals(value))
+    ) {
       this._cleanupCellSubscription();
       if (schema !== undefined && value instanceof CellHandle) {
         this._currentValue = value.asSchema<T>(schema);
