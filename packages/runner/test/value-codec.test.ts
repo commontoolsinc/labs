@@ -148,7 +148,7 @@ describe("value-codec", () => {
         expect(toStorableValue(obj)).toBe(obj);
       });
 
-      it("passes through arrays", () => {
+      it("passes through dense arrays", () => {
         const arr = [1, 2, 3];
         expect(toStorableValue(arr)).toBe(arr);
       });
@@ -156,6 +156,52 @@ describe("value-codec", () => {
       // TODO(@danfuzz): This should throw once the TODO is resolved
       it("passes through undefined (TODO: should throw)", () => {
         expect(toStorableValue(undefined)).toBe(undefined);
+      });
+    });
+
+    describe("handles sparse arrays", () => {
+      it("densifies sparse arrays by filling holes with undefined", () => {
+        const sparse: unknown[] = [];
+        sparse[0] = 1;
+        sparse[2] = 3; // hole at index 1
+        const result = toStorableValue(sparse);
+        expect(result).not.toBe(sparse); // returns a new array
+        expect(result).toEqual([1, undefined, 3]);
+      });
+
+      it("densifies arrays with multiple holes", () => {
+        const sparse: unknown[] = [];
+        sparse[0] = "a";
+        sparse[3] = "b"; // holes at indices 1 and 2
+        sparse[5] = "c"; // hole at index 4
+        const result = toStorableValue(sparse);
+        expect(result).toEqual([
+          "a",
+          undefined,
+          undefined,
+          "b",
+          undefined,
+          "c",
+        ]);
+      });
+
+      it("throws for arrays with named properties", () => {
+        const arr = [1, 2, 3] as unknown[] & { foo?: string };
+        arr.foo = "bar";
+        expect(() => toStorableValue(arr)).toThrow(
+          "Cannot store array with enumerable named properties",
+        );
+      });
+
+      it("throws for sparse arrays with named properties", () => {
+        // Even if the sparse array could be densified, named props are not allowed
+        const sparse = [] as unknown[] & { foo?: string };
+        sparse[0] = 1;
+        sparse[2] = 3;
+        sparse.foo = "bar";
+        expect(() => toStorableValue(sparse)).toThrow(
+          "Cannot store array with enumerable named properties",
+        );
       });
     });
 
@@ -241,7 +287,7 @@ describe("value-codec", () => {
           }
         }
         expect(() => toStorableValue(new BadToJSON())).toThrow(
-          "`toJSON()` on object returned something other than a `JSONValue`",
+          "`toJSON()` on object returned something other than a storable value",
         );
       });
 
@@ -252,7 +298,7 @@ describe("value-codec", () => {
           }
         }
         expect(() => toStorableValue(new ReturnsFunction())).toThrow(
-          "`toJSON()` on object returned something other than a `JSONValue`",
+          "`toJSON()` on object returned something other than a storable value",
         );
       });
 
@@ -263,7 +309,7 @@ describe("value-codec", () => {
           }
         }
         expect(() => toStorableValue(new ReturnsInstance())).toThrow(
-          "`toJSON()` on object returned something other than a `JSONValue`",
+          "`toJSON()` on object returned something other than a storable value",
         );
       });
     });

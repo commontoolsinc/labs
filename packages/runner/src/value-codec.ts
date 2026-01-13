@@ -101,6 +101,28 @@ export function toStorableValue(value: unknown): unknown {
         throw new Error(
           `Cannot store ${typeName} per se (needs to have a \`toJSON()\` method)`,
         );
+      } else if (Array.isArray(valueObj)) {
+        if (!isStorableArray(valueObj)) {
+          // We accept arrays that are non-storable by virtue of simply having
+          // holes -- which we fill in -- but we do not accept arrays that are
+          // non-storable by virtue of having any additional properties. Note
+          // that if the original `value` had a `toJSON()` method, that would
+          // have triggered the `toJSON` clause above and so we won't end up
+          // here.
+          const densified = [...valueObj];
+          const len = densified.length;
+          const hasNamedProps = Object.keys(valueObj).some((k) => {
+            const n = Number(k);
+            return !Number.isInteger(n) || n < 0 || n >= len;
+          });
+          if (hasNamedProps) {
+            throw new Error(
+              "Cannot store array with enumerable named properties.",
+            );
+          }
+          return densified;
+        }
+        return valueObj;
       } else {
         return valueObj;
       }
