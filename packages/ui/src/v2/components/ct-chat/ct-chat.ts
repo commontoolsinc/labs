@@ -2,7 +2,7 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
-import { type CellHandle } from "@commontools/runtime-client";
+import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 import "../ct-chat-message/ct-chat-message.ts";
 import "../ct-tool-call/ct-tool-call.ts";
@@ -19,6 +19,12 @@ import {
   mergeWithDefaultTheme,
   themeContext,
 } from "../theme-context.ts";
+import { LLMMessageSchema } from "@commontools/runner";
+
+const BuiltInLLMMessagesArraySchema = {
+  type: "array",
+  items: LLMMessageSchema,
+} as const satisfies JSONSchema;
 
 /**
  * CTChat - Chat container that handles message flow and tool call correlation
@@ -179,7 +185,7 @@ export class CTChat extends BaseElement {
   override firstUpdated(changedProperties: Map<string, any>) {
     super.firstUpdated(changedProperties);
     // Initialize cell controller binding
-    this._cellController.bind(this.messages);
+    this._cellController.bind(this.messages, BuiltInLLMMessagesArraySchema);
     // Compute and apply theme on first render
     const source = this.theme && Object.keys(this.theme).length > 0
       ? this.theme
@@ -217,7 +223,7 @@ export class CTChat extends BaseElement {
     // If the messages property itself changed (e.g., switched to a different cell)
     if (changedProperties.has("messages")) {
       // Bind the new messages (Cell or plain array) to the controller
-      this._cellController.bind(this.messages);
+      this._cellController.bind(this.messages, BuiltInLLMMessagesArraySchema);
     }
 
     // If the theme property or provided theme changed, recompute
