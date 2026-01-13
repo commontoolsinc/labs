@@ -35,11 +35,15 @@ Use camelCase for `ct-*` component properties. Kebab-case JSX attributes don't m
 ## ct-button
 
 ```tsx
-// Inline handler
+// Simple inline handler
 <ct-button onClick={() => count.set(count.get() + 1)}>Increment</ct-button>
 
-// handler() for complex logic
-<ct-button onClick={handleClick({ count })}>Increment</ct-button>
+// action() for more complex logic (preferred)
+const increment = action(() => {
+  count.set(count.get() + 1);
+  lastUpdated.set(Date.now());
+});
+<ct-button onClick={increment}>Increment</ct-button>
 ```
 
 ---

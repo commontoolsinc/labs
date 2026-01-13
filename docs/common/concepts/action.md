@@ -1,40 +1,106 @@
-### action() vs handler()
+# Handling Events
 
-**Use `action()`** for inline handlers where all data is in scope (closes over variables):
+Use `action()` to handle user events like button clicks, form submissions, and other interactions. Actions close over variables in your pattern, making them simple to write and easy to understand.
+
+## Basic Usage
 
 ```tsx
-import { action, handler, pattern, Cell, UI, Stream } from 'commontools';
+import { action, pattern, Cell, UI } from 'commontools';
 
-interface Output {
-  increment: Stream<void>;  // Only handlers can be exported
-}
-
-export default pattern<Record<string, never>, Output>(_ => {
+export default pattern(() => {
   const count = Cell.of(0);
 
-  // action() - closes over count, used inline in JSX
-  const incrementAction = action(() => count.set(count.get() + 1));
+  // action() closes over `count` - no binding needed
+  const increment = action(() => {
+    count.set(count.get() + 1);
+  });
 
-  // handler() with binding - can be exported as Stream
-  const incrementHandler = handler<void, { count: Cell<number> }>(
-    (_, { count }) => count.set(count.get() + 1)
-  );
+  const decrement = action(() => {
+    count.set(count.get() - 1);
+  });
 
   return {
-    increment: incrementHandler({ count }), // Bound handler IS the Stream
     [UI]: (
       <div>
         <div>Count: {count}</div>
-        {/* action() used inline - not exported */}
-        <ct-button onClick={incrementAction}>+1 (action)</ct-button>
-        {/* Or use handler bound inline */}
-        <ct-button onClick={incrementHandler({ count })}>+1 (handler)</ct-button>
+        <ct-button onClick={decrement}>-</ct-button>
+        <ct-button onClick={increment}>+</ct-button>
       </div>
     ),
   };
 });
 ```
 
-**Key difference:**
-- `action()` returns a function for inline use (onClick, etc.) - **cannot be exported**
-- `handler()` bound with state returns `Stream<T>` - **can be exported** for other charms to call via linking
+Actions are defined inside your pattern body and naturally close over any cells or state you need to modify. This is the most common and straightforward way to handle events.
+
+## Actions with Event Data
+
+When you need data from the event (like form input), the action receives it as a parameter:
+
+```tsx
+const items = Cell.of<string[]>([]);
+
+const addItem = action((event: { title: string }) => {
+  items.push(event.title);
+});
+
+// In JSX - pass data when calling
+<ct-button onClick={() => addItem({ title: "New Item" })}>
+  Add Item
+</ct-button>
+```
+
+## Multiple Operations in One Action
+
+Actions can perform multiple mutations in a single handler:
+
+```tsx
+const resetGame = action(() => {
+  score.set(0);
+  lives.set(3);
+  level.set(1);
+  gameState.set("ready");
+});
+```
+
+## When to Use `handler()` Instead
+
+Use `action()` for most cases. Switch to `handler()` when you need to:
+
+1. **Reuse the same logic with different state bindings**
+2. **Export the handler for other patterns to call via linking**
+
+```tsx
+// If you need the SAME logic bound to DIFFERENT state:
+const increment = handler<void, { count: Cell<number> }>(
+  (_, { count }) => count.set(count.get() + 1)
+);
+
+// Now you can bind it to different counters
+const incrementA = increment({ count: counterA });
+const incrementB = increment({ count: counterB });
+```
+
+See [Reusable Handlers](./handler.md) for the full `handler()` API.
+
+## Inline Arrow Functions
+
+For very simple one-liners, you can use arrow functions directly in JSX:
+
+```tsx
+<ct-button onClick={() => count.set(count.get() + 1)}>+</ct-button>
+```
+
+However, `action()` is preferred for:
+- Multiple statements
+- Better readability
+- Giving the action a descriptive name
+- Reusing the same action in multiple places
+
+## Summary
+
+| Approach | Use When |
+|----------|----------|
+| `action()` | Default choice - closes over pattern state |
+| Arrow function | Simple one-liners in JSX |
+| `handler()` | Reusable logic with different bindings, or exported streams |

@@ -2,7 +2,7 @@ The Common Tools runtime is a fully integrated, reactive runtime and execution e
 
 ## Mental Model
 
-Unlike React, patterns are programs that define a reactive graph once upfront rather than being repeatedly re-invoked. This is analogous to [Solid.js](https://docs.solidjs.com/quick-start) components with signal networks. Authors use `computed()`, `lift()`, and `handler()` to operate on reactive Cells.
+Unlike React, patterns are programs that define a reactive graph once upfront rather than being repeatedly re-invoked. This is analogous to [Solid.js](https://docs.solidjs.com/quick-start) components with signal networks. Authors use `computed()` and `lift()` for derived values, and `action()` for handling events.
 
 Want to see it in action? `packages/patterns` contains working examples of many patterns.
 
