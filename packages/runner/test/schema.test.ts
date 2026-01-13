@@ -1271,7 +1271,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      // Undefined, sine the boolean item makes the array invalid,
+      // Undefined, since the boolean item makes the array invalid,
       // which then means the object's arr is invalid.
       expect(cell.get()).toBeUndefined();
 
