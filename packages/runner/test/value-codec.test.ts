@@ -44,11 +44,16 @@ describe("value-codec", () => {
         expect(isStorableValue([])).toBe(true);
         expect(isStorableValue([1, 2, 3])).toBe(true);
         expect(isStorableValue([{ a: 1 }, { b: 2 }])).toBe(true);
-        expect(isStorableValue([null, undefined, null])).toBe(true);
+        expect(isStorableValue([null, "test", null])).toBe(true);
       });
     });
 
     describe("returns false for non-storable arrays", () => {
+      it("rejects arrays with undefined elements", () => {
+        expect(isStorableValue([1, undefined, 3])).toBe(false);
+        expect(isStorableValue([undefined])).toBe(false);
+      });
+
       it("rejects sparse arrays (arrays with holes)", () => {
         const sparse: unknown[] = [];
         sparse[0] = 1;
@@ -157,14 +162,14 @@ describe("value-codec", () => {
       });
     });
 
-    describe("handles sparse arrays", () => {
-      it("densifies sparse arrays by filling holes with undefined", () => {
+    describe("handles sparse arrays and undefined elements", () => {
+      it("densifies sparse arrays by filling holes with null", () => {
         const sparse: unknown[] = [];
         sparse[0] = 1;
         sparse[2] = 3; // hole at index 1
         const result = toStorableValue(sparse);
         expect(result).not.toBe(sparse); // returns a new array
-        expect(result).toEqual([1, undefined, 3]);
+        expect(result).toEqual([1, null, 3]);
       });
 
       it("densifies arrays with multiple holes", () => {
@@ -173,14 +178,12 @@ describe("value-codec", () => {
         sparse[3] = "b"; // holes at indices 1 and 2
         sparse[5] = "c"; // hole at index 4
         const result = toStorableValue(sparse);
-        expect(result).toEqual([
-          "a",
-          undefined,
-          undefined,
-          "b",
-          undefined,
-          "c",
-        ]);
+        expect(result).toEqual(["a", null, null, "b", null, "c"]);
+      });
+
+      it("converts undefined elements to null", () => {
+        const result = toStorableValue([1, undefined, 3]);
+        expect(result).toEqual([1, null, 3]);
       });
 
       it("throws for arrays with named properties", () => {
@@ -476,29 +479,34 @@ describe("value-codec", () => {
       });
     });
 
-    describe("handles sparse arrays", () => {
-      it("densifies top-level sparse arrays", () => {
+    describe("handles sparse arrays and undefined elements", () => {
+      it("densifies top-level sparse arrays with null", () => {
         const sparse: unknown[] = [];
         sparse[0] = 1;
         sparse[2] = 3; // hole at index 1
         const result = toDeepStorableValue(sparse);
-        expect(result).toEqual([1, undefined, 3]);
+        expect(result).toEqual([1, null, 3]);
       });
 
-      it("densifies nested sparse arrays", () => {
+      it("densifies nested sparse arrays with null", () => {
         const sparse: unknown[] = [];
         sparse[0] = "a";
         sparse[2] = "c";
         const result = toDeepStorableValue({ arr: sparse });
-        expect(result).toEqual({ arr: ["a", undefined, "c"] });
+        expect(result).toEqual({ arr: ["a", null, "c"] });
       });
 
-      it("densifies sparse arrays inside arrays", () => {
+      it("densifies sparse arrays inside arrays with null", () => {
         const sparse: unknown[] = [];
         sparse[0] = 1;
         sparse[2] = 3;
         const result = toDeepStorableValue([[sparse]]);
-        expect(result).toEqual([[[1, undefined, 3]]]);
+        expect(result).toEqual([[[1, null, 3]]]);
+      });
+
+      it("converts undefined elements to null", () => {
+        const result = toDeepStorableValue([1, undefined, 3]);
+        expect(result).toEqual([1, null, 3]);
       });
 
       it("recursively processes elements after densifying", () => {
@@ -506,7 +514,7 @@ describe("value-codec", () => {
         sparse[0] = new Date("2024-01-15T12:00:00.000Z");
         sparse[2] = { nested: true };
         const result = toDeepStorableValue(sparse);
-        expect(result).toEqual(["2024-01-15T12:00:00.000Z", undefined, {
+        expect(result).toEqual(["2024-01-15T12:00:00.000Z", null, {
           nested: true,
         }]);
       });

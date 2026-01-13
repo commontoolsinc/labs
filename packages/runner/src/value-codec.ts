@@ -2,15 +2,15 @@ import { isInstance, isRecord } from "@commontools/utils/types";
 
 /**
  * Determines if the given value is considered "storable" by the system per se
- * (without invoking any conversions such as `.toJSON()`), but without taking
- * into consideration the contents of values (that is, it doesn't iterate over
- * array or object contents to make its determination).
+ * (without invoking any conversions such as `.toJSON()`). This function does
+ * not recursively validate nested values in arrays or objects.
  *
  * For the purposes of this system, storable values are values which are
  * JSON-encodable, _plus_ `undefined`. On the latter: A top-level `undefined`
- * indicates that the salient stored value is to be deleted. `undefined` at an
- * array index is treated as `null`. `undefined` as an object property value is
- * treated as if it were absent.
+ * indicates that the salient stored value is to be deleted. `undefined` as an
+ * object property value is treated as if it were absent. Arrays must not
+ * contain `undefined` elements (including holes); these get converted to `null`
+ * during conversion to storable form.
  *
  * @param value - The value to check.
  * @returns `true` if the value is storable per se, `false` otherwise.
@@ -106,16 +106,16 @@ export function toStorableValue(value: unknown): unknown {
       } else if (Array.isArray(valueObj)) {
         // Note that if the original `value` had a `toJSON()` method, that would
         // have triggered the `toJSON` clause above and so we won't end up here.
-        if (isStorableArray(valueObj)) {
-          return valueObj;
-        } else if (isArrayWithOnlyIndexProperties(valueObj)) {
-          // `valueObj` is non-storable only because it is sparse. Just densify
-          // it.
-          return [...valueObj];
-        } else {
+        if (!isArrayWithOnlyIndexProperties(valueObj)) {
           throw new Error(
             "Cannot store array with enumerable named properties.",
           );
+        } else if (isStorableArray(valueObj)) {
+          return valueObj;
+        } else {
+          // Array has holes or `undefined` elements. Densify and convert
+          // `undefined` to `null`.
+          return [...valueObj].map((v) => (v === undefined ? null : v));
         }
       } else {
         return valueObj;
@@ -241,8 +241,8 @@ function isArrayWithOnlyIndexProperties(array: unknown[]): boolean {
 /**
  * Helper for other functions in this file, which accepts an array and checks to
  * see whether or not it in storable form. To be in storable form, an array must
- * have all numeric keys from `0` through `.length - 1`, and it must have no
- * other (enumerable own) properties.
+ * have all numeric keys from `0` through `.length - 1`, it must have no other
+ * (enumerable own) properties, and it must not contain any `undefined` elements.
  *
  * @param array The array to check.
  * @returns `true` if the array is in storable form, `false` otherwise.
@@ -256,10 +256,11 @@ function isStorableArray(array: unknown[]): boolean {
     return false;
   }
 
-  // Verify all indices from 0 through length-1 exist (no holes). This catches
-  // the edge case where holes and extra properties balance out the count.
+  // Reject holes and `undefined` elements (neither should be present once a
+  // value has been converted to storable form). Note: `array[i]` returns
+  // `undefined` for holes, so this covers both cases.
   for (let i = 0; i < len; i++) {
-    if (!(i in array)) {
+    if (array[i] === undefined) {
       return false;
     }
   }
