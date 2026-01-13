@@ -527,10 +527,8 @@ export abstract class BaseObjectTraverser<
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
-      // doc.path can be [] here, so we can't just normalize the link
-      // We aren't pulling defaults from the link's schema in this branch,
-      // so just make a placeholder link.
-      // This does impact the back to cell symbols
+      // doc.path can be [] here, so we can't just normalize the link, which
+      // would trim "value". This does impact the back to cell symbols.
       return this.objectCreator.applyDefault(doc.address, defaultValue);
     } else if (isPrimitive(doc.value)) {
       return doc.value;
