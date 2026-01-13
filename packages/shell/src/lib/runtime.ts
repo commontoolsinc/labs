@@ -12,7 +12,6 @@ import {
 import { WebWorkerRuntimeTransport } from "@commontools/runtime-client/transports/web-worker";
 import { getLogger } from "@commontools/utils/logger";
 import { AppView, navigate } from "../../shared/mod.ts";
-import { API_URL } from "./env.ts";
 
 const logger = getLogger("shell.runtime", {
   enabled: false,
@@ -221,8 +220,13 @@ export class RuntimeInternals extends EventTarget {
       })`,
     );
 
+    // Worker script is bundled with shell assets, so load from shell origin
+    // (not apiUrl which points to the backend/router)
     const transport = await WebWorkerRuntimeTransport.connect({
-      workerUrl: new URL("./scripts/worker-runtime.js", API_URL),
+      workerUrl: new URL(
+        "/scripts/worker-runtime.js",
+        globalThis.location.origin,
+      ),
     });
     const client = await RuntimeClient.initialize(transport, {
       apiUrl,
