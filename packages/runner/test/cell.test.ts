@@ -71,6 +71,98 @@ describe("Cell", () => {
     expect(c.get()).toBe(20);
   });
 
+  it("should convert Error instances to @Error wrapper on set", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should convert Error instances to @Error wrapper on set",
+      undefined,
+      tx,
+    );
+    const error = new TypeError("something went wrong");
+    c.set(error);
+
+    // Error should be converted to @Error wrapper during set
+    const result = c.get() as { "@Error": Record<string, unknown> } | undefined;
+    expect(result).toHaveProperty("@Error");
+    expect(result!["@Error"].name).toBe("TypeError");
+    expect(result!["@Error"].message).toBe("something went wrong");
+    expect(typeof result!["@Error"].stack).toBe("string");
+  });
+
+  it("should call toJSON() on plain objects during set", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should call toJSON() on plain objects during set",
+      undefined,
+      tx,
+    );
+    const objWithToJSON = {
+      secret: "internal",
+      toJSON() {
+        return { exposed: true };
+      },
+    };
+    c.set({ data: objWithToJSON });
+
+    const result = c.get() as { data: unknown } | undefined;
+    // toJSON() should have been called, so we get { exposed: true } not { secret, toJSON }
+    expect(result?.data).toEqual({ exposed: true });
+  });
+
+  it("should densify sparse arrays during set", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should densify sparse arrays during set",
+      undefined,
+      tx,
+    );
+    const sparse: unknown[] = [];
+    sparse[0] = "a";
+    sparse[2] = "c"; // hole at index 1
+    c.set({ arr: sparse });
+
+    const result = c.get() as { arr: unknown[] } | undefined;
+    // Sparse array should be densified with null in the hole
+    expect(result?.arr).toEqual(["a", null, "c"]);
+  });
+
+  it("should densify shared sparse arrays and preserve sharing", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should densify shared sparse arrays and preserve sharing",
+      undefined,
+      tx,
+    );
+    const sparse: unknown[] = [];
+    sparse[0] = 1;
+    sparse[3] = 2; // holes at indices 1 and 2
+    // Same sparse array referenced twice
+    c.set([sparse, sparse]);
+
+    const result = c.get() as unknown[][] | undefined;
+    // Both should be densified
+    expect(result?.[0]).toEqual([1, null, null, 2]);
+    expect(result?.[1]).toEqual([1, null, null, 2]);
+    // Both should reference the same array (sharing preserved)
+    expect(result?.[0]).toBe(result?.[1]);
+  });
+
+  it("should call toJSON() on arrays with toJSON method during set", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should call toJSON() on arrays with toJSON method during set",
+      undefined,
+      tx,
+    );
+    const arrWithToJSON = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
+    arrWithToJSON.toJSON = () => "custom-array-value";
+    c.set({ arr: arrWithToJSON });
+
+    const result = c.get() as { arr: unknown } | undefined;
+    // toJSON() should have been called
+    expect(result?.arr).toBe("custom-array-value");
+  });
+
   it("should create a proxy for the cell", () => {
     const c = runtime.getCell<{ x: number; y: number }>(
       space,

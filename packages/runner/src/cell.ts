@@ -1700,6 +1700,26 @@ function recursivelyAddIDIfNeeded<T>(
   // Already seen, return previously annotated result.
   if (seen.has(value)) return seen.get(value) as T;
 
+  // Convert value to storable form. This handles:
+  // - Instances (e.g., Error → @Error wrapper)
+  // - Objects/arrays with toJSON() methods
+  // - Sparse arrays (densified to have null in holes)
+  // If conversion produces a different value, process that recursively and
+  // cache the result so shared references are preserved.
+  const converted = toStorableValue(value);
+  if (converted !== value) {
+    let result: T;
+    if (isRecord(converted)) {
+      result = recursivelyAddIDIfNeeded(converted as T, frame, seen);
+    } else {
+      // Conversion resulted in a primitive (e.g., from toJSON returning a string)
+      result = converted as T;
+    }
+    // Cache the result for the ORIGINAL value so shared references work
+    seen.set(value, result);
+    return result;
+  }
+
   if (Array.isArray(value)) {
     const result: unknown[] = [];
 
