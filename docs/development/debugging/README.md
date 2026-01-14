@@ -9,7 +9,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | "Property 'set' does not exist" | Missing `Writable<>` in signature | Add `Writable<T>` for write access ([@writeable](../../common/concepts/types-and-schemas/writeable.md)) |
 | "X.get is not a function" | Calling `.get()` on computed/lift result | Access directly without `.get()` - only `Writable<>` has `.get()` ([gotchas/get-is-not-a-function](gotchas/get-is-not-a-function.md)) |
 | "X.filter is not a function" | Value isn't an array (yet) | Check `Default<>`, don't assume `.get()` is the fix ([gotchas/filter-map-find-not-a-function](gotchas/filter-map-find-not-a-function.md)) |
-| "Tried to access a reactive reference outside a reactive context" | Using reactive value to index plain object in `.map()` | Use `lift()` for object indexing ([gotchas/reactive-reference-outside-context](gotchas/reactive-reference-outside-context.md)) |
+| "Tried to access a reactive reference outside a reactive context" | Accessing reactive value at init time (in `[NAME]`, `Cell.of()`, or object indexing) | Wrap in `computed()`, use `lift()`, or set in event handler ([gotchas/reactive-reference-outside-context](gotchas/reactive-reference-outside-context.md)) |
 | "Type 'string' is not assignable to type 'CSSProperties'" | String style on HTML element | Use object syntax `style={{ ... }}` ([style-errors](style-errors.md)) |
 | Type mismatch binding item to `$checked` | Binding whole item, not property | Bind `item.done`, not `item` ([type-errors](type-errors.md)) |
 | "ReadOnlyAddressError" | onClick inside computed() | Move button outside, use disabled ([gotchas/onclick-inside-computed](gotchas/onclick-inside-computed.md)) |

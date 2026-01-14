@@ -4,7 +4,27 @@
 
 **Cause:** The CTS transformer requires that `handler()`, `lift()`, and helper functions be defined at module scope (outside the pattern body). The transformer cannot process closures over pattern-scoped variables.
 
-## Wrong
+## Quick Fix: Use action() Instead
+
+For most event handling, use `action()` which IS allowed inside patterns and automatically closes over pattern state:
+
+```typescript
+export default pattern<Input, Input>(({ items }) => {
+  // action() works inside patterns - this is the recommended approach
+  const addItem = action(() => {
+    items.push({ title: "New" });
+  });
+
+  return {
+    [UI]: <ct-button onClick={addItem}>Add</ct-button>,
+    items,
+  };
+});
+```
+
+Only use `handler()` when you need to reuse the same logic with different state bindings, or export the handler for other patterns to call.
+
+## Wrong - handler() Inside Pattern
 
 ```typescript
 export default pattern<Input, Input>(({ items }) => {
@@ -18,7 +38,9 @@ export default pattern<Input, Input>(({ items }) => {
 });
 ```
 
-## Correct
+## Correct - handler() at Module Scope
+
+If you need `handler()` specifically (for reusability or exports), define it outside the pattern:
 
 ```typescript
 // Handler at module scope

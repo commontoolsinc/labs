@@ -15,8 +15,31 @@ creating internal cells.
 - Input parameters (they're already writable if declared with `Writable<>`)
 - Values you won't mutate
 
+**IMPORTANT: Initialize with static values only**
+
+You cannot initialize a cell with a reactive value (like an input prop) because `Cell.of()` runs at pattern initialization time, outside a reactive context:
+
+```tsx
+// WRONG - deck.name is reactive, causes "reactive reference outside context" error
+export default pattern<Input>(({ deck }) => {
+  const editedName = Cell.of(deck.name);  // ERROR!
+  ...
+});
+
+// CORRECT - initialize with static value, set from event handler
+export default pattern<Input>(({ deck }) => {
+  const editedName = Cell.of("");  // Static initial value
+
+  const startEditing = action(() => {
+    editedName.set(deck.name);  // OK - event handlers run at click time
+    editingMode.set(true);
+  });
+  ...
+});
+```
+
 ```typescript
-// ✅ Creating new cells in pattern body
+// Creating new cells in pattern body
 export default pattern(({ inputItems }) => {
   // Create new cells for local state
   const filteredItems = Cell.of<Item[]>([]);
@@ -32,7 +55,7 @@ export default pattern(({ inputItems }) => {
   };
 });
 
-// ✅ Common patterns
+// Common patterns
 const count = Cell.of(0);                           // Number
 const name = Cell.of("Alice");                      // String
 const items = Cell.of<Item[]>([]);                  // Empty array with type
