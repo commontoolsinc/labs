@@ -272,8 +272,10 @@ const computeStats = lift((args: {
   const { examples, rules } = args;
 
   // Single-pass computation for O(n) instead of O(4n)
+  // Filter out any undefined/null entries that might exist in the array
   const counts = examples.reduce(
     (acc, e) => {
+      if (!e) return acc; // Skip undefined/null entries
       if (e.label) acc.positive++;
       else acc.negative++;
       if (e.decidedBy === "auto") acc.auto++;
@@ -479,6 +481,7 @@ const getFieldValue = lift(
 
 /** Format example preview - truncates first field value for compact display */
 const getExamplePreview = lift((example: LabeledExample): string => {
+  if (!example?.input?.fields) return "(invalid)";
   const entries = Object.entries(example.input.fields);
   const first = entries[0];
   return first ? `${first[0]}: ${first[1].substring(0, 30)}...` : "(empty)";
@@ -486,7 +489,7 @@ const getExamplePreview = lift((example: LabeledExample): string => {
 
 /** Extract decidedBy label - simple property access wrapped for reactivity */
 const getExampleDecidedBy = lift(
-  (example: LabeledExample): string => example.decidedBy,
+  (example: LabeledExample): string => example?.decidedBy ?? "unknown",
 );
 
 /** Remove a field from the newItemFields record */
