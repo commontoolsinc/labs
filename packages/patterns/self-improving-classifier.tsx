@@ -506,6 +506,19 @@ const removeFieldHandler = handler<
   newItemFields.set(updated);
 });
 
+/** Update a field value in the newItemFields record */
+const updateFieldHandler = handler<
+  { detail?: { value?: string } },
+  {
+    fieldKey: string;
+    newItemFields: Writable<Record<string, string>>;
+  }
+>((event, { fieldKey, newItemFields }) => {
+  const value = event.detail?.value ?? "";
+  const current = newItemFields.get();
+  newItemFields.set({ ...current, [fieldKey]: value });
+});
+
 // =============================================================================
 // MODULE-SCOPED HANDLERS FOR BUTTON CLICKS IN .map()
 // These handlers receive the pending item as a parameter at render time (in reactive context)
@@ -606,6 +619,92 @@ const removeRuleHandler = handler<
 >((_event, { rule, rules }) => {
   const currentRules = rules.get();
   rules.set(currentRules.filter((r) => !equals(rule, r)));
+});
+
+/** Toggle example selection for expanded details view */
+const toggleExampleSelectionHandler = handler<
+  unknown,
+  {
+    example: LabeledExample;
+    selectedExampleId: Writable<string | null>;
+  }
+>((_event, { example, selectedExampleId }) => {
+  const currentSelected = selectedExampleId.get();
+  const exampleId = example?.input?.id;
+  if (!exampleId) return;
+
+  // Toggle: if already selected, deselect; otherwise select this one
+  if (currentSelected === exampleId) {
+    selectedExampleId.set(null);
+  } else {
+    selectedExampleId.set(exampleId);
+  }
+});
+
+/** Remove an example from the examples list */
+const removeExampleHandler = handler<
+  unknown,
+  {
+    example: LabeledExample;
+    examples: Writable<LabeledExample[]>;
+    selectedExampleId: Writable<string | null>;
+  }
+>((_event, { example, examples, selectedExampleId }) => {
+  const examplesList = examples.get();
+  const exampleId = example?.input?.id;
+  if (!exampleId) return;
+
+  // Remove the example
+  examples.set(examplesList.filter((ex) => ex.input.id !== exampleId));
+
+  // Clear selection if this was the selected example
+  if (selectedExampleId.get() === exampleId) {
+    selectedExampleId.set(null);
+  }
+
+  console.log(`[Classifier] Removed example ${exampleId}`);
+});
+
+/** Reclassify an example - remove it and set as current item */
+const reclassifyExampleHandler = handler<
+  unknown,
+  {
+    example: LabeledExample;
+    examples: Writable<LabeledExample[]>;
+    currentItem: Writable<ClassifiableInput | null>;
+    selectedExampleId: Writable<string | null>;
+  }
+>((_event, { example, examples, currentItem, selectedExampleId }) => {
+  // Only allow reclassification if not already classifying something
+  if (currentItem.get() !== null) {
+    console.warn(
+      "[Classifier] Already classifying an item, cannot reclassify",
+    );
+    return;
+  }
+
+  const exampleId = example?.input?.id;
+  if (!exampleId) return;
+
+  // Get the input data from the example
+  const inputData = example.input;
+
+  // Remove from examples
+  const examplesList = examples.get();
+  examples.set(examplesList.filter((ex) => ex.input.id !== exampleId));
+
+  // Clear selection
+  selectedExampleId.set(null);
+
+  // Set as current item with a new ID (so it's treated as a fresh classification)
+  const newInput: ClassifiableInput = {
+    id: generateId(),
+    receivedAt: Date.now(),
+    fields: { ...inputData.fields },
+  };
+  currentItem.set(newInput);
+
+  console.log(`[Classifier] Reclassifying example (new ID: ${newInput.id})`);
 });
 
 /** Undo an auto-classification (module-scoped handler) */
@@ -778,11 +877,39 @@ export default pattern<ClassifierInput, ClassifierOutput>(
     // Track recently auto-classified items for undo functionality
     const recentAutoClassified = Writable.of<AutoClassifiedItem[]>([]);
 
+    // Track selected example for expanded details view (null when none selected)
+    const selectedExampleId = Writable.of<string | null>(null);
+
+    // Compute common field names from existing examples
+    // These are field names that appear in ALL examples
+    const commonFields = computed(() => {
+      const examplesList = examples.get();
+      if (examplesList.length === 0) return [];
+
+      // Get field names from first example
+      const firstFields = Object.keys(examplesList[0]?.input?.fields || {});
+
+      // Filter to only fields that exist in ALL examples
+      return firstFields.filter((field) =>
+        examplesList.every((ex) => ex?.input?.fields?.[field] !== undefined)
+      );
+    });
+
     // Transform Record to array of {key, value} for reactive iteration
     // Use computed() instead of lift() to avoid closure limitations
+    // When no fields are manually added, pre-populate with common fields (empty values)
     const newItemFieldEntries = computed(() => {
       const fields = newItemFields.get() ?? {};
-      return Object.entries(fields).map(([key, value]) => ({ key, value }));
+      const manualEntries = Object.entries(fields);
+
+      // If user has manually added fields, show those
+      if (manualEntries.length > 0) {
+        return manualEntries.map(([key, value]) => ({ key, value }));
+      }
+
+      // Otherwise, pre-populate with common fields from examples (empty values)
+      // Access computed directly - no .get() needed within computed context
+      return (commonFields as string[]).map((key) => ({ key, value: "" }));
     });
 
     // Compute stats
@@ -1095,7 +1222,7 @@ Respond with:
           inputId: item.id,
           classification: llmResultValue.classification,
           confidence: llmResultValue.confidence,
-          reasoning: llmResultValue.reasoning,
+          reasoning: llmResultValue.reasoning ?? "",
           decidedBy: "llm",
           matchedRules,
         };
@@ -1112,58 +1239,61 @@ Respond with:
 
     // ==========================================================================
     // HANDLERS FOR CURRENT ITEM (in-progress classification)
-    // These are called when user clicks Confirm/Correct on the item being classified
-    // They move the item from currentItem to pendingClassifications
+    // These are called when user clicks Accept/Correct on the item being classified
+    // They store directly to examples (single-step confirmation)
     // ==========================================================================
 
-    /** Accept the current classification result and move to pending */
+    /** Accept the current classification result and store directly to examples */
     const acceptCurrentClassification = action(() => {
       const result = currentClassificationResult;
       if (!result) return;
 
       const { item, classification } = result;
 
-      // Spread to create plain objects (breaks proxy chain)
-      pendingClassifications.push({
+      // Store directly to examples (skip pendingClassifications intermediate step)
+      examples.push({
         input: {
           id: item.id,
           receivedAt: item.receivedAt,
           fields: { ...item.fields },
         },
-        result: {
-          inputId: classification.inputId,
-          classification: classification.classification,
-          confidence: classification.confidence,
-          reasoning: classification.reasoning,
-          decidedBy: classification.decidedBy,
-          matchedRules: [...classification.matchedRules],
-        },
+        label: classification.classification,
+        decidedBy: "suggestion-accepted",
+        reasoning: classification.reasoning,
+        confidence: classification.confidence,
+        labeledAt: Date.now(),
+        wasCorrection: false,
+        isInteresting: classification.confidence < 0.7,
+        interestingReason: classification.confidence < 0.7
+          ? "Low confidence, user confirmed"
+          : undefined,
       });
       currentItem.set(null);
     });
 
-    /** Correct the current classification and move to pending with flipped label */
+    /** Correct the current classification and store directly to examples with flipped label */
     const correctCurrentClassification = action(() => {
       const result = currentClassificationResult;
       if (!result) return;
 
       const { item, classification } = result;
 
-      // Spread to create plain objects (breaks proxy chain)
-      pendingClassifications.push({
+      // Store directly to examples with corrected label
+      examples.push({
         input: {
           id: item.id,
           receivedAt: item.receivedAt,
           fields: { ...item.fields },
         },
-        result: {
-          inputId: classification.inputId,
-          classification: !classification.classification, // FLIP the classification
-          confidence: 1.0, // User is certain
-          reasoning: "User corrected classification",
-          decidedBy: "user",
-          matchedRules: [...classification.matchedRules],
-        },
+        label: !classification.classification, // FLIP the classification
+        decidedBy: "user",
+        reasoning: "User corrected classification",
+        confidence: 1.0, // User is certain
+        labeledAt: Date.now(),
+        wasCorrection: true,
+        originalPrediction: classification.classification,
+        isInteresting: true,
+        interestingReason: "User corrected classification",
       });
       currentItem.set(null);
     });
@@ -1385,9 +1515,10 @@ Each suggestion should have:
 
                   {/* Current fields - show empty message or field list */}
                   {ifElse(
-                    computed(() =>
-                      Object.keys(newItemFields.get()).length === 0
-                    ),
+                    computed(() => {
+                      const entries = newItemFieldEntries;
+                      return !entries || entries.length === 0;
+                    }),
                     <span style="color: var(--ct-color-gray-400); font-size: 0.875rem;">
                       No fields added yet
                     </span>,
@@ -1398,9 +1529,17 @@ Each suggestion should have:
                             <span style="font-weight: 500; min-width: 80px;">
                               {getFieldKey(entry)}:
                             </span>
-                            <span style="flex: 1; color: var(--ct-color-gray-600);">
-                              {getFieldValue(entry)}
-                            </span>
+                            <ct-input
+                              value={getFieldValue(entry)}
+                              placeholder={computed(() =>
+                                `Enter ${getFieldKey(entry)}`
+                              )}
+                              style="flex: 1;"
+                              onct-input={updateFieldHandler({
+                                fieldKey: getFieldKey(entry),
+                                newItemFields,
+                              })}
+                            />
                             <ct-button
                               variant="ghost"
                               onClick={removeFieldHandler({
@@ -1435,9 +1574,13 @@ Each suggestion should have:
 
                   <ct-button
                     variant="primary"
-                    disabled={computed(() =>
-                      Object.keys(newItemFields.get()).length === 0
-                    )}
+                    disabled={computed(() => {
+                      const fields = newItemFields.get();
+                      const fieldKeys = Object.keys(fields);
+                      // Disabled if no fields or all fields are empty
+                      if (fieldKeys.length === 0) return true;
+                      return fieldKeys.every((k) => !fields[k]?.trim());
+                    })}
                     onClick={submitNewItem}
                   >
                     Classify
@@ -1496,8 +1639,7 @@ Each suggestion should have:
                                 (currentClassificationResult?.classification
                                   .confidence ?? 0) * 100
                               ).toFixed(0)
-                            )}% confidence via{" "}
-                            {computed(() =>
+                            )}% confidence via {computed(() =>
                               currentClassificationResult?.classification
                                 .decidedBy ?? ""
                             )})
@@ -1585,12 +1727,13 @@ Each suggestion should have:
                             <span style="color: var(--ct-color-gray-500); font-size: 0.875rem;">
                               ({computed(() =>
                                 (pending.result.confidence * 100).toFixed(0)
-                              )}% confidence via {pending.result.decidedBy})
+                              )}% confidence via{" "}
+                              {pending.result.decidedBy ?? "unknown"})
                             </span>
                           </ct-hstack>
 
                           <span style="font-size: 0.875rem; color: var(--ct-color-gray-600);">
-                            {pending.result.reasoning}
+                            {pending.result.reasoning ?? ""}
                           </span>
 
                           <ct-hstack gap="2">
@@ -1674,9 +1817,9 @@ Each suggestion should have:
                             )} → {ifElse(rule.predicts, "YES", "NO")}
                           </span>
                           <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
-                            P:{" "}
-                            {computed(() => (rule.precision * 100).toFixed(0))}%
-                            | F1: {computed(() =>
+                            P: {computed(() =>
+                              (rule.precision * 100).toFixed(0)
+                            )}% | F1: {computed(() =>
                               (calculateF1(rule) * 100).toFixed(0)
                             )}% | {rule.evaluationCount} evals | {computed(() =>
                               getTierLabel(rule.tier)
@@ -1873,44 +2016,224 @@ Each suggestion should have:
                   </summary>
                   <ct-vstack gap="1" style="margin-top: 0.5rem;">
                     {examples.map((example) => (
-                      <ct-hstack
-                        gap="2"
-                        align="center"
-                        style={{
-                          padding: "0.5rem",
-                          background: ifElse(
-                            example.wasCorrection,
-                            "var(--ct-color-warning-50)",
-                            "var(--ct-color-gray-50)",
-                          ),
-                          borderRadius: "4px",
-                          borderLeft: ifElse(
-                            example.isInteresting,
-                            "3px solid var(--ct-color-warning-400)",
-                            "none",
-                          ),
-                        }}
-                      >
-                        <span
+                      <ct-vstack gap="0">
+                        {/* Clickable example row */}
+                        <ct-hstack
+                          gap="2"
+                          align="center"
+                          onClick={toggleExampleSelectionHandler({
+                            example,
+                            selectedExampleId,
+                          })}
                           style={{
-                            fontWeight: "600",
-                            color: ifElse(
-                              example.label,
-                              "var(--ct-color-success-600)",
-                              "var(--ct-color-error-600)",
+                            padding: "0.5rem",
+                            cursor: "pointer",
+                            background: ifElse(
+                              computed(() =>
+                                selectedExampleId.get() === example.input.id
+                              ),
+                              "var(--ct-color-info-100)",
+                              ifElse(
+                                example.wasCorrection,
+                                "var(--ct-color-warning-50)",
+                                "var(--ct-color-gray-50)",
+                              ),
+                            ),
+                            borderRadius: ifElse(
+                              computed(() =>
+                                selectedExampleId.get() === example.input.id
+                              ),
+                              "4px 4px 0 0",
+                              "4px",
+                            ),
+                            borderLeft: ifElse(
+                              example.isInteresting,
+                              "3px solid var(--ct-color-warning-400)",
+                              "none",
                             ),
                           }}
                         >
-                          {ifElse(example.label, "YES", "NO")}
-                        </span>
-                        <span style="flex: 1; font-size: 0.875rem; color: var(--ct-color-gray-600);">
-                          {getExamplePreview(example)}
-                        </span>
-                        <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
-                          {getExampleDecidedBy(example)}
-                          {ifElse(example.wasCorrection, " (corrected)", "")}
-                        </span>
-                      </ct-hstack>
+                          <span
+                            style={{
+                              fontWeight: "600",
+                              color: ifElse(
+                                example.label,
+                                "var(--ct-color-success-600)",
+                                "var(--ct-color-error-600)",
+                              ),
+                            }}
+                          >
+                            {ifElse(example.label, "YES", "NO")}
+                          </span>
+                          <span style="flex: 1; font-size: 0.875rem; color: var(--ct-color-gray-600);">
+                            {getExamplePreview(example)}
+                          </span>
+                          <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
+                            {getExampleDecidedBy(example)}
+                            {ifElse(example.wasCorrection, " (corrected)", "")}
+                          </span>
+                          <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
+                            {ifElse(
+                              computed(() =>
+                                selectedExampleId.get() === example.input.id
+                              ),
+                              "[-]",
+                              "[+]",
+                            )}
+                          </span>
+                        </ct-hstack>
+
+                        {/* Expanded details panel */}
+                        {ifElse(
+                          computed(() =>
+                            selectedExampleId.get() === example.input.id
+                          ),
+                          <ct-card
+                            style={{
+                              marginTop: "0",
+                              borderRadius: "0 0 4px 4px",
+                              borderTop: "1px solid var(--ct-color-gray-200)",
+                              background: "var(--ct-color-gray-25)",
+                            }}
+                          >
+                            <ct-vstack gap="2">
+                              {/* All input fields */}
+                              <ct-vstack gap="1">
+                                <span style="font-weight: 600; font-size: 0.75rem; color: var(--ct-color-gray-500); text-transform: uppercase;">
+                                  Input Fields
+                                </span>
+                                <pre style="font-size: 0.75rem; overflow: auto; max-height: 150px; margin: 0; background: white; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--ct-color-gray-200);">
+                                  {computed(() =>
+                                    JSON.stringify(
+                                      example.input.fields,
+                                      null,
+                                      2,
+                                    )
+                                  )}
+                                </pre>
+                              </ct-vstack>
+
+                              {/* Classification details */}
+                              <ct-hstack gap="4" wrap>
+                                <ct-vstack gap="0">
+                                  <span style="font-weight: 600; font-size: 0.625rem; color: var(--ct-color-gray-500); text-transform: uppercase;">
+                                    Label
+                                  </span>
+                                  <span
+                                    style={{
+                                      fontWeight: "600",
+                                      color: ifElse(
+                                        example.label,
+                                        "var(--ct-color-success-600)",
+                                        "var(--ct-color-error-600)",
+                                      ),
+                                    }}
+                                  >
+                                    {ifElse(example.label, "YES", "NO")}
+                                  </span>
+                                </ct-vstack>
+                                <ct-vstack gap="0">
+                                  <span style="font-weight: 600; font-size: 0.625rem; color: var(--ct-color-gray-500); text-transform: uppercase;">
+                                    Confidence
+                                  </span>
+                                  <span style="font-size: 0.875rem;">
+                                    {computed(() =>
+                                      (example.confidence * 100).toFixed(0)
+                                    )}%
+                                  </span>
+                                </ct-vstack>
+                                <ct-vstack gap="0">
+                                  <span style="font-weight: 600; font-size: 0.625rem; color: var(--ct-color-gray-500); text-transform: uppercase;">
+                                    Decided By
+                                  </span>
+                                  <span style="font-size: 0.875rem;">
+                                    {getExampleDecidedBy(example)}
+                                  </span>
+                                </ct-vstack>
+                                <ct-vstack gap="0">
+                                  <span style="font-weight: 600; font-size: 0.625rem; color: var(--ct-color-gray-500); text-transform: uppercase;">
+                                    Timestamp
+                                  </span>
+                                  <span style="font-size: 0.875rem;">
+                                    {computed(() =>
+                                      new Date(
+                                        example.labeledAt,
+                                      ).toLocaleString()
+                                    )}
+                                  </span>
+                                </ct-vstack>
+                              </ct-hstack>
+
+                              {/* Reasoning */}
+                              {ifElse(
+                                computed(() => !!example.reasoning),
+                                <ct-vstack gap="1">
+                                  <span style="font-weight: 600; font-size: 0.625rem; color: var(--ct-color-gray-500); text-transform: uppercase;">
+                                    Reasoning
+                                  </span>
+                                  <span style="font-size: 0.875rem; color: var(--ct-color-gray-600);">
+                                    {example.reasoning}
+                                  </span>
+                                </ct-vstack>,
+                                null,
+                              )}
+
+                              {/* Correction info */}
+                              {ifElse(
+                                example.wasCorrection,
+                                <ct-hstack
+                                  gap="1"
+                                  align="center"
+                                  style="font-size: 0.75rem; color: var(--ct-color-warning-600); padding: 0.25rem 0.5rem; background: var(--ct-color-warning-50); border-radius: 4px;"
+                                >
+                                  <span style="font-weight: 500;">
+                                    Correction:
+                                  </span>
+                                  <span>
+                                    Originally predicted {ifElse(
+                                      example.originalPrediction,
+                                      "YES",
+                                      "NO",
+                                    )}
+                                  </span>
+                                </ct-hstack>,
+                                null,
+                              )}
+
+                              {/* Action buttons */}
+                              <ct-hstack gap="2" style="margin-top: 0.5rem;">
+                                <ct-button
+                                  variant="secondary"
+                                  size="sm"
+                                  disabled={computed(() =>
+                                    currentItem.get() !== null
+                                  )}
+                                  onClick={reclassifyExampleHandler({
+                                    example,
+                                    examples,
+                                    currentItem,
+                                    selectedExampleId,
+                                  })}
+                                >
+                                  Reclassify
+                                </ct-button>
+                                <ct-button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={removeExampleHandler({
+                                    example,
+                                    examples,
+                                    selectedExampleId,
+                                  })}
+                                >
+                                  Remove
+                                </ct-button>
+                              </ct-hstack>
+                            </ct-vstack>
+                          </ct-card>,
+                          null,
+                        )}
+                      </ct-vstack>
                     ))}
                   </ct-vstack>
                 </details>,
