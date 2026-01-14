@@ -163,6 +163,71 @@ describe("Cell", () => {
     expect(result?.arr).toBe("custom-array-value");
   });
 
+  it("should convert -0 to 0 during set", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should convert -0 to 0 during set",
+      undefined,
+      tx,
+    );
+    c.set({ value: -0 });
+
+    const result = c.get() as { value: number } | undefined;
+    expect(result?.value).toBe(0);
+    // Verify it's actually 0, not -0
+    expect(Object.is(result?.value, 0)).toBe(true);
+    expect(Object.is(result?.value, -0)).toBe(false);
+  });
+
+  it("should throw when setting NaN", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should throw when setting NaN",
+      undefined,
+      tx,
+    );
+    expect(() => c.set({ value: NaN })).toThrow(
+      "Cannot store non-finite number",
+    );
+  });
+
+  it("should throw when setting Infinity", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should throw when setting Infinity",
+      undefined,
+      tx,
+    );
+    expect(() => c.set({ value: Infinity })).toThrow(
+      "Cannot store non-finite number",
+    );
+    expect(() => c.set({ value: -Infinity })).toThrow(
+      "Cannot store non-finite number",
+    );
+  });
+
+  it("should throw when setting Symbol", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should throw when setting Symbol",
+      undefined,
+      tx,
+    );
+    expect(() => c.set({ value: Symbol("test") })).toThrow(
+      "Cannot store symbol",
+    );
+  });
+
+  it("should throw when setting BigInt", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should throw when setting BigInt",
+      undefined,
+      tx,
+    );
+    expect(() => c.set({ value: BigInt(123) })).toThrow("Cannot store bigint");
+  });
+
   it("should create a proxy for the cell", () => {
     const c = runtime.getCell<{ x: number; y: number }>(
       space,
