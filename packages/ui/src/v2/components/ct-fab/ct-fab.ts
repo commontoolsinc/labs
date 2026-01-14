@@ -4,6 +4,7 @@ import { BaseElement } from "../../core/base-element.ts";
 import type { CellHandle } from "@commontools/runtime-client";
 import { isCellHandle } from "@commontools/runtime-client";
 import { fabAnimations } from "./styles.ts";
+import { stringSchema } from "@commontools/runner/schemas";
 
 /**
  * A morphing floating action button that expands into a panel.
@@ -419,14 +420,16 @@ export class CTFab extends BaseElement {
             if (
               this.previewMessage && isCellHandle<string>(this.previewMessage)
             ) {
-              this._previewUnsubscribe = this.previewMessage.subscribe(
-                (value) => {
-                  this._resolvedPreviewMessage = value;
-                  if (this._resolvedPreviewMessage && !this.expanded) {
-                    this._showPreviewNotification();
-                  }
-                },
-              );
+              this._previewUnsubscribe = this.previewMessage
+                .asSchema<string>(stringSchema)
+                .subscribe(
+                  (value) => {
+                    this._resolvedPreviewMessage = value;
+                    if (this._resolvedPreviewMessage && !this.expanded) {
+                      this._showPreviewNotification();
+                    }
+                  },
+                );
             } else if (
               this.previewMessage && typeof this.previewMessage === "string"
             ) {

@@ -43,10 +43,22 @@ export default pattern(({ value }) => {
     type: "object",
     properties: {
         update: {
+            $ref: "#/$defs/MyEvent",
             asStream: true
         }
     },
-    required: ["update"]
+    required: ["update"],
+    $defs: {
+        MyEvent: {
+            type: "object",
+            properties: {
+                data: {
+                    type: "string"
+                }
+            },
+            required: ["data"]
+        }
+    }
 } as const satisfies __ctHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }

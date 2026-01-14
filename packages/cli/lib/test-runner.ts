@@ -3,17 +3,39 @@
  *
  * Test patterns (.test.tsx) are patterns that:
  * 1. Import and instantiate the pattern under test
- * 2. Define test actions as handlers (Stream<void>)
- * 3. Define assertions as Cell<boolean>
- * 4. Return { tests: [...] } array processed sequentially
+ * 2. Define test steps as an array of { assertion } or { action } objects
+ * 3. Return { tests: TestStep[] }
+ *
+ * TestStep is a discriminated union:
+ * - { assertion: OpaqueRef<boolean> } from computed(() => condition)
+ * - { action: Stream<void> } from action(() => sideEffect)
+ *
+ * The discriminated union avoids TypeScript declaration emit issues
+ * that occur when mixing Cell and Stream types in the same array.
+ *
+ * Example:
+ * tests: [
+ *   { assertion: computed(() => game.phase === "playing") },
+ *   { action: action(() => game.start.send(undefined)) },
+ *   { assertion: computed(() => game.phase === "started") },
+ * ]
  */
 
 import { Identity } from "@commontools/identity";
-import { Engine, isCell, isStream, Runtime } from "@commontools/runner";
+import { Engine, Runtime } from "@commontools/runner";
 import type { Cell, Recipe, Stream } from "@commontools/runner";
+import type { OpaqueRef } from "@commontools/api";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { basename } from "@std/path";
 import { timeout } from "@commontools/utils/sleep";
+
+/**
+ * A test step is an object with either an 'assertion' or 'action' property.
+ * This discriminated union avoids TypeScript trying to unify incompatible Cell/Stream types.
+ */
+export type TestStep =
+  | { assertion: OpaqueRef<boolean> }
+  | { action: Stream<void> };
 
 export interface TestResult {
   name: string;
@@ -109,47 +131,63 @@ export async function runTestPattern(
     sinkCancel = patternResult.sink(() => {});
 
     // 4. Get the tests array from pattern output
-    // Use .key() to get sub-cells without unwrapping
-    const testsCell = patternResult.key("tests") as Cell<unknown[]>;
-
-    // Get the length of the tests array to iterate
+    const testsCell = patternResult.key("tests") as Cell<unknown>;
     const testsValue = testsCell.get();
+
+    // Validate it's an array
     if (!Array.isArray(testsValue)) {
       throw new Error(
-        "Test pattern must return { tests: [...] }. Got: " +
+        "Test pattern must return { tests: TestStep[] }. Got: " +
           JSON.stringify(typeof testsValue),
       );
     }
 
-    const testCount = testsValue.length;
-
     if (options.verbose) {
-      console.log(`  Found ${testCount} test items`);
+      console.log(`  Found ${testsValue.length} test steps`);
     }
 
-    // 5. Process tests in order
+    // 5. Process tests sequentially
     const results: TestResult[] = [];
-    let lastActionName: string | null = null;
-    let assertionIndex = 0;
-    let actionIndex = 0;
+    let lastActionIndex: number | null = null;
+    let assertionCount = 0;
+    let actionCount = 0;
 
-    for (let i = 0; i < testCount; i++) {
-      // Use .key() to get the item as a Cell/Stream without unwrapping
-      const testItem = testsCell.key(i);
+    for (let i = 0; i < testsValue.length; i++) {
       const itemStart = performance.now();
+      const stepValue = testsValue[i] as {
+        action?: unknown;
+        assertion?: unknown;
+      };
 
-      if (isStream(testItem)) {
+      // Check if this step has 'action' or 'assertion' key
+      const isAction = "action" in stepValue;
+      const isAssertion = "assertion" in stepValue;
+
+      if (!isAction && !isAssertion) {
+        throw new Error(
+          `Test step at index ${i} must have either 'action' or 'assertion' key. Got: ${
+            JSON.stringify(Object.keys(stepValue))
+          }`,
+        );
+      }
+
+      if (isAction) {
         // It's an action - invoke it
-        actionIndex++;
-        lastActionName = `action_${actionIndex}`;
+        actionCount++;
+        lastActionIndex = i;
+        const actionName = `action_${actionCount}`;
 
         if (options.verbose) {
-          console.log(`  → Running ${lastActionName}...`);
+          console.log(`  → Running ${actionName}...`);
         }
 
-        // Send empty object - handlers may expect event-like object
-        // Cast needed because .key() returns Cell which overlaps with Stream
-        (testItem as unknown as Stream<unknown>).send({});
+        // Get the action stream via .key()
+        const actionStream = testsCell.key(i).key(
+          "action",
+        ) as unknown as Stream<unknown>;
+
+        // Send undefined for void streams
+        actionStream.send(undefined);
 
         // Wait for idle with timeout
         try {
@@ -157,29 +195,30 @@ export async function runTestPattern(
             runtime.idle(),
             timeout(
               TIMEOUT,
-              `Action ${lastActionName} timed out after ${TIMEOUT}ms`,
+              `Action at index ${i} timed out after ${TIMEOUT}ms`,
             ),
           ]);
         } catch (err) {
           results.push({
-            name: lastActionName,
+            name: actionName,
             passed: false,
             afterAction: null,
             error: err instanceof Error ? err.message : String(err),
             durationMs: performance.now() - itemStart,
           });
-          // Continue to next test item
         }
-      } else if (isCell(testItem)) {
+      } else {
         // It's an assertion - check the boolean value
-        assertionIndex++;
-        const assertName = `assert_${assertionIndex}`;
+        assertionCount++;
+        const assertionName = `assertion_${assertionCount}`;
 
         let passed = false;
         let error: string | undefined;
 
         try {
-          const value = testItem.get();
+          // Get the assertion cell via .key()
+          const assertCell = testsCell.key(i).key("assertion") as Cell<unknown>;
+          const value = assertCell.get();
           passed = value === true;
           if (!passed) {
             error = `Expected true, got ${JSON.stringify(value)}`;
@@ -192,22 +231,21 @@ export async function runTestPattern(
         }
 
         results.push({
-          name: assertName,
+          name: assertionName,
           passed,
-          afterAction: lastActionName,
+          afterAction: lastActionIndex !== null
+            ? `action_${actionCount}`
+            : null,
           error,
           durationMs: performance.now() - itemStart,
         });
 
         if (options.verbose) {
           const status = passed ? "✓" : "✗";
-          const suffix = lastActionName ? ` (after ${lastActionName})` : "";
-          console.log(`  ${status} ${assertName}${suffix}`);
-        }
-      } else {
-        // Unknown type - skip with warning
-        if (options.verbose) {
-          console.log(`  ? Skipping unknown test item at index ${i}`);
+          const suffix = lastActionIndex !== null
+            ? ` (after action_${actionCount})`
+            : "";
+          console.log(`  ${status} ${assertionName}${suffix}`);
         }
       }
     }

@@ -20,7 +20,10 @@ import {
   UnsafeEvalIsolate,
   UnsafeEvalRuntime,
 } from "./eval-runtime.ts";
-import { CommonToolsTransformerPipeline } from "@commontools/ts-transformers";
+import {
+  CommonToolsTransformerPipeline,
+  OpaqueRefErrorTransformer,
+} from "@commontools/ts-transformers";
 import * as RuntimeModules from "./runtime-modules.ts";
 import { Runtime } from "../runtime.ts";
 import { refer } from "@commontools/memory/reference";
@@ -159,6 +162,12 @@ export class Engine extends EventTarget implements Harness {
     const { compiler, isolate, runtimeExports, exportsCallback } = await this
       .getInternals();
     const resolvedProgram = await this.resolve(resolver);
+
+    // Create diagnostic message transformer for clearer error messages
+    const diagnosticMessageTransformer = new OpaqueRefErrorTransformer({
+      verbose: options.verboseErrors,
+    });
+
     const output = await compiler.compile(resolvedProgram, {
       filename,
       noCheck: options.noCheck,
@@ -166,6 +175,7 @@ export class Engine extends EventTarget implements Harness {
       runtimeModules: Engine.runtimeModuleNames(),
       bundleExportAll: true,
       getTransformedProgram: options.getTransformedProgram,
+      diagnosticMessageTransformer,
       beforeTransformers: (program) => {
         const pipeline = new CommonToolsTransformerPipeline();
         return {

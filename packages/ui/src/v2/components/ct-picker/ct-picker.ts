@@ -2,6 +2,7 @@ import { css, html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { createCellController } from "../../core/cell-controller.ts";
 import { type CellHandle } from "@commontools/runtime-client";
+import { numberSchema } from "@commontools/runner/schemas";
 import "../ct-render/ct-render.ts";
 
 /**
@@ -296,7 +297,7 @@ export class CTPicker extends BaseElement {
           }
 
           override firstUpdated() {
-            this._cellController.bind(this.selectedIndex);
+            this._cellController.bind(this.selectedIndex, numberSchema);
             this._updateAriaAttributes();
             this._updateMinHeight();
           }
@@ -304,7 +305,7 @@ export class CTPicker extends BaseElement {
           override willUpdate(changedProperties: PropertyValues) {
             super.willUpdate(changedProperties);
             if (changedProperties.has("selectedIndex")) {
-              this._cellController.bind(this.selectedIndex);
+              this._cellController.bind(this.selectedIndex, numberSchema);
             }
           }
 

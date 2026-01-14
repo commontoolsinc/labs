@@ -543,7 +543,8 @@ export async function callCharmHandler<T = any>(
   }
 
   // Send the event to trigger the handler
-  handlerStream.send(args);
+  // Type assertion needed because TypeScript can't verify the conditional type at this generic callsite
+  (handlerStream.send as (event: T) => void)(args);
 
   // Wait for processing to complete
   await manager.runtime.idle();

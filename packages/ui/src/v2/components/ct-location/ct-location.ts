@@ -1,7 +1,8 @@
 import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import { type CellHandle } from "@commontools/runtime-client";
+import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
+import type { Schema } from "@commontools/api";
 import { createCellController } from "../../core/cell-controller.ts";
 import { consume } from "@lit/context";
 import {
@@ -11,6 +12,23 @@ import {
   themeContext,
 } from "../theme-context.ts";
 import { classMap } from "lit/directives/class-map.js";
+
+// Schema for LocationData
+const LocationDataSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    latitude: { type: "number" },
+    longitude: { type: "number" },
+    accuracy: { type: "number" },
+    altitude: { type: "number" },
+    altitudeAccuracy: { type: "number" },
+    heading: { type: "number" },
+    speed: { type: "number" },
+    timestamp: { type: "number" },
+  },
+  required: ["id", "latitude", "longitude", "accuracy", "timestamp"],
+} as const satisfies JSONSchema;
 
 /**
  * Location request state machine to prevent race conditions
@@ -40,6 +58,12 @@ export interface LocationData {
   /** Unix timestamp in milliseconds when the location was captured */
   timestamp: number;
 }
+
+// Type validation: ensure schema matches interface
+type _ValidateLocationData = Schema<
+  typeof LocationDataSchema
+> extends LocationData ? true : never;
+const _validateLocationData: _ValidateLocationData = true;
 
 /**
  * CTLocation - Browser Geolocation API wrapper component
@@ -259,14 +283,14 @@ export class CTLocation extends BaseElement {
 
   override firstUpdated(changedProperties: Map<string, unknown>) {
     super.firstUpdated(changedProperties);
-    this._cellController.bind(this.location);
+    this._cellController.bind(this.location, LocationDataSchema);
     this._updateThemeProperties();
   }
 
   override willUpdate(changedProperties: Map<string, unknown>) {
     super.willUpdate(changedProperties);
     if (changedProperties.has("location")) {
-      this._cellController.bind(this.location);
+      this._cellController.bind(this.location, LocationDataSchema);
     }
   }
 

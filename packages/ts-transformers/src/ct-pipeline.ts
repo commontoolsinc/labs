@@ -1,5 +1,6 @@
 import {
   CastValidationTransformer,
+  OpaqueGetValidationTransformer,
   OpaqueRefJSXTransformer,
   PatternContextValidationTransformer,
   SchemaGeneratorTransformer,
@@ -33,6 +34,7 @@ export class CommonToolsTransformerPipeline extends Pipeline {
     super([
       // Validation transformers run first to catch errors early
       new CastValidationTransformer(sharedOps),
+      new OpaqueGetValidationTransformer(sharedOps),
       new PatternContextValidationTransformer(sharedOps),
       // Then the regular transformation pipeline
       new OpaqueRefJSXTransformer(sharedOps),
