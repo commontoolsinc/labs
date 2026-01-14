@@ -128,31 +128,26 @@ export default pattern(() => {
     );
   });
 
-  // 4. Return tests array - processed in order
+  // 4. Return tests array - processed sequentially
   return {
     tests: [
       // Test 1: Initial values are identical
-      assert_initial_values_identical,
-
+      { assertion: assert_initial_values_identical },
       // Test 2: firstName change propagates to all three
-      action_change_firstName,
-      assert_firstName_change_propagates,
-
+      { action: action_change_firstName },
+      { assertion: assert_firstName_change_propagates },
       // Test 3: lastName change propagates to all three
-      action_change_lastName,
-      assert_lastName_change_propagates,
-
+      { action: action_change_lastName },
+      { assertion: assert_lastName_change_propagates },
       // Test 4: age change propagates to all three
-      action_change_age,
-      assert_age_change_propagates,
-
+      { action: action_change_age },
+      { assertion: assert_age_change_propagates },
       // Test 5: Multiple changes propagate
-      action_change_all,
-      assert_all_changes_propagate,
-
+      { action: action_change_all },
+      { assertion: assert_all_changes_propagate },
       // Test 6: Empty string handled correctly
-      action_set_empty_firstName,
-      assert_empty_string_handled,
+      { action: action_set_empty_firstName },
+      { assertion: assert_empty_string_handled },
     ],
     // Expose subject for debugging when deployed as charm
     subject,

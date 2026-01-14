@@ -119,12 +119,19 @@ declare module "@commontools/api" {
   }
 
   /**
-   * Augment Streamable to add onCommit callback support
+   * Augment Streamable to add onCommit callback support.
+   * Event is optional only when T is void (matching public API).
    */
   interface IStreamable<T> {
     send(
-      value: AnyCellWrapping<T> | T,
-      onCommit?: (tx: IExtendedStorageTransaction) => void,
+      ...args: T extends void ? [] | [AnyCellWrapping<T> | T] | [
+          AnyCellWrapping<T> | T,
+          (tx: IExtendedStorageTransaction) => void,
+        ]
+        : [AnyCellWrapping<T> | T] | [
+          AnyCellWrapping<T> | T,
+          (tx: IExtendedStorageTransaction) => void,
+        ]
     ): void;
   }
 
@@ -733,10 +740,17 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   }
 
   send(
-    event: AnyCellWrapping<T>,
-    onCommit?: (tx: IExtendedStorageTransaction) => void,
+    ...args: T extends void ? [] | [AnyCellWrapping<T>] | [
+        AnyCellWrapping<T>,
+        (tx: IExtendedStorageTransaction) => void,
+      ]
+      : [AnyCellWrapping<T>] | [
+        AnyCellWrapping<T>,
+        (tx: IExtendedStorageTransaction) => void,
+      ]
   ): void {
-    this.set(event, onCommit);
+    const [event, onCommit] = args;
+    this.set(event as AnyCellWrapping<T>, onCommit);
   }
 
   update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(
@@ -934,10 +948,11 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
    */
   key(...keys: PropertyKey[]): Cell<any> {
     let currentLink = this._link;
+    let childSchema: JSONSchema | undefined;
 
     for (const key of keys) {
       // Get child schema if we have one
-      const childSchema = currentLink.schema
+      childSchema = currentLink.schema
         ? this.runtime.cfc.getSchemaAtPath(
           currentLink.schema,
           [key.toString()],
@@ -958,13 +973,23 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       };
     }
 
+    // Determine the kind based on schema flags
+    let kind: CellKind = this._kind;
+    if (isObject(childSchema)) {
+      if (childSchema.asStream) {
+        kind = "stream";
+      } else if (childSchema.asCell) {
+        kind = "cell";
+      }
+    }
+
     return new CellImpl(
       this.runtime,
       this.tx,
       currentLink,
       this.synced,
       this._causeContainer,
-      this._kind,
+      kind,
     ) as unknown as Cell<any>;
   }
 

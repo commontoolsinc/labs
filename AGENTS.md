@@ -30,24 +30,23 @@ If you are developing patterns, use Claude Skills (pattern-dev) to do the work.
 
 **Start here:**
 
-- `docs/common/PATTERNS.md` - Main tutorial with examples, levels, and common
-  patterns (START HERE for learning)
-- `docs/common/COMPONENTS.md` - UI component reference with bidirectional
-  binding and event handling
+- `docs/common/INTRODUCTION.md` - Overview of the pattern system
+- `docs/common/components/COMPONENTS.md` - UI component reference with
+  bidirectional binding and event handling
 
 **Core concepts:**
 
-- `docs/common/REACTIVITY.md` - Cell system, computed(), reactivity mental
-  models (when Writable<> is needed for write access)
-- `docs/common/TYPES_AND_SCHEMAS.md` - Type system, Cell<> vs OpaqueRef<>,
-  Default<>, when to use [ID]
+- `docs/common/concepts/reactivity.md` - Cell system, reactivity mental models
+- `docs/common/concepts/computed/` - computed(), lift(), derived values
+- `docs/common/concepts/types-and-schemas/` - Type system, Writable<>, Default<>
+- `docs/common/patterns/` - Common patterns (conditionals, composition, binding)
 
 **Workflow:**
 
-- `docs/development/DEBUGGING.md` - Error reference, debugging workflows,
+- `docs/development/debugging/` - Error reference, debugging workflows,
   troubleshooting
-- `docs/common/LLM.md` - Using generateText and generateObject for LLM
-  integration
+- `docs/common/capabilities/llm.md` - Using generateText and generateObject for
+  LLM integration
 
 **Reference:**
 
@@ -60,11 +59,11 @@ If you are developing patterns, use Claude Skills (pattern-dev) to do the work.
 
 If you are developing runtime code, read the following documentation:
 
-- `docs/common/RUNTIME.md` - Running servers, testing, and runtime package
-  overview
 - `docs/development/DEVELOPMENT.md` - Coding style, design principles, and best
   practices
-- `docs/development/UI_TESTING.md` - How to work with shadow dom in our
-  integration tests
 - `docs/development/LOCAL_DEV_SERVERS.md` - **CRITICAL**: How to start local dev
   servers correctly (use `dev-local` for shell, not `dev`)
+- `docs/development/UI_TESTING.md` - How to work with shadow dom in our
+  integration tests
+- `docs/development/debugging/` - Runtime errors, type errors, and
+  troubleshooting

@@ -1,61 +1,131 @@
 ---
 name: pattern-dev
-description: Guide for developing CommonTools patterns (TypeScript modules that define reactive data transformations with UI). Use this skill when creating patterns, modifying existing patterns, linking patches (instantiated patterns), debugging pattern errors, or working with the pattern framework. Triggers include requests like "build a pattern", "fix this pattern error", "deploy this charm/patch", "link these charms", or questions about handlers, cells, and reactive patterns.
+description: Guide for developing CommonTools patterns (TypeScript modules that define reactive data transformations with UI). Use this skill when creating patterns, modifying existing patterns, or working with the pattern framework. Triggers include requests like "build a pattern", "fix this pattern error", "deploy this pattern", or questions about handlers and reactive patterns.
 ---
 
 # Pattern Development
 
+## Read This First
+
+**You MUST write and run tests for each sub-pattern before writing the next one.**
+
+The #1 mistake is writing all the code first, then testing. This wastes hours debugging cascading errors. Instead:
+
+```
+schemas.tsx → ingredient.tsx → ingredient.test.tsx → RUN TESTS → recipe.tsx → recipe.test.tsx → RUN TESTS → main.tsx
+```
+
+Run tests with: `deno task ct test packages/patterns/[name]/ingredient.test.tsx`
+
+See `docs/common/workflows/pattern-testing.md` for test file format.
+
+**First pass = minimal UI.** Just basic inputs/buttons to verify data and actions work. No styling, no polish. Read COMPONENTS.md only during the final UI polish step, not at the start.
+
+## Warning: Existing Patterns Are Not Reliable Guides
+
+**Do not copy patterns from `packages/patterns/` without verification.** Existing patterns were written using older conventions and varied styles. Many lack explicit Output types, use deprecated APIs, or don't follow current best practices.
+
+When you encounter errors:
+1. **Read the error message carefully** and consult the relevant docs
+2. **Do not search existing patterns** looking for "how others did it"
+3. **Trust this skill document** and the linked docs as the source of truth
+
+Existing patterns are useful for:
+- UI layout examples (how to structure `ct-screen`, `ct-vstack`, etc.)
+
+Existing patterns are NOT reliable for:
+- Type patterns (`Writable<>`, `Default<>`, Input/Output types)
+- Action/handler definitions
+- Schema structure
+- Testing patterns
+
+We're actively standardizing the pattern library. Until complete, treat `packages/patterns/` as legacy code.
+
 ## Overview
 
-Develop CommonTools patterns using the `ct` CLI and the reactive pattern framework. Patterns are TypeScript/JSX programs that define data transformations with interactive UIs, deployed as "charms" that can be linked together for complex workflows.
+Patterns are TypeScript/JSX programs that define reactive data transformations with UIs. Use the `ct` CLI to deploy and interactively test them; `deno task ct --help` has comprehensive details on how to do so.
 
-## When to Use This Skill
+## Quick Start
 
-Use this skill when:
-- Building new patterns from scratch
-- Modifying or debugging existing patterns
-- Understanding pattern framework concepts (cells, handlers, computed, lift)
-- Troubleshooting type errors or runtime issues
-- Working with multi-file pattern structures
+→ **Create a new pattern** → See "Starting a New Pattern"
+→ **Modify existing pattern** → See "Modifying Patterns"
+→ **Debug an error** → Check `docs/development/debugging/`
 
-**For ct commands** (deploying, linking, inspecting charms), use the **ct** skill instead.
+## Key Principles
 
-## Prerequisites
+### Object Graph, Not Database
 
-Before starting pattern development:
+The reactive fabric uses direct references between objects. When you have a reference to an object, you *have* that object. Use `equals()` for identity comparison:
 
-1. **Know the ct CLI** - Use the **ct** skill for ct command reference
-2. **Read the core documentation** - These two docs are essential; read them before starting:
-   - `docs/common/PATTERNS.md` - Main tutorial with examples and common patterns
-   - `docs/common/REACTIVITY.md` - Cell system, computed(), lift(), frame-based execution
-3. **Reference docs as needed:**
-   - `docs/common/COMPONENTS.md` - UI components and bidirectional binding
-   - `docs/common/TYPES_AND_SCHEMAS.md` - Type system, Writable<>, defaults
-   - `docs/development/DEBUGGING.md` - Error reference and troubleshooting
-4. **Check example patterns** - Look in `packages/patterns/` for working examples
+```tsx
+interface Task {
+  title: string;
+  done: boolean;
+}
 
-## Quick Decision Tree
+// Use equals() to find/remove items by reference
+const deleteTask = action((task: Task) => {
+  tasks.set(tasks.get().filter(t => !equals(task, t)));
+});
 
-**What do you want to do?**
+// Or use the index from .map()
+{tasks.map((task, index) => (
+  <ct-button onClick={() => tasks.set(tasks.get().toSpliced(index, 1))}>
+    Delete
+  </ct-button>
+))}
+```
 
-→ **Create a new pattern** → Go to "Starting a New Pattern" (decide structure FIRST)
-→ **Modify existing pattern** → Go to "Modifying Patterns"
-→ **Fix pattern errors** → Go to "Debugging Patterns"
-→ **Deploy/link charms** → Use **ct** skill
-→ **Understand pattern concepts** → Read `docs/common/PATTERNS.md` and `REACTIVITY.md`
+See `docs/common/concepts/identity.md` for the full mental model.
+
+### Scoping Rules
+
+**Define at module scope:**
+- Helper functions
+- `handler()` definitions
+- `lift()` definitions
+
+**Define inside pattern body:**
+- `action()` callbacks
+- `computed()` callbacks
+- `.map()` callbacks
+
+Bind handlers inside the pattern: `onClick={myHandler({ state })}`
+
+See `docs/development/debugging/gotchas/handler-inside-pattern.md` for details and error messages.
+
+### Action vs Handler
+
+In most cases, `action` defined inside the pattern body is preferred:
+
+- **Use `action()`** when the handler closes over local state created in the pattern body
+- **Use `handler()`** only when the same logic needs different bindings (e.g., per-item operations in a list)
+
+```tsx
+// action() - closes over local `inputValue`
+const inputValue = Cell.of("");
+const submit = action(() => {
+  items.push({ text: inputValue.get() });
+  inputValue.set("");
+});
+
+// handler() - reused with different bindings per item
+const deleteItem = handler<unknown, { items: Writable<Item[]>; index: number }>(
+  (_, { items, index }) => items.set(items.get().toSpliced(index, 1))
+);
+
+// In JSX:
+{items.map((item, index) => (
+  <ct-button onClick={deleteItem({ items, index })}>Delete</ct-button>
+))}
+```
+
+See `docs/common/concepts/action.md` and `docs/common/concepts/handler.md` for details.
 
 ## Starting a New Pattern
 
-Before writing any code, decide which approach to use:
+Always use multi-file composition. Create the folder structure first:
 
-**Use Pattern Composition if ANY of these apply:**
-- Multiple data types (e.g., Card + Column, Note + Folder, Expense + Budget)
-- 3+ computed values
-- Distinct UI areas (sidebar + main content, list + editor panel)
-- You want to test data logic separately from UI
-- The pattern was described with a folder structure
-
-**For Composition patterns, create structure FIRST:**
 ```bash
 mkdir -p packages/patterns/[name]
 touch packages/patterns/[name]/schemas.tsx
@@ -63,207 +133,251 @@ touch packages/patterns/[name]/schemas.tsx
 
 **Define all types in `schemas.tsx` before writing any pattern code.** This file is the anchor - all other files import from it.
 
-For simple single-file patterns (counter, basic list), skip this and go directly to "Building a New Pattern" below.
+### Always Define Input AND Output Types
+
+**Every pattern must have explicit `Input` and `Output` interface types.** Use `pattern<Input, Output>(...)`.
+
+The Output type must include:
+- All data fields returned from the pattern
+- All `Writable<>` cells returned
+- **All actions/handlers returned** as `Stream<void>` (or `Stream<EventType>`)
+
+Without explicit Output types, the schema generator won't know the types of exported actions, and tests calling `.send()` on them will fail at runtime.
+
+### Schema Field Rules
+
+For each field in your data schemas, decide:
+
+1. **Will it be edited via UI** (`$value`, `$checked`)? → Use `Writable<>`
+2. **Could it be undefined initially?** → Use `Default<T, value>`
+3. **Both?** → Use `Writable<Default<T, value>>`
+
+See `docs/common/concepts/types-and-schemas/default.md` for full documentation.
+
+### Decompose into Sub-Patterns
+
+**Always decompose patterns into focused sub-patterns.** Avoid monolithic `main.tsx` files. Each schema type that has its own display or behavior should be its own sub-pattern.
+
+**Rule of thumb:** If you have a schema like `Project` containing `Task[]`, create both a `project.tsx` sub-pattern AND a `task.tsx` sub-pattern. The project pattern composes task patterns for each item.
+
+Benefits of decomposition:
+- **Testability**: Each sub-pattern can be tested independently
+- **Reusability**: Sub-patterns can be composed in different ways
+- **Maintainability**: Smaller files are easier to understand and modify
+- **Parallel development**: Different sub-patterns can be worked on separately
+
+### Example: Recipe Manager
+
+**Step 1: Write schemas.tsx FIRST** (data types, Input/Output types for each pattern):
+
+```tsx
+// schemas.tsx
+import { Default, Stream, Writable } from "commontools";
+
+// ============ DATA TYPES ============
+
+export interface Ingredient {
+  name: Writable<Default<string, "">>;
+  amount: Writable<Default<string, "">>;
+  optional: Writable<Default<boolean, false>>;
+}
+
+export interface Recipe {
+  title: Writable<Default<string, "Untitled">>;
+  ingredients: Writable<Default<Ingredient[], []>>;
+  instructions: Writable<Default<string, "">>;
+}
+
+export interface RecipeBook {
+  recipes: Writable<Default<Recipe[], []>>;
+}
+
+// ============ PATTERN INPUT/OUTPUT TYPES ============
+// Define these for each sub-pattern. Output must include all returned actions as Stream<void>.
+
+export interface IngredientInput {
+  ingredient: Ingredient;
+}
+
+export interface IngredientOutput {
+  ingredient: Ingredient;
+  isEditing: Writable<boolean>;
+  startEditing: Stream<void>;  // Actions must be Stream<void>
+  stopEditing: Stream<void>;
+}
+
+export interface RecipeInput {
+  recipe: Recipe;
+}
+
+export interface RecipeOutput {
+  recipe: Recipe;
+  addIngredient: Stream<void>;
+}
+```
+
+**Step 2: Write ingredient.tsx** (import Input/Output from schemas)
+
+```tsx
+import { action, pattern, UI, Writable } from "commontools";
+import type { IngredientInput, IngredientOutput } from "./schemas.tsx";
+
+export default pattern<IngredientInput, IngredientOutput>(({ ingredient }) => {
+  const isEditing = Writable.of(false);
+  const startEditing = action(() => isEditing.set(true));
+  const stopEditing = action(() => isEditing.set(false));
+
+  return {
+    [UI]: (
+      <div>
+        <input $value={ingredient.name} />
+        <input $value={ingredient.amount} />
+      </div>
+    ),
+    ingredient,
+    isEditing,
+    startEditing,
+    stopEditing,
+  };
+});
+```
+
+**Step 3: Write ingredient.test.tsx → RUN TESTS → FIX until passing**
+
+```bash
+deno task ct test packages/patterns/recipe-manager/ingredient.test.tsx
+```
+
+See `docs/common/workflows/pattern-testing.md` for test file format. **Do NOT continue until tests pass.**
+
+**Step 4: Write recipe.tsx** (import Input/Output from schemas)
+
+```tsx
+import { action, pattern, UI } from "commontools";
+import type { RecipeInput, RecipeOutput } from "./schemas.tsx";
+import Ingredient from "./ingredient.tsx";
+
+export default pattern<RecipeInput, RecipeOutput>(({ recipe }) => {
+  const addIngredient = action(() => {
+    recipe.ingredients.push({ name: "", amount: "", optional: false });
+  });
+
+  return {
+    [UI]: (
+      <div>
+        <input $value={recipe.title} />
+        {recipe.ingredients.map((ing) => Ingredient({ ingredient: ing }))}
+        <button onClick={addIngredient}>Add Ingredient</button>
+      </div>
+    ),
+    recipe,
+    addIngredient,
+  };
+});
+```
+
+**Step 5: Write recipe.test.tsx → RUN TESTS → FIX until passing**
+
+```bash
+deno task ct test packages/patterns/recipe-manager/recipe.test.tsx
+```
+
+**Do NOT continue until tests pass.**
+
+**Step 6: Write main.tsx → TEST IT**
+
+Only after ingredient and recipe tests are passing.
+
+### Project Structure
+
+```
+packages/patterns/[name]/
+├── schemas.tsx           # Types with Writable<>/Default<> (create FIRST)
+├── [leaf].tsx            # Leaf sub-pattern → TEST before continuing
+├── [container].tsx       # Container sub-pattern → TEST before continuing
+└── main.tsx              # Top-level composition → TEST
+```
 
 ## Development Methodology
 
-Follow a layered approach rather than building everything at once. This makes each piece independently testable and isolates bugs to specific layers.
+**The core rule: Write one sub-pattern → Test it → Move to the next. Never skip testing.**
 
-### Two Development Approaches
+**First pass: Data and logic only.** Use minimal stub UI (basic inputs/buttons) just to verify data flow and actions work. Don't spend time on layout, styling, or UI polish—that comes later. Most bugs are in data/actions, not UI.
 
-**Approach A: Single-File Evolution** (simple patterns only)
-- One file that evolves through git commits
-- Build incrementally: schemas → computeds → handlers → UI
-- Use `setsrc` to update the same deployed charm
-- Git history provides rollback points
+Work from leaf patterns up to main.tsx. For each sub-pattern:
 
-**Approach B: Pattern Composition** (use for most real patterns)
-- Shared schemas in `schemas.tsx` (created FIRST)
-- Sub-patterns that can be independently tested
-- Main pattern composes sub-patterns, passing shared cells
-- Use `charm new` to deploy sub-patterns for isolated testing
+1. **Write** the sub-pattern with minimal UI (e.g., `ingredient.tsx`)
+2. **Test** it using CLI commands OR automated tests (see below)
+3. **Fix** any issues until it works correctly
+4. **Then** move to the next sub-pattern that composes it
 
-### Build in Layers
+**Do NOT write multiple sub-patterns before testing.** Write tests and run them for each sub-pattern as you complete it.
 
-Whether using single-file or composition, build in this order:
+### Pattern Tests
 
-**Layer 1: Data Model + Reactive Derivations**
-- Define schemas/interfaces
-- Build computed values and transformations
-- Create debug UI showing all cell values
-- Test via CLI: set inputs, verify computed outputs
-- **Read:** `PATTERNS.md`, `REACTIVITY.md`
+For each sub-pattern, write a corresponding `.test.tsx` file:
 
-**Layer 2: Mutation Handlers**
-- Add handlers one at a time
-- Test each handler via `charm call` before adding more
-- Debug UI shows before/after state
-- **Read:** `TYPES_AND_SCHEMAS.md` for handler typing (especially `Stream<T>` for Output interfaces)
-
-**Layer 3: Real UI**
-- Replace debug UI with production interface
-- Bidirectional bindings connect to already-verified cells
-- **Read:** `COMPONENTS.md` for component reference
-
-### Debug Visibility
-
-Include inline debug display showing cell values during development. This makes reactivity visible - you can see which computed values update when inputs change. Strip debug UI when moving to production.
-
-See `packages/patterns/` for examples of debug panels.
-
-### Project Organization
-
-**Single-File Evolution:**
-```
-packages/patterns/expense-tracker/
-└── expense-tracker.tsx     # Single file, evolves through layers via git commits
+```bash
+deno task ct test packages/patterns/[name]/ingredient.test.tsx
 ```
 
-**Pattern Composition:**
-```
-packages/patterns/expense-tracker/
-├── schemas.tsx           # Shared types
-├── data-view.tsx         # Sub-pattern: computeds + display
-├── expense-form.tsx      # Sub-pattern: form + handlers
-└── main.tsx              # Composes sub-patterns, passes shared cells
-```
+See `docs/common/workflows/pattern-testing.md` for test file format.
 
-Each sub-pattern imports from `schemas.tsx` and can be deployed independently. See `PATTERNS.md` Level 4 for composition examples.
-
-### Version Control
-
-- Create a new git branch: `git checkout -b pattern/[name]`
-- Commit after each successful phase (verified via CLI)
-- Git commits are your rollback points - each should represent a working state
-
-### CLI-First Testing
-
-Use the ct CLI to verify each layer before touching browser. See **ct** skill for:
-- `charm new` to deploy, `setsrc` to update
-- `charm get/set/call` to test data and handlers
-- `charm inspect` to view full state
-
-### Session Continuity
-
-If context compacts during pattern development, immediately reload the **pattern-dev** and **ct** skills before continuing work.
-
-## Building a New Pattern
-
-**Before you start:** Review the Development Methodology section above.
-
-### For Simple Patterns
-
-See `PATTERNS.md` Level 1-2 for complete examples. The basic structure:
-
-```typescript
-/// <cts-enable />
-import { Default, NAME, pattern, UI } from "commontools";
-
-interface Input { items: Default<Item[], []>; }
-
-export default pattern<Input, Input>(({ items }) => ({
-  [NAME]: "My Pattern",
-  [UI]: <div>{items.map(item => <div>{item.title}</div>)}</div>,
-  items,
-}));
+**Alternative: Interactive CLI testing** (for quick debugging)
+```bash
+deno task ct charm new packages/patterns/[name]/ingredient.tsx  # Deploy
+deno task ct charm inspect                                       # Check state
 ```
 
-### For Complex Patterns
+### UI Polish (Final Step)
 
-**You should have already created the folder and `schemas.tsx`** (see "Starting a New Pattern" above).
+Only after ALL sub-patterns have working data and actions, go back and build the full UI. Before writing UI:
+1. Read `docs/common/components/COMPONENTS.md` for available components
+2. Search `packages/patterns/` for **UI layout examples only** (component arrangement, not data/action patterns)
 
-Then follow the layered methodology:
-1. Define types in `schemas.tsx`
-2. Build Layer 1: data + computeds + debug UI in first pattern file
-3. Deploy, test via CLI
-4. Build Layer 2: handlers, test via CLI
-5. Build Layer 3: production UI
+### Using the ct CLI
 
-### Key Principles
+When deploying and interacting with patterns, explore the CLI documentation thoroughly:
 
-- **Bidirectional binding (`$prop`)** for simple value updates
-- **Handlers** for structural changes, validation, side effects
-- **Test with CLI** before touching browser
+```bash
+# Learn available commands
+deno task ct --help
 
-See `PATTERNS.md` for complete examples at each level.
+# Get help for specific subcommands
+deno task ct charm --help
+deno task ct test --help
+```
+
+**Before deploying, find your identity key:**
+
+```bash
+# Check for .key files in common locations
+ls -la *.key 2>/dev/null || ls -la ~/.claude/*.key 2>/dev/null || find . -name "*.key" -maxdepth 2 2>/dev/null
+```
+
+Use the `--identity` flag with the path to your key file when deploying.
+
+Common commands:
+- `deno task ct dev pattern.tsx --no-run` - Check syntax without deploying
+- `deno task ct charm new` - Deploy a new pattern
+- `deno task ct charm inspect` - View pattern state
+- `deno task ct test` - Run automated tests
+
+See `docs/development/LOCAL_DEV_SERVERS.md` for local development setup.
 
 ## Modifying Patterns
 
 ### Getting Pattern Source
 
-Use the **ct** skill to retrieve source:
 ```bash
-# Use ct charm getsrc (see ct skill)
+deno task ct charm getsrc [output-path] --charm CHARM_ID
 ```
 
 ### Making Changes
 
 1. Edit the pattern file
-2. Check syntax: Use **ct** skill for `deno task ct dev pattern.tsx --no-run`
-3. Update charm: Use **ct** skill for `deno task ct charm setsrc`
-
-## Debugging Patterns
-
-1. **Check TypeScript errors first:** `deno task ct dev pattern.tsx --no-run`
-2. **Consult `DEBUGGING.md`** - comprehensive error reference with solutions
-3. **Use CLI inspection:** `charm inspect`, `charm get` (see **ct** skill)
-4. **Check examples:** `packages/patterns/` for similar patterns
-
-## Key Concepts Summary
-
-### Direct Writable<> Binding
-
-**Use `$` prefix to pass a Writable cell to a component (for deep interop, see `lit-component` skill):**
-
-```typescript
-<ct-checkbox $checked={item.done} />
-<ct-input $value={item.title} />
-<ct-select $value={item.category} items={...} />
-```
-
-**When NOT to use:** Need validation, side effects, or structural changes (use handlers).
-
-See `COMPONENTS.md` for full details.
-
-### Handlers
-
-Handlers have **two-step binding**: define with `handler<EventType, StateType>`, then bind with state only.
-
-```typescript
-const addItem = handler<{ detail: { message: string } }, { items: Writable<Item[]> }>(
-  ({ detail }, { items }) => { items.push({ title: detail.message }); }
-);
-
-<ct-message-input onct-send={addItem({ items })} />  // Bind with state only
-```
-
-**Key rules:**
-- **Define handlers at module scope** - NOT inside the pattern body (transformer requirement)
-- Pass **state only** when binding - event data comes at runtime
-- For test buttons with hardcoded data, use **inline handlers**: `onClick={() => items.push(...)}`
-- A bound handler IS a `Stream<T>` - don't use `Stream.of()` or `.subscribe()`
-- Use `Writable<T[]>` in handler state (plain array type)
-- Helper functions and `lift()` should also be at module scope
-
-See `PATTERNS.md` for handler patterns, `TYPES_AND_SCHEMAS.md` for Stream typing, `DEBUGGING.md` for common errors.
-
-### Reactive Transformations
-
-**Use `computed()` by default** - it handles closures and reactive tracking automatically:
-
-```typescript
-const filteredItems = computed(() => items.filter(item => !item.done));
-const totalAmount = computed(() => expenses.reduce((sum, e) => sum + e.amount, 0));
-```
-
-**Key rules:**
-- `computed()` handles closures automatically via CTS transformer
-- `lift()` requires passing all deps as object parameter: `lift((args) => ...)({ cell1, cell2 })`
-- Passing cells directly to `lift()` returns stale/empty data
-
-**Access patterns:** `Writable<>` has `.get()`, but `computed()` and `lift()` results do NOT - access them directly.
-
-See `REACTIVITY.md` for details on frame-based execution, lift() limitations, and access patterns.
+2. Check syntax: `deno task ct dev pattern.tsx --no-run`
+3. Update deployed pattern: `deno task ct charm setsrc`
 
 ### Self-Referential Types with SELF
 
@@ -314,29 +428,53 @@ See `packages/patterns/self-reference-test.tsx` for a working example.
 
 ## Multi-File Patterns
 
-See Project Organization in Development Methodology above. Key points:
+Key points:
 - Use relative imports: `import { Schema } from "./schemas.tsx"`
 - ct bundles all dependencies automatically on deployment
-- Export shared schemas to avoid mismatches between linked charms
+- Export shared schemas to avoid type mismatches between linked patterns
 
-See `PATTERNS.md` Level 3-4 for linking and composition patterns.
+## Consult Docs on First Use
+
+When using an API feature for the first time in a session, read the relevant documentation before proceeding. This prevents subtle mistakes that examples alone won't catch.
+
+| First time using... | Read this first |
+|---------------------|-----------------|
+| `Default<>` | `docs/common/concepts/types-and-schemas/default.md` |
+| `computed()` | `docs/common/concepts/computed/computed.md` |
+| `lift()` | `docs/common/concepts/lift.md` |
+| `Writable<>` | `docs/common/concepts/types-and-schemas/writable.md` |
+| `action()` | `docs/common/concepts/action.md` |
+| `handler()` | `docs/common/concepts/handler.md` |
+| `equals()` / object identity | `docs/common/concepts/identity.md` |
+| `pattern<Input, Output>()` | `docs/common/concepts/pattern.md` |
+| `ifElse` / conditionals | `docs/common/patterns/conditional.md` |
+| `$value` bindings | `docs/common/patterns/two-way-binding.md` |
+| UI components (`ct-*`) | `docs/common/components/COMPONENTS.md` |
+| Pattern composition | `docs/common/patterns/composition.md` |
+| Pattern testing | `docs/common/workflows/pattern-testing.md` |
+| LLM integration | `docs/common/capabilities/llm.md` |
+
+After drafting code, cross-check against docs for the features you used to verify correct usage.
 
 ## Documentation Map
 
-| Task | Read |
-|------|------|
-| Main tutorial and common patterns | `docs/common/PATTERNS.md` |
-| Cells, reactivity, computed() | `docs/common/REACTIVITY.md` |
-| Type system, Writable<>, defaults | `docs/common/TYPES_AND_SCHEMAS.md` |
-| Component usage and bidirectional binding | `docs/common/COMPONENTS.md` |
-| Error reference and debugging | `docs/development/DEBUGGING.md` |
-| LLM integration (generateObject, etc.) | `docs/common/LLM.md` |
-| ct commands | Use **ct** skill |
-| Working examples | `packages/patterns/` directory |
+| Topic | Location |
+|-------|----------|
+| Introduction | `docs/common/INTRODUCTION.md` |
+| Core concepts | `docs/common/concepts/` |
+| UI components | `docs/common/components/` |
+| Common patterns | `docs/common/patterns/` |
+| Capabilities (LLM, side-effects) | `docs/common/capabilities/` |
+| Workflows (dev, linking, testing) | `docs/common/workflows/` |
+| Pattern testing | `docs/common/workflows/pattern-testing.md` |
+| UI layout examples | `packages/patterns/` (layout only, see warning above) |
 
 ## Remember
 
-- Read docs before building - start with `PATTERNS.md` and `REACTIVITY.md`
-- Check `packages/patterns/` for working examples
-- Use **ct** skill for deployment commands
-- Start simple, test incrementally, use bidirectional binding when possible
+- **Write and run tests for each sub-pattern before writing the next one** - this is the most important rule
+- **Don't copy from existing patterns** - they use outdated conventions; trust this doc and linked docs
+- Define ALL types in `schemas.tsx`: data types, Input/Output types for each pattern
+- **Output types must include actions as `Stream<void>`** - tests will fail without this
+- Use `Writable<Default<>>` for editable fields
+- Work from leaf patterns → container patterns → main.tsx
+- Only build polished UI after all tests pass
