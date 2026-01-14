@@ -15,31 +15,34 @@ Create `schemas.tsx` with all data types and Input/Output types BEFORE any patte
 - `docs/common/concepts/pattern.md` (Input/Output section)
 
 ## Rules
-1. Every editable field needs `Writable<>` for write access
-2. Fields that could be undefined initially: use `Default<T, value>`
-3. Combine when needed: `Writable<Default<T, value>>`
-4. Every pattern needs explicit `Input` AND `Output` interface types
-5. Actions in Output type: `Stream<void>`
+1. **ALWAYS use `pattern<Input, Output>()`** - Never use single-type `pattern<State>()`. Single-type patterns cannot be tested via `.send()`.
+2. Every editable field needs `Writable<>` in Input type (for write access)
+3. **Output types never use `Writable<>`** - they reflect returned data shape
+4. Fields that could be undefined initially: use `Default<T, value>`
+5. Actions in Output type: `Stream<T>` (enables testing and linking)
+6. Sub-patterns need `[NAME]: string` and `[UI]: VNode` in Output type
 
 ## Template
 
 ```tsx
-import { Default, Stream, Writable } from "commontools";
+import { Default, NAME, Stream, UI, VNode, Writable } from "commontools";
 
 // ============ DATA TYPES ============
 export interface Item {
-  name: Writable<Default<string, "">>;
-  done: Writable<Default<boolean, false>>;
+  name: Default<string, "">;
+  done: Default<boolean, false>;
 }
 
 // ============ PATTERN INPUT/OUTPUT ============
 export interface ItemInput {
-  item: Item;
+  item: Writable<Item>;  // Writable in Input = pattern will modify
 }
 
 export interface ItemOutput {
-  item: Item;
-  toggle: Stream<void>;  // Actions must be Stream<void>
+  [NAME]: string;        // Required for sub-patterns
+  [UI]: VNode;           // Required for sub-patterns
+  item: Item;            // No Writable in Output
+  toggle: Stream<void>;  // Actions as Stream<T>
 }
 ```
 
