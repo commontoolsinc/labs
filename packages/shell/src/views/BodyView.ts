@@ -4,12 +4,7 @@ import { Task } from "@lit/task";
 import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import "../components/OmniLayout.ts";
-import {
-  CellHandle,
-  isCellHandle,
-  PageHandle,
-  VNode,
-} from "@commontools/runtime-client";
+import { CellHandle, PageHandle, VNode } from "@commontools/runtime-client";
 import { vdomSchema } from "@commontools/runner/schemas";
 import type { JSONSchema } from "@commontools/runner/shared";
 
@@ -101,32 +96,6 @@ export class XBodyView extends BaseView {
   @property({ attribute: false })
   patternError?: Error;
 
-  private _charms = new Task(this, {
-    task: async ([rt, _spaceRootPattern]) => {
-      if (!rt) return undefined;
-
-      await rt.synced();
-      const charmsListCell = await rt.getCharmsListCell();
-      await charmsListCell.sync();
-
-      const charmsList = charmsListCell.get() as any[];
-      if (!charmsList) return [];
-
-      const handles: PageHandle[] = [];
-      for (const charmData of charmsList) {
-        const id = isCellHandle(charmData) ? charmData.id() : charmData?.$ID;
-        if (id) {
-          const charm = await rt.getPattern(id) as PageHandle;
-          if (charm) {
-            handles.push(charm);
-          }
-        }
-      }
-      return handles;
-    },
-    args: () => [this.rt, this.spaceRootPattern],
-  });
-
   private _subPages = new Task(this, {
     task: async ([activePattern, spaceRootPattern]) => {
       const [
@@ -151,33 +120,6 @@ export class XBodyView extends BaseView {
   });
 
   override render() {
-    const charms = this._charms.value;
-    const spaceName = this.rt?.spaceName();
-    const spaceDid = this.rt?.space();
-    /*
-    if (!charms) {
-      return html`
-        <div class="content">
-          <x-spinner></x-spinner>
-        </div>
-      `;
-    }
-    */
-
-    if (this.showShellCharmListView) {
-      return html`
-        <div class="content">
-          <x-charm-list-view
-            .charms="${charms}"
-            .spaceName="${spaceName}"
-            .spaceDid="${spaceDid}"
-            .rt="${this.rt}"
-            @charm-removed="${() => this._charms.run()}"
-          ></x-charm-list-view>
-        </div>
-      `;
-    }
-
     // Show error if pattern failed to start
     const mainContent = this.patternError
       ? html`
