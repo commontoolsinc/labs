@@ -43,7 +43,11 @@ import {
 import { stringSchema } from "@commontools/runner/schemas";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
-import { Mentionable, MentionableArray } from "../../core/mentionable.ts";
+import {
+  Mentionable,
+  MentionableArray,
+  MentionableArraySchema,
+} from "../../core/mentionable.ts";
 
 /**
  * Supported MIME types for syntax highlighting
@@ -343,6 +347,7 @@ export class CTCodeEditor extends BaseElement {
   private _themeComp = new Compartment();
   private _cleanupFns: Array<() => void> = [];
   private _mentionableUnsub: (() => void) | null = null;
+  private _mentionedUnsub: (() => void) | null = null;
   // Track previous backlink names to detect changes for syncing to charm NAME
   private _previousBacklinkNames = new Map<string, string>();
   // Track subscriptions to charm NAME cells for bidirectional sync
@@ -456,12 +461,11 @@ export class CTCodeEditor extends BaseElement {
    * Get filtered mentionable items based on query
    */
   private getFilteredMentionable(query: string): CellHandle<Mentionable>[] {
-    const mentionableCell = this._getMentionableCell();
-    if (!mentionableCell) {
+    if (!this.mentionable) {
       return [];
     }
 
-    const rawMentionable = mentionableCell.get();
+    const rawMentionable = this.mentionable.get();
     const mentionableData = Array.isArray(rawMentionable)
       ? rawMentionable as MentionableArray
       : isCellHandle(rawMentionable)
@@ -483,7 +487,7 @@ export class CTCodeEditor extends BaseElement {
           ?.toLowerCase()
           ?.includes(queryLower)
       ) {
-        matches.push(mentionableCell.key(i) as CellHandle<Mentionable>);
+        matches.push(this.mentionable.key(i) as CellHandle<Mentionable>);
       }
     }
 
@@ -494,10 +498,9 @@ export class CTCodeEditor extends BaseElement {
    * Find exact case-insensitive match in mentionable items
    */
   private _findExactMentionable(query: string): CellHandle<Mentionable> | null {
-    const mentionableCell = this._getMentionableCell();
-    if (!mentionableCell) return null;
+    if (!this.mentionable) return null;
 
-    const rawMentionable = mentionableCell.get();
+    const rawMentionable = this.mentionable.get();
     const mentionableData = Array.isArray(rawMentionable)
       ? rawMentionable as MentionableArray
       : isCellHandle(rawMentionable)
@@ -510,7 +513,7 @@ export class CTCodeEditor extends BaseElement {
       const mention = mentionableData[i];
       const name = mention?.[NAME] ?? "";
       if (name.toLowerCase() === queryLower) {
-        return mentionableCell.key(i);
+        return this.mentionable.key(i);
       }
     }
 
@@ -790,10 +793,9 @@ export class CTCodeEditor extends BaseElement {
    * Find a charm by ID in the mentionable list
    */
   private findCharmById(id: string): CellHandle<Mentionable> | null {
-    const mentionableCell = this._getMentionableCell();
-    if (!mentionableCell) return null;
+    if (!this.mentionable) return null;
 
-    const rawMentionable = mentionableCell.get();
+    const rawMentionable = this.mentionable.get();
     if (!rawMentionable) return null;
     const mentionableData = Array.isArray(rawMentionable)
       ? rawMentionable as MentionableArray
@@ -806,7 +808,7 @@ export class CTCodeEditor extends BaseElement {
     for (let i = 0; i < mentionableData.length; i++) {
       const charmValue = mentionableData[i];
       if (!charmValue) continue;
-      const charmCell = mentionableCell.key(i) as CellHandle<Mentionable>;
+      const charmCell = this.mentionable.key(i) as CellHandle<Mentionable>;
       const charmId = charmCell.id();
       if (charmId === id) {
         return charmCell;
@@ -1016,12 +1018,31 @@ export class CTCodeEditor extends BaseElement {
       this._mentionableUnsub = null;
     }
 
-    const mentionableCell = this._getMentionableCell();
-    if (!mentionableCell) return;
-    const unsubscribe = mentionableCell.subscribe(() => {
-      this._updateMentionedFromContent();
-    });
+    if (!this.mentionable) return;
+    const unsubscribe = this.mentionable
+      .subscribe((_value) => {
+        this._updateMentionedFromContent();
+      });
     this._mentionableUnsub = unsubscribe;
+  }
+
+  /**
+   * Subscribe to mentioned cell changes to handle external updates.
+   * Unsubscribes from previous cell when binding changes.
+   */
+  private _setupMentionedSyncHandler(): void {
+    if (this._mentionedUnsub) {
+      this._mentionedUnsub();
+      this._mentionedUnsub = null;
+    }
+
+    if (!this.mentioned) return;
+    const unsubscribe = this.mentioned
+      .subscribe((_value) => {
+        // Re-sync charm name subscriptions when mentioned list changes externally
+        this._setupCharmNameSubscriptions();
+      });
+    this._mentionedUnsub = unsubscribe;
   }
 
   private _cleanup(): void {
@@ -1031,11 +1052,32 @@ export class CTCodeEditor extends BaseElement {
       this._mentionableUnsub();
       this._mentionableUnsub = null;
     }
+    if (this._mentionedUnsub) {
+      this._mentionedUnsub();
+      this._mentionedUnsub = null;
+    }
     this._cleanupFns.forEach((fn) => fn());
     this._cleanupFns = [];
     if (this._editorView) {
       this._editorView.destroy();
       this._editorView = undefined;
+    }
+  }
+
+  override willUpdate(changedProperties: Map<string, any>) {
+    if (changedProperties.has("mentionable")) {
+      if (this.mentionable) {
+        this.mentionable = this.mentionable.asSchema(MentionableArraySchema);
+      }
+      this._setupMentionableSyncHandler();
+      this._updateMentionedFromContent();
+    }
+    if (changedProperties.has("mentioned")) {
+      if (this.mentioned) {
+        this.mentioned = this.mentioned.asSchema(MentionableArraySchema);
+      }
+      this._setupMentionedSyncHandler();
+      this._updateMentionedFromContent();
     }
   }
 
@@ -1144,17 +1186,6 @@ export class CTCodeEditor extends BaseElement {
         ),
       });
     }
-
-    // Re-subscribe if mention source reference changes
-    if (changedProperties.has("mentionable")) {
-      this._setupMentionableSyncHandler();
-      this._updateMentionedFromContent();
-    }
-
-    // If `$mentioned` binding changes, push current state immediately
-    if (changedProperties.has("mentioned")) {
-      this._updateMentionedFromContent();
-    }
   }
 
   protected override firstUpdated(_changedProperties: PropertyValues): void {
@@ -1175,6 +1206,7 @@ export class CTCodeEditor extends BaseElement {
 
     // Set up mentionable sync handler and initialize mentioned list
     this._setupMentionableSyncHandler();
+    this._setupMentionedSyncHandler();
     this._updateMentionedFromContent();
 
     // Initialize backlink name tracking for sync detection
@@ -1405,43 +1437,16 @@ export class CTCodeEditor extends BaseElement {
   private _updateMentionedFromContent(): void {
     if (!this.mentioned) return;
 
-    // TODO(runtime-worker-refactor): Need to
-    // disambiguate between getting `T[]` versus
-    // `CellHandle<T>[]`.
-    console.warn(
-      "runtime-worker-refactor: Updating mentions from code editor TBD.",
-    );
-
-    /*
     const content = this.getValue() || "";
-    const newMentioned = this._extractMentionedCharms(content);
 
-    // Compare by id set to avoid unnecessary writes
-    const rawMentioned = this.mentioned.getMaybe();
-    if (!rawMentioned) return;
-    const currentSource = Array.isArray(rawMentioned)
-      ? rawMentioned
-      : isCellHandle(rawMentioned)
-      ? ((rawMentioned.get() ?? []) as MentionableArray)
-      : [];
+    // Extract IDs from content
+    const newIds = this._extractMentionedIds(content);
 
-    const _current: Mentionable[] = currentSource.filter((
-      value,
-    ): value is Mentionable => Boolean(value));
+    // Get current mentioned IDs by looking them up in mentionable
+    const curIds = this._getCurrentMentionedIds();
 
-    const curIds = new Set();
-    const newIds = new Set();
-    const curIds = new Set(
-      current
-        .map((c) => getEntityId(c)?.["/"])
-        .filter((id): id is string => typeof id === "string"),
-    );
-    const newIds = new Set(
-      newMentioned
-        .map((c) => getEntityId(c)?.["/"])
-        .filter((id): id is string => typeof id === "string"),
-    );
-    if (curIds.size === newIds.size) {
+    // Compare ID sets to avoid unnecessary writes
+    if (newIds.size === curIds.size) {
       let same = true;
       for (const id of newIds) {
         if (!curIds.has(id)) {
@@ -1452,9 +1457,65 @@ export class CTCodeEditor extends BaseElement {
       if (same) return; // No change
     }
 
+    // Resolve IDs to Mentionable values and update the cell
+    const newMentioned = this._extractMentionedCharms(content);
     this.mentioned.set(newMentioned);
-    */
     this._setupCharmNameSubscriptions();
+  }
+
+  /**
+   * Extract unique charm IDs from content backlinks.
+   */
+  private _extractMentionedIds(content: string): Set<string> {
+    const ids = new Set<string>();
+    const regex = /\[\[[^\]]*?\(([^)]+)\)\]\]/g;
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(content)) !== null) {
+      const id = match[1];
+      if (id) ids.add(id);
+    }
+    return ids;
+  }
+
+  /**
+   * Get IDs of currently mentioned charms by looking them up in mentionable.
+   */
+  private _getCurrentMentionedIds(): Set<string> {
+    const curIds = new Set<string>();
+    if (!this.mentioned) return curIds;
+
+    const rawMentioned = this.mentioned.get();
+    if (!rawMentioned) return curIds;
+
+    const currentSource = Array.isArray(rawMentioned)
+      ? rawMentioned
+      : isCellHandle(rawMentioned)
+      ? ((rawMentioned.get() ?? []) as MentionableArray)
+      : [];
+
+    if (!this.mentionable) return curIds;
+
+    const rawMentionable = this.mentionable.get();
+    const mentionableData = Array.isArray(rawMentionable)
+      ? rawMentionable as MentionableArray
+      : isCellHandle(rawMentionable)
+      ? ((rawMentionable.get() ?? []) as MentionableArray)
+      : [];
+
+    // For each current mentioned value, find its ID by matching in mentionable
+    for (const mentionedValue of currentSource) {
+      if (!mentionedValue) continue;
+      for (let i = 0; i < mentionableData.length; i++) {
+        if (mentionableData[i] === mentionedValue) {
+          const charmCell = this.mentionable.key(i) as CellHandle<Mentionable>;
+          const charmId = charmCell.id();
+          if (charmId) curIds.add(charmId);
+          break;
+        }
+      }
+    }
+
+    return curIds;
   }
 
   /**
@@ -1561,8 +1622,7 @@ export class CTCodeEditor extends BaseElement {
    * Parse content to a list of unique Charms referenced by [[...]] links.
    */
   private _extractMentionedCharms(content: string): Mentionable[] {
-    const mentionableCell = this._getMentionableCell();
-    if (!content || !mentionableCell) return [];
+    if (!content || !this.mentionable) return [];
 
     const ids: string[] = [];
     const regex = /\[\[[^\]]*?\(([^)]+)\)\]\]/g;
@@ -1643,13 +1703,6 @@ export class CTCodeEditor extends BaseElement {
       newName,
       charm: charmCell,
     });
-  }
-
-  /**
-   * Resolve the active mentionable cell.
-   */
-  private _getMentionableCell(): CellHandle<MentionableArray> | null {
-    return this.mentionable ?? null;
   }
 }
 
