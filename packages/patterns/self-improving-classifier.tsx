@@ -93,6 +93,7 @@ interface ClassifierConfig {
 
 /** LLM classification response */
 interface LLMClassificationResult {
+  itemId: string;
   classification: boolean;
   confidence: number;
   reasoning: string;
@@ -146,7 +147,8 @@ interface ClassifierInput {
   examples: Writable<Default<LabeledExample[], []>>;
   rules: Writable<Default<ClassificationRule[], []>>;
   pendingClassifications: Writable<Default<PendingClassification[], []>>;
-  // Item currently being classified by LLM
+  // The item currently being classified (null when idle)
+  // Only one item can be classified at a time
   currentItem: Writable<Default<ClassifiableInput | null, null>>;
 }
 
@@ -435,7 +437,13 @@ const removeRuleHandler = handler<
 // =============================================================================
 
 export default pattern<ClassifierInput>(
-  ({ config, examples, rules, pendingClassifications, currentItem }) => {
+  ({
+    config,
+    examples,
+    rules,
+    pendingClassifications,
+    currentItem,
+  }) => {
     // Local state for new item input - use Writable.of for bidirectional binding with $value
     const newItemFields = Writable.of<Record<string, string>>({});
     const newFieldKey = Writable.of("");
@@ -457,8 +465,15 @@ export default pattern<ClassifierInput>(
 
     /** Submit a new item for classification */
     const submitItem = action((e: { fields: Record<string, string> }) => {
-      // Spread fields to ensure we get a plain copy, not a reactive proxy
-      const fieldsCopy = { ...e.fields };
+      // Only allow one item at a time - ignore if already classifying
+      if (currentItem.get() !== null) {
+        console.warn(
+          "[Classifier] Already classifying an item, ignoring new submission",
+        );
+        return;
+      }
+      // Deep clone fields to ensure we get a plain copy, not a reactive proxy
+      const fieldsCopy = JSON.parse(JSON.stringify(e.fields));
       const input: ClassifiableInput = {
         id: generateId(),
         receivedAt: Date.now(),
@@ -581,36 +596,46 @@ export default pattern<ClassifierInput>(
     /** Submit the new item for classification */
     const submitNewItem = action(() => {
       const fields = newItemFields.get();
-      if (Object.keys(fields).length > 0) {
-        // Inline the submitItem logic to avoid action-calling-action issue
-        const fieldsCopy = { ...fields };
-        const input: ClassifiableInput = {
-          id: generateId(),
-          receivedAt: Date.now(),
-          fields: fieldsCopy,
-        };
-        currentItem.set(input);
-        newItemFields.set({});
+      if (Object.keys(fields).length === 0) return;
+
+      // Only allow one item at a time - ignore if already classifying
+      if (currentItem.get() !== null) {
+        console.warn(
+          "[Classifier] Already classifying an item, ignoring new submission",
+        );
+        return;
       }
+
+      // Deep clone to avoid reactive proxy leak
+      const fieldsCopy = JSON.parse(JSON.stringify(fields));
+      const input: ClassifiableInput = {
+        id: generateId(),
+        receivedAt: Date.now(),
+        fields: fieldsCopy,
+      };
+      currentItem.set(input);
+      newItemFields.set({});
     });
 
     // ==========================================================================
     // LLM CLASSIFICATION
     // ==========================================================================
 
-    // Build the classification prompt when there's a current item to classify
+    // Build the classification prompt for the current item
     const classificationPrompt = computed(() => {
       const item = currentItem.get();
       if (!item) return "";
 
-      const question = config.get().question || "Is this a positive example?";
+      const question = config.get()?.question || "Is this a positive example?";
       const examplesList = examples.get();
 
       // Get recent examples for few-shot learning
       const recentPositive = examplesList.filter((e) => e.label).slice(-3);
       const recentNegative = examplesList.filter((e) => !e.label).slice(-3);
 
-      let prompt = `Question: ${question}\n\n`;
+      // Include itemId in prompt so LLM echoes it back
+      let prompt = `Item ID: ${item.id}\n\n`;
+      prompt += `Question: ${question}\n\n`;
       prompt += `Input to classify:\n${
         JSON.stringify(item.fields, null, 2)
       }\n\n`;
@@ -640,28 +665,40 @@ export default pattern<ClassifierInput>(
       system:
         `You are a precise classifier. Analyze the input and determine if it matches the question criteria.
 Respond with:
+- itemId: echo back the exact Item ID from the prompt (REQUIRED - this must match exactly)
 - classification: true for YES, false for NO
 - confidence: a number between 0 and 1 indicating your confidence
 - reasoning: a brief explanation of why you classified it this way`,
       model: "anthropic:claude-sonnet-4-5",
     });
 
-    // When LLM result arrives, move item from currentItem to pendingClassifications
-    const processLLMResult = computed(() => {
-      const item = currentItem.get();
-      if (!item) return null;
-
+    // When LLM result arrives, compute the classification result
+    // IMPORTANT: This computed has NO SIDE EFFECTS - it only derives state
+    // The UI shows this result, and user actions (Confirm/Correct) trigger state changes
+    const currentClassificationResult = computed((): {
+      item: ClassifiableInput;
+      classification: ClassificationResult;
+    } | null => {
+      // Skip if still pending or error
       if (llmResult.pending || llmResult.error) return null;
 
       const llmResultValue = llmResult.result;
-      if (!llmResultValue) return null;
+      if (!llmResultValue || !llmResultValue.itemId) return null;
 
-      // Check if we already processed this item
-      const pending = pendingClassifications.get();
-      if (pending.some((p) => p.input.id === item.id)) return null;
+      // Get the current item being classified
+      const item = currentItem.get();
+      if (!item) return null;
+
+      // Verify the LLM response matches the item we sent
+      if (item.id !== llmResultValue.itemId) {
+        console.warn(
+          `[Classifier] Item ID mismatch: expected ${item.id}, got ${llmResultValue.itemId}`,
+        );
+        return null;
+      }
 
       // Try rules first with precision-weighted voting
-      const configVal = config.get();
+      const configVal = config.get() || DEFAULT_CONFIG;
       const rulesVal = rules.get();
       const matchedRules: string[] = [];
 
@@ -753,18 +790,93 @@ Respond with:
         };
       }
 
-      // Add to pending and clear current
-      // Deep clone to ensure no reactive proxies leak in
-      const plainInput = JSON.parse(JSON.stringify(item));
-      const plainResult = JSON.parse(JSON.stringify(classification));
-      pendingClassifications.push({ input: plainInput, result: plainResult });
-      currentItem.set(null);
-
-      return classification;
+      // Return the computed classification - NO SIDE EFFECTS
+      return { item, classification };
     });
 
-    // Force the computed to run by referencing it
-    const _lastProcessed = processLLMResult;
+    // Helper computed to check if we have a classification result ready
+    const hasClassificationResult = computed(
+      () => currentClassificationResult !== null,
+    );
+
+    // ==========================================================================
+    // HANDLERS FOR CURRENT ITEM (in-progress classification)
+    // These are called when user clicks Confirm/Correct on the item being classified
+    // They move the item from currentItem to pendingClassifications
+    // ==========================================================================
+
+    /** Accept the current classification result and move to pending */
+    const acceptCurrentClassification = action(() => {
+      const result = currentClassificationResult;
+      if (!result) return;
+
+      const { item, classification } = result;
+
+      // Deep clone to ensure no reactive proxies leak
+      const plainItem: ClassifiableInput = JSON.parse(
+        JSON.stringify({
+          id: item.id,
+          receivedAt: item.receivedAt,
+          fields: item.fields,
+        }),
+      );
+      const plainClassification: ClassificationResult = JSON.parse(
+        JSON.stringify({
+          inputId: classification.inputId,
+          classification: classification.classification,
+          confidence: classification.confidence,
+          reasoning: classification.reasoning,
+          decidedBy: classification.decidedBy,
+          matchedRules: classification.matchedRules,
+        }),
+      );
+
+      // Add to pending and clear current
+      pendingClassifications.push({
+        input: plainItem,
+        result: plainClassification,
+      });
+      currentItem.set(null);
+    });
+
+    /** Correct the current classification and move to pending with flipped label */
+    const correctCurrentClassification = action(() => {
+      const result = currentClassificationResult;
+      if (!result) return;
+
+      const { item, classification } = result;
+
+      // Deep clone with flipped classification
+      const plainItem: ClassifiableInput = JSON.parse(
+        JSON.stringify({
+          id: item.id,
+          receivedAt: item.receivedAt,
+          fields: item.fields,
+        }),
+      );
+      const plainClassification: ClassificationResult = JSON.parse(
+        JSON.stringify({
+          inputId: classification.inputId,
+          classification: !classification.classification, // FLIP the classification
+          confidence: 1.0, // User is certain
+          reasoning: "User corrected classification",
+          decidedBy: "user",
+          matchedRules: classification.matchedRules,
+        }),
+      );
+
+      // Add to pending and clear current
+      pendingClassifications.push({
+        input: plainItem,
+        result: plainClassification,
+      });
+      currentItem.set(null);
+    });
+
+    /** Dismiss the current item without classifying */
+    const dismissCurrentItem = action(() => {
+      currentItem.set(null);
+    });
 
     // ==========================================================================
     // PHASE 3: LLM RULE GENERATION
@@ -783,6 +895,7 @@ Respond with:
       const _refreshCount = ruleGenCounter.get();
 
       // Only generate when we have enough examples
+      if (!configVal) return "";
       if (examplesList.length < (configVal.minExamplesForRules || 5)) return "";
 
       // Check for errors/corrections that indicate room for improvement
@@ -891,7 +1004,8 @@ Each suggestion should have:
 
     // Display name
     const displayName = computed(() => {
-      const q = config.get().question;
+      const configVal = config.get();
+      const q = configVal?.question;
       return q ? `Classifier: ${q}` : "Self-Improving Classifier";
     });
 
@@ -906,11 +1020,11 @@ Each suggestion should have:
           <ct-vstack slot="header" gap="2">
             <ct-heading level={4}>{displayName}</ct-heading>
             <ct-input
-              value={computed(() => config.get().question)}
+              value={computed(() => config.get()?.question ?? "")}
               placeholder="Enter your classification question (e.g., 'Is this email a bill?')"
               onct-input={(e: { detail?: { value?: string } }) => {
                 const q = e.detail?.value || "";
-                const current = config.get();
+                const current = config.get() || DEFAULT_CONFIG;
                 config.set({ ...current, question: q });
               }}
             />
@@ -1036,18 +1150,106 @@ Each suggestion should have:
                 </ct-vstack>
               </ct-card>
 
-              {/* Currently classifying */}
+              {/* Currently classifying - show loader or result */}
               {ifElse(
                 computed(() => currentItem.get() !== null),
                 <ct-card style="border-left: 4px solid var(--ct-color-info-500);">
                   <ct-vstack gap="2">
-                    <ct-hstack gap="2" align="center">
-                      <ct-loader size="sm" />
-                      <span style="font-weight: 500;">Classifying...</span>
-                    </ct-hstack>
+                    {/* Show item being classified */}
                     <pre style="font-size: 0.75rem; overflow: auto; max-height: 100px; margin: 0; background: var(--ct-color-gray-50); padding: 0.5rem; border-radius: 4px;">
-                      {computed(() => JSON.stringify(currentItem.get()?.fields, null, 2))}
+                      {computed(() => {
+                        const result = currentClassificationResult;
+                        if (result) {
+                          return JSON.stringify(result.item.fields, null, 2);
+                        }
+                        const item = currentItem.get();
+                        return item ? JSON.stringify(item.fields, null, 2) : "";
+                      })}
                     </pre>
+
+                    {/* Show loading or result */}
+                    {ifElse(
+                      hasClassificationResult,
+                      // Result is ready - show classification with action buttons
+                      <ct-vstack gap="2">
+                        <ct-hstack gap="2" align="center">
+                          <span
+                            style={{
+                              fontWeight: "600",
+                              color: ifElse(
+                                computed(() =>
+                                  currentClassificationResult?.classification
+                                    .classification ?? false
+                                ),
+                                "var(--ct-color-success-600)",
+                                "var(--ct-color-error-600)",
+                              ),
+                            }}
+                          >
+                            {ifElse(
+                              computed(() =>
+                                currentClassificationResult?.classification
+                                  .classification ?? false
+                              ),
+                              "YES",
+                              "NO",
+                            )}
+                          </span>
+                          <span style="color: var(--ct-color-gray-500); font-size: 0.875rem;">
+                            ({computed(() =>
+                              (
+                                (currentClassificationResult?.classification
+                                  .confidence ?? 0) * 100
+                              ).toFixed(0)
+                            )}% confidence via{" "}
+                            {computed(() =>
+                              currentClassificationResult?.classification
+                                .decidedBy ?? ""
+                            )})
+                          </span>
+                        </ct-hstack>
+
+                        <span style="font-size: 0.875rem; color: var(--ct-color-gray-600);">
+                          {computed(() =>
+                            currentClassificationResult?.classification
+                              .reasoning ?? ""
+                          )}
+                        </span>
+
+                        <ct-hstack gap="2">
+                          <ct-button
+                            variant="primary"
+                            onClick={acceptCurrentClassification}
+                          >
+                            Accept
+                          </ct-button>
+                          <ct-button
+                            variant="secondary"
+                            onClick={correctCurrentClassification}
+                          >
+                            Actually {ifElse(
+                              computed(() =>
+                                currentClassificationResult?.classification
+                                  .classification ?? false
+                              ),
+                              "NO",
+                              "YES",
+                            )}
+                          </ct-button>
+                          <ct-button
+                            variant="ghost"
+                            onClick={dismissCurrentItem}
+                          >
+                            Dismiss
+                          </ct-button>
+                        </ct-hstack>
+                      </ct-vstack>,
+                      // Still loading
+                      <ct-hstack gap="2" align="center">
+                        <ct-loader size="sm" />
+                        <span style="font-weight: 500;">Classifying...</span>
+                      </ct-hstack>,
+                    )}
                   </ct-vstack>
                 </ct-card>,
                 null,
