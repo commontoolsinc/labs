@@ -338,16 +338,7 @@ export default pattern(({ card }) => {
                     asOpaque: true
                 },
                 startEditing: {
-                    type: "object",
-                    properties: {
-                        type: {
-                            "enum": ["ref", "javascript", "recipe", "raw", "isolated", "passthrough"]
-                        },
-                        "with": {
-                            asStream: true
-                        }
-                    },
-                    required: ["type", "with"]
+                    asStream: true
                 }
             },
             required: ["card", "hasDescription", "startEditing"]
