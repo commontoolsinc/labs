@@ -6,10 +6,9 @@ Patterns can compose other patterns by instantiating them and including the resu
 
 **Always use function call syntax** to render sub-patterns:
 
-```tsx
+```
 // ✅ Correct - function call returns OpaqueCell with [UI]
 {items.map((item) => ItemCard({ item }))}
-<div>{listView}</div>
 
 // ❌ Wrong - JSX fails type checking for patterns with Output types
 {items.map((item) => <ItemCard item={item} />)}
@@ -29,9 +28,11 @@ This is why sub-patterns **must include `[UI]` in their Output type** - see [Pat
 ## Example
 
 ```tsx
-import { pattern, NAME, UI, VNode, Stream } from "commontools";
+import { pattern, NAME, UI, VNode, Writable } from "commontools";
 
-interface ItemInput { item: Writable<Item> }
+interface Item { name: Writable<string> }
+
+interface ItemInput { item: Item }
 interface ItemOutput {
   [NAME]: string;
   [UI]: VNode;  // Required for composition
@@ -43,6 +44,13 @@ const ItemCard = pattern<ItemInput, ItemOutput>(({ item }) => ({
   [UI]: <div>{item.name}</div>,
   item,
 }));
+
+interface ListInput { items: Writable<Item[]> }
+interface ListOutput {
+  [NAME]: string;
+  [UI]: VNode;
+  items: Item[];
+}
 
 // Parent pattern composes ItemCard
 export default pattern<ListInput, ListOutput>(({ items }) => ({
