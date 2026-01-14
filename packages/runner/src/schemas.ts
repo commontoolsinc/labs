@@ -87,3 +87,12 @@ export const processSchema = {
   },
   required: [TYPE],
 } as const satisfies JSONSchema;
+
+// Primitive schemas for UI component cell bindings
+export const stringSchema = { type: "string" } as const satisfies JSONSchema;
+export const booleanSchema = { type: "boolean" } as const satisfies JSONSchema;
+export const numberSchema = { type: "number" } as const satisfies JSONSchema;
+export const stringArraySchema = {
+  type: "array",
+  items: { type: "string" },
+} as const satisfies JSONSchema;

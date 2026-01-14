@@ -10,11 +10,21 @@ import {
   PageHandle,
   VNode,
 } from "@commontools/runtime-client";
+import { vdomSchema } from "@commontools/runner/schemas";
+import type { JSONSchema } from "@commontools/runner/shared";
 
 type SubPages = {
   sidebarUI?: VNode;
   fabUI?: VNode;
 };
+
+const SubPagesSchema = {
+  type: "object",
+  properties: {
+    sidebarUI: vdomSchema,
+    fabUI: vdomSchema,
+  },
+} as const satisfies JSONSchema;
 
 export class XBodyView extends BaseView {
   static override styles = css`
@@ -209,15 +219,16 @@ async function getSubPageCell(
   key: "fabUI" | "sidebarUI",
 ): Promise<CellHandle<VNode> | undefined> {
   if (!cell) return undefined;
-  let value = cell.get();
+  const typedCell = cell.asSchema<SubPages>(SubPagesSchema);
+  let value = typedCell.get();
   if (!value) {
-    await cell.sync();
-    value = cell.get();
+    await typedCell.sync();
+    value = typedCell.get();
     if (!value) {
       return;
     }
   }
   if (key in value && value[key]) {
-    return cell.key(key) as CellHandle<VNode>;
+    return typedCell.key(key).asSchema<VNode>(vdomSchema);
   }
 }

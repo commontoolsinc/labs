@@ -1,5 +1,6 @@
 import { css, html } from "lit";
 import { type CellHandle } from "@commontools/runtime-client";
+import { stringSchema } from "@commontools/runner/schemas";
 import { BaseElement } from "../../core/base-element.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
 import type { CTTab } from "../ct-tab/ct-tab.ts";
@@ -130,7 +131,7 @@ export class CTTabs extends BaseElement {
 
   override firstUpdated() {
     // Initialize cell controller binding
-    this._cellController.bind(this.value);
+    this._cellController.bind(this.value, stringSchema);
     // Track initial value
     this._lastKnownValue = this._cellController.getValue();
     // Initialize tab selection
@@ -144,7 +145,7 @@ export class CTTabs extends BaseElement {
 
     // If the value property itself changed (e.g., switched to a different cell)
     if (changedProperties.has("value")) {
-      this._cellController.bind(this.value);
+      this._cellController.bind(this.value, stringSchema);
     }
   }
 

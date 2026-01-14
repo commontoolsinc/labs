@@ -40,6 +40,7 @@ import {
   isCellHandle,
   NAME,
 } from "@commontools/runtime-client";
+import { stringSchema } from "@commontools/runner/schemas";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
 import { Mentionable, MentionableArray } from "../../core/mentionable.ts";
@@ -1047,7 +1048,7 @@ export class CTCodeEditor extends BaseElement {
       this._cellController.cancel();
       // Clean up old Cell subscription and set up new one
       this._cleanupCellSyncHandler();
-      this._cellController.bind(this.value);
+      this._cellController.bind(this.value, stringSchema);
       this._setupCellSyncHandler();
       this._updateEditorFromCellValue();
     }
@@ -1161,7 +1162,7 @@ export class CTCodeEditor extends BaseElement {
     this._initializeEditor();
 
     // Bind the initial value to the cell controller
-    this._cellController.bind(this.value);
+    this._cellController.bind(this.value, stringSchema);
 
     // Update timing options to match current properties
     this._cellController.updateTimingOptions({
