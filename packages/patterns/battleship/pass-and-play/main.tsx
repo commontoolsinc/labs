@@ -3,6 +3,7 @@ import {
   computed,
   derive,
   handler,
+  lift,
   NAME,
   pattern,
   Stream,
@@ -10,168 +11,109 @@ import {
   Writable,
 } from "commontools";
 
-// =============================================================================
-// Types
-// =============================================================================
+import {
+  areAllShipsSunk,
+  buildShipPositions,
+  COLS,
+  createInitialState,
+  findShipAt,
+  type GameState,
+  GRID_INDICES,
+  isShipSunk,
+  ROWS,
+  SHIP_NAMES,
+} from "./schemas.tsx";
 
-export type Coordinate = { row: number; col: number };
-
-export type ShipType =
-  | "carrier"
-  | "battleship"
-  | "cruiser"
-  | "submarine"
-  | "destroyer";
-
-export interface Ship {
-  type: ShipType;
-  start: Coordinate;
-  orientation: "horizontal" | "vertical";
-}
-
-export type SquareState = "empty" | "miss" | "hit";
-
-export interface PlayerBoard {
-  ships: Ship[];
-  shots: SquareState[][]; // 10x10 grid - shots RECEIVED from opponent
-}
-
-export interface GameState {
-  phase: "playing" | "finished";
-  currentTurn: 1 | 2;
-  player1: PlayerBoard;
-  player2: PlayerBoard;
-  winner: 1 | 2 | null;
-  lastMessage: string;
-  viewingAs: 1 | 2 | null; // null = full transition screen (ready to reveal)
-  awaitingPass: boolean; // true = show result + pass button, board locked
-}
+// Re-export types for test compatibility
+export type {
+  Coordinate,
+  GameState,
+  PlayerBoard,
+  Ship,
+  ShipType,
+  SquareState,
+} from "./schemas.tsx";
 
 // =============================================================================
-// Constants
+// Lifted Functions (module scope - pure transformation logic)
 // =============================================================================
 
-const SHIP_SIZES: Record<ShipType, number> = {
-  carrier: 5,
-  battleship: 4,
-  cruiser: 3,
-  submarine: 3,
-  destroyer: 2,
-};
-
-const SHIP_NAMES: Record<ShipType, string> = {
-  carrier: "Carrier",
-  battleship: "Battleship",
-  cruiser: "Cruiser",
-  submarine: "Submarine",
-  destroyer: "Destroyer",
-};
-
-const COLS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
-const ROWS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-const GRID_INDICES = ROWS.flatMap((r) => ROWS.map((c) => ({ row: r, col: c })));
-
-// =============================================================================
-// Helper Functions
-// =============================================================================
-
-function createEmptyGrid(): SquareState[][] {
-  return Array.from(
-    { length: 10 },
-    () => Array.from({ length: 10 }, () => "empty" as SquareState),
-  );
+interface BoardCell {
+  row: number;
+  col: number;
+  bgColor: string;
+  content: string;
+  gridRow: string;
+  gridCol: string;
 }
 
-function getShipCoordinates(ship: Ship): Coordinate[] {
-  const size = SHIP_SIZES[ship.type];
-  const coords: Coordinate[] = [];
-  for (let i = 0; i < size; i++) {
-    if (ship.orientation === "horizontal") {
-      coords.push({ row: ship.start.row, col: ship.start.col + i });
-    } else {
-      coords.push({ row: ship.start.row + i, col: ship.start.col });
-    }
-  }
-  return coords;
-}
+const computeMyBoardCells = lift<{ game: GameState }, BoardCell[]>(
+  ({ game }) => {
+    const viewer = game.viewingAs;
+    if (viewer === null) return [];
 
-function findShipAt(ships: Ship[], coord: Coordinate): Ship | null {
-  for (const ship of ships) {
-    const shipCoords = getShipCoordinates(ship);
-    if (shipCoords.some((c) => c.row === coord.row && c.col === coord.col)) {
-      return ship;
-    }
-  }
-  return null;
-}
+    const myBoard = viewer === 1 ? game.player1 : game.player2;
+    const shots = myBoard.shots;
+    const shipPositions = buildShipPositions(myBoard.ships);
 
-function isShipSunk(ship: Ship, shots: SquareState[][]): boolean {
-  const coords = getShipCoordinates(ship);
-  return coords.every((c) => shots[c.row][c.col] === "hit");
-}
+    return GRID_INDICES.map(({ row, col }) => {
+      const shotState = shots[row]?.[col] ?? "empty";
+      const hasShip = !!shipPositions[`${row},${col}`];
+      const bgColor = shotState === "hit"
+        ? "#dc2626"
+        : shotState === "miss"
+        ? "#374151"
+        : hasShip
+        ? "#22c55e"
+        : "#1e3a5f";
+      const content = shotState === "hit"
+        ? "X"
+        : shotState === "miss"
+        ? "O"
+        : "";
+      return {
+        row,
+        col,
+        bgColor,
+        content,
+        gridRow: `${row + 2}`,
+        gridCol: `${col + 2}`,
+      };
+    });
+  },
+);
 
-function areAllShipsSunk(ships: Ship[], shots: SquareState[][]): boolean {
-  return ships.every((ship) => isShipSunk(ship, shots));
-}
+const computeEnemyBoardCells = lift<{ game: GameState }, BoardCell[]>(
+  ({ game }) => {
+    const viewer = game.viewingAs;
+    if (viewer === null) return [];
 
-function buildShipPositions(ships: Ship[]): Record<string, ShipType> {
-  const positions: Record<string, ShipType> = {};
-  for (const ship of ships) {
-    const coords = getShipCoordinates(ship);
-    for (const c of coords) {
-      positions[`${c.row},${c.col}`] = ship.type;
-    }
-  }
-  return positions;
-}
+    const enemyBoard = viewer === 1 ? game.player2 : game.player1;
+    const shots = enemyBoard.shots;
 
-// Default ship placements for testing
-function createDefaultShips1(): Ship[] {
-  return [
-    { type: "carrier", start: { row: 0, col: 0 }, orientation: "horizontal" },
-    {
-      type: "battleship",
-      start: { row: 2, col: 1 },
-      orientation: "horizontal",
-    },
-    { type: "cruiser", start: { row: 4, col: 3 }, orientation: "vertical" },
-    { type: "submarine", start: { row: 5, col: 7 }, orientation: "horizontal" },
-    { type: "destroyer", start: { row: 8, col: 5 }, orientation: "vertical" },
-  ];
-}
-
-function createDefaultShips2(): Ship[] {
-  return [
-    { type: "carrier", start: { row: 1, col: 2 }, orientation: "vertical" },
-    {
-      type: "battleship",
-      start: { row: 0, col: 6 },
-      orientation: "horizontal",
-    },
-    { type: "cruiser", start: { row: 3, col: 0 }, orientation: "horizontal" },
-    { type: "submarine", start: { row: 7, col: 4 }, orientation: "vertical" },
-    { type: "destroyer", start: { row: 9, col: 8 }, orientation: "horizontal" },
-  ];
-}
-
-function createInitialState(): GameState {
-  return {
-    phase: "playing",
-    currentTurn: 1,
-    player1: {
-      ships: createDefaultShips1(),
-      shots: createEmptyGrid(),
-    },
-    player2: {
-      ships: createDefaultShips2(),
-      shots: createEmptyGrid(),
-    },
-    winner: null,
-    lastMessage: "Player 1's turn",
-    viewingAs: null, // Start with transition screen
-    awaitingPass: false,
-  };
-}
+    return GRID_INDICES.map(({ row, col }) => {
+      const shotState = shots[row]?.[col] ?? "empty";
+      const bgColor = shotState === "hit"
+        ? "#dc2626"
+        : shotState === "miss"
+        ? "#374151"
+        : "#1e3a5f";
+      const content = shotState === "hit"
+        ? "X"
+        : shotState === "miss"
+        ? "O"
+        : "";
+      return {
+        row,
+        col,
+        bgColor,
+        content,
+        gridRow: `${row + 2}`,
+        gridCol: `${col + 2}`,
+      };
+    });
+  },
+);
 
 // =============================================================================
 // Handlers (module level - clean event/state separation)
@@ -334,72 +276,9 @@ export default pattern<Input, Output>((_input) => {
   const isTransition = computed(() => game.get().viewingAs === null);
   const isFinished = computed(() => game.get().phase === "finished");
 
-  // Board cell computation - ONE computed per board = minimal subscriptions
-  const myBoardCells = computed(() => {
-    const state = game.get();
-    const viewer = state.viewingAs;
-    if (viewer === null) return [];
-
-    const myBoard = viewer === 1 ? state.player1 : state.player2;
-    const shots = myBoard.shots;
-    const shipPositions = buildShipPositions(myBoard.ships);
-
-    return GRID_INDICES.map(({ row, col }) => {
-      const shotState = shots[row]?.[col] ?? "empty";
-      const hasShip = !!shipPositions[`${row},${col}`];
-      const bgColor = shotState === "hit"
-        ? "#dc2626"
-        : shotState === "miss"
-        ? "#374151"
-        : hasShip
-        ? "#22c55e"
-        : "#1e3a5f";
-      const content = shotState === "hit"
-        ? "X"
-        : shotState === "miss"
-        ? "O"
-        : "";
-      return {
-        row,
-        col,
-        bgColor,
-        content,
-        gridRow: `${row + 2}`,
-        gridCol: `${col + 2}`,
-      };
-    });
-  });
-
-  const enemyBoardCells = computed(() => {
-    const state = game.get();
-    const viewer = state.viewingAs;
-    if (viewer === null) return [];
-
-    const enemyBoard = viewer === 1 ? state.player2 : state.player1;
-    const shots = enemyBoard.shots;
-
-    return GRID_INDICES.map(({ row, col }) => {
-      const shotState = shots[row]?.[col] ?? "empty";
-      const bgColor = shotState === "hit"
-        ? "#dc2626"
-        : shotState === "miss"
-        ? "#374151"
-        : "#1e3a5f";
-      const content = shotState === "hit"
-        ? "X"
-        : shotState === "miss"
-        ? "O"
-        : "";
-      return {
-        row,
-        col,
-        bgColor,
-        content,
-        gridRow: `${row + 2}`,
-        gridCol: `${col + 2}`,
-      };
-    });
-  });
+  // Board cell computation using lift functions
+  const myBoardCells = computeMyBoardCells({ game });
+  const enemyBoardCells = computeEnemyBoardCells({ game });
 
   // ---------------------------------------------------------------------------
   // Styles
