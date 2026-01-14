@@ -10,6 +10,10 @@
  * - Department location assignment
  * - Adding item corrections
  * - Outline generation
+ * - AI photo import: addExtractedAisle with valid products
+ * - AI photo import: addExtractedAisle with null products (graceful handling)
+ * - AI photo import: addExtractedAisle duplicate prevention
+ * - AI photo import: mergeExtractedAisle product merging
  *
  * Run: deno task ct test packages/patterns/store-mapper.test.tsx --verbose
  */
@@ -88,6 +92,61 @@ const setStoreName = handler<
     storeName.set(name);
   },
 );
+
+// Types for AI photo import testing
+interface ExtractedAisle {
+  name: string;
+  products: string[] | null;
+}
+
+// Handler to simulate addExtractedAisle (mirrors store-mapper.tsx implementation)
+const addExtractedAisle = handler<
+  void,
+  { aisles: Writable<Aisle[]>; extracted: ExtractedAisle }
+>((_event, { aisles, extracted }) => {
+  const current = aisles.get() || [];
+  const exists = current.some(
+    (a: Aisle) => a.name.toLowerCase() === extracted.name.toLowerCase(),
+  );
+  if (!exists) {
+    aisles.push({
+      name: extracted.name,
+      description: (extracted.products || []).map((p: string) => `- ${p}`).join(
+        "\n",
+      ),
+    });
+  }
+});
+
+// Handler to simulate mergeExtractedAisle (mirrors store-mapper.tsx implementation)
+const mergeExtractedAisle = handler<
+  void,
+  { aisles: Writable<Aisle[]>; extracted: ExtractedAisle }
+>((_event, { aisles, extracted }) => {
+  const current = aisles.get() || [];
+  const idx = current.findIndex(
+    (a: Aisle) => a.name.toLowerCase() === extracted.name.toLowerCase(),
+  );
+  if (idx >= 0) {
+    const existing = current[idx];
+    const existingItems = (existing.description || "")
+      .split("\n")
+      .map((l) => l.replace(/^-\s*/, "").trim().toLowerCase())
+      .filter(Boolean);
+    const newProducts = (extracted.products || []).filter(
+      (p) => !existingItems.includes(p.toLowerCase()),
+    );
+    if (newProducts.length > 0) {
+      const newDesc = existing.description
+        ? existing.description + "\n" +
+          newProducts.map((p) => `- ${p}`).join("\n")
+        : newProducts.map((p) => `- ${p}`).join("\n");
+      aisles.set(
+        current.toSpliced(idx, 1, { ...existing, description: newDesc }),
+      );
+    }
+  }
+});
 
 export default pattern(() => {
   // Create writable cells that we control
@@ -250,6 +309,90 @@ export default pattern(() => {
   );
 
   // ==========================================================================
+  // AI Photo Import Handler Actions
+  // ==========================================================================
+
+  // Test 9: addExtractedAisle with valid products
+  const action_add_extracted_aisle_8 = addExtractedAisle({
+    aisles: aislesCell,
+    extracted: { name: "8", products: ["Bread", "Cereal", "Coffee"] },
+  });
+
+  // Test 10: addExtractedAisle with null products (should not crash)
+  const action_add_extracted_aisle_9_null_products = addExtractedAisle({
+    aisles: aislesCell,
+    extracted: { name: "9", products: null },
+  });
+
+  // Test 11: addExtractedAisle duplicate (should not add - aisle "8" already exists)
+  const action_add_extracted_aisle_8_duplicate = addExtractedAisle({
+    aisles: aislesCell,
+    extracted: { name: "8", products: ["Snacks", "Chips"] },
+  });
+
+  // Test 12: mergeExtractedAisle - merge new products into existing aisle 8
+  const action_merge_extracted_aisle_8 = mergeExtractedAisle({
+    aisles: aislesCell,
+    extracted: { name: "8", products: ["Tea", "Coffee", "Sugar"] }, // Coffee is duplicate, Tea and Sugar are new
+  });
+
+  // ==========================================================================
+  // AI Photo Import Handler Assertions
+  // ==========================================================================
+
+  // After adding extracted aisle 8
+  const assert_four_aisles = computed(() => Number(store.aisleCount) === 4);
+  const assert_aisle_8_exists = computed(() =>
+    store.aisles.some((a: Aisle) => a.name === "8")
+  );
+  const assert_aisle_8_has_products = computed(() => {
+    const aisle8 = store.aisles.find((a: Aisle) => a.name === "8");
+    return aisle8 &&
+      String(aisle8.description).includes("Bread") &&
+      String(aisle8.description).includes("Cereal") &&
+      String(aisle8.description).includes("Coffee");
+  });
+
+  // After adding extracted aisle 9 with null products
+  const assert_five_aisles = computed(() => Number(store.aisleCount) === 5);
+  const assert_aisle_9_exists = computed(() =>
+    store.aisles.some((a: Aisle) => a.name === "9")
+  );
+  const assert_aisle_9_empty_description = computed(() => {
+    const aisle9 = store.aisles.find((a: Aisle) => a.name === "9");
+    return aisle9 && String(aisle9.description) === "";
+  });
+
+  // After attempting to add duplicate aisle 8 (count should remain 5)
+  const assert_still_five_aisles = computed(() =>
+    Number(store.aisleCount) === 5
+  );
+  const assert_aisle_8_unchanged = computed(() => {
+    const aisle8 = store.aisles.find((a: Aisle) => a.name === "8");
+    // Description should NOT contain Snacks or Chips from the duplicate attempt
+    return aisle8 &&
+      !String(aisle8.description).includes("Snacks") &&
+      !String(aisle8.description).includes("Chips");
+  });
+
+  // After merging into aisle 8
+  const assert_aisle_8_merged = computed(() => {
+    const aisle8 = store.aisles.find((a: Aisle) => a.name === "8");
+    // Should have original items plus Tea and Sugar, but Coffee only once
+    return aisle8 &&
+      String(aisle8.description).includes("Bread") &&
+      String(aisle8.description).includes("Tea") &&
+      String(aisle8.description).includes("Sugar");
+  });
+  const assert_aisle_8_no_duplicate_coffee = computed(() => {
+    const aisle8 = store.aisles.find((a: Aisle) => a.name === "8");
+    if (!aisle8) return false;
+    // Count occurrences of "Coffee" in description
+    const matches = String(aisle8.description).match(/Coffee/g);
+    return matches && matches.length === 1;
+  });
+
+  // ==========================================================================
   // Test Sequence
   // ==========================================================================
   return {
@@ -297,6 +440,28 @@ export default pattern(() => {
       // === Test 8: Store name change ===
       { action: action_change_store_name },
       { assertion: assert_store_name_changed },
+
+      // === Test 9: Add extracted aisle with valid products ===
+      { action: action_add_extracted_aisle_8 },
+      { assertion: assert_four_aisles },
+      { assertion: assert_aisle_8_exists },
+      { assertion: assert_aisle_8_has_products },
+
+      // === Test 10: Add extracted aisle with null products (should not crash) ===
+      { action: action_add_extracted_aisle_9_null_products },
+      { assertion: assert_five_aisles },
+      { assertion: assert_aisle_9_exists },
+      { assertion: assert_aisle_9_empty_description },
+
+      // === Test 11: Add duplicate extracted aisle (should not add) ===
+      { action: action_add_extracted_aisle_8_duplicate },
+      { assertion: assert_still_five_aisles },
+      { assertion: assert_aisle_8_unchanged },
+
+      // === Test 12: Merge products into existing aisle ===
+      { action: action_merge_extracted_aisle_8 },
+      { assertion: assert_aisle_8_merged },
+      { assertion: assert_aisle_8_no_duplicate_coffee },
     ],
     store,
   };
