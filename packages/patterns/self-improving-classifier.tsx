@@ -100,7 +100,7 @@ interface LLMClassificationResult {
 }
 
 /** Rule suggestion from LLM */
-interface RuleSuggestion {
+export interface RuleSuggestion {
   name: string;
   targetField: string;
   pattern: string;
@@ -175,6 +175,17 @@ interface ClassifierOutput {
   removeRule: Stream<{ ruleId: string }>;
 }
 
+/** Item that was auto-classified (tracked for undo functionality) */
+interface AutoClassifiedItem {
+  input: ClassifiableInput;
+  label: boolean;
+  confidence: number;
+  reasoning: string;
+  matchedRules: string[];
+  tier: Tier;
+  classifiedAt: number;
+}
+
 // =============================================================================
 // HELPER FUNCTIONS
 // =============================================================================
@@ -218,9 +229,10 @@ const computeStats = lift((args: {
  * Calculate F1 score for a rule based on its metrics
  * F1 = 2 * (precision * recall) / (precision + recall)
  */
-function calculateF1(rule: ClassificationRule): number {
-  const precision = rule.precision;
-  const recall = rule.recall;
+function calculateF1(rule: ClassificationRule | undefined): number {
+  if (!rule) return 0;
+  const precision = rule.precision ?? 0;
+  const recall = rule.recall ?? 0;
   if (precision + recall === 0) return 0;
   return (2 * precision * recall) / (precision + recall);
 }
@@ -249,7 +261,7 @@ function _calculateTier(rule: ClassificationRule): Tier {
 /**
  * Get human-readable tier label
  */
-function getTierLabel(tier: Tier): string {
+function getTierLabel(tier: Tier | undefined): string {
   switch (tier) {
     case 0:
       return "Silent";
@@ -261,15 +273,18 @@ function getTierLabel(tier: Tier): string {
       return "Auto+Undo";
     case 4:
       return "Automatic";
+    default:
+      return "Silent";
   }
 }
 
 /**
  * Get tier badge color
  */
-function getTierColor(tier: Tier): string {
+function getTierColor(tier: Tier | undefined): string {
   switch (tier) {
     case 0:
+    default:
       return "var(--ct-color-gray-400)";
     case 1:
       return "var(--ct-color-info-500)";
@@ -280,6 +295,106 @@ function getTierColor(tier: Tier): string {
     case 4:
       return "var(--ct-color-error-500)";
   }
+}
+
+/**
+ * Result of matching rules against an input
+ */
+interface RuleMatchResult {
+  matchedRules: string[];
+  prediction: boolean | null;
+  confidence: number;
+  highestTier: Tier;
+  shouldAutoClassify: boolean;
+  votes: Array<{
+    name: string;
+    predicts: boolean;
+    precision: number;
+    tier: Tier;
+  }>;
+}
+
+/**
+ * Match rules against an input and return the aggregated result
+ */
+function matchRulesAgainstInput(
+  input: ClassifiableInput,
+  rules: readonly ClassificationRule[],
+  autoClassifyThreshold: number,
+): RuleMatchResult {
+  const matchedRules: string[] = [];
+  const votes: RuleMatchResult["votes"] = [];
+
+  for (const rule of rules) {
+    const fieldValue = input.fields[rule.targetField];
+    if (!fieldValue) continue;
+
+    try {
+      const flags = rule.caseInsensitive ? "i" : "";
+      const regex = new RegExp(rule.pattern, flags);
+      if (regex.test(fieldValue)) {
+        matchedRules.push(rule.name);
+        votes.push({
+          name: rule.name,
+          predicts: rule.predicts,
+          precision: rule.precision,
+          tier: rule.tier,
+        });
+      }
+    } catch {
+      // Invalid regex, skip
+    }
+  }
+
+  // Precision-weighted voting
+  let yesWeight = 0;
+  let noWeight = 0;
+  let highestTier: Tier = 0;
+
+  for (const vote of votes) {
+    if (vote.predicts) {
+      yesWeight += vote.precision;
+    } else {
+      noWeight += vote.precision;
+    }
+    if (vote.tier > highestTier) {
+      highestTier = vote.tier;
+    }
+  }
+
+  // Determine prediction
+  let prediction: boolean | null = null;
+  let confidence = 0;
+
+  if (votes.length > 0) {
+    const totalWeight = yesWeight + noWeight;
+    if (yesWeight > noWeight) {
+      prediction = true;
+      confidence = totalWeight > 0 ? yesWeight / totalWeight : 0.5;
+    } else if (noWeight > yesWeight) {
+      prediction = false;
+      confidence = totalWeight > 0 ? noWeight / totalWeight : 0.5;
+    } else {
+      // Tie - use the higher tier rule's prediction
+      const highestTierVote = votes.reduce((a, b) => a.tier > b.tier ? a : b);
+      prediction = highestTierVote.predicts;
+      confidence = 0.5;
+    }
+  }
+
+  // Determine if we should auto-classify (Tier 3-4 with high confidence)
+  const shouldAutoClassify = prediction !== null &&
+    highestTier >= 3 &&
+    confidence >= autoClassifyThreshold;
+
+  return {
+    matchedRules,
+    prediction,
+    confidence,
+    highestTier,
+    shouldAutoClassify,
+    votes,
+  };
 }
 
 // =============================================================================
@@ -424,11 +539,155 @@ const removeRuleHandler = handler<
   rules.set(currentRules.filter((r) => !equals(rule, r)));
 });
 
+/** Undo an auto-classification (module-scoped handler) */
+const undoAutoClassificationHandler = handler<
+  unknown,
+  {
+    autoItem: AutoClassifiedItem;
+    examples: Writable<LabeledExample[]>;
+    rules: Writable<ClassificationRule[]>;
+    currentItem: Writable<ClassifiableInput | null>;
+    recentAutoClassified: Writable<AutoClassifiedItem[]>;
+  }
+>(
+  (
+    _event,
+    { autoItem, examples, rules, currentItem, recentAutoClassified },
+  ) => {
+    const inputId = autoItem.input.id;
+
+    // Remove from examples
+    const examplesList = examples.get();
+    examples.set(examplesList.filter((ex) => ex.input.id !== inputId));
+
+    // Remove from recent auto-classified
+    const autoItems = recentAutoClassified.get();
+    recentAutoClassified.set(autoItems.filter((a) => a.input.id !== inputId));
+
+    // Revert rule metrics
+    const rulesVal = rules.get();
+    for (const rule of rulesVal) {
+      if (autoItem.matchedRules.includes(rule.name)) {
+        const predicted = rule.predicts;
+        const wasCorrect = predicted === autoItem.label;
+        if (wasCorrect) {
+          rule.truePositives = Math.max(0, (rule.truePositives || 0) - 1);
+        }
+        rule.evaluationCount = Math.max(0, (rule.evaluationCount || 0) - 1);
+      }
+    }
+
+    // Set as current item for manual classification
+    currentItem.set(autoItem.input);
+
+    console.log(`[Classifier] Undid auto-classification for ${inputId}`);
+  },
+);
+
+/** Submit an item for classification (module-scoped handler for cross-pattern invocation) */
+const submitItemHandler = handler<
+  { fields: Record<string, string> },
+  {
+    currentItem: Writable<ClassifiableInput | null>;
+    rules: Writable<ClassificationRule[]>;
+    config: Writable<ClassifierConfig>;
+    examples: Writable<LabeledExample[]>;
+    recentAutoClassified: Writable<AutoClassifiedItem[]>;
+  }
+>(
+  (
+    event,
+    { currentItem, rules, config, examples, recentAutoClassified },
+  ) => {
+    // Only allow one item at a time - ignore if already classifying
+    if (currentItem.get() !== null) {
+      console.warn(
+        "[Classifier] Already classifying an item, ignoring new submission",
+      );
+      return;
+    }
+
+    // Create the input object
+    const input: ClassifiableInput = {
+      id: generateId(),
+      receivedAt: Date.now(),
+      fields: { ...event.fields },
+    };
+
+    // Check rules first for potential auto-classification
+    const rulesVal = rules.get();
+    const configVal = config.get() || DEFAULT_CONFIG;
+    const ruleMatch = matchRulesAgainstInput(
+      input,
+      rulesVal,
+      configVal.autoClassifyThreshold,
+    );
+
+    if (ruleMatch.shouldAutoClassify && ruleMatch.prediction !== null) {
+      // Auto-classify: store directly to examples, skip LLM
+      const example: LabeledExample = {
+        input,
+        label: ruleMatch.prediction,
+        decidedBy: "auto",
+        reasoning: `Auto-classified by Tier ${ruleMatch.highestTier} rule(s): ${
+          ruleMatch.matchedRules.join(", ")
+        }`,
+        confidence: ruleMatch.confidence,
+        labeledAt: Date.now(),
+        wasCorrection: false,
+        isInteresting: false,
+      };
+      examples.push(example);
+
+      // Track for undo UI
+      const autoItem: AutoClassifiedItem = {
+        input,
+        label: ruleMatch.prediction,
+        confidence: ruleMatch.confidence,
+        reasoning: example.reasoning,
+        matchedRules: ruleMatch.matchedRules,
+        tier: ruleMatch.highestTier,
+        classifiedAt: Date.now(),
+      };
+      recentAutoClassified.set(
+        [autoItem, ...recentAutoClassified.get()].slice(0, 10),
+      );
+
+      // Update rule metrics (create new objects to avoid mutation)
+      const updatedRules = rulesVal.map((rule) => {
+        if (ruleMatch.matchedRules.includes(rule.name)) {
+          const predicted = rule.predicts;
+          const actual = ruleMatch.prediction;
+          const newTP = predicted === actual
+            ? (rule.truePositives || 0) + 1
+            : rule.truePositives || 0;
+          return {
+            ...rule,
+            truePositives: newTP,
+            evaluationCount: (rule.evaluationCount || 0) + 1,
+          };
+        }
+        return rule;
+      });
+      rules.set(updatedRules);
+
+      console.log(
+        `[Classifier] Auto-classified as ${
+          ruleMatch.prediction ? "YES" : "NO"
+        } by Tier ${ruleMatch.highestTier} rules`,
+      );
+    } else {
+      // Normal flow: send to LLM for classification
+      currentItem.set(input);
+    }
+  },
+);
+
 // =============================================================================
 // PATTERN
 // =============================================================================
 
-export default pattern<ClassifierInput>(
+export default pattern<ClassifierInput, ClassifierOutput>(
   ({
     config,
     examples,
@@ -440,6 +699,9 @@ export default pattern<ClassifierInput>(
     const newItemFields = Writable.of<Record<string, string>>({});
     const newFieldKey = Writable.of("");
     const newFieldValue = Writable.of("");
+
+    // Track recently auto-classified items for undo functionality
+    const recentAutoClassified = Writable.of<AutoClassifiedItem[]>([]);
 
     // Transform Record to array of {key, value} for reactive iteration
     // Use computed() instead of lift() to avoid closure limitations
@@ -455,21 +717,13 @@ export default pattern<ClassifierInput>(
     // ACTIONS (using action() for simpler closures)
     // ==========================================================================
 
-    /** Submit a new item for classification */
-    const submitItem = action((e: { fields: Record<string, string> }) => {
-      // Only allow one item at a time - ignore if already classifying
-      if (currentItem.get() !== null) {
-        console.warn(
-          "[Classifier] Already classifying an item, ignoring new submission",
-        );
-        return;
-      }
-      // Spread to create a new plain object (shallow copy breaks proxy chain)
-      currentItem.set({
-        id: generateId(),
-        receivedAt: Date.now(),
-        fields: { ...e.fields },
-      });
+    /** Submit a new item for classification (API endpoint) */
+    const submitItem = submitItemHandler({
+      currentItem,
+      rules,
+      config,
+      examples,
+      recentAutoClassified,
     });
 
     /** Confirm an LLM classification (user agrees) - for API use */
@@ -596,12 +850,77 @@ export default pattern<ClassifierInput>(
         return;
       }
 
-      // Spread to create a new plain object (shallow copy breaks proxy chain)
-      currentItem.set({
+      // Create the input object
+      const input: ClassifiableInput = {
         id: generateId(),
         receivedAt: Date.now(),
         fields: { ...fields },
-      });
+      };
+
+      // Check rules first for potential auto-classification
+      const rulesVal = rules.get();
+      const configVal = config.get() || DEFAULT_CONFIG;
+      const ruleMatch = matchRulesAgainstInput(
+        input,
+        rulesVal,
+        configVal.autoClassifyThreshold,
+      );
+
+      if (ruleMatch.shouldAutoClassify && ruleMatch.prediction !== null) {
+        // Auto-classify: store directly to examples, skip LLM
+        const example: LabeledExample = {
+          input,
+          label: ruleMatch.prediction,
+          decidedBy: "auto",
+          reasoning:
+            `Auto-classified by Tier ${ruleMatch.highestTier} rule(s): ${
+              ruleMatch.matchedRules.join(", ")
+            }`,
+          confidence: ruleMatch.confidence,
+          labeledAt: Date.now(),
+          wasCorrection: false,
+          isInteresting: false,
+        };
+        examples.push(example);
+
+        // Track for undo UI
+        const autoItem: AutoClassifiedItem = {
+          input,
+          label: ruleMatch.prediction,
+          confidence: ruleMatch.confidence,
+          reasoning: example.reasoning,
+          matchedRules: ruleMatch.matchedRules,
+          tier: ruleMatch.highestTier,
+          classifiedAt: Date.now(),
+        };
+        recentAutoClassified.set(
+          [autoItem, ...recentAutoClassified.get()].slice(0, 10),
+        );
+
+        // Update rule metrics
+        for (const rule of rulesVal) {
+          if (ruleMatch.matchedRules.includes(rule.name)) {
+            const predicted = rule.predicts;
+            const actual = ruleMatch.prediction;
+            // Note: For auto-classification, we assume the prediction is correct
+            // Metrics will be adjusted if user undoes
+            if (predicted === actual) {
+              rule.truePositives = (rule.truePositives || 0) + 1;
+            }
+            rule.evaluationCount = (rule.evaluationCount || 0) + 1;
+          }
+        }
+
+        console.log(
+          `[Classifier] Auto-classified as ${
+            ruleMatch.prediction ? "YES" : "NO"
+          } by Tier ${ruleMatch.highestTier} rules`,
+        );
+      } else {
+        // Normal flow: send to LLM for classification
+        currentItem.set(input);
+      }
+
       newItemFields.set({});
     });
 
@@ -1459,6 +1778,83 @@ Each suggestion should have:
                         </ct-card>
                       ))
                     )}
+                  </ct-vstack>
+                </ct-card>,
+                null,
+              )}
+
+              {/* Auto-Classified Items (with Undo) */}
+              {ifElse(
+                computed(() => recentAutoClassified.get().length > 0),
+                <ct-card style="margin-bottom: 1rem; border-left: 4px solid var(--ct-color-warning-500);">
+                  <ct-vstack gap="2">
+                    <ct-hstack align="center" gap="2">
+                      <h5 style="margin: 0;">Auto-Classified</h5>
+                      <span style="font-size: 0.75rem; color: var(--ct-color-warning-600);">
+                        (click Undo to review manually)
+                      </span>
+                    </ct-hstack>
+                    {recentAutoClassified.map((autoItem) => (
+                      <ct-hstack
+                        gap="2"
+                        align="center"
+                        style={{
+                          padding: "0.5rem",
+                          background: "var(--ct-color-warning-50)",
+                          borderRadius: "4px",
+                        }}
+                      >
+                        <span
+                          style={{
+                            padding: "0.125rem 0.375rem",
+                            borderRadius: "4px",
+                            fontSize: "0.625rem",
+                            fontWeight: "600",
+                            background: computed(() =>
+                              getTierColor(autoItem.tier)
+                            ),
+                            color: "white",
+                          }}
+                        >
+                          T{autoItem.tier}
+                        </span>
+                        <span
+                          style={{
+                            fontWeight: "600",
+                            color: ifElse(
+                              autoItem.label,
+                              "var(--ct-color-success-600)",
+                              "var(--ct-color-error-600)",
+                            ),
+                          }}
+                        >
+                          {ifElse(autoItem.label, "YES", "NO")}
+                        </span>
+                        <span style="flex: 1; font-size: 0.875rem;">
+                          {computed(() => {
+                            const fields = autoItem.input.fields;
+                            const entries = Object.entries(fields);
+                            const first = entries[0];
+                            return first
+                              ? `${first[0]}: ${first[1].substring(0, 30)}...`
+                              : "(empty)";
+                          })}
+                        </span>
+                        <ct-button
+                          variant="secondary"
+                          size="sm"
+                          onClick={undoAutoClassificationHandler({
+                            autoItem,
+                            examples,
+                            rules,
+                            currentItem,
+                            recentAutoClassified,
+                          })}
+                        >
+                          Undo
+                        </ct-button>
+                      </ct-hstack>
+                    ))}
                   </ct-vstack>
                 </ct-card>,
                 null,
