@@ -21,6 +21,26 @@ See `docs/common/workflows/pattern-testing.md` for test file format.
 
 **First pass = minimal UI.** Just basic inputs/buttons to verify data and actions work. No styling, no polish. Read COMPONENTS.md only during the final UI polish step, not at the start.
 
+## Warning: Existing Patterns Are Not Reliable Guides
+
+**Do not copy patterns from `packages/patterns/` without verification.** Existing patterns were written using older conventions and varied styles. Many lack explicit Output types, use deprecated APIs, or don't follow current best practices.
+
+When you encounter errors:
+1. **Read the error message carefully** and consult the relevant docs
+2. **Do not search existing patterns** looking for "how others did it"
+3. **Trust this skill document** and the linked docs as the source of truth
+
+Existing patterns are useful for:
+- UI layout examples (how to structure `ct-screen`, `ct-vstack`, etc.)
+
+Existing patterns are NOT reliable for:
+- Type patterns (`Writable<>`, `Default<>`, Input/Output types)
+- Action/handler definitions
+- Schema structure
+- Testing patterns
+
+We're actively standardizing the pattern library. Until complete, treat `packages/patterns/` as legacy code.
+
 ## Overview
 
 Patterns are TypeScript/JSX programs that define reactive data transformations with UIs. Use the `ct` CLI to deploy and interactively test them; `deno task ct --help` has comprehensive details on how to do so.
@@ -313,7 +333,7 @@ deno task ct charm inspect                                       # Check state
 
 Only after ALL sub-patterns have working data and actions, go back and build the full UI. Before writing UI:
 1. Read `docs/common/components/COMPONENTS.md` for available components
-2. Search `packages/patterns/` for similar UI patterns
+2. Search `packages/patterns/` for **UI layout examples only** (component arrangement, not data/action patterns)
 
 ### Using the ct CLI
 
@@ -447,11 +467,12 @@ After drafting code, cross-check against docs for the features you used to verif
 | Capabilities (LLM, side-effects) | `docs/common/capabilities/` |
 | Workflows (dev, linking, testing) | `docs/common/workflows/` |
 | Pattern testing | `docs/common/workflows/pattern-testing.md` |
-| Working examples | `packages/patterns/` |
+| UI layout examples | `packages/patterns/` (layout only, see warning above) |
 
 ## Remember
 
 - **Write and run tests for each sub-pattern before writing the next one** - this is the most important rule
+- **Don't copy from existing patterns** - they use outdated conventions; trust this doc and linked docs
 - Define ALL types in `schemas.tsx`: data types, Input/Output types for each pattern
 - **Output types must include actions as `Stream<void>`** - tests will fail without this
 - Use `Writable<Default<>>` for editable fields
