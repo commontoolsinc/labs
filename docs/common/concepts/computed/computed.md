@@ -53,6 +53,24 @@ export default pattern<Input, Input>(({ items }) => {
 
 Use `computed()` **outside of JSX** for reactive transformations.
 
+**Use `computed()` for dynamic `[NAME]` values:** When deriving `[NAME]` from input props or other reactive values, wrap it in `computed()`:
+
+```tsx
+// WRONG - input props are reactive, can't access at init time
+export default pattern<Input>(({ deck }) => ({
+  [NAME]: `Study: ${deck.name}`,  // Error: reactive reference outside context
+  ...
+}));
+
+// CORRECT - computed() creates a reactive context
+export default pattern<Input>(({ deck }) => ({
+  [NAME]: computed(() => `Study: ${deck.name}`),
+  ...
+}));
+```
+
+Static strings like `[NAME]: "My Pattern"` don't need `computed()`.
+
 **Never wrap JSX in `computed()`** - the transformer automatically handles reactivity in JSX expressions. The compiler analyzes your JSX and wraps reactive expressions in `derive()` calls behind the scenes, so explicit `computed()` is unnecessary and can cause issues.
 
 Similarly, ternaries in JSX are automatically converted to `ifElse()` - see `docs/common/patterns/conditional.md`.
