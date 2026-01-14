@@ -23,6 +23,7 @@ import {
   OptJSONValue,
   SchemaObjectTraverser,
 } from "@commontools/runner/traverse";
+import { buildRenameMap, renameSchemaRefs } from "./schema-def-rename.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -582,6 +583,16 @@ export function generateHandlerSchema(
 ): JSONSchema | undefined {
   if (eventSchema === undefined && stateSchema === undefined) {
     return undefined;
+  }
+  // If these are both objects, rename any potential schema $defs collisions
+  if (isObject(eventSchema) && isObject(stateSchema)) {
+    const renameMap = buildRenameMap(eventSchema as any, stateSchema as any);
+    if (renameMap !== null) {
+      eventSchema = renameSchemaRefs(
+        eventSchema as any,
+        renameMap,
+      ) as JSONSchema;
+    }
   }
   const mergedDefs: Record<string, JSONSchema> = {};
   const mergedDefinitions: Record<string, JSONSchema> = {};
