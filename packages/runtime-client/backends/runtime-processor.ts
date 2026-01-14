@@ -45,7 +45,6 @@ import {
   createCellRef,
   createPageRef,
   getCell,
-  getPageResultCell,
   mapCellRefsToSigilLinks,
 } from "./utils.ts";
 import { cellRefToKey } from "../shared/utils.ts";
@@ -315,10 +314,8 @@ export class RuntimeProcessor {
       input: request.argument as object | undefined,
       start: request.run ?? true,
     }, request.cause);
-    const cell = charm.getCell();
-    const result = getPageResultCell(cell);
     return {
-      page: createPageRef(cell, result),
+      page: createPageRef(charm.getCell()),
     };
   }
 
@@ -326,10 +323,8 @@ export class RuntimeProcessor {
     _: PatternGetSpaceRoot,
   ): Promise<PageResponse> {
     const charm = await this.cc.ensureDefaultPattern();
-    const cell = charm.getCell();
-    const result = getPageResultCell(cell);
     return {
-      page: createPageRef(cell, result),
+      page: createPageRef(charm.getCell()),
     };
   }
 
@@ -342,14 +337,13 @@ export class RuntimeProcessor {
       "/": request.pageId,
     });
     cell = cell.asSchema(nameSchema);
-    const result = getPageResultCell(cell);
 
     if (request.runIt) {
       this.runtime.start(cell).catch(console.error);
     }
 
     return {
-      page: createPageRef(cell, result),
+      page: createPageRef(cell),
     };
   }
 

@@ -15,8 +15,6 @@ export type CellRef = NormalizedFullLink;
 
 export type PageRef = {
   cell: CellRef;
-  result?: CellRef;
-  recipeId?: string;
 };
 
 export enum RequestType {

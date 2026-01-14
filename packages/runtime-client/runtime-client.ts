@@ -109,10 +109,10 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     await this.#conn.request<RequestType.Idle>({ type: RequestType.Idle });
   }
 
-  async createPage<T = unknown, R = unknown>(
+  async createPage<T = unknown>(
     input: string | URL | Program,
     options?: { argument?: JSONValue; run?: boolean },
-  ): Promise<PageHandle<T, R>> {
+  ): Promise<PageHandle<T>> {
     const source = input instanceof URL
       ? { url: input.href }
       : typeof input === "string"
@@ -136,7 +136,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       run: options?.run,
     });
 
-    return new PageHandle<T, R>(this, response.page);
+    return new PageHandle<T>(this, response.page);
   }
 
   async getSpaceRootPattern(): Promise<PageHandle<NameSchema>> {
@@ -148,10 +148,10 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return new PageHandle<NameSchema>(this, response.page);
   }
 
-  async getPage<T = unknown, R = unknown>(
+  async getPage<T = unknown>(
     pageId: string,
     runIt?: boolean,
-  ): Promise<PageHandle<T, R> | null> {
+  ): Promise<PageHandle<T> | null> {
     const response = await this.#conn.request<RequestType.PageGet>({
       type: RequestType.PageGet,
       pageId: pageId,
@@ -160,7 +160,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
     if (!response) return null;
 
-    return new PageHandle<T, R>(this, response.page);
+    return new PageHandle<T>(this, response.page);
   }
 
   async removePage(pageId: string): Promise<boolean> {
