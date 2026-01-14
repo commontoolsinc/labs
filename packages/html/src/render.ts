@@ -25,7 +25,6 @@ import {
   stringifyText,
   styleObjectToCssString,
 } from "./render-utils.ts";
-import { isRecord } from "@commontools/utils/types";
 import { vdomSchema } from "@commontools/runner/schemas";
 //import { animate } from "./debug-element.ts";
 
