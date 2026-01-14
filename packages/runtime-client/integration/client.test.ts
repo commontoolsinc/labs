@@ -107,7 +107,7 @@ describe("RuntimeClient", () => {
       assertEquals(value, input);
     });
 
-    it("recursively returns CellHandles", async () => {
+    it("recursively returns VNodes inline with schema-driven serialization", async () => {
       const session = await createSession({ identity, spaceName });
       await using rt = await createRuntimeClient(session);
 
@@ -116,12 +116,12 @@ describe("RuntimeClient", () => {
       });
       const cell = page.cell();
       const value = await cell.sync() as { $UI?: VNode; $NAME?: string };
-      const firstChildCell =
-        (value.$UI?.children as unknown as CellHandle<CellHandle<VNode>>[])[0];
-      const firstChildCellCell = await firstChildCell.sync();
-      const vnode = await firstChildCellCell!.sync();
-      assertEquals(vnode?.children, ["Non-positive"]);
-      assertEquals(vnode?.name, "p");
+      // With schema-driven serialization (asCell: true), children are resolved
+      // inline as VNodes rather than wrapped in CellHandle indirection.
+      const children = value.$UI?.children as VNode[];
+      const firstChild = children?.[0];
+      assertEquals(firstChild?.children, ["Non-positive"]);
+      assertEquals(firstChild?.name, "p");
     });
 
     it("subscribes to cell updates via subscribe()", async () => {

@@ -25,7 +25,6 @@ import {
   stringifyText,
   styleObjectToCssString,
 } from "./render-utils.ts";
-import { isRecord } from "@commontools/utils/types";
 import { vdomSchema } from "@commontools/runner/schemas";
 //import { animate } from "./debug-element.ts";
 
@@ -252,50 +251,7 @@ const bindChildren = (
   // Set up a reactive effect so that changes to the children array are diffed and applied.
   const cancelArrayEffect = effect<RenderNode>(
     children,
-    (childrenVal) => {
-      if (!Array.isArray(childrenVal)) {
-        return updateChildren(childrenVal);
-      }
-
-      // Check if any children are CellHandles that need to be resolved.
-      // This handles cases like:
-      // `<ul>{cell.map((val) => <li>{val}</li>)}</ul>`
-      // as well as mixed children:
-      // `<ul>{staticItems}{cell1.map(...)}{cell2.map(...)}</ul>`
-      const hasCellHandles = childrenVal.some(isCellHandle);
-
-      if (!hasCellHandles) {
-        return updateChildren(childrenVal);
-      }
-
-      // We have cell handles mixed in - set up effects for each and merge results
-      const [cancelGroup, addCancel] = useCancelGroup();
-      const resolvedValues: RenderNode[] = [...childrenVal];
-      let initializing = true;
-
-      const mergeAndUpdate = () => {
-        if (initializing) return;
-        updateChildren(resolvedValues.flat());
-      };
-
-      for (let i = 0; i < childrenVal.length; i++) {
-        const child = childrenVal[i];
-        if (isCellHandle(child)) {
-          addCancel(
-            effect(child as CellHandle<RenderNode>, (resolved) => {
-              resolvedValues[i] = resolved;
-              mergeAndUpdate();
-            }),
-          );
-        }
-      }
-
-      initializing = false;
-      // Initial render with all resolved values
-      updateChildren(resolvedValues.flat());
-
-      return cancelGroup;
-    },
+    (childrenVal) => updateChildren(childrenVal),
   );
 
   return () => {
@@ -440,73 +396,11 @@ function bindProps(
     } else if (key.startsWith("$")) {
       setProperty(element, key.slice(1), value);
     } else {
-      addCancel(bindComplexProp(element, key, value, setProperty));
+      addCancel(effect(value, (replacement) => {
+        setProperty(element, key, replacement);
+      }));
     }
   }
 
   return cancel;
-}
-
-function bindComplexProp(
-  element: HTMLElement,
-  propKey: string,
-  propValue: PropsValues,
-  setProperty: SetPropHandler,
-): Cancel {
-  if (isCellHandle<PropsValues>(propValue)) {
-    return effect(
-      propValue,
-      (resolved) =>
-        resolved
-          ? bindComplexProp(element, propKey, resolved, setProperty)
-          : noop,
-    );
-  } else if (Array.isArray(propValue)) {
-    const [cancel, addCancel] = useCancelGroup();
-    const derived: unknown[] = [];
-
-    let initializing = true;
-    propValue.forEach((value, index) => {
-      if (isCellHandle(value)) {
-        addCancel(effect(value, (unwrapped) => {
-          derived[index] = unwrapped;
-          if (!initializing) {
-            // Spread `derived` to trigger rerender in Lit components
-            setProperty(element, propKey, [...derived]);
-          }
-        }));
-      } else {
-        derived[index] = value;
-      }
-    });
-    initializing = false;
-    setProperty(element, propKey, derived);
-
-    return cancel;
-  } else if (isRecord(propValue) && typeof propValue === "object") {
-    const [cancel, addCancel] = useCancelGroup();
-    const derived: Record<string, any> = {};
-
-    let initializing = true;
-    Object.entries(propValue).forEach(([prop, value]) => {
-      if (isCellHandle(value)) {
-        addCancel(effect(value, (unwrapped) => {
-          derived[prop] = unwrapped;
-          if (!initializing) {
-            // Spread `derived` to trigger rerender in Lit components
-            setProperty(element, propKey, { ...derived });
-          }
-        }));
-      } else {
-        derived[prop] = value;
-      }
-    });
-    initializing = false;
-    setProperty(element, propKey, derived);
-
-    return cancel;
-  } else {
-    setProperty(element, propKey, propValue);
-  }
-  return noop;
 }

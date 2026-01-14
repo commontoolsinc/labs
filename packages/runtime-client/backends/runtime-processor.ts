@@ -47,9 +47,7 @@ import {
   getCell,
   getPageResultCell,
   mapCellRefsToSigilLinks,
-  unwrapProxy,
 } from "./utils.ts";
-import { isCellResult } from "../../runner/src/query-result-proxy.ts";
 import { cellRefToKey } from "../shared/utils.ts";
 import { RemoteResponse } from "@commontools/runtime-client";
 
@@ -188,11 +186,10 @@ export class RuntimeProcessor {
   ): JSONValueResponse {
     const cell = getCell(this.runtime, request.cell);
     const value = cell.get();
-    const rawValue = cell.getRaw?.({ meta: { scheduling: "ignore" } }) ?? value;
-    const converted = convertCellsToLinks(rawValue, {
+    const converted = convertCellsToLinks(value, {
       includeSchema: true,
       keepAsCell: true,
-      doNotConvertCellResults: false,
+      doNotConvertCellResults: true,
     });
     return { value: converted };
   }
@@ -250,17 +247,11 @@ export class RuntimeProcessor {
 
     const cell = getCell(this.runtime, request.cell);
 
-    const cancel = cell.sink((sinkValue) => {
-      // Dereference the value to get actual data, matching sync() behavior.
-      // This handles both Cell/CellResult objects and SigilLinks.
-      let value: unknown = sinkValue;
-      if (isCellResult(sinkValue) && cell.equals(sinkValue)) {
-        value = unwrapProxy(sinkValue);
-      }
+    const cancel = cell.sink((value) => {
       const converted = convertCellsToLinks(value, {
         includeSchema: true,
         keepAsCell: true,
-        doNotConvertCellResults: false,
+        doNotConvertCellResults: true,
       });
 
       // `.sink` fires synchronously on invocation. Trigger the notification

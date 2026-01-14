@@ -6,42 +6,39 @@
 
 import { JSONSchema, NAME, type Schema, TYPE, UI } from "./shared.ts";
 
-export const vdomSchemaDefs: Record<string, JSONSchema> = {
-  VNode: {
-    type: "object",
-    properties: {
-      type: { type: "string" },
-      name: { type: "string" },
-      props: {
-        type: "object",
-        additionalProperties: { asCell: true },
-      },
-      children: {
-        type: "array",
-        items: {
-          anyOf: [
-            { $ref: "#/$defs/VNode", asCell: true },
-            { type: "string", asCell: true },
-            { type: "number", asCell: true },
-            { type: "boolean", asCell: true },
-            { type: "array", items: { $ref: "#/$defs/VNode", asCell: true } },
-          ],
+export const vdomSchema = {
+  $defs: {
+    vdomNode: {
+      type: "object",
+      properties: {
+        type: { type: "string" },
+        name: { type: "string" },
+        props: {
+          type: "object",
+          additionalProperties: { asCell: true },
         },
-        asCell: true,
+        children: {
+          type: "array",
+          items: {
+            anyOf: [
+              { $ref: "#/$defs/vdomNode", asCell: true },
+              { type: "string", asCell: true },
+              { type: "number", asCell: true },
+              { type: "boolean", asCell: true },
+              {
+                type: "array",
+                items: { $ref: "#/$defs/vdomNode", asCell: true },
+              },
+            ],
+          },
+          asCell: true,
+        },
+        [UI]: { $ref: "#/$defs/vdomNode" },
       },
-      [UI]: { $ref: "#/$defs/VNode" },
     },
   },
-};
-
-export const vdomSchemaNoDefs: JSONSchema = {
-  $ref: "#/$defs/VNode",
-} as const;
-
-export const vdomSchema: JSONSchema = {
-  ...vdomSchemaNoDefs,
-  $defs: vdomSchemaDefs,
-} as const;
+  $ref: "#/$defs/vdomNode",
+} as const satisfies JSONSchema;
 
 export const nameSchema = {
   type: "object",
