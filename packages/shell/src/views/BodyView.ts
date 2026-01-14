@@ -10,7 +10,11 @@ import {
   PageHandle,
   VNode,
 } from "@commontools/runtime-client";
-import { vdomSchema } from "@commontools/runner/schemas";
+import {
+  vdomSchema,
+  vdomSchemaDefs,
+  vdomSchemaNoDefs,
+} from "@commontools/runner/schemas";
 import type { JSONSchema } from "@commontools/runner/shared";
 
 type SubPages = {
@@ -21,9 +25,10 @@ type SubPages = {
 const SubPagesSchema = {
   type: "object",
   properties: {
-    sidebarUI: vdomSchema,
-    fabUI: vdomSchema,
+    sidebarUI: vdomSchemaNoDefs,
+    fabUI: vdomSchemaNoDefs,
   },
+  $defs: vdomSchemaDefs,
 } as const satisfies JSONSchema;
 
 export class XBodyView extends BaseView {
