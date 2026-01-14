@@ -2,6 +2,7 @@ import { css, html } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { type CellHandle } from "@commontools/runtime-client";
+import { booleanSchema } from "@commontools/runner/schemas";
 import { createBooleanCellController } from "../../core/cell-controller.ts";
 
 /**
@@ -208,7 +209,7 @@ export class CTCheckbox extends BaseElement {
       this.setAttribute("role", "checkbox");
       this._updateAriaAttributes();
       // Bind initial checked value
-      this._checkedCellController.bind(this.checked);
+      this._checkedCellController.bind(this.checked, booleanSchema);
       // Add event listeners to the host element to make entire component clickable
       this.addEventListener("click", this._handleClick);
       this.addEventListener("keydown", this._handleKeydown);
@@ -229,7 +230,7 @@ export class CTCheckbox extends BaseElement {
       // If the checked property itself changed (e.g., switched to a different cell)
       if (changedProperties.has("checked")) {
         // Bind the new checked (Cell or plain) to the controller
-        this._checkedCellController.bind(this.checked);
+        this._checkedCellController.bind(this.checked, booleanSchema);
       }
     }
 

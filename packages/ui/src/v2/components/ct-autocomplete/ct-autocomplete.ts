@@ -9,8 +9,25 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
-import { type CellHandle } from "@commontools/runtime-client";
+import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
+import { stringArraySchema, stringSchema } from "@commontools/runner/schemas";
 import { createCellController } from "../../core/cell-controller.ts";
+
+// Schema for AutocompleteItem array
+const AutocompleteItemArraySchema = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      value: { type: "string" },
+      label: { type: "string" },
+      group: { type: "string" },
+      searchAliases: { type: "array", items: { type: "string" } },
+      data: {},
+    },
+    required: ["value"],
+  },
+} as const satisfies JSONSchema;
 
 /**
  * AutocompleteItem - Item format for ct-autocomplete
@@ -455,12 +472,15 @@ export class CTAutocomplete extends BaseElement {
       this._input = this.shadowRoot?.querySelector("input") || null;
       this._dropdown = this.shadowRoot?.querySelector(".dropdown") || null;
 
-      // Initialize cell controller bindings
+      // Initialize cell controller bindings with appropriate schemas
+      const valueSchema = this.multiple ? stringArraySchema : stringSchema;
       this._cellController.bind(
         this.value as CellHandle<string | string[]> | string | string[],
+        valueSchema,
       );
       this._itemsCellController.bind(
         this.items as CellHandle<AutocompleteItem[]> | AutocompleteItem[],
+        AutocompleteItemArraySchema,
       );
 
       applyThemeToElement(this, this.theme ?? defaultTheme);
@@ -471,8 +491,10 @@ export class CTAutocomplete extends BaseElement {
 
       // If the value property itself changed (e.g., switched to a different cell)
       if (changedProperties.has("value")) {
+        const valueSchema = this.multiple ? stringArraySchema : stringSchema;
         this._cellController.bind(
           this.value as CellHandle<string | string[]> | string | string[],
+          valueSchema,
         );
       }
 
@@ -480,6 +502,7 @@ export class CTAutocomplete extends BaseElement {
       if (changedProperties.has("items")) {
         this._itemsCellController.bind(
           this.items as CellHandle<AutocompleteItem[]> | AutocompleteItem[],
+          AutocompleteItemArraySchema,
         );
       }
 

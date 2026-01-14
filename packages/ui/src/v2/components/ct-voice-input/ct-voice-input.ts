@@ -2,7 +2,7 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { createRef, type Ref, ref } from "lit/directives/ref.js";
 import { BaseElement } from "../../core/base-element.ts";
-import { type CellHandle } from "@commontools/runtime-client";
+import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 import { consume } from "@lit/context";
 import {
@@ -15,6 +15,29 @@ import { classMap } from "lit/directives/class-map.js";
 import "../ct-audio-visualizer/ct-audio-visualizer.ts";
 import type { CTAudioVisualizer } from "../ct-audio-visualizer/ct-audio-visualizer.ts";
 import { convertToWav } from "../../utils/audio-conversion.ts";
+
+// Schema for TranscriptionData
+const TranscriptionDataSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    text: { type: "string" },
+    chunks: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          timestamp: { type: "array", items: { type: "number" } },
+          text: { type: "string" },
+        },
+      },
+    },
+    audioData: { type: "string" },
+    duration: { type: "number" },
+    timestamp: { type: "number" },
+  },
+  required: ["id", "text", "duration", "timestamp"],
+} as const satisfies JSONSchema;
 
 /**
  * Recording state machine to prevent race conditions
@@ -299,7 +322,7 @@ export class CTVoiceInput extends BaseElement {
   ) {
     super.firstUpdated(changedProperties);
     this._updateThemeProperties();
-    this._cellController.bind(this.transcription);
+    this._cellController.bind(this.transcription, TranscriptionDataSchema);
   }
 
   override updated(
@@ -315,7 +338,7 @@ export class CTVoiceInput extends BaseElement {
     super.willUpdate(changedProperties);
 
     if (changedProperties.has("transcription")) {
-      this._cellController.bind(this.transcription);
+      this._cellController.bind(this.transcription, TranscriptionDataSchema);
     }
   }
 

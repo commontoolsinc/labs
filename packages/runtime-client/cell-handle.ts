@@ -36,6 +36,20 @@ export class CellHandle<T = unknown> {
     this.#value = value;
   }
 
+  /**
+   * Check if this cell has a schema defined. Throws if no schema is set.
+   */
+  #requireSchema(method: string): void {
+    if (!this.#ref.schema) {
+      throw new Error(
+        `[CellHandle] ${method}() called without schema on cell ${this.#ref.id}:${
+          this.#ref.path.join(".")
+        }. ` +
+          `Please bind a schema using asSchema() or pass a schema to the cell controller's bind() method.`,
+      );
+    }
+  }
+
   runtime(): RuntimeClient {
     return this.#rt;
   }
@@ -57,6 +71,7 @@ export class CellHandle<T = unknown> {
    * Get the current cached value.
    */
   get(): Readonly<T> | undefined {
+    this.#requireSchema("get");
     return this.#value !== undefined ? this.#value as Readonly<T> : undefined;
   }
 
@@ -64,6 +79,7 @@ export class CellHandle<T = unknown> {
    * Set the cell's value locally, as well as in the runtime.
    */
   async set(value: T): Promise<void> {
+    this.#requireSchema("set");
     this.#value = value;
 
     for (const callback of this.#callbacks.values()) {
@@ -134,6 +150,7 @@ export class CellHandle<T = unknown> {
   subscribe(
     callback: (value: T | undefined) => Cancel | undefined | void,
   ): Cancel {
+    this.#requireSchema("subscribe");
     const callbackId = this.#nextCallbackId++;
     let cleanup: Cancel | undefined | void;
 
