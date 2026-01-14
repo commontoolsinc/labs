@@ -20,9 +20,9 @@
     }
   },
   "required": [
-    "titles",
     "count",
-    "level"
+    "level",
+    "titles"
   ],
   "type": "object"
 }
