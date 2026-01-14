@@ -9,11 +9,7 @@ import { html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { styles } from "./styles.ts";
 import * as L from "leaflet";
-import {
-  type CellHandle,
-  isCellHandle,
-  useCancelGroup,
-} from "@commontools/runtime-client";
+import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 import type {
   Bounds,
@@ -55,27 +51,75 @@ const EMOJI_REGEX =
 // ResizeObserver debounce delay in milliseconds
 const RESIZE_DEBOUNCE_MS = 150;
 
-// No-op function for effect cleanup
-const noop = () => {};
+// JSON Schemas for nested cell resolution via CellController.bind()
+// These schemas enable automatic resolution of nested CellHandles
+const latLngSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    lat: { type: "number" },
+    lng: { type: "number" },
+  },
+};
 
-// Cancel function type
-type Cancel = () => void;
+const boundsSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    north: { type: "number" },
+    south: { type: "number" },
+    east: { type: "number" },
+    west: { type: "number" },
+  },
+};
 
-/**
- * Effect that runs a callback when the value changes. The callback is also
- * called immediately. CellHandle version of Reactivity features.
- * Adapted from @commontools/html/render-utils.
- */
-const effect = <T>(
-  value: CellHandle<T> | T,
-  callback: (value: T | undefined) => Cancel | undefined | void,
-): Cancel => {
-  if (isCellHandle<T>(value)) {
-    return value.subscribe(callback);
-  } else {
-    const cancel = callback(value as T);
-    return typeof cancel === "function" && cancel.length === 0 ? cancel : noop;
-  }
+const mapValueSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    markers: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          position: latLngSchema,
+          title: { type: "string" },
+          description: { type: "string" },
+          icon: { type: "string" },
+          draggable: { type: "boolean" },
+          // popup is OpaqueRef, left unspecified to preserve as-is
+        },
+      },
+    },
+    circles: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          center: latLngSchema,
+          radius: { type: "number" },
+          color: { type: "string" },
+          fillOpacity: { type: "number" },
+          strokeWidth: { type: "number" },
+          title: { type: "string" },
+          description: { type: "string" },
+          // popup is OpaqueRef, left unspecified to preserve as-is
+        },
+      },
+    },
+    polylines: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          points: {
+            type: "array",
+            items: latLngSchema,
+          },
+          color: { type: "string" },
+          strokeWidth: { type: "number" },
+          dashArray: { type: "string" },
+        },
+      },
+    },
+  },
 };
 
 /**
@@ -153,15 +197,6 @@ export class CTMap extends BaseElement {
   // Flag to prevent echo loops during programmatic updates
   private _isUpdatingFromCell = false;
 
-  // Track nested cell subscriptions for cleanup
-  private _nestedCellUnsubscribes: (() => void)[] = [];
-
-  // Cached resolved data - populated by nested effect callbacks
-  // This avoids re-traversing the cell tree on each render
-  private _resolvedMarkers: MapMarker[] = [];
-  private _resolvedCircles: MapCircle[] = [];
-  private _resolvedPolylines: MapPolyline[] = [];
-
   // Cell controllers for reactive data binding
   // These manage subscriptions automatically via Lit's ReactiveController lifecycle
   // Note: Feature rendering is handled in updated() to catch both property changes
@@ -203,266 +238,6 @@ export class CTMap extends BaseElement {
   // Bound event handler for cleanup
   private _boundHandleKeydown = this._handleKeydown.bind(this);
 
-  /**
-   * Check if a value looks like a CellHandle using duck-typing.
-   * This is necessary because `instanceof CellHandle` fails across JavaScript realms
-   * (e.g., when CellHandle comes from a web worker or iframe).
-   */
-  private _isCellHandleLike(value: unknown): boolean {
-    if (!value || typeof value !== "object") return false;
-    const obj = value as Record<string, unknown>;
-    // Check for CellHandle's characteristic methods
-    return (
-      typeof obj.get === "function" &&
-      typeof obj.set === "function" &&
-      typeof obj.key === "function" &&
-      typeof obj.ref === "function"
-    );
-  }
-
-  /**
-   * Subscribe to nested cells within the value object using the effect pattern.
-   *
-   * The key insight: each effect callback receives the ALREADY-RESOLVED value,
-   * so we cache those resolved values instead of re-traversing the cell tree.
-   * This avoids the "proxy identity mismatch" problem where each .get() call
-   * returns a new proxy object with different nested CellHandle instances.
-   */
-  private _subscribeToNestedCells(): void {
-    const value = this._getValue();
-    if (!value) return;
-
-    // Clean up old subscriptions first
-    this._cleanupNestedCellSubscriptions();
-
-    const [cancelGroup, addCancel] = useCancelGroup();
-
-    // Set up effect for markers array
-    if (value.markers) {
-      addCancel(
-        effect(
-          value.markers as CellHandle<unknown[]> | unknown[],
-          (markersArray) => {
-            if (!Array.isArray(markersArray)) {
-              this._resolvedMarkers = [];
-              this._renderFeaturesFromCache();
-              return;
-            }
-            // Set up effects for each marker element
-            return this._setupArrayElementEffects(
-              markersArray,
-              "markers",
-              (resolved) => {
-                this._resolvedMarkers = resolved as MapMarker[];
-                this._renderFeaturesFromCache();
-              },
-            );
-          },
-        ),
-      );
-    }
-
-    // Set up effect for circles array
-    if (value.circles) {
-      addCancel(
-        effect(
-          value.circles as CellHandle<unknown[]> | unknown[],
-          (circlesArray) => {
-            if (!Array.isArray(circlesArray)) {
-              this._resolvedCircles = [];
-              this._renderFeaturesFromCache();
-              return;
-            }
-            return this._setupArrayElementEffects(
-              circlesArray,
-              "circles",
-              (resolved) => {
-                this._resolvedCircles = resolved as MapCircle[];
-                this._renderFeaturesFromCache();
-              },
-            );
-          },
-        ),
-      );
-    }
-
-    // Set up effect for polylines array
-    if (value.polylines) {
-      addCancel(
-        effect(
-          value.polylines as CellHandle<unknown[]> | unknown[],
-          (polylinesArray) => {
-            if (!Array.isArray(polylinesArray)) {
-              this._resolvedPolylines = [];
-              this._renderFeaturesFromCache();
-              return;
-            }
-            return this._setupArrayElementEffects(
-              polylinesArray,
-              "polylines",
-              (resolved) => {
-                this._resolvedPolylines = resolved as MapPolyline[];
-                this._renderFeaturesFromCache();
-              },
-            );
-          },
-        ),
-      );
-    }
-
-    this._nestedCellUnsubscribes.push(cancelGroup);
-  }
-
-  /**
-   * Set up effects for array elements and their nested properties.
-   * Returns a cancel function that cleans up all element effects.
-   */
-  private _setupArrayElementEffects(
-    array: unknown[],
-    name: string,
-    onResolved: (resolved: unknown[]) => void,
-  ): Cancel {
-    const [cancelGroup, addCancel] = useCancelGroup();
-    const resolvedElements: unknown[] = new Array(array.length).fill(undefined);
-
-    const checkAllResolved = () => {
-      // Call onResolved with resolved elements (skip undefined)
-      const fullyResolved = resolvedElements.filter((el) => el !== undefined);
-      onResolved(fullyResolved);
-    };
-
-    for (let i = 0; i < array.length; i++) {
-      const element = array[i];
-
-      if (this._isCellHandleLike(element)) {
-        // Element is a CellHandle - set up effect
-        addCancel(
-          effect(element as CellHandle<unknown>, (resolvedElement) => {
-            if (resolvedElement === undefined) {
-              resolvedElements[i] = undefined;
-              checkAllResolved();
-              return;
-            }
-
-            // Set up effects for nested properties (position, center, points)
-            return this._setupPropertyEffects(
-              resolvedElement,
-              `${name}[${i}]`,
-              (fullyResolvedElement) => {
-                resolvedElements[i] = fullyResolvedElement;
-                checkAllResolved();
-              },
-            );
-          }),
-        );
-      } else {
-        // Element is already resolved - still need to check nested properties
-        addCancel(
-          this._setupPropertyEffects(
-            element,
-            `${name}[${i}]`,
-            (fullyResolvedElement) => {
-              resolvedElements[i] = fullyResolvedElement;
-              checkAllResolved();
-            },
-          ),
-        );
-      }
-    }
-
-    // Handle empty arrays
-    if (array.length === 0) {
-      onResolved([]);
-    }
-
-    return cancelGroup;
-  }
-
-  /**
-   * Set up effects for nested property CellHandles (position, center, points).
-   * Calls onResolved with the fully resolved element when all properties are loaded.
-   */
-  private _setupPropertyEffects(
-    element: unknown,
-    _name: string,
-    onResolved: (resolved: unknown) => void,
-  ): Cancel {
-    if (!element || typeof element !== "object") {
-      onResolved(element);
-      return noop;
-    }
-
-    const obj = element as Record<string, unknown>;
-    const propertyNames = ["position", "center", "points"];
-    const [cancelGroup, addCancel] = useCancelGroup();
-    const resolvedProps: Record<string, unknown> = { ...obj };
-    let hasCellHandleProps = false;
-
-    for (const prop of propertyNames) {
-      const propValue = obj[prop];
-      if (this._isCellHandleLike(propValue)) {
-        hasCellHandleProps = true;
-        addCancel(
-          effect(propValue as CellHandle<unknown>, (resolvedProp) => {
-            resolvedProps[prop] = resolvedProp;
-            // Only call onResolved if the property actually loaded
-            if (resolvedProp !== undefined) {
-              onResolved(resolvedProps);
-            }
-          }),
-        );
-      }
-    }
-
-    // If no CellHandle properties, element is already fully resolved
-    if (!hasCellHandleProps) {
-      onResolved(element);
-    }
-
-    return cancelGroup;
-  }
-
-  /**
-   * Clean up nested cell subscriptions.
-   */
-  private _cleanupNestedCellSubscriptions(): void {
-    for (const unsub of this._nestedCellUnsubscribes) {
-      unsub();
-    }
-    this._nestedCellUnsubscribes = [];
-    // Clear cached resolved data
-    this._resolvedMarkers = [];
-    this._resolvedCircles = [];
-    this._resolvedPolylines = [];
-  }
-
-  /**
-   * Render features using cached resolved data.
-   * This avoids re-traversing the cell tree.
-   */
-  private _renderFeaturesFromCache(): void {
-    if (!this._map) return;
-
-    // Clear existing layers
-    this._clearLayers();
-
-    // Render from cached resolved data
-    if (this._resolvedMarkers.length > 0) {
-      this._renderMarkers(this._resolvedMarkers);
-    }
-    if (this._resolvedCircles.length > 0) {
-      this._renderCircles(this._resolvedCircles);
-    }
-    if (this._resolvedPolylines.length > 0) {
-      this._renderPolylines(this._resolvedPolylines);
-    }
-
-    // Handle fitToBounds
-    if (this.fitToBounds) {
-      this._fitMapToBounds();
-    }
-  }
-
   constructor() {
     super();
     this.fitToBounds = false;
@@ -483,19 +258,17 @@ export class CTMap extends BaseElement {
   protected override firstUpdated(_changedProperties: PropertyValues): void {
     super.firstUpdated(_changedProperties);
 
-    // Bind all controllers to their initial values
-    this._valueController.bind(this.value);
-    this._centerController.bind(this.center);
+    // Bind all controllers to their initial values with JSON schemas
+    // Schema binding enables automatic resolution of nested CellHandles
+    this._valueController.bind(this.value, mapValueSchema);
+    this._centerController.bind(this.center, latLngSchema);
     this._zoomController.bind(this.zoom);
-    this._boundsController.bind(this.bounds);
+    this._boundsController.bind(this.bounds, boundsSchema);
 
     this._initializeMap();
 
-    // Subscribe to nested cells (for deeply nested CellHandles in computed values)
-    // The effects will call _renderFeaturesFromCache when data is resolved
-    if (this._valueController.hasCell()) {
-      this._subscribeToNestedCells();
-    }
+    // Render features after map initialization
+    this._renderFeatures();
   }
 
   protected override updated(changedProperties: PropertyValues): void {
@@ -503,20 +276,18 @@ export class CTMap extends BaseElement {
 
     // Handle value changes - rebind controller when property changes
     if (changedProperties.has("value")) {
-      this._valueController.bind(this.value);
-      // Only re-subscribe to nested cells when the value property actually changes
-      // Don't re-subscribe on every render (that would clear subscriptions before they fire with data)
-      if (this._valueController.hasCell()) {
-        this._subscribeToNestedCells();
-      }
+      this._valueController.bind(this.value, mapValueSchema);
     }
 
-    // Note: Feature rendering is handled by the effect system via _renderFeaturesFromCache
-    // Effects fire when nested cells resolve and automatically call the render method
+    // Re-render features on every update when we have a Cell
+    // Cell subscription updates trigger requestUpdate() but don't show in changedProperties
+    if (this._valueController.hasCell() || changedProperties.has("value")) {
+      this._renderFeatures();
+    }
 
     // Handle center changes - rebind controller when property changes
     if (changedProperties.has("center")) {
-      this._centerController.bind(this.center);
+      this._centerController.bind(this.center, latLngSchema);
       this._updateMapCenter();
     }
 
@@ -528,7 +299,7 @@ export class CTMap extends BaseElement {
 
     // Handle bounds changes - rebind controller when property changes
     if (changedProperties.has("bounds")) {
-      this._boundsController.bind(this.bounds);
+      this._boundsController.bind(this.bounds, boundsSchema);
     }
 
     // Handle interactive changes
@@ -841,6 +612,36 @@ export class CTMap extends BaseElement {
     this._polylineLayer?.clearLayers();
     this._leafletMarkers = [];
     this._leafletCircles = [];
+  }
+
+  /**
+   * Render all map features from the current value.
+   * Schema binding via CellController.bind() automatically resolves nested CellHandles,
+   * so we can read directly from _getValue() without manual cell traversal.
+   */
+  private _renderFeatures(): void {
+    if (!this._map) return;
+
+    const value = this._getValue();
+
+    // Clear existing layers
+    this._clearLayers();
+
+    // Render features from resolved data
+    if (value.markers && value.markers.length > 0) {
+      this._renderMarkers(value.markers);
+    }
+    if (value.circles && value.circles.length > 0) {
+      this._renderCircles(value.circles);
+    }
+    if (value.polylines && value.polylines.length > 0) {
+      this._renderPolylines(value.polylines);
+    }
+
+    // Handle fitToBounds
+    if (this.fitToBounds) {
+      this._fitMapToBounds();
+    }
   }
 
   private _renderMarkers(markers: readonly MapMarker[]): void {
@@ -1402,9 +1203,6 @@ export class CTMap extends BaseElement {
     this._polylineLayer = null;
     this._leafletMarkers = [];
     this._leafletCircles = [];
-
-    // Clean up nested cell subscriptions
-    this._cleanupNestedCellSubscriptions();
 
     // Note: CellControllers are automatically cleaned up by Lit's reactive
     // controller system. They implement ReactiveController with
