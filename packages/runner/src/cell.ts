@@ -1709,18 +1709,21 @@ function recursivelyAddIDIfNeeded<T>(
   // - Objects/arrays with toJSON() methods
   // - Sparse arrays (densified with null in holes)
   const converted = toStorableValue(value);
+  const convertedIsRecord = isRecord(converted);
 
-  // Primitives don't need further processing.
-  if (!isRecord(converted)) {
-    return converted as T;
-  }
-
-  // If conversion produced a different record, process it recursively
-  // and cache the result so shared references are preserved.
+  // If conversion changed the value, cache the result so shared references
+  // are preserved and we avoid redundant toJSON() calls.
   if (converted !== value) {
-    const result = recursivelyAddIDIfNeeded(converted as T, frame, seen);
+    const result = convertedIsRecord
+      ? recursivelyAddIDIfNeeded(converted as T, frame, seen)
+      : converted as T;
     seen.set(value, result);
     return result;
+  }
+
+  // Primitives that didn't need conversion don't need further processing.
+  if (!convertedIsRecord) {
+    return converted as T;
   }
 
   if (Array.isArray(value)) {
