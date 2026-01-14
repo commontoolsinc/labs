@@ -76,6 +76,9 @@ interface ClassificationRule {
   trueNegatives: number;
   falseNegatives: number;
   createdAt: number;
+  // NOTE: isShared/sharedFrom are planned for cross-classifier rule sharing.
+  // When implemented, users will be able to share high-performing rules
+  // between classifiers and track rule provenance.
   isShared: boolean;
   sharedFrom?: string;
 }
@@ -87,6 +90,9 @@ interface ClassifierConfig {
   autoClassifyThreshold: number;
   prefillThreshold: number;
   suggestionThreshold: number;
+  // NOTE: harmAsymmetry is planned for asymmetric error weighting -
+  // "fp" penalizes false positives more, "fn" penalizes false negatives more.
+  // Not yet implemented - will affect confidence thresholds and tier promotion.
   harmAsymmetry: "fp" | "fn" | "equal";
   enableLLMFallback: boolean;
 }
@@ -187,12 +193,68 @@ interface AutoClassifiedItem {
 }
 
 // =============================================================================
+// REGEX CACHE
+// =============================================================================
+
+/**
+ * Module-scoped cache for compiled RegExp objects.
+ * Key format: `${pattern}|${caseInsensitive ? 'i' : ''}`
+ * This avoids recompiling the same regex thousands of times when matching rules.
+ */
+const regexCache = new Map<string, RegExp | null>();
+
+/**
+ * Get a cached compiled regex, or compile and cache it.
+ * Returns null for invalid regex patterns.
+ */
+function getCachedRegex(
+  pattern: string,
+  caseInsensitive: boolean,
+): RegExp | null {
+  const cacheKey = `${pattern}|${caseInsensitive ? "i" : ""}`;
+
+  if (regexCache.has(cacheKey)) {
+    return regexCache.get(cacheKey)!;
+  }
+
+  try {
+    const flags = caseInsensitive ? "i" : "";
+    const regex = new RegExp(pattern, flags);
+    regexCache.set(cacheKey, regex);
+    return regex;
+  } catch (e) {
+    // Log invalid regex pattern for debugging
+    console.warn(
+      `[Classifier] Invalid regex pattern "${pattern}": ${
+        e instanceof Error ? e.message : "Unknown error"
+      }`,
+    );
+    // Cache null to avoid re-trying
+    regexCache.set(cacheKey, null);
+    return null;
+  }
+}
+
+// =============================================================================
 // HELPER FUNCTIONS
 // =============================================================================
 
 /** Generate a unique ID */
 function generateId(): string {
   return Math.random().toString(36).substring(2, 15);
+}
+
+/** Validate a regex pattern and return validation result */
+function isValidRegex(pattern: string): { valid: boolean; error?: string } {
+  try {
+    new RegExp(pattern);
+    return { valid: true };
+  } catch (e) {
+    return {
+      valid: false,
+      error: e instanceof Error ? e.message : "Invalid regex",
+    };
+  }
 }
 
 /** Compute statistics from examples */
@@ -209,17 +271,25 @@ const computeStats = lift((args: {
 } => {
   const { examples, rules } = args;
 
-  const positiveExamples = examples.filter((e) => e.label).length;
-  const negativeExamples = examples.filter((e) => !e.label).length;
-  const autoClassified = examples.filter((e) => e.decidedBy === "auto").length;
-  const corrections = examples.filter((e) => e.wasCorrection).length;
-  const correctionRate = autoClassified > 0 ? corrections / autoClassified : 0;
+  // Single-pass computation for O(n) instead of O(4n)
+  const counts = examples.reduce(
+    (acc, e) => {
+      if (e.label) acc.positive++;
+      else acc.negative++;
+      if (e.decidedBy === "auto") acc.auto++;
+      if (e.wasCorrection) acc.corrections++;
+      return acc;
+    },
+    { positive: 0, negative: 0, auto: 0, corrections: 0 },
+  );
+
+  const correctionRate = counts.auto > 0 ? counts.corrections / counts.auto : 0;
 
   return {
     totalExamples: examples.length,
-    positiveExamples,
-    negativeExamples,
-    autoClassified,
+    positiveExamples: counts.positive,
+    negativeExamples: counts.negative,
+    autoClassified: counts.auto,
     correctionRate,
     totalRules: rules.length,
   };
@@ -329,20 +399,15 @@ function matchRulesAgainstInput(
     const fieldValue = input.fields[rule.targetField];
     if (!fieldValue) continue;
 
-    try {
-      const flags = rule.caseInsensitive ? "i" : "";
-      const regex = new RegExp(rule.pattern, flags);
-      if (regex.test(fieldValue)) {
-        matchedRules.push(rule.name);
-        votes.push({
-          name: rule.name,
-          predicts: rule.predicts,
-          precision: rule.precision,
-          tier: rule.tier,
-        });
-      }
-    } catch {
-      // Invalid regex, skip
+    const regex = getCachedRegex(rule.pattern, rule.caseInsensitive);
+    if (regex && regex.test(fieldValue)) {
+      matchedRules.push(rule.name);
+      votes.push({
+        name: rule.name,
+        predicts: rule.predicts,
+        precision: rule.precision,
+        tier: rule.tier,
+      });
     }
   }
 
@@ -398,29 +463,30 @@ function matchRulesAgainstInput(
 }
 
 // =============================================================================
-// MODULE-SCOPED LIFT FUNCTIONS FOR DISPLAYING DATA IN .map()
+// LIFT FUNCTIONS FOR REACTIVE .map() DISPLAY
+// These need lift() because they're used inside .map() with reactive proxies
 // =============================================================================
 
-/** Get the key from a field entry (for display in JSX) */
-const getFieldKey = lift((entry: { key: string; value: string }): string =>
-  entry.key
+/** Extract field key - simple property access wrapped for reactivity */
+const getFieldKey = lift(
+  (entry: { key: string; value: string }): string => entry.key,
 );
 
-/** Get the value from a field entry (for display in JSX) */
-const getFieldValue = lift((entry: { key: string; value: string }): string =>
-  entry.value
+/** Extract field value - simple property access wrapped for reactivity */
+const getFieldValue = lift(
+  (entry: { key: string; value: string }): string => entry.value,
 );
 
-/** Get a preview of an example's fields (for display in Recent Examples) */
+/** Format example preview - truncates first field value for compact display */
 const getExamplePreview = lift((example: LabeledExample): string => {
   const entries = Object.entries(example.input.fields);
   const first = entries[0];
   return first ? `${first[0]}: ${first[1].substring(0, 30)}...` : "(empty)";
 });
 
-/** Get the decidedBy label for an example */
-const getExampleDecidedBy = lift((example: LabeledExample): string =>
-  example.decidedBy
+/** Extract decidedBy label - simple property access wrapped for reactivity */
+const getExampleDecidedBy = lift(
+  (example: LabeledExample): string => example.decidedBy,
 );
 
 /** Remove a field from the newItemFields record */
@@ -800,6 +866,15 @@ export default pattern<ClassifierInput, ClassifierOutput>(
 
     /** Add a new rule */
     const addRule = action((e: RuleSuggestion) => {
+      // Validate regex pattern before adding
+      const validation = isValidRegex(e.pattern);
+      if (!validation.valid) {
+        console.error(
+          `[Classifier] Cannot add rule "${e.name}": invalid regex pattern "${e.pattern}" - ${validation.error}`,
+        );
+        return;
+      }
+
       const newRule: ClassificationRule = {
         id: generateId(),
         name: e.name,
@@ -1032,20 +1107,15 @@ Respond with:
         const fieldValue = item.fields[rule.targetField];
         if (!fieldValue) continue;
 
-        try {
-          const flags = rule.caseInsensitive ? "i" : "";
-          const regex = new RegExp(rule.pattern, flags);
-          if (regex.test(fieldValue)) {
-            matchedRules.push(rule.name);
-            votes.push({
-              name: rule.name,
-              predicts: rule.predicts,
-              precision: rule.precision,
-              tier: rule.tier,
-            });
-          }
-        } catch {
-          // Invalid regex, skip
+        const regex = getCachedRegex(rule.pattern, rule.caseInsensitive);
+        if (regex && regex.test(fieldValue)) {
+          matchedRules.push(rule.name);
+          votes.push({
+            name: rule.name,
+            predicts: rule.predicts,
+            precision: rule.precision,
+            tier: rule.tier,
+          });
         }
       }
 
