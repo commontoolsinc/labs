@@ -1719,11 +1719,37 @@ function recursivelyAddIDIfNeeded<T>(
   // Can't add IDs without frame.
   if (!frame) return value;
 
-  // Not a record, no need to add IDs. Already a link, no need to add IDs.
-  if (!isRecord(value) || isCellLink(value)) return value;
-
-  // Already seen, return previously annotated result.
+  // Already seen, return previously annotated result. Check this before
+  // toStorableValue() to handle circular references properly.
   if (seen.has(value)) return seen.get(value) as T;
+
+  // Cell links pass through unchanged.
+  if (isCellLink(value)) {
+    return value;
+  }
+
+  // Convert value to storable form. This handles:
+  // - Primitives (e.g., -0 → 0, reject NaN/Infinity/Symbol/BigInt)
+  // - Instances (e.g., Error → @Error wrapper)
+  // - Objects/arrays with toJSON() methods
+  // - Sparse arrays (densified with null in holes)
+  const converted = toStorableValue(value);
+  const convertedIsRecord = isRecord(converted);
+
+  // If conversion changed the value, cache the result so shared references
+  // are preserved and we avoid redundant toJSON() calls.
+  if (converted !== value) {
+    const result = convertedIsRecord
+      ? recursivelyAddIDIfNeeded(converted as T, frame, seen)
+      : converted as T;
+    seen.set(value, result);
+    return result;
+  }
+
+  // Primitives that didn't need conversion don't need further processing.
+  if (!convertedIsRecord) {
+    return converted as T;
+  }
 
   if (Array.isArray(value)) {
     const result: unknown[] = [];
@@ -1744,20 +1770,23 @@ function recursivelyAddIDIfNeeded<T>(
     }));
     return result as T;
   } else {
+    // At this point we know `value` is a non-array record (we returned early
+    // for primitives and `Array.isArray` was false).
+    const valueRecord = value as Record<string, unknown>;
     const result: Record<string, unknown> = {};
 
     // Set before traversing, otherwise we'll infinite recurse.
     seen.set(value, result);
 
-    Object.entries(value).forEach(([key, v]) => {
+    Object.entries(valueRecord).forEach(([key, v]) => {
       result[key] = recursivelyAddIDIfNeeded(v, frame, seen);
     });
 
     // Copy supported symbols from original value.
     [ID, ID_FIELD].forEach((symbol) => {
-      if (symbol in value) {
+      if (symbol in valueRecord) {
         (result as IDFields)[symbol as keyof IDFields] =
-          value[symbol as keyof IDFields];
+          (valueRecord as IDFields)[symbol as keyof IDFields];
       }
     });
 

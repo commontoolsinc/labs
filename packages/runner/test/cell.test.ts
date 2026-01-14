@@ -71,6 +71,185 @@ describe("Cell", () => {
     expect(c.get()).toBe(20);
   });
 
+  it("should convert Error instances to @Error wrapper on set", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should convert Error instances to @Error wrapper on set",
+      undefined,
+      tx,
+    );
+    const error = new TypeError("something went wrong");
+    c.set(error);
+
+    // Error should be converted to @Error wrapper during set
+    const result = c.get() as { "@Error": Record<string, unknown> } | undefined;
+    expect(result).toHaveProperty("@Error");
+    expect(result!["@Error"].name).toBe("TypeError");
+    expect(result!["@Error"].message).toBe("something went wrong");
+    expect(typeof result!["@Error"].stack).toBe("string");
+  });
+
+  it("should preserve Error cause property on set", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should preserve Error cause property on set",
+      undefined,
+      tx,
+    );
+    const cause = new Error("root cause");
+    const error = new Error("wrapper error", { cause });
+    c.set(error);
+
+    // Error cause should be recursively converted to @Error wrapper
+    const result = c.get() as { "@Error": Record<string, unknown> } | undefined;
+    expect(result).toHaveProperty("@Error");
+    expect(result!["@Error"].message).toBe("wrapper error");
+    const causeWrapper = result!["@Error"].cause as {
+      "@Error": Record<string, unknown>;
+    };
+    expect(causeWrapper).toHaveProperty("@Error");
+    expect(causeWrapper["@Error"].message).toBe("root cause");
+  });
+
+  it("should call toJSON() on plain objects during set", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should call toJSON() on plain objects during set",
+      undefined,
+      tx,
+    );
+    const objWithToJSON = {
+      secret: "internal",
+      toJSON() {
+        return { exposed: true };
+      },
+    };
+    c.set({ data: objWithToJSON });
+
+    const result = c.get() as { data: unknown } | undefined;
+    // toJSON() should have been called, so we get { exposed: true } not { secret, toJSON }
+    expect(result?.data).toEqual({ exposed: true });
+  });
+
+  it("should densify sparse arrays during set", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should densify sparse arrays during set",
+      undefined,
+      tx,
+    );
+    const sparse: unknown[] = [];
+    sparse[0] = "a";
+    sparse[2] = "c"; // hole at index 1
+    c.set({ arr: sparse });
+
+    const result = c.get() as { arr: unknown[] } | undefined;
+    // Sparse array should be densified with null in the hole
+    expect(result?.arr).toEqual(["a", null, "c"]);
+  });
+
+  it("should densify shared sparse arrays and preserve sharing", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should densify shared sparse arrays and preserve sharing",
+      undefined,
+      tx,
+    );
+    const sparse: unknown[] = [];
+    sparse[0] = 1;
+    sparse[3] = 2; // holes at indices 1 and 2
+    // Same sparse array referenced twice
+    c.set([sparse, sparse]);
+
+    const result = c.get() as unknown[][] | undefined;
+    // Both should be densified
+    expect(result?.[0]).toEqual([1, null, null, 2]);
+    expect(result?.[1]).toEqual([1, null, null, 2]);
+    // Both should reference the same array (sharing preserved)
+    expect(result?.[0]).toBe(result?.[1]);
+  });
+
+  it("should call toJSON() on arrays with toJSON method during set", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should call toJSON() on arrays with toJSON method during set",
+      undefined,
+      tx,
+    );
+    const arrWithToJSON = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
+    arrWithToJSON.toJSON = () => "custom-array-value";
+    c.set({ arr: arrWithToJSON });
+
+    const result = c.get() as { arr: unknown } | undefined;
+    // toJSON() should have been called
+    expect(result?.arr).toBe("custom-array-value");
+  });
+
+  it("should convert -0 to 0 during set", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should convert -0 to 0 during set",
+      undefined,
+      tx,
+    );
+    c.set({ value: -0 });
+
+    const result = c.get() as { value: number } | undefined;
+    expect(result?.value).toBe(0);
+    // Verify it's actually 0, not -0
+    expect(Object.is(result?.value, 0)).toBe(true);
+    expect(Object.is(result?.value, -0)).toBe(false);
+  });
+
+  it("should throw when setting NaN", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should throw when setting NaN",
+      undefined,
+      tx,
+    );
+    expect(() => c.set({ value: NaN })).toThrow(
+      "Cannot store non-finite number",
+    );
+  });
+
+  it("should throw when setting Infinity", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should throw when setting Infinity",
+      undefined,
+      tx,
+    );
+    expect(() => c.set({ value: Infinity })).toThrow(
+      "Cannot store non-finite number",
+    );
+    expect(() => c.set({ value: -Infinity })).toThrow(
+      "Cannot store non-finite number",
+    );
+  });
+
+  it("should throw when setting Symbol", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should throw when setting Symbol",
+      undefined,
+      tx,
+    );
+    expect(() => c.set({ value: Symbol("test") })).toThrow(
+      "Cannot store symbol",
+    );
+  });
+
+  it("should throw when setting BigInt", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should throw when setting BigInt",
+      undefined,
+      tx,
+    );
+    expect(() => c.set({ value: BigInt(123) })).toThrow("Cannot store bigint");
+  });
+
   it("should create a proxy for the cell", () => {
     const c = runtime.getCell<{ x: number; y: number }>(
       space,
