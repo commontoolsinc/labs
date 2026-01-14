@@ -95,7 +95,8 @@ type ItemsByPos = Record<
 interface ImageData {
   id: string;
   name: string;
-  data: string; // base64 encoded image
+  url?: string; // data URL (preferred)
+  data?: string; // data URL (for compatibility)
 }
 
 interface ExtractedAisle {
@@ -287,9 +288,10 @@ export default pattern<Input, Output>(
         system:
           'You are analyzing photos from a grocery store. Your task is to extract ALL visible aisle signs and return them as JSON.\n\nIMPORTANT: You MUST return a JSON object with an "aisles" array, even if you only see one aisle or partial information.\n\nFor each aisle sign you see:\n- Extract ONLY the aisle number (e.g., "8", "12", "5A", "5B") - DO NOT include the word "Aisle"\n- Extract each product category as a separate item in the products array\n- Include partially visible signs - do your best to read them\n\nExample output:\n{\n  "aisles": [\n    {"name": "8", "products": ["Bread", "Cereal", "Coffee"]},\n    {"name": "9", "products": ["Snacks", "Chips"]}\n  ]\n}',
         prompt: derive(photo, (p: ImageData) => {
-          if (!p || !p.data) return [];
+          const imageUrl = p?.url || p?.data;
+          if (!imageUrl) return [];
           return [
-            { type: "image" as const, image: p.data },
+            { type: "image" as const, image: imageUrl },
             {
               type: "text" as const,
               text:
@@ -1649,11 +1651,17 @@ export default pattern<Input, Output>(
                                     } catch {
                                       aislesArray = [];
                                     }
-                                    const existingNames = new Set(
-                                      aislesArray.map((a: Aisle) =>
-                                        a.name.toLowerCase()
-                                      ),
-                                    );
+                                    // Create Set defensively - map might fail on proxied array items
+                                    let existingNames: Set<string>;
+                                    try {
+                                      existingNames = new Set(
+                                        aislesArray.map((a: Aisle) =>
+                                          a?.name?.toLowerCase?.() || ""
+                                        ),
+                                      );
+                                    } catch {
+                                      existingNames = new Set();
+                                    }
                                     const newCount = extracted.aisles.filter(
                                       (e) =>
                                         !existingNames.has(
