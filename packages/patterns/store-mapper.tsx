@@ -188,14 +188,14 @@ const addExtractedAisle = handler<
   unknown,
   { aisles: Writable<Aisle[]>; extracted: ExtractedAisle }
 >((_event, { aisles, extracted }) => {
-  const current = aisles.get();
+  const current = aisles.get() || [];
   const exists = current.some(
-    (a) => a.name.toLowerCase() === extracted.name.toLowerCase(),
+    (a: Aisle) => a.name.toLowerCase() === extracted.name.toLowerCase(),
   );
   if (!exists) {
     aisles.push({
       name: extracted.name,
-      description: extracted.products.map((p) => `- ${p}`).join("\n"),
+      description: extracted.products.map((p: string) => `- ${p}`).join("\n"),
     });
   }
 });
@@ -209,8 +209,10 @@ const addAllExtractedAisles = handler<
     photoId: string;
   }
 >((_event, { aisles, extractedList, hiddenPhotoIds, photoId }) => {
-  const current = aisles.get();
-  const existingNames = new Set(current.map((a) => a.name.toLowerCase()));
+  const current = aisles.get() || [];
+  const existingNames = new Set(
+    current.map((a: Aisle) => a.name.toLowerCase()),
+  );
   const newAisles = extractedList
     .filter((e) => !existingNames.has(e.name.toLowerCase()))
     .map((e) => ({
@@ -229,9 +231,9 @@ const mergeExtractedAisle = handler<
   unknown,
   { aisles: Writable<Aisle[]>; extracted: ExtractedAisle }
 >((_event, { aisles, extracted }) => {
-  const current = aisles.get();
+  const current = aisles.get() || [];
   const idx = current.findIndex(
-    (a) => a.name.toLowerCase() === extracted.name.toLowerCase(),
+    (a: Aisle) => a.name.toLowerCase() === extracted.name.toLowerCase(),
   );
   if (idx >= 0) {
     const existing = current[idx];
@@ -258,7 +260,7 @@ const hidePhoto = handler<
   unknown,
   { hiddenPhotoIds: Writable<string[]>; photoId: string }
 >((_event, { hiddenPhotoIds, photoId }) => {
-  const current = hiddenPhotoIds.get();
+  const current = hiddenPhotoIds.get() || [];
   if (!current.includes(photoId)) {
     hiddenPhotoIds.set([...current, photoId]);
   }
@@ -278,25 +280,10 @@ export default pattern<Input, Output>(
     const hiddenPhotoIds = Writable.of<string[]>([]);
 
     // Process uploaded photos with AI
-    const photoExtractions = uploadedPhotos.map((photo) => {
+    const photoExtractions = uploadedPhotos.map((photo, photoIndex) => {
       const extraction = generateObject({
         system:
-          `You are analyzing photos from a grocery store. Your task is to extract ALL visible aisle signs and return them as JSON.
-
-IMPORTANT: You MUST return a JSON object with an "aisles" array, even if you only see one aisle or partial information.
-
-For each aisle sign you see:
-- Extract ONLY the aisle number (e.g., "8", "12", "5A", "5B") - DO NOT include the word "Aisle"
-- Extract each product category as a separate item in the products array
-- Include partially visible signs - do your best to read them
-
-Example output:
-{
-  "aisles": [
-    {"name": "8", "products": ["Bread", "Cereal", "Coffee"]},
-    {"name": "9", "products": ["Snacks", "Chips"]}
-  ]
-}`,
+          'You are analyzing photos from a grocery store. Your task is to extract ALL visible aisle signs and return them as JSON.\n\nIMPORTANT: You MUST return a JSON object with an "aisles" array, even if you only see one aisle or partial information.\n\nFor each aisle sign you see:\n- Extract ONLY the aisle number (e.g., "8", "12", "5A", "5B") - DO NOT include the word "Aisle"\n- Extract each product category as a separate item in the products array\n- Include partially visible signs - do your best to read them\n\nExample output:\n{\n  "aisles": [\n    {"name": "8", "products": ["Bread", "Cereal", "Coffee"]},\n    {"name": "9", "products": ["Snacks", "Chips"]}\n  ]\n}',
         prompt: derive(photo, (p: ImageData) => {
           if (!p || !p.data) return [];
           return [
@@ -308,7 +295,43 @@ Example output:
             },
           ];
         }),
+        schema: {
+          type: "object",
+          properties: {
+            aisles: {
+              type: "array",
+              description: "List of aisles detected in the photo",
+              items: {
+                type: "object",
+                properties: {
+                  name: {
+                    type: "string",
+                    description:
+                      "Aisle number only (e.g., '8', '5A', '12') - do NOT include the word 'Aisle'",
+                  },
+                  products: {
+                    type: "array",
+                    description: "Array of product categories in this aisle",
+                    items: {
+                      type: "string",
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
         model: "anthropic:claude-sonnet-4-5",
+      });
+
+      // Debug: Track pending state changes
+      const pendingDebug = derive(extraction.pending, (pending: boolean) => {
+        console.log(
+          `[EXTRACTION ${photoIndex}] Photo pending:`,
+          pending,
+          `at ${new Date().toISOString()}`,
+        );
+        return pending;
       });
 
       return {
@@ -316,11 +339,17 @@ Example output:
         photoName: photo.name,
         extractedAisles: derive(
           extraction.result,
-          (result: { aisles?: ExtractedAisle[] } | null) => ({
-            aisles: (result && result.aisles) || [],
-          }),
+          (result: { aisles?: ExtractedAisle[] } | null) => {
+            console.log(
+              `[EXTRACTION ${photoIndex}] Result:`,
+              JSON.stringify(result, null, 2),
+            );
+            return {
+              aisles: (result && result.aisles) || [],
+            };
+          },
         ),
-        pending: extraction.pending,
+        pending: pendingDebug,
       };
     });
 
@@ -1601,8 +1630,24 @@ Example output:
                                     );
                                   }
 
+                                  // Ensure currentAisles is a proper array
+                                  // Use safe conversion for reactive proxy
+                                  let aislesArray: Aisle[] = [];
+                                  try {
+                                    if (
+                                      currentAisles &&
+                                      typeof currentAisles[Symbol.iterator] ===
+                                        "function"
+                                    ) {
+                                      aislesArray = [...currentAisles];
+                                    } else if (Array.isArray(currentAisles)) {
+                                      aislesArray = currentAisles;
+                                    }
+                                  } catch {
+                                    aislesArray = [];
+                                  }
                                   const existingNames = new Set(
-                                    currentAisles.map((a) =>
+                                    aislesArray.map((a: Aisle) =>
                                       a.name.toLowerCase()
                                     ),
                                   );
