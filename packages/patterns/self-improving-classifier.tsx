@@ -923,89 +923,10 @@ export default pattern<ClassifierInput, ClassifierOutput>(
       const fields = newItemFields.get();
       if (Object.keys(fields).length === 0) return;
 
-      // Only allow one item at a time - ignore if already classifying
-      if (currentItem.get() !== null) {
-        console.warn(
-          "[Classifier] Already classifying an item, ignoring new submission",
-        );
-        return;
-      }
+      // Delegate to the module-scoped handler (spread fields to break proxy chain)
+      submitItem.send({ fields: { ...fields } });
 
-      // Create the input object
-      const input: ClassifiableInput = {
-        id: generateId(),
-        receivedAt: Date.now(),
-        fields: { ...fields },
-      };
-
-      // Check rules first for potential auto-classification
-      const rulesVal = rules.get();
-      const configVal = config.get() || DEFAULT_CONFIG;
-      const ruleMatch = matchRulesAgainstInput(
-        input,
-        rulesVal,
-        configVal.autoClassifyThreshold,
-      );
-
-      if (ruleMatch.shouldAutoClassify && ruleMatch.prediction !== null) {
-        // Auto-classify: store directly to examples, skip LLM
-        const example: LabeledExample = {
-          input,
-          label: ruleMatch.prediction,
-          decidedBy: "auto",
-          reasoning:
-            `Auto-classified by Tier ${ruleMatch.highestTier} rule(s): ${
-              ruleMatch.matchedRules.join(", ")
-            }`,
-          confidence: ruleMatch.confidence,
-          labeledAt: Date.now(),
-          wasCorrection: false,
-          isInteresting: false,
-        };
-        examples.push(example);
-
-        // Track for undo UI
-        const autoItem: AutoClassifiedItem = {
-          input,
-          label: ruleMatch.prediction,
-          confidence: ruleMatch.confidence,
-          reasoning: example.reasoning,
-          matchedRules: ruleMatch.matchedRules,
-          tier: ruleMatch.highestTier,
-          classifiedAt: Date.now(),
-        };
-        recentAutoClassified.set(
-          [autoItem, ...recentAutoClassified.get()].slice(0, 10),
-        );
-
-        // Update rule metrics (create new objects to avoid mutation)
-        const updatedRules = rulesVal.map((rule) => {
-          if (ruleMatch.matchedRules.includes(rule.name)) {
-            const predicted = rule.predicts;
-            const actual = ruleMatch.prediction;
-            const newTP = predicted === actual
-              ? (rule.truePositives || 0) + 1
-              : rule.truePositives || 0;
-            return {
-              ...rule,
-              truePositives: newTP,
-              evaluationCount: (rule.evaluationCount || 0) + 1,
-            };
-          }
-          return rule;
-        });
-        rules.set(updatedRules);
-
-        console.log(
-          `[Classifier] Auto-classified as ${
-            ruleMatch.prediction ? "YES" : "NO"
-          } by Tier ${ruleMatch.highestTier} rules`,
-        );
-      } else {
-        // Normal flow: send to LLM for classification
-        currentItem.set(input);
-      }
-
+      // Clear the input fields
       newItemFields.set({});
     });
 
