@@ -9,6 +9,8 @@ user-invocable: false
 ## Core Rule
 Write ONE sub-pattern with minimal stub UI. No styling, just basic inputs/buttons to verify data flow.
 
+**Always use `pattern<Input, Output>()`** - expose actions as `Stream<T>` for testability.
+
 ## Order
 1. Leaf patterns first (no dependencies on other patterns)
 2. Container patterns (compose leaf patterns)
@@ -34,10 +36,19 @@ const submit = action(() => {
 
 **handler()** - Reused with different bindings:
 ```tsx
-const deleteItem = handler<unknown, { items: Writable<Item[]>; index: number }>(
+const deleteItem = handler<void, { items: Writable<Item[]>; index: number }>(
   (_, { items, index }) => items.set(items.get().toSpliced(index, 1))
 );
 // In JSX: onClick={deleteItem({ items, index })}
+```
+
+**Rendering sub-patterns** - Use function calls, not JSX:
+```tsx
+// ✅ Correct
+{items.map((item) => ItemPattern({ item, allItems: items }))}
+
+// ❌ Wrong - JSX fails with typed Output
+{items.map((item) => <ItemPattern item={item} />)}
 ```
 
 ## Done When

@@ -152,9 +152,7 @@ export class XAppView extends BaseView {
         );
       }
       this.titleSubscription = undefined;
-      this.charmTitle = this.app && "spaceName" in this.app.view
-        ? this.app.view.spaceName
-        : "Common Tools";
+      this.charmTitle = "Untitled";
     } else {
       const cell = activeCharm.cell().key(NAME).asSchema<string>(stringSchema);
       if (
