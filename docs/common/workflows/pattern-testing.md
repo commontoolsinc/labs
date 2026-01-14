@@ -16,12 +16,12 @@ Test files end in `.test.tsx` and are run with `deno task ct test`.
 
 ```tsx
 /// <cts-enable />
-import { Cell, action, computed, pattern } from "commontools";
+import { action, computed, pattern } from "commontools";
 import Counter from "./counter.tsx";
 
 export default pattern(() => {
-  // 1. Instantiate pattern under test
-  const counter = Counter({ value: Cell.of(0) });
+  // 1. Instantiate pattern under test with plain values
+  const counter = Counter({ value: 0 });
 
   // 2. Define actions (trigger events on the pattern)
   const action_increment = action(() => {
@@ -42,6 +42,8 @@ export default pattern(() => {
   };
 });
 ```
+
+**Note:** Pass plain values when instantiating patterns in tests. The runtime creates independent writable cells automatically. Use `Writable.of()` only when you need to test shared state behavior. See [Writable](../concepts/types-and-schemas/writable.md#passing-values-to-pattern-inputs) for details.
 
 ## Running Tests
 
