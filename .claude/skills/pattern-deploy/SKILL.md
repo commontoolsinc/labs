@@ -1,7 +1,6 @@
 ---
 name: pattern-deploy
 description: Deploy patterns and test with CLI
-context: fork
 user-invocable: false
 ---
 

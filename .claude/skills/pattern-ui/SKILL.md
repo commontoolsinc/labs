@@ -1,7 +1,6 @@
 ---
 name: pattern-ui
 description: Add UI polish with layout and styling
-context: fork
 user-invocable: false
 ---
 

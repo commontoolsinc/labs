@@ -1,7 +1,6 @@
 ---
 name: pattern-debug
 description: Debug pattern errors systematically
-context: fork
 user-invocable: false
 ---
 

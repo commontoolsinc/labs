@@ -28,16 +28,26 @@ Pattern tests: `deno task ct test packages/patterns/[name]/[file].test.tsx`
 Standard deno tests: `deno test [file].test.ts`
 - For pure functions with no reactivity
 
-## Subagents
+## Delegate to Subagents
 
-Use phase skills as needed. Each runs with `context: fork` and `user-invocable: false`:
+Use `Task()` subagents for all code changes. Tell them which skill to use for guidance:
 
-- **pattern-schema**: Types and actions
-- **pattern-implement**: Implementation code
-- **pattern-test**: Tests for key invariants
-- **pattern-ui**: Layout and styling
-- **pattern-deploy**: ct CLI, charm ops
-- **pattern-debug**: When things break
+```
+Task({
+  prompt: "Use Skill('pattern-schema') for guidance. Create schemas.tsx with [specific types]...",
+  subagent_type: "blackboard:implementer"
+})
+```
+
+Phase skills provide guidance:
+- **pattern-schema** — types and actions
+- **pattern-implement** — implementation code
+- **pattern-test** — tests for invariants
+- **pattern-ui** — layout and styling
+- **pattern-deploy** — ct CLI, charm ops
+- **pattern-debug** — error investigation
+
+Don't do implementation work directly—spawn subagents and tell them which skill to load.
 
 ## Parallel Execution
 
@@ -47,7 +57,9 @@ Launch concurrent agents when independent:
 
 Pass each subagent specific files, decisions, and constraints.
 
-## Documentation
+## Documentation Over Existing Patterns
+
+Prefer docs—they contain validated code snippets. Existing patterns in `packages/patterns/` may be outdated or use older conventions. Use them as reference but don't copy blindly.
 
 Phase skills consult as needed:
 - Types: `docs/common/concepts/types-and-schemas/`

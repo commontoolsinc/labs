@@ -1,7 +1,6 @@
 ---
 name: pattern-test
 description: Write and run pattern tests
-context: fork
 user-invocable: false
 ---
 

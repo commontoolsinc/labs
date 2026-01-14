@@ -1,7 +1,6 @@
 ---
 name: pattern-schema
 description: Design schemas.tsx with Input/Output types for patterns
-context: fork
 user-invocable: false
 ---
 

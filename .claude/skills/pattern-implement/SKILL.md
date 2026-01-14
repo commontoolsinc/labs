@@ -1,7 +1,6 @@
 ---
 name: pattern-implement
 description: Build sub-patterns with minimal UI
-context: fork
 user-invocable: false
 ---
 
