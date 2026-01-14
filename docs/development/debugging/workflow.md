@@ -15,7 +15,7 @@ Fix all type errors before deploying. Most issues are caught here.
 - **Type errors** - [@writeable](../../common/concepts/types-and-schemas/writeable.md)
 - **Reactivity issues** - [@reactivity](../../common/concepts/reactivity.md)
 - **Component questions** - [@COMPONENTS](../../common/components/COMPONENTS.md)
-- **Pattern examples** - [@INDEX](../../../packages/patterns/INDEX.md)
+- **Pattern examples** - [@index](../../../packages/patterns/index.md)
 
 ### 3. Inspect Cell Values
 

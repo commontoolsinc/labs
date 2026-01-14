@@ -147,7 +147,7 @@ export const charm = new Command()
     "Root directory for resolving imports. Allows imports from parent directories within this root.",
   )
   .action(async (options, main) => {
-    if (options.quiet) setQuietMode(true);
+    setQuietMode(!!options.quiet);
     const spaceConfig = parseSpaceOptions(options);
     const charmId = await newCharm(
       spaceConfig,
@@ -237,7 +237,7 @@ export const charm = new Command()
   )
   .arguments("<main:string>")
   .action(async (options, mainPath) => {
-    if (options.quiet) setQuietMode(true);
+    setQuietMode(!!options.quiet);
     const charmConfig = parseCharmOptions(options);
     await setCharmRecipe(charmConfig, {
       mainPath: absPath(mainPath),
@@ -438,7 +438,7 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
   )
   .arguments("<source:string> <target:string>")
   .action(async (options, sourceRef, targetRef) => {
-    if (options.quiet) setQuietMode(true);
+    setQuietMode(!!options.quiet);
     const spaceConfig = parseSpaceOptions(options);
 
     // Parse source and target references - handle both charmId/path and well-known IDs
@@ -521,7 +521,7 @@ JSON VALUES: Strings need quotes: echo '"hello"' | ct charm set ...`,
   .option("--input", "Write to the charm's input cell instead of result cell")
   .arguments("<path:string>")
   .action(async (options, pathString) => {
-    if (options.quiet) setQuietMode(true);
+    setQuietMode(!!options.quiet);
     const charmConfig = parseCharmOptions(options);
     const pathSegments = parsePath(pathString);
     const value = await drainStdin();
@@ -571,7 +571,7 @@ JSON VALUES: Strings need quotes: echo '"hello"' | ct charm set ...`,
   .option("-c,--charm <charm:string>", "The target charm ID.")
   .arguments("<handler:string> [args:string]")
   .action(async (options, handlerName, argsJson) => {
-    if (options.quiet) setQuietMode(true);
+    setQuietMode(!!options.quiet);
     const charmConfig = parseCharmOptions(options);
     const args = argsJson ? JSON.parse(argsJson) : await drainStdin();
     await callCharmHandler(charmConfig, handlerName, args);
