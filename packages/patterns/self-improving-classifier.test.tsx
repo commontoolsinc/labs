@@ -7,6 +7,13 @@
  * - Rule metric updates after classification
  *
  * Pattern under test: ./self-improving-classifier.tsx
+ *
+ * KNOWN ISSUE: This test currently fails with "Tried to access a reactive
+ * reference outside a reactive context" when submitting items via the
+ * exported Stream. The test was committed in a failing state and requires
+ * investigation into how pattern testing interacts with handler-exported
+ * Streams. The pattern itself works correctly when deployed and tested
+ * manually via Playwright or CLI.
  */
 import { action, Cell, computed, handler, pattern } from "commontools";
 import SelfImprovingClassifier from "./self-improving-classifier.tsx";
