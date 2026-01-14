@@ -5,6 +5,7 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { deepEqual } from "@commontools/utils/deep-equal";
 
 const signer = await Identity.fromPassphrase("bench storage");
 const space = signer.did();
@@ -856,5 +857,105 @@ Deno.bench(
 
     await runtime.dispose();
     await storageManager.close();
+  },
+);
+
+// ============================================================================
+// Value comparison: JSON.stringify vs deepEqual
+//
+// These benchmarks compare the two approaches used for equality checking in
+// the storage layer. The test data represents "median complexity" values
+// typical of Cell data flowing through Nursery.evict(), differential.ts,
+// attestation.claim(), and History.claim().
+// ============================================================================
+
+// Representative "median complexity" data: an array of objects with
+// string/boolean/number fields, similar to todo items, contacts, etc.
+const medianComplexityA = {
+  items: [
+    { id: "item-1", title: "Buy groceries", done: false, priority: 1 },
+    { id: "item-2", title: "Call mom", done: true, priority: 2 },
+    { id: "item-3", title: "Finish report", done: false, priority: 1 },
+    { id: "item-4", title: "Schedule dentist", done: false, priority: 3 },
+    { id: "item-5", title: "Review PR", done: true, priority: 1 },
+  ],
+  metadata: {
+    createdAt: "2024-01-15T10:30:00Z",
+    updatedAt: "2024-01-15T14:22:00Z",
+    version: 3,
+  },
+};
+
+// Identical structure and values (for "equal" case)
+const medianComplexityB = JSON.parse(JSON.stringify(medianComplexityA));
+
+// Different value (for "not equal" case) - last item's `done` differs
+const medianComplexityC = JSON.parse(JSON.stringify(medianComplexityA));
+medianComplexityC.items[4].done = false;
+
+// Different value early - first item's `done` differs (tests short-circuit)
+const medianComplexityD = JSON.parse(JSON.stringify(medianComplexityA));
+medianComplexityD.items[0].done = true;
+
+Deno.bench(
+  "Compare - JSON.stringify, equal values (1000x)",
+  { group: "value-comparison" },
+  () => {
+    for (let i = 0; i < 1000; i++) {
+      const _result =
+        JSON.stringify(medianComplexityA) === JSON.stringify(medianComplexityB);
+    }
+  },
+);
+
+Deno.bench(
+  "Compare - deepEqual, equal values (1000x)",
+  { group: "value-comparison" },
+  () => {
+    for (let i = 0; i < 1000; i++) {
+      const _result = deepEqual(medianComplexityA, medianComplexityB);
+    }
+  },
+);
+
+Deno.bench(
+  "Compare - JSON.stringify, unequal late (1000x)",
+  { group: "value-comparison" },
+  () => {
+    for (let i = 0; i < 1000; i++) {
+      const _result =
+        JSON.stringify(medianComplexityA) === JSON.stringify(medianComplexityC);
+    }
+  },
+);
+
+Deno.bench(
+  "Compare - deepEqual, unequal late (1000x)",
+  { group: "value-comparison" },
+  () => {
+    for (let i = 0; i < 1000; i++) {
+      const _result = deepEqual(medianComplexityA, medianComplexityC);
+    }
+  },
+);
+
+Deno.bench(
+  "Compare - JSON.stringify, unequal early (1000x)",
+  { group: "value-comparison" },
+  () => {
+    for (let i = 0; i < 1000; i++) {
+      const _result =
+        JSON.stringify(medianComplexityA) === JSON.stringify(medianComplexityD);
+    }
+  },
+);
+
+Deno.bench(
+  "Compare - deepEqual, unequal early (1000x)",
+  { group: "value-comparison" },
+  () => {
+    for (let i = 0; i < 1000; i++) {
+      const _result = deepEqual(medianComplexityA, medianComplexityD);
+    }
   },
 );
