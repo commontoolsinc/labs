@@ -2082,7 +2082,7 @@ describe("Recipe Runner", () => {
     // This mimics what computed(() => items.length) compiles to
     // asStub tells the query engine not to traverse the items
     const computeLength = lift(
-      // Input schema with asStub - cast needed as asStub isn't in JSONSchema type yet
+      // Input schema with asStub
       {
         type: "object",
         properties: {
@@ -2092,7 +2092,7 @@ describe("Recipe Runner", () => {
           },
         },
         required: ["items"],
-      } as unknown as JSONSchema,
+      } as const satisfies JSONSchema,
       // Output schema
       { type: "number" } as const satisfies JSONSchema,
       // Compute function - reads .length from the array
