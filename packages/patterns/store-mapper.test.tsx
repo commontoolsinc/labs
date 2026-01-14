@@ -163,22 +163,24 @@ export default pattern(() => {
   // Assertions - use store's computed values where available
   // ==========================================================================
 
-  // Initial state
+  // Initial state - use computed count values for reliable reactive array length checks
   const assert_initial_store_name = computed(() =>
     String(store.storeName) === "Test Store"
   );
-  const assert_initial_no_aisles = computed(() => store.aisles.length === 0);
+  const assert_initial_no_aisles = computed(() =>
+    Number(store.aisleCount) === 0
+  );
   const assert_initial_no_departments = computed(() =>
-    store.departments.length === 0
+    Number(store.deptCount) === 0
   );
   const assert_initial_no_corrections = computed(() =>
-    store.itemLocations.length === 0
+    Number(store.correctionCount) === 0
   );
 
-  // After adding aisles
-  const assert_one_aisle = computed(() => store.aisles.length === 1);
-  const assert_two_aisles = computed(() => store.aisles.length === 2);
-  const assert_three_aisles = computed(() => store.aisles.length === 3);
+  // After adding aisles - use computed aisleCount for reliable reactive array length checks
+  const assert_one_aisle = computed(() => Number(store.aisleCount) === 1);
+  const assert_two_aisles = computed(() => Number(store.aisleCount) === 2);
+  const assert_three_aisles = computed(() => Number(store.aisleCount) === 3);
   const assert_first_aisle_is_1 = computed(() => store.aisles[0]?.name === "1");
 
   // After setting description
@@ -186,9 +188,9 @@ export default pattern(() => {
     store.aisles[0]?.description === "Dairy & Eggs"
   );
 
-  // After loading departments
+  // After loading departments - use computed deptCount for reliable reactive array length checks
   const assert_three_departments = computed(() =>
-    store.departments.length === 3
+    Number(store.deptCount) === 3
   );
   const assert_bakery_exists = computed(() =>
     store.departments[0]?.name === "Bakery"
@@ -202,9 +204,9 @@ export default pattern(() => {
     store.departments[0]?.location === "front-left"
   );
 
-  // After adding correction
+  // After adding correction - use computed correctionCount for reliable reactive array length checks
   const assert_one_correction = computed(() =>
-    store.itemLocations.length === 1
+    Number(store.correctionCount) === 1
   );
   const assert_coffee_correction = computed(() =>
     store.itemLocations[0]?.itemName === "Coffee" &&

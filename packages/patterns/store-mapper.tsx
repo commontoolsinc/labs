@@ -62,6 +62,9 @@ interface Output {
   entrances: Entrance[];
   itemLocations: ItemLocation[];
   outline: string;
+  aisleCount: number;
+  deptCount: number;
+  correctionCount: number;
 }
 
 // Default departments to load
@@ -190,9 +193,10 @@ export default pattern<Input, Output>(
       },
     );
 
-    // Aisle count
+    // Counts for reactive arrays
     const aisleCount = computed(() => aisles.get().length);
     const deptCount = computed(() => departments.get().length);
+    const correctionCount = computed(() => itemLocations.get().length);
 
     // Gap detection for aisles
     const detectedGaps = derive(aisles, (aisleList: Aisle[]) => {
@@ -615,6 +619,9 @@ export default pattern<Input, Output>(
       entrances,
       itemLocations,
       outline,
+      aisleCount,
+      deptCount,
+      correctionCount,
     };
   },
 );
