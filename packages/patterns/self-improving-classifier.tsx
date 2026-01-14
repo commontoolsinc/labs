@@ -345,24 +345,20 @@ const confirmPendingClassification = handler<
   const item = pendingList[idx];
   const result = item.result;
 
-  // Deep clone to ensure no reactive proxies leak into stored examples
-  const example: LabeledExample = JSON.parse(
-    JSON.stringify({
-      input: item.input,
-      label: result.classification,
-      decidedBy: "suggestion-accepted",
-      reasoning: result.reasoning,
-      confidence: result.confidence,
-      labeledAt: Date.now(),
-      wasCorrection: false,
-      isInteresting: result.confidence < 0.7,
-      interestingReason: result.confidence < 0.7
-        ? "Low confidence, user confirmed"
-        : undefined,
-    }),
-  );
-
-  examples.push(example);
+  // Spread to create plain objects (breaks proxy chain)
+  examples.push({
+    input: { ...item.input, fields: { ...item.input.fields } },
+    label: result.classification,
+    decidedBy: "suggestion-accepted",
+    reasoning: result.reasoning,
+    confidence: result.confidence,
+    labeledAt: Date.now(),
+    wasCorrection: false,
+    isInteresting: result.confidence < 0.7,
+    interestingReason: result.confidence < 0.7
+      ? "Low confidence, user confirmed"
+      : undefined,
+  });
   pendingClassifications.set(
     pendingList.filter((p) => !equals(pending, p)),
   );
@@ -384,23 +380,19 @@ const correctPendingClassification = handler<
   const item = pendingList[idx];
   const correctLabel = !item.result.classification;
 
-  // Deep clone to ensure no reactive proxies leak into stored examples
-  const example: LabeledExample = JSON.parse(
-    JSON.stringify({
-      input: item.input,
-      label: correctLabel,
-      decidedBy: "user",
-      reasoning: "User correction",
-      confidence: 1.0,
-      labeledAt: Date.now(),
-      wasCorrection: true,
-      originalPrediction: item.result.classification,
-      isInteresting: true,
-      interestingReason: "User corrected classification",
-    }),
-  );
-
-  examples.push(example);
+  // Spread to create plain objects (breaks proxy chain)
+  examples.push({
+    input: { ...item.input, fields: { ...item.input.fields } },
+    label: correctLabel,
+    decidedBy: "user",
+    reasoning: "User correction",
+    confidence: 1.0,
+    labeledAt: Date.now(),
+    wasCorrection: true,
+    originalPrediction: item.result.classification,
+    isInteresting: true,
+    interestingReason: "User corrected classification",
+  });
   pendingClassifications.set(
     pendingList.filter((p) => !equals(pending, p)),
   );
@@ -472,14 +464,12 @@ export default pattern<ClassifierInput>(
         );
         return;
       }
-      // Deep clone fields to ensure we get a plain copy, not a reactive proxy
-      const fieldsCopy = JSON.parse(JSON.stringify(e.fields));
-      const input: ClassifiableInput = {
+      // Spread to create a new plain object (shallow copy breaks proxy chain)
+      currentItem.set({
         id: generateId(),
         receivedAt: Date.now(),
-        fields: fieldsCopy,
-      };
-      currentItem.set(input);
+        fields: { ...e.fields },
+      });
     });
 
     /** Confirm an LLM classification (user agrees) - for API use */
@@ -606,14 +596,12 @@ export default pattern<ClassifierInput>(
         return;
       }
 
-      // Deep clone to avoid reactive proxy leak
-      const fieldsCopy = JSON.parse(JSON.stringify(fields));
-      const input: ClassifiableInput = {
+      // Spread to create a new plain object (shallow copy breaks proxy chain)
+      currentItem.set({
         id: generateId(),
         receivedAt: Date.now(),
-        fields: fieldsCopy,
-      };
-      currentItem.set(input);
+        fields: { ...fields },
+      });
       newItemFields.set({});
     });
 
@@ -812,29 +800,21 @@ Respond with:
 
       const { item, classification } = result;
 
-      // Deep clone to ensure no reactive proxies leak
-      const plainItem: ClassifiableInput = JSON.parse(
-        JSON.stringify({
+      // Spread to create plain objects (breaks proxy chain)
+      pendingClassifications.push({
+        input: {
           id: item.id,
           receivedAt: item.receivedAt,
-          fields: item.fields,
-        }),
-      );
-      const plainClassification: ClassificationResult = JSON.parse(
-        JSON.stringify({
+          fields: { ...item.fields },
+        },
+        result: {
           inputId: classification.inputId,
           classification: classification.classification,
           confidence: classification.confidence,
           reasoning: classification.reasoning,
           decidedBy: classification.decidedBy,
-          matchedRules: classification.matchedRules,
-        }),
-      );
-
-      // Add to pending and clear current
-      pendingClassifications.push({
-        input: plainItem,
-        result: plainClassification,
+          matchedRules: [...classification.matchedRules],
+        },
       });
       currentItem.set(null);
     });
@@ -846,29 +826,21 @@ Respond with:
 
       const { item, classification } = result;
 
-      // Deep clone with flipped classification
-      const plainItem: ClassifiableInput = JSON.parse(
-        JSON.stringify({
+      // Spread to create plain objects (breaks proxy chain)
+      pendingClassifications.push({
+        input: {
           id: item.id,
           receivedAt: item.receivedAt,
-          fields: item.fields,
-        }),
-      );
-      const plainClassification: ClassificationResult = JSON.parse(
-        JSON.stringify({
+          fields: { ...item.fields },
+        },
+        result: {
           inputId: classification.inputId,
           classification: !classification.classification, // FLIP the classification
           confidence: 1.0, // User is certain
           reasoning: "User corrected classification",
           decidedBy: "user",
-          matchedRules: classification.matchedRules,
-        }),
-      );
-
-      // Add to pending and clear current
-      pendingClassifications.push({
-        input: plainItem,
-        result: plainClassification,
+          matchedRules: [...classification.matchedRules],
+        },
       });
       currentItem.set(null);
     });
