@@ -294,6 +294,18 @@ const getFieldValue = lift((entry: { key: string; value: string }): string =>
   entry.value
 );
 
+/** Get a preview of an example's fields (for display in Recent Examples) */
+const getExamplePreview = lift((example: LabeledExample): string => {
+  const entries = Object.entries(example.input.fields);
+  const first = entries[0];
+  return first ? `${first[0]}: ${first[1].substring(0, 30)}...` : "(empty)";
+});
+
+/** Get the decidedBy label for an example */
+const getExampleDecidedBy = lift((example: LabeledExample): string =>
+  example.decidedBy
+);
+
 /** Remove a field from the newItemFields record */
 const removeFieldHandler = handler<
   unknown,
@@ -331,19 +343,22 @@ const confirmPendingClassification = handler<
   const item = pendingList[idx];
   const result = item.result;
 
-  const example: LabeledExample = {
-    input: item.input,
-    label: result.classification,
-    decidedBy: "suggestion-accepted",
-    reasoning: result.reasoning,
-    confidence: result.confidence,
-    labeledAt: Date.now(),
-    wasCorrection: false,
-    isInteresting: result.confidence < 0.7,
-    interestingReason: result.confidence < 0.7
-      ? "Low confidence, user confirmed"
-      : undefined,
-  };
+  // Deep clone to ensure no reactive proxies leak into stored examples
+  const example: LabeledExample = JSON.parse(
+    JSON.stringify({
+      input: item.input,
+      label: result.classification,
+      decidedBy: "suggestion-accepted",
+      reasoning: result.reasoning,
+      confidence: result.confidence,
+      labeledAt: Date.now(),
+      wasCorrection: false,
+      isInteresting: result.confidence < 0.7,
+      interestingReason: result.confidence < 0.7
+        ? "Low confidence, user confirmed"
+        : undefined,
+    }),
+  );
 
   examples.push(example);
   pendingClassifications.set(
@@ -367,18 +382,21 @@ const correctPendingClassification = handler<
   const item = pendingList[idx];
   const correctLabel = !item.result.classification;
 
-  const example: LabeledExample = {
-    input: item.input,
-    label: correctLabel,
-    decidedBy: "user",
-    reasoning: "User correction",
-    confidence: 1.0,
-    labeledAt: Date.now(),
-    wasCorrection: true,
-    originalPrediction: item.result.classification,
-    isInteresting: true,
-    interestingReason: "User corrected classification",
-  };
+  // Deep clone to ensure no reactive proxies leak into stored examples
+  const example: LabeledExample = JSON.parse(
+    JSON.stringify({
+      input: item.input,
+      label: correctLabel,
+      decidedBy: "user",
+      reasoning: "User correction",
+      confidence: 1.0,
+      labeledAt: Date.now(),
+      wasCorrection: true,
+      originalPrediction: item.result.classification,
+      isInteresting: true,
+      interestingReason: "User corrected classification",
+    }),
+  );
 
   examples.push(example);
   pendingClassifications.set(
@@ -754,11 +772,15 @@ Respond with:
 
     // Local state for pending rule suggestions - use Writable.of for .set() calls
     const suggestedRules = Writable.of<RuleSuggestion[]>([]);
+    // Counter to force refresh of rule generation prompt
+    const ruleGenCounter = Writable.of(0);
 
     // Build the rule generation prompt when conditions are met
     const ruleGenerationPrompt = computed(() => {
       const examplesList = examples.get();
       const configVal = config.get();
+      // Read counter to establish dependency (forces regeneration when incremented)
+      const _refreshCount = ruleGenCounter.get();
 
       // Only generate when we have enough examples
       if (examplesList.length < (configVal.minExamplesForRules || 5)) return "";
@@ -860,9 +882,11 @@ Each suggestion should have:
     // Force evaluation
     const _ruleSuggestions = processRuleSuggestions;
 
-    /** Clear all suggestions (to request new ones) */
+    /** Clear all suggestions and trigger new generation */
     const refreshSuggestions = action(() => {
       suggestedRules.set([]);
+      // Increment counter to force regeneration of prompt (triggers new LLM call)
+      ruleGenCounter.set(ruleGenCounter.get() + 1);
     });
 
     // Display name
@@ -1274,55 +1298,46 @@ Each suggestion should have:
                     Recent Examples ({computed(() => examples.get().length)})
                   </summary>
                   <ct-vstack gap="1" style="margin-top: 0.5rem;">
-                    {computed(() => [...examples.get()].reverse().slice(0, 10))
-                      .map((example) => (
-                        <ct-hstack
-                          gap="2"
-                          align="center"
+                    {examples.map((example) => (
+                      <ct-hstack
+                        gap="2"
+                        align="center"
+                        style={{
+                          padding: "0.5rem",
+                          background: ifElse(
+                            example.wasCorrection,
+                            "var(--ct-color-warning-50)",
+                            "var(--ct-color-gray-50)",
+                          ),
+                          borderRadius: "4px",
+                          borderLeft: ifElse(
+                            example.isInteresting,
+                            "3px solid var(--ct-color-warning-400)",
+                            "none",
+                          ),
+                        }}
+                      >
+                        <span
                           style={{
-                            padding: "0.5rem",
-                            background: ifElse(
-                              example.wasCorrection,
-                              "var(--ct-color-warning-50)",
-                              "var(--ct-color-gray-50)",
-                            ),
-                            borderRadius: "4px",
-                            borderLeft: ifElse(
-                              example.isInteresting,
-                              "3px solid var(--ct-color-warning-400)",
-                              "none",
+                            fontWeight: "600",
+                            color: ifElse(
+                              example.label,
+                              "var(--ct-color-success-600)",
+                              "var(--ct-color-error-600)",
                             ),
                           }}
                         >
-                          <span
-                            style={{
-                              fontWeight: "600",
-                              color: ifElse(
-                                example.label,
-                                "var(--ct-color-success-600)",
-                                "var(--ct-color-error-600)",
-                              ),
-                            }}
-                          >
-                            {ifElse(example.label, "YES", "NO")}
-                          </span>
-                          <span style="flex: 1; font-size: 0.875rem; color: var(--ct-color-gray-600);">
-                            {computed(() => {
-                              const entries = Object.entries(
-                                example.input.fields,
-                              );
-                              const first = entries[0];
-                              return first
-                                ? `${first[0]}: ${first[1].substring(0, 30)}...`
-                                : "(empty)";
-                            })}
-                          </span>
-                          <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
-                            {example.decidedBy}
-                            {ifElse(example.wasCorrection, " (corrected)", "")}
-                          </span>
-                        </ct-hstack>
-                      ))}
+                          {ifElse(example.label, "YES", "NO")}
+                        </span>
+                        <span style="flex: 1; font-size: 0.875rem; color: var(--ct-color-gray-600);">
+                          {getExamplePreview(example)}
+                        </span>
+                        <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
+                          {getExampleDecidedBy(example)}
+                          {ifElse(example.wasCorrection, " (corrected)", "")}
+                        </span>
+                      </ct-hstack>
+                    ))}
                   </ct-vstack>
                 </details>,
                 null,
