@@ -232,8 +232,9 @@ export class CellHandle<T = unknown> {
    * Create a new CellHandle with a different schema.
    */
   asSchema<U = unknown>(schema: JSONSchema): CellHandle<U> {
+    const { schema: _schema, rootSchema: _rootSchema, ...rest } = this.#ref;
     const newCell = new CellHandle(this.#rt, {
-      ...this.#ref,
+      ...rest,
       schema,
     });
     newCell.#value = this.#value;

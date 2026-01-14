@@ -33,7 +33,13 @@ export function cellRefToSigilLink(cell: CellRef): SigilLink {
 }
 
 export function createCellRef(cell: Cell<unknown>, schema?: unknown): CellRef {
-  const link = parseLink(cell.getAsLink());
+  const link = parseLink(
+    cell.getAsLink({
+      includeSchema: true,
+      keepAsCell: true,
+      keepStreams: true,
+    }),
+  );
   // Check before casting to a NormalizedFullLink
   if (!link.id || !link.space || !link.type) {
     throw new Error("Serialized links must contain id, space, type.");
@@ -47,7 +53,10 @@ export function createCellRef(cell: Cell<unknown>, schema?: unknown): CellRef {
   if (link.schema != null) cellRef.schema = link.schema;
   if (link.rootSchema != null) cellRef.rootSchema = link.rootSchema;
   if (link.overwrite != null) cellRef.overwrite = link.overwrite;
-  if (schema !== undefined) cellRef.schema = schema as JSONSchema;
+  if (schema !== undefined) {
+    cellRef.schema = schema as JSONSchema;
+    delete cellRef.rootSchema;
+  }
   return cellRef;
 }
 
