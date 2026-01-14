@@ -43,21 +43,21 @@ This shift has several benefits:
 Use `equals()` to compare cells or values. For cells, this checks reference equality (same object in the graph). For plain values, it checks structural equality.
 
 ```typescript
-import { equals, Cell } from 'commontools';
+import { equals, Writable } from 'commontools';
 
-const myCell = Cell.of({ name: "Ben" });
+const myCell = Writable.of({ name: "Ben" });
 
 // Reference equality for cells
 equals(myCell, myCell);                    // => true
-equals(Cell.of({ name: "Ben" }),
-       Cell.of({ name: "Ben" }));          // => false (different cells)
+equals(Writable.of({ name: "Ben" }),
+       Writable.of({ name: "Ben" }));      // => false (different cells)
 
 // Structural equality for plain values
 equals({ name: "Gideon" }, { name: "Gideon" });  // => true
 equals({ name: "Ben" }, { name: "Berni" });      // => false
 
 // Mixed comparison (unwraps cell to compare)
-equals(Cell.of({ name: "Gideon" }), { name: "Gideon" });  // => true
+equals(Writable.of({ name: "Gideon" }), { name: "Gideon" });  // => true
 ```
 
 ### Using `equals()` in Array Operations
