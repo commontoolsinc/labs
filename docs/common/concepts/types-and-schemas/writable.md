@@ -35,9 +35,9 @@ With `Writable<T>` in your signature:
 
 Without `Writable<>`, you can still display values in JSX, pass to `computed()`, and map over arrays - all reactively. Note: filtering and transformations must be done in `computed()` outside JSX, then the result can be mapped inside JSX.
 
-### Passing Values to Writable Inputs
+### Passing Values to Pattern Inputs
 
-When calling a pattern that expects `Writable<T>`, you have two options:
+When calling a pattern, you have two options for providing input values:
 
 **Plain values** create independent state for each pattern instance:
 
@@ -50,10 +50,12 @@ const counter2 = Counter({ count: 0 });
 **Cell references** share state across pattern instances:
 
 ```typescript
-const sharedCount = Cell.of(0);
+const sharedCount = Writable.of(0);
 const counter1 = Counter({ count: sharedCount });
 const counter2 = Counter({ count: sharedCount });
 // counter1 and counter2 share state - incrementing one affects both
 ```
 
-For most cases, pass plain values. Use `Cell.of()` when you intentionally want multiple patterns to share the same underlying state.
+For most cases, pass plain values. Use `Writable.of()` when you intentionally want multiple patterns to share the same underlying state.
+
+Note: The `Writable<T>` annotation in a pattern's type signature indicates write intent within that pattern, but doesn't affect how input values are coerced. Plain values always become owned state that the pattern can modify—the pattern can pass these to handlers with `Writable<>` inputs, making them effectively writable regardless of the signature.
