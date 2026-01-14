@@ -10,6 +10,7 @@ import {
   themeContext,
 } from "../theme-context.ts";
 import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
+import type { Schema } from "@commontools/api";
 import { stringArraySchema, stringSchema } from "@commontools/runner/schemas";
 import { createCellController } from "../../core/cell-controller.ts";
 
@@ -58,6 +59,12 @@ export interface AutocompleteItem {
    */
   data?: unknown;
 }
+
+// Type validation: ensure schema matches interface
+type _ValidateAutocompleteItem = Schema<
+  typeof AutocompleteItemArraySchema
+>[number] extends AutocompleteItem ? true : never;
+const _validateAutocompleteItem: _ValidateAutocompleteItem = true;
 
 /**
  * Pre-processed item with search words for fast matching.

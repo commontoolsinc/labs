@@ -2,6 +2,7 @@ import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
+import type { Schema } from "@commontools/api";
 import { createCellController } from "../../core/cell-controller.ts";
 import { consume } from "@lit/context";
 import {
@@ -57,6 +58,12 @@ export interface LocationData {
   /** Unix timestamp in milliseconds when the location was captured */
   timestamp: number;
 }
+
+// Type validation: ensure schema matches interface
+type _ValidateLocationData = Schema<
+  typeof LocationDataSchema
+> extends LocationData ? true : never;
+const _validateLocationData: _ValidateLocationData = true;
 
 /**
  * CTLocation - Browser Geolocation API wrapper component

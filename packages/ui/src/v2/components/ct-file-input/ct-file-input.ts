@@ -3,6 +3,7 @@ import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import type { ButtonSize, ButtonVariant } from "../ct-button/ct-button.ts";
 import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
+import type { Schema } from "@commontools/api";
 import { createArrayCellController } from "../../core/cell-controller.ts";
 import { consume } from "@lit/context";
 import {
@@ -50,8 +51,14 @@ export interface FileData {
   // Optional metadata (can be populated by subclasses)
   width?: number;
   height?: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
+
+// Type validation: ensure schema matches interface
+type _ValidateFileData = Schema<
+  typeof FileDataArraySchema
+>[number] extends FileData ? true : never;
+const _validateFileData: _ValidateFileData = true;
 
 /**
  * CTFileInput - Generic file upload component

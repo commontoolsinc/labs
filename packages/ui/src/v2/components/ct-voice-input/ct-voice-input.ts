@@ -3,6 +3,7 @@ import { property } from "lit/decorators.js";
 import { createRef, type Ref, ref } from "lit/directives/ref.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
+import type { Schema } from "@commontools/api";
 import { createCellController } from "../../core/cell-controller.ts";
 import { consume } from "@lit/context";
 import {
@@ -27,9 +28,15 @@ const TranscriptionDataSchema = {
       items: {
         type: "object",
         properties: {
-          timestamp: { type: "array", items: { type: "number" } },
+          timestamp: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 2,
+            maxItems: 2,
+          },
           text: { type: "string" },
         },
+        required: ["timestamp", "text"],
       },
     },
     audioData: { type: "string" },
@@ -53,7 +60,7 @@ type RecordingState =
  * Timestamped segment of transcription
  */
 export interface TranscriptionChunk {
-  timestamp: [number, number]; // [start_seconds, end_seconds]
+  timestamp: number[]; // [start_seconds, end_seconds]
   text: string;
 }
 
@@ -68,6 +75,12 @@ export interface TranscriptionData {
   duration: number; // Recording duration in seconds
   timestamp: number; // Unix timestamp when recorded
 }
+
+// Type validation: ensure schema matches interface
+type _ValidateTranscriptionData = Schema<
+  typeof TranscriptionDataSchema
+> extends TranscriptionData ? true : never;
+const _validateTranscriptionData: _ValidateTranscriptionData = true;
 
 /**
  * CTVoiceInput - Voice recording and transcription component
