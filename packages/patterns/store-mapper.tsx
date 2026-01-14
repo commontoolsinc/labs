@@ -24,6 +24,23 @@ import {
 } from "commontools";
 
 // Types for store layout
+type WallPosition =
+  | "front-left"
+  | "front-center"
+  | "front-right"
+  | "back-left"
+  | "back-center"
+  | "back-right"
+  | "left-front"
+  | "left-center"
+  | "left-back"
+  | "right-front"
+  | "right-center"
+  | "right-back"
+  | "unassigned"
+  | "not-in-store"
+  | "in-center-aisle";
+
 interface Aisle {
   name: string; // Just the number, e.g., "1", "2", "5A"
   description: Default<string, "">;
@@ -32,12 +49,12 @@ interface Aisle {
 interface Department {
   name: string;
   icon: string;
-  location: Default<string, "unassigned">; // wall position or "unassigned" | "not-in-store" | "in-center-aisle"
+  location: Default<WallPosition, "unassigned">;
   description: Default<string, "">;
 }
 
 interface Entrance {
-  position: string; // e.g., "front-left", "front-center"
+  position: WallPosition;
 }
 
 interface ItemLocation {
@@ -66,6 +83,12 @@ interface Output {
   deptCount: number;
   correctionCount: number;
 }
+
+// Type for position grouping in visual map (must be at module scope for pattern compiler)
+type ItemsByPos = Record<
+  string,
+  { depts: Department[]; entrances: Entrance[] }
+>;
 
 // Default departments to load
 const DEFAULT_DEPARTMENTS: Array<{ name: string; icon: string }> = [
@@ -125,12 +148,34 @@ const loadDefaultDepartments = handler<
   departments.set([...current, ...newDepts]);
 });
 
+// Entrance handlers
+const addEntrance = handler<
+  unknown,
+  { entrances: Writable<Entrance[]>; position: WallPosition }
+>((_event, { entrances, position }) => {
+  const current = entrances.get();
+  // Don't add duplicate entrances at same position
+  if (current.some((e) => e.position === position)) return;
+  entrances.push({ position });
+});
+
+const removeEntrance = handler<
+  unknown,
+  { entrances: Writable<Entrance[]>; entrance: Entrance }
+>((_event, { entrances, entrance }) => {
+  const current = entrances.get();
+  const index = current.findIndex((el) => equals(entrance, el));
+  if (index >= 0) {
+    entrances.set(current.toSpliced(index, 1));
+  }
+});
+
 export default pattern<Input, Output>(
   ({ storeName, aisles, departments, entrances, itemLocations }) => {
     // UI state
     const currentSection = Writable.of<
-      "aisles" | "departments" | "corrections" | "outline"
-    >("aisles");
+      "map" | "aisles" | "departments" | "corrections" | "outline"
+    >("map");
     const newCorrectionItem = Writable.of("");
     const newCorrectionAisle = Writable.of("");
 
@@ -197,6 +242,42 @@ export default pattern<Input, Output>(
     const aisleCount = computed(() => aisles.get().length);
     const deptCount = computed(() => departments.get().length);
     const correctionCount = computed(() => itemLocations.get().length);
+    const entranceCount = computed(() => entrances.get().length);
+
+    // Group departments and entrances by position for the visual map
+    const itemsByPosition = computed((): ItemsByPos => {
+      const byPos: ItemsByPos = {};
+      // Add departments
+      for (const dept of departments.get()) {
+        if (
+          dept.location && dept.location !== "unassigned" &&
+          dept.location !== "not-in-store" &&
+          dept.location !== "in-center-aisle"
+        ) {
+          if (!byPos[dept.location]) {
+            byPos[dept.location] = { depts: [], entrances: [] };
+          }
+          byPos[dept.location].depts.push(dept);
+        }
+      }
+      // Add entrances
+      for (const entrance of entrances.get()) {
+        if (!byPos[entrance.position]) {
+          byPos[entrance.position] = { depts: [], entrances: [] };
+        }
+        byPos[entrance.position].entrances.push(entrance);
+      }
+      return byPos;
+    });
+
+    // Pre-compute entrance positions for button states (use Record instead of Set for JSON-serializable)
+    const entrancePositions = computed(() => {
+      const positions: Record<string, boolean> = {};
+      for (const e of entrances.get()) {
+        positions[e.position] = true;
+      }
+      return positions;
+    });
 
     // Gap detection for aisles
     const detectedGaps = derive(aisles, (aisleList: Aisle[]) => {
@@ -247,7 +328,11 @@ export default pattern<Input, Output>(
                 marginTop: "0.5rem",
               }}
             >
-              {aisleCount} aisles • {deptCount} departments
+              {derive(
+                [aisleCount, deptCount, entranceCount],
+                ([a, d, e]: [number, number, number]) =>
+                  `${a} aisles • ${d} departments • ${e} entrances`,
+              )}
             </div>
           </div>
 
@@ -256,6 +341,16 @@ export default pattern<Input, Output>(
             gap="1"
             style="padding: 0.5rem 1rem; border-bottom: 1px solid var(--ct-color-gray-200);"
           >
+            <ct-button
+              variant={ifElse(
+                computed(() => currentSection.get() === "map"),
+                "primary",
+                "ghost",
+              )}
+              onClick={() => currentSection.set("map")}
+            >
+              🗺️ Map
+            </ct-button>
             <ct-button
               variant={ifElse(
                 computed(() => currentSection.get() === "aisles"),
@@ -274,7 +369,7 @@ export default pattern<Input, Output>(
               )}
               onClick={() => currentSection.set("departments")}
             >
-              Departments
+              Depts
             </ct-button>
             <ct-button
               variant={ifElse(
@@ -284,7 +379,7 @@ export default pattern<Input, Output>(
               )}
               onClick={() => currentSection.set("corrections")}
             >
-              Corrections
+              Fixes
             </ct-button>
             <ct-button
               variant={ifElse(
@@ -301,6 +396,890 @@ export default pattern<Input, Output>(
           {/* Main content */}
           <ct-vscroll flex showScrollbar fadeEdges>
             <ct-vstack gap="2" style="padding: 1rem; max-width: 800px;">
+              {/* MAP SECTION */}
+              {ifElse(
+                computed(() => currentSection.get() === "map"),
+                <ct-vstack gap="3">
+                  {/* CSS for store map */}
+                  <style>
+                    {`
+                    .store-map {
+                      display: grid;
+                      grid-template-columns: 60px 1fr 60px;
+                      grid-template-rows: 60px 140px 60px;
+                      gap: 0;
+                      width: 100%;
+                      max-width: 400px;
+                      height: 260px;
+                      border: 3px solid #374151;
+                      border-radius: 8px;
+                      overflow: hidden;
+                      background: transparent;
+                      margin: 0 auto;
+                    }
+                    .store-map-corner {
+                      background: #d1d5db;
+                      width: 100%;
+                      height: 100%;
+                    }
+                    .store-map-corner-tl { background: linear-gradient(to bottom left, #fed7aa 50%, #bbf7d0 50%); }
+                    .store-map-corner-tr { background: linear-gradient(to bottom right, #fed7aa 50%, #e9d5ff 50%); }
+                    .store-map-corner-bl { background: linear-gradient(to top left, #dbeafe 50%, #bbf7d0 50%); }
+                    .store-map-corner-br { background: linear-gradient(to top right, #dbeafe 50%, #e9d5ff 50%); }
+                    .store-map-wall {
+                      display: flex;
+                      padding: 4px;
+                      gap: 2px;
+                      overflow: hidden;
+                      width: 100%;
+                      height: 100%;
+                    }
+                    .store-map-wall-horizontal { flex-direction: row; }
+                    .store-map-wall-vertical { flex-direction: column; }
+                    .store-map-wall-front { grid-column: 2; grid-row: 3; background: #dbeafe; }
+                    .store-map-wall-back { grid-column: 2; grid-row: 1; background: #fed7aa; }
+                    .store-map-wall-left { grid-column: 1; grid-row: 2; background: #bbf7d0; }
+                    .store-map-wall-right { grid-column: 3; grid-row: 2; background: #e9d5ff; }
+                    .store-map-slot {
+                      flex: 1;
+                      display: flex;
+                      justify-content: center;
+                      align-items: center;
+                      min-width: 0;
+                      min-height: 0;
+                      gap: 2px;
+                      flex-wrap: wrap;
+                    }
+                    .store-map-entrance-slot {
+                      background: #374151;
+                      border-radius: 2px;
+                    }
+                    .store-map-center {
+                      grid-column: 2;
+                      grid-row: 2;
+                      background: #f9fafb;
+                      display: flex;
+                      flex-direction: column;
+                      align-items: center;
+                      justify-content: center;
+                      color: #6b7280;
+                      font-size: 14px;
+                    }
+                    .store-map-badge {
+                      font-size: 24px;
+                      cursor: default;
+                    }
+                    .store-map-entrance {
+                      font-size: 20px;
+                      cursor: default;
+                    }
+                    .wall-btn-front::part(button) {
+                      background-color: #eff6ff;
+                      color: #1e40af;
+                      border-color: #3b82f6;
+                    }
+                    .wall-btn-back::part(button) {
+                      background-color: #fff7ed;
+                      color: #c2410c;
+                      border-color: #f97316;
+                    }
+                    .wall-btn-left::part(button) {
+                      background-color: #f0fdf4;
+                      color: #047857;
+                      border-color: #10b981;
+                    }
+                    .wall-btn-right::part(button) {
+                      background-color: #faf5ff;
+                      color: #7e22ce;
+                      border-color: #a855f7;
+                    }
+                  `}
+                  </style>
+
+                  {/* Visual Store Map */}
+                  <ct-card>
+                    <ct-vstack gap="2">
+                      <span style={{ fontWeight: 600, fontSize: "16px" }}>
+                        🏪 Store Layout
+                      </span>
+                      <div className="store-map">
+                        {/* Corners */}
+                        <div
+                          className="store-map-corner store-map-corner-tl"
+                          style={{ gridColumn: 1, gridRow: 1 }}
+                        />
+                        <div
+                          className="store-map-corner store-map-corner-tr"
+                          style={{ gridColumn: 3, gridRow: 1 }}
+                        />
+                        <div
+                          className="store-map-corner store-map-corner-bl"
+                          style={{ gridColumn: 1, gridRow: 3 }}
+                        />
+                        <div
+                          className="store-map-corner store-map-corner-br"
+                          style={{ gridColumn: 3, gridRow: 3 }}
+                        />
+
+                        {/* Back wall (top - orange) */}
+                        <div className="store-map-wall store-map-wall-horizontal store-map-wall-back">
+                          {derive(itemsByPosition, (items: ItemsByPos) => {
+                            const hasBL =
+                              (items["back-left"]?.entrances || []).length > 0;
+                            const hasBC =
+                              (items["back-center"]?.entrances || []).length >
+                                0;
+                            const hasBR =
+                              (items["back-right"]?.entrances || []).length > 0;
+                            return (
+                              <>
+                                <div
+                                  className={`store-map-slot${
+                                    hasBL ? " store-map-entrance-slot" : ""
+                                  }`}
+                                >
+                                  {(items["back-left"]?.entrances || []).map(
+                                    () => (
+                                      <span
+                                        className="store-map-entrance"
+                                        title="Entrance"
+                                      >
+                                        🚪
+                                      </span>
+                                    ),
+                                  )}
+                                  {(items["back-left"]?.depts || []).map((
+                                    d,
+                                  ) => (
+                                    <span
+                                      className="store-map-badge"
+                                      title={d.name}
+                                    >
+                                      {d.icon}
+                                    </span>
+                                  ))}
+                                </div>
+                                <div
+                                  className={`store-map-slot${
+                                    hasBC ? " store-map-entrance-slot" : ""
+                                  }`}
+                                >
+                                  {(items["back-center"]?.entrances || []).map(
+                                    () => (
+                                      <span
+                                        className="store-map-entrance"
+                                        title="Entrance"
+                                      >
+                                        🚪
+                                      </span>
+                                    ),
+                                  )}
+                                  {(items["back-center"]?.depts || []).map((
+                                    d,
+                                  ) => (
+                                    <span
+                                      className="store-map-badge"
+                                      title={d.name}
+                                    >
+                                      {d.icon}
+                                    </span>
+                                  ))}
+                                </div>
+                                <div
+                                  className={`store-map-slot${
+                                    hasBR ? " store-map-entrance-slot" : ""
+                                  }`}
+                                >
+                                  {(items["back-right"]?.entrances || []).map(
+                                    () => (
+                                      <span
+                                        className="store-map-entrance"
+                                        title="Entrance"
+                                      >
+                                        🚪
+                                      </span>
+                                    ),
+                                  )}
+                                  {(items["back-right"]?.depts || []).map((
+                                    d,
+                                  ) => (
+                                    <span
+                                      className="store-map-badge"
+                                      title={d.name}
+                                    >
+                                      {d.icon}
+                                    </span>
+                                  ))}
+                                </div>
+                              </>
+                            );
+                          })}
+                        </div>
+
+                        {/* Left wall (green) */}
+                        <div className="store-map-wall store-map-wall-vertical store-map-wall-left">
+                          {derive(itemsByPosition, (items: ItemsByPos) => {
+                            const hasLB =
+                              (items["left-back"]?.entrances || []).length > 0;
+                            const hasLC =
+                              (items["left-center"]?.entrances || []).length >
+                                0;
+                            const hasLF =
+                              (items["left-front"]?.entrances || []).length > 0;
+                            return (
+                              <>
+                                <div
+                                  className={`store-map-slot${
+                                    hasLB ? " store-map-entrance-slot" : ""
+                                  }`}
+                                >
+                                  {(items["left-back"]?.entrances || []).map(
+                                    () => (
+                                      <span
+                                        className="store-map-entrance"
+                                        title="Entrance"
+                                      >
+                                        🚪
+                                      </span>
+                                    ),
+                                  )}
+                                  {(items["left-back"]?.depts || []).map((
+                                    d,
+                                  ) => (
+                                    <span
+                                      className="store-map-badge"
+                                      title={d.name}
+                                    >
+                                      {d.icon}
+                                    </span>
+                                  ))}
+                                </div>
+                                <div
+                                  className={`store-map-slot${
+                                    hasLC ? " store-map-entrance-slot" : ""
+                                  }`}
+                                >
+                                  {(items["left-center"]?.entrances || []).map(
+                                    () => (
+                                      <span
+                                        className="store-map-entrance"
+                                        title="Entrance"
+                                      >
+                                        🚪
+                                      </span>
+                                    ),
+                                  )}
+                                  {(items["left-center"]?.depts || []).map((
+                                    d,
+                                  ) => (
+                                    <span
+                                      className="store-map-badge"
+                                      title={d.name}
+                                    >
+                                      {d.icon}
+                                    </span>
+                                  ))}
+                                </div>
+                                <div
+                                  className={`store-map-slot${
+                                    hasLF ? " store-map-entrance-slot" : ""
+                                  }`}
+                                >
+                                  {(items["left-front"]?.entrances || []).map(
+                                    () => (
+                                      <span
+                                        className="store-map-entrance"
+                                        title="Entrance"
+                                      >
+                                        🚪
+                                      </span>
+                                    ),
+                                  )}
+                                  {(items["left-front"]?.depts || []).map((
+                                    d,
+                                  ) => (
+                                    <span
+                                      className="store-map-badge"
+                                      title={d.name}
+                                    >
+                                      {d.icon}
+                                    </span>
+                                  ))}
+                                </div>
+                              </>
+                            );
+                          })}
+                        </div>
+
+                        {/* Center */}
+                        <div className="store-map-center">
+                          <div style={{ fontWeight: 500 }}>Aisles</div>
+                          <div>{aisleCount}</div>
+                        </div>
+
+                        {/* Right wall (purple) */}
+                        <div className="store-map-wall store-map-wall-vertical store-map-wall-right">
+                          {derive(itemsByPosition, (items: ItemsByPos) => {
+                            const hasRB =
+                              (items["right-back"]?.entrances || []).length > 0;
+                            const hasRC =
+                              (items["right-center"]?.entrances || []).length >
+                                0;
+                            const hasRF =
+                              (items["right-front"]?.entrances || []).length >
+                                0;
+                            return (
+                              <>
+                                <div
+                                  className={`store-map-slot${
+                                    hasRB ? " store-map-entrance-slot" : ""
+                                  }`}
+                                >
+                                  {(items["right-back"]?.entrances || []).map(
+                                    () => (
+                                      <span
+                                        className="store-map-entrance"
+                                        title="Entrance"
+                                      >
+                                        🚪
+                                      </span>
+                                    ),
+                                  )}
+                                  {(items["right-back"]?.depts || []).map((
+                                    d,
+                                  ) => (
+                                    <span
+                                      className="store-map-badge"
+                                      title={d.name}
+                                    >
+                                      {d.icon}
+                                    </span>
+                                  ))}
+                                </div>
+                                <div
+                                  className={`store-map-slot${
+                                    hasRC ? " store-map-entrance-slot" : ""
+                                  }`}
+                                >
+                                  {(items["right-center"]?.entrances || []).map(
+                                    () => (
+                                      <span
+                                        className="store-map-entrance"
+                                        title="Entrance"
+                                      >
+                                        🚪
+                                      </span>
+                                    ),
+                                  )}
+                                  {(items["right-center"]?.depts || []).map((
+                                    d,
+                                  ) => (
+                                    <span
+                                      className="store-map-badge"
+                                      title={d.name}
+                                    >
+                                      {d.icon}
+                                    </span>
+                                  ))}
+                                </div>
+                                <div
+                                  className={`store-map-slot${
+                                    hasRF ? " store-map-entrance-slot" : ""
+                                  }`}
+                                >
+                                  {(items["right-front"]?.entrances || []).map(
+                                    () => (
+                                      <span
+                                        className="store-map-entrance"
+                                        title="Entrance"
+                                      >
+                                        🚪
+                                      </span>
+                                    ),
+                                  )}
+                                  {(items["right-front"]?.depts || []).map((
+                                    d,
+                                  ) => (
+                                    <span
+                                      className="store-map-badge"
+                                      title={d.name}
+                                    >
+                                      {d.icon}
+                                    </span>
+                                  ))}
+                                </div>
+                              </>
+                            );
+                          })}
+                        </div>
+
+                        {/* Front wall (bottom - blue) */}
+                        <div className="store-map-wall store-map-wall-horizontal store-map-wall-front">
+                          {derive(itemsByPosition, (items: ItemsByPos) => {
+                            const hasFL =
+                              (items["front-left"]?.entrances || []).length > 0;
+                            const hasFC =
+                              (items["front-center"]?.entrances || []).length >
+                                0;
+                            const hasFR =
+                              (items["front-right"]?.entrances || []).length >
+                                0;
+                            return (
+                              <>
+                                <div
+                                  className={`store-map-slot${
+                                    hasFL ? " store-map-entrance-slot" : ""
+                                  }`}
+                                >
+                                  {(items["front-left"]?.entrances || []).map(
+                                    () => (
+                                      <span
+                                        className="store-map-entrance"
+                                        title="Entrance"
+                                      >
+                                        🚪
+                                      </span>
+                                    ),
+                                  )}
+                                  {(items["front-left"]?.depts || []).map((
+                                    d,
+                                  ) => (
+                                    <span
+                                      className="store-map-badge"
+                                      title={d.name}
+                                    >
+                                      {d.icon}
+                                    </span>
+                                  ))}
+                                </div>
+                                <div
+                                  className={`store-map-slot${
+                                    hasFC ? " store-map-entrance-slot" : ""
+                                  }`}
+                                >
+                                  {(items["front-center"]?.entrances || []).map(
+                                    () => (
+                                      <span
+                                        className="store-map-entrance"
+                                        title="Entrance"
+                                      >
+                                        🚪
+                                      </span>
+                                    ),
+                                  )}
+                                  {(items["front-center"]?.depts || []).map((
+                                    d,
+                                  ) => (
+                                    <span
+                                      className="store-map-badge"
+                                      title={d.name}
+                                    >
+                                      {d.icon}
+                                    </span>
+                                  ))}
+                                </div>
+                                <div
+                                  className={`store-map-slot${
+                                    hasFR ? " store-map-entrance-slot" : ""
+                                  }`}
+                                >
+                                  {(items["front-right"]?.entrances || []).map(
+                                    () => (
+                                      <span
+                                        className="store-map-entrance"
+                                        title="Entrance"
+                                      >
+                                        🚪
+                                      </span>
+                                    ),
+                                  )}
+                                  {(items["front-right"]?.depts || []).map((
+                                    d,
+                                  ) => (
+                                    <span
+                                      className="store-map-badge"
+                                      title={d.name}
+                                    >
+                                      {d.icon}
+                                    </span>
+                                  ))}
+                                </div>
+                              </>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div
+                        style={{
+                          textAlign: "center",
+                          fontSize: "12px",
+                          color: "var(--ct-color-gray-500)",
+                        }}
+                      >
+                        <span style={{ color: "#3b82f6" }}>■</span>{" "}
+                        Front (entrance){" "}
+                        <span style={{ color: "#f97316" }}>■</span> Back{" "}
+                        <span style={{ color: "#10b981" }}>■</span> Left{" "}
+                        <span style={{ color: "#a855f7" }}>■</span> Right
+                      </div>
+                    </ct-vstack>
+                  </ct-card>
+
+                  {/* Add Entrances Section */}
+                  <ct-card style="background: #fef3c7; border: 1px solid #fbbf24;">
+                    <ct-vstack gap="2">
+                      <span style={{ fontWeight: 600, color: "#92400e" }}>
+                        🚪 Mark Store Entrances
+                      </span>
+                      <div
+                        style={{
+                          fontSize: "13px",
+                          color: "#78350f",
+                        }}
+                      >
+                        Click to add entrances:
+                      </div>
+
+                      {/* Front wall buttons */}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "6px",
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: "60px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            color: "#3b82f6",
+                          }}
+                        >
+                          Front:
+                        </span>
+                        <ct-button
+                          size="sm"
+                          variant="outline"
+                          className="wall-btn-front"
+                          disabled={derive(
+                            entrancePositions,
+                            (p: Record<string, boolean>) => !!p["front-left"],
+                          )}
+                          onClick={addEntrance({
+                            entrances,
+                            position: "front-left",
+                          })}
+                        >
+                          Left
+                        </ct-button>
+                        <ct-button
+                          size="sm"
+                          variant="outline"
+                          className="wall-btn-front"
+                          disabled={derive(
+                            entrancePositions,
+                            (p: Record<string, boolean>) => !!p["front-center"],
+                          )}
+                          onClick={addEntrance({
+                            entrances,
+                            position: "front-center",
+                          })}
+                        >
+                          Center
+                        </ct-button>
+                        <ct-button
+                          size="sm"
+                          variant="outline"
+                          className="wall-btn-front"
+                          disabled={derive(
+                            entrancePositions,
+                            (p: Record<string, boolean>) => !!p["front-right"],
+                          )}
+                          onClick={addEntrance({
+                            entrances,
+                            position: "front-right",
+                          })}
+                        >
+                          Right
+                        </ct-button>
+                      </div>
+
+                      {/* Back wall buttons */}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "6px",
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: "60px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            color: "#f97316",
+                          }}
+                        >
+                          Back:
+                        </span>
+                        <ct-button
+                          size="sm"
+                          variant="outline"
+                          className="wall-btn-back"
+                          disabled={derive(
+                            entrancePositions,
+                            (p: Record<string, boolean>) => !!p["back-left"],
+                          )}
+                          onClick={addEntrance({
+                            entrances,
+                            position: "back-left",
+                          })}
+                        >
+                          Left
+                        </ct-button>
+                        <ct-button
+                          size="sm"
+                          variant="outline"
+                          className="wall-btn-back"
+                          disabled={derive(
+                            entrancePositions,
+                            (p: Record<string, boolean>) => !!p["back-center"],
+                          )}
+                          onClick={addEntrance({
+                            entrances,
+                            position: "back-center",
+                          })}
+                        >
+                          Center
+                        </ct-button>
+                        <ct-button
+                          size="sm"
+                          variant="outline"
+                          className="wall-btn-back"
+                          disabled={derive(
+                            entrancePositions,
+                            (p: Record<string, boolean>) => !!p["back-right"],
+                          )}
+                          onClick={addEntrance({
+                            entrances,
+                            position: "back-right",
+                          })}
+                        >
+                          Right
+                        </ct-button>
+                      </div>
+
+                      {/* Left wall buttons */}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "6px",
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: "60px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            color: "#10b981",
+                          }}
+                        >
+                          Left:
+                        </span>
+                        <ct-button
+                          size="sm"
+                          variant="outline"
+                          className="wall-btn-left"
+                          disabled={derive(
+                            entrancePositions,
+                            (p: Record<string, boolean>) => !!p["left-front"],
+                          )}
+                          onClick={addEntrance({
+                            entrances,
+                            position: "left-front",
+                          })}
+                        >
+                          Front
+                        </ct-button>
+                        <ct-button
+                          size="sm"
+                          variant="outline"
+                          className="wall-btn-left"
+                          disabled={derive(
+                            entrancePositions,
+                            (p: Record<string, boolean>) => !!p["left-center"],
+                          )}
+                          onClick={addEntrance({
+                            entrances,
+                            position: "left-center",
+                          })}
+                        >
+                          Center
+                        </ct-button>
+                        <ct-button
+                          size="sm"
+                          variant="outline"
+                          className="wall-btn-left"
+                          disabled={derive(
+                            entrancePositions,
+                            (p: Record<string, boolean>) => !!p["left-back"],
+                          )}
+                          onClick={addEntrance({
+                            entrances,
+                            position: "left-back",
+                          })}
+                        >
+                          Back
+                        </ct-button>
+                      </div>
+
+                      {/* Right wall buttons */}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "6px",
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: "60px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            color: "#a855f7",
+                          }}
+                        >
+                          Right:
+                        </span>
+                        <ct-button
+                          size="sm"
+                          variant="outline"
+                          className="wall-btn-right"
+                          disabled={derive(
+                            entrancePositions,
+                            (p: Record<string, boolean>) => !!p["right-front"],
+                          )}
+                          onClick={addEntrance({
+                            entrances,
+                            position: "right-front",
+                          })}
+                        >
+                          Front
+                        </ct-button>
+                        <ct-button
+                          size="sm"
+                          variant="outline"
+                          className="wall-btn-right"
+                          disabled={derive(
+                            entrancePositions,
+                            (p: Record<string, boolean>) => !!p["right-center"],
+                          )}
+                          onClick={addEntrance({
+                            entrances,
+                            position: "right-center",
+                          })}
+                        >
+                          Center
+                        </ct-button>
+                        <ct-button
+                          size="sm"
+                          variant="outline"
+                          className="wall-btn-right"
+                          disabled={derive(
+                            entrancePositions,
+                            (p: Record<string, boolean>) => !!p["right-back"],
+                          )}
+                          onClick={addEntrance({
+                            entrances,
+                            position: "right-back",
+                          })}
+                        >
+                          Back
+                        </ct-button>
+                      </div>
+
+                      {/* Show added entrances */}
+                      {ifElse(
+                        derive(entranceCount, (c: number) => c > 0),
+                        <div style={{ marginTop: "0.5rem" }}>
+                          <span
+                            style={{
+                              fontSize: "12px",
+                              fontWeight: 600,
+                              color: "#92400e",
+                            }}
+                          >
+                            Added ({entranceCount}):
+                          </span>
+                          <div
+                            style={{
+                              display: "flex",
+                              flexWrap: "wrap",
+                              gap: "0.5rem",
+                              marginTop: "0.5rem",
+                            }}
+                          >
+                            {entrances.map((entrance) => (
+                              <div
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "0.25rem",
+                                  padding: "4px 8px",
+                                  background: "white",
+                                  border: "1px solid #fbbf24",
+                                  borderRadius: "4px",
+                                  fontSize: "12px",
+                                }}
+                              >
+                                🚪 {entrance.position}
+                                <ct-button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={removeEntrance({
+                                    entrances,
+                                    entrance,
+                                  })}
+                                  style="padding: 2px 4px; min-height: 0;"
+                                >
+                                  ×
+                                </ct-button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>,
+                        null,
+                      )}
+                    </ct-vstack>
+                  </ct-card>
+
+                  {/* Quick Actions */}
+                  <ct-hstack gap="2">
+                    <ct-button
+                      variant="secondary"
+                      onClick={() => currentSection.set("aisles")}
+                      style="flex: 1;"
+                    >
+                      + Add Aisles
+                    </ct-button>
+                    <ct-button
+                      variant="secondary"
+                      onClick={() => currentSection.set("departments")}
+                      style="flex: 1;"
+                    >
+                      + Add Departments
+                    </ct-button>
+                  </ct-hstack>
+                </ct-vstack>,
+                null,
+              )}
+
               {/* AISLES SECTION */}
               {ifElse(
                 computed(() => currentSection.get() === "aisles"),

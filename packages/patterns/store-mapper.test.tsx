@@ -21,10 +21,27 @@ interface Aisle {
   description: string;
 }
 
+type WallPosition =
+  | "front-left"
+  | "front-center"
+  | "front-right"
+  | "back-left"
+  | "back-center"
+  | "back-right"
+  | "left-front"
+  | "left-center"
+  | "left-back"
+  | "right-front"
+  | "right-center"
+  | "right-back"
+  | "unassigned"
+  | "not-in-store"
+  | "in-center-aisle";
+
 interface Department {
   name: string;
   icon: string;
-  location: string;
+  location: WallPosition;
   description: string;
 }
 
@@ -77,7 +94,7 @@ export default pattern(() => {
   const storeNameCell = Writable.of("Test Store");
   const aislesCell = Writable.of<Aisle[]>([]);
   const departmentsCell = Writable.of<Department[]>([]);
-  const entrancesCell = Writable.of<{ position: string }[]>([]);
+  const entrancesCell = Writable.of<{ position: WallPosition }[]>([]);
   const itemLocationsCell = Writable.of<ItemLocation[]>([]);
 
   // Instantiate the store mapper pattern
