@@ -310,16 +310,7 @@ export default pattern(({ card }) => {
                         required: ["description"]
                     },
                     startEditing: {
-                        type: "object",
-                        properties: {
-                            type: {
-                                "enum": ["ref", "javascript", "recipe", "raw", "isolated", "passthrough"]
-                            },
-                            "with": {
-                                asStream: true
-                            }
-                        },
-                        required: ["type", "with"]
+                        asStream: true
                     }
                 },
                 required: ["card", "startEditing"]
@@ -416,9 +407,9 @@ export default pattern(({ card }) => {
                                     type: "array",
                                     items: true
                                 }, {
-                                    asStream: true
-                                }, {
                                     asCell: true
+                                }, {
+                                    asStream: true
                                 }, {
                                     type: "null"
                                 }]
@@ -578,9 +569,9 @@ export default pattern(({ card }) => {
                         type: "array",
                         items: true
                     }, {
-                        asStream: true
-                    }, {
                         asCell: true
+                    }, {
+                        asStream: true
                     }, {
                         type: "null"
                     }]
