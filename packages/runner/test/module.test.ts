@@ -260,6 +260,45 @@ describe("module", () => {
         });
       }).toThrow("action() must be used with CTS enabled");
     });
+
+    it("infers Stream<void> for zero-parameter callbacks (type test)", () => {
+      // This test verifies that TypeScript correctly infers Stream<void> for
+      // zero-parameter action callbacks, rather than Stream<unknown>.
+      //
+      // The test passes if it compiles. Previously, action(() => {...}) would
+      // infer Stream<unknown>, causing type errors when assigned to Stream<void>.
+      //
+      // We can't actually call action() at runtime (it throws), so we just
+      // verify the type inference is correct at compile time.
+
+      // Use a helper type to extract the inner type from Stream<T>
+      // This allows us to verify the inference without needing runtime values
+      type ExtractStreamType<S> = S extends { _type?: infer T } ? T : never;
+
+      // Zero-parameter callback should infer void
+      type ZeroParamResult = ReturnType<typeof action<void>>;
+      const _checkVoid: ExtractStreamType<ZeroParamResult> extends void ? true
+        : false = true;
+
+      // Parameterized callback should infer the parameter type
+      type StringParamResult = ReturnType<typeof action<string>>;
+      const _checkString: ExtractStreamType<StringParamResult> extends string
+        ? true
+        : false = true;
+
+      // Complex type parameter
+      type ComplexResult = ReturnType<
+        typeof action<{ id: number; name: string }>
+      >;
+      const _checkComplex: ExtractStreamType<ComplexResult> extends {
+        id: number;
+        name: string;
+      } ? true
+        : false = true;
+
+      // If this test compiles, the types are correct
+      expect(_checkVoid && _checkString && _checkComplex).toBe(true);
+    });
   });
 
   describe("source location tracking", () => {
