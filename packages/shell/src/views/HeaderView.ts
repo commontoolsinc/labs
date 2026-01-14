@@ -156,13 +156,15 @@ export class XHeaderView extends BaseView {
   override render() {
     const spaceLink = this.spaceName
       ? html`
-        <x-charm-link .spaceName="${this.spaceName}">${this
+        <x-charm-link id="header-space-link" .spaceName="${this.spaceName}"
+        >${this
           .spaceName}</x-charm-link>
       `
       : null;
     const charmLink = this.charmId && this.spaceName
       ? html`
         <x-charm-link
+          id="header-charm-link"
           .charmId="${this.charmId}"
           .spaceName="${this.spaceName}"
         >${this.charmTitle || this.charmId}</x-charm-link>

@@ -3,7 +3,6 @@ import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commontools/identity";
 import { assert } from "@std/assert";
-import { sleep } from "@commontools/utils/sleep";
 
 const { FRONTEND_URL } = env;
 
@@ -12,11 +11,9 @@ describe("default-app flow test", () => {
   shell.bindLifecycle();
 
   let identity: Identity;
-  let spaceName: string;
+  const spaceName = `test-space-${crypto.randomUUID()}`;
 
   it("should create a note via default app and see it in the space list", async () => {
-    // Generate a unique space name
-    spaceName = `test-space-${crypto.randomUUID()}`;
     identity = await Identity.generate({ implementation: "noble" });
 
     const page = shell.page();
@@ -43,29 +40,21 @@ describe("default-app flow test", () => {
     // Wait for the note page to load by checking for the note title
     console.log("Look for '📝 New Note'...");
     await waitFor(async () => {
-      return await textExistsInDom(page, "📝 New Note");
+      const link = await page.waitForSelector("#header-charm-link", {
+        strategy: "pierce",
+      });
+      const innerText = await link.innerText();
+      return innerText === "📝 New Note";
     });
 
-    // Wait for the note to be fully persisted
-    // Note: We don't have persistence hooks to wait on, so use a sleep
-    await sleep(10000);
-
-    // Navigate back to the space list
-    console.log("Navigate back to space...");
-    await shell.goto({
-      frontendUrl: FRONTEND_URL,
-      view: { spaceName },
-      identity,
-    });
-
-    // Wait for the list content to fully load (look for Patterns heading)
-    console.log("Look for 'Patterns'...");
+    // Navigate back to the space page and wait for new note to appear
+    console.log("Navigate back to space page...");
     await waitFor(async () => {
-      return await textExistsInDom(page, "Patterns");
+      return await clickButtonWithText(page, spaceName);
     });
 
-    console.log("Wait for note in list...");
     // Check that the list contains a note item
+    console.log("Wait for note in list...");
     await waitFor(() => findNoteInList(page));
 
     // Final assertion using the same helper
@@ -104,43 +93,6 @@ async function clickButtonWithText(
       }
     }
     return false;
-  } catch (_) {
-    return false;
-  }
-}
-
-// Helper to check if text exists in the DOM using waitForFunction
-async function textExistsInDom(
-  page: Page,
-  searchText: string,
-): Promise<boolean> {
-  try {
-    // Use page.evaluate to search text in shadow DOM
-    return await page.evaluate((text: string) => {
-      function searchShadowDom(root: Document | ShadowRoot): boolean {
-        const walker = document.createTreeWalker(
-          root,
-          NodeFilter.SHOW_TEXT,
-          null,
-        );
-        let node;
-        while ((node = walker.nextNode())) {
-          if (node.textContent?.includes(text)) {
-            return true;
-          }
-        }
-        const elements = root.querySelectorAll("*");
-        for (const el of elements) {
-          if (el.shadowRoot) {
-            if (searchShadowDom(el.shadowRoot)) {
-              return true;
-            }
-          }
-        }
-        return false;
-      }
-      return searchShadowDom(document);
-    }, { args: [searchText] });
   } catch (_) {
     return false;
   }
