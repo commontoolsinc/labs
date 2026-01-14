@@ -2124,28 +2124,14 @@ export type Props = {
     | Stream<any>;
 };
 
+/** Valid renderable content for JSX children */
+type Renderable = InnerRenderNode | UIRenderable | JSXElement;
+
 /** A child in a view can be one of a few things */
 export type RenderNode =
   | InnerRenderNode
-  | AnyBrandedCell<InnerRenderNode>
-  | AnyBrandedCell<UIRenderable>
-  // Support nullable/undefined UIRenderable from ifElse and conditionals
-  | AnyBrandedCell<UIRenderable | null>
-  | AnyBrandedCell<UIRenderable | undefined>
-  // Support mixed unions from ifElse (e.g. string | UIRenderable)
-  | AnyBrandedCell<InnerRenderNode | UIRenderable>
-  | AnyBrandedCell<InnerRenderNode | UIRenderable | null>
-  | AnyBrandedCell<InnerRenderNode | UIRenderable | undefined>
-  // Support cells containing JSXElement (e.g. from derive returning pattern components)
-  | AnyBrandedCell<JSXElement>
-  | AnyBrandedCell<JSXElement | null>
-  | AnyBrandedCell<JSXElement | undefined>
-  | OpaqueRef<UIRenderable>
-  | OpaqueRef<UIRenderable | null>
-  | OpaqueRef<UIRenderable | undefined>
-  | OpaqueRef<InnerRenderNode | UIRenderable>
-  | OpaqueRef<InnerRenderNode | UIRenderable | null>
-  | OpaqueRef<InnerRenderNode | UIRenderable | undefined>
+  | AnyBrandedCell<Renderable | null | undefined>
+  | OpaqueRef<Renderable | null | undefined>
   | Array<RenderNode>;
 
 type InnerRenderNode =
