@@ -102,8 +102,7 @@ export default pattern<DragDropDemoInput, DragDropDemoOutput>(
           <ct-drop-zone
             accept="item"
             onct-drop={(e: { detail: { sourceCell: Writable<Item> } }) => {
-              const sourceItem = e.detail.sourceCell.get();
-              droppedItems.push(sourceItem);
+              droppedItems.push(e.detail.sourceCell);
             }}
           >
             <div

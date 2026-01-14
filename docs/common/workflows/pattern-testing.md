@@ -177,12 +177,12 @@ deno task ct charm new ./main.test.tsx
 deno task ct charm inspect --charm <CHARM_ID>
 
 # Get specific values
-deno task ct charm get subject.items --charm <CHARM_ID>
+deno task ct charm get subject/items --charm <CHARM_ID>
 
 # Step through manually
-deno task ct charm call tests.0.action --charm <CHARM_ID>
+deno task ct charm call tests/0/action --charm <CHARM_ID>
 deno task ct charm step --charm <CHARM_ID>
-deno task ct charm get tests.1.assertion --charm <CHARM_ID>
+deno task ct charm get tests/1/assertion --charm <CHARM_ID>
 ```
 
 ### 3. Expose Debug Data
