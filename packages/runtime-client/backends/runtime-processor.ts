@@ -201,40 +201,11 @@ export class RuntimeProcessor {
     tx.commit();
   }
 
-  /**
-   * Send event to a stream cell.
-   *
-   * For handler streams (paths containing "__#" indicating internal handler streams),
-   * we route directly to the scheduler. This is necessary because:
-   * 1. Stream cells are detected by their stored value having { $stream: true }
-   * 2. When events arrive before the charm has fully initialized, the stream
-   *    structure may not exist yet, causing Cell.set() to fall through to
-   *    regular cell behavior and fail with storage path errors like
-   *    "Value at path value/internal/__#7stream is not an object"
-   * 3. queueEvent bypasses storage entirely and goes directly to the scheduler
-   *
-   * For other cells, we use the standard set() method which handles both
-   * stream and non-stream cells appropriately.
-   */
   handleCellSend(request: CellSendRequest): void {
-    const link = request.cell;
-
-    // Check if this looks like a handler stream path (internal/__#Nstream pattern)
-    // These are created by handler() and may not have their structure initialized
-    // when the first event arrives
-    const isHandlerStream = link.path.some((segment) =>
-      segment.includes("__#") && segment.endsWith("stream")
-    );
-
-    const event = mapCellRefsToSigilLinks(request.event);
-    if (isHandlerStream) {
-      this.runtime.scheduler.queueEvent(link, event);
-    } else {
-      const tx = this.runtime.edit();
-      const cell = getCell(this.runtime, link);
-      cell.withTx(tx).send(event);
-      tx.commit();
-    }
+    const tx = this.runtime.edit();
+    const cell = getCell(this.runtime, request.cell);
+    cell.withTx(tx).send(mapCellRefsToSigilLinks(request.event));
+    tx.commit();
   }
 
   handleCellSubscribe(request: CellSubscribeRequest): BooleanResponse {
