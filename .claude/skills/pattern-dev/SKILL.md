@@ -77,9 +77,11 @@ Launch concurrent agents when independent:
 
 Pass each subagent specific files, decisions, and constraints.
 
-## Documentation Over Existing Patterns
+## Documentation
 
-Prefer docs—they contain validated code snippets. Existing patterns in `packages/patterns/` may be outdated or use older conventions. Use them as reference but don't copy blindly.
+Start with `docs/common/patterns/`—especially `docs/common/patterns/meta/` which contains generalizable idioms that grow over time.
+
+Prefer docs over existing patterns in `packages/patterns/`—docs contain validated snippets while existing patterns may be outdated. Use `packages/patterns/` as reference but don't copy blindly.
 
 Phase skills consult as needed:
 - Types: `docs/common/concepts/types-and-schemas/`

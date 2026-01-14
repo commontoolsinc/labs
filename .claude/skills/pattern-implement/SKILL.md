@@ -15,6 +15,7 @@ Write ONE sub-pattern with minimal stub UI. No styling, just basic inputs/button
 3. main.tsx last (composes everything)
 
 ## Read First
+- `docs/common/patterns/` - especially `meta/` for generalizable idioms
 - `docs/common/concepts/action.md` - action() for local state
 - `docs/common/concepts/handler.md` - handler() for reusable logic
 - `docs/common/concepts/reactivity.md` - Cell behavior, .get()/.set()
