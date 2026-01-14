@@ -21,8 +21,11 @@ type SubPages = {
 const SubPagesSchema = {
   type: "object",
   properties: {
-    sidebarUI: vdomSchema,
-    fabUI: vdomSchema,
+    sidebarUI: { $ref: "#/$defs/vdomNode" },
+    fabUI: { $ref: "#/$defs/vdomNode" },
+  },
+  $defs: {
+    ...vdomSchema.$defs,
   },
 } as const satisfies JSONSchema;
 

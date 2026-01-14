@@ -6,31 +6,39 @@
 
 import { JSONSchema, NAME, type Schema, TYPE, UI } from "./shared.ts";
 
-export const vdomSchema: JSONSchema = {
-  type: "object",
-  properties: {
-    type: { type: "string" },
-    name: { type: "string" },
-    props: {
+export const vdomSchema = {
+  $defs: {
+    vdomNode: {
       type: "object",
-      additionalProperties: { asCell: true },
-    },
-    children: {
-      type: "array",
-      items: {
-        anyOf: [
-          { $ref: "#", asCell: true },
-          { type: "string", asCell: true },
-          { type: "number", asCell: true },
-          { type: "boolean", asCell: true },
-          { type: "array", items: { $ref: "#", asCell: true } },
-        ],
+      properties: {
+        type: { type: "string" },
+        name: { type: "string" },
+        props: {
+          type: "object",
+          additionalProperties: { asCell: true },
+        },
+        children: {
+          type: "array",
+          items: {
+            anyOf: [
+              { $ref: "#/$defs/vdomNode", asCell: true },
+              { type: "string", asCell: true },
+              { type: "number", asCell: true },
+              { type: "boolean", asCell: true },
+              {
+                type: "array",
+                items: { $ref: "#/$defs/vdomNode", asCell: true },
+              },
+            ],
+          },
+          asCell: true,
+        },
+        [UI]: { $ref: "#/$defs/vdomNode" },
       },
-      asCell: true,
     },
-    [UI]: { $ref: "#" },
   },
-} as const;
+  $ref: "#/$defs/vdomNode",
+} as const satisfies JSONSchema;
 
 export const nameSchema = {
   type: "object",
