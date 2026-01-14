@@ -393,10 +393,10 @@ interface Output {
 
 ## `reading-list.tsx`
 
-Track books, articles, papers, and videos you want to read or have read. Filter
-by status (want/reading/finished/abandoned) and rate items.
+**Canonical list-detail example.** Track books, articles, papers, and videos.
+Demonstrates: footer forms, `navigateTo()` for details, `lift()` for filtering.
 
-**Keywords:** reading, books, articles, status-tracking, lift
+**Keywords:** reading, books, articles, status-tracking, lift, navigateTo
 
 ### Input Schema
 
