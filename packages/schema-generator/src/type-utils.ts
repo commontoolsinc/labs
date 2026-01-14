@@ -301,6 +301,23 @@ export function getNativeTypeSchema(
 
     const symbol = getPrimarySymbol(current);
     const name = symbol?.getName();
+
+    // Reject non-JSON-serializable collection types
+    // These types cannot be properly serialized to JSON and should not be used
+    // in pattern inputs/outputs
+    if (name === "Map" || name === "WeakMap") {
+      throw new Error(
+        `${name} cannot be used in pattern inputs/outputs because it is not JSON-serializable. ` +
+          `Use Record<string, V> for key-value data or Array<[K, V]> for ordered pairs instead.`,
+      );
+    }
+    if (name === "Set" || name === "WeakSet") {
+      throw new Error(
+        `${name} cannot be used in pattern inputs/outputs because it is not JSON-serializable. ` +
+          `Use Array<T> instead.`,
+      );
+    }
+
     if (name && NATIVE_TYPE_NAMES.has(name)) {
       return cloneSchemaDefinition(NATIVE_TYPE_SCHEMAS[name]!);
     }
@@ -416,6 +433,30 @@ export function getNamedTypeKey(
     typeWithAlias.aliasTypeArguments.length > 0
   ) {
     return undefined;
+  }
+
+  // Also check for generic interface/class instantiations (e.g., PatternToolResult<E>)
+  // Type aliases use aliasTypeArguments (checked above), but interfaces and classes
+  // store their type arguments in TypeReference.typeArguments instead.
+  //
+  // Important: Skip this check if the type has an alias name (like `type ItemTuple = [...]`).
+  // The alias provides a unique, user-defined name that should be used for hoisting.
+  // We only want to prevent hoisting for anonymous generic interface instantiations
+  // where different instantiations (e.g., PatternToolResult<A> vs PatternToolResult<B>)
+  // would incorrectly collide under the same base name.
+  if (objectFlags & ts.ObjectFlags.Reference && !aliasName) {
+    const typeRef = type as ts.TypeReference;
+    const target = typeRef.target as ts.InterfaceType | undefined;
+    // Only reject if target has type parameters (is a generic interface/class)
+    // AND there are type arguments provided for this instantiation
+    if (
+      target?.typeParameters &&
+      target.typeParameters.length > 0 &&
+      typeRef.typeArguments &&
+      typeRef.typeArguments.length > 0
+    ) {
+      return undefined;
+    }
   }
 
   return name;
