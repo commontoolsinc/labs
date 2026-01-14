@@ -714,13 +714,13 @@ const undoAutoClassificationHandler = handler<
     autoItem: AutoClassifiedItem;
     examples: Writable<LabeledExample[]>;
     rules: Writable<ClassificationRule[]>;
-    currentItem: Writable<ClassifiableInput | null>;
     recentAutoClassified: Writable<AutoClassifiedItem[]>;
+    undoneAutoItem: Writable<AutoClassifiedItem | null>;
   }
 >(
   (
     _event,
-    { autoItem, examples, rules, currentItem, recentAutoClassified },
+    { autoItem, examples, rules, recentAutoClassified, undoneAutoItem },
   ) => {
     const inputId = autoItem.input.id;
 
@@ -751,8 +751,21 @@ const undoAutoClassificationHandler = handler<
     });
     rules.set(updatedRules);
 
-    // Set as current item for manual classification
-    currentItem.set(autoItem.input);
+    // Set as undone item for manual review (shows rules-based result immediately)
+    // Create a mutable copy to satisfy type requirements
+    undoneAutoItem.set({
+      input: {
+        id: autoItem.input.id,
+        receivedAt: autoItem.input.receivedAt,
+        fields: { ...autoItem.input.fields },
+      },
+      label: autoItem.label,
+      confidence: autoItem.confidence,
+      reasoning: autoItem.reasoning,
+      matchedRules: [...autoItem.matchedRules], // Mutable array copy
+      tier: autoItem.tier,
+      classifiedAt: autoItem.classifiedAt,
+    });
 
     console.log(`[Classifier] Undid auto-classification for ${inputId}`);
   },
@@ -876,6 +889,10 @@ export default pattern<ClassifierInput, ClassifierOutput>(
 
     // Track recently auto-classified items for undo functionality
     const recentAutoClassified = Writable.of<AutoClassifiedItem[]>([]);
+
+    // Track undone auto-classified item awaiting manual review
+    // When set, this takes priority over currentClassificationResult (shows rules-based result immediately)
+    const undoneAutoItem = Writable.of<AutoClassifiedItem | null>(null);
 
     // Track selected example for expanded details view (null when none selected)
     const selectedExampleId = Writable.of<string | null>(null);
@@ -1205,10 +1222,14 @@ Respond with:
 
       let classification: ClassificationResult;
 
-      if (
-        rulesPrediction !== null &&
-        rulesConfidence >= (configVal.autoClassifyThreshold || 0.85)
-      ) {
+      // Determine if rules should be used:
+      // 1. Rules must have produced a prediction (rulesPrediction !== null means at least one rule matched)
+      // 2. Rules confidence must meet the threshold
+      const threshold = configVal.autoClassifyThreshold || 0.85;
+      const useRules = rulesPrediction !== null && rulesConfidence >= threshold;
+
+      if (useRules && rulesPrediction !== null) {
+        // TypeScript needs the explicit null check here for type narrowing
         classification = {
           inputId: item.id,
           classification: rulesPrediction,
@@ -1218,6 +1239,7 @@ Respond with:
           matchedRules,
         };
       } else {
+        // Use LLM when: no rules matched OR rules confidence below threshold
         classification = {
           inputId: item.id,
           classification: llmResultValue.classification,
@@ -1301,6 +1323,64 @@ Respond with:
     /** Dismiss the current item without classifying */
     const dismissCurrentItem = action(() => {
       currentItem.set(null);
+    });
+
+    // ==========================================================================
+    // UNDONE ITEM HANDLERS (for items that were auto-classified and then undone)
+    // These show the original rules-based classification immediately
+    // ==========================================================================
+
+    /** Accept the undone item's classification (user agrees with the original rules-based result) */
+    const acceptUndoneClassification = action(() => {
+      const undone = undoneAutoItem.get();
+      if (!undone) return;
+
+      // Store to examples with the original rules-based classification
+      examples.push({
+        input: {
+          id: undone.input.id,
+          receivedAt: undone.input.receivedAt,
+          fields: { ...undone.input.fields },
+        },
+        label: undone.label,
+        decidedBy: "suggestion-accepted",
+        reasoning: undone.reasoning,
+        confidence: undone.confidence,
+        labeledAt: Date.now(),
+        wasCorrection: false,
+        isInteresting: false,
+      });
+      undoneAutoItem.set(null);
+    });
+
+    /** Correct the undone item's classification (user disagrees with the original rules-based result) */
+    const correctUndoneClassification = action(() => {
+      const undone = undoneAutoItem.get();
+      if (!undone) return;
+
+      // Store to examples with the FLIPPED classification
+      examples.push({
+        input: {
+          id: undone.input.id,
+          receivedAt: undone.input.receivedAt,
+          fields: { ...undone.input.fields },
+        },
+        label: !undone.label, // FLIP the classification
+        decidedBy: "user",
+        reasoning: "User corrected classification",
+        confidence: 1.0, // User is certain
+        labeledAt: Date.now(),
+        wasCorrection: true,
+        originalPrediction: undone.label,
+        isInteresting: true,
+        interestingReason: "User corrected classification",
+      });
+      undoneAutoItem.set(null);
+    });
+
+    /** Dismiss the undone item without storing it */
+    const dismissUndoneItem = action(() => {
+      undoneAutoItem.set(null);
     });
 
     // ==========================================================================
@@ -1692,6 +1772,88 @@ Each suggestion should have:
                 null,
               )}
 
+              {/* Undone Auto-Classification - Manual Review */}
+              {ifElse(
+                computed(() => undoneAutoItem.get() !== null),
+                <ct-card style="border-left: 4px solid var(--ct-color-warning-500);">
+                  <ct-vstack gap="2">
+                    <ct-hstack gap="2" align="center">
+                      <ct-heading level={5}>Manual Review</ct-heading>
+                      <span style="font-size: 0.75rem; color: var(--ct-color-warning-600);">
+                        (undone auto-classification)
+                      </span>
+                    </ct-hstack>
+
+                    {/* Show item fields */}
+                    <pre style="font-size: 0.75rem; overflow: auto; max-height: 100px; margin: 0; background: var(--ct-color-gray-50); padding: 0.5rem; border-radius: 4px;">
+                      {computed(() => {
+                        const undone = undoneAutoItem.get();
+                        return undone
+                          ? JSON.stringify(undone.input.fields, null, 2)
+                          : "";
+                      })}
+                    </pre>
+
+                    {/* Show the original rules-based classification */}
+                    <ct-hstack gap="2" align="center">
+                      <span
+                        style={{
+                          fontWeight: "600",
+                          color: ifElse(
+                            computed(() =>
+                              undoneAutoItem.get()?.label ?? false
+                            ),
+                            "var(--ct-color-success-600)",
+                            "var(--ct-color-error-600)",
+                          ),
+                        }}
+                      >
+                        {ifElse(
+                          computed(() => undoneAutoItem.get()?.label ?? false),
+                          "YES",
+                          "NO",
+                        )}
+                      </span>
+                      <span style="color: var(--ct-color-gray-500); font-size: 0.875rem;">
+                        ({computed(() =>
+                          (
+                            (undoneAutoItem.get()?.confidence ?? 0) * 100
+                          ).toFixed(0)
+                        )}% confidence via rules - Tier{" "}
+                        {computed(() => undoneAutoItem.get()?.tier ?? 0)})
+                      </span>
+                    </ct-hstack>
+
+                    <span style="font-size: 0.875rem; color: var(--ct-color-gray-600);">
+                      {computed(() => undoneAutoItem.get()?.reasoning ?? "")}
+                    </span>
+
+                    <ct-hstack gap="2">
+                      <ct-button
+                        variant="primary"
+                        onClick={acceptUndoneClassification}
+                      >
+                        Accept
+                      </ct-button>
+                      <ct-button
+                        variant="secondary"
+                        onClick={correctUndoneClassification}
+                      >
+                        Actually {ifElse(
+                          computed(() => undoneAutoItem.get()?.label ?? false),
+                          "NO",
+                          "YES",
+                        )}
+                      </ct-button>
+                      <ct-button variant="ghost" onClick={dismissUndoneItem}>
+                        Dismiss
+                      </ct-button>
+                    </ct-hstack>
+                  </ct-vstack>
+                </ct-card>,
+                null,
+              )}
+
               {/* Pending Classifications */}
               {ifElse(
                 computed(() => pendingClassifications.get().length > 0),
@@ -1817,9 +1979,9 @@ Each suggestion should have:
                             )} → {ifElse(rule.predicts, "YES", "NO")}
                           </span>
                           <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
-                            P: {computed(() =>
-                              (rule.precision * 100).toFixed(0)
-                            )}% | F1: {computed(() =>
+                            P:{" "}
+                            {computed(() => (rule.precision * 100).toFixed(0))}%
+                            | F1: {computed(() =>
                               (calculateF1(rule) * 100).toFixed(0)
                             )}% | {rule.evaluationCount} evals | {computed(() =>
                               getTierLabel(rule.tier)
@@ -1994,8 +2156,8 @@ Each suggestion should have:
                             autoItem,
                             examples,
                             rules,
-                            currentItem,
                             recentAutoClassified,
+                            undoneAutoItem,
                           })}
                         >
                           Undo
