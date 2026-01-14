@@ -3914,6 +3914,93 @@ interface CTToolCallAttributes<T> extends CTHTMLAttributes<T> {
   "expanded"?: boolean | CellLike<boolean>;
 }
 
+// Map component types
+interface CTMapLatLng {
+  lat: number;
+  lng: number;
+}
+
+interface CTMapBounds {
+  north: number;
+  south: number;
+  east: number;
+  west: number;
+}
+
+interface CTMapMarker {
+  position: CTMapLatLng;
+  title?: string;
+  description?: string;
+  icon?: string;
+  popup?: any;
+  draggable?: boolean;
+}
+
+interface CTMapCircle {
+  center: CTMapLatLng;
+  radius: number;
+  color?: string;
+  fillOpacity?: number;
+  strokeWidth?: number;
+  title?: string;
+  description?: string;
+  popup?: any;
+}
+
+interface CTMapPolyline {
+  points: CTMapLatLng[];
+  color?: string;
+  strokeWidth?: number;
+  dashArray?: string;
+}
+
+interface CTMapValue {
+  markers?: CTMapMarker[];
+  circles?: CTMapCircle[];
+  polylines?: CTMapPolyline[];
+}
+
+interface CTMapAttributes<T> extends CTHTMLAttributes<T> {
+  "value"?: CTMapValue | CellLike<CTMapValue>;
+  "$value"?: CTMapValue | CellLike<CTMapValue>;
+  "center"?: CTMapLatLng | CellLike<CTMapLatLng | null> | null;
+  "$center"?: CTMapLatLng | CellLike<CTMapLatLng | null> | null;
+  "zoom"?: number | CellLike<number | null> | null;
+  "$zoom"?: number | CellLike<number | null> | null;
+  "bounds"?: CTMapBounds | CellLike<CTMapBounds | null> | null;
+  "$bounds"?: CTMapBounds | CellLike<CTMapBounds | null> | null;
+  "fitToBounds"?: boolean | CellLike<boolean>;
+  "interactive"?: boolean | CellLike<boolean>;
+  "onct-click"?: (event: CustomEvent<{ lat: number; lng: number }>) => void;
+  "onct-bounds-change"?: (
+    event: CustomEvent<
+      { bounds: CTMapBounds; center: CTMapLatLng; zoom: number }
+    >,
+  ) => void;
+  "onct-marker-click"?: (
+    event: CustomEvent<
+      { marker: CTMapMarker; index: number; lat: number; lng: number }
+    >,
+  ) => void;
+  "onct-marker-drag-end"?: (
+    event: CustomEvent<
+      {
+        marker: CTMapMarker;
+        index: number;
+        position: CTMapLatLng;
+        oldPosition: CTMapLatLng;
+      }
+    >,
+  ) => void;
+  "onct-circle-click"?: (
+    event: CustomEvent<
+      { circle: CTMapCircle; index: number; lat: number; lng: number }
+    >,
+  ) => void;
+}
+
+interface CTMapElement extends CTHTMLElement {}
+
 /**
  * Typings for native DOM elements.
  * Notably, this does not propagate to IDEs when defined in another file and
@@ -4721,6 +4808,12 @@ declare global {
       "ct-tool-call": CTDOM.DetailedHTMLProps<
         CTToolCallAttributes<CTToolCallElement>,
         CTToolCallElement
+      >;
+
+      // Map component
+      "ct-map": CTDOM.DetailedHTMLProps<
+        CTMapAttributes<CTMapElement>,
+        CTMapElement
       >;
     }
   }
