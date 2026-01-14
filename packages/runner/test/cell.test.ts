@@ -970,7 +970,9 @@ describe("Proxy", () => {
     streamCell.send({ $stream: true });
     await runtime.idle();
 
-    expect(c.get()).toStrictEqual({ stream: { $stream: true } });
+    // The stream property returns a Cell (stream kind) rather than raw { $stream: true }
+    // because createQueryResultProxy detects stream markers and returns stream cells
+    expect(c.get().stream).toHaveProperty("send");
     expect(eventCount).toBe(1);
     expect(lastEventSeen).toEqual({ $stream: true });
   });
