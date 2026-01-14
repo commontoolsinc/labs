@@ -6,6 +6,8 @@ user-invocable: false
 
 # Deploy Phase
 
+Use `Skill("ct")` for comprehensive ct CLI documentation.
+
 ## Read First
 - `docs/development/LOCAL_DEV_SERVERS.md` - Local dev setup
 - `docs/common/workflows/development.md` - Workflow commands
