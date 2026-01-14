@@ -197,6 +197,9 @@ export class CTMap extends BaseElement {
   // Flag to prevent echo loops during programmatic updates
   private _isUpdatingFromCell = false;
 
+  // Flag to track pending click events deferred during animations
+  private _pendingClickEvent: L.LeafletMouseEvent | null = null;
+
   // Cell controllers for reactive data binding
   // These manage subscriptions automatically via Lit's ReactiveController lifecycle
   // Note: Feature rendering is handled in updated() to catch both property changes
@@ -342,8 +345,8 @@ export class CTMap extends BaseElement {
   // === Keyboard Navigation ===
 
   private _handleKeydown(event: KeyboardEvent): void {
-    // Only handle when interactive and map exists
-    if (!this.interactive || !this._map) return;
+    // Only handle when interactive and map exists and is stable
+    if (!this.interactive || !this._map || !this._isMapStable()) return;
 
     // Check that the event target is within the map container
     const mapContainer = this.shadowRoot?.querySelector(".map-container");
@@ -380,6 +383,34 @@ export class CTMap extends BaseElement {
         this._map.zoomOut();
         break;
     }
+  }
+
+  // === Map State Helpers ===
+
+  /**
+   * Check if the map is in a stable state for operations.
+   * Returns false during zoom animations or when the map pane is not ready.
+   * This prevents the Leaflet race condition where _mapPane becomes undefined
+   * during concurrent pan+click operations.
+   */
+  private _isMapStable(): boolean {
+    if (!this._map) return false;
+
+    // Check if map is during a zoom animation
+    // Access internal Leaflet state - _animatingZoom is set during zoom transitions
+    const map = this._map as L.Map & { _animatingZoom?: boolean };
+    if (map._animatingZoom) return false;
+
+    // Check if map pane exists and is ready
+    // This is the element that causes the _leaflet_pos error when undefined
+    try {
+      const pane = this._map.getPane("mapPane");
+      if (!pane) return false;
+    } catch {
+      return false;
+    }
+
+    return true;
   }
 
   // === Map Initialization ===
@@ -446,48 +477,79 @@ export class CTMap extends BaseElement {
   private _setupMapEventHandlers(): void {
     if (!this._map) return;
 
-    // Map click event
+    // Map click event - guard against race condition during zoom animations
     this._map.on("click", (e: L.LeafletMouseEvent) => {
-      const detail: CtClickDetail = {
-        lat: e.latlng.lat,
-        lng: e.latlng.lng,
-      };
-      this.emit("ct-click", detail);
+      // If map is not stable (e.g., during zoom animation), defer the click
+      if (!this._isMapStable()) {
+        this._pendingClickEvent = e;
+        return;
+      }
+
+      this._emitClickEvent(e);
+    });
+
+    // Handle deferred clicks after zoom animations complete
+    this._map.on("zoomend", () => {
+      if (this._pendingClickEvent && this._isMapStable()) {
+        this._emitClickEvent(this._pendingClickEvent);
+        this._pendingClickEvent = null;
+      }
     });
 
     // Bounds change event (moveend covers both pan and zoom)
     this._map.on("moveend", () => {
       if (this._isUpdatingFromCell) return;
 
-      const bounds = this._map!.getBounds();
-      const center = this._map!.getCenter();
-      const zoom = this._map!.getZoom();
+      // Guard against race condition - map pane may not be ready
+      if (!this._isMapStable()) return;
 
-      const boundsData: Bounds = {
-        north: bounds.getNorth(),
-        south: bounds.getSouth(),
-        east: bounds.getEast(),
-        west: bounds.getWest(),
-      };
+      // Wrap in try-catch as additional safety for Leaflet internal state issues
+      try {
+        const bounds = this._map!.getBounds();
+        const center = this._map!.getCenter();
+        const zoom = this._map!.getZoom();
 
-      const centerData: LatLng = {
-        lat: center.lat,
-        lng: center.lng,
-      };
+        const boundsData: Bounds = {
+          north: bounds.getNorth(),
+          south: bounds.getSouth(),
+          east: bounds.getEast(),
+          west: bounds.getWest(),
+        };
 
-      // Emit bounds change event
-      const detail: CtBoundsChangeDetail = {
-        bounds: boundsData,
-        center: centerData,
-        zoom,
-      };
-      this.emit("ct-bounds-change", detail);
+        const centerData: LatLng = {
+          lat: center.lat,
+          lng: center.lng,
+        };
 
-      // Update Cell values (bidirectional) using controllers
-      this._updateCenterCell(centerData);
-      this._updateZoomCell(zoom);
-      this._updateBoundsCell(boundsData);
+        // Emit bounds change event
+        const detail: CtBoundsChangeDetail = {
+          bounds: boundsData,
+          center: centerData,
+          zoom,
+        };
+        this.emit("ct-bounds-change", detail);
+
+        // Update Cell values (bidirectional) using controllers
+        this._updateCenterCell(centerData);
+        this._updateZoomCell(zoom);
+        this._updateBoundsCell(boundsData);
+      } catch {
+        // Silently ignore errors from Leaflet internal state issues
+        // This can happen during rapid pan+click operations
+      }
     });
+  }
+
+  /**
+   * Emit click event with coordinates.
+   * Extracted to allow deferred clicks after animations.
+   */
+  private _emitClickEvent(e: L.LeafletMouseEvent): void {
+    const detail: CtClickDetail = {
+      lat: e.latlng.lat,
+      lng: e.latlng.lng,
+    };
+    this.emit("ct-click", detail);
   }
 
   // === Value Getters (using CellControllers) ===
@@ -548,7 +610,7 @@ export class CTMap extends BaseElement {
   // === Map Updates ===
 
   private _updateMapCenter(): void {
-    if (!this._map) return;
+    if (!this._map || !this._isMapStable()) return;
 
     this._isUpdatingFromCell = true;
     try {
@@ -562,7 +624,7 @@ export class CTMap extends BaseElement {
   }
 
   private _updateMapZoom(): void {
-    if (!this._map) return;
+    if (!this._map || !this._isMapStable()) return;
 
     this._isUpdatingFromCell = true;
     try {
@@ -574,7 +636,7 @@ export class CTMap extends BaseElement {
   }
 
   private _updateMapFromBounds(): void {
-    if (!this._map) return;
+    if (!this._map || !this._isMapStable()) return;
 
     const bounds = this._getBounds();
     if (!bounds) return;
@@ -975,7 +1037,7 @@ export class CTMap extends BaseElement {
   // === Fit to Bounds ===
 
   private _fitMapToBounds(): void {
-    if (!this._map) return;
+    if (!this._map || !this._isMapStable()) return;
 
     const value = this._getValue();
     const allPoints: L.LatLng[] = [];
@@ -1203,6 +1265,7 @@ export class CTMap extends BaseElement {
     this._polylineLayer = null;
     this._leafletMarkers = [];
     this._leafletCircles = [];
+    this._pendingClickEvent = null;
 
     // Note: CellControllers are automatically cleaned up by Lit's reactive
     // controller system. They implement ReactiveController with
@@ -1237,6 +1300,7 @@ export class CTMap extends BaseElement {
    * Pan to a specific location
    */
   panTo(lat: number, lng: number): void {
+    if (!this._isMapStable()) return;
     this._map?.panTo([lat, lng]);
   }
 
@@ -1244,6 +1308,7 @@ export class CTMap extends BaseElement {
    * Set the map view to a specific location and zoom
    */
   setView(lat: number, lng: number, zoom: number): void {
+    if (!this._isMapStable()) return;
     this._map?.setView([lat, lng], zoom);
   }
 }
