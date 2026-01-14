@@ -357,9 +357,7 @@ function applyValue(
   previous: unknown,
   base: CellHandle,
 ): unknown {
-  const cellRef = isRecord(current)
-    ? parseAsCellRef(current as JSONValue, base.ref())
-    : undefined;
+  const cellRef = parseAsCellRef(current as JSONValue, base.ref());
 
   if (cellRef) {
     if (isCellHandle(previous) && cellRefsEqual(cellRef, previous.ref())) {
