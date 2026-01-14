@@ -306,6 +306,19 @@ describe("value-codec", () => {
         expect(result["@Error"].name).toBe("SyntaxError");
         expect(result["@Error"].message).toBe("invalid syntax");
       });
+
+      it("preserves cause property from Error constructor (ES2022)", () => {
+        const cause = new Error("root cause");
+        const error = new Error("wrapper", { cause });
+        const result = toStorableValue(error) as {
+          "@Error": Record<string, unknown>;
+        };
+
+        expect(result["@Error"].message).toBe("wrapper");
+        // cause is captured but not recursively converted by toStorableValue
+        // (shallow conversion) - the cause is still a raw Error here
+        expect(result["@Error"].cause).toBe(cause);
+      });
     });
 
     describe("converts via toJSON when available", () => {
@@ -638,6 +651,20 @@ describe("value-codec", () => {
         const cause = new Error("root cause");
         const outer = new Error("outer error") as Error & { cause: Error };
         outer.cause = cause;
+
+        const result = toDeepStorableValue(outer) as {
+          "@Error": Record<string, unknown> & {
+            cause: { "@Error": Record<string, unknown> };
+          };
+        };
+
+        expect(result["@Error"].message).toBe("outer error");
+        expect(result["@Error"].cause["@Error"].message).toBe("root cause");
+      });
+
+      it("converts Error with standard cause option (ES2022)", () => {
+        const cause = new Error("root cause");
+        const outer = new Error("outer error", { cause });
 
         const result = toDeepStorableValue(outer) as {
           "@Error": Record<string, unknown> & {

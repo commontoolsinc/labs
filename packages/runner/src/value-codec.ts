@@ -25,6 +25,7 @@ function specialInstanceToStorableValue(
         name: error.name,
         message: error.message,
         stack: error.stack,
+        cause: error.cause,
       },
     };
   }

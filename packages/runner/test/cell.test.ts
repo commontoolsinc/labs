@@ -89,6 +89,28 @@ describe("Cell", () => {
     expect(typeof result!["@Error"].stack).toBe("string");
   });
 
+  it("should preserve Error cause property on set", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should preserve Error cause property on set",
+      undefined,
+      tx,
+    );
+    const cause = new Error("root cause");
+    const error = new Error("wrapper error", { cause });
+    c.set(error);
+
+    // Error cause should be recursively converted to @Error wrapper
+    const result = c.get() as { "@Error": Record<string, unknown> } | undefined;
+    expect(result).toHaveProperty("@Error");
+    expect(result!["@Error"].message).toBe("wrapper error");
+    const causeWrapper = result!["@Error"].cause as {
+      "@Error": Record<string, unknown>;
+    };
+    expect(causeWrapper).toHaveProperty("@Error");
+    expect(causeWrapper["@Error"].message).toBe("root cause");
+  });
+
   it("should call toJSON() on plain objects during set", () => {
     const c = runtime.getCell<unknown>(
       space,
