@@ -17,7 +17,6 @@
  */
 import {
   action,
-  Cell,
   computed,
   type Default,
   equals,
@@ -282,6 +281,34 @@ function getTierColor(tier: Tier): string {
 }
 
 // =============================================================================
+// MODULE-SCOPED LIFT FUNCTIONS FOR DISPLAYING DATA IN .map()
+// =============================================================================
+
+/** Get the key from a field entry (for display in JSX) */
+const getFieldKey = lift((entry: { key: string; value: string }): string =>
+  entry.key
+);
+
+/** Get the value from a field entry (for display in JSX) */
+const getFieldValue = lift((entry: { key: string; value: string }): string =>
+  entry.value
+);
+
+/** Remove a field from the newItemFields record */
+const removeFieldHandler = handler<
+  unknown,
+  {
+    entry: { key: string; value: string };
+    newItemFields: Writable<Record<string, string>>;
+  }
+>((_event, { entry, newItemFields }) => {
+  const current = newItemFields.get();
+  const updated = { ...current };
+  delete updated[entry.key];
+  newItemFields.set(updated);
+});
+
+// =============================================================================
 // MODULE-SCOPED HANDLERS FOR BUTTON CLICKS IN .map()
 // These handlers receive the pending item as a parameter at render time (in reactive context)
 // so they don't need to access reactive proxies in the callback.
@@ -373,16 +400,35 @@ const dismissPendingClassification = handler<
   );
 });
 
+/** Remove a rule from the rules list */
+const removeRuleHandler = handler<
+  unknown,
+  {
+    rule: ClassificationRule;
+    rules: Writable<ClassificationRule[]>;
+  }
+>((_event, { rule, rules }) => {
+  const currentRules = rules.get();
+  rules.set(currentRules.filter((r) => !equals(rule, r)));
+});
+
 // =============================================================================
 // PATTERN
 // =============================================================================
 
 export default pattern<ClassifierInput>(
   ({ config, examples, rules, pendingClassifications, currentItem }) => {
-    // Local state for new item input
-    const newItemFields = Cell.of<Record<string, string>>({});
-    const newFieldKey = Cell.of("");
-    const newFieldValue = Cell.of("");
+    // Local state for new item input - use Writable.of for bidirectional binding with $value
+    const newItemFields = Writable.of<Record<string, string>>({});
+    const newFieldKey = Writable.of("");
+    const newFieldValue = Writable.of("");
+
+    // Transform Record to array of {key, value} for reactive iteration
+    // Use computed() instead of lift() to avoid closure limitations
+    const newItemFieldEntries = computed(() => {
+      const fields = newItemFields.get() ?? {};
+      return Object.entries(fields).map(([key, value]) => ({ key, value }));
+    });
 
     // Compute stats
     const stats = computeStats({ examples, rules });
@@ -706,8 +752,8 @@ Respond with:
     // PHASE 3: LLM RULE GENERATION
     // ==========================================================================
 
-    // Local state for pending rule suggestions
-    const suggestedRules = Cell.of<RuleSuggestion[]>([]);
+    // Local state for pending rule suggestions - use Writable.of for .set() calls
+    const suggestedRules = Writable.of<RuleSuggestion[]>([]);
 
     // Build the rule generation prompt when conditions are met
     const ruleGenerationPrompt = computed(() => {
@@ -904,44 +950,38 @@ Each suggestion should have:
                     Submit Item for Classification
                   </ct-heading>
 
-                  {/* Current fields */}
-                  {computed(() => {
-                    const fields = newItemFields.get();
-                    const entries = Object.entries(fields);
-                    if (entries.length === 0) {
-                      return (
-                        <span style="color: var(--ct-color-gray-400); font-size: 0.875rem;">
-                          No fields added yet
-                        </span>
-                      );
-                    }
-                    return (
-                      <ct-vstack gap="1">
-                        {entries.map(([key, value]) => (
+                  {/* Current fields - show empty message or field list */}
+                  {ifElse(
+                    computed(() =>
+                      Object.keys(newItemFields.get()).length === 0
+                    ),
+                    <span style="color: var(--ct-color-gray-400); font-size: 0.875rem;">
+                      No fields added yet
+                    </span>,
+                    <ct-vstack gap="1">
+                      {newItemFieldEntries.map(
+                        (entry: { key: string; value: string }) => (
                           <ct-hstack gap="2" align="center">
                             <span style="font-weight: 500; min-width: 80px;">
-                              {key}:
+                              {getFieldKey(entry)}:
                             </span>
                             <span style="flex: 1; color: var(--ct-color-gray-600);">
-                              {value.substring(0, 50)}
-                              {value.length > 50 ? "..." : ""}
+                              {getFieldValue(entry)}
                             </span>
                             <ct-button
                               variant="ghost"
-                              onClick={() => {
-                                const current = newItemFields.get();
-                                const updated = { ...current };
-                                delete updated[key];
-                                newItemFields.set(updated);
-                              }}
+                              onClick={removeFieldHandler({
+                                entry,
+                                newItemFields,
+                              })}
                             >
                               x
                             </ct-button>
                           </ct-hstack>
-                        ))}
-                      </ct-vstack>
-                    );
-                  })}
+                        ),
+                      )}
+                    </ct-vstack>,
+                  )}
 
                   {/* Add field */}
                   <ct-hstack gap="2">
@@ -1124,14 +1164,7 @@ Each suggestion should have:
                         </ct-vstack>
                         <ct-button
                           variant="ghost"
-                          onClick={() => {
-                            const currentRules = rules.get();
-                            rules.set(
-                              currentRules.filter(
-                                (r) => !Cell.equals(r, rule),
-                              ),
-                            );
-                          }}
+                          onClick={removeRuleHandler({ rule, rules })}
                         >
                           x
                         </ct-button>
