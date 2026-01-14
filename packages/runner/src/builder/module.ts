@@ -343,15 +343,26 @@ export const computed: <T>(fn: () => T) => OpaqueRef<T> = <T>(fn: () => T) =>
  * CTS transformer rewrites action() calls to handler() calls. If this function
  * is reached, it means CTS is not enabled.
  *
+ * @example Zero-parameter action (most common)
+ * ```ts
+ * const increment = action(() => count.set(count.get() + 1));
+ * // Returns Stream<void>
+ * ```
+ *
+ * @example Action with event data
+ * ```ts
+ * const selectItem = action((id: string) => selected.set(id));
+ * // Returns Stream<string>
+ * ```
+ *
  * @param _event - A function that receives an event and performs side effects
  * @throws Error if called directly (CTS must be enabled for action() to work)
  */
-export function action<T>(
-  _event: (event: T) => void,
-): Stream<T>;
-export function action<T>(
-  _event: (event: T) => void,
-): Stream<T> {
+// Overload 1: Zero-parameter callback returns Stream<void>
+export function action(_event: () => void): Stream<void>;
+// Overload 2: Parameterized callback returns Stream<T>
+export function action<T>(_event: (event: T) => void): Stream<T>;
+export function action<T>(_event: (event?: T) => void): Stream<T> {
   throw new Error(
     "action() must be used with CTS enabled - add /// <cts-enable /> to your file",
   );
