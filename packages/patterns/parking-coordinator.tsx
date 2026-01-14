@@ -275,6 +275,28 @@ const isArrayEmpty = lift((arr: unknown[]): boolean => arr.length === 0);
 
 const isNumberZero = lift((n: number): boolean => n === 0);
 
+// Lifted helpers for conditional rendering (to avoid computed() inside .map())
+const isPendingGreaterThanZero = lift(
+  (day: { pending: number }): boolean => day.pending > 0,
+);
+
+const personLivesNearby = lift((person: Person): boolean =>
+  person.livesNearby === true
+);
+
+const personHasDefaultSpot = lift((person: Person): boolean =>
+  person.defaultSpot !== null
+);
+
+const isGuestHighPriority = lift((guest: Guest): boolean =>
+  guest.type === "high-priority"
+);
+
+const isTabActive = lift(
+  (args: { activeTab: string; tab: string }): boolean =>
+    args.activeTab === args.tab,
+);
+
 // ============ STATS ============
 
 const getTodayAllocatedCount = lift(
@@ -879,7 +901,7 @@ export default pattern<Input, Output>(
           <ct-vscroll flex showScrollbar fadeEdges>
             {/* TODAY TAB */}
             {ifElse(
-              computed(() => activeTab.get() === "today"),
+              isTabActive({ activeTab, tab: "today" }),
               <ct-vstack gap="3" style="padding: 1rem;">
                 <ct-heading level={5}>Today's Spots</ct-heading>
                 {spots.map((spot) => {
@@ -988,7 +1010,7 @@ export default pattern<Input, Output>(
 
             {/* WEEK TAB */}
             {ifElse(
-              computed(() => activeTab.get() === "week"),
+              isTabActive({ activeTab, tab: "week" }),
               <ct-vstack gap="2" style="padding: 1rem;">
                 {weekSummary.map((day) => {
                   const dayIsToday = isToday(day.date);
@@ -1025,7 +1047,7 @@ export default pattern<Input, Output>(
                             {day.allocated} alloc
                           </span>
                           {ifElse(
-                            computed(() => day.pending > 0),
+                            isPendingGreaterThanZero(day),
                             <span style="font-size: 0.75rem; color: var(--ct-color-orange-600);">
                               {day.pending} pending
                             </span>,
@@ -1042,7 +1064,7 @@ export default pattern<Input, Output>(
 
             {/* PEOPLE TAB */}
             {ifElse(
-              computed(() => activeTab.get() === "people"),
+              isTabActive({ activeTab, tab: "people" }),
               <ct-vstack gap="2" style="padding: 1rem;">
                 <ct-hstack justify="between" align="center">
                   <ct-heading level={5}>
@@ -1057,7 +1079,7 @@ export default pattern<Input, Output>(
                   <ct-card>
                     <ct-hstack gap="2" align="center">
                       <span style="font-size: 1.25rem; font-weight: bold; min-width: 30px; color: var(--ct-color-gray-400);">
-                        {computed(() => idx + 1)}
+                        {idx + 1}
                       </span>
                       <ct-vstack gap="0" style="flex: 1;">
                         <span style="font-weight: 500;">{person.name}</span>
@@ -1066,14 +1088,14 @@ export default pattern<Input, Output>(
                             {person.usualCommuteMode || "drive"}
                           </span>
                           {ifElse(
-                            computed(() => person.livesNearby === true),
+                            personLivesNearby(person),
                             <span style="font-size: 0.625rem; background: var(--ct-color-cyan-100); color: var(--ct-color-cyan-700); padding: 0.125rem 0.5rem; border-radius: 999px;">
                               Nearby
                             </span>,
                             null,
                           )}
                           {ifElse(
-                            computed(() => person.defaultSpot !== null),
+                            personHasDefaultSpot(person),
                             <span style="font-size: 0.625rem; background: var(--ct-color-gray-100); color: var(--ct-color-gray-700); padding: 0.125rem 0.5rem; border-radius: 999px;">
                               Default: #{person.defaultSpot}
                             </span>,
@@ -1129,7 +1151,7 @@ export default pattern<Input, Output>(
 
             {/* ADMIN TAB */}
             {ifElse(
-              computed(() => activeTab.get() === "admin"),
+              isTabActive({ activeTab, tab: "admin" }),
               <ct-vstack gap="3" style="padding: 1rem;">
                 {/* Add Person */}
                 <ct-card>
@@ -1531,12 +1553,12 @@ export default pattern<Input, Output>(
                               padding: "0.125rem 0.5rem",
                               borderRadius: "999px",
                               background: ifElse(
-                                computed(() => guest.type === "high-priority"),
+                                isGuestHighPriority(guest),
                                 "var(--ct-color-red-100)",
                                 "var(--ct-color-gray-100)",
                               ),
                               color: ifElse(
-                                computed(() => guest.type === "high-priority"),
+                                isGuestHighPriority(guest),
                                 "var(--ct-color-red-700)",
                                 "var(--ct-color-gray-700)",
                               ),
