@@ -185,6 +185,9 @@ export class CTMap extends BaseElement {
   // Track circles for click events
   private _leafletCircles: L.Circle[] = [];
 
+  // Track polylines for cleanup
+  private _leafletPolylines: L.Polyline[] = [];
+
   // RAF ID for map initialization (prevent race condition on disconnect)
   private _rafId: number | null = null;
 
@@ -199,6 +202,13 @@ export class CTMap extends BaseElement {
 
   // Flag to track pending click events deferred during animations
   private _pendingClickEvent: L.LeafletMouseEvent | null = null;
+
+  // Pending updates deferred during animations
+  // These are processed when the map stabilizes (on zoomend)
+  private _pendingCenterUpdate: LatLng | null = null;
+  private _pendingZoomUpdate: number | null = null;
+  private _pendingBoundsUpdate: Bounds | null = null;
+  private _pendingFitToBounds = false;
 
   // Cell controllers for reactive data binding
   // These manage subscriptions automatically via Lit's ReactiveController lifecycle
@@ -439,10 +449,20 @@ export class CTMap extends BaseElement {
     });
 
     // Add tile layer with crossOrigin for CORS compatibility
-    L.tileLayer(TILE_URL, {
+    const tileLayer = L.tileLayer(TILE_URL, {
       attribution: TILE_ATTRIBUTION,
       crossOrigin: true,
-    }).addTo(this._map);
+    });
+
+    // Handle tile loading errors gracefully
+    tileLayer.on("tileerror", (event: L.TileErrorEvent) => {
+      console.warn("ct-map: Tile loading error", {
+        coords: event.coords,
+        error: event.error,
+      });
+    });
+
+    tileLayer.addTo(this._map);
 
     // Create layer groups
     this._markerLayer = L.layerGroup().addTo(this._map);
@@ -488,12 +508,19 @@ export class CTMap extends BaseElement {
       this._emitClickEvent(e);
     });
 
-    // Handle deferred clicks after zoom animations complete
+    // Handle deferred updates after zoom animations complete
     this._map.on("zoomend", () => {
-      if (this._pendingClickEvent && this._isMapStable()) {
+      if (!this._isMapStable()) return;
+
+      // Process pending click event
+      if (this._pendingClickEvent) {
         this._emitClickEvent(this._pendingClickEvent);
         this._pendingClickEvent = null;
       }
+
+      // Process pending map updates (queued during animation)
+      // Process in order: bounds first (most specific), then center, then zoom
+      this._processPendingUpdates();
     });
 
     // Bounds change event (moveend covers both pan and zoom)
@@ -610,11 +637,18 @@ export class CTMap extends BaseElement {
   // === Map Updates ===
 
   private _updateMapCenter(): void {
-    if (!this._map || !this._isMapStable()) return;
+    if (!this._map) return;
+
+    const center = this._getCenter(); // Already validated by _getCenter()
+
+    // If map is not stable, queue the update for when it stabilizes
+    if (!this._isMapStable()) {
+      this._pendingCenterUpdate = center;
+      return;
+    }
 
     this._isUpdatingFromCell = true;
     try {
-      const center = this._getCenter(); // Already validated by _getCenter()
       this._map.setView([center.lat, center.lng], this._map.getZoom(), {
         animate: true,
       });
@@ -624,11 +658,18 @@ export class CTMap extends BaseElement {
   }
 
   private _updateMapZoom(): void {
-    if (!this._map || !this._isMapStable()) return;
+    if (!this._map) return;
+
+    const zoom = this._getZoom(); // Already validated by _getZoom()
+
+    // If map is not stable, queue the update for when it stabilizes
+    if (!this._isMapStable()) {
+      this._pendingZoomUpdate = zoom;
+      return;
+    }
 
     this._isUpdatingFromCell = true;
     try {
-      const zoom = this._getZoom(); // Already validated by _getZoom()
       this._map.setZoom(zoom, { animate: true });
     } finally {
       this._isUpdatingFromCell = false;
@@ -636,7 +677,7 @@ export class CTMap extends BaseElement {
   }
 
   private _updateMapFromBounds(): void {
-    if (!this._map || !this._isMapStable()) return;
+    if (!this._map) return;
 
     const bounds = this._getBounds();
     if (!bounds) return;
@@ -644,6 +685,12 @@ export class CTMap extends BaseElement {
     // Validate bounds before applying
     const validatedBounds = this._validateBounds(bounds);
     if (!validatedBounds) return;
+
+    // If map is not stable, queue the update for when it stabilizes
+    if (!this._isMapStable()) {
+      this._pendingBoundsUpdate = validatedBounds;
+      return;
+    }
 
     this._isUpdatingFromCell = true;
     try {
@@ -654,6 +701,71 @@ export class CTMap extends BaseElement {
       this._map.fitBounds(leafletBounds, { animate: true });
     } finally {
       this._isUpdatingFromCell = false;
+    }
+  }
+
+  /**
+   * Process any pending updates that were queued during animations.
+   * Called from zoomend handler when map becomes stable.
+   */
+  private _processPendingUpdates(): void {
+    if (!this._map) return;
+
+    // Process bounds update (most specific - sets both center and zoom)
+    if (this._pendingBoundsUpdate) {
+      const bounds = this._pendingBoundsUpdate;
+      this._pendingBoundsUpdate = null;
+      // Clear other pending updates since bounds encompasses them
+      this._pendingCenterUpdate = null;
+      this._pendingZoomUpdate = null;
+
+      this._isUpdatingFromCell = true;
+      try {
+        const leafletBounds = L.latLngBounds(
+          [bounds.south, bounds.west],
+          [bounds.north, bounds.east],
+        );
+        this._map.fitBounds(leafletBounds, { animate: true });
+      } finally {
+        this._isUpdatingFromCell = false;
+      }
+      return; // Let the next zoomend handle any remaining updates
+    }
+
+    // Process center update
+    if (this._pendingCenterUpdate) {
+      const center = this._pendingCenterUpdate;
+      this._pendingCenterUpdate = null;
+
+      this._isUpdatingFromCell = true;
+      try {
+        this._map.setView([center.lat, center.lng], this._map.getZoom(), {
+          animate: true,
+        });
+      } finally {
+        this._isUpdatingFromCell = false;
+      }
+      return; // Let the next zoomend handle zoom update if any
+    }
+
+    // Process zoom update
+    if (this._pendingZoomUpdate !== null) {
+      const zoom = this._pendingZoomUpdate;
+      this._pendingZoomUpdate = null;
+
+      this._isUpdatingFromCell = true;
+      try {
+        this._map.setZoom(zoom, { animate: true });
+      } finally {
+        this._isUpdatingFromCell = false;
+      }
+      return;
+    }
+
+    // Process fitToBounds
+    if (this._pendingFitToBounds) {
+      this._pendingFitToBounds = false;
+      this._fitMapToBounds();
     }
   }
 
@@ -668,12 +780,16 @@ export class CTMap extends BaseElement {
     for (const circle of this._leafletCircles) {
       circle.off();
     }
+    for (const polyline of this._leafletPolylines) {
+      polyline.off();
+    }
 
     this._markerLayer?.clearLayers();
     this._circleLayer?.clearLayers();
     this._polylineLayer?.clearLayers();
     this._leafletMarkers = [];
     this._leafletCircles = [];
+    this._leafletPolylines = [];
   }
 
   /**
@@ -985,8 +1101,9 @@ export class CTMap extends BaseElement {
         dashArray: dashArray,
       });
 
-      // Add to layer
+      // Add to layer and track
       leafletPolyline.addTo(this._polylineLayer!);
+      this._leafletPolylines.push(leafletPolyline);
     }
   }
 
@@ -1037,7 +1154,13 @@ export class CTMap extends BaseElement {
   // === Fit to Bounds ===
 
   private _fitMapToBounds(): void {
-    if (!this._map || !this._isMapStable()) return;
+    if (!this._map) return;
+
+    // If map is not stable, queue the update for when it stabilizes
+    if (!this._isMapStable()) {
+      this._pendingFitToBounds = true;
+      return;
+    }
 
     const value = this._getValue();
     const allPoints: L.LatLng[] = [];
@@ -1265,7 +1388,12 @@ export class CTMap extends BaseElement {
     this._polylineLayer = null;
     this._leafletMarkers = [];
     this._leafletCircles = [];
+    this._leafletPolylines = [];
     this._pendingClickEvent = null;
+    this._pendingCenterUpdate = null;
+    this._pendingZoomUpdate = null;
+    this._pendingBoundsUpdate = null;
+    this._pendingFitToBounds = false;
 
     // Note: CellControllers are automatically cleaned up by Lit's reactive
     // controller system. They implement ReactiveController with
@@ -1312,8 +1440,6 @@ export class CTMap extends BaseElement {
     this._map?.setView([lat, lng], zoom);
   }
 }
-
-globalThis.customElements.define("ct-map", CTMap);
 
 declare global {
   interface HTMLElementTagNameMap {
