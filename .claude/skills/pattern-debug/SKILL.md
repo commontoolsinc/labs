@@ -25,8 +25,8 @@ Use `Skill("ct")` for ct CLI documentation if debugging deployment or charm issu
 
 3. **Check gotchas:**
    - `docs/development/debugging/gotchas/handler-inside-pattern.md`
-   - `docs/development/debugging/gotchas/filter-map.md`
-   - `docs/development/debugging/gotchas/onClick-in-computed.md`
+   - `docs/development/debugging/gotchas/filter-map-find-not-a-function.md`
+   - `docs/development/debugging/gotchas/onclick-inside-computed.md`
 
 4. **Simplify to minimal reproduction:**
    - Comment out code until error disappears
