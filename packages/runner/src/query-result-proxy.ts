@@ -1,6 +1,7 @@
 import { refer } from "merkle-reference/json";
 import { isRecord } from "@commontools/utils/types";
 import { getTopFrame } from "./builder/recipe.ts";
+import { isStreamValue } from "./builder/types.ts";
 import { toCell } from "./back-to-cell.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLink } from "./link-resolution.ts";
@@ -92,6 +93,14 @@ export function createQueryResultProxy<T>(
   const readTx = (txStatus?.status === "ready" && tx) ? tx : runtime.edit();
   link = resolveLink(runtime, readTx, link);
   const value = readTx.readValueOrThrow(link) as any;
+
+  // If the value is a stream marker ({ $stream: true }), return a Cell with
+  // stream kind so that .send() is available. This handles the case where a
+  // pattern's Output type wasn't explicitly specified, causing the capture
+  // schema to lose the asStream information.
+  if (isStreamValue(value)) {
+    return createCell(runtime, link, tx, false, "stream") as T;
+  }
 
   if (!isRecord(value) || Object.isFrozen(value)) return value;
 
