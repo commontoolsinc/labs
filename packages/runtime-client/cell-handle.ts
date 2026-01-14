@@ -43,11 +43,13 @@ export class CellHandle<T = unknown> {
   #requireSchema(method: string): void {
     if (!this.#ref.schema && !this.#schemaWarned) {
       this.#schemaWarned = true;
+      const stack = new Error().stack;
       console.warn(
         `[CellHandle] ${method}() called without schema on cell ${this.#ref.id}:${
           this.#ref.path.join(".")
         }. ` +
-          `Please bind a schema using asSchema() or pass a schema to the cell controller's bind() method.`,
+          `Please bind a schema using asSchema() or pass a schema to the cell controller's bind() method.\n` +
+          `Stack trace:\n${stack}`,
       );
     }
   }
