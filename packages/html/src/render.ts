@@ -313,12 +313,6 @@ class VdomChildNode {
   }
 
   onEffect = (childValue: RenderNode): Cancel | undefined => {
-    console.log(
-      "onEffect childValue:",
-      childValue,
-      "isVNodeish:",
-      isVNodeish(childValue),
-    );
     let element;
     let cancel;
     if (isCellHandle(childValue)) {
