@@ -49,8 +49,9 @@ import type {
   WriterError,
 } from "./storage/interface.ts";
 import { resolve } from "./storage/transaction/attestation.ts";
+import { buildRenameMap, renameSchemaRefs } from "./schema-def-rename.ts";
 
-const logger = getLogger("traverse", { enabled: true, level: "warn" });
+const logger = getLogger("traverse", { enabled: true, level: "debug" });
 
 export type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 export type { SchemaPathSelector };
@@ -1133,6 +1134,7 @@ export function combineSchema(
     (isObject(linkSchema) && linkSchema.type === "object") &&
     (isObject(parentSchema) && parentSchema.type === "object")
   ) {
+    linkSchema = renameCollisionDefs(linkSchema, parentSchema);
     // If both schemas have required properties, only include those that are
     // in both lists
     const { required: parentRequired, $defs: parentDefs, ...parentSchemaRest } =
@@ -1250,10 +1252,12 @@ export function combineSchema(
     } else if (linkSchema.items === undefined) {
       return parentSchema;
     }
+    // Check for def collisions
+    linkSchema = renameCollisionDefs(linkSchema, parentSchema);
     const mergedDefs = { ...linkSchema.$defs, ...parentSchema.$defs };
     const mergedSchemaItems = combineSchema(
       parentSchema.items,
-      linkSchema.items,
+      linkSchema.items!,
     );
     // this isn't great, but at least grab the flags from parent schema
     return mergeSchemaFlags(parentSchema, {
@@ -1264,7 +1268,8 @@ export function combineSchema(
     });
   } else if (isObject(linkSchema) && isObject(parentSchema)) {
     // this isn't great, but at least grab the flags from parent schema
-    // Merge $defs from the two schema, with parent taking priority
+    // Check for def collisions
+    linkSchema = renameCollisionDefs(linkSchema, parentSchema);
     const mergedDefs = { ...linkSchema.$defs, ...parentSchema.$defs };
     // In this case, we use the link for flags, but generally use the parent
     // since the object types may be different
@@ -2340,4 +2345,15 @@ function getCircularReplacer() {
     ancestors.push(value);
     return value;
   };
+}
+
+function renameCollisionDefs(
+  linkSchema: JSONSchemaObj,
+  parentSchema: JSONSchemaObj,
+): JSONSchemaObj {
+  const renameMap = buildRenameMap(linkSchema as any, parentSchema as any);
+  if (renameMap != null) {
+    return renameSchemaRefs(linkSchema as any, renameMap) as JSONSchemaObj;
+  }
+  return linkSchema;
 }
