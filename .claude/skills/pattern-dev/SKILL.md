@@ -9,6 +9,26 @@ You and the user are a team finding the efficient path to their vision.
 
 Use the `EnterPlanMode` tool—don't just create a PLAN.md file. Launch parallel Explore agents to understand context: existing patterns, relevant docs, the user's data model. Write a concrete plan. Get user approval via `ExitPlanMode` before executing.
 
+## Pattern Structure
+
+Make use of multi-file composition. Each concept with its own behavior becomes its own sub-pattern:
+
+```
+packages/patterns/[name]/
+├── schemas.tsx        # All types, Input/Output for each pattern
+├── [leaf].tsx         # Leaf sub-patterns (no dependencies)
+├── [leaf].test.tsx    # Tests for leaf pattern
+├── [container].tsx    # Compose leaf patterns
+├── [container].test.tsx
+└── main.tsx           # Top-level composition
+```
+
+Each sub-pattern gets a corresponding `.test.tsx` file to verify its data model and actions before moving on.
+
+Rule of thumb: `Project` containing `Task[]` means both `project.tsx` AND `task.tsx` sub-patterns, each with their own tests. The project pattern composes task patterns.
+
+Work from leaves up: leaf patterns → container patterns → main.tsx
+
 ## Development Approach
 
 Build incrementally. Write a verifiable piece, verify it works, keep going. Don't over-test code that will be refactored—test what matters for confidence to proceed.
