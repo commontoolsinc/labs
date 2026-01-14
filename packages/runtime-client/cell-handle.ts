@@ -28,6 +28,7 @@ export class CellHandle<T = unknown> {
   #value: T | undefined;
   #callbacks = new Map<number, (value: Readonly<T>) => void>();
   #nextCallbackId = 0;
+  #schemaWarned = false;
 
   constructor(worker: RuntimeClient, cellRef: CellRef, value?: T) {
     this.#rt = worker;
@@ -37,11 +38,12 @@ export class CellHandle<T = unknown> {
   }
 
   /**
-   * Check if this cell has a schema defined. Throws if no schema is set.
+   * Check if this cell has a schema defined. Warns if no schema is set.
    */
   #requireSchema(method: string): void {
-    if (!this.#ref.schema) {
-      throw new Error(
+    if (!this.#ref.schema && !this.#schemaWarned) {
+      this.#schemaWarned = true;
+      console.warn(
         `[CellHandle] ${method}() called without schema on cell ${this.#ref.id}:${
           this.#ref.path.join(".")
         }. ` +

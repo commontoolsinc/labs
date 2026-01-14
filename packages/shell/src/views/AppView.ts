@@ -6,7 +6,7 @@ import { RuntimeInternals } from "../lib/runtime.ts";
 import { DebuggerController } from "../lib/debugger-controller.ts";
 import { Task, TaskStatus } from "@lit/task";
 import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
-import { type NameSchema } from "@commontools/runner/schemas";
+import { type NameSchema, stringSchema } from "@commontools/runner/schemas";
 import { updatePageTitle } from "../../shared/mod.ts";
 import { KeyboardController } from "../lib/keyboard-router.ts";
 import { NAME, PageHandle } from "@commontools/runtime-client";
@@ -156,7 +156,7 @@ export class XAppView extends BaseView {
         ? this.app.view.spaceName
         : "Common Tools";
     } else {
-      const cell = activeCharm.cell().key(NAME);
+      const cell = activeCharm.cell().key(NAME).asSchema<string>(stringSchema);
       if (
         this.titleSubscription && cell.equals(this.titleSubscription.cell())
       ) {
