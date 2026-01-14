@@ -188,11 +188,10 @@ export class RuntimeProcessor {
   ): JSONValueResponse {
     const cell = getCell(this.runtime, request.cell);
     const value = cell.get();
-    const rawValue = cell.getRaw?.({ meta: { scheduling: "ignore" } }) ?? value;
-    const converted = convertCellsToLinks(rawValue, {
+    const converted = convertCellsToLinks(value, {
       includeSchema: true,
       keepAsCell: true,
-      doNotConvertCellResults: false,
+      doNotConvertCellResults: true,
     });
     return { value: converted };
   }
@@ -260,7 +259,7 @@ export class RuntimeProcessor {
       const converted = convertCellsToLinks(value, {
         includeSchema: true,
         keepAsCell: true,
-        doNotConvertCellResults: false,
+        doNotConvertCellResults: true,
       });
 
       // `.sink` fires synchronously on invocation. Trigger the notification
