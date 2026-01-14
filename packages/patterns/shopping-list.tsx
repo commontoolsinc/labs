@@ -13,6 +13,7 @@ import {
   Default,
   derive,
   equals,
+  generateObject,
   handler,
   ifElse,
   NAME,
@@ -114,11 +115,28 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
     (layout: string) => extractLocations(layout),
   );
 
-  // For now, items in sorted view just show "Other" - AI categorization can be added later
+  // AI categorization for each item (only when store layout exists)
   const itemsWithAisles = items.map((item) => {
+    // Build prompt using store layout + item
+    const categorizePrompt = derive(
+      [storeLayout, item.title, item.aisleSeed],
+      ([layout, title, seed]: [string, string, number]) => {
+        if (!layout.trim()) return "";
+        return `Store layout:\n${layout}\n\nItem: ${title}\n\nSeed: ${seed}\n\nWhich aisle or department is this item most likely to be in? Respond with the exact location name.`;
+      },
+    );
+
+    // Generate location using AI (only if layout exists)
+    const aisleResult = generateObject<AisleResult>({
+      system:
+        "You are a grocery store assistant. Given a store layout and an item, determine which aisle or department the item is most likely to be in. You must respond with one of the exact locations from the store layout, or 'Other' if the item doesn't fit any category.",
+      prompt: categorizePrompt,
+      model: "anthropic:claude-haiku-4-5",
+    });
+
     return {
       item,
-      aisle: { pending: false, result: { location: "Other" } },
+      aisle: aisleResult,
     };
   });
 
