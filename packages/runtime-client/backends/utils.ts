@@ -57,14 +57,6 @@ export function createPageRef(cell: Cell<unknown>): PageRef {
   };
 }
 
-export function unwrapProxy(proxy: unknown): any {
-  if (Array.isArray(proxy)) {
-    return [...proxy];
-  } else if (proxy && typeof proxy === "object") {
-    return { ...proxy };
-  }
-}
-
 export function getCell(runtime: Runtime, ref: CellRef): Cell<unknown> {
   // We explicitly do not pass in `schema`, as this function applies
   // the schema to both `schema` and `rootSchema`, and cell refs already
