@@ -77,16 +77,58 @@ However, explicit types are recommended because they:
 - Catch type mismatches at compile time
 - Make the pattern's contract visible in `schemas.tsx`
 
-### When to Use Dual Type Parameters
+### Always Use Dual Type Parameters
 
-Use `pattern<Input, Output>()` when:
-- Input and output shapes differ (transformation patterns)
-- You need `SELF` reference (see [Self-Reference](./self-reference.md))
-- You want explicit documentation of the pattern's contract
+**Always use `pattern<Input, Output>()`** for production patterns:
 
-Use `pattern<State>()` to infer the output type or `pattern<>()` to infer both types when you're prototyping and will add explicit types later.
+```typescript
+// ✅ Correct - explicit Output enables testing and proper typing
+export default pattern<TodoInput, TodoOutput>(({ items }) => {
+  const addItem = addItemHandler({ items });
+  return { items, addItem };
+});
+
+// ❌ Avoid - actions aren't typed, can't test via .send()
+export default pattern<TodoInput>(({ items }) => {
+  const addItem = addItemHandler({ items });
+  return { items, addItem };  // addItem type is unknown
+});
+```
+
+**Why this matters:**
+- **Testing requires Output types** - To test via `instance.action.send()`, actions must be typed as `Stream<T>` in the Output interface
+- **Sub-patterns require `[UI]` in Output** - When rendering a sub-pattern via `.map()`, the Output type must include `[UI]: VNode`
+- **TypeScript verification** - Explicit Output types catch mismatches at compile time
+
+Use `pattern<State>()` or `pattern<>()` only for throwaway prototypes.
+
+### Output Types for Sub-Patterns
+
+When a pattern will be rendered inside another pattern (e.g., Column inside Board), include `[NAME]` and `[UI]` in the Output type:
+
+```typescript
+import { NAME, UI, VNode, Stream } from "commontools";
+
+interface ColumnOutput {
+  [NAME]: string;
+  [UI]: VNode;
+  cardCount: number;
+  addCard: Stream<{ title: string }>;
+}
+```
+
+**Rendering syntax:** Use function calls, not JSX, for sub-patterns with Output types:
+
+```tsx
+// ✅ Correct - function call
+{columns.map((col) => Column({ column: col }))}
+
+// ❌ Wrong - JSX fails because OpaqueCell isn't a JSX Element
+{columns.map((col) => <Column column={col} />)}
+```
 
 ## See Also
 
+- [Pattern Composition](../patterns/composition.md) - How sub-pattern rendering works
 - [Writable](./types-and-schemas/writable.md) - Write intent in type signatures
 - [Self-Reference](./self-reference.md) - Using `SELF` with dual type parameters

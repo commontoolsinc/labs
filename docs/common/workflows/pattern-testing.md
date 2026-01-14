@@ -2,6 +2,28 @@
 
 Write automated tests for patterns using the same reactive system.
 
+## Prerequisites
+
+Before writing tests, ensure your pattern:
+
+1. **Uses `pattern<Input, Output>()`** - Single-type patterns can't be properly tested
+2. **Exports actions as `Stream<T>`** - Required for `instance.action.send()` to work
+
+```typescript
+// Pattern must have explicit Output type with Stream<T> for testable actions
+interface MyOutput {
+  count: number;
+  increment: Stream<void>;  // ← Enables testing via .send()
+}
+
+export default pattern<MyInput, MyOutput>(({ count }) => {
+  const increment = incrementHandler({ count });
+  return { count, increment };  // ← Must return bound handler
+});
+```
+
+If your pattern uses `pattern<State>()` or doesn't export actions, fix the pattern first. See [Pattern Types](../concepts/pattern.md#always-use-dual-type-parameters).
+
 ## Overview
 
 Test patterns are patterns that test other patterns. They:
