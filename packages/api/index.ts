@@ -1557,7 +1557,7 @@ export type HandlerFunction = {
  * computed(() => expr) becomes derive({}, () => expr) with closure extraction.
  */
 export type ActionFunction = {
-  <T>(fn: (event: T) => void): Stream<void>;
+  <T>(fn: (event: T) => void): Stream<T>;
 };
 
 /**

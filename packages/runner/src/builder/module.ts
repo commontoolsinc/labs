@@ -348,10 +348,10 @@ export const computed: <T>(fn: () => T) => OpaqueRef<T> = <T>(fn: () => T) =>
  */
 export function action<T>(
   _event: (event: T) => void,
-): Stream<void>;
+): Stream<T>;
 export function action<T>(
   _event: (event: T) => void,
-): Stream<void> {
+): Stream<T> {
   throw new Error(
     "action() must be used with CTS enabled - add /// <cts-enable /> to your file",
   );
