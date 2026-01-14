@@ -6,7 +6,7 @@ import * as __ctHelpers from "commontools";
  * - allCharms comes from wish<{ allCharms: MentionableCharm[] }>
  * - computed(() => allCharms.length) accesses .length on an OpaqueRef<T[]>
  *
- * The fix ensures the schema is { type: "array", items: { not: true, asOpaque: true } }
+ * The fix ensures the schema is { type: "array", items: { asStub: true } }
  * rather than { type: "object", properties: { length: { type: "number" } } }
  */
 import { computed, NAME, pattern, UI, wish } from "commontools";
@@ -50,8 +50,7 @@ export default pattern(() => {
                 allCharms: {
                     type: "array",
                     items: {
-                        not: true,
-                        asOpaque: true
+                        asStub: true
                     }
                 }
             },
@@ -68,8 +67,7 @@ export default pattern(() => {
                 allCharms: {
                     type: "array",
                     items: {
-                        not: true,
-                        asOpaque: true
+                        asStub: true
                     }
                 }
             },

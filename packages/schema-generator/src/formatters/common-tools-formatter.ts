@@ -214,20 +214,16 @@ export class CommonToolsFormatter implements TypeFormatter {
       !innerTypeIsGeneric;
 
     // Check for schema hints on the current typeNode and propagate to child context
-    // This allows array-property-only access patterns (e.g., .length) to generate items: { not: true, asCell/asOpaque: true }
+    // This allows array-property-only access patterns (e.g., .length) to generate items: { asStub: true }
+    // asStub tells the query engine not to traverse the items
     let childContext = context;
     let isArrayPropertyOnlyAccess = false;
     if (context.schemaHints && context.typeNode) {
       const hint = context.schemaHints.get(context.typeNode);
       if (hint?.items === false) {
         isArrayPropertyOnlyAccess = true;
-        // Build items override with not:true and the appropriate wrapper semantic
-        const itemsOverride: Record<string, boolean> = { not: true };
-        if (wrapperKind === "Cell") {
-          itemsOverride.asCell = true;
-        } else if (wrapperKind === "OpaqueRef") {
-          itemsOverride.asOpaque = true;
-        }
+        // Use asStub to tell the query engine not to traverse items
+        const itemsOverride: Record<string, boolean> = { asStub: true };
         childContext = { ...context, arrayItemsOverride: itemsOverride };
       }
     }

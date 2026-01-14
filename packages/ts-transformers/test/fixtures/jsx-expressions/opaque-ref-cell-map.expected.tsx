@@ -603,8 +603,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                 typedCellRef: {
                     type: "array",
                     items: {
-                        not: true,
-                        asOpaque: true
+                        asStub: true
                     }
                 }
             },
