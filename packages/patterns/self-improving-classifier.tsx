@@ -564,18 +564,24 @@ const undoAutoClassificationHandler = handler<
     const autoItems = recentAutoClassified.get();
     recentAutoClassified.set(autoItems.filter((a) => a.input.id !== inputId));
 
-    // Revert rule metrics
+    // Revert rule metrics (create new objects to avoid mutation)
     const rulesVal = rules.get();
-    for (const rule of rulesVal) {
+    const updatedRules = rulesVal.map((rule) => {
       if (autoItem.matchedRules.includes(rule.name)) {
         const predicted = rule.predicts;
         const wasCorrect = predicted === autoItem.label;
-        if (wasCorrect) {
-          rule.truePositives = Math.max(0, (rule.truePositives || 0) - 1);
-        }
-        rule.evaluationCount = Math.max(0, (rule.evaluationCount || 0) - 1);
+        const newTP = wasCorrect
+          ? Math.max(0, (rule.truePositives || 0) - 1)
+          : rule.truePositives || 0;
+        return {
+          ...rule,
+          truePositives: newTP,
+          evaluationCount: Math.max(0, (rule.evaluationCount || 0) - 1),
+        };
       }
-    }
+      return rule;
+    });
+    rules.set(updatedRules);
 
     // Set as current item for manual classification
     currentItem.set(autoItem.input);
@@ -897,19 +903,23 @@ export default pattern<ClassifierInput, ClassifierOutput>(
           [autoItem, ...recentAutoClassified.get()].slice(0, 10),
         );
 
-        // Update rule metrics
-        for (const rule of rulesVal) {
+        // Update rule metrics (create new objects to avoid mutation)
+        const updatedRules = rulesVal.map((rule) => {
           if (ruleMatch.matchedRules.includes(rule.name)) {
             const predicted = rule.predicts;
             const actual = ruleMatch.prediction;
-            // Note: For auto-classification, we assume the prediction is correct
-            // Metrics will be adjusted if user undoes
-            if (predicted === actual) {
-              rule.truePositives = (rule.truePositives || 0) + 1;
-            }
-            rule.evaluationCount = (rule.evaluationCount || 0) + 1;
+            const newTP = predicted === actual
+              ? (rule.truePositives || 0) + 1
+              : rule.truePositives || 0;
+            return {
+              ...rule,
+              truePositives: newTP,
+              evaluationCount: (rule.evaluationCount || 0) + 1,
+            };
           }
-        }
+          return rule;
+        });
+        rules.set(updatedRules);
 
         console.log(
           `[Classifier] Auto-classified as ${
