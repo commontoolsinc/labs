@@ -51,7 +51,7 @@ function ordinal(n: number): string {
 
 // ===== Pattern =====
 
-export default pattern<Input, Output>(({ value }) => {
+const Counter = pattern<Input, Output>(({ value }) => {
   // Bind the module-scope handler with its required context
   const boundIncrement = increment({ value });
 
@@ -59,7 +59,7 @@ export default pattern<Input, Output>(({ value }) => {
   // When an action only needs to work with this pattern's state, use action()
   // which closes over the pattern's values directly. This is simpler and clearer
   // than defining a reusable handler when you don't need reusability.
-  const decrement = action(() => {
+  const decrement = action<void>(() => {
     value.set(value.get() - 1);
   });
 
@@ -116,3 +116,15 @@ export default pattern<Input, Output>(({ value }) => {
     decrement, // Pattern-body action, closes over value directly
   };
 });
+
+// ===== Pattern as JSX Element =====
+// Patterns can be rendered as JSX elements directly. This is useful when
+// composing patterns or creating wrapper views. Pass props like regular JSX.
+
+const _CounterView = pattern<void, { [UI]: VNode }>(() => {
+  return {
+    [UI]: <Counter value={0} />,
+  };
+});
+
+export default Counter;
