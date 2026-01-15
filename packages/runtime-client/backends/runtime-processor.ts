@@ -1,6 +1,7 @@
 import { DID, Identity } from "@commontools/identity";
 import { CharmManager } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
+import { getLoggerCountsBreakdown, Logger } from "@commontools/utils/logger";
 import {
   type Cancel,
   convertCellsToLinks,
@@ -25,10 +26,14 @@ import {
   type CellUnsubscribeRequest,
   type GetCellRequest,
   GetGraphSnapshotRequest,
+  type GetLoggerCountsRequest,
   GraphSnapshotResponse,
   type InitializationData,
   IPCClientRequest,
   JSONValueResponse,
+  type LoggerCountsResponse,
+  type LoggerMetadata,
+  type LogLevel,
   NotificationType,
   type PageCreateRequest,
   type PageGetRequest,
@@ -38,6 +43,9 @@ import {
   type PageStartRequest,
   type PageStopRequest,
   RequestType,
+  type SetLoggerEnabledRequest,
+  type SetLoggerLevelRequest,
+  type SetPullModeRequest,
 } from "../protocol/mod.ts";
 import { HttpProgramResolver, Program } from "@commontools/js-compiler";
 import { setLLMUrl } from "@commontools/llm";
@@ -392,6 +400,64 @@ export class RuntimeProcessor {
     return { snapshot: this.runtime.scheduler.getGraphSnapshot() };
   }
 
+  setPullMode(request: SetPullModeRequest): void {
+    if (request.pullMode) {
+      this.runtime.scheduler.enablePullMode();
+    } else {
+      this.runtime.scheduler.disablePullMode();
+    }
+  }
+
+  getLoggerCounts(_: GetLoggerCountsRequest): LoggerCountsResponse {
+    const counts = getLoggerCountsBreakdown();
+    const metadata = this.#getLoggerMetadata();
+    return { counts, metadata };
+  }
+
+  #getLoggerMetadata(): LoggerMetadata {
+    const global = globalThis as unknown as {
+      commontools?: { logger?: Record<string, Logger> };
+    };
+    const result: LoggerMetadata = {};
+    if (global.commontools?.logger) {
+      for (const [name, logger] of Object.entries(global.commontools.logger)) {
+        result[name] = {
+          enabled: !logger.disabled,
+          level: (logger.level ?? "info") as LogLevel,
+        };
+      }
+    }
+    return result;
+  }
+
+  setLoggerLevel(request: SetLoggerLevelRequest): void {
+    const loggers = this.#getLoggers(request.loggerName);
+    for (const logger of loggers) {
+      logger.level = request.level;
+    }
+  }
+
+  setLoggerEnabled(request: SetLoggerEnabledRequest): void {
+    const loggers = this.#getLoggers(request.loggerName);
+    for (const logger of loggers) {
+      logger.disabled = !request.enabled;
+    }
+  }
+
+  #getLoggers(loggerName?: string): Logger[] {
+    const global = globalThis as unknown as {
+      commontools?: { logger?: Record<string, Logger> };
+    };
+    if (!global.commontools?.logger) {
+      return [];
+    }
+    if (loggerName) {
+      const logger = global.commontools.logger[loggerName];
+      return logger ? [logger] : [];
+    }
+    return Object.values(global.commontools.logger);
+  }
+
   #onTelemetry = (event: Event) => {
     const marker = (event as RuntimeTelemetryEvent).marker;
     self.postMessage({
@@ -442,6 +508,14 @@ export class RuntimeProcessor {
         return await this.handlePageSynced();
       case RequestType.GetGraphSnapshot:
         return this.getGraphSnapshot(request);
+      case RequestType.SetPullMode:
+        return this.setPullMode(request);
+      case RequestType.GetLoggerCounts:
+        return this.getLoggerCounts(request);
+      case RequestType.SetLoggerLevel:
+        return this.setLoggerLevel(request);
+      case RequestType.SetLoggerEnabled:
+        return this.setLoggerEnabled(request);
       default:
         throw new Error(`Unknown message type: ${(request as any).type}`);
     }

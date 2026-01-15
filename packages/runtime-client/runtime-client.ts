@@ -19,6 +19,9 @@ import {
   ErrorNotification,
   InitializationData,
   JSONValue,
+  type LoggerCountsData,
+  type LoggerMetadata,
+  type LogLevel,
   NavigateRequestNotification,
   RequestType,
   TelemetryNotification,
@@ -197,6 +200,49 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       type: RequestType.GetGraphSnapshot,
     });
     return res.snapshot;
+  }
+
+  async setPullMode(pullMode: boolean): Promise<void> {
+    await this.#conn.request<RequestType.SetPullMode>({
+      type: RequestType.SetPullMode,
+      pullMode,
+    });
+  }
+
+  async getLoggerCounts(): Promise<{
+    counts: LoggerCountsData;
+    metadata: LoggerMetadata;
+  }> {
+    const res = await this.#conn.request<RequestType.GetLoggerCounts>({
+      type: RequestType.GetLoggerCounts,
+    });
+    return { counts: res.counts, metadata: res.metadata };
+  }
+
+  /**
+   * Set log level for a logger in the worker.
+   * @param level - The log level to set
+   * @param loggerName - Optional logger name. If not provided, sets level for all loggers.
+   */
+  async setLoggerLevel(level: LogLevel, loggerName?: string): Promise<void> {
+    await this.#conn.request<RequestType.SetLoggerLevel>({
+      type: RequestType.SetLoggerLevel,
+      level,
+      loggerName,
+    });
+  }
+
+  /**
+   * Enable or disable a logger in the worker.
+   * @param enabled - Whether to enable or disable the logger
+   * @param loggerName - Optional logger name. If not provided, sets enabled for all loggers.
+   */
+  async setLoggerEnabled(enabled: boolean, loggerName?: string): Promise<void> {
+    await this.#conn.request<RequestType.SetLoggerEnabled>({
+      type: RequestType.SetLoggerEnabled,
+      enabled,
+      loggerName,
+    });
   }
 
   async dispose(): Promise<void> {
