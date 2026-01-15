@@ -151,6 +151,9 @@ interface ClassifierInput {
   config: Writable<Default<ClassifierConfig, typeof DEFAULT_CONFIG>>;
   examples: Writable<Default<LabeledExample[], []>>;
   rules: Writable<Default<ClassificationRule[], []>>;
+  // NOTE: pendingClassifications is reserved for future batch processing API.
+  // Currently items flow through currentItem → LLM → user confirmation → examples.
+  // External systems could use this queue for bulk submissions in the future.
   pendingClassifications: Writable<Default<PendingClassification[], []>>;
   // The item currently being classified (null when idle)
   // Only one item can be classified at a time
@@ -196,6 +199,18 @@ interface AutoClassifiedItem {
 // =============================================================================
 
 /**
+ * Maximum number of cached regex patterns to prevent memory leaks.
+ * Uses simple LRU-like eviction (removes oldest entries when full).
+ */
+const REGEX_CACHE_MAX_SIZE = 100;
+
+/**
+ * Maximum length for regex patterns to prevent ReDoS attacks.
+ * Patterns longer than this are rejected.
+ */
+const REGEX_MAX_PATTERN_LENGTH = 500;
+
+/**
  * Module-scoped cache for compiled RegExp objects.
  * Key format: `${pattern}|${caseInsensitive ? 'i' : ''}`
  * This avoids recompiling the same regex thousands of times when matching rules.
@@ -203,8 +218,36 @@ interface AutoClassifiedItem {
 const regexCache = new Map<string, RegExp | null>();
 
 /**
+ * Check if a regex pattern is potentially dangerous (ReDoS).
+ * This is a heuristic check for common catastrophic backtracking patterns.
+ * Returns true if the pattern appears safe, false if potentially dangerous.
+ */
+function isRegexSafe(pattern: string): boolean {
+  // Reject overly long patterns
+  if (pattern.length > REGEX_MAX_PATTERN_LENGTH) {
+    return false;
+  }
+
+  // Check for nested quantifiers which can cause catastrophic backtracking
+  // Patterns like (a+)+, (.*)+, (a*)*
+  const nestedQuantifiers = /\([^)]*[+*][^)]*\)[+*]|\([^)]*\)[+*][+*]/;
+  if (nestedQuantifiers.test(pattern)) {
+    return false;
+  }
+
+  // Check for overlapping alternatives with quantifiers
+  // Patterns like (a|a)+, (ab|abc)+
+  const overlappingAlts = /\([^)]*\|[^)]*\)[+*]{2,}/;
+  if (overlappingAlts.test(pattern)) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * Get a cached compiled regex, or compile and cache it.
- * Returns null for invalid regex patterns.
+ * Returns null for invalid or potentially dangerous regex patterns.
  */
 function getCachedRegex(
   pattern: string,
@@ -214,6 +257,23 @@ function getCachedRegex(
 
   if (regexCache.has(cacheKey)) {
     return regexCache.get(cacheKey)!;
+  }
+
+  // Check for potentially dangerous patterns (ReDoS prevention)
+  if (!isRegexSafe(pattern)) {
+    console.warn(
+      `[Classifier] Rejecting potentially dangerous regex pattern: "${pattern}"`,
+    );
+    regexCache.set(cacheKey, null);
+    return null;
+  }
+
+  // Evict oldest entries if cache is full (simple LRU-like behavior)
+  if (regexCache.size >= REGEX_CACHE_MAX_SIZE) {
+    const firstKey = regexCache.keys().next().value;
+    if (firstKey) {
+      regexCache.delete(firstKey);
+    }
   }
 
   try {
