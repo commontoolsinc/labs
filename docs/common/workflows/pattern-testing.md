@@ -82,7 +82,7 @@ deno task ct test packages/patterns/my-pattern/
 
 ## Test Step Format
 
-Tests use a **discriminated union** format to avoid TypeScript issues:
+Tests use a **discriminated union** format:
 
 ```tsx
 return {
@@ -93,7 +93,7 @@ return {
 };
 ```
 
-Each step is either `{ action: Stream<void> }` or `{ assertion: Cell<boolean> }`.
+Each step is either `{ action: Stream<void> }` or `{ assertion: boolean }`.
 
 ## Writing Actions
 

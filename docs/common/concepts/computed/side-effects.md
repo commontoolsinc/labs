@@ -4,13 +4,13 @@
 If your `computed()` has side effects (like setting another cell), they should be idempotent. Non-idempotent side effects cause the scheduler to re-run repeatedly until it hits the 101-iteration limit.
 
 ```typescript
-import { computed, pattern, Cell } from 'commontools';
+import { computed, pattern, Writable } from 'commontools';
 
 interface Props {}
 
 export default pattern<Props, Props>((_) => {
-  const logArray = Cell.of<Array<{ timestamp: number }>>([]);
-  const cacheMap = Cell.of<Record<string, number>>({});
+  const logArray = Writable.of<Array<{ timestamp: number }>>([]);
+  const cacheMap = Writable.of<Record<string, number>>({});
     
   // ❌ Non-idempotent - appends on every run
   const badComputed = computed(() => {

@@ -12,10 +12,10 @@ export default pattern<Input, Output>(({ ... }) => {
 });
 ```
 
-For dynamic collections, use a Cell:
+For dynamic collections, use a Writable:
 
 ```tsx
-const createdCharms = Cell.of<any[]>([]);
+const createdCharms = Writable.of<any[]>([]);
 
 const create = handler((_, { createdCharms }) => {
   createdCharms.push(ChildPattern({ name: "New" }));
@@ -23,7 +23,7 @@ const create = handler((_, { createdCharms }) => {
 
 return {
   [UI]: <ct-button onClick={create({ createdCharms })}>Create</ct-button>,
-  mentionable: createdCharms,  // Cell is automatically unwrapped
+  mentionable: createdCharms,
 };
 ```
 

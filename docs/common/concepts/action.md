@@ -45,7 +45,7 @@ const addItem = action((event: { title: string }) => {
 });
 
 // In JSX - pass data when calling
-<ct-button onClick={() => addItem({ title: "New Item" })}>
+<ct-button onClick={() => addItem.send({ title: "New Item" })}>
   Add Item
 </ct-button>
 ```

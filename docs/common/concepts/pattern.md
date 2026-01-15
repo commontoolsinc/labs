@@ -13,12 +13,14 @@ flowchart TD
 
 ## Input and Output Types
 
-Explicitly define types for your pattern inputs and outputs. This makes your code clearer and helps catch errors early.
+Explicitly define types for your pattern inputs and outputs.
+
+The type declares what data it expects and _how_ it is accessed.
 
 ```typescript
 interface TodoInput {
-  items: Writable<Todo[]>;
-  title: Writable<string>;
+  items?: Writable<Default<Todo[], []>>;
+  title?: Writable<Default<string, "untitled">>;
 }
 
 interface TodoOutput {
@@ -45,7 +47,10 @@ interface MyInput {
 }
 ```
 
-**Guideline:** Most inputs should be `Writable<>` since patterns typically modify their state. Use plain types only for truly read-only data.
+**Guideline:**
+
+- Use `Writable<>` when you want to call .set(), .push(), .update(), etc on it. Use plain types otherwise. It's explicitly ok to pass a plain type to a pattern that requests Writable<>, the framework will handle write intent transparently.
+- Add `Default<Type, Value>` with a reasonable initial state for most inputs, unless it really makes no sense to use the pattern without that value being passed in.
 
 ### Output Types
 
@@ -60,22 +65,6 @@ interface MyOutput {
 ```
 
 The output type reflects the *shape* of the returned data, not how it's stored internally.
-
-### Type Inference
-
-You can omit type parameters and let TypeScript infer them:
-
-```typescript
-// Inferred types - acceptable for simple patterns
-export default pattern(({ count, items }) => {
-  return { count, items };
-});
-```
-
-However, explicit types are recommended because they:
-- Document intent clearly
-- Catch type mismatches at compile time
-- Make the pattern's contract visible in `schemas.tsx`
 
 ### Always Use Dual Type Parameters
 
@@ -100,8 +89,6 @@ export default pattern<TodoInput>(({ items }) => {
 - **Sub-patterns require `[UI]` in Output** - When rendering a sub-pattern via `.map()`, the Output type must include `[UI]: VNode`
 - **TypeScript verification** - Explicit Output types catch mismatches at compile time
 
-Use `pattern<State>()` or `pattern<>()` only for throwaway prototypes.
-
 ### Output Types for Sub-Patterns
 
 When a pattern will be rendered inside another pattern (e.g., Column inside Board), include `[NAME]` and `[UI]` in the Output type:
@@ -117,18 +104,8 @@ interface ColumnOutput {
 }
 ```
 
-**Rendering syntax:** Use function calls, not JSX, for sub-patterns with Output types:
-
-```tsx
-// ✅ Correct - function call
-{columns.map((col) => Column({ column: col }))}
-
-// ❌ Wrong - JSX fails because OpaqueCell isn't a JSX Element
-{columns.map((col) => <Column column={col} />)}
-```
-
 ## See Also
 
 - [Pattern Composition](../patterns/composition.md) - How sub-pattern rendering works
 - [Writable](./types-and-schemas/writable.md) - Write intent in type signatures
-- [Self-Reference](./self-reference.md) - Using `SELF` with dual type parameters
+- [Self-Reference](./self-reference.md) - For accessing a reference to the pattern instance itself
