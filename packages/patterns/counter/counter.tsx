@@ -1,5 +1,6 @@
 /// <cts-enable />
 import {
+  action,
   computed,
   Default,
   handler,
@@ -25,18 +26,16 @@ interface Output {
   decrement: Stream<void>;
 }
 
-// ===== Handlers at module scope =====
-// Handler<Args, Context> - Args is what .send() receives, Context is bound state
+// ===== Module-scope handler =====
+// Use module-scope handlers when the same handler needs to be reused across
+// multiple pattern instances or bound to different values. The handler is
+// defined once and can be bound to different contexts.
+//
+// handler<Event, Context> - Event is what .send() receives, Context is bound state
 
 const increment = handler<void, { value: Writable<number> }>(
   (_, { value }) => {
     value.set(value.get() + 1);
-  },
-);
-
-const decrement = handler<void, { value: Writable<number> }>(
-  (_, { value }) => {
-    value.set(value.get() - 1);
   },
 );
 
@@ -53,11 +52,18 @@ function ordinal(n: number): string {
 // ===== Pattern =====
 
 export default pattern<Input, Output>(({ value }) => {
-  // Bind handlers with their required context
+  // Bind the module-scope handler with its required context
   const boundIncrement = increment({ value });
-  const boundDecrement = decrement({ value });
 
-  // Computed values - ordinal needs computed() to work with reactive value
+  // Pattern-body action (PREFERRED approach for single-use handlers)
+  // When an action only needs to work with this pattern's state, use action()
+  // which closes over the pattern's values directly. This is simpler and clearer
+  // than defining a reusable handler when you don't need reusability.
+  const decrement = action(() => {
+    value.set(value.get() - 1);
+  });
+
+  // Computed values
   const displayName = computed(() => `Counter: ${value}`);
   const ordinalDisplay = computed(() => ordinal(value.get()));
 
@@ -88,7 +94,7 @@ export default pattern<Input, Output>(({ value }) => {
             <ct-button
               id="counter-decrement"
               variant="secondary"
-              onClick={() => boundDecrement.send()}
+              onClick={decrement}
             >
               - Decrement
             </ct-button>
@@ -104,7 +110,9 @@ export default pattern<Input, Output>(({ value }) => {
       </ct-screen>
     ),
     value,
-    increment: boundIncrement,
-    decrement: boundDecrement,
+    // Both approaches can be exported and tested via the `ct` CLI
+    // and with automated pattern tests. See counter.test.tsx.
+    increment: boundIncrement, // Module-scope handler, bound in pattern
+    decrement, // Pattern-body action, closes over value directly
   };
 });
