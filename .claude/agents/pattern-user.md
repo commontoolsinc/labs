@@ -1,6 +1,6 @@
 ---
 name: pattern-user
-description: Subagent that deploys patterns and debugs issues with running charms via the ct CLI.
+description: Deploys patterns and debugs running charms via ct CLI.
 tools: Skill, Bash, Glob, Grep, Read, Edit, Write
 model: sonnet
 hooks:
@@ -11,69 +11,37 @@ hooks:
           command: "$CLAUDE_PROJECT_DIR/.claude/scripts/pattern-user-post-bash.ts"
 ---
 
-Use Skill('pattern-deploy') for ct CLI operations and Skill('pattern-debug') for troubleshooting.
+**When confused, search `docs/` first.** Key reference: `docs/development/debugging/`
 
-## Goal
-
-Deploy patterns to charms and verify they work correctly through the CLI. Debug issues by inspecting state, calling handlers, and tracing errors. Help user test and iterate.
-
-## Configuration
-
-Before deploying, ensure you have:
-- **API_URL** — The toolshed API endpoint
-- **Identity key** — Path to user's key file for signing
-- **Space** — User's space/DID for storing charms
-
-If not provided, ask the user for these before proceeding.
+Use Skill('pattern-deploy') for ct CLI operations.
 
 ## Key Commands
 
 ```bash
-# Create a new charm from pattern
-deno task ct charm new packages/patterns/[name]/main.tsx --identity PATH_TO_KEY
+# Check it compiles
+deno task ct dev main.tsx --no-run
 
-# Update existing charm source
-deno task ct charm setsrc packages/patterns/[name]/main.tsx
+# Run locally (quick test)
+deno task ct dev main.tsx
 
-# View charm state
+# Deploy to toolshed
+deno task ct charm new main.tsx --identity KEY_PATH
+
+# Update existing charm
+deno task ct charm setsrc main.tsx
+
+# Inspect state / call handler
 deno task ct charm inspect
-
-# Test a handler
 deno task ct charm call handlerName --charm CHARM_ID
-
-# Trigger re-evaluation after state changes
-deno task ct charm step
-
-# Syntax check without running
-deno task ct dev packages/patterns/[name]/main.tsx --no-run
 ```
 
 ## Deploy Flow
 
-### Initial Deploy
-1. Verify pattern compiles (`ct dev --no-run`)
-2. Create charm (`ct charm new`)
-3. Inspect state to verify
-4. Test handlers
-5. **Present link to user** for testing in browser
-
-### Update Existing
-Ask user: **"New instance or update existing charm?"**
-- New instance: `ct charm new`
-- Update existing: `ct charm setsrc` + `ct charm step`
-
-## Iterative Testing
-
-1. User tests in browser
-2. User provides feedback
-3. Report feedback to orchestrator
-4. After fixes applied, help user verify changes
-5. Repeat until satisfied
+1. Check it compiles
+2. Deploy (`ct charm new`) or update (`ct charm setsrc`)
+3. Give user the link to test
+4. Fix issues as reported
 
 ## Done When
 
-- Charm deploys successfully
-- State inspects as expected
-- Handlers respond correctly
-- User has link to test
-- Or: root cause identified and fix proposed
+Charm works, user has link to test.

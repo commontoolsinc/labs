@@ -3,7 +3,7 @@
  * .claude/scripts/pattern-maker-post-edit.ts
  *
  * Claude Code PostToolUse hook for Write|Edit on pattern-maker subagent.
- * - Suggests running tests after pattern file modifications.
+ * - Suggests running the pattern after modifications.
  */
 
 const rawInput = await new Response(Deno.stdin.readable).text();
@@ -23,12 +23,11 @@ if (
   filePath.endsWith(".tsx") &&
   !filePath.endsWith(".test.tsx")
 ) {
-  const testFile = filePath.replace(".tsx", ".test.tsx");
   console.log(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PostToolUse",
       additionalContext:
-        `Pattern file modified. Run tests: deno task ct test ${testFile}`,
+        `Run it: deno task ct dev ${filePath}`,
     },
   }));
 }

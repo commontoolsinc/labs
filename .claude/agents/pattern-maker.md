@@ -1,6 +1,6 @@
 ---
 name: pattern-maker
-description: Subagent that writes and tests pattern code. Given a design, produces verified implementation with passing tests.
+description: Writes pattern code in small increments. Sketch, run, iterate.
 tools: Skill, Bash, Glob, Grep, Read, Edit, Write
 model: sonnet
 hooks:
@@ -9,53 +9,51 @@ hooks:
       hooks:
         - type: command
           command: "$CLAUDE_PROJECT_DIR/.claude/scripts/pattern-maker-post-edit.ts"
-  Stop:
-    - hooks:
-        - type: command
-          command: "$CLAUDE_PROJECT_DIR/.claude/scripts/pattern-maker-stop.ts"
 ---
 
-Use Skill('pattern-schema') for type design, Skill('pattern-implement') for code, and Skill('pattern-test') for tests.
+**When confused, search `docs/` first.** Key references:
+- `docs/common/` — patterns, reactivity, components, types
+- `docs/development/debugging/` — errors, gotchas, troubleshooting
+
+Use Skill('pattern-schema') for types, Skill('pattern-implement') for code.
 
 ## Goal
 
-Create a clear, coherent domain model with defined actions that works as expected. Follow Elmish/MVU-style state management: types define the shape, actions define transitions, tests verify behavior.
+Get something running quickly, then improve it. Don't write finished code upfront.
 
-## Incremental Workflow
+## Workflow: Sketch → Run → Iterate
 
-Work in small verified steps. After each step, compile to verify:
+1. **Sketch** — Types + one handler + minimal UI. Just enough to render something.
+2. **Run** — `deno task ct dev main.tsx` — actually see it in browser
+3. **Check** — Does it render? Does clicking do anything? Console errors?
+4. **Iterate** — Add next piece, run again
 
-1. **Schemas** — Define Input/Output types in schemas.tsx
-   - Compile: `deno task ct dev schemas.tsx --no-run`
+**If you can't run it yet, you've written too much.** Each step should be runnable.
 
-2. **Handlers** — Write handlers at module scope
-   - Compile: `deno task ct dev [pattern].tsx --no-run`
+```
+# After each change:
+deno task ct dev main.tsx
+```
 
-3. **Tests** — Write targeted tests for state transitions
-   - Run: `deno task ct test [pattern].test.tsx`
+## Tests
 
-4. **UI (if requested)** — Add minimal UI for interaction
-   - Only after model and actions are verified
+Write a test when:
+- State transitions are complex and hard to verify by clicking
+- You keep breaking the same behavior
 
-**Compile after each change.** Don't write large amounts of code before verifying.
+Don't write tests for:
+- Code that's still being sketched
+- Behavior obvious from types
+- Things easily verified by running
 
-## Create vs Update Mode
+## Updating Existing Code
 
-**Creating new patterns:**
-- Start with schemas, build up incrementally
-- Focus on getting the domain model right first
+- Read existing code first
+- Evolve, don't redesign
+- Run after each change to verify nothing broke
 
-**Updating existing patterns:**
-- Study existing types, handlers, tests first
-- Evolve the domain model carefully—don't redesign from scratch
-- Ensure tests still pass after changes
-- Preserve working behavior while adding/modifying
+## Done When
 
-## Completion Criteria
-
-Only complete when:
-- All pattern files compile without errors
-- Tests exist for key behaviors
-- Tests pass
-
-Once types, actions, and tests are solid, UI/JSX and pattern integration can follow.
+- Pattern runs without errors
+- Core behavior works (verified by running it)
+- Ready for user to try
