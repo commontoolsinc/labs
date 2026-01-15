@@ -38,6 +38,7 @@ import {
   type PageStartRequest,
   type PageStopRequest,
   RequestType,
+  type SetPullModeRequest,
 } from "../protocol/mod.ts";
 import { HttpProgramResolver, Program } from "@commontools/js-compiler";
 import { setLLMUrl } from "@commontools/llm";
@@ -392,6 +393,14 @@ export class RuntimeProcessor {
     return { snapshot: this.runtime.scheduler.getGraphSnapshot() };
   }
 
+  setPullMode(request: SetPullModeRequest): void {
+    if (request.pullMode) {
+      this.runtime.scheduler.enablePullMode();
+    } else {
+      this.runtime.scheduler.disablePullMode();
+    }
+  }
+
   #onTelemetry = (event: Event) => {
     const marker = (event as RuntimeTelemetryEvent).marker;
     self.postMessage({
@@ -442,6 +451,8 @@ export class RuntimeProcessor {
         return await this.handlePageSynced();
       case RequestType.GetGraphSnapshot:
         return this.getGraphSnapshot(request);
+      case RequestType.SetPullMode:
+        return this.setPullMode(request);
       default:
         throw new Error(`Unknown message type: ${(request as any).type}`);
     }

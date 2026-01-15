@@ -199,6 +199,13 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return res.snapshot;
   }
 
+  async setPullMode(pullMode: boolean): Promise<void> {
+    await this.#conn.request<RequestType.SetPullMode>({
+      type: RequestType.SetPullMode,
+      pullMode,
+    });
+  }
+
   async dispose(): Promise<void> {
     await this.#conn.dispose();
   }

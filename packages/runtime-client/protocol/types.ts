@@ -35,6 +35,7 @@ export enum RequestType {
   GetCell = "runtime:getCell",
   Idle = "runtime:idle",
   GetGraphSnapshot = "runtime:getGraphSnapshot",
+  SetPullMode = "runtime:setPullMode",
 
   // Page operations (main -> worker)
   GetSpaceRootPattern = "pattern:getSpaceRoot",
@@ -141,6 +142,11 @@ export interface GetGraphSnapshotRequest extends BaseRequest {
   type: RequestType.GetGraphSnapshot;
 }
 
+export interface SetPullModeRequest extends BaseRequest {
+  type: RequestType.SetPullMode;
+  pullMode: boolean;
+}
+
 export interface PageCreateRequest extends BaseRequest {
   type: RequestType.PageCreate;
   source: {
@@ -196,6 +202,7 @@ export type IPCClientRequest =
   | CellUnsubscribeRequest
   | GetCellRequest
   | GetGraphSnapshotRequest
+  | SetPullModeRequest
   | IdleRequest
   | PageCreateRequest
   | PageGetSpaceDefault
@@ -298,6 +305,10 @@ export type Commands = {
   [RequestType.GetGraphSnapshot]: {
     request: GetGraphSnapshotRequest;
     response: GraphSnapshotResponse;
+  };
+  [RequestType.SetPullMode]: {
+    request: SetPullModeRequest;
+    response: EmptyResponse;
   };
   // Cell requests
   [RequestType.CellGet]: {
