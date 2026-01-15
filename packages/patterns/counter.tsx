@@ -50,7 +50,7 @@ const Counter = pattern<RecipeState, RecipeOutput>((state) => {
   };
 });
 
-const _CounterView = pattern(() => {
+const _CounterView = pattern<void, { [UI]: VNode }>(() => {
   return {
     [UI]: <Counter />,
   };

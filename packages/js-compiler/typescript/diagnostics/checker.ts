@@ -9,6 +9,10 @@ export interface CheckerOptions {
   messageTransformer?: DiagnosticMessageTransformer;
 }
 
+// These symbols are exported from commontools but TypeScript's declaration emit
+// has trouble with unique symbols in certain contexts. Filter out false positives.
+const KNOWN_EXPORTED_SYMBOLS = ["CELL_BRAND", "CELL_INNER_TYPE"];
+
 export class Checker {
   private program: Program;
   private messageTransformer?: DiagnosticMessageTransformer;
@@ -32,10 +36,6 @@ export class Checker {
   }
 
   declarationCheck() {
-    // These symbols are exported from commontools but TypeScript's declaration emit
-    // has trouble with unique symbols in certain contexts. Filter out false positives.
-    const knownExportedSymbols = ["CELL_BRAND", "CELL_INNER_TYPE"];
-
     const errors = this.sources().reduce((output, sourceFile) => {
       const diagnostics = this.program.getDeclarationDiagnostics(sourceFile);
       for (const diagnostic of diagnostics) {
@@ -43,7 +43,7 @@ export class Checker {
         const message = typeof diagnostic.messageText === "string"
           ? diagnostic.messageText
           : diagnostic.messageText.messageText;
-        const isKnownSymbol = knownExportedSymbols.some((sym) =>
+        const isKnownSymbol = KNOWN_EXPORTED_SYMBOLS.some((sym) =>
           message.includes(`private name '${sym}'`)
         );
         if (!isKnownSymbol) {
@@ -61,8 +61,20 @@ export class Checker {
     if (!diagnostics || diagnostics.length === 0) {
       return;
     }
+    // Filter out false positives for known exported symbols
+    const filtered = diagnostics.filter((diagnostic) => {
+      const message = typeof diagnostic.messageText === "string"
+        ? diagnostic.messageText
+        : diagnostic.messageText.messageText;
+      return !KNOWN_EXPORTED_SYMBOLS.some((sym) =>
+        message.includes(`private name '${sym}'`)
+      );
+    });
+    if (filtered.length === 0) {
+      return;
+    }
     throw new CompilerError(
-      diagnostics.map((diagnostic) => ({ diagnostic })),
+      filtered.map((diagnostic) => ({ diagnostic })),
       this.messageTransformer,
     );
   }
