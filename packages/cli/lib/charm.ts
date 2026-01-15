@@ -149,7 +149,7 @@ export async function newCharm(
   }
 
   const program = await getProgramFromFile(manager, entry);
-  const charm = await charms.create(program, { ...options, addToList: true });
+  const charm = await charms.create(program, { addToList: true, ...options });
   return charm.id;
 }
 
