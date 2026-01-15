@@ -409,6 +409,8 @@ const confirmOperation = handler<
         error: error instanceof Error ? error.message : String(error),
         timestamp: new Date().toISOString(),
       });
+      // Close confirmation modal on error
+      pendingOp.set(null);
     } finally {
       processing.set(false);
     }

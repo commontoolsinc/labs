@@ -180,7 +180,10 @@ export class GmailSendClient {
    * @returns The sent message metadata (id, threadId, labelIds)
    * @throws Error if sending fails or auth is invalid
    */
-  async sendEmail(params: SendEmailParams): Promise<SendEmailResult> {
+  async sendEmail(
+    params: SendEmailParams,
+    retryCount = 0,
+  ): Promise<SendEmailResult> {
     const token = this.auth.get()?.token;
     if (!token) {
       throw new Error("No authorization token. Please authenticate first.");
@@ -244,11 +247,16 @@ export class GmailSendClient {
       },
     );
 
-    // Handle 401 (token expired) - try to refresh and retry once
+    // Handle 401 (token expired) - try to refresh and retry with limit
     if (res.status === 401) {
       debugLog(this.debugMode, "Token expired, attempting refresh...");
+      if (retryCount >= 2) {
+        throw new Error(
+          "Token refresh failed after multiple attempts. Please re-authenticate.",
+        );
+      }
       await this.refreshAuth();
-      return this.sendEmail(params); // Retry with new token
+      return this.sendEmail(params, retryCount + 1);
     }
 
     if (!res.ok) {
@@ -279,6 +287,7 @@ export class GmailSendClient {
   async modifyLabels(
     messageId: string,
     params: ModifyLabelsParams,
+    retryCount = 0,
   ): Promise<ModifyLabelsResult> {
     const token = this.auth.get()?.token;
     if (!token) {
@@ -304,11 +313,16 @@ export class GmailSendClient {
       },
     );
 
-    // Handle 401 (token expired) - try to refresh and retry once
+    // Handle 401 (token expired) - try to refresh and retry with limit
     if (res.status === 401) {
       debugLog(this.debugMode, "Token expired, attempting refresh...");
+      if (retryCount >= 2) {
+        throw new Error(
+          "Token refresh failed after multiple attempts. Please re-authenticate.",
+        );
+      }
       await this.refreshAuth();
-      return this.modifyLabels(messageId, params);
+      return this.modifyLabels(messageId, params, retryCount + 1);
     }
 
     if (!res.ok) {
@@ -338,6 +352,7 @@ export class GmailSendClient {
   async batchModifyLabels(
     messageIds: string[],
     params: ModifyLabelsParams,
+    retryCount = 0,
   ): Promise<void> {
     const token = this.auth.get()?.token;
     if (!token) {
@@ -375,11 +390,16 @@ export class GmailSendClient {
       },
     );
 
-    // Handle 401 (token expired) - try to refresh and retry once
+    // Handle 401 (token expired) - try to refresh and retry with limit
     if (res.status === 401) {
       debugLog(this.debugMode, "Token expired, attempting refresh...");
+      if (retryCount >= 2) {
+        throw new Error(
+          "Token refresh failed after multiple attempts. Please re-authenticate.",
+        );
+      }
       await this.refreshAuth();
-      return this.batchModifyLabels(messageIds, params);
+      return this.batchModifyLabels(messageIds, params, retryCount + 1);
     }
 
     if (!res.ok) {
@@ -406,7 +426,7 @@ export class GmailSendClient {
    * @returns Array of available labels
    * @throws Error if listing fails or auth is invalid
    */
-  async listLabels(): Promise<GmailLabel[]> {
+  async listLabels(retryCount = 0): Promise<GmailLabel[]> {
     const token = this.auth.get()?.token;
     if (!token) {
       throw new Error("No authorization token. Please authenticate first.");
@@ -423,11 +443,16 @@ export class GmailSendClient {
       },
     );
 
-    // Handle 401 (token expired) - try to refresh and retry once
+    // Handle 401 (token expired) - try to refresh and retry with limit
     if (res.status === 401) {
       debugLog(this.debugMode, "Token expired, attempting refresh...");
+      if (retryCount >= 2) {
+        throw new Error(
+          "Token refresh failed after multiple attempts. Please re-authenticate.",
+        );
+      }
       await this.refreshAuth();
-      return this.listLabels();
+      return this.listLabels(retryCount + 1);
     }
 
     if (!res.ok) {

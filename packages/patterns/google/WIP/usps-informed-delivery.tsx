@@ -353,13 +353,6 @@ export default pattern<PatternInput, PatternOutput>(
       }[] = [];
       for (const email of emails || []) {
         const urls = extractMailPieceImages(email.htmlContent);
-        // DEBUG: Log extracted URLs
-        console.log(
-          `[USPS] Email ${
-            email.id.slice(0, 8)
-          }... extracted ${urls.length} images:`,
-          urls.slice(0, 3),
-        );
         urls.forEach((url, idx) => {
           images.push({
             emailId: email.id,
@@ -369,8 +362,6 @@ export default pattern<PatternInput, PatternOutput>(
           });
         });
       }
-      // DEBUG: Log total images
-      console.log(`[USPS] Total images extracted: ${images.length}`);
       // Limit to first 10 images for now to avoid overwhelming LLM calls
       return images.slice(0, 10);
     });

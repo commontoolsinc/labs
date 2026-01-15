@@ -9,7 +9,7 @@
  * 1. Pre-hoc: Create this directly, log in, and favorite
  * 2. Post-hoc: Created by google-auth-switcher after login
  */
-import { computed, Default, NAME, pattern, UI } from "commontools";
+import { computed, Default, ifElse, NAME, pattern, UI } from "commontools";
 import GoogleAuth, {
   Auth,
   createPreviewUI,
@@ -112,8 +112,9 @@ export default pattern<Input, Output>(({ auth, selectedScopes }) => {
         {/* Embed the base auth UI */}
         {baseAuth as any}
 
-        {/* Prominent favorite CTA */}
-        {computed(() => baseAuth.auth?.user?.email) && (
+        {/* Prominent favorite CTA - only show when logged in */}
+        {ifElse(
+          computed(() => !!baseAuth.auth?.user?.email),
           <div
             style={{
               marginTop: "16px",
@@ -154,7 +155,8 @@ export default pattern<Input, Output>(({ auth, selectedScopes }) => {
                 #googleAuthPersonal
               </code>
             </p>
-          </div>
+          </div>,
+          null,
         )}
       </div>
     ),

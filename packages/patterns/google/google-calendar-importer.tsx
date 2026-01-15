@@ -41,39 +41,7 @@ const env = getRecipeEnvironment();
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// ========== DERIVE DEBUG INSTRUMENTATION ==========
-// Track derive execution counts to investigate performance issues
-let deriveCallCount = 0;
-let perRowDeriveCount = 0;
-let lastLogTime = Date.now();
-const startTime = Date.now();
-
-function logDeriveCall(name: string, isPerRow = false) {
-  deriveCallCount++;
-  if (isPerRow) perRowDeriveCount++;
-  const now = Date.now();
-  const elapsed = now - startTime;
-  // Log on milestones or every second
-  if (now - lastLogTime > 1000 || deriveCallCount % 100 === 0) {
-    console.log(
-      `[DERIVE DEBUG] ${name}: total=${deriveCallCount}, perRow=${perRowDeriveCount}, elapsed=${elapsed}ms`,
-    );
-    lastLogTime = now;
-  }
-}
-
-// Start summary interval - using try/catch to handle server vs browser execution
-try {
-  setInterval(() => {
-    const elapsed = Date.now() - startTime;
-    console.log(
-      `[DERIVE DEBUG SUMMARY] total=${deriveCallCount}, perRow=${perRowDeriveCount}, elapsed=${elapsed}ms`,
-    );
-  }, 5000);
-} catch {
-  // Ignore if setInterval isn't available during compilation
-}
-// ========== END DEBUG INSTRUMENTATION ==========
+// Debug instrumentation removed - was causing resource leak (setInterval without cleanup)
 
 export type CalendarEvent = {
   id: string;
@@ -779,10 +747,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
       ),
       events,
       calendars,
-      eventCount: derive(events, (list: CalendarEvent[]) => {
-        logDeriveCall(`eventCount (length=${list?.length})`);
-        return list?.length || 0;
-      }),
+      eventCount: derive(events, (list: CalendarEvent[]) => list?.length || 0),
       bgUpdater: calendarUpdater({ events, calendars, auth, settings }),
       // Pattern tools for omnibot (implementations at module scope)
       searchEvents: patternTool(searchEventsImpl, { events }),

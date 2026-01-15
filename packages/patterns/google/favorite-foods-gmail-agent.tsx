@@ -305,7 +305,7 @@ Report each discovery immediately. Focus on patterns - if someone orders from th
                         {categoryLabels[category] || category}{" "}
                         ({groups[category].length})
                       </summary>
-                      <ct-vstack gap={2} style="paddingLeft: 16px;">
+                      <ct-vstack gap={2} style="padding-left: 16px;">
                         {groups[category].map((f: FoodPreference) => (
                           <div
                             style={{

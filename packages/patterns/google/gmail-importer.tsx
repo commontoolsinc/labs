@@ -979,7 +979,6 @@ const setAccountType = handler<
   { selectedType: Writable<AccountType> }
 >((event, state) => {
   const newType = event.target.value as AccountType;
-  console.log("[GmailImporter] Account type changed to:", newType);
   state.selectedType.set(newType);
 });
 

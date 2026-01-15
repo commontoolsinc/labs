@@ -54,6 +54,7 @@
  */
 
 import {
+  computed,
   derive,
   handler,
   ifElse,
@@ -966,9 +967,10 @@ export function createGoogleAuth(
   const currentEmail = derive(authInfo, (info) => info.email);
   const currentState = derive(authInfo, (info) => info.state);
 
-  // Extract the writable auth cell from authInfo
-  // IMPORTANT: This is the CELL reference, not derived data - supports writes for token refresh
-  const auth = derive(authInfo, (info) => info.authCell);
+  // Extract the writable auth cell directly from wishResult (not through derive)
+  // IMPORTANT: Using computed() preserves the original cell reference for token refresh writes
+  // derive() would create a read-only projection, breaking auth.update() calls in clients
+  const auth = computed(() => (wishResult as any)?.result?.auth ?? null);
 
   return {
     // Core auth cell - WRITABLE for token refresh

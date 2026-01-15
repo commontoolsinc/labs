@@ -82,13 +82,13 @@ well-tested version.
 
 2. **OAuth Scopes** The patterns request various scopes depending on their
    needs:
-   - `email`, `profile` - Basic user info
-   - `gmail.readonly` - Read emails
-   - `gmail.send` - Send emails
-   - `gmail.modify` - Modify labels
-   - `calendar.readonly` - Read calendar
-   - `calendar.events` - Manage calendar events
-   - `documents.readonly` - Read Google Docs
+   - `email`, `profile` - Basic user info (OpenID Connect)
+   - `https://www.googleapis.com/auth/gmail.readonly` - Read emails
+   - `https://www.googleapis.com/auth/gmail.send` - Send emails
+   - `https://www.googleapis.com/auth/gmail.modify` - Modify labels
+   - `https://www.googleapis.com/auth/calendar.readonly` - Read calendar
+   - `https://www.googleapis.com/auth/calendar.events` - Manage calendar events
+   - `https://www.googleapis.com/auth/documents.readonly` - Read Google Docs
 
 ## Quick Start
 

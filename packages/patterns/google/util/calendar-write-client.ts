@@ -531,6 +531,7 @@ export class CalendarWriteClient {
     calendarId: string,
     eventId: string,
     status: RSVPStatus,
+    retryCount = 0,
   ): Promise<CalendarEventResult> {
     const token = this.auth.get()?.token;
     if (!token) {
@@ -557,11 +558,16 @@ export class CalendarWriteClient {
       },
     });
 
-    // Handle 401 (token expired) - try to refresh and retry once
+    // Handle 401 (token expired) - try to refresh and retry with limit
     if (getRes.status === 401) {
       debugLog(this.debugMode, "Token expired, attempting refresh...");
+      if (retryCount >= 2) {
+        throw new Error(
+          "Token refresh failed after multiple attempts. Please re-authenticate.",
+        );
+      }
       await this.refreshAuth();
-      return this.rsvpToEvent(calendarId, eventId, status);
+      return this.rsvpToEvent(calendarId, eventId, status, retryCount + 1);
     }
 
     if (!getRes.ok) {

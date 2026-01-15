@@ -713,24 +713,18 @@ export async function validateAndRefreshTokenCrossCharm(
     | undefined,
   debugMode: boolean = false,
 ): Promise<{ valid: boolean; refreshed?: boolean; error?: string }> {
-  // DEBUG: Log entry point and initial state
-  console.log("[DEBUG-REFRESH] validateAndRefreshTokenCrossCharm called");
-  console.log("[DEBUG-REFRESH] Has refresh stream:", !!refreshStream?.send);
+  if (debugMode) {
+    console.log("[GmailClient] validateAndRefreshTokenCrossCharm called");
+    console.log("[GmailClient] Has refresh stream:", !!refreshStream?.send);
+  }
 
   const authData = auth.get();
   const token = authData?.token;
 
-  console.log(
-    "[DEBUG-REFRESH] Current token (first 20 chars):",
-    token?.slice(0, 20),
-  );
-  console.log(
-    "[DEBUG-REFRESH] Token expiresAt:",
-    authData?.expiresAt,
-    "now:",
-    Date.now(),
-  );
-  console.log("[DEBUG-REFRESH] Has refreshToken:", !!authData?.refreshToken);
+  if (debugMode) {
+    console.log("[GmailClient] Has token:", !!token);
+    console.log("[GmailClient] Has refreshToken:", !!authData?.refreshToken);
+  }
 
   if (!token) {
     return { valid: false, error: "No token provided" };
@@ -738,7 +732,9 @@ export async function validateAndRefreshTokenCrossCharm(
 
   // First, try validating the current token
   const initialValidation = await validateGmailToken(token);
-  console.log("[DEBUG-REFRESH] Initial validation result:", initialValidation);
+  if (debugMode) {
+    console.log("[GmailClient] Initial validation result:", initialValidation);
+  }
 
   if (initialValidation.valid) {
     return { valid: true };
@@ -809,19 +805,18 @@ export async function validateAndRefreshTokenCrossCharm(
       });
 
       // Re-read auth cell to get the refreshed token
-      console.log("[DEBUG-REFRESH] onCommit fired, re-reading auth cell...");
+      if (debugMode) {
+        console.log("[GmailClient] onCommit fired, re-reading auth cell...");
+      }
       const refreshedAuth = auth.get();
       const newToken = refreshedAuth?.token;
 
-      console.log(
-        "[DEBUG-REFRESH] New token (first 20 chars):",
-        newToken?.slice(0, 20),
-      );
-      console.log(
-        "[DEBUG-REFRESH] Token changed:",
-        newToken !== authData?.token,
-      );
-      console.log("[DEBUG-REFRESH] New expiresAt:", refreshedAuth?.expiresAt);
+      if (debugMode) {
+        console.log(
+          "[GmailClient] Token changed:",
+          newToken !== authData?.token,
+        );
+      }
 
       if (!newToken) {
         return {
@@ -837,12 +832,16 @@ export async function validateAndRefreshTokenCrossCharm(
       }
 
       // Validate the new token
-      console.log("[DEBUG-REFRESH] Validating new token...");
+      if (debugMode) {
+        console.log("[GmailClient] Validating new token...");
+      }
       const refreshedValidation = await validateGmailToken(newToken);
-      console.log(
-        "[DEBUG-REFRESH] New token validation result:",
-        refreshedValidation,
-      );
+      if (debugMode) {
+        console.log(
+          "[GmailClient] New token validation result:",
+          refreshedValidation,
+        );
+      }
       if (refreshedValidation.valid) {
         return { valid: true, refreshed: true };
       }
