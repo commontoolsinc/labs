@@ -26,8 +26,47 @@ import { Engine, Runtime } from "@commontools/runner";
 import type { Cell, Recipe, Stream } from "@commontools/runner";
 import type { OpaqueRef } from "@commontools/api";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
-import { basename } from "@std/path";
+import { basename, dirname, join } from "@std/path";
 import { timeout } from "@commontools/utils/sleep";
+
+/**
+ * Find the project root by walking up from a file path.
+ * Looks for deno.json, package.json, or a packages/ directory.
+ * This enables relative imports like `../shared/utils.tsx` in test files.
+ */
+function findProjectRoot(filePath: string): string {
+  let dir = dirname(filePath);
+  const markers = ["deno.json", "deno.jsonc", "package.json"];
+
+  // Walk up the directory tree
+  while (dir !== "/" && dir !== ".") {
+    // Check for marker files
+    for (const marker of markers) {
+      try {
+        Deno.statSync(join(dir, marker));
+        return dir;
+      } catch {
+        // File doesn't exist, continue
+      }
+    }
+
+    // Check if we're in a packages/ directory structure
+    // If we find a "packages" directory at this level, use the parent
+    try {
+      const stat = Deno.statSync(join(dir, "packages"));
+      if (stat.isDirectory) {
+        return dir;
+      }
+    } catch {
+      // Directory doesn't exist, continue
+    }
+
+    dir = dirname(dir);
+  }
+
+  // Fallback: use the test file's directory (original behavior)
+  return dirname(filePath);
+}
 
 /**
  * A test step is an object with either an 'assertion' or 'action' property.
@@ -85,8 +124,10 @@ export async function runTestPattern(
 
   try {
     // 2. Compile the test pattern
+    // Use project root to enable relative imports like ../shared/utils.tsx
+    const projectRoot = findProjectRoot(testPath);
     const program = await engine.resolve(
-      new FileSystemProgramResolver(testPath),
+      new FileSystemProgramResolver(testPath, projectRoot),
     );
     const { main } = await engine.process(program, {
       noCheck: false,
