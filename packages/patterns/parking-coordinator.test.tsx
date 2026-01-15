@@ -5,7 +5,7 @@
  * Tests the core allocation logic, priority ordering, and state transitions.
  * Run: deno task ct test packages/patterns/parking-coordinator.test.tsx --verbose
  */
-import { action, computed, pattern, Writable } from "commontools";
+import { action, computed, equals, pattern, Writable } from "commontools";
 import ParkingCoordinator from "./parking-coordinator.tsx";
 
 // Date helper at module scope (not inside pattern)
@@ -109,7 +109,7 @@ export default pattern(() => {
     const alice = coordinator.people.find((p) => p.name === "Alice");
     if (alice) {
       coordinator.requestSpot.send({
-        personId: alice.id,
+        person: alice,
         date: todayDate,
       });
     }
@@ -119,7 +119,7 @@ export default pattern(() => {
     const bob = coordinator.people.find((p) => p.name === "Bob");
     if (bob) {
       coordinator.requestSpot.send({
-        personId: bob.id,
+        person: bob,
         date: todayDate,
       });
     }
@@ -129,7 +129,7 @@ export default pattern(() => {
     const charlie = coordinator.people.find((p) => p.name === "Charlie");
     if (charlie) {
       coordinator.requestSpot.send({
-        personId: charlie.id,
+        person: charlie,
         date: todayDate,
       });
     }
@@ -165,7 +165,7 @@ export default pattern(() => {
     const alice = coordinator.people.find((p) => p.name === "Alice");
     if (!alice) return false;
     const alloc = coordinator.allocations.find(
-      (a) => a.personId === alice.id && a.date === todayDate,
+      (a) => a.person && equals(a.person, alice) && a.date === todayDate,
     );
     return alloc?.spot === 5;
   });
@@ -175,7 +175,7 @@ export default pattern(() => {
     const bob = coordinator.people.find((p) => p.name === "Bob");
     if (!bob) return false;
     const alloc = coordinator.allocations.find(
-      (a) => a.personId === bob.id && a.date === todayDate,
+      (a) => a.person && equals(a.person, bob) && a.date === todayDate,
     );
     return alloc?.spot === 1;
   });
@@ -185,7 +185,7 @@ export default pattern(() => {
     const charlie = coordinator.people.find((p) => p.name === "Charlie");
     if (!charlie) return false;
     const alloc = coordinator.allocations.find(
-      (a) => a.personId === charlie.id && a.date === todayDate,
+      (a) => a.person && equals(a.person, charlie) && a.date === todayDate,
     );
     return alloc?.spot === 12;
   });
@@ -193,10 +193,10 @@ export default pattern(() => {
   // ============ PRIORITY REORDER TEST ============
 
   const action_move_third_person_up = action(() => {
-    // Move whoever is third up
+    // Move whoever is third up (priorityOrder is now Person[])
     const order = coordinator.priorityOrder;
     if (order.length >= 3) {
-      coordinator.movePriorityUp.send({ personId: order[2] });
+      coordinator.movePriorityUp.send({ person: order[2] });
     }
   });
 
@@ -213,7 +213,7 @@ export default pattern(() => {
     if (alice) {
       coordinator.addGuest.send({
         name: "VIP Investor",
-        hostPersonId: alice.id,
+        hostPerson: alice,
         type: "high-priority",
         compatibleSpots: [1, 5, 12],
         notes: "Board meeting",
