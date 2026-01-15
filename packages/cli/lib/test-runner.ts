@@ -30,37 +30,19 @@ import { basename, dirname, join } from "@std/path";
 import { timeout } from "@commontools/utils/sleep";
 
 /**
- * Find the project root by walking up from a file path.
- * Looks for deno.json, package.json, or a packages/ directory.
+ * Find the project root by walking up from a file path looking for deno.json.
  * This enables relative imports like `../shared/utils.tsx` in test files.
  */
 function findProjectRoot(filePath: string): string {
   let dir = dirname(filePath);
-  const markers = ["deno.json", "deno.jsonc", "package.json"];
 
-  // Walk up the directory tree
   while (dir !== "/" && dir !== ".") {
-    // Check for marker files
-    for (const marker of markers) {
-      try {
-        Deno.statSync(join(dir, marker));
-        return dir;
-      } catch {
-        // File doesn't exist, continue
-      }
-    }
-
-    // Check if we're in a packages/ directory structure
-    // If we find a "packages" directory at this level, use the parent
     try {
-      const stat = Deno.statSync(join(dir, "packages"));
-      if (stat.isDirectory) {
-        return dir;
-      }
+      Deno.statSync(join(dir, "deno.json"));
+      return dir;
     } catch {
-      // Directory doesn't exist, continue
+      // deno.json doesn't exist at this level, continue up
     }
-
     dir = dirname(dir);
   }
 
