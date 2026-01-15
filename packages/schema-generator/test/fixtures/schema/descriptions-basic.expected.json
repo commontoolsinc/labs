@@ -1,4 +1,5 @@
 {
+  "description": "Root doc",
   "properties": {
     "name": {
       "description": "Name doc",
@@ -8,6 +9,5 @@
   "required": [
     "name"
   ],
-  "description": "Root doc",
   "type": "object"
 }

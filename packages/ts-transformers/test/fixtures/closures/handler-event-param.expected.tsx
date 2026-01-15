@@ -82,32 +82,30 @@ export default pattern((state) => {
     type: "object",
     properties: {
         $UI: {
-            $ref: "#/$defs/Element"
+            $ref: "#/$defs/JSXElement"
         }
     },
     required: ["$UI"],
     $defs: {
-        Element: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "#/$defs/VNode"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
             type: "object",
             properties: {
-                type: {
-                    type: "string",
-                    "enum": ["vnode"]
-                },
-                name: {
-                    type: "string"
-                },
-                props: {
-                    $ref: "#/$defs/Props"
-                },
-                children: {
-                    $ref: "#/$defs/RenderNode"
-                },
                 $UI: {
                     $ref: "#/$defs/VNode"
                 }
             },
-            required: ["type", "name", "props"]
+            required: ["$UI"]
         },
         VNode: {
             type: "object",
@@ -147,6 +145,9 @@ export default pattern((state) => {
                 }, {
                     type: "object",
                     properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
                 }, {
                     type: "object",
                     properties: {}

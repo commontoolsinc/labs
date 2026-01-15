@@ -10,8 +10,8 @@
     }
   },
   "required": [
-    "name",
-    "age"
+    "age",
+    "name"
   ],
   "type": "object"
 }
