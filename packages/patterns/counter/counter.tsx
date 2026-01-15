@@ -64,7 +64,7 @@ const Counter = pattern<Input, Output>(({ value }) => {
   });
 
   // Computed values
-  const displayName = computed(() => `Counter: ${value}`);
+  const displayName = computed(() => `Counter: ${value.get()}`);
   const ordinalDisplay = computed(() => ordinal(value.get()));
 
   return {
