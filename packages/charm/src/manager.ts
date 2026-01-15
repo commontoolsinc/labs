@@ -752,7 +752,7 @@ export class CharmManager {
     options?: { start?: boolean; addToList?: boolean },
   ): Promise<Cell<T>> {
     const start = options?.start ?? true;
-    const addToList = options?.addToList ?? true;
+    const addToList = options?.addToList ?? false;
     const charm = await this.setupPersistent<T>(
       recipe,
       inputs,
@@ -774,7 +774,7 @@ export class CharmManager {
     recipe: Recipe | Module,
     charmId: string,
     inputs?: object,
-    options?: { start?: boolean },
+    options?: { start?: boolean; addToList?: boolean },
   ): Promise<Cell<unknown>> {
     const charm = this.runtime.getCellFromEntityId(this.space, {
       "/": charmId,
@@ -788,7 +788,10 @@ export class CharmManager {
     }
     await this.syncRecipe(charm);
 
-    await this.add([charm]);
+    // Only add to list if explicitly requested
+    if (options?.addToList) {
+      await this.add([charm]);
+    }
 
     return charm;
   }
@@ -802,7 +805,7 @@ export class CharmManager {
     inputs?: unknown,
     cause?: unknown,
     llmRequestId?: string,
-    addToList: boolean = true,
+    addToList: boolean = false,
   ): Promise<Cell<T>> {
     await this.runtime.idle();
     const charm = this.runtime.getCell<T>(
@@ -813,7 +816,7 @@ export class CharmManager {
     this.runtime.setup(undefined, recipe, inputs ?? {}, charm);
     await this.syncRecipe(charm);
 
-    // Only add to list if requested (defaults to true for backward compatibility)
+    // Only add to list if explicitly requested
     if (addToList) {
       await this.add([charm]);
     }

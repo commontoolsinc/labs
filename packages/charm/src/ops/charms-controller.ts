@@ -38,11 +38,6 @@ export class CharmsController<T = unknown> {
     cause: string | undefined = undefined,
   ): Promise<CharmController<U>> {
     this.disposeCheck();
-
-    // Ensure default pattern exists before creating charms.
-    // Required because add() delegates to defaultPattern's addCharm handler.
-    await this.ensureDefaultPattern();
-
     const recipe = await compileProgram(this.#manager, program);
     const charm = await this.#manager.runPersistent<U>(
       recipe,
