@@ -64,17 +64,26 @@ export function deepEqual(a: any, b: any): boolean {
 
   let indexCount = 0; // Counts non-hole indexed properties.
   for (let i = 0; i < lengthA; i++) {
-    const aHasIt = Object.hasOwn(a, i);
-    const bHasIt = Object.hasOwn(b, i);
-    if (aHasIt && bHasIt) {
-      if (!deepEqual(a[i], b[i])) {
-        return false;
-      }
-      indexCount++;
-    } else if (aHasIt || bHasIt) {
+    const aValue = a[i];
+    const bValue = b[i];
+
+    indexCount++; // Assume non-hole to start. Might get reversed below.
+
+    if (!deepEqual(aValue, bValue)) {
       return false;
     }
-    // else both have a hole here, and so remain "equal" at this point.
+
+    if ((aValue === undefined) && (bValue === undefined)) {
+      // Need to distinguish hole from a truly stored `undefined`.
+      const aHasIt = Object.hasOwn(a, i);
+      const bHasIt = Object.hasOwn(b, i);
+      if ((aHasIt && !bHasIt) || (!aHasIt && bHasIt)) {
+        return false;
+      } else if (!aHasIt && !bHasIt) {
+        // It's a hole.
+        indexCount--;
+      }
+    }
   }
 
   if (indexCount === keysALength) {
