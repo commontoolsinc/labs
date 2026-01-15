@@ -368,46 +368,6 @@ const getWeekSummary = lift(
 
 // ============ MODULE-SCOPE HANDLERS ============
 
-/**
- * Remove a person (event-based for stream pattern)
- *
- * WORKAROUND for rendering issue: Creating handler bindings inside .map()
- * with person from callback causes only the first card to render.
- * Using event-based handlers with .send() in arrow functions fixes this.
- * See: movePriorityUpStreamHandler for the same pattern.
- */
-const removePersonStreamHandler = handler<
-  RemovePersonEvent,
-  {
-    people: Writable<Person[]>;
-    requests: Writable<SpotRequest[]>;
-    guests: Writable<Guest[]>;
-  }
->((event, { people, requests, guests }) => {
-  const person = event.person;
-  const pList = people.get();
-  const idx = pList.findIndex((p) => equals(person, p));
-  if (idx >= 0) {
-    people.set(pList.toSpliced(idx, 1));
-  }
-  // Remove related requests
-  const reqList = requests.get();
-  const filteredReqs = reqList.filter(
-    (r) => !r.person || !equals(r.person, person),
-  );
-  if (filteredReqs.length !== reqList.length) {
-    requests.set(filteredReqs);
-  }
-  // Remove guests hosted by this person
-  const guestList = guests.get();
-  const filteredGuests = guestList.filter(
-    (g) => !g.hostPerson || !equals(g.hostPerson, person),
-  );
-  if (filteredGuests.length !== guestList.length) {
-    guests.set(filteredGuests);
-  }
-});
-
 // Remove a guest (context-based for UI buttons)
 const removeGuestHandler = handler<
   unknown,
@@ -585,6 +545,79 @@ const movePriorityDownStreamHandler = handler<
   const newOrder = order.map(reconstructPerson);
   [newOrder[idx], newOrder[idx + 1]] = [newOrder[idx + 1], newOrder[idx]];
   people.set(newOrder);
+});
+
+/**
+ * Index-based handlers for UI buttons in .map()
+ *
+ * IDIOMATIC PATTERN: Use index from .map() callback instead of reactive
+ * object references. Passing reactive refs to handlers causes runtime
+ * errors ("Tried to access a reactive reference outside a reactive context").
+ *
+ * See: packages/patterns/simple-list.tsx for the canonical example.
+ */
+const movePriorityUpByIndex = handler<
+  unknown,
+  { people: Writable<Person[]>; index: number }
+>((_event, { people, index }) => {
+  const order = people.get();
+  if (index <= 0 || index >= order.length) return;
+
+  const newOrder = order.map(reconstructPerson);
+  [newOrder[index - 1], newOrder[index]] = [
+    newOrder[index],
+    newOrder[index - 1],
+  ];
+  people.set(newOrder);
+});
+
+const movePriorityDownByIndex = handler<
+  unknown,
+  { people: Writable<Person[]>; index: number }
+>((_event, { people, index }) => {
+  const order = people.get();
+  if (index < 0 || index >= order.length - 1) return;
+
+  const newOrder = order.map(reconstructPerson);
+  [newOrder[index], newOrder[index + 1]] = [
+    newOrder[index + 1],
+    newOrder[index],
+  ];
+  people.set(newOrder);
+});
+
+const removePersonByIndex = handler<
+  unknown,
+  {
+    people: Writable<Person[]>;
+    requests: Writable<SpotRequest[]>;
+    guests: Writable<Guest[]>;
+    index: number;
+  }
+>((_event, { people, requests, guests, index }) => {
+  const pList = people.get();
+  if (index < 0 || index >= pList.length) return;
+
+  const personName = pList[index].name;
+  people.set(pList.toSpliced(index, 1));
+
+  // Also remove related requests for this person
+  const reqList = requests.get();
+  const filteredReqs = reqList.filter(
+    (r) => !r.person || r.person.name !== personName,
+  );
+  if (filteredReqs.length !== reqList.length) {
+    requests.set(filteredReqs);
+  }
+
+  // Remove guests hosted by this person
+  const guestList = guests.get();
+  const filteredGuests = guestList.filter(
+    (g) => !g.hostPerson || g.hostPerson.name !== personName,
+  );
+  if (filteredGuests.length !== guestList.length) {
+    guests.set(filteredGuests);
+  }
 });
 
 // Add a person
@@ -1206,21 +1239,6 @@ export default pattern<Input, Output>(
       people,
     });
 
-    /**
-     * Priority control streams for People tab
-     *
-     * WORKAROUND: Creating handler bindings inside .map() with person from
-     * callback causes only the first card to render. Using pre-created
-     * streams and calling .send() in onClick arrow functions fixes this.
-     */
-    const movePriorityUpStream = movePriorityUpStreamHandler({ people });
-    const movePriorityDownStream = movePriorityDownStreamHandler({ people });
-    const removePersonStream = removePersonStreamHandler({
-      people,
-      requests,
-      guests,
-    });
-
     // ============ UI ============
 
     return {
@@ -1474,14 +1492,12 @@ export default pattern<Input, Output>(
                   /*
                    * Person cards with priority controls
                    *
-                   * WORKAROUND: Use pre-created handler streams and call .send()
-                   * in onClick arrow functions instead of creating handlers
-                   * inline in .map(). Creating handlers inside .map() with
-                   * person from the callback causes rendering issues where
-                   * only the first card renders.
+                   * IDIOMATIC PATTERN: Use index from .map() callback with
+                   * handler binding. Passing reactive refs to handlers causes
+                   * runtime errors. See: packages/patterns/simple-list.tsx
                    */
                 }
-                {sortedPriority.map((person) => (
+                {sortedPriority.map((person, index: number) => (
                   <ct-card>
                     <ct-hstack gap="2" align="center">
                       <ct-vstack gap="0" style="flex: 1;">
@@ -1493,21 +1509,26 @@ export default pattern<Input, Output>(
                       <ct-button
                         variant="ghost"
                         size="sm"
-                        onClick={() => movePriorityUpStream.send({ person })}
+                        onClick={movePriorityUpByIndex({ people, index })}
                       >
                         ↑
                       </ct-button>
                       <ct-button
                         variant="ghost"
                         size="sm"
-                        onClick={() => movePriorityDownStream.send({ person })}
+                        onClick={movePriorityDownByIndex({ people, index })}
                       >
                         ↓
                       </ct-button>
                       <ct-button
                         variant="ghost"
                         size="sm"
-                        onClick={() => removePersonStream.send({ person })}
+                        onClick={removePersonByIndex({
+                          people,
+                          requests,
+                          guests,
+                          index,
+                        })}
                       >
                         ×
                       </ct-button>
