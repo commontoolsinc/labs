@@ -1,7 +1,7 @@
 /// <cts-enable />
 
 import { computed, NAME, recipe, UI, Writable } from "commontools";
-import Counter from "../counter.tsx";
+import Counter from "../counter/counter.tsx";
 import Note from "../notes/note.tsx";
 
 // Simple random ID generator (crypto.randomUUID not available in pattern env)
