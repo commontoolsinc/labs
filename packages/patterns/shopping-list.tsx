@@ -195,6 +195,32 @@ const removeItem = handler<
   }
 });
 
+// Handler for opening correction panel
+const openCorrection = handler<
+  unknown,
+  {
+    items: Writable<ShoppingItem[]>;
+    item: ShoppingItem;
+    correctionIndex: Writable<number>;
+    correctionTitle: Writable<string>;
+  }
+>((_event, { items, item, correctionIndex, correctionTitle }) => {
+  const current = items.get();
+  const index = current.findIndex((el) => equals(item, el));
+  if (index >= 0) {
+    correctionTitle.set(current[index]?.title || "");
+    correctionIndex.set(index);
+  }
+});
+
+// Handler for closing correction panel
+const closeCorrection = handler<
+  unknown,
+  { correctionIndex: Writable<number> }
+>((_event, { correctionIndex }) => {
+  correctionIndex.set(-1);
+});
+
 // Extract valid locations from store layout
 function extractLocations(layout: string): string[] {
   const locations: string[] = [];
@@ -212,7 +238,12 @@ function extractLocations(layout: string): string[] {
 export default pattern<Input, Output>(({ items, storeLayout }) => {
   // UI state for view mode
   const viewMode = Writable.of<"quick" | "sorted">("quick");
-  const correctionItem = Writable.of<ShoppingItem | null>(null);
+  // Store both index and title when opening correction panel
+  const correctionIndex = Writable.of<number>(-1);
+  const correctionTitle = Writable.of<string>("");
+
+  // Computed for whether correction panel is open
+  const isCorrecting = computed(() => correctionIndex.get() >= 0);
 
   // Computed statistics
   const totalCount = computed(() => items.get().length);
@@ -224,7 +255,10 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
   // Combined stats string to avoid adjacent reactive text node rendering issues
   const statsText = derive(
     [remainingCount, doneCount],
-    ([remaining, done]) => `${remaining} items to get • ${done} checked off`,
+    ([remaining, done]) => {
+      const itemWord = remaining === 1 ? "item" : "items";
+      return `${remaining} ${itemWord} to get • ${done} checked off`;
+    },
   );
 
   // Check if a real store layout is connected (not using demo fallback)
@@ -313,6 +347,15 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
         {/* Main scrollable content */}
         <ct-vscroll flex showScrollbar fadeEdges>
           <ct-vstack gap="2" style="padding: 1rem; max-width: 800px;">
+            {/* Input field at top - with right padding to avoid FAB */}
+            <div style={{ paddingRight: "60px" }}>
+              <ct-message-input
+                placeholder="Add item..."
+                appearance="rounded"
+                onct-send={addItem({ items })}
+              />
+            </div>
+
             {/* QUICK LIST VIEW */}
             {ifElse(
               computed(() => viewMode.get() === "quick"),
@@ -327,7 +370,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                       padding: "2rem",
                     }}
                   >
-                    Your shopping list is empty. Add items below!
+                    Your shopping list is empty. Type above to add items!
                   </div>,
                   null,
                 )}
@@ -388,26 +431,6 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
             {ifElse(
               computed(() => viewMode.get() === "sorted"),
               <ct-vstack gap="2">
-                {/* Demo layout notice in sorted view */}
-                {ifElse(
-                  derive(hasConnectedStore, (connected: boolean) => !connected),
-                  <div
-                    style={{
-                      textAlign: "center",
-                      color: "#f59e0b",
-                      background: "#fef3c7",
-                      padding: "0.75rem",
-                      fontSize: "13px",
-                      borderRadius: "6px",
-                      border: "1px solid #fcd34d",
-                      marginBottom: "0.5rem",
-                    }}
-                  >
-                    ⚠️ Using demo store layout (Andronico's). Connect a Store
-                    Mapper for your actual store.
-                  </div>,
-                  null,
-                )}
                 {/* Items with aisles */}
                 {itemsWithAisles.map((itemWithAisle) => (
                   <ct-card>
@@ -457,7 +480,12 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                       {/* Correction button */}
                       <ct-button
                         variant="ghost"
-                        onClick={() => correctionItem.set(itemWithAisle.item)}
+                        onClick={openCorrection({
+                          items,
+                          item: itemWithAisle.item,
+                          correctionIndex,
+                          correctionTitle,
+                        })}
                         style="font-size: 12px; padding: 4px;"
                       >
                         ✏️
@@ -465,6 +493,26 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                     </ct-hstack>
                   </ct-card>
                 ))}
+
+                {/* Demo layout notice */}
+                {ifElse(
+                  derive(hasConnectedStore, (connected: boolean) => !connected),
+                  <div
+                    style={{
+                      textAlign: "center",
+                      color: "#f59e0b",
+                      background: "#fef3c7",
+                      padding: "0.75rem",
+                      fontSize: "13px",
+                      borderRadius: "6px",
+                      border: "1px solid #fcd34d",
+                    }}
+                  >
+                    ⚠️ Using demo store layout (Andronico's). Connect a Store
+                    Mapper for your actual store.
+                  </div>,
+                  null,
+                )}
               </ct-vstack>,
               null,
             )}
@@ -473,7 +521,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
 
         {/* Correction panel (shown when correcting an item) */}
         {ifElse(
-          computed(() => correctionItem.get() !== null),
+          isCorrecting,
           <div
             style={{
               position: "fixed",
@@ -492,13 +540,11 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
             <ct-vstack gap="2">
               <ct-hstack justify="between" align="center">
                 <span style={{ fontWeight: 500 }}>
-                  Where is "{derive(correctionItem, (c: ShoppingItem | null) =>
-                    c?.title || "")}" actually located?
+                  Where is "{correctionTitle}" actually located?
                 </span>
                 <ct-button
                   variant="ghost"
-                  onClick={() =>
-                    correctionItem.set(null)}
+                  onClick={closeCorrection({ correctionIndex })}
                 >
                   ✕ Cancel
                 </ct-button>
@@ -515,15 +561,13 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                     variant="secondary"
                     onClick={() => {
                       // Force re-categorization by incrementing aisleSeed
-                      const currentItem = correctionItem.get();
-                      if (currentItem) {
+                      const idx = correctionIndex.get();
+                      if (idx >= 0) {
                         const itemsList = items.get();
-                        const index = itemsList.findIndex((i) =>
-                          equals(i, currentItem)
-                        );
-                        if (index >= 0) {
-                          const updated = itemsList.map((i, idx) =>
-                            idx === index
+                        const item = itemsList[idx];
+                        if (item) {
+                          const updated = itemsList.map((i, index) =>
+                            index === idx
                               ? {
                                 ...i,
                                 aisleSeed: (i.aisleSeed || 0) + 1,
@@ -533,7 +577,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                           items.set(updated);
                         }
                       }
-                      correctionItem.set(null);
+                      correctionIndex.set(-1);
                     }}
                   >
                     {location}
@@ -544,15 +588,6 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
           </div>,
           null,
         )}
-
-        {/* Footer with input */}
-        <div slot="footer" style="padding: 1rem;">
-          <ct-message-input
-            placeholder="Enter item..."
-            appearance="rounded"
-            onct-send={addItem({ items })}
-          />
-        </div>
       </ct-screen>
     ),
     items,
