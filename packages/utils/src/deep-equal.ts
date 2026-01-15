@@ -62,7 +62,7 @@ export function deepEqual(a: any, b: any): boolean {
       return false;
     }
 
-    if ((aValue === undefined) && (bValue === undefined)) {
+    if (aValue === undefined) {
       // Need to distinguish hole from a truly stored `undefined`.
       const aHasIt = Object.hasOwn(a, i);
       const bHasIt = Object.hasOwn(b, i);
@@ -104,8 +104,22 @@ function checkSpecificProps(
   keysToCheck: string[],
 ): boolean {
   for (const key of keysToCheck) {
-    if (!(Object.hasOwn(b, key) && deepEqual(a[key], b[key]))) {
+    const aValue = a[key];
+    const bValue = b[key];
+
+    if (!deepEqual(aValue, bValue)) {
       return false;
+    }
+
+    if (aValue === undefined) {
+      // Need to distinguish a missing property from a truly stored `undefined`.
+      // Given how `keysToCheck` we know `a` definitely has the property, so we
+      // just have to check `b`.
+      if (!Object.hasOwn(b, key)) {
+        // `a` has the property (because of how `keysToCheck` was constructed),
+        // but `b` does not.
+        return false;
+      }
     }
   }
 
