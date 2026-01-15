@@ -504,69 +504,19 @@ export default pattern<Input, Output>(
           </div>
 
           {/* Navigation tabs */}
-          <ct-hstack
-            gap="1"
-            style="padding: 0.5rem 1rem; border-bottom: 1px solid var(--ct-color-gray-200);"
-          >
-            <ct-button
-              variant={ifElse(
-                computed(() => currentSection.get() === "map"),
-                "primary",
-                "ghost",
-              )}
-              onClick={() => currentSection.set("map")}
-            >
-              🗺️ Map
-            </ct-button>
-            <ct-button
-              variant={ifElse(
-                computed(() => currentSection.get() === "aisles"),
-                "primary",
-                "ghost",
-              )}
-              onClick={() => currentSection.set("aisles")}
-            >
-              Aisles
-            </ct-button>
-            <ct-button
-              variant={ifElse(
-                computed(() => currentSection.get() === "departments"),
-                "primary",
-                "ghost",
-              )}
-              onClick={() => currentSection.set("departments")}
-            >
-              Depts
-            </ct-button>
-            <ct-button
-              variant={ifElse(
-                computed(() => currentSection.get() === "corrections"),
-                "primary",
-                "ghost",
-              )}
-              onClick={() => currentSection.set("corrections")}
-            >
-              Fixes
-            </ct-button>
-            <ct-button
-              variant={ifElse(
-                computed(() => currentSection.get() === "outline"),
-                "primary",
-                "ghost",
-              )}
-              onClick={() => currentSection.set("outline")}
-            >
-              Outline
-            </ct-button>
-          </ct-hstack>
+          <ct-tabs $value={currentSection}>
+            <ct-tab-list>
+              <ct-tab value="map">Map</ct-tab>
+              <ct-tab value="aisles">Aisles</ct-tab>
+              <ct-tab value="departments">Depts</ct-tab>
+              <ct-tab value="corrections">Fixes</ct-tab>
+              <ct-tab value="outline">Outline</ct-tab>
+            </ct-tab-list>
 
-          {/* Main content */}
-          <ct-vscroll flex showScrollbar fadeEdges>
-            <ct-vstack gap="2" style="padding: 1rem; max-width: 800px;">
-              {/* MAP SECTION */}
-              {ifElse(
-                computed(() => currentSection.get() === "map"),
-                <ct-vstack gap="3">
+            {/* MAP SECTION */}
+            <ct-tab-panel value="map">
+              <ct-vscroll flex showScrollbar fadeEdges>
+                <ct-vstack gap="3" style="padding: 1rem; max-width: 800px;">
                   {/* CSS for store map */}
                   <style>
                     {`
@@ -1443,14 +1393,14 @@ export default pattern<Input, Output>(
                       + Add Departments
                     </ct-button>
                   </ct-hstack>
-                </ct-vstack>,
-                null,
-              )}
+                </ct-vstack>
+              </ct-vscroll>
+            </ct-tab-panel>
 
-              {/* AISLES SECTION */}
-              {ifElse(
-                computed(() => currentSection.get() === "aisles"),
-                <ct-vstack gap="2">
+            {/* AISLES SECTION */}
+            <ct-tab-panel value="aisles">
+              <ct-vscroll flex showScrollbar fadeEdges>
+                <ct-vstack gap="2" style="padding: 1rem; max-width: 800px;">
                   {/* Gap warning */}
                   {ifElse(
                     derive(detectedGaps, (gaps: number[]) => gaps.length > 0),
@@ -1759,14 +1709,14 @@ export default pattern<Input, Output>(
                       )}
                     </ct-vstack>
                   </ct-card>
-                </ct-vstack>,
-                null,
-              )}
+                </ct-vstack>
+              </ct-vscroll>
+            </ct-tab-panel>
 
-              {/* DEPARTMENTS SECTION */}
-              {ifElse(
-                computed(() => currentSection.get() === "departments"),
-                <ct-vstack gap="2">
+            {/* DEPARTMENTS SECTION */}
+            <ct-tab-panel value="departments">
+              <ct-vscroll flex showScrollbar fadeEdges>
+                <ct-vstack gap="2" style="padding: 1rem; max-width: 800px;">
                   {/* Load defaults button */}
                   {ifElse(
                     computed(() => departments.get().length === 0),
@@ -1853,14 +1803,14 @@ export default pattern<Input, Output>(
                     </div>,
                     null,
                   )}
-                </ct-vstack>,
-                null,
-              )}
+                </ct-vstack>
+              </ct-vscroll>
+            </ct-tab-panel>
 
-              {/* CORRECTIONS SECTION */}
-              {ifElse(
-                computed(() => currentSection.get() === "corrections"),
-                <ct-vstack gap="2">
+            {/* CORRECTIONS SECTION */}
+            <ct-tab-panel value="corrections">
+              <ct-vscroll flex showScrollbar fadeEdges>
+                <ct-vstack gap="2" style="padding: 1rem; max-width: 800px;">
                   <ct-card>
                     <ct-vstack gap="2">
                       <span style={{ fontWeight: 500 }}>
@@ -1959,14 +1909,14 @@ export default pattern<Input, Output>(
                       No corrections saved yet.
                     </div>,
                   )}
-                </ct-vstack>,
-                null,
-              )}
+                </ct-vstack>
+              </ct-vscroll>
+            </ct-tab-panel>
 
-              {/* OUTLINE SECTION */}
-              {ifElse(
-                computed(() => currentSection.get() === "outline"),
-                <ct-vstack gap="2">
+            {/* OUTLINE SECTION */}
+            <ct-tab-panel value="outline">
+              <ct-vscroll flex showScrollbar fadeEdges>
+                <ct-vstack gap="2" style="padding: 1rem; max-width: 800px;">
                   <ct-card>
                     <ct-vstack gap="2">
                       <span style={{ fontWeight: 500 }}>
@@ -1995,11 +1945,10 @@ export default pattern<Input, Output>(
                       </pre>
                     </ct-vstack>
                   </ct-card>
-                </ct-vstack>,
-                null,
-              )}
-            </ct-vstack>
-          </ct-vscroll>
+                </ct-vstack>
+              </ct-vscroll>
+            </ct-tab-panel>
+          </ct-tabs>
         </ct-screen>
       ),
       storeName,
