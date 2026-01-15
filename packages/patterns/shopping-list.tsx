@@ -47,6 +47,127 @@ interface Output {
   storeLayout: string;
 }
 
+// Demo store layout from Andronico's on Shattuck (community-patterns)
+// Used as fallback when no actual store layout is connected
+const DEMO_STORE_LAYOUT = `# Aisle 1
+Soda & Beverages
+- Soda
+- Sparkling Water
+- Soft Drinks
+- Beverages
+
+# Aisle 2
+Frozen Foods
+- Breakfast
+- Pizza
+- Vegetables
+- Frozen Dinners
+
+# Aisle 3
+Cleaning & Paper
+- Charcoal / Logs
+- Paper Towels
+- Bath Tissue
+- Cleaning Supplies
+- Laundry
+
+# Aisle 4
+Health & Beauty
+- Oral Care
+- Skin Care
+- Shampoo
+- Hair Care
+
+# Aisle 5
+Pet & Baby
+- Cat Food
+- Dog Food
+- Baby Food
+- Feminine Care
+- Diapers
+
+# Aisle 6
+International & Pasta
+- Asian
+- Hispanic
+- Packaged Dinners
+- Soups
+- Pasta
+
+# Aisle 7
+Condiments & Cereal
+- Condiments
+- Pickles & Olives
+- Cereal
+- Hot Cereal
+
+# Aisle 8
+Baking & Spices
+- Cups & Plates
+- Peanut Butter & Jam
+- Flour
+- Cooking Oil
+- Spices
+
+# Aisle 9
+Coffee & Snacks
+- Coffee
+- Tea
+- Crackers
+- Cookies
+- Popcorn & Nuts
+
+# Aisle 10
+Wine & Candy
+- Wine
+- Juices
+- Candy
+
+# Aisle 11
+Spirits
+- Champagne
+- Spirits
+- Wine
+- Mixers
+
+# Aisle 12
+Beer & Chips
+- Beer
+- Cold Beverages
+- Chips & Salsa
+- Water
+
+# Bakery (right)
+Fresh baked goods
+
+# Produce (right)
+Fresh fruits and vegetables
+
+# Bulk Bins (right)
+Bulk dry goods, nuts, grains
+
+# Deli (back)
+Prepared foods and deli meats
+
+# Fromagerie (back)
+Artisan cheese counter
+
+# Butcher (back)
+Meat counter
+
+# Seafood (back)
+Fresh seafood counter
+
+# Dairy (left)
+Milk, yogurt, cheese
+
+# Eggs (left)
+Fresh eggs
+
+# Breakfast Meats & Sausage (left)
+Bacon, sausage, breakfast meats
+`;
+
 // Handler for adding items via the message input
 const addItem = handler<
   { detail: { message: string } },
@@ -106,22 +227,27 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
     ([remaining, done]) => `${remaining} items to get • ${done} checked off`,
   );
 
-  // Check if store layout is available
-  const hasStoreLayout = computed(() => storeLayout.get().trim().length > 0);
+  // Check if a real store layout is connected (not using demo fallback)
+  const hasConnectedStore = computed(() => storeLayout.get().trim().length > 0);
 
-  // Valid locations derived from layout
-  const validLocations = derive(
+  // Effective layout: use connected store or demo fallback
+  const effectiveLayout = derive(
     storeLayout,
+    (layout: string) => layout.trim().length > 0 ? layout : DEMO_STORE_LAYOUT,
+  );
+
+  // Valid locations derived from effective layout
+  const validLocations = derive(
+    effectiveLayout,
     (layout: string) => extractLocations(layout),
   );
 
-  // AI categorization for each item (only when store layout exists)
+  // AI categorization for each item (uses effectiveLayout which always has a value)
   const itemsWithAisles = items.map((item) => {
-    // Build prompt using store layout + item
+    // Build prompt using effective layout + item
     const categorizePrompt = derive(
-      [storeLayout, item.title, item.aisleSeed],
+      [effectiveLayout, item.title, item.aisleSeed],
       ([layout, title, seed]: [string, string, number]) => {
-        if (!layout.trim()) return "";
         return `Store layout:\n${layout}\n\nItem: ${title}\n\nSeed: ${seed}\n\nWhich aisle or department is this item most likely to be in? Respond with the exact location name.`;
       },
     );
@@ -144,64 +270,46 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
     [NAME]: "Shopping List",
     [UI]: (
       <ct-screen>
-        {/* Header with gradient background */}
-        <div
-          slot="header"
-          style={{
-            background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-            borderRadius: "8px",
-            padding: "1rem",
-            color: "white",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-          }}
-        >
+        {/* Header */}
+        <ct-vstack slot="header" gap="2">
           <ct-hstack justify="between" align="center">
             <ct-hstack gap="2" align="center">
-              <span style={{ fontSize: "1.5rem" }}>🛒</span>
-              <ct-heading level={4} style="color: white; margin: 0;">
-                Shopping List
-              </ct-heading>
+              <span style={{ fontSize: "1.25rem" }}>🛒</span>
+              <ct-heading level={4}>Shopping List</ct-heading>
             </ct-hstack>
-            {/* View toggle (only show if store layout exists) */}
-            {ifElse(
-              hasStoreLayout,
-              <ct-hstack gap="1">
-                <ct-button
-                  variant={ifElse(
-                    computed(() => viewMode.get() === "quick"),
-                    "secondary",
-                    "ghost",
-                  )}
-                  onClick={() => viewMode.set("quick")}
-                  style="color: white; border-color: rgba(255,255,255,0.5);"
-                >
-                  Quick
-                </ct-button>
-                <ct-button
-                  variant={ifElse(
-                    computed(() => viewMode.get() === "sorted"),
-                    "secondary",
-                    "ghost",
-                  )}
-                  onClick={() => viewMode.set("sorted")}
-                  style="color: white; border-color: rgba(255,255,255,0.5);"
-                >
-                  📍 Sorted
-                </ct-button>
-              </ct-hstack>,
-              null,
-            )}
+            {/* View toggle */}
+            <ct-hstack gap="1">
+              <ct-button
+                variant={ifElse(
+                  computed(() => viewMode.get() === "quick"),
+                  "primary",
+                  "secondary",
+                )}
+                onClick={() => viewMode.set("quick")}
+              >
+                Quick
+              </ct-button>
+              <ct-button
+                variant={ifElse(
+                  computed(() => viewMode.get() === "sorted"),
+                  "primary",
+                  "secondary",
+                )}
+                onClick={() => viewMode.set("sorted")}
+              >
+                📍 Sorted
+              </ct-button>
+            </ct-hstack>
           </ct-hstack>
           <div
             style={{
               fontSize: "13px",
-              opacity: 0.9,
-              marginTop: "0.5rem",
+              color: "var(--ct-color-gray-500)",
             }}
           >
             {statsText}
           </div>
-        </div>
+        </ct-vstack>
 
         {/* Main scrollable content */}
         <ct-vscroll flex showScrollbar fadeEdges>
@@ -233,6 +341,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                       <div
                         style={{
                           flex: 1,
+                          color: "#111827",
                           textDecoration: ifElse(
                             item.done,
                             "line-through",
@@ -253,21 +362,22 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                   </ct-card>
                 ))}
 
-                {/* Store layout hint */}
+                {/* Demo layout notice */}
                 {ifElse(
-                  computed(() =>
-                    storeLayout.get().trim().length === 0 &&
-                    items.get().length > 0
-                  ),
+                  derive(hasConnectedStore, (connected: boolean) => !connected),
                   <div
                     style={{
                       textAlign: "center",
-                      color: "var(--ct-color-gray-400)",
-                      padding: "1rem",
+                      color: "#f59e0b",
+                      background: "#fef3c7",
+                      padding: "0.75rem",
                       fontSize: "13px",
+                      borderRadius: "6px",
+                      border: "1px solid #fcd34d",
                     }}
                   >
-                    💡 Add a store layout to enable smart sorting by aisle
+                    ⚠️ Using demo store layout (Andronico's). Connect a Store
+                    Mapper for your actual store.
                   </div>,
                   null,
                 )}
@@ -279,6 +389,26 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
             {ifElse(
               computed(() => viewMode.get() === "sorted"),
               <ct-vstack gap="2">
+                {/* Demo layout notice in sorted view */}
+                {ifElse(
+                  derive(hasConnectedStore, (connected: boolean) => !connected),
+                  <div
+                    style={{
+                      textAlign: "center",
+                      color: "#f59e0b",
+                      background: "#fef3c7",
+                      padding: "0.75rem",
+                      fontSize: "13px",
+                      borderRadius: "6px",
+                      border: "1px solid #fcd34d",
+                      marginBottom: "0.5rem",
+                    }}
+                  >
+                    ⚠️ Using demo store layout (Andronico's). Connect a Store
+                    Mapper for your actual store.
+                  </div>,
+                  null,
+                )}
                 {/* Items with aisles */}
                 {itemsWithAisles.map((itemWithAisle) => (
                   <ct-card>
@@ -287,6 +417,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                       <div
                         style={{
                           flex: 1,
+                          color: "#111827",
                           textDecoration: ifElse(
                             itemWithAisle.item.done,
                             "line-through",
