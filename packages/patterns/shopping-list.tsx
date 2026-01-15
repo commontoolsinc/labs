@@ -22,11 +22,12 @@ import {
   Writable,
 } from "commontools";
 
-// Item with optional aisle seed for forcing re-categorization
+// Item with optional aisle override for manual corrections
 interface ShoppingItem {
   title: string;
   done: Default<boolean, false>;
   aisleSeed: Default<number, 0>;
+  aisleOverride: Default<string, "">; // User's manual aisle selection
 }
 
 // AI categorization result
@@ -180,6 +181,7 @@ const addItem = handler<
     title,
     done: false,
     aisleSeed: 0,
+    aisleOverride: "",
   });
 });
 
@@ -227,8 +229,9 @@ const selectAisle = handler<
   {
     items: Writable<ShoppingItem[]>;
     correctionIndex: Writable<number>;
+    selectedAisle: string;
   }
->((_event, { items, correctionIndex }) => {
+>((_event, { items, correctionIndex, selectedAisle }) => {
   const idx = correctionIndex.get();
   if (idx >= 0) {
     const itemsList = items.get();
@@ -238,7 +241,7 @@ const selectAisle = handler<
         index === idx
           ? {
             ...i,
-            aisleSeed: (i.aisleSeed || 0) + 1,
+            aisleOverride: selectedAisle, // Store user's selection
           }
           : i
       );
@@ -477,32 +480,49 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                       >
                         {itemWithAisle.item.title}
                       </div>
-                      {/* Show aisle */}
+                      {/* Show aisle - prefer user override, then AI result */}
                       {ifElse(
-                        itemWithAisle.aisle.pending,
-                        <span
-                          style={{
-                            fontSize: "11px",
-                            color: "#667eea",
-                          }}
-                        >
-                          🔄 sorting...
-                        </span>,
+                        derive(
+                          itemWithAisle.item.aisleOverride,
+                          (override: string) => !!override,
+                        ),
                         <span
                           style={{
                             fontSize: "12px",
                             padding: "4px 8px",
                             borderRadius: "4px",
-                            background: "var(--ct-color-blue-100)",
-                            color: "var(--ct-color-blue-700)",
+                            background: "var(--ct-color-green-100)",
+                            color: "var(--ct-color-green-700)",
                           }}
                         >
-                          {derive(
-                            itemWithAisle.aisle.result,
-                            (r: AisleResult | undefined) =>
-                              r?.location || "Other",
-                          )}
+                          {itemWithAisle.item.aisleOverride}
                         </span>,
+                        ifElse(
+                          itemWithAisle.aisle.pending,
+                          <span
+                            style={{
+                              fontSize: "11px",
+                              color: "#667eea",
+                            }}
+                          >
+                            🔄 sorting...
+                          </span>,
+                          <span
+                            style={{
+                              fontSize: "12px",
+                              padding: "4px 8px",
+                              borderRadius: "4px",
+                              background: "var(--ct-color-blue-100)",
+                              color: "var(--ct-color-blue-700)",
+                            }}
+                          >
+                            {derive(
+                              itemWithAisle.aisle.result,
+                              (r: AisleResult | undefined) =>
+                                r?.location || "Other",
+                            )}
+                          </span>,
+                        ),
                       )}
                       {/* Correction button */}
                       <ct-button
@@ -583,14 +603,22 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                   gap: "0.5rem",
                 }}
               >
-                {validLocations.map((location) => (
-                  <ct-button
-                    variant="secondary"
-                    onClick={selectAisle({ items, correctionIndex })}
-                  >
-                    {location}
-                  </ct-button>
-                ))}
+                {validLocations.map((location) => {
+                  // Extract raw location string for handler
+                  const locationStr = derive(location, (l: string) => l);
+                  return (
+                    <ct-button
+                      variant="secondary"
+                      onClick={selectAisle({
+                        items,
+                        correctionIndex,
+                        selectedAisle: locationStr,
+                      })}
+                    >
+                      {location}
+                    </ct-button>
+                  );
+                })}
               </div>
             </ct-vstack>
           </div>,

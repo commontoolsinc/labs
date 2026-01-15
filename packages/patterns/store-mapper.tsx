@@ -475,9 +475,13 @@ export default pattern<Input, Output>(
 
       const gaps: number[] = [];
       for (let i = 1; i < numbers.length; i++) {
-        const expected = numbers[i - 1] + 1;
-        if (expected < numbers[i]) {
-          gaps.push(expected);
+        // Push all missing numbers in the gap, not just the first one
+        for (
+          let missing = numbers[i - 1] + 1;
+          missing < numbers[i];
+          missing++
+        ) {
+          gaps.push(missing);
         }
       }
       return gaps;

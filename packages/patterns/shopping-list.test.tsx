@@ -18,6 +18,7 @@ interface ShoppingItem {
   title: string;
   done: boolean;
   aisleSeed: number;
+  aisleOverride: string;
 }
 
 // Handler to set items
@@ -58,32 +59,32 @@ export default pattern(() => {
 
   const action_add_milk = setItems({
     items: itemsCell,
-    data: [{ title: "Milk", done: false, aisleSeed: 0 }],
+    data: [{ title: "Milk", done: false, aisleSeed: 0, aisleOverride: "" }],
   });
 
   const action_add_bread_eggs = setItems({
     items: itemsCell,
     data: [
-      { title: "Milk", done: false, aisleSeed: 0 },
-      { title: "Bread", done: false, aisleSeed: 0 },
-      { title: "Eggs", done: false, aisleSeed: 0 },
+      { title: "Milk", done: false, aisleSeed: 0, aisleOverride: "" },
+      { title: "Bread", done: false, aisleSeed: 0, aisleOverride: "" },
+      { title: "Eggs", done: false, aisleSeed: 0, aisleOverride: "" },
     ],
   });
 
   const action_mark_first_done = setItems({
     items: itemsCell,
     data: [
-      { title: "Milk", done: true, aisleSeed: 0 },
-      { title: "Bread", done: false, aisleSeed: 0 },
-      { title: "Eggs", done: false, aisleSeed: 0 },
+      { title: "Milk", done: true, aisleSeed: 0, aisleOverride: "" },
+      { title: "Bread", done: false, aisleSeed: 0, aisleOverride: "" },
+      { title: "Eggs", done: false, aisleSeed: 0, aisleOverride: "" },
     ],
   });
 
   const action_remove_first = setItems({
     items: itemsCell,
     data: [
-      { title: "Bread", done: false, aisleSeed: 0 },
-      { title: "Eggs", done: false, aisleSeed: 0 },
+      { title: "Bread", done: false, aisleSeed: 0, aisleOverride: "" },
+      { title: "Eggs", done: false, aisleSeed: 0, aisleOverride: "" },
     ],
   });
 
