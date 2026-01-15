@@ -34,6 +34,37 @@ async function cleanup(
 }
 
 // ============================================================================
+// Shared test fixtures - "median complexity" data representative of typical
+// Cell values (arrays of objects with string/boolean/number fields)
+// ============================================================================
+
+const medianComplexityA = {
+  items: [
+    { id: "item-1", title: "Buy groceries", done: false, priority: 1 },
+    { id: "item-2", title: "Call mom", done: true, priority: 2 },
+    { id: "item-3", title: "Finish report", done: false, priority: 1 },
+    { id: "item-4", title: "Schedule dentist", done: false, priority: 3 },
+    { id: "item-5", title: "Review PR", done: true, priority: 1 },
+  ],
+  metadata: {
+    createdAt: "2024-01-15T10:30:00Z",
+    updatedAt: "2024-01-15T14:22:00Z",
+    version: 3,
+  },
+};
+
+// Identical structure and values (for "equal" case)
+const medianComplexityB = JSON.parse(JSON.stringify(medianComplexityA));
+
+// Different value late - last item's `done` differs
+const medianComplexityC = JSON.parse(JSON.stringify(medianComplexityA));
+medianComplexityC.items[4].done = false;
+
+// Different value early - first item's `done` differs (tests short-circuit)
+const medianComplexityD = JSON.parse(JSON.stringify(medianComplexityA));
+medianComplexityD.items[0].done = true;
+
+// ============================================================================
 // Write operations
 // ============================================================================
 
@@ -861,41 +892,148 @@ Deno.bench(
 );
 
 // ============================================================================
+// Realistic commit benchmarks - using "median complexity" data
+//
+// These measure commit performance with realistic Cell data, testing the
+// differential change detection (which now uses deepEqual).
+// ============================================================================
+
+Deno.bench(
+  "Realistic commit - equal values, no change (100x)",
+  { group: "realistic-commit" },
+  async (b) => {
+    const { runtime, storageManager, tx } = setup();
+
+    // Write 100 entities with medianComplexityA, then "update" with equal value
+    for (let i = 0; i < 100; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:realistic-eq-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        medianComplexityA,
+      );
+    }
+    // Commit first batch
+    await tx.commit();
+
+    // Start new transaction and write identical values
+    const tx2 = runtime.edit();
+    for (let i = 0; i < 100; i++) {
+      tx2.write(
+        {
+          space,
+          id: `test:realistic-eq-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        medianComplexityB, // identical to A
+      );
+    }
+
+    b.start();
+    await tx2.commit();
+    b.end();
+
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
+
+Deno.bench(
+  "Realistic commit - unequal late (100x)",
+  { group: "realistic-commit" },
+  async (b) => {
+    const { runtime, storageManager, tx } = setup();
+
+    // Write 100 entities with medianComplexityA
+    for (let i = 0; i < 100; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:realistic-late-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        medianComplexityA,
+      );
+    }
+    await tx.commit();
+
+    // Update with values that differ at end of structure
+    const tx2 = runtime.edit();
+    for (let i = 0; i < 100; i++) {
+      tx2.write(
+        {
+          space,
+          id: `test:realistic-late-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        medianComplexityC, // differs in items[4].done
+      );
+    }
+
+    b.start();
+    await tx2.commit();
+    b.end();
+
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
+
+Deno.bench(
+  "Realistic commit - unequal early (100x)",
+  { group: "realistic-commit" },
+  async (b) => {
+    const { runtime, storageManager, tx } = setup();
+
+    // Write 100 entities with medianComplexityA
+    for (let i = 0; i < 100; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:realistic-early-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        medianComplexityA,
+      );
+    }
+    await tx.commit();
+
+    // Update with values that differ at start of structure
+    const tx2 = runtime.edit();
+    for (let i = 0; i < 100; i++) {
+      tx2.write(
+        {
+          space,
+          id: `test:realistic-early-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        medianComplexityD, // differs in items[0].done
+      );
+    }
+
+    b.start();
+    await tx2.commit();
+    b.end();
+
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
+
+// ============================================================================
 // Value comparison: JSON.stringify vs deepEqual
 //
 // These benchmarks compare the two approaches used for equality checking in
-// the storage layer. The test data represents "median complexity" values
-// typical of Cell data flowing through Nursery.evict(), differential.ts,
-// attestation.claim(), and History.claim().
+// the storage layer. Uses shared "median complexity" fixtures defined at top.
 // ============================================================================
-
-// Representative "median complexity" data: an array of objects with
-// string/boolean/number fields, similar to todo items, contacts, etc.
-const medianComplexityA = {
-  items: [
-    { id: "item-1", title: "Buy groceries", done: false, priority: 1 },
-    { id: "item-2", title: "Call mom", done: true, priority: 2 },
-    { id: "item-3", title: "Finish report", done: false, priority: 1 },
-    { id: "item-4", title: "Schedule dentist", done: false, priority: 3 },
-    { id: "item-5", title: "Review PR", done: true, priority: 1 },
-  ],
-  metadata: {
-    createdAt: "2024-01-15T10:30:00Z",
-    updatedAt: "2024-01-15T14:22:00Z",
-    version: 3,
-  },
-};
-
-// Identical structure and values (for "equal" case)
-const medianComplexityB = JSON.parse(JSON.stringify(medianComplexityA));
-
-// Different value (for "not equal" case) - last item's `done` differs
-const medianComplexityC = JSON.parse(JSON.stringify(medianComplexityA));
-medianComplexityC.items[4].done = false;
-
-// Different value early - first item's `done` differs (tests short-circuit)
-const medianComplexityD = JSON.parse(JSON.stringify(medianComplexityA));
-medianComplexityD.items[0].done = true;
 
 Deno.bench(
   "Compare - JSON.stringify, equal values (1000x)",
