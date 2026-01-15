@@ -13,7 +13,7 @@
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
-import { Replica } from "../src/storage/cache.ts";
+import { Nursery, Replica } from "../src/storage/cache.ts";
 
 const signer = await Identity.fromPassphrase("bench server sim");
 const space = signer.did();
@@ -281,6 +281,165 @@ Deno.bench(
       await storageManager.close();
     } finally {
       restoreReplicaGet();
+    }
+  },
+);
+
+// ============================================================================
+// Nursery.evict stub for forcing slow path comparison
+//
+// Nursery.evict is called when a transaction commit succeeds, comparing
+// nursery state (before) with server-confirmed state (after). The slow path
+// (JSON.stringify comparison) only triggers when before.is !== after.is,
+// which rarely happens in practice since references are usually preserved.
+//
+// This stub clones the `before` state to force the slow path.
+// ============================================================================
+
+const originalNurseryEvict = Nursery.evict;
+
+function stubNurseryEvictWithCloning() {
+  // deno-lint-ignore no-explicit-any
+  Nursery.evict = function (before: any, after: any) {
+    // Clone before to break reference equality, forcing slow path
+    const clonedBefore = before?.is !== undefined
+      ? {
+        ...before,
+        is: fixtureClones.get(before.is) ??
+          JSON.parse(JSON.stringify(before.is)),
+      }
+      : before;
+    // Delegate to original implementation with cloned argument
+    return originalNurseryEvict(clonedBefore, after);
+  };
+}
+
+function restoreNurseryEvict() {
+  Nursery.evict = originalNurseryEvict;
+}
+
+// ============================================================================
+// Nursery.evict benchmarks - large strings
+// ============================================================================
+
+Deno.bench(
+  "Nursery.evict OFF - commit with large string (50x)",
+  { group: "nursery-evict" },
+  async (b) => {
+    restoreNurseryEvict(); // Ensure clean state
+    const { runtime, storageManager, tx } = setup();
+
+    for (let i = 0; i < 50; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:nursery-evict-off-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        largeStringA,
+      );
+    }
+
+    b.start();
+    await tx.commit();
+    b.end();
+
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
+
+Deno.bench(
+  "Nursery.evict ON - commit with large string (50x)",
+  { group: "nursery-evict" },
+  async (b) => {
+    const { runtime, storageManager, tx } = setup();
+    stubNurseryEvictWithCloning();
+    try {
+      for (let i = 0; i < 50; i++) {
+        tx.write(
+          {
+            space,
+            id: `test:nursery-evict-on-${i}`,
+            type: "application/json",
+            path: [],
+          },
+          largeStringA,
+        );
+      }
+
+      b.start();
+      await tx.commit();
+      b.end();
+
+      await runtime.dispose();
+      await storageManager.close();
+    } finally {
+      restoreNurseryEvict();
+    }
+  },
+);
+
+// ============================================================================
+// Nursery.evict benchmarks - median complexity
+// ============================================================================
+
+Deno.bench(
+  "Nursery.evict OFF - commit with median complexity (100x)",
+  { group: "nursery-evict-median" },
+  async (b) => {
+    restoreNurseryEvict();
+    const { runtime, storageManager, tx } = setup();
+
+    for (let i = 0; i < 100; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:nursery-evict-med-off-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        medianComplexityA,
+      );
+    }
+
+    b.start();
+    await tx.commit();
+    b.end();
+
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
+
+Deno.bench(
+  "Nursery.evict ON - commit with median complexity (100x)",
+  { group: "nursery-evict-median" },
+  async (b) => {
+    const { runtime, storageManager, tx } = setup();
+    stubNurseryEvictWithCloning();
+    try {
+      for (let i = 0; i < 100; i++) {
+        tx.write(
+          {
+            space,
+            id: `test:nursery-evict-med-on-${i}`,
+            type: "application/json",
+            path: [],
+          },
+          medianComplexityA,
+        );
+      }
+
+      b.start();
+      await tx.commit();
+      b.end();
+
+      await runtime.dispose();
+      await storageManager.close();
+    } finally {
+      restoreNurseryEvict();
     }
   },
 );
