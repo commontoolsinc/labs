@@ -347,6 +347,7 @@ export class RuntimeProcessor {
     const charm = await this.cc.create<NameSchema>(program, {
       input: request.argument as object | undefined,
       start: request.run ?? true,
+      addToList: true,
     }, request.cause);
     return {
       page: createPageRef(charm.getCell()),

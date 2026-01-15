@@ -17,6 +17,8 @@ import { ACLManager } from "./acl-manager.ts";
 export interface CreateCharmOptions {
   input?: object;
   start?: boolean;
+  /** Whether to add the charm to the default pattern's allCharms list. Defaults to false. */
+  addToList?: boolean;
 }
 
 export class CharmsController<T = unknown> {
@@ -44,7 +46,7 @@ export class CharmsController<T = unknown> {
       options.input,
       cause,
       undefined,
-      { start: options.start ?? true },
+      { start: options.start ?? true, addToList: options.addToList },
     );
     await this.#manager.runtime.idle();
     await this.#manager.synced();
