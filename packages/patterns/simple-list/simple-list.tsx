@@ -6,9 +6,9 @@
  * like Record. Provides rapid keyboard entry, checkboxes, and indent toggle.
  */
 import {
+  action,
   computed,
   Default,
-  handler,
   NAME,
   pattern,
   Stream,
@@ -16,9 +16,16 @@ import {
   type VNode,
   Writable,
 } from "commontools";
-import type { ModuleMetadata } from "./container-protocol.ts";
-
 // ===== Self-Describing Metadata =====
+// ModuleMetadata type inlined to avoid parent directory import issues
+interface ModuleMetadata {
+  type: string;
+  label: string;
+  icon: string;
+  allowMultiple?: boolean;
+  schema?: Record<string, unknown>;
+  fieldMapping?: string[];
+}
 export const MODULE_METADATA: ModuleMetadata = {
   type: "simple-list",
   label: "Simple List",
@@ -45,14 +52,14 @@ export const MODULE_METADATA: ModuleMetadata = {
 };
 
 // ===== Types =====
-interface SimpleListItem {
+export interface SimpleListItem {
   text: string;
   indented: Default<boolean, false>;
   done: Default<boolean, false>;
 }
 
 export interface SimpleListModuleInput {
-  items: Writable<Default<SimpleListItem[], []>>;
+  items?: Writable<Default<SimpleListItem[], []>>;
 }
 
 interface SimpleListModuleOutput {
@@ -65,69 +72,48 @@ interface SimpleListModuleOutput {
   addItem: Stream<{ text: string }>;
 }
 
-// ===== Handlers at module scope =====
-
-// Toggle indent on an item
-const toggleIndent = handler<
-  { index: number },
-  { items: Writable<SimpleListItem[]> }
->(({ index }, { items }) => {
-  const current = items.get() || [];
-  if (index < 0 || index >= current.length) return;
-
-  const updated = [...current];
-  updated[index] = {
-    ...updated[index],
-    indented: !updated[index].indented,
-  };
-  items.set(updated);
-});
-
-// Set indent state directly (for keyboard shortcuts)
-const setIndent = handler<
-  { index: number; indented: boolean },
-  { items: Writable<SimpleListItem[]> }
->(({ index, indented }, { items }) => {
-  const current = items.get() || [];
-  if (index < 0 || index >= current.length) return;
-
-  const updated = [...current];
-  updated[index] = { ...updated[index], indented };
-  items.set(updated);
-});
-
-// Delete an item
-const deleteItem = handler<
-  { index: number },
-  { items: Writable<SimpleListItem[]> }
->(({ index }, { items }) => {
-  const current = items.get() || [];
-  if (index < 0 || index >= current.length) return;
-
-  items.set(current.toSpliced(index, 1));
-});
-
-// Add a new item
-const addItem = handler<
-  { text: string },
-  { items: Writable<SimpleListItem[]> }
->(({ text }, { items }) => {
-  const trimmed = text.trim();
-  if (trimmed) {
-    items.push({ text: trimmed, indented: false, done: false });
-  }
-});
-
 // ===== The Pattern =====
 export const SimpleListModule = pattern<
   SimpleListModuleInput,
   SimpleListModuleOutput
 >(({ items }) => {
-  // Bind handlers at pattern level
-  const boundToggleIndent = toggleIndent({ items });
-  const boundSetIndent = setIndent({ items });
-  const boundDeleteItem = deleteItem({ items });
-  const boundAddItem = addItem({ items });
+  // Pattern-body actions - preferred for single-use handlers
+  const toggleIndent = action(({ index }: { index: number }) => {
+    const current = items.get() || [];
+    if (index < 0 || index >= current.length) return;
+
+    const updated = [...current];
+    updated[index] = {
+      ...updated[index],
+      indented: !updated[index].indented,
+    };
+    items.set(updated);
+  });
+
+  const setIndent = action(
+    ({ index, indented }: { index: number; indented: boolean }) => {
+      const current = items.get() || [];
+      if (index < 0 || index >= current.length) return;
+
+      const updated = [...current];
+      updated[index] = { ...updated[index], indented };
+      items.set(updated);
+    },
+  );
+
+  const deleteItem = action(({ index }: { index: number }) => {
+    const current = items.get() || [];
+    if (index < 0 || index >= current.length) return;
+
+    items.set(current.toSpliced(index, 1));
+  });
+
+  const addItem = action(({ text }: { text: string }) => {
+    const trimmed = text.trim();
+    if (trimmed) {
+      items.push({ text: trimmed, indented: false, done: false });
+    }
+  });
 
   // Computed summary for NAME
   const displayText = computed(() => {
@@ -182,11 +168,11 @@ export const SimpleListModule = pattern<
                   if (!d) return;
                   // Cmd+] or Ctrl+] = indent
                   if (d.key === "]" && (d.metaKey || d.ctrlKey)) {
-                    boundSetIndent.send({ index, indented: true });
+                    setIndent.send({ index, indented: true });
                   }
                   // Cmd+[ or Ctrl+[ = outdent
                   if (d.key === "[" && (d.metaKey || d.ctrlKey)) {
-                    boundSetIndent.send({ index, indented: false });
+                    setIndent.send({ index, indented: false });
                   }
                 }}
               />
@@ -194,7 +180,7 @@ export const SimpleListModule = pattern<
               {/* Indent toggle */}
               <button
                 type="button"
-                onClick={() => boundToggleIndent.send({ index })}
+                onClick={() => toggleIndent.send({ index })}
                 style={{
                   background: "none",
                   border: "none",
@@ -213,7 +199,7 @@ export const SimpleListModule = pattern<
               {/* Delete - subtle until hover */}
               <button
                 type="button"
-                onClick={() => boundDeleteItem.send({ index })}
+                onClick={() => deleteItem.send({ index })}
                 style={{
                   background: "none",
                   border: "none",
@@ -242,17 +228,17 @@ export const SimpleListModule = pattern<
           onct-send={(e: { detail?: { message?: string } }) => {
             const text = e.detail?.message;
             if (text) {
-              boundAddItem.send({ text });
+              addItem.send({ text });
             }
           }}
         />
       </ct-vstack>
     ),
     items,
-    toggleIndent: boundToggleIndent,
-    setIndent: boundSetIndent,
-    deleteItem: boundDeleteItem,
-    addItem: boundAddItem,
+    toggleIndent,
+    setIndent,
+    deleteItem,
+    addItem,
   };
 });
 
