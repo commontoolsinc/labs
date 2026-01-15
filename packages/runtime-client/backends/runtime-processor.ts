@@ -32,6 +32,8 @@ import {
   IPCClientRequest,
   JSONValueResponse,
   type LoggerCountsResponse,
+  type LoggerMetadata,
+  type LogLevel,
   NotificationType,
   type PageCreateRequest,
   type PageGetRequest,
@@ -407,7 +409,25 @@ export class RuntimeProcessor {
   }
 
   getLoggerCounts(_: GetLoggerCountsRequest): LoggerCountsResponse {
-    return { counts: getLoggerCountsBreakdown() };
+    const counts = getLoggerCountsBreakdown();
+    const metadata = this.#getLoggerMetadata();
+    return { counts, metadata };
+  }
+
+  #getLoggerMetadata(): LoggerMetadata {
+    const global = globalThis as unknown as {
+      commontools?: { logger?: Record<string, Logger> };
+    };
+    const result: LoggerMetadata = {};
+    if (global.commontools?.logger) {
+      for (const [name, logger] of Object.entries(global.commontools.logger)) {
+        result[name] = {
+          enabled: !logger.disabled,
+          level: (logger.level ?? "info") as LogLevel,
+        };
+      }
+    }
+    return result;
   }
 
   setLoggerLevel(request: SetLoggerLevelRequest): void {

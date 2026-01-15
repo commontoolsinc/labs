@@ -1393,7 +1393,8 @@ export class XDebuggerView extends LitElement {
     const rt = runtime.runtime();
     if (!rt) return null;
     try {
-      return await rt.getLoggerCounts();
+      const result = await rt.getLoggerCounts();
+      return result.counts;
     } catch {
       return null;
     }

@@ -189,6 +189,13 @@ export type LoggerCountsData = Record<string, LoggerBreakdown> & {
   total: number;
 };
 
+export interface LoggerInfo {
+  enabled: boolean;
+  level: LogLevel;
+}
+
+export type LoggerMetadata = Record<string, LoggerInfo>;
+
 export interface PageCreateRequest extends BaseRequest {
   type: RequestType.PageCreate;
   source: {
@@ -284,6 +291,7 @@ export interface GraphSnapshotResponse {
 
 export interface LoggerCountsResponse {
   counts: LoggerCountsData;
+  metadata: LoggerMetadata;
 }
 
 export interface CellUpdateNotification {
