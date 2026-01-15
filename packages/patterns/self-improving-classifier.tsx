@@ -16,7 +16,6 @@
  * @tags #classifier #learning
  */
 import {
-  action,
   computed,
   type Default,
   equals,
@@ -1171,6 +1170,152 @@ const dismissCurrentItemHandler = handler<
   currentItem.set(null);
 });
 
+/** Accept a rule suggestion - add as new rule and mark as dismissed */
+const acceptSuggestionHandler = handler<
+  void,
+  {
+    suggestion: RuleSuggestion;
+    originalIndex: number;
+    rules: Writable<ClassificationRule[]>;
+    dismissedSuggestionIndices: Writable<number[]>;
+  }
+>((
+  _event,
+  { suggestion, originalIndex, rules, dismissedSuggestionIndices },
+) => {
+  // Validate regex pattern before adding
+  const validation = isValidRegex(suggestion.pattern);
+  if (!validation.valid) {
+    console.error(
+      `[Classifier] Cannot accept suggestion "${suggestion.name}": invalid regex pattern "${suggestion.pattern}" - ${validation.error}`,
+    );
+    return;
+  }
+
+  // Add the rule
+  const newRule: ClassificationRule = {
+    id: generateId(),
+    name: suggestion.name,
+    targetField: suggestion.targetField,
+    pattern: suggestion.pattern,
+    caseInsensitive: true,
+    predicts: suggestion.predicts,
+    precision: 0.5,
+    recall: 0.5,
+    tier: 0,
+    evaluationCount: 0,
+    truePositives: 0,
+    falsePositives: 0,
+    trueNegatives: 0,
+    falseNegatives: 0,
+    createdAt: Date.now(),
+    isShared: false,
+  };
+  rules.push(newRule);
+
+  // Mark as dismissed
+  const dismissed = dismissedSuggestionIndices.get();
+  if (!dismissed.includes(originalIndex)) {
+    dismissedSuggestionIndices.set([...dismissed, originalIndex]);
+  }
+});
+
+/** Reject a rule suggestion - just mark as dismissed */
+const rejectSuggestionHandler = handler<
+  void,
+  {
+    originalIndex: number;
+    dismissedSuggestionIndices: Writable<number[]>;
+  }
+>((_event, { originalIndex, dismissedSuggestionIndices }) => {
+  const dismissed = dismissedSuggestionIndices.get();
+  if (!dismissed.includes(originalIndex)) {
+    dismissedSuggestionIndices.set([...dismissed, originalIndex]);
+  }
+});
+
+/** State type for the classification result cell passed to handlers */
+interface CurrentClassificationResultState {
+  item: ClassifiableInput;
+  classification: ClassificationResult;
+}
+
+/**
+ * Accept the current classification result and store directly to examples.
+ * Uses module-scoped handler pattern with Writable cell that is resolved
+ * via .get() inside the handler (avoids reactive context issues).
+ */
+const acceptCurrentClassificationHandler = handler<
+  void,
+  {
+    resultCell: Writable<CurrentClassificationResultState | null>;
+    examples: Writable<LabeledExample[]>;
+    currentItem: Writable<ClassifiableInput | null>;
+  }
+>((_event, { resultCell, examples, currentItem }) => {
+  const result = resultCell.get();
+  if (!result) return;
+
+  const { item, classification } = result;
+
+  examples.push({
+    input: {
+      id: item.id,
+      receivedAt: item.receivedAt,
+      fields: { ...item.fields },
+    },
+    label: classification.classification,
+    decidedBy: "suggestion-accepted",
+    reasoning: classification.reasoning,
+    confidence: classification.confidence,
+    labeledAt: Date.now(),
+    wasCorrection: false,
+    isInteresting: classification.confidence < 0.7,
+    interestingReason: classification.confidence < 0.7
+      ? "Low confidence, user confirmed"
+      : undefined,
+  });
+  currentItem.set(null);
+});
+
+/**
+ * Correct the current classification and store directly to examples with flipped label.
+ * Uses module-scoped handler pattern with Writable cell that is resolved
+ * via .get() inside the handler (avoids reactive context issues).
+ */
+const correctCurrentClassificationHandler = handler<
+  void,
+  {
+    resultCell: Writable<CurrentClassificationResultState | null>;
+    examples: Writable<LabeledExample[]>;
+    currentItem: Writable<ClassifiableInput | null>;
+  }
+>((_event, { resultCell, examples, currentItem }) => {
+  const result = resultCell.get();
+  if (!result) return;
+
+  const { item, classification } = result;
+  const flippedLabel = !classification.classification;
+
+  examples.push({
+    input: {
+      id: item.id,
+      receivedAt: item.receivedAt,
+      fields: { ...item.fields },
+    },
+    label: flippedLabel, // FLIP the classification
+    decidedBy: "user",
+    reasoning: "User corrected classification",
+    confidence: 1.0, // User is certain
+    labeledAt: Date.now(),
+    wasCorrection: true,
+    originalPrediction: classification.classification,
+    isInteresting: true,
+    interestingReason: "User corrected classification",
+  });
+  currentItem.set(null);
+});
+
 /** Item that was auto-classified (for handler state typing) */
 interface AutoClassifiedItemState {
   input: ClassifiableInput;
@@ -1371,6 +1516,24 @@ const refreshSuggestionsHandler = handler<
   ruleGenCounter.set(ruleGenCounter.get() + 1);
 });
 
+/** Submit a new item for classification from UI input fields */
+const submitNewItemHandler = handler<
+  void,
+  {
+    newItemFields: Writable<Record<string, string>>;
+    submitItem: Stream<{ fields: Record<string, string> }>;
+  }
+>((_event, { newItemFields, submitItem }) => {
+  const fields = newItemFields.get();
+  if (Object.keys(fields).length === 0) return;
+
+  // Delegate to the submitItem stream (spread fields to break proxy chain)
+  submitItem.send({ fields: { ...fields } });
+
+  // Clear the input fields
+  newItemFields.set({});
+});
+
 // =============================================================================
 // PATTERN
 // =============================================================================
@@ -1435,8 +1598,8 @@ export default pattern<ClassifierInput, ClassifierOutput>(
 
     // ==========================================================================
     // BOUND HANDLERS
-    // Most handlers use module-scoped handler() functions with explicit state.
-    // A few remain as action() where they need access to computed values or Streams.
+    // All handlers use module-scoped handler() functions with explicit state.
+    // Computed values and Streams are passed as state to enable this pattern.
     // ==========================================================================
 
     /** Submit a new item for classification (API endpoint) */
@@ -1482,19 +1645,10 @@ export default pattern<ClassifierInput, ClassifierOutput>(
       newItemFields,
     });
 
-    /**
-     * Submit the new item for classification.
-     * Note: This must remain as action() because Stream.send() requires reactive context.
-     */
-    const submitNewItem = action(() => {
-      const fields = newItemFields.get();
-      if (Object.keys(fields).length === 0) return;
-
-      // Delegate to the module-scoped handler (spread fields to break proxy chain)
-      submitItem.send({ fields: { ...fields } });
-
-      // Clear the input fields
-      newItemFields.set({});
+    /** Submit the new item for classification */
+    const submitNewItem = submitNewItemHandler({
+      newItemFields,
+      submitItem,
     });
 
     // ==========================================================================
@@ -1659,69 +1813,22 @@ Respond with:
     // HANDLERS FOR CURRENT ITEM (in-progress classification)
     // These are called when user clicks Accept/Correct on the item being classified
     // They store directly to examples (single-step confirmation)
-    // Note: These must remain as action() because they access currentClassificationResult,
-    // which is a computed value that cannot be properly passed to module-scoped handlers.
+    // Computed values extract item/classification from currentClassificationResult
+    // to pass to module-scoped handlers.
     // ==========================================================================
 
-    /**
-     * Accept the current classification result and store directly to examples.
-     * Must use action() to access computed value currentClassificationResult.
-     */
-    const acceptCurrentClassification = action(() => {
-      const result = currentClassificationResult;
-      if (!result) return;
-
-      const { item, classification } = result;
-
-      // Store directly to examples (skip pendingClassifications intermediate step)
-      examples.push({
-        input: {
-          id: item.id,
-          receivedAt: item.receivedAt,
-          fields: { ...item.fields },
-        },
-        label: classification.classification,
-        decidedBy: "suggestion-accepted",
-        reasoning: classification.reasoning,
-        confidence: classification.confidence,
-        labeledAt: Date.now(),
-        wasCorrection: false,
-        isInteresting: classification.confidence < 0.7,
-        interestingReason: classification.confidence < 0.7
-          ? "Low confidence, user confirmed"
-          : undefined,
-      });
-      currentItem.set(null);
+    /** Accept the current classification result and store directly to examples */
+    const acceptCurrentClassification = acceptCurrentClassificationHandler({
+      resultCell: currentClassificationResult,
+      examples,
+      currentItem,
     });
 
-    /**
-     * Correct the current classification and store directly to examples with flipped label.
-     * Must use action() to access computed value currentClassificationResult.
-     */
-    const correctCurrentClassification = action(() => {
-      const result = currentClassificationResult;
-      if (!result) return;
-
-      const { item, classification } = result;
-
-      // Store directly to examples with corrected label
-      examples.push({
-        input: {
-          id: item.id,
-          receivedAt: item.receivedAt,
-          fields: { ...item.fields },
-        },
-        label: !classification.classification, // FLIP the classification
-        decidedBy: "user",
-        reasoning: "User corrected classification",
-        confidence: 1.0, // User is certain
-        labeledAt: Date.now(),
-        wasCorrection: true,
-        originalPrediction: classification.classification,
-        isInteresting: true,
-        interestingReason: "User corrected classification",
-      });
-      currentItem.set(null);
+    /** Correct the current classification and store directly to examples with flipped label */
+    const correctCurrentClassification = correctCurrentClassificationHandler({
+      resultCell: currentClassificationResult,
+      examples,
+      currentItem,
     });
 
     /** Dismiss the current item without classifying */
@@ -1859,7 +1966,9 @@ Each suggestion should have:
         }
 
         const dismissed = dismissedSuggestionIndices.get();
-        return result.suggestions
+        // Convert reactive proxy to plain array to avoid mapWithPattern issues
+        const suggestionsArray = [...result.suggestions];
+        return suggestionsArray
           .map((suggestion, index) => ({ suggestion, originalIndex: index }))
           .filter(({ originalIndex }) => !dismissed.includes(originalIndex))
           .filter(({ suggestion }) => {
@@ -2405,55 +2514,21 @@ Each suggestion should have:
                           <ct-hstack gap="2">
                             <ct-button
                               variant="primary"
-                              onClick={() => {
-                                const s = suggestion;
-                                // Add rule
-                                const newRule: ClassificationRule = {
-                                  id: generateId(),
-                                  name: s.name,
-                                  targetField: s.targetField,
-                                  pattern: s.pattern,
-                                  caseInsensitive: true,
-                                  predicts: s.predicts,
-                                  precision: 0.5,
-                                  recall: 0.5,
-                                  tier: 0,
-                                  evaluationCount: 0,
-                                  truePositives: 0,
-                                  falsePositives: 0,
-                                  trueNegatives: 0,
-                                  falseNegatives: 0,
-                                  createdAt: Date.now(),
-                                  isShared: false,
-                                };
-                                rules.push(newRule);
-
-                                // Mark as dismissed (removes from visible suggestions)
-                                const dismissed = dismissedSuggestionIndices
-                                  .get();
-                                if (!dismissed.includes(originalIndex)) {
-                                  dismissedSuggestionIndices.set([
-                                    ...dismissed,
-                                    originalIndex,
-                                  ]);
-                                }
-                              }}
+                              onClick={acceptSuggestionHandler({
+                                suggestion,
+                                originalIndex,
+                                rules,
+                                dismissedSuggestionIndices,
+                              })}
                             >
                               Accept
                             </ct-button>
                             <ct-button
                               variant="ghost"
-                              onClick={() => {
-                                // Mark as dismissed (removes from visible suggestions)
-                                const dismissed = dismissedSuggestionIndices
-                                  .get();
-                                if (!dismissed.includes(originalIndex)) {
-                                  dismissedSuggestionIndices.set([
-                                    ...dismissed,
-                                    originalIndex,
-                                  ]);
-                                }
-                              }}
+                              onClick={rejectSuggestionHandler({
+                                originalIndex,
+                                dismissedSuggestionIndices,
+                              })}
                             >
                               Reject
                             </ct-button>
