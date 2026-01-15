@@ -132,17 +132,29 @@ export default pattern<{
       ].sort(),
   );
 
-  // Upcoming events (sorted by start date)
-  const upcomingEvents = derive(events, (evts: CalendarEvent[]) => {
-    const now = new Date();
-    return [...(evts || [])]
-      .filter((e: CalendarEvent) =>
-        e?.startDate && new Date(e.startDate) >= now
-      )
-      .sort((a: CalendarEvent, b: CalendarEvent) =>
-        new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
-      );
-  });
+  // Upcoming events (sorted by start date, filtered by hidden calendars)
+  const upcomingEvents = derive(
+    { events, hiddenCalendars },
+    ({
+      events: evts,
+      hiddenCalendars: hidden,
+    }: {
+      events: CalendarEvent[];
+      hiddenCalendars: string[];
+    }) => {
+      const now = new Date();
+      const hiddenSet = new Set(hidden || []);
+      return [...(evts || [])]
+        .filter((e: CalendarEvent) =>
+          e?.startDate &&
+          new Date(e.startDate) >= now &&
+          !hiddenSet.has(e.calendarName)
+        )
+        .sort((a: CalendarEvent, b: CalendarEvent) =>
+          new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
+        );
+    },
+  );
 
   const totalUpcoming = derive(
     upcomingEvents,
@@ -200,6 +212,7 @@ export default pattern<{
                   const color = getCalendarColor(name);
                   return (
                     <button
+                      type="button"
                       // Pass the Cell from outer scope, not the destructured value
                       onClick={toggleCalendar({
                         calendarName: name,

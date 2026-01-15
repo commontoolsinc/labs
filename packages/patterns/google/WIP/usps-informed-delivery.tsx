@@ -18,20 +18,20 @@
  * 2. Deploy this pattern and it will connect via wish()
  */
 import {
-  computed,
   Default,
   derive,
   generateObject,
   handler,
   ifElse,
   NAME,
-  Opaque,
   pattern,
-  str,
   UI,
   wish,
   Writable,
 } from "commontools";
+
+// Debug flag for development - disable in production
+const DEBUG_USPS = false;
 
 // Email type - inlined to avoid import chain issues when deploying from WIP/
 interface Email {
@@ -212,8 +212,9 @@ function normalizeName(name: string): string {
 
 /**
  * Check if two names are likely the same person (fuzzy match).
+ * Prefixed with _ as not currently used - preserved for future use.
  */
-function namesMatch(name1: string, name2: string): boolean {
+function _namesMatch(name1: string, name2: string): boolean {
   const n1 = normalizeName(name1);
   const n2 = normalizeName(name2);
 
@@ -290,9 +291,9 @@ interface PatternOutput {
 }
 
 export default pattern<PatternInput, PatternOutput>(
-  ({ settings, mailPieces, householdMembers, linkedEmails }) => {
-    // Local state
-    const processing = Writable.of(false);
+  ({ settings: _settings, mailPieces, householdMembers, linkedEmails }) => {
+    // Local state - prefixed with _ as not currently used directly
+    const _processing = Writable.of(false);
 
     // Check if linkedEmails is provided (manual linking via CT CLI)
     const hasLinkedEmails = derive(
@@ -355,13 +356,6 @@ export default pattern<PatternInput, PatternOutput>(
       }[] = [];
       for (const email of emails || []) {
         const urls = extractMailPieceImages(email.htmlContent);
-        // DEBUG: Log extracted URLs
-        console.log(
-          `[USPS] Email ${
-            email.id.slice(0, 8)
-          }... extracted ${urls.length} images:`,
-          urls.slice(0, 3),
-        );
         urls.forEach((url, idx) => {
           images.push({
             emailId: email.id,
@@ -371,8 +365,6 @@ export default pattern<PatternInput, PatternOutput>(
           });
         });
       }
-      // DEBUG: Log total images
-      console.log(`[USPS] Total images extracted: ${images.length}`);
       // Limit to first 10 images for now to avoid overwhelming LLM calls
       return images.slice(0, 10);
     });
@@ -390,22 +382,28 @@ export default pattern<PatternInput, PatternOutput>(
       const analysis = generateObject({
         // Prompt must be derived to access cell values properly
         prompt: derive(imageUrl, (url) => {
-          // DEBUG: Log the URL being sent to LLM
-          console.log(
-            `[USPS LLM] Processing image URL (first 100 chars):`,
-            url?.slice(0, 100),
-          );
+          // Debug logging (gated by DEBUG_USPS flag)
+          if (DEBUG_USPS) {
+            console.log(
+              `[USPS LLM] Processing image URL (first 100 chars):`,
+              url?.slice(0, 100),
+            );
+          }
 
           if (!url) {
-            console.log(`[USPS LLM] Empty URL, returning text-only prompt`);
+            if (DEBUG_USPS) {
+              console.log(`[USPS LLM] Empty URL, returning text-only prompt`);
+            }
             return "No image URL available - please return default values";
           }
 
           // Check if it's a base64 data URL vs external URL
           const isBase64 = url.startsWith("data:");
-          console.log(
-            `[USPS LLM] Image type: ${isBase64 ? "base64" : "external URL"}`,
-          );
+          if (DEBUG_USPS) {
+            console.log(
+              `[USPS LLM] Image type: ${isBase64 ? "base64" : "external URL"}`,
+            );
+          }
 
           // NOTE: External URLs from USPS require authentication and may fail.
           // The LLM server cannot fetch authenticated URLs.
@@ -464,8 +462,8 @@ If you cannot read the image clearly, make your best guess based on what you can
         pieces?.filter((p) => p.isLikelySpam)?.length || 0,
     );
 
-    // Group mail by date
-    const mailByDate = derive(mailPieces, (pieces: MailPiece[]) => {
+    // Group mail by date - prefixed with _ as not currently used in UI
+    const _mailByDate = derive(mailPieces, (pieces: MailPiece[]) => {
       const groups: Record<string, MailPiece[]> = {};
       for (const piece of pieces || []) {
         const date = new Date(piece.emailDate).toLocaleDateString();
@@ -746,6 +744,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                       {ifElse(
                         derive(member, (m: HouseholdMember) => !m.isConfirmed),
                         <button
+                          type="button"
                           onClick={confirmMember({ member })}
                           style={{
                             padding: "4px 8px",
@@ -762,6 +761,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                         null,
                       )}
                       <button
+                        type="button"
                         onClick={deleteMember({ householdMembers, member })}
                         style={{
                           padding: "4px 8px",

@@ -39,7 +39,7 @@ import {
   Writable,
 } from "commontools";
 import {
-  type AccountType,
+  type AccountType as _AccountType,
   createGoogleAuth as createGoogleAuthUtil,
   type ScopeKey,
 } from "./util/google-auth-manager.tsx";
@@ -57,7 +57,10 @@ import type {
 export type { Auth } from "./gmail-importer.tsx";
 import type { Auth } from "./gmail-importer.tsx";
 
-const env = getRecipeEnvironment();
+const _env = getRecipeEnvironment();
+
+// Debug flag for development - disable in production
+const DEBUG_AGENT = false;
 
 // ============================================================================
 // TYPES
@@ -150,14 +153,17 @@ export interface GmailAgenticSearchInput {
   suggestedQueries?: Default<string[], []>;
 
   // JSON schema for agent's structured output
-  resultSchema?: Default<object, {}>;
+  resultSchema?: Default<object, Record<string, never>>;
 
   // Account type for multi-account support
   // "default" = any #googleAuth, "personal" = #googleAuthPersonal, "work" = #googleAuthWork
   accountType?: Default<"default" | "personal" | "work", "default">;
 
   // Additional tools beyond searchGmail
-  additionalTools?: Default<Record<string, ToolDefinition>, {}>;
+  additionalTools?: Default<
+    Record<string, ToolDefinition>,
+    Record<string, never>
+  >;
 
   // UI customization
   title?: Default<string, "Gmail Agentic Search">;
@@ -351,7 +357,9 @@ export interface GmailAgenticSearchOutput {
 // Handler to create a new GmailSearchRegistry charm
 const createSearchRegistryHandler = handler<unknown, Record<string, never>>(
   () => {
-    console.log("[GmailAgenticSearch] Creating new search registry charm");
+    if (DEBUG_AGENT) {
+      console.log("[GmailAgenticSearch] Creating new search registry charm");
+    }
     const registryCharm = GmailSearchRegistry({
       queries: [],
     });
@@ -365,7 +373,9 @@ const setAccountTypeHandler = handler<
   { selectedType: Writable<"default" | "personal" | "work"> }
 >((event, state) => {
   const newType = event.target.value as "default" | "personal" | "work";
-  console.log("[GmailAgenticSearch] Account type changed to:", newType);
+  if (DEBUG_AGENT) {
+    console.log("[GmailAgenticSearch] Account type changed to:", newType);
+  }
   state.selectedType.set(newType);
 });
 
@@ -379,7 +389,9 @@ const stopScanHandler = handler<
 >((_, state) => {
   state.lastScanAt.set(Date.now());
   state.isScanning.set(false);
-  console.log("[GmailAgenticSearch] Scan stopped");
+  if (DEBUG_AGENT) {
+    console.log("[GmailAgenticSearch] Scan stopped");
+  }
 });
 
 // Handler to complete scan
@@ -392,7 +404,9 @@ const completeScanHandler = handler<
 >((_, state) => {
   state.lastScanAt.set(Date.now());
   state.isScanning.set(false);
-  console.log("[GmailAgenticSearch] Scan completed");
+  if (DEBUG_AGENT) {
+    console.log("[GmailAgenticSearch] Scan completed");
+  }
 });
 
 // Handler to toggle debug log expansion
@@ -455,7 +469,9 @@ const searchGmailHandler = handler<
 
   // Check if we've hit the search limit
   if (max > 0 && currentProgress.searchCount >= max) {
-    console.log(`[SearchGmail Tool] Search limit reached (${max})`);
+    if (DEBUG_AGENT) {
+      console.log(`[SearchGmail Tool] Search limit reached (${max})`);
+    }
     addDebugLogEntry(state.debugLog, {
       type: "info",
       message: `Search limit reached (${max})`,
@@ -507,7 +523,9 @@ const searchGmailHandler = handler<
     resultData = { error: "Not authenticated", emails: [] };
   } else {
     try {
-      console.log(`[SearchGmail Tool] Searching: ${input.query}`);
+      if (DEBUG_AGENT) {
+        console.log(`[SearchGmail Tool] Searching: ${input.query}`);
+      }
 
       // Cross-charm token refresh via Stream<T> handler signature
       // The framework unwraps the opaque stream, giving us a callable .send()
@@ -520,9 +538,11 @@ const searchGmailHandler = handler<
         // The refresh happens in the auth charm's transaction context
         // Note: TypeScript types don't include onCommit, but runtime supports it
         onRefresh = async () => {
-          console.log(
-            "[SearchGmail Tool] Refreshing token via cross-charm stream...",
-          );
+          if (DEBUG_AGENT) {
+            console.log(
+              "[SearchGmail Tool] Refreshing token via cross-charm stream...",
+            );
+          }
           await new Promise<void>((resolve, reject) => {
             // Cast to bypass TS types - runtime supports onCommit (verified in cell.ts:105-108)
             (refreshStream.send as (
@@ -540,15 +560,19 @@ const searchGmailHandler = handler<
                   );
                   reject(new Error(`Token refresh failed: ${status.error}`));
                 } else {
-                  console.log(
-                    "[SearchGmail Tool] Token refresh transaction committed",
-                  );
+                  if (DEBUG_AGENT) {
+                    console.log(
+                      "[SearchGmail Tool] Token refresh transaction committed",
+                    );
+                  }
                   resolve();
                 }
               },
             );
           });
-          console.log("[SearchGmail Tool] Token refresh completed");
+          if (DEBUG_AGENT) {
+            console.log("[SearchGmail Tool] Token refresh completed");
+          }
         };
       }
 
@@ -559,7 +583,9 @@ const searchGmailHandler = handler<
       });
       const emails = await client.searchEmails(input.query, 30);
 
-      console.log(`[SearchGmail Tool] Found ${emails.length} emails`);
+      if (DEBUG_AGENT) {
+        console.log(`[SearchGmail Tool] Found ${emails.length} emails`);
+      }
 
       // Log the search results
       addDebugLogEntry(state.debugLog, {
@@ -655,9 +681,11 @@ const searchGmailHandler = handler<
           const registry = wishResult?.result;
           if (registry?.upvoteQuery) {
             const typeUrl = state.agentTypeUrl.get();
-            console.log(
-              `[SearchGmail] Upvoting community query: ${matchingCommunityQuery.query}`,
-            );
+            if (DEBUG_AGENT) {
+              console.log(
+                `[SearchGmail] Upvoting community query: ${matchingCommunityQuery.query}`,
+              );
+            }
             addDebugLogEntry(state.debugLog, {
               type: "info",
               message:
@@ -735,7 +763,9 @@ const startScanHandler = handler<
   // Validate token before starting scan
   // Cross-charm refresh works via Stream<T> handler signature pattern
   // See: community-docs/blessed/cross-charm.md
-  console.log("[GmailAgenticSearch] Validating token before scan...");
+  if (DEBUG_AGENT) {
+    console.log("[GmailAgenticSearch] Validating token before scan...");
+  }
   addDebugLogEntry(state.debugLog, {
     type: "info",
     message: "Validating Gmail token...",
@@ -751,9 +781,11 @@ const startScanHandler = handler<
   );
 
   if (!validation.valid) {
-    console.log(
-      `[GmailAgenticSearch] Token validation failed: ${validation.error}`,
-    );
+    if (DEBUG_AGENT) {
+      console.log(
+        `[GmailAgenticSearch] Token validation failed: ${validation.error}`,
+      );
+    }
     addDebugLogEntry(state.debugLog, {
       type: "error",
       message: `Token validation failed: ${validation.error}`,
@@ -769,14 +801,18 @@ const startScanHandler = handler<
   }
 
   if (validation.refreshed) {
-    console.log("[GmailAgenticSearch] Token was refreshed automatically");
+    if (DEBUG_AGENT) {
+      console.log("[GmailAgenticSearch] Token was refreshed automatically");
+    }
     addDebugLogEntry(state.debugLog, {
       type: "info",
       message: "Token was expired - refreshed automatically",
     });
   }
 
-  console.log("[GmailAgenticSearch] Token valid, starting scan");
+  if (DEBUG_AGENT) {
+    console.log("[GmailAgenticSearch] Token valid, starting scan");
+  }
   addDebugLogEntry(state.debugLog, {
     type: "info",
     message: "Token valid - starting agent...",
@@ -859,13 +895,14 @@ const flagForShareHandler = handler<
 });
 
 // Handler to flag a query for sharing (runs PII screening)
-const flagQueryForSharingHandler = handler<
+// Prefixed with _ as not currently used in pattern body - preserved for future use
+const _flagQueryForSharingHandler = handler<
   { queryId: string },
   {
     localQueries: Writable<LocalQuery[]>;
     pendingSubmissions: Writable<PendingSubmission[]>;
   }
->(async (input, state) => {
+>((input, state) => {
   const queries = state.localQueries.get() || [];
   const query = queries.find((q) => q.id === input.queryId);
   if (!query) return;
@@ -895,7 +932,8 @@ const flagQueryForSharingHandler = handler<
 });
 
 // Handler to approve a pending submission
-const approvePendingSubmissionHandler = handler<
+// Prefixed with _ as not currently used in pattern body - preserved for future use
+const _approvePendingSubmissionHandler = handler<
   { localQueryId: string },
   { pendingSubmissions: Writable<PendingSubmission[]> }
 >((input, state) => {
@@ -909,7 +947,8 @@ const approvePendingSubmissionHandler = handler<
 });
 
 // Handler to reject/cancel a pending submission
-const rejectPendingSubmissionHandler = handler<
+// Prefixed with _ as not currently used in pattern body - preserved for future use
+const _rejectPendingSubmissionHandler = handler<
   { localQueryId: string },
   {
     pendingSubmissions: Writable<PendingSubmission[]>;
@@ -931,7 +970,8 @@ const rejectPendingSubmissionHandler = handler<
 });
 
 // Handler to update the sanitized query manually
-const updateSanitizedQueryHandler = handler<
+// Prefixed with _ as not currently used in pattern body - preserved for future use
+const _updateSanitizedQueryHandler = handler<
   { localQueryId: string; sanitizedQuery: string },
   { pendingSubmissions: Writable<PendingSubmission[]> }
 >((input, state) => {
@@ -968,7 +1008,7 @@ const GmailAgenticSearch = pattern<
     searchProgress, // Can be passed in for parent coordination
     debugLog, // Debug log for tracking agent activity
     auth: inputAuth, // CT-1085 workaround: direct auth input
-    accountType, // Multi-account support: "default" | "personal" | "work"
+    accountType: _accountType, // Multi-account support: "default" | "personal" | "work" (prefixed with _ as read-only input, using selectedAccountType instead)
     // Shared search strings support
     agentTypeUrl,
     localQueries: localQueriesInput, // Renamed: input may be read-only
@@ -1033,9 +1073,11 @@ const GmailAgenticSearch = pattern<
         const signalVal = signalValue || 0;
         const lastSignalVal = lastSignalValue || 0;
 
-        console.log(
-          `[GmailAgenticSearch] itemFoundSignal derive triggered: signalValue=${signalVal}, lastSignalValue=${lastSignalVal}, queryId=${queryId}`,
-        );
+        if (DEBUG_AGENT) {
+          console.log(
+            `[GmailAgenticSearch] itemFoundSignal derive triggered: signalValue=${signalVal}, lastSignalValue=${lastSignalVal}, queryId=${queryId}`,
+          );
+        }
 
         if (signalVal > lastSignalVal) {
           if (queryId) {
@@ -1048,13 +1090,17 @@ const GmailAgenticSearch = pattern<
               [queryId]: newCount,
             });
 
-            console.log(
-              `[GmailAgenticSearch] Marked query ${queryId} as found item (now ${newCount})`,
-            );
+            if (DEBUG_AGENT) {
+              console.log(
+                `[GmailAgenticSearch] Marked query ${queryId} as found item (now ${newCount})`,
+              );
+            }
           } else {
-            console.warn(
-              "[GmailAgenticSearch] itemFoundSignal increased but no recent query to mark",
-            );
+            if (DEBUG_AGENT) {
+              console.warn(
+                "[GmailAgenticSearch] itemFoundSignal increased but no recent query to mark",
+              );
+            }
           }
           lastSignalValueCell.set(signalVal);
         }
@@ -1079,7 +1125,7 @@ const GmailAgenticSearch = pattern<
       auth: wishedAuth,
       fullUI: authFullUI,
       isReady: wishedAuthReady,
-      currentEmail: wishedEmail,
+      currentEmail: _wishedEmail, // Prefixed with _ as not currently used directly
       wishResult,
       createAuth: createGoogleAuthAction,
     } = createGoogleAuthUtil({

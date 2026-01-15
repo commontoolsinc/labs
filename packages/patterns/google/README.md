@@ -4,11 +4,6 @@
 >
 > These patterns are experimental and may have bugs or incomplete features. They
 > are being actively developed and tested.
->
-> <!-- TODO(@jkomoros): Fix type errors - ~12 TypeScript errors related to -->
-> <!-- wish() return types, UIRenderable compatibility, etc. -->
-> <!-- TODO(@jkomoros): Fix lint issues - ~79 deno lint violations -->
-> <!-- (unused vars, missing button types, untagged TODOs, etc.) -->
 
 This folder contains patterns for integrating with Google services (Gmail,
 Calendar, Docs) via OAuth authentication.
@@ -87,13 +82,13 @@ well-tested version.
 
 2. **OAuth Scopes** The patterns request various scopes depending on their
    needs:
-   - `email`, `profile` - Basic user info
-   - `gmail.readonly` - Read emails
-   - `gmail.send` - Send emails
-   - `gmail.modify` - Modify labels
-   - `calendar.readonly` - Read calendar
-   - `calendar.events` - Manage calendar events
-   - `documents.readonly` - Read Google Docs
+   - `email`, `profile` - Basic user info (OpenID Connect)
+   - `https://www.googleapis.com/auth/gmail.readonly` - Read emails
+   - `https://www.googleapis.com/auth/gmail.send` - Send emails
+   - `https://www.googleapis.com/auth/gmail.modify` - Modify labels
+   - `https://www.googleapis.com/auth/calendar.readonly` - Read calendar
+   - `https://www.googleapis.com/auth/calendar.events` - Manage calendar events
+   - `https://www.googleapis.com/auth/documents.readonly` - Read Google Docs
 
 ## Quick Start
 

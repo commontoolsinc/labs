@@ -16,6 +16,7 @@ deno check recipes/[!_]*.ts*
 # Ignore ct-outliner until re-added
 deno check packages/ui/src/v2/components/*[!outliner]/*.ts*
 
+# Check core packages
 deno check \
   packages/api \
   packages/background-charm-service \
@@ -31,6 +32,18 @@ deno check \
   packages/js-compiler \
   packages/llm \
   packages/memory \
+  packages/runner \
+  packages/runtime-client \
+  packages/seeder \
+  packages/shell \
+  packages/static/*.ts \
+  packages/static/scripts \
+  packages/static/test \
+  packages/toolshed \
+  packages/utils
+
+# Check patterns separately to avoid OOM in CI
+deno check \
   packages/patterns/*.ts \
   packages/patterns/*.tsx \
   packages/patterns/battleship \
@@ -45,16 +58,7 @@ deno check \
   packages/patterns/scrabble \
   packages/patterns/system \
   packages/patterns/test \
-  packages/patterns/weekly-calendar \
-  packages/runner \
-  packages/runtime-client \
-  packages/seeder \
-  packages/shell \
-  packages/static/*.ts \
-  packages/static/scripts \
-  packages/static/test \
-  packages/toolshed \
-  packages/utils
+  packages/patterns/weekly-calendar
 
-# TODO(@jkomoros): Fix type errors in google patterns and re-enable checking
-# Excluded: packages/patterns/google (WIP patterns with ~12 type errors)
+# Check google patterns separately (large package)
+deno check packages/patterns/google

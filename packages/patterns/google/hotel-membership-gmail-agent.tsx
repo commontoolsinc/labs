@@ -19,13 +19,15 @@ import {
   // wish,  // TEMPORARILY DISABLED - may cause self-referential loop
 } from "commontools";
 import GmailAgenticSearch, {
-  type GmailAgenticSearchInput,
   type SearchProgress,
 } from "./gmail-agentic-search.tsx";
 import { defineItemSchema, InferItem, listTool } from "./util/agentic-tools.ts";
 
 // Scan mode: "full" = comprehensive all-time search, "recent" = last 7 days only
 type ScanMode = "full" | "recent";
+
+// Debug flag for development - disable in production
+const DEBUG_HOTEL = false;
 
 // ============================================================================
 // EFFECTIVE QUERY HINTS
@@ -176,9 +178,11 @@ const startScan = handler<
   }
 >((_, state) => {
   const mode = state.mode;
-  console.log(
-    `[HotelMembership] Starting scan in ${mode} mode with limit ${state.searchLimit}`,
-  );
+  if (DEBUG_HOTEL) {
+    console.log(
+      `[HotelMembership] Starting scan in ${mode} mode with limit ${state.searchLimit}`,
+    );
+  }
   state.currentScanMode.set(mode);
   state.maxSearches.set(state.searchLimit);
   // Initialize progress to trigger progressUI display
@@ -467,9 +471,11 @@ Report memberships as you find them. Don't wait until the end.`,
         const lastCount = lastMembershipCountCell.get() || 0;
         if (currentCount > lastCount) {
           // New membership was added - signal the base pattern to mark the query
-          console.log(
-            `[HotelMembership] New membership detected (${lastCount} -> ${currentCount}), signaling itemFoundSignal`,
-          );
+          if (DEBUG_HOTEL) {
+            console.log(
+              `[HotelMembership] New membership detected (${lastCount} -> ${currentCount}), signaling itemFoundSignal`,
+            );
+          }
           // Increment the signal - base pattern watches this and marks the query
           const currentSignal = itemFoundSignal.get() || 0;
           itemFoundSignal.set(currentSignal + 1);

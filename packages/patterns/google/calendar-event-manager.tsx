@@ -409,6 +409,8 @@ const confirmOperation = handler<
         error: error instanceof Error ? error.message : String(error),
         timestamp: new Date().toISOString(),
       });
+      // Close confirmation modal on error
+      pendingOp.set(null);
     } finally {
       processing.set(false);
     }
@@ -519,6 +521,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
                 )}
               </div>
               <button
+                type="button"
                 onClick={dismissResult({ result })}
                 style={{
                   background: "none",
@@ -567,6 +570,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
                 </div>
               </div>
               <button
+                type="button"
                 onClick={dismissResult({ result })}
                 style={{
                   background: "none",
@@ -739,6 +743,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
               hasExistingEvent,
               null,
               <button
+                type="button"
                 onClick={prepareCreate({ draft, pendingOp })}
                 disabled={derive(canCreate, (can) => !can)}
                 style={{
@@ -762,6 +767,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
               hasExistingEvent,
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                 <button
+                  type="button"
                   onClick={prepareUpdate({ draft, existingEvent, pendingOp })}
                   disabled={derive(canCreate, (can) => !can)}
                   style={{
@@ -779,6 +785,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
                   Update Event
                 </button>
                 <button
+                  type="button"
                   onClick={prepareDelete({ draft, existingEvent, pendingOp })}
                   disabled={processing}
                   style={{
@@ -812,6 +819,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
                     RSVP:
                   </span>
                   <button
+                    type="button"
                     onClick={prepareRsvp({
                       status: "accepted",
                       draft,
@@ -832,6 +840,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
                     Accept
                   </button>
                   <button
+                    type="button"
                     onClick={prepareRsvp({
                       status: "tentative",
                       draft,
@@ -852,6 +861,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
                     Maybe
                   </button>
                   <button
+                    type="button"
                     onClick={prepareRsvp({
                       status: "declined",
                       draft,
@@ -1205,6 +1215,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
                 }}
               >
                 <button
+                  type="button"
                   onClick={cancelOperation({ pendingOp })}
                   disabled={processing}
                   style={{
@@ -1221,6 +1232,7 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
                   Cancel
                 </button>
                 <button
+                  type="button"
                   onClick={confirmOperation({
                     pendingOp,
                     auth,

@@ -173,9 +173,6 @@ export function listTool<Fields extends string>(
       let resultMessage: string;
 
       if (existingKeys.has(dedupeKey)) {
-        console.log(
-          `[listTool:${state.idPrefix}] Duplicate skipped: ${dedupeKey}`,
-        );
         resultMessage = `Duplicate: ${dedupeKey} already saved`;
       } else {
         const id = `${state.idPrefix}-${Date.now()}-${
@@ -189,8 +186,7 @@ export function listTool<Fields extends string>(
         delete newRecord.result; // Don't save the result cell
 
         state.items.set([...currentItems, newRecord]);
-        console.log(`[listTool:${state.idPrefix}] SAVED: ${dedupeKey}`);
-        resultMessage = `Saved: ${dedupeKey}`;
+        resultMessage = `Saved new item`;
       }
 
       // Write result for LLM

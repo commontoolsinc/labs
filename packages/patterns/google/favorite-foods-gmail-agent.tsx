@@ -251,7 +251,7 @@ Report each discovery immediately. Focus on patterns - if someone orders from th
           <ct-vscroll flex showScrollbar>
             <ct-vstack style="padding: 16px; gap: 16px;">
               {/* Embed the base searcher - provides auth + scan UI */}
-              {searcher}
+              {searcher as any}
 
               {/* Stats */}
               <div style={{ fontSize: "13px", color: "#666" }}>
@@ -305,7 +305,7 @@ Report each discovery immediately. Focus on patterns - if someone orders from th
                         {categoryLabels[category] || category}{" "}
                         ({groups[category].length})
                       </summary>
-                      <ct-vstack gap={2} style="paddingLeft: 16px;">
+                      <ct-vstack gap={2} style="padding-left: 16px;">
                         {groups[category].map((f: FoodPreference) => (
                           <div
                             style={{

@@ -41,14 +41,18 @@ const env = getRecipeEnvironment();
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// ========== DERIVE DEBUG INSTRUMENTATION ==========
-// Track derive execution counts to investigate performance issues
+// ========== OPTIONAL DERIVE DEBUG INSTRUMENTATION ==========
+// Set DEBUG_DERIVE=true to enable derive() call counting for performance investigation.
+// IMPORTANT: Keep disabled in production - the setInterval has no cleanup mechanism.
+const DEBUG_DERIVE = false;
+
 let deriveCallCount = 0;
 let perRowDeriveCount = 0;
 let lastLogTime = Date.now();
-let startTime = Date.now();
+const startTime = Date.now();
 
 function logDeriveCall(name: string, isPerRow = false) {
+  if (!DEBUG_DERIVE) return;
   deriveCallCount++;
   if (isPerRow) perRowDeriveCount++;
   const now = Date.now();
@@ -62,16 +66,18 @@ function logDeriveCall(name: string, isPerRow = false) {
   }
 }
 
-// Start summary interval - using try/catch to handle server vs browser execution
-try {
-  setInterval(() => {
-    const elapsed = Date.now() - startTime;
-    console.log(
-      `[DERIVE DEBUG SUMMARY] total=${deriveCallCount}, perRow=${perRowDeriveCount}, elapsed=${elapsed}ms`,
-    );
-  }, 5000);
-} catch {
-  // Ignore if setInterval isn't available during compilation
+// Only start interval if debugging is enabled
+if (DEBUG_DERIVE) {
+  try {
+    setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      console.log(
+        `[DERIVE DEBUG SUMMARY] total=${deriveCallCount}, perRow=${perRowDeriveCount}, elapsed=${elapsed}ms`,
+      );
+    }, 5000);
+  } catch {
+    // Ignore if setInterval isn't available during compilation
+  }
 }
 // ========== END DEBUG INSTRUMENTATION ==========
 
@@ -245,7 +251,7 @@ class CalendarClient {
     options.headers.set("Authorization", `Bearer ${token}`);
 
     const res = await fetch(url, options);
-    let { ok, status, statusText } = res;
+    const { ok, status, statusText } = res;
 
     if (ok) {
       debugLog(this.debugMode, `${url}: ${status} ${statusText}`);
@@ -420,13 +426,13 @@ const toggleDebugMode = handler<
   },
 );
 
-const nextPage = handler<unknown, { currentPage: Writable<number> }>(
+const _nextPage = handler<unknown, { currentPage: Writable<number> }>(
   (_, { currentPage }) => {
     currentPage.set(currentPage.get() + 1);
   },
 );
 
-const prevPage = handler<unknown, { currentPage: Writable<number> }>(
+const _prevPage = handler<unknown, { currentPage: Writable<number> }>(
   (_, { currentPage }) => {
     const current = currentPage.get();
     if (current > 0) {
@@ -559,13 +565,13 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
       upcomingEvents,
       (evts: CalendarEvent[]) => evts.length,
     );
-    const maxPageNum = derive(
+    const _maxPageNum = derive(
       totalUpcoming,
       (total: number) => Math.max(0, Math.ceil(total / PAGE_SIZE) - 1),
     );
 
     // Paginated events for display - use computed with events Cell directly
-    const paginatedEvents = computed(() => {
+    const _paginatedEvents = computed(() => {
       const allEvents = events.get() || [];
       const now = new Date();
       const upcoming = [...allEvents]

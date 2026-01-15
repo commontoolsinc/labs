@@ -134,6 +134,7 @@ export default pattern<Input, Output>(({ auth, selectedScopes }) => {
                   style={{ display: "flex", gap: "12px", marginBottom: "16px" }}
                 >
                   <button
+                    type="button"
                     onClick={createPersonalWrapper({
                       auth: baseAuth.auth,
                       selectedScopes,
@@ -153,6 +154,7 @@ export default pattern<Input, Output>(({ auth, selectedScopes }) => {
                     Personal Account
                   </button>
                   <button
+                    type="button"
                     onClick={createWorkWrapper({
                       auth: baseAuth.auth,
                       selectedScopes,
@@ -190,7 +192,7 @@ export default pattern<Input, Output>(({ auth, selectedScopes }) => {
         )}
 
         {/* Embed base auth UI */}
-        {baseAuth}
+        {baseAuth as any}
       </div>
     ),
     auth: baseAuth.auth,

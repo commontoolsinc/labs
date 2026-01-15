@@ -246,6 +246,7 @@ export default pattern<Input, Output>(({ draft }) => {
                 </div>
               </div>
               <button
+                type="button"
                 onClick={dismissResult({ result })}
                 style={{
                   background: "none",
@@ -294,6 +295,7 @@ export default pattern<Input, Output>(({ draft }) => {
                 </div>
               </div>
               <button
+                type="button"
                 onClick={dismissResult({ result })}
                 style={{
                   background: "none",
@@ -418,6 +420,7 @@ export default pattern<Input, Output>(({ draft }) => {
           </div>
 
           <button
+            type="button"
             onClick={prepareToSend({ showConfirmation })}
             disabled={computed(() => !canSend)}
             style={{
@@ -629,6 +632,7 @@ export default pattern<Input, Output>(({ draft }) => {
                 }}
               >
                 <button
+                  type="button"
                   onClick={cancelSend({ showConfirmation })}
                   disabled={sending}
                   style={{
@@ -645,6 +649,7 @@ export default pattern<Input, Output>(({ draft }) => {
                   Cancel
                 </button>
                 <button
+                  type="button"
                   onClick={confirmAndSend({
                     draft,
                     auth,
