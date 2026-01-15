@@ -586,6 +586,20 @@ const movePriorityDownByIndex = handler<
   people.set(newOrder);
 });
 
+const movePriorityToTopByIndex = handler<
+  unknown,
+  { people: Writable<Person[]>; index: number }
+>((_event, { people, index }) => {
+  const order = people.get();
+  if (index <= 0 || index >= order.length) return;
+
+  const newOrder = order.map(reconstructPerson);
+  // Remove the person from their current position and insert at the beginning
+  const [person] = newOrder.splice(index, 1);
+  newOrder.unshift(person);
+  people.set(newOrder);
+});
+
 const removePersonByIndex = handler<
   unknown,
   {
@@ -618,6 +632,52 @@ const removePersonByIndex = handler<
   if (filteredGuests.length !== guestList.length) {
     guests.set(filteredGuests);
   }
+});
+
+const setDefaultSpot1ByIndex = handler<
+  unknown,
+  { people: Writable<Person[]>; index: number }
+>((_event, { people, index }) => {
+  const pList = people.get();
+  if (index < 0 || index >= pList.length) return;
+
+  const newList = pList.map(reconstructPerson);
+  // Toggle: if already #1, clear it; otherwise set to #1
+  newList[index] = {
+    ...newList[index],
+    defaultSpot: newList[index].defaultSpot === 1 ? null : 1,
+  };
+  people.set(newList);
+});
+
+const setDefaultSpot5ByIndex = handler<
+  unknown,
+  { people: Writable<Person[]>; index: number }
+>((_event, { people, index }) => {
+  const pList = people.get();
+  if (index < 0 || index >= pList.length) return;
+
+  const newList = pList.map(reconstructPerson);
+  newList[index] = {
+    ...newList[index],
+    defaultSpot: newList[index].defaultSpot === 5 ? null : 5,
+  };
+  people.set(newList);
+});
+
+const setDefaultSpot12ByIndex = handler<
+  unknown,
+  { people: Writable<Person[]>; index: number }
+>((_event, { people, index }) => {
+  const pList = people.get();
+  if (index < 0 || index >= pList.length) return;
+
+  const newList = pList.map(reconstructPerson);
+  newList[index] = {
+    ...newList[index],
+    defaultSpot: newList[index].defaultSpot === 12 ? null : 12,
+  };
+  people.set(newList);
 });
 
 // Add a person
@@ -873,12 +933,19 @@ const addPersonFromFormHandler = handler<
   {
     newPersonName: Writable<string>;
     newPersonEmail: Writable<string>;
+    newPersonDefaultSpot: Writable<string>;
     people: Writable<Person[]>;
   }
->((_event, { newPersonName, newPersonEmail, people }) => {
+>((_event, { newPersonName, newPersonEmail, newPersonDefaultSpot, people }) => {
   const name = newPersonName.get().trim();
   const email = newPersonEmail.get().trim();
+  const defaultSpotStr = newPersonDefaultSpot.get();
   if (!name) return;
+
+  // Parse default spot - empty string means null
+  const defaultSpot: SpotNumber | null = defaultSpotStr
+    ? (parseInt(defaultSpotStr, 10) as SpotNumber)
+    : null;
 
   const currentPeople = people.get();
   const person: Person = {
@@ -889,7 +956,7 @@ const addPersonFromFormHandler = handler<
     livesNearby: false,
     spotPreferences: [],
     compatibleSpots: [1, 5, 12],
-    defaultSpot: null,
+    defaultSpot,
     priorityRank: currentPeople.length + 1,
     totalBookings: 0,
     lastBookingDate: null,
@@ -899,6 +966,7 @@ const addPersonFromFormHandler = handler<
 
   newPersonName.set("");
   newPersonEmail.set("");
+  newPersonDefaultSpot.set("");
 });
 
 const addGuestFromFormHandler = handler<
@@ -937,236 +1005,191 @@ const addGuestFromFormHandler = handler<
   newGuestType.set("best-effort");
 });
 
+// Helper to get all dates in a range (inclusive)
+// If endDate is empty or invalid, returns just the startDate
+function getDateRange(startDate: string, endDate: string): string[] {
+  const dates: string[] = [];
+  const start = new Date(startDate);
+
+  // If no end date provided, just return the single start date
+  if (!endDate || endDate.trim() === "") {
+    return [startDate];
+  }
+
+  const end = new Date(endDate);
+
+  // Ensure start is before or equal to end
+  if (start > end) return [startDate];
+
+  const current = new Date(start);
+  while (current <= end) {
+    dates.push(current.toISOString().split("T")[0]);
+    current.setDate(current.getDate() + 1);
+  }
+  return dates;
+}
+
 const requestSpotFromFormHandler = handler<
   void,
   {
     selectedPersonForRequest: Writable<string>;
     selectedRequestDate: Writable<string>;
+    selectedRequestEndDate: Writable<string>;
     people: Writable<Person[]>;
     requests: Writable<SpotRequest[]>;
+    allocations: Writable<Allocation[]>;
+    spots: ParkingSpot[];
   }
 >(
   (
     _event,
-    { selectedPersonForRequest, selectedRequestDate, people, requests },
+    {
+      selectedPersonForRequest,
+      selectedRequestDate,
+      selectedRequestEndDate,
+      people,
+      requests,
+      allocations,
+      spots,
+    },
   ) => {
     const personIdx = parseInt(selectedPersonForRequest.get(), 10);
-    const date = selectedRequestDate.get();
+    const startDate = selectedRequestDate.get();
+    const endDate = selectedRequestEndDate.get();
     const peopleList = people.get();
     if (
       isNaN(personIdx) ||
       personIdx < 0 ||
-      personIdx >= peopleList.length ||
-      !isWithinBookingWindow(date)
+      personIdx >= peopleList.length
     ) return;
 
     const person = peopleList[personIdx];
+    const dates = getDateRange(startDate, endDate);
 
-    // Check for existing request using equals()
-    const existingRequest = requests.get().find(
-      (r) =>
-        r.date === date &&
-        r.person &&
-        equals(r.person, person) &&
-        r.status !== "cancelled",
-    );
-    if (existingRequest) return;
+    // Create requests for each date in range
+    const requestsList = requests.get();
+    const newRequests: SpotRequest[] = [];
 
-    requests.push({
-      date,
-      person,
-      guest: null,
-      requestedAt: Date.now(),
-      status: "pending",
-      allocatedSpot: null,
-      notes: "",
-    });
-  },
-);
+    for (const date of dates) {
+      if (!isWithinBookingWindow(date)) continue;
 
-const runAutoAllocateFromFormHandler = handler<
-  void,
-  {
-    selectedRequestDate: Writable<string>;
-    requests: Writable<SpotRequest[]>;
-    allocations: Writable<Allocation[]>;
-    people: Writable<Person[]>;
-  }
->(
-  (
-    _event,
-    { selectedRequestDate, requests, allocations, people },
-  ) => {
-    const date = selectedRequestDate.get();
-    const reqList = requests.get();
-    const allocList = allocations.get();
-    const prioOrder = people.get();
+      // Check for existing request on this date
+      const existingRequest = requestsList.find(
+        (r) =>
+          r.date === date &&
+          r.person &&
+          equals(r.person, person) &&
+          r.status !== "cancelled",
+      );
+      if (existingRequest) continue;
 
-    const pendingReqs = reqList.filter(
-      (r) => r.date === date && r.status === "pending",
-    );
-    if (pendingReqs.length === 0) return;
-
-    const usedSpots = new Set<SpotNumber>(
-      allocList.filter((a) => a.date === date).map((a) => a.spot),
-    );
-    const allSpotNumbers: SpotNumber[] = [1, 5, 12];
-
-    const getAvailableCompatible = (compatible: SpotNumber[]): SpotNumber[] =>
-      compatible.filter((s) => !usedSpots.has(s));
-
-    const newAllocs: Allocation[] = [];
-    const updatedReqs = [...reqList];
-
-    // Phase 1: High-priority guests
-    for (
-      const req of pendingReqs.filter((r) => {
-        if (!r.guest) return false;
-        return r.guest.type === "high-priority";
-      })
-    ) {
-      const guest = req.guest;
-      if (!guest) continue;
-      const compat = (guest.compatibleSpots as SpotNumber[]) || allSpotNumbers;
-      const avail = getAvailableCompatible(compat);
-      const reqIdx = updatedReqs.findIndex((r) => equals(req, r));
-      if (avail.length > 0 && reqIdx >= 0) {
-        const spot = avail[0];
-        usedSpots.add(spot);
-        updatedReqs[reqIdx] = {
-          ...updatedReqs[reqIdx],
-          status: "allocated" as RequestStatus,
-          allocatedSpot: spot,
-        };
-        newAllocs.push({
-          date,
-          spot,
-          person: req.person,
-          guest: req.guest,
-          allocatedAt: Date.now(),
-          wasAutoAllocated: true,
-        });
-      } else if (reqIdx >= 0) {
-        updatedReqs[reqIdx] = {
-          ...updatedReqs[reqIdx],
-          status: "denied" as RequestStatus,
-        };
-      }
+      newRequests.push({
+        date,
+        person,
+        guest: null,
+        requestedAt: Date.now(),
+        status: "pending",
+        allocatedSpot: null,
+        notes: "",
+      });
     }
 
-    // Phase 2: People in priority order
-    const personReqs = pendingReqs
-      .filter(
-        (r) =>
-          r.person &&
-          updatedReqs.find((ur) => equals(ur, r))?.status === "pending",
-      )
-      .sort((a, b) => {
-        const aIdx = a.person
-          ? prioOrder.findIndex((p) => equals(p, a.person!))
-          : -1;
-        const bIdx = b.person
-          ? prioOrder.findIndex((p) => equals(p, b.person!))
-          : -1;
-        return aIdx - bIdx;
-      });
+    if (newRequests.length === 0) return;
 
-    for (const req of personReqs) {
-      const person = req.person;
-      if (!person) continue;
-      const compat = (person.compatibleSpots as SpotNumber[]) || allSpotNumbers;
-      const avail = getAvailableCompatible(compat);
-      const reqIdx = updatedReqs.findIndex((r) => equals(req, r));
+    // Add all new requests
+    const updatedRequests = [...requestsList, ...newRequests];
+    requests.set(updatedRequests);
 
-      let spot: SpotNumber | null = null;
-      if (avail.length > 0) {
-        // Check default spot
-        if (
-          person.defaultSpot &&
-          avail.includes(person.defaultSpot as SpotNumber)
-        ) {
-          spot = person.defaultSpot as SpotNumber;
-        } else {
-          // Check preferences
-          const prefs = (person.spotPreferences as SpotNumber[]) || [];
-          for (const pref of prefs) {
-            if (avail.includes(pref)) {
-              spot = pref;
-              break;
-            }
+    // Auto-allocate for each date that has new requests
+    const allocList = allocations.get();
+    const newAllocations: Allocation[] = [];
+    const finalRequests = [...updatedRequests];
+
+    for (const req of newRequests) {
+      // Get available spots for this date
+      const dateAllocations = [...allocList, ...newAllocations].filter(
+        (a) => a.date === req.date,
+      );
+      const usedSpots = new Set(dateAllocations.map((a) => a.spot));
+      const availableSpots = spots
+        .map((s) => s.number)
+        .filter((n) => !usedSpots.has(n));
+
+      if (availableSpots.length === 0) continue;
+      if (!req.person) continue;
+
+      // Allocate based on person's default spot or first available
+      let allocatedSpot: SpotNumber | null = null;
+      if (
+        req.person.defaultSpot &&
+        availableSpots.includes(req.person.defaultSpot)
+      ) {
+        allocatedSpot = req.person.defaultSpot;
+      } else {
+        // Check preferences
+        for (const pref of req.person.spotPreferences || []) {
+          if (availableSpots.includes(pref)) {
+            allocatedSpot = pref;
+            break;
           }
-          if (!spot) spot = avail[0];
+        }
+        // Fall back to first available compatible spot
+        if (!allocatedSpot) {
+          const compatible = req.person.compatibleSpots || [1, 5, 12];
+          allocatedSpot = availableSpots.find((s) => compatible.includes(s)) ||
+            null;
         }
       }
 
-      if (spot && reqIdx >= 0) {
-        usedSpots.add(spot);
-        updatedReqs[reqIdx] = {
-          ...updatedReqs[reqIdx],
-          status: "allocated" as RequestStatus,
-          allocatedSpot: spot,
-        };
-        newAllocs.push({
-          date,
-          spot,
+      if (allocatedSpot) {
+        // Update request status
+        const reqIdx = finalRequests.findIndex(
+          (r) =>
+            r.date === req.date &&
+            r.person &&
+            req.person &&
+            equals(r.person, req.person) &&
+            r.status === "pending",
+        );
+        if (reqIdx >= 0) {
+          finalRequests[reqIdx] = {
+            ...finalRequests[reqIdx],
+            status: "allocated",
+            allocatedSpot,
+          };
+        }
+
+        // Create allocation
+        newAllocations.push({
+          date: req.date,
+          spot: allocatedSpot,
           person: req.person,
-          guest: req.guest,
+          guest: null,
           allocatedAt: Date.now(),
           wasAutoAllocated: true,
         });
-      } else if (reqIdx >= 0) {
-        updatedReqs[reqIdx] = {
-          ...updatedReqs[reqIdx],
-          status: "denied" as RequestStatus,
-        };
       }
     }
 
-    // Phase 3: Best-effort guests
-    for (
-      const req of pendingReqs.filter((r) => {
-        if (!r.guest) return false;
-        const curr = updatedReqs.find((ur) => equals(ur, r));
-        if (curr?.status !== "pending") return false;
-        return r.guest.type === "best-effort";
-      })
-    ) {
-      const guest = req.guest;
-      if (!guest) continue;
-      const compat = (guest.compatibleSpots as SpotNumber[]) || allSpotNumbers;
-      const avail = getAvailableCompatible(compat);
-      const reqIdx = updatedReqs.findIndex((r) => equals(req, r));
-      if (avail.length > 0 && reqIdx >= 0) {
-        const spot = avail[0];
-        usedSpots.add(spot);
-        updatedReqs[reqIdx] = {
-          ...updatedReqs[reqIdx],
-          status: "allocated" as RequestStatus,
-          allocatedSpot: spot,
-        };
-        newAllocs.push({
-          date,
-          spot,
-          person: req.person,
-          guest: req.guest,
-          allocatedAt: Date.now(),
-          wasAutoAllocated: true,
-        });
-      } else if (reqIdx >= 0) {
-        updatedReqs[reqIdx] = {
-          ...updatedReqs[reqIdx],
-          status: "denied" as RequestStatus,
-        };
-      }
-    }
-
-    // Apply updates
-    requests.set(updatedReqs);
-    for (const alloc of newAllocs) {
-      allocations.push(alloc);
+    // Update state
+    if (newAllocations.length > 0) {
+      requests.set(finalRequests);
+      allocations.set([...allocList, ...newAllocations]);
     }
   },
 );
+
+const toggleMultiDay = handler<
+  unknown,
+  { showMultiDay: Writable<boolean>; selectedRequestEndDate: Writable<string> }
+>((_event, { showMultiDay, selectedRequestEndDate }) => {
+  const current = showMultiDay.get();
+  showMultiDay.set(!current);
+  // Clear end date when hiding multi-day
+  if (current) {
+    selectedRequestEndDate.set("");
+  }
+});
 
 // ============ MAIN PATTERN ============
 
@@ -1180,11 +1203,14 @@ export default pattern<Input, Output>(
     // Form states
     const newPersonName = Writable.of("");
     const newPersonEmail = Writable.of("");
+    const newPersonDefaultSpot = Writable.of<string>("");
     const newGuestName = Writable.of("");
     const newGuestHost = Writable.of("");
     const newGuestType = Writable.of<GuestType>("best-effort");
     const selectedRequestDate = Writable.of(todayDate);
+    const selectedRequestEndDate = Writable.of("");
     const selectedPersonForRequest = Writable.of("");
+    const showMultiDay = Writable.of(false);
 
     // Computed values
     const todayAllocated = getTodayAllocatedCount({ allocations });
@@ -1217,6 +1243,7 @@ export default pattern<Input, Output>(
     const addPersonFromFormStream = addPersonFromFormHandler({
       newPersonName,
       newPersonEmail,
+      newPersonDefaultSpot,
       people,
     });
     const addGuestFromFormStream = addGuestFromFormHandler({
@@ -1229,14 +1256,15 @@ export default pattern<Input, Output>(
     const requestSpotFromFormStream = requestSpotFromFormHandler({
       selectedPersonForRequest,
       selectedRequestDate,
+      selectedRequestEndDate,
       people,
-      requests,
-    });
-    const runAutoAllocateFromFormStream = runAutoAllocateFromFormHandler({
-      selectedRequestDate,
       requests,
       allocations,
-      people,
+      spots,
+    });
+    const toggleMultiDayStream = toggleMultiDay({
+      showMultiDay,
+      selectedRequestEndDate,
     });
 
     // ============ UI ============
@@ -1499,40 +1527,82 @@ export default pattern<Input, Output>(
                 }
                 {sortedPriority.map((person, index: number) => (
                   <ct-card>
-                    <ct-hstack gap="2" align="center">
-                      <ct-vstack gap="0" style="flex: 1;">
-                        <span style="font-weight: 500;">{person.name}</span>
+                    <ct-vstack gap="1">
+                      <ct-hstack gap="2" align="center">
+                        <ct-vstack gap="0" style="flex: 1;">
+                          <span style="font-weight: 500;">{person.name}</span>
+                          <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
+                            {person.usualCommuteMode || "drive"}
+                          </span>
+                        </ct-vstack>
+                        <ct-button
+                          variant="ghost"
+                          size="sm"
+                          onClick={movePriorityToTopByIndex({ people, index })}
+                          title="Move to top"
+                        >
+                          ⤒
+                        </ct-button>
+                        <ct-button
+                          variant="ghost"
+                          size="sm"
+                          onClick={movePriorityUpByIndex({ people, index })}
+                        >
+                          ↑
+                        </ct-button>
+                        <ct-button
+                          variant="ghost"
+                          size="sm"
+                          onClick={movePriorityDownByIndex({ people, index })}
+                        >
+                          ↓
+                        </ct-button>
+                        <ct-button
+                          variant="ghost"
+                          size="sm"
+                          onClick={removePersonByIndex({
+                            people,
+                            requests,
+                            guests,
+                            index,
+                          })}
+                        >
+                          ×
+                        </ct-button>
+                      </ct-hstack>
+                      <ct-hstack gap="1" align="center">
                         <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
-                          {person.usualCommuteMode || "drive"}
+                          Default:
                         </span>
-                      </ct-vstack>
-                      <ct-button
-                        variant="ghost"
-                        size="sm"
-                        onClick={movePriorityUpByIndex({ people, index })}
-                      >
-                        ↑
-                      </ct-button>
-                      <ct-button
-                        variant="ghost"
-                        size="sm"
-                        onClick={movePriorityDownByIndex({ people, index })}
-                      >
-                        ↓
-                      </ct-button>
-                      <ct-button
-                        variant="ghost"
-                        size="sm"
-                        onClick={removePersonByIndex({
-                          people,
-                          requests,
-                          guests,
-                          index,
-                        })}
-                      >
-                        ×
-                      </ct-button>
-                    </ct-hstack>
+                        <ct-button
+                          variant={person.defaultSpot === 1
+                            ? "primary"
+                            : "ghost"}
+                          size="sm"
+                          onClick={setDefaultSpot1ByIndex({ people, index })}
+                        >
+                          #1
+                        </ct-button>
+                        <ct-button
+                          variant={person.defaultSpot === 5
+                            ? "primary"
+                            : "ghost"}
+                          size="sm"
+                          onClick={setDefaultSpot5ByIndex({ people, index })}
+                        >
+                          #5
+                        </ct-button>
+                        <ct-button
+                          variant={person.defaultSpot === 12
+                            ? "primary"
+                            : "ghost"}
+                          size="sm"
+                          onClick={setDefaultSpot12ByIndex({ people, index })}
+                        >
+                          #12
+                        </ct-button>
+                      </ct-hstack>
+                    </ct-vstack>
                   </ct-card>
                 ))}
 
@@ -1565,6 +1635,17 @@ export default pattern<Input, Output>(
                         $value={newPersonEmail}
                         placeholder="Email..."
                         style="flex: 1;"
+                      />
+                      <ct-select
+                        $value={newPersonDefaultSpot}
+                        items={[
+                          { label: "No default", value: "" },
+                          { label: "#1", value: "1" },
+                          { label: "#5", value: "5" },
+                          { label: "#12", value: "12" },
+                        ]}
+                        placeholder="Default spot"
+                        style="width: 120px;"
                       />
                       <ct-button
                         variant="primary"
@@ -1615,48 +1696,54 @@ export default pattern<Input, Output>(
                 <ct-card>
                   <ct-vstack gap="2">
                     <ct-heading level={6}>Request Spot</ct-heading>
-                    <ct-hstack gap="2">
+                    <ct-hstack gap="2" align="center">
                       <ct-select
                         $value={selectedPersonForRequest}
                         items={personSelectItems}
                         placeholder="Person..."
-                        style="flex: 1;"
+                        style="width: 150px;"
                       />
                       <ct-input
                         $value={selectedRequestDate}
                         type="date"
-                        style="width: 150px;"
+                        style="width: 140px;"
                       />
                       <ct-button
-                        variant="secondary"
+                        variant="primary"
                         onClick={requestSpotFromFormStream}
                       >
                         Request
                       </ct-button>
                     </ct-hstack>
-                  </ct-vstack>
-                </ct-card>
-
-                {/* Auto-Allocate */}
-                <ct-card>
-                  <ct-vstack gap="2">
-                    <ct-heading level={6}>Auto-Allocate</ct-heading>
-                    <ct-hstack gap="2">
-                      <ct-input
-                        $value={selectedRequestDate}
-                        type="date"
-                        style="width: 150px;"
-                      />
+                    <ct-hstack gap="2" align="center">
                       <ct-button
-                        variant="primary"
-                        onClick={runAutoAllocateFromFormStream}
+                        variant="ghost"
+                        size="sm"
+                        onClick={toggleMultiDayStream}
                       >
-                        Run Auto-Allocate
+                        {ifElse(
+                          showMultiDay,
+                          "− Single day",
+                          "+ Multiple days",
+                        )}
                       </ct-button>
+                      {ifElse(
+                        showMultiDay,
+                        <ct-hstack gap="2" align="center">
+                          <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
+                            through
+                          </span>
+                          <ct-input
+                            $value={selectedRequestEndDate}
+                            type="date"
+                            style="width: 140px;"
+                          />
+                        </ct-hstack>,
+                        null,
+                      )}
                     </ct-hstack>
                     <p style="font-size: 0.75rem; color: var(--ct-color-gray-500); margin: 0;">
-                      Assigns spots based on priority, preferences, and
-                      compatibility.
+                      Spots are auto-allocated immediately when available.
                     </p>
                   </ct-vstack>
                 </ct-card>
