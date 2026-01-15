@@ -45,8 +45,6 @@ interface LobbyOutput {
 }
 
 // Module-level function for navigation (pattern from Scrabble)
-// Note: BattleshipRoom still uses old JSON interface - this will cause type errors
-// until room.tsx is also rewritten
 let createGameAndNavigate: (
   gameName: string,
   player1: Writable<PlayerData | null>,
@@ -561,9 +559,6 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
 );
 
 // Navigation function setup
-// NOTE: BattleshipRoom will be updated to accept typed Cells in the next step.
-// For now, we pass the typed cells directly - the underlying Cell mechanism
-// is the same, only the type annotations differ.
 createGameAndNavigate = (
   gameName: string,
   player1: Writable<PlayerData | null>,
@@ -582,7 +577,6 @@ createGameAndNavigate = (
   );
 
   // Pass typed Cells to BattleshipRoom
-  // @ts-ignore: BattleshipRoom will be updated to use RoomInput from schemas.tsx
   const gameInstance = BattleshipRoom({
     gameName,
     player1,
