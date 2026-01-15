@@ -14,6 +14,11 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { Nursery, Replica } from "../src/storage/cache.ts";
+import {
+  largeStringA,
+  manySmallObjectsA,
+  medianComplexityA,
+} from "./bench-fixtures.ts";
 
 const signer = await Identity.fromPassphrase("bench server sim");
 const space = signer.did();
@@ -34,88 +39,12 @@ function setup() {
 }
 
 // ============================================================================
-// Test fixtures and their pre-cloned versions
+// Pre-cloned fixture versions for server simulation
 //
 // We pre-create cloned versions of each fixture to simulate what happens when
 // a server round-trip re-serializes data (breaking reference equality).
 // This avoids JSON.stringify/parse in the hot path during benchmarking.
 // ============================================================================
-
-const medianComplexityA = {
-  items: [
-    { id: "item-1", title: "Buy groceries", done: false, priority: 1 },
-    { id: "item-2", title: "Call mom", done: true, priority: 2 },
-    { id: "item-3", title: "Finish report", done: false, priority: 1 },
-    { id: "item-4", title: "Schedule dentist", done: false, priority: 3 },
-    { id: "item-5", title: "Review PR", done: true, priority: 1 },
-  ],
-  metadata: {
-    createdAt: "2024-01-15T10:30:00Z",
-    updatedAt: "2024-01-15T14:22:00Z",
-    version: 3,
-  },
-};
-
-const hugeString = "x".repeat(100_000);
-
-const largeStringA = {
-  items: [
-    { id: "item-1", title: "Buy groceries", done: false, priority: 1 },
-    { id: "item-2", title: "Call mom", done: true, priority: 2 },
-  ],
-  content: hugeString,
-  metadata: {
-    createdAt: "2024-01-15T10:30:00Z",
-    version: 1,
-  },
-};
-
-// Many small objects: 20 arrays × 15 objects × 15 properties = 4,500 properties
-// Tests deepEqual performance on wide, shallow object graphs
-// Note: Originally tried 100 × 25 × 25 = 62,500 properties but that caused OOM
-// when running 25 iterations in the benchmark. Can tune these numbers to find
-// a sweet spot that stresses the comparison without exhausting memory.
-function buildSmallObject(groupIdx: number, objIdx: number) {
-  const obj: Record<string, string | number | boolean | null> = {};
-  for (let p = 0; p < 15; p++) {
-    const key = `prop_${p}`;
-    // Mix of value types
-    switch (p % 5) {
-      case 0:
-        obj[key] = groupIdx * 1000 + objIdx * 15 + p;
-        break; // number
-      case 1:
-        obj[key] = `val_${groupIdx}_${objIdx}_${p}`;
-        break; // string
-      case 2:
-        obj[key] = p % 2 === 0;
-        break; // boolean
-      case 3:
-        obj[key] = null;
-        break; // null
-      case 4:
-        obj[key] = (groupIdx + objIdx + p) * 0.123;
-        break; // float
-    }
-  }
-  return obj;
-}
-
-function buildManySmallObjects(): {
-  groups: Record<string, string | number | boolean | null>[][];
-} {
-  const groups: Record<string, string | number | boolean | null>[][] = [];
-  for (let g = 0; g < 20; g++) {
-    const group: Record<string, string | number | boolean | null>[] = [];
-    for (let o = 0; o < 15; o++) {
-      group.push(buildSmallObject(g, o));
-    }
-    groups.push(group);
-  }
-  return { groups };
-}
-
-const manySmallObjectsA = buildManySmallObjects();
 
 // Pre-cloned versions (same values, different object references)
 const medianComplexityA_cloned = JSON.parse(JSON.stringify(medianComplexityA));
