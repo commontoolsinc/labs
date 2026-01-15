@@ -15,7 +15,7 @@ import {
 // ===== Types =====
 
 interface Input {
-  value: Writable<Default<number, 0>>;
+  value?: Writable<Default<number, 0>>;
 }
 
 interface Output {
@@ -59,7 +59,7 @@ const Counter = pattern<Input, Output>(({ value }) => {
   // When an action only needs to work with this pattern's state, use action()
   // which closes over the pattern's values directly. This is simpler and clearer
   // than defining a reusable handler when you don't need reusability.
-  const decrement = action<void>(() => {
+  const decrement = action(() => {
     value.set(value.get() - 1);
   });
 
@@ -119,11 +119,12 @@ const Counter = pattern<Input, Output>(({ value }) => {
 
 // ===== Pattern as JSX Element =====
 // Patterns can be rendered as JSX elements directly. This is useful when
-// composing patterns or creating wrapper views. Pass props like regular JSX.
+// composing patterns or creating wrapper views. Since value is optional with
+// a Default, we don't need to pass it.
 
 const _CounterView = pattern<void, { [UI]: VNode }>(() => {
   return {
-    [UI]: <Counter value={0} />,
+    [UI]: <Counter />,
   };
 });
 
