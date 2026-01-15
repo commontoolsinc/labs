@@ -177,8 +177,9 @@ export function getRandomColor(index: number): string {
 
 export function getInitials(name: string): string {
   if (!name || typeof name !== "string") return "?";
-  return name
-    .trim()
+  const trimmed = name.trim();
+  if (!trimmed) return "?";
+  return trimmed
     .split(/\s+/)
     .map((word) => word[0])
     .join("")
