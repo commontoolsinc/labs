@@ -9,7 +9,6 @@ import {
   Stream,
   UI,
   type VNode,
-  wish,
   Writable,
 } from "commontools";
 
@@ -68,7 +67,7 @@ export default pattern<Input, Output>(({ items }) => {
   const hasNoItems = computed(() => items.get().length === 0);
 
   return {
-    [NAME]: "Todo with Suggestions",
+    [NAME]: "Todo List",
     [UI]: (
       <ct-screen>
         <ct-vstack slot="header" gap="1">
@@ -82,43 +81,24 @@ export default pattern<Input, Output>(({ items }) => {
 
         <ct-vscroll flex showScrollbar fadeEdges>
           <ct-vstack gap="2" style="padding: 1rem;">
-            {items.map((item) => {
-              // AI suggestion based on current todo item
-              const wishResult = wish({
-                query: item.title,
-                context: { item, items },
-              });
-
-              return (
-                <ct-card>
-                  <ct-vstack gap="2">
-                    <ct-hstack gap="2" align="center">
-                      <ct-checkbox $checked={item.done} />
-                      <ct-input
-                        $value={item.title}
-                        style="flex: 1;"
-                        placeholder="Todo item..."
-                      />
-                      <ct-button
-                        variant="ghost"
-                        onClick={() => boundRemoveItem.send({ item })}
-                      >
-                        x
-                      </ct-button>
-                    </ct-hstack>
-
-                    <details>
-                      <summary style="cursor: pointer; font-size: 0.875rem; color: var(--ct-color-gray-500);">
-                        AI Suggestion
-                      </summary>
-                      <div style="margin-top: 0.5rem; padding: 0.5rem; background: var(--ct-color-gray-50); border-radius: 4px;">
-                        {wishResult.$UI}
-                      </div>
-                    </details>
-                  </ct-vstack>
-                </ct-card>
-              );
-            })}
+            {items.map((item) => (
+              <ct-card>
+                <ct-hstack gap="2" align="center">
+                  <ct-checkbox $checked={item.done} />
+                  <ct-input
+                    $value={item.title}
+                    style="flex: 1;"
+                    placeholder="Todo item..."
+                  />
+                  <ct-button
+                    variant="ghost"
+                    onClick={() => boundRemoveItem.send({ item })}
+                  >
+                    x
+                  </ct-button>
+                </ct-hstack>
+              </ct-card>
+            ))}
 
             {hasNoItems
               ? (
