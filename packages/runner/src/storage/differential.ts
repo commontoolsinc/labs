@@ -1,4 +1,5 @@
 import { unclaimed } from "@commontools/memory/fact";
+import { deepEqual } from "@commontools/utils/deep-equal";
 import type {
   IMemoryAddress,
   IMemoryChange,
@@ -52,10 +53,7 @@ class Checkout {
       const before = fact?.is;
       const address = toAddress(fact);
       const after = memory.get(address)?.is;
-      if (
-        before !== after &&
-        JSON.stringify(before) !== JSON.stringify(after)
-      ) {
+      if (!deepEqual(before, after)) {
         changes.add({ address, before, after });
       }
     }
@@ -92,10 +90,7 @@ class Changes implements IMergedChanges {
       const address = toAddress(fact);
       const before = memory.get(address)?.is;
       const after = fact.is;
-      if (
-        before !== after &&
-        JSON.stringify(before) !== JSON.stringify(after)
-      ) {
+      if (!deepEqual(before, after)) {
         this.add({ address, before, after });
       }
     }
