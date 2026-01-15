@@ -65,6 +65,33 @@ const medianComplexityD = JSON.parse(JSON.stringify(medianComplexityA));
 medianComplexityD.items[0].done = true;
 
 // ============================================================================
+// Large string fixtures - 100k character strings, difference at last character
+// Tests worst case for deepEqual (no short-circuit, maximum traversal)
+// ============================================================================
+
+const hugeString = "x".repeat(100_000);
+const hugeStringDifferentEnd = hugeString.slice(0, -1) + "y";
+
+const largeStringA = {
+  items: [
+    { id: "item-1", title: "Buy groceries", done: false, priority: 1 },
+    { id: "item-2", title: "Call mom", done: true, priority: 2 },
+  ],
+  content: hugeString,
+  metadata: {
+    createdAt: "2024-01-15T10:30:00Z",
+    version: 1,
+  },
+};
+
+// Identical structure (for "equal" case)
+const largeStringB = JSON.parse(JSON.stringify(largeStringA));
+
+// Different at end of huge string
+const largeStringC = JSON.parse(JSON.stringify(largeStringA));
+largeStringC.content = hugeStringDifferentEnd;
+
+// ============================================================================
 // Write operations
 // ============================================================================
 
@@ -1016,6 +1043,100 @@ Deno.bench(
           path: [],
         },
         medianComplexityD, // differs in items[0].done
+      );
+    }
+
+    b.start();
+    await tx2.commit();
+    b.end();
+
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
+
+// ============================================================================
+// Realistic commit benchmarks with large strings (100k chars)
+//
+// This tests the case where deepEqual should clearly win: comparing large
+// strings. JSON.stringify must serialize both 100k strings every comparison,
+// while deepEqual just uses === on strings directly (no construction).
+// ============================================================================
+
+Deno.bench(
+  "Large string commit - equal values (50x)",
+  { group: "large-string-commit" },
+  async (b) => {
+    const { runtime, storageManager, tx } = setup();
+
+    // Write 50 entities with largeStringA (contains 100k string)
+    for (let i = 0; i < 50; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:large-eq-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        largeStringA,
+      );
+    }
+    await tx.commit();
+
+    // "Update" with identical values
+    const tx2 = runtime.edit();
+    for (let i = 0; i < 50; i++) {
+      tx2.write(
+        {
+          space,
+          id: `test:large-eq-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        largeStringB, // identical to A
+      );
+    }
+
+    b.start();
+    await tx2.commit();
+    b.end();
+
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
+
+Deno.bench(
+  "Large string commit - diff at end of string (50x)",
+  { group: "large-string-commit" },
+  async (b) => {
+    const { runtime, storageManager, tx } = setup();
+
+    // Write 50 entities with largeStringA
+    for (let i = 0; i < 50; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:large-diff-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        largeStringA,
+      );
+    }
+    await tx.commit();
+
+    // Update with values where 100k string differs only at last char
+    const tx2 = runtime.edit();
+    for (let i = 0; i < 50; i++) {
+      tx2.write(
+        {
+          space,
+          id: `test:large-diff-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        largeStringC, // 100k string differs at last character
       );
     }
 
