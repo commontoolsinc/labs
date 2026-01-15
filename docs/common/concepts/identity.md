@@ -43,10 +43,10 @@ equals(Writable.of({ name: "Ben" }),
 // Reference equality for values from a cell
 equals(data, data.get());              // => true
 
-// Mixed comparison (unwraps cell to compare)
-equals(Writable.of({ name: "Gideon" }), { name: "Gideon" });  // => true
+// Does not compare cell values!
+equals(Writable.of({ name: "Gideon" }), { name: "Gideon" });  // => false
 
-// Also when navigating
+// Works when navigating via .key()
 const deepData = Writable.of({ address: { street: "123 Main" } });
 equals(deepData.key("address"), deepData.get().address); // => true
 
