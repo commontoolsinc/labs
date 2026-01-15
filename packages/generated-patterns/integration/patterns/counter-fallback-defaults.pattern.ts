@@ -2,7 +2,7 @@
 import { Cell, Default, handler, lift, recipe, str } from "commontools";
 
 interface FallbackDefaultsArgs {
-  slots: Default<(number | undefined)[], []>;
+  slots: Default<(number | null)[], []>;
   fallback: Default<number, 0>;
   expectedLength: Default<number, 0>;
 }
@@ -38,7 +38,7 @@ const updateSlot = handler(
   (
     event: SlotUpdateEvent | undefined,
     context: {
-      slots: Cell<(number | undefined)[]>;
+      slots: Cell<(number | null)[]>;
       fallback: Cell<number>;
       expectedLength: Cell<number>;
     },
@@ -86,7 +86,7 @@ const liftNormalizedExpected = lift((value: number | undefined) => {
 
 const liftDense = lift(
   (input: {
-    raw: (number | undefined)[] | undefined;
+    raw: (number | null)[] | undefined;
     fallback: number;
     expected: number;
   }) => {

@@ -7,8 +7,12 @@ import type {
   State,
   URI,
 } from "@commontools/memory/interface";
-import { SchemaObjectTraverser } from "../src/traverse.ts";
+import {
+  ManagedStorageTransaction,
+  SchemaObjectTraverser,
+} from "../src/traverse.ts";
 import { StoreObjectManager } from "../src/storage/query.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 
 describe("SchemaObjectTraverser.traverseDAG", () => {
@@ -73,13 +77,15 @@ describe("SchemaObjectTraverser.traverseDAG", () => {
     );
 
     const manager = new StoreObjectManager(store);
-    const traverser = new SchemaObjectTraverser(manager, {
-      path: [],
+    const managedTx = new ManagedStorageTransaction(manager);
+    const tx = new ExtendedStorageTransaction(managedTx);
+    const traverser = new SchemaObjectTraverser(tx, {
+      path: ["value"],
       schemaContext: { schema: true, rootSchema: true },
     });
 
     const result = traverser.traverse({
-      address: { id: doc2Uri, type, path: ["value"] },
+      address: { space: "did:null:null", id: doc2Uri, type, path: ["value"] },
       value: doc2Value,
     });
 
@@ -139,13 +145,15 @@ describe("SchemaObjectTraverser array traversal", () => {
     } as const satisfies JSONSchema;
 
     const manager = new StoreObjectManager(store);
-    const traverser = new SchemaObjectTraverser(manager, {
-      path: [],
+    const managedTx = new ManagedStorageTransaction(manager);
+    const tx = new ExtendedStorageTransaction(managedTx);
+    const traverser = new SchemaObjectTraverser(tx, {
+      path: ["value"],
       schemaContext: { schema, rootSchema: schema },
     });
 
     const result = traverser.traverse({
-      address: { id: docUri, type, path: ["value"] },
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
 
@@ -179,13 +187,15 @@ describe("SchemaObjectTraverser array traversal", () => {
     } as const satisfies JSONSchema;
 
     const manager = new StoreObjectManager(store);
-    const traverser = new SchemaObjectTraverser(manager, {
-      path: [],
+    const managedTx = new ManagedStorageTransaction(manager);
+    const tx = new ExtendedStorageTransaction(managedTx);
+    const traverser = new SchemaObjectTraverser(tx, {
+      path: ["value"],
       schemaContext: { schema, rootSchema: schema },
     });
 
     const result = traverser.traverse({
-      address: { id: docUri, type, path: ["value"] },
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
 

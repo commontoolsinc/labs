@@ -27,6 +27,7 @@ export const releaseChecklistScenario: PatternIntegrationScenario<
         required: true,
         status: "in_progress",
         owner: "Sam Reed",
+        note: null,
       },
       {
         id: "docs",
@@ -34,6 +35,7 @@ export const releaseChecklistScenario: PatternIntegrationScenario<
         required: true,
         status: "pending",
         owner: "Avery Fox",
+        note: null,
       },
       {
         id: "ops-runbook",
@@ -41,12 +43,15 @@ export const releaseChecklistScenario: PatternIntegrationScenario<
         required: true,
         status: "done",
         owner: "Taylor Young",
+        note: null,
       },
       {
         id: "marketing-check",
         label: "Marketing Review",
         required: false,
         status: "pending",
+        owner: null,
+        note: null,
       },
     ],
   },

@@ -80,18 +80,25 @@ export interface RuntimeOptions {
   telemetry?: RuntimeTelemetry;
 }
 
+/**
+ * For these schema, we use type object with empty properties, so that we
+ * will fetch the objects and consider them valid, but will not walk into
+ * their properties on the server traversal, so we don't need to return every
+ * reachable object from these charms.
+ * @see SchemaObjectTraverser.traverseObjectWithSchema for more detail.
+ */
 export const spaceCellSchema: JSONSchema = {
   type: "object",
   properties: {
     allCharms: {
       type: "array",
-      items: { not: true, asCell: true },
+      items: { type: "object", properties: {}, asCell: true },
     },
     recentCharms: {
       type: "array",
-      items: { not: true, asCell: true },
+      items: { type: "object", properties: {}, asCell: true },
     },
-    defaultPattern: { not: true, asCell: true },
+    defaultPattern: { type: "object", properties: {}, asCell: true },
   },
 } as JSONSchema;
 
@@ -101,13 +108,13 @@ export const homeSpaceCellSchema: JSONSchema = {
     // Include all space cell properties
     allCharms: {
       type: "array",
-      items: { not: true, asCell: true },
+      items: { type: "object", properties: {}, asCell: true },
     },
     recentCharms: {
       type: "array",
-      items: { not: true, asCell: true },
+      items: { type: "object", properties: {}, asCell: true },
     },
-    defaultPattern: { not: true, asCell: true },
+    defaultPattern: { type: "object", properties: {}, asCell: true },
     // Plus home-space-specific properties
     favorites: { ...favoriteListSchema, asCell: true },
     journal: { ...journalSchema, asCell: true },

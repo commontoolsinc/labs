@@ -44,12 +44,17 @@ export function navigateTo(
     if (resultCell.withTx(tx).get()) return;
 
     // Read with a schema that won't subscribe to the whole charm
-    const inputsWithLog = inputsCell.asSchema({ not: true, asCell: true })
+    const inputsWithLog = inputsCell.asSchema({
+      type: "object",
+      properties: {},
+      asCell: true,
+    })
       .withTx(tx);
     const target = inputsWithLog.get();
 
     // If we have a target and the value isn't `undefined`, navigate to it.
-    const targetValue = target?.asSchema({ not: true }).get();
+    const targetValue = target?.asSchema({ type: "object", properties: {} })
+      .get();
     if (target && targetValue) {
       if (!runtime.navigateCallback) {
         throw new Error("navigateCallback is not set");

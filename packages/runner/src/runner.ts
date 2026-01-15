@@ -860,10 +860,10 @@ export class Runner {
       const { $defs, definitions, ...rest } = recipe.argumentSchema;
       (processCellSchema as any).properties.argument = rest ?? true;
       if (isRecord($defs)) {
-        (processCellSchema as any).$defs = $defs;
+        processCellSchema.$defs = { ...$defs };
       }
       if (isRecord(definitions)) {
-        (processCellSchema as any).definitions = definitions;
+        processCellSchema.definitions = { ...definitions };
       }
     }
 
@@ -1258,10 +1258,27 @@ export class Runner {
             tx,
           );
 
-          const argument = module.argumentSchema
+          const argument = module.argumentSchema !== undefined
             ? inputsCell.asSchema(module.argumentSchema).get()
             : inputsCell.getAsQueryResult([], tx);
-          const result = fn(argument);
+
+          // If we have a schema of false, we don't use our argument, so undefined is ok
+          const isValidArgument = module.argumentSchema === false ||
+            argument !== undefined;
+
+          if (!isValidArgument) {
+            logger.error(
+              "stream",
+              () => [
+                "action argument is undefined (potential schema mismatch) -- not running",
+                module.argumentSchema,
+                inputsCell.getRaw(),
+              ],
+            );
+          }
+          // We only run the action if we have a valid argument, or the function's schema
+          // is false (like an input of `never`).
+          const result = isValidArgument ? fn(argument) : undefined;
 
           const postRun = (result: any) => {
             if (
@@ -1413,11 +1430,27 @@ export class Runner {
         );
 
         try {
-          const argument = module.argumentSchema
+          const argument = module.argumentSchema !== undefined
             ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
             : inputsCell.getAsQueryResult([], tx);
 
-          const result = fn(argument);
+          // If we have a schema of false, we don't use our argument, so undefined is ok
+          const isValidArgument = module.argumentSchema === false ||
+            argument !== undefined;
+
+          if (!isValidArgument) {
+            logger.debug(
+              "action",
+              () => [
+                "action argument is undefined (potential schema mismatch) -- not running",
+                module.argumentSchema,
+                inputsCell.getRaw(),
+              ],
+            );
+          }
+          // We only run the action if we have a valid argument, or the function's schema
+          // is false (like an input of `never`).
+          const result = isValidArgument ? fn(argument) : undefined;
 
           const postRun = (result: any) => {
             if (

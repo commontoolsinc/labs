@@ -88,7 +88,9 @@ export default pattern<OmniboxFABInput>(
 
     // Derive assistant message count for dismiss tracking
     const assistantMessageCount = computed(() => {
-      return omnibot.messages.filter((m) => m.role === "assistant").length;
+      return omnibot.messages
+        ? omnibot.messages.filter((m) => m.role === "assistant").length
+        : 0;
     });
 
     // Derive latest assistant message for peek

@@ -56,9 +56,11 @@ export const uiSchema = {
 
 export type UISchema = Schema<typeof uiSchema>;
 
+// We specify not true for the items, since we don't want to recursively load them
 export const charmListSchema = {
   type: "array",
   items: { not: true, asCell: true },
+  default: [],
 } as const satisfies JSONSchema;
 
 export const charmLineageSchema = {

@@ -1,6 +1,7 @@
 import { isRecord } from "@commontools/utils/types";
 import {
   type Frame,
+  type ICell,
   isOpaqueRef,
   type JSONSchema,
   type Module,
@@ -238,10 +239,10 @@ function factoryFromRecipe<T, R>(
   const selfRef = (inputs as unknown as { [SELF]: OpaqueRef<any> })[SELF];
 
   // Traverse the value, collect all mentioned nodes and cells
-  const allCells = new Set<OpaqueRef<any>>();
+  const allCells = new Set<ICell<unknown>>();
   const allNodes = new Set<NodeRef>();
 
-  const collectCellsAndNodes = (value: Opaque<any>) =>
+  const collectCellsAndNodes = (value: Opaque<unknown>) =>
     traverseValue(value, (value) => {
       if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
       if (isCell(value) && !allCells.has(value)) {
@@ -335,7 +336,7 @@ function factoryFromRecipe<T, R>(
   // Add paths for all the internal cells
   // TODO(seefeld): Infer more stable identifiers
   let count = 0;
-  allCells.forEach((cell: OpaqueRef<any>) => {
+  allCells.forEach((cell) => {
     if (paths.has(cell)) return;
     const { cell: top, path, value, name, external } = cell.export();
     if (!external) {
@@ -363,7 +364,7 @@ function factoryFromRecipe<T, R>(
   const initial: any = {};
   allCells.forEach((cell) => {
     // Only process roots of extra cells:
-    if (cell === inputs) return;
+    if (cell === (inputs as unknown)) return;
     const { path, value, external } = cell.export();
     if (path.length > 0 || external) return;
 

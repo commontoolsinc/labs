@@ -250,7 +250,8 @@ describe("runRecipe", () => {
     });
     const resultValue2 = await result.pull();
     expect(resultValue2).toEqual({ result: undefined });
-    expect(ran).toBe(true);
+    // We don't run the action if the arguments fail to validate
+    expect(ran).toBe(false);
   });
 
   it("should handle nested recipes", async () => {
