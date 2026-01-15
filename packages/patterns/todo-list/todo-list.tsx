@@ -1,9 +1,8 @@
 /// <cts-enable />
 import {
+  action,
   computed,
   Default,
-  equals,
-  handler,
   NAME,
   pattern,
   Stream,
@@ -14,13 +13,13 @@ import {
 
 // ===== Types =====
 
-interface TodoItem {
+export interface TodoItem {
   title: string;
   done: Default<boolean, false>;
 }
 
 interface Input {
-  items: Writable<Default<TodoItem[], []>>;
+  items?: Writable<Default<TodoItem[], []>>;
 }
 
 interface Output {
@@ -32,35 +31,21 @@ interface Output {
   removeItem: Stream<{ item: TodoItem }>;
 }
 
-// ===== Handlers at module scope =====
-
-const addItem = handler<
-  { title: string },
-  { items: Writable<TodoItem[]> }
->(({ title }, { items }) => {
-  const trimmed = title.trim();
-  if (trimmed) {
-    items.push({ title: trimmed, done: false });
-  }
-});
-
-const removeItem = handler<
-  { item: TodoItem },
-  { items: Writable<TodoItem[]> }
->(({ item }, { items }) => {
-  const current = items.get();
-  const index = current.findIndex((el) => equals(item, el));
-  if (index >= 0) {
-    items.set(current.toSpliced(index, 1));
-  }
-});
-
 // ===== Pattern =====
 
 export default pattern<Input, Output>(({ items }) => {
-  // Bind handlers with their required context
-  const boundAddItem = addItem({ items });
-  const boundRemoveItem = removeItem({ items });
+  // Pattern-body actions - preferred for single-use handlers that close over
+  // this pattern's state.
+  const addItem = action(({ title }: { title: string }) => {
+    const trimmed = title.trim();
+    if (trimmed) {
+      items.push({ title: trimmed, done: false });
+    }
+  });
+
+  const removeItem = action(({ item }: { item: TodoItem }) => {
+    items.remove(item);
+  });
 
   // Computed values
   const itemCount = computed(() => items.get().length);
@@ -92,7 +77,7 @@ export default pattern<Input, Output>(({ items }) => {
                   />
                   <ct-button
                     variant="ghost"
-                    onClick={() => boundRemoveItem.send({ item })}
+                    onClick={() => removeItem.send({ item })}
                   >
                     x
                   </ct-button>
@@ -117,7 +102,7 @@ export default pattern<Input, Output>(({ items }) => {
             onct-send={(e: { detail?: { message?: string } }) => {
               const title = e.detail?.message?.trim();
               if (title) {
-                boundAddItem.send({ title });
+                addItem.send({ title });
               }
             }}
           />
@@ -126,7 +111,7 @@ export default pattern<Input, Output>(({ items }) => {
     ),
     items,
     itemCount,
-    addItem: boundAddItem,
-    removeItem: boundRemoveItem,
+    addItem,
+    removeItem,
   };
 });
