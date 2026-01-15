@@ -67,6 +67,10 @@ well-tested version.
 | `WIP/usps-informed-delivery.tsx` | USPS mail analyzer with LLM vision |
 | `WIP/google-docs-importer.tsx`   | Import Google Docs content         |
 
+> **Note:** `google-docs-importer.tsx` imports from `../../notes/note.tsx` and
+> requires deploying with `--root packages/patterns` to resolve cross-folder
+> imports.
+
 ## Prerequisites
 
 1. **Google Cloud Console Setup**

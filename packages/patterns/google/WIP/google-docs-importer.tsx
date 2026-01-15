@@ -32,7 +32,8 @@ import {
 } from "../util/google-docs-client.ts";
 
 // Import Note pattern for "Save as Note" feature
-import Note from "../lib/note.tsx";
+// NOTE: This requires deploying with --root packages/patterns to resolve the import
+import Note from "../../notes/note.tsx";
 
 // =============================================================================
 // SETUP REQUIREMENTS
