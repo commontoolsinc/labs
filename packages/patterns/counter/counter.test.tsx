@@ -61,7 +61,9 @@ export default pattern(() => {
 
   // Initial state assertions
   const assert_initial_value_is_0 = computed(() => counter.value === 0);
-  const assert_initial_value_is_5 = computed(() => counterStartingAt5.value === 5);
+  const assert_initial_value_is_5 = computed(() =>
+    counterStartingAt5.value === 5
+  );
 
   // After first increment
   const assert_value_is_1 = computed(() => counter.value === 1);
@@ -79,7 +81,9 @@ export default pattern(() => {
   const assert_from_5_is_4 = computed(() => counterStartingAt5.value === 4);
 
   // Counter starting at 5: after increment should be 5 again
-  const assert_from_5_back_to_5 = computed(() => counterStartingAt5.value === 5);
+  const assert_from_5_back_to_5 = computed(() =>
+    counterStartingAt5.value === 5
+  );
 
   // After another increment should be 6
   const action_increment_to_6 = action(() => {

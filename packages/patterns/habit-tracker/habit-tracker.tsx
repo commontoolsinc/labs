@@ -1,6 +1,6 @@
 /// <cts-enable />
 import { action, computed, NAME, pattern, UI, Writable } from "commontools";
-import type { Habit, HabitLog, Input, Output } from "./schemas.tsx";
+import type { Habit, Input, Output } from "./schemas.tsx";
 
 // Re-export for consumers
 export type { Habit, HabitLog } from "./schemas.tsx";
