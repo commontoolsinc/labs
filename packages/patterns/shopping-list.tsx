@@ -273,42 +273,41 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
         {/* Header */}
         <ct-vstack slot="header" gap="2">
           <ct-hstack justify="between" align="center">
-            <ct-hstack gap="2" align="center">
-              <span style={{ fontSize: "1.25rem" }}>🛒</span>
-              <ct-heading level={4}>Shopping List</ct-heading>
-            </ct-hstack>
-            {/* View toggle */}
-            <ct-hstack gap="1">
-              <ct-button
-                variant={ifElse(
-                  computed(() => viewMode.get() === "quick"),
-                  "primary",
-                  "secondary",
-                )}
-                onClick={() => viewMode.set("quick")}
-              >
-                Quick
-              </ct-button>
-              <ct-button
-                variant={ifElse(
-                  computed(() => viewMode.get() === "sorted"),
-                  "primary",
-                  "secondary",
-                )}
-                onClick={() => viewMode.set("sorted")}
-              >
-                📍 Sorted
-              </ct-button>
-            </ct-hstack>
+            <ct-heading level={4}>🛒 Shopping List</ct-heading>
           </ct-hstack>
-          <div
-            style={{
-              fontSize: "13px",
-              color: "var(--ct-color-gray-500)",
-            }}
-          >
-            {statsText}
-          </div>
+          <ct-hstack gap="2" align="center">
+            <span
+              style={{
+                fontSize: "13px",
+                color: "var(--ct-color-gray-500)",
+                flex: 1,
+              }}
+            >
+              {statsText}
+            </span>
+            <ct-button
+              variant={ifElse(
+                computed(() => viewMode.get() === "quick"),
+                "primary",
+                "secondary",
+              )}
+              size="sm"
+              onClick={() => viewMode.set("quick")}
+            >
+              Quick
+            </ct-button>
+            <ct-button
+              variant={ifElse(
+                computed(() => viewMode.get() === "sorted"),
+                "primary",
+                "secondary",
+              )}
+              size="sm"
+              onClick={() => viewMode.set("sorted")}
+            >
+              📍 Sorted
+            </ct-button>
+          </ct-hstack>
         </ct-vstack>
 
         {/* Main scrollable content */}
