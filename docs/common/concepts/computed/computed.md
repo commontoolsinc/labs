@@ -88,10 +88,10 @@ Similarly, ternaries in JSX are automatically converted to `ifElse()` - see `doc
 Example of correct usage:
 
 ```tsx
-import { computed, UI, Cell } from 'commontools';
+import { computed, UI, Writable } from 'commontools';
 
 interface Item { title: string; }
-const searchQuery = Cell.of("");
+const searchQuery = Writable.of("");
 declare const items: Item[];
 declare const groupedItems: Record<string, Item[]>;
 
@@ -124,12 +124,12 @@ const result = {
 If your `computed()` has side effects (like setting another cell), they should be idempotent. Non-idempotent side effects cause the scheduler to re-run repeatedly until it hits the 101-iteration limit.
 
 ```typescript
-import { computed, Cell } from 'commontools';
+import { computed, Writable } from 'commontools';
 
 interface Item {}
 declare const items: Item[];
-const logArray = Cell.of<{ timestamp: number }[]>([]);
-const cacheMap = Cell.of<Record<string, number>>({});
+const logArray = Writable.of<{ timestamp: number }[]>([]);
+const cacheMap = Writable.of<Record<string, number>>({});
 
 // ❌ Non-idempotent - appends on every run
 const badComputed = computed(() => {

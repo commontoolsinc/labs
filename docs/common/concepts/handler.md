@@ -11,7 +11,7 @@ Use `handler()` when you need to define event-handling logic once and bind it to
 ## Basic Structure
 
 ```typescript
-import { handler, Cell, Writable } from "commontools";
+import { handler, Writable } from "commontools";
 
 // Define at module scope (outside pattern body)
 const increment = handler<EventType, StateType>((event, state) => {
@@ -25,20 +25,20 @@ const increment = handler<EventType, StateType>((event, state) => {
 ## Example: Reusable Counter Logic
 
 ```tsx
-import { handler, pattern, Cell, UI } from "commontools";
+import { handler, pattern, Writable, UI } from "commontools";
 
 // Define once at module scope
-const increment = handler<void, { count: Cell<number> }>(
+const increment = handler<void, { count: Writable<number> }>(
   (_, { count }) => count.set(count.get() + 1)
 );
 
-const decrement = handler<void, { count: Cell<number> }>(
+const decrement = handler<void, { count: Writable<number> }>(
   (_, { count }) => count.set(count.get() - 1)
 );
 
 export default pattern(() => {
-  const counterA = Cell.of(0);
-  const counterB = Cell.of(100);
+  const counterA = Writable.of(0);
+  const counterB = Writable.of(100);
 
   return {
     [UI]: (

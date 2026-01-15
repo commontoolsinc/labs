@@ -21,7 +21,7 @@ interface Output {
 A bound handler IS a `Stream<EventType>`. Don't try to create streams directly:
 
 ```typescript
-import { handler, pattern, Writable, Cell, Stream } from 'commontools';
+import { handler, pattern, Writable, Stream } from 'commontools';
 
 interface Item { title: string }
 
@@ -38,7 +38,7 @@ interface Output {
 }
 
 export default pattern<Record<string, never>, Output>(_ => {
-  const items = Cell.of([] as Array<Item>)
+  const items = Writable.of([] as Array<Item>)
   
   // Binding returns Stream<Item>
   const addItem = addItemHandler({ items });

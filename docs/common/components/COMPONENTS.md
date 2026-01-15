@@ -240,13 +240,15 @@ Debugging tool for inspecting cell values. See [CELL_CONTEXT.md](CELL_CONTEXT.md
 
 ## Removing Array Items
 
-Use `Cell.equals()` for identity comparison:
+Use `equals()` for identity comparison:
 
 ```tsx
+import { equals, handler, Writable } from 'commontools';
+
 const removeItem = handler<unknown, { items: Writable<Item[]>; item: Item }>(
   (_, { items, item }) => {
     const current = items.get();
-    const index = current.findIndex((el) => Cell.equals(item, el));
+    const index = current.findIndex((el) => equals(item, el));
     if (index >= 0) items.set(current.toSpliced(index, 1));
   }
 );
