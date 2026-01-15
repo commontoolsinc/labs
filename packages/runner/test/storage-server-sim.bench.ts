@@ -70,14 +70,63 @@ const largeStringA = {
   },
 };
 
+// Many small objects: 20 arrays × 15 objects × 15 properties = 4,500 properties
+// Tests deepEqual performance on wide, shallow object graphs
+// Note: Originally tried 100 × 25 × 25 = 62,500 properties but that caused OOM
+// when running 25 iterations in the benchmark. Can tune these numbers to find
+// a sweet spot that stresses the comparison without exhausting memory.
+function buildSmallObject(groupIdx: number, objIdx: number) {
+  const obj: Record<string, string | number | boolean | null> = {};
+  for (let p = 0; p < 15; p++) {
+    const key = `prop_${p}`;
+    // Mix of value types
+    switch (p % 5) {
+      case 0:
+        obj[key] = groupIdx * 1000 + objIdx * 15 + p;
+        break; // number
+      case 1:
+        obj[key] = `val_${groupIdx}_${objIdx}_${p}`;
+        break; // string
+      case 2:
+        obj[key] = p % 2 === 0;
+        break; // boolean
+      case 3:
+        obj[key] = null;
+        break; // null
+      case 4:
+        obj[key] = (groupIdx + objIdx + p) * 0.123;
+        break; // float
+    }
+  }
+  return obj;
+}
+
+function buildManySmallObjects(): {
+  groups: Record<string, string | number | boolean | null>[][];
+} {
+  const groups: Record<string, string | number | boolean | null>[][] = [];
+  for (let g = 0; g < 20; g++) {
+    const group: Record<string, string | number | boolean | null>[] = [];
+    for (let o = 0; o < 15; o++) {
+      group.push(buildSmallObject(g, o));
+    }
+    groups.push(group);
+  }
+  return { groups };
+}
+
+const manySmallObjectsA = buildManySmallObjects();
+
 // Pre-cloned versions (same values, different object references)
 const medianComplexityA_cloned = JSON.parse(JSON.stringify(medianComplexityA));
 const largeStringA_cloned = JSON.parse(JSON.stringify(largeStringA));
+const manySmallObjectsA_cloned = JSON.parse(JSON.stringify(manySmallObjectsA));
 
 // Map from original fixture to its clone for O(1) lookup
 const fixtureClones = new Map<unknown, unknown>([
   [medianComplexityA, medianComplexityA_cloned],
   [largeStringA, largeStringA_cloned],
+  [manySmallObjectsA, manySmallObjectsA_cloned],
 ]);
 
 // ============================================================================
@@ -286,6 +335,92 @@ Deno.bench(
 );
 
 // ============================================================================
+// Server simulation benchmarks - many small objects
+// ============================================================================
+
+Deno.bench(
+  "Server sim OFF - read validation, many small objects (25x)",
+  { group: "server-simulation-many-objects" },
+  async (b) => {
+    restoreReplicaGet();
+    const { runtime, storageManager, tx } = setup();
+
+    for (let i = 0; i < 25; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:serversim-many-off-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        manySmallObjectsA,
+      );
+    }
+    await tx.commit();
+
+    const tx2 = runtime.edit();
+    for (let i = 0; i < 25; i++) {
+      tx2.read({
+        space,
+        id: `test:serversim-many-off-${i}`,
+        type: "application/json",
+        path: [],
+      });
+    }
+
+    b.start();
+    await tx2.commit();
+    b.end();
+
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
+
+Deno.bench(
+  "Server sim ON - read validation, many small objects (25x)",
+  { group: "server-simulation-many-objects" },
+  async (b) => {
+    stubReplicaGetWithReserialization();
+    try {
+      const { runtime, storageManager, tx } = setup();
+
+      for (let i = 0; i < 25; i++) {
+        tx.write(
+          {
+            space,
+            id: `test:serversim-many-on-${i}`,
+            type: "application/json",
+            path: [],
+          },
+          manySmallObjectsA,
+        );
+      }
+      await tx.commit();
+
+      const tx2 = runtime.edit();
+      for (let i = 0; i < 25; i++) {
+        tx2.read({
+          space,
+          id: `test:serversim-many-on-${i}`,
+          type: "application/json",
+          path: [],
+        });
+      }
+
+      b.start();
+      await tx2.commit();
+      b.end();
+
+      await runtime.dispose();
+      await storageManager.close();
+    } finally {
+      restoreReplicaGet();
+    }
+  },
+);
+
+// ============================================================================
 // Nursery.evict stub for forcing slow path comparison
 //
 // Nursery.evict is called when a transaction commit succeeds, comparing
@@ -429,6 +564,69 @@ Deno.bench(
             path: [],
           },
           medianComplexityA,
+        );
+      }
+
+      b.start();
+      await tx.commit();
+      b.end();
+
+      await runtime.dispose();
+      await storageManager.close();
+    } finally {
+      restoreNurseryEvict();
+    }
+  },
+);
+
+// ============================================================================
+// Nursery.evict benchmarks - many small objects
+// ============================================================================
+
+Deno.bench(
+  "Nursery.evict OFF - commit with many small objects (25x)",
+  { group: "nursery-evict-many-objects" },
+  async (b) => {
+    restoreNurseryEvict();
+    const { runtime, storageManager, tx } = setup();
+
+    for (let i = 0; i < 25; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:nursery-evict-many-off-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        manySmallObjectsA,
+      );
+    }
+
+    b.start();
+    await tx.commit();
+    b.end();
+
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
+
+Deno.bench(
+  "Nursery.evict ON - commit with many small objects (25x)",
+  { group: "nursery-evict-many-objects" },
+  async (b) => {
+    const { runtime, storageManager, tx } = setup();
+    stubNurseryEvictWithCloning();
+    try {
+      for (let i = 0; i < 25; i++) {
+        tx.write(
+          {
+            space,
+            id: `test:nursery-evict-many-on-${i}`,
+            type: "application/json",
+            path: [],
+          },
+          manySmallObjectsA,
         );
       }
 
