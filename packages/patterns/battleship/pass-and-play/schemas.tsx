@@ -1,29 +1,43 @@
 /// <cts-enable />
 /**
- * Battleship Pass-and-Play - Shared Schemas
+ * Battleship Pass-and-Play - Schemas
  *
- * Type definitions, constants, and helper functions used by the
- * pass-and-play Battleship game pattern.
+ * Re-exports shared types and constants from the battleship shared infrastructure,
+ * plus pass-and-play specific type definitions and helpers.
  */
 
-// ============ CORE TYPES ============
+// ============ RE-EXPORT SHARED TYPES ============
+export type {
+  Coordinate,
+  Ship,
+  ShipType,
+  SquareState,
+} from "../shared/index.tsx";
 
-export type Coordinate = { row: number; col: number };
+// ============ RE-EXPORT SHARED CONSTANTS ============
+export {
+  BOARD_SIZE,
+  COLS,
+  GRID_INDICES,
+  ROWS,
+  SHIP_NAMES,
+  SHIP_SIZES,
+} from "../shared/index.tsx";
 
-export type ShipType =
-  | "carrier"
-  | "battleship"
-  | "cruiser"
-  | "submarine"
-  | "destroyer";
+// ============ RE-EXPORT SHARED GAME LOGIC ============
+export {
+  areAllShipsSunk,
+  buildShipPositions,
+  createEmptyGrid,
+  findShipAt,
+  getShipCoordinates,
+  isShipSunk,
+} from "../shared/index.tsx";
 
-export interface Ship {
-  type: ShipType;
-  start: Coordinate;
-  orientation: "horizontal" | "vertical";
-}
+// ============ PASS-AND-PLAY SPECIFIC TYPES ============
 
-export type SquareState = "empty" | "miss" | "hit";
+import type { Ship, SquareState } from "../shared/index.tsx";
+import { createEmptyGrid } from "../shared/index.tsx";
 
 export interface PlayerBoard {
   ships: Ship[];
@@ -41,84 +55,7 @@ export interface GameState {
   awaitingPass: boolean; // true = show result + pass button, board locked
 }
 
-// ============ CONSTANTS ============
-
-export const SHIP_SIZES: Record<ShipType, number> = {
-  carrier: 5,
-  battleship: 4,
-  cruiser: 3,
-  submarine: 3,
-  destroyer: 2,
-};
-
-export const SHIP_NAMES: Record<ShipType, string> = {
-  carrier: "Carrier",
-  battleship: "Battleship",
-  cruiser: "Cruiser",
-  submarine: "Submarine",
-  destroyer: "Destroyer",
-};
-
-export const COLS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
-export const ROWS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-export const GRID_INDICES = ROWS.flatMap((r) =>
-  ROWS.map((c) => ({ row: r, col: c }))
-);
-
-// ============ HELPER FUNCTIONS ============
-
-export function createEmptyGrid(): SquareState[][] {
-  return Array.from(
-    { length: 10 },
-    () => Array.from({ length: 10 }, () => "empty" as SquareState),
-  );
-}
-
-export function getShipCoordinates(ship: Ship): Coordinate[] {
-  const size = SHIP_SIZES[ship.type];
-  const coords: Coordinate[] = [];
-  for (let i = 0; i < size; i++) {
-    if (ship.orientation === "horizontal") {
-      coords.push({ row: ship.start.row, col: ship.start.col + i });
-    } else {
-      coords.push({ row: ship.start.row + i, col: ship.start.col });
-    }
-  }
-  return coords;
-}
-
-export function findShipAt(ships: Ship[], coord: Coordinate): Ship | null {
-  for (const ship of ships) {
-    const shipCoords = getShipCoordinates(ship);
-    if (shipCoords.some((c) => c.row === coord.row && c.col === coord.col)) {
-      return ship;
-    }
-  }
-  return null;
-}
-
-export function isShipSunk(ship: Ship, shots: SquareState[][]): boolean {
-  const coords = getShipCoordinates(ship);
-  return coords.every((c) => shots[c.row][c.col] === "hit");
-}
-
-export function areAllShipsSunk(
-  ships: Ship[],
-  shots: SquareState[][],
-): boolean {
-  return ships.every((ship) => isShipSunk(ship, shots));
-}
-
-export function buildShipPositions(ships: Ship[]): Record<string, ShipType> {
-  const positions: Record<string, ShipType> = {};
-  for (const ship of ships) {
-    const coords = getShipCoordinates(ship);
-    for (const c of coords) {
-      positions[`${c.row},${c.col}`] = ship.type;
-    }
-  }
-  return positions;
-}
+// ============ PASS-AND-PLAY SPECIFIC HELPERS ============
 
 // Default ship placements for testing
 export function createDefaultShips1(): Ship[] {
