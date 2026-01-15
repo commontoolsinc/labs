@@ -3584,6 +3584,9 @@ interface CTToolsChipAttributes<T> extends CTHTMLAttributes<T> {
   "tools"?:
     | { name: string; description?: string; schema?: unknown }[]
     | Record<string, { handler?: unknown; pattern?: unknown } | any>;
+  "$tools"?:
+    | { name: string; description?: string; schema?: unknown }[]
+    | Record<string, { handler?: unknown; pattern?: unknown } | any>;
 }
 
 interface CTHeadingAttributes<T> extends CTHTMLAttributes<T> {
