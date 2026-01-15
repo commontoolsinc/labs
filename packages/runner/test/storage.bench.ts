@@ -1150,6 +1150,55 @@ Deno.bench(
 );
 
 // ============================================================================
+// Read invariant validation benchmarks (exercises attestation.claim())
+//
+// At commit time, each read invariant is validated via attestation.claim()
+// which compares expected vs actual values using JSON.stringify. This tests
+// the impact of that comparison with large string data.
+// ============================================================================
+
+Deno.bench(
+  "Read validation - large string, unchanged (50x)",
+  { group: "read-validation" },
+  async (b) => {
+    const { runtime, storageManager, tx } = setup();
+
+    // Write 50 entities with large strings
+    for (let i = 0; i < 50; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:read-val-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        largeStringA,
+      );
+    }
+    await tx.commit();
+
+    // New transaction: read all entities (creates read invariants)
+    const tx2 = runtime.edit();
+    for (let i = 0; i < 50; i++) {
+      tx2.read({
+        space,
+        id: `test:read-val-${i}`,
+        type: "application/json",
+        path: [],
+      });
+    }
+
+    // Commit validates each read invariant via attestation.claim()
+    b.start();
+    await tx2.commit();
+    b.end();
+
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
+
+// ============================================================================
 // Value comparison: JSON.stringify vs deepEqual
 //
 // These benchmarks compare the two approaches used for equality checking in
