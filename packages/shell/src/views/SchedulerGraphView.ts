@@ -1329,8 +1329,8 @@ export class XSchedulerGraph extends LitElement {
     return inferredParents;
   }
 
-  private handleSnapshot(): void {
-    this.debuggerController?.requestGraphSnapshot();
+  private async handleSnapshot(): Promise<void> {
+    await this.debuggerController?.requestGraphSnapshot();
     this.requestUpdate();
   }
 
