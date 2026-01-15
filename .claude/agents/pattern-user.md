@@ -32,11 +32,11 @@ deno task ct dev main.tsx --no-run
 API_URL=<url> deno task ct charm new main.tsx --identity <key_path>
 
 # Update existing charm
-API_URL=<url> deno task ct charm setsrc main.tsx --charm <charm_id>
+API_URL=<url> deno task ct charm setsrc main.tsx --charm <charm_id> --identity <key_path>
 
 # Inspect state / call handler
-API_URL=<url> deno task ct charm inspect --charm <charm_id>
-API_URL=<url> deno task ct charm call <handler> --charm <charm_id>
+API_URL=<url> deno task ct charm inspect --charm <charm_id> --identity <key_path>
+API_URL=<url> deno task ct charm call <handler> --charm <charm_id> --identity <key_path>
 ```
 
 ## Deploy Flow
