@@ -4,7 +4,7 @@ Use `handler()` when you need to define event-handling logic once and bind it to
 
 ## When to Use `handler()`
 
-1. **Same logic, different state** - You want to reuse identical handler logic with different cells
+1. **Same logic, different state** - You want to reuse identical handler logic with different state
 2. **Exported streams** - Other patterns need to call your handler via linking
 3. **CLI testing** - You want to test handlers via `ct charm call` before building UI
 
@@ -16,7 +16,7 @@ import { handler, Writable } from "commontools";
 // Define at module scope (outside pattern body)
 const increment = handler<EventType, StateType>((event, state) => {
   // event = data passed to .send()
-  // state = cells bound when handler is invoked
+  // state = state bound when handler is invoked
 });
 ```
 
