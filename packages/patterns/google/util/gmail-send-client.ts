@@ -109,8 +109,29 @@ export interface GmailLabel {
 // HELPERS
 // ============================================================================
 
+/**
+ * Maximum retry attempts for 401 token refresh errors.
+ * Allows 3 total attempts (initial + 2 retries) before failing.
+ * This prevents infinite recursion while giving transient auth issues a chance to resolve.
+ */
+const MAX_RETRY_ATTEMPTS = 2;
+
+/**
+ * Base delay in ms for exponential backoff between retries.
+ * Actual delay = BASE_RETRY_DELAY_MS * 2^retryCount (100ms, 200ms, 400ms...)
+ */
+const BASE_RETRY_DELAY_MS = 100;
+
 function debugLog(debugMode: boolean, ...args: unknown[]) {
   if (debugMode) console.log("[GmailSendClient]", ...args);
+}
+
+/**
+ * Sleep for exponential backoff delay based on retry count.
+ */
+async function retryDelay(retryCount: number): Promise<void> {
+  const delay = BASE_RETRY_DELAY_MS * Math.pow(2, retryCount);
+  await new Promise((resolve) => setTimeout(resolve, delay));
 }
 
 /**
@@ -247,15 +268,23 @@ export class GmailSendClient {
       },
     );
 
-    // Handle 401 (token expired) - try to refresh and retry with limit
+    // Handle 401 (token expired) - try to refresh and retry with exponential backoff
     if (res.status === 401) {
-      debugLog(this.debugMode, "Token expired, attempting refresh...");
-      if (retryCount >= 2) {
+      debugLog(
+        this.debugMode,
+        `Token expired (attempt ${retryCount + 1}/${
+          MAX_RETRY_ATTEMPTS + 1
+        }), attempting refresh...`,
+      );
+      if (retryCount >= MAX_RETRY_ATTEMPTS) {
         throw new Error(
-          "Token refresh failed after multiple attempts. Please re-authenticate.",
+          `Authentication failed after ${
+            MAX_RETRY_ATTEMPTS + 1
+          } attempts. Your session may have expired or permissions were revoked. Please re-authenticate.`,
         );
       }
       await this.refreshAuth();
+      await retryDelay(retryCount);
       return this.sendEmail(params, retryCount + 1);
     }
 
@@ -313,15 +342,23 @@ export class GmailSendClient {
       },
     );
 
-    // Handle 401 (token expired) - try to refresh and retry with limit
+    // Handle 401 (token expired) - try to refresh and retry with exponential backoff
     if (res.status === 401) {
-      debugLog(this.debugMode, "Token expired, attempting refresh...");
-      if (retryCount >= 2) {
+      debugLog(
+        this.debugMode,
+        `Token expired (attempt ${retryCount + 1}/${
+          MAX_RETRY_ATTEMPTS + 1
+        }), attempting refresh...`,
+      );
+      if (retryCount >= MAX_RETRY_ATTEMPTS) {
         throw new Error(
-          "Token refresh failed after multiple attempts. Please re-authenticate.",
+          `Authentication failed after ${
+            MAX_RETRY_ATTEMPTS + 1
+          } attempts. Your session may have expired or permissions were revoked. Please re-authenticate.`,
         );
       }
       await this.refreshAuth();
+      await retryDelay(retryCount);
       return this.modifyLabels(messageId, params, retryCount + 1);
     }
 
@@ -390,15 +427,23 @@ export class GmailSendClient {
       },
     );
 
-    // Handle 401 (token expired) - try to refresh and retry with limit
+    // Handle 401 (token expired) - try to refresh and retry with exponential backoff
     if (res.status === 401) {
-      debugLog(this.debugMode, "Token expired, attempting refresh...");
-      if (retryCount >= 2) {
+      debugLog(
+        this.debugMode,
+        `Token expired (attempt ${retryCount + 1}/${
+          MAX_RETRY_ATTEMPTS + 1
+        }), attempting refresh...`,
+      );
+      if (retryCount >= MAX_RETRY_ATTEMPTS) {
         throw new Error(
-          "Token refresh failed after multiple attempts. Please re-authenticate.",
+          `Authentication failed after ${
+            MAX_RETRY_ATTEMPTS + 1
+          } attempts. Your session may have expired or permissions were revoked. Please re-authenticate.`,
         );
       }
       await this.refreshAuth();
+      await retryDelay(retryCount);
       return this.batchModifyLabels(messageIds, params, retryCount + 1);
     }
 
@@ -443,15 +488,23 @@ export class GmailSendClient {
       },
     );
 
-    // Handle 401 (token expired) - try to refresh and retry with limit
+    // Handle 401 (token expired) - try to refresh and retry with exponential backoff
     if (res.status === 401) {
-      debugLog(this.debugMode, "Token expired, attempting refresh...");
-      if (retryCount >= 2) {
+      debugLog(
+        this.debugMode,
+        `Token expired (attempt ${retryCount + 1}/${
+          MAX_RETRY_ATTEMPTS + 1
+        }), attempting refresh...`,
+      );
+      if (retryCount >= MAX_RETRY_ATTEMPTS) {
         throw new Error(
-          "Token refresh failed after multiple attempts. Please re-authenticate.",
+          `Authentication failed after ${
+            MAX_RETRY_ATTEMPTS + 1
+          } attempts. Your session may have expired or permissions were revoked. Please re-authenticate.`,
         );
       }
       await this.refreshAuth();
+      await retryDelay(retryCount);
       return this.listLabels(retryCount + 1);
     }
 

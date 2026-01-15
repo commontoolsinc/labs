@@ -219,8 +219,24 @@ export interface CalendarEventResult {
 // HELPERS
 // ============================================================================
 
+/**
+ * Maximum retry attempts for 401 token refresh errors.
+ * Allows 3 total attempts (initial + 2 retries) before failing.
+ */
+const MAX_RETRY_ATTEMPTS = 2;
+
+/**
+ * Base delay in ms for exponential backoff between retries.
+ */
+const BASE_RETRY_DELAY_MS = 100;
+
 function debugLog(debugMode: boolean, ...args: unknown[]) {
   if (debugMode) console.log("[CalendarWriteClient]", ...args);
+}
+
+async function retryDelay(retryCount: number): Promise<void> {
+  const delay = BASE_RETRY_DELAY_MS * Math.pow(2, retryCount);
+  await new Promise((resolve) => setTimeout(resolve, delay));
 }
 
 // ============================================================================
@@ -333,15 +349,23 @@ export class CalendarWriteClient {
       body: JSON.stringify(body),
     });
 
-    // Handle 401 (token expired) - try to refresh and retry (max 2 retries)
+    // Handle 401 (token expired) - try to refresh and retry with exponential backoff
     if (res.status === 401) {
-      if (retryCount >= 2) {
+      debugLog(
+        this.debugMode,
+        `Token expired (attempt ${retryCount + 1}/${
+          MAX_RETRY_ATTEMPTS + 1
+        }), attempting refresh...`,
+      );
+      if (retryCount >= MAX_RETRY_ATTEMPTS) {
         throw new Error(
-          "Authentication failed after retries. Please re-authenticate.",
+          `Authentication failed after ${
+            MAX_RETRY_ATTEMPTS + 1
+          } attempts. Please re-authenticate.`,
         );
       }
-      debugLog(this.debugMode, "Token expired, attempting refresh...");
       await this.refreshAuth();
+      await retryDelay(retryCount);
       return this.createEvent(params, retryCount + 1);
     }
 
@@ -422,15 +446,23 @@ export class CalendarWriteClient {
       body: JSON.stringify(body),
     });
 
-    // Handle 401 (token expired) - try to refresh and retry (max 2 retries)
+    // Handle 401 (token expired) - try to refresh and retry with exponential backoff
     if (res.status === 401) {
-      if (retryCount >= 2) {
+      debugLog(
+        this.debugMode,
+        `Token expired (attempt ${retryCount + 1}/${
+          MAX_RETRY_ATTEMPTS + 1
+        }), attempting refresh...`,
+      );
+      if (retryCount >= MAX_RETRY_ATTEMPTS) {
         throw new Error(
-          "Authentication failed after retries. Please re-authenticate.",
+          `Authentication failed after ${
+            MAX_RETRY_ATTEMPTS + 1
+          } attempts. Please re-authenticate.`,
         );
       }
-      debugLog(this.debugMode, "Token expired, attempting refresh...");
       await this.refreshAuth();
+      await retryDelay(retryCount);
       return this.updateEvent(
         calendarId,
         eventId,
@@ -490,15 +522,23 @@ export class CalendarWriteClient {
       },
     });
 
-    // Handle 401 (token expired) - try to refresh and retry (max 2 retries)
+    // Handle 401 (token expired) - try to refresh and retry with exponential backoff
     if (res.status === 401) {
-      if (retryCount >= 2) {
+      debugLog(
+        this.debugMode,
+        `Token expired (attempt ${retryCount + 1}/${
+          MAX_RETRY_ATTEMPTS + 1
+        }), attempting refresh...`,
+      );
+      if (retryCount >= MAX_RETRY_ATTEMPTS) {
         throw new Error(
-          "Authentication failed after retries. Please re-authenticate.",
+          `Authentication failed after ${
+            MAX_RETRY_ATTEMPTS + 1
+          } attempts. Your session may have expired or permissions were revoked. Please re-authenticate.`,
         );
       }
-      debugLog(this.debugMode, "Token expired, attempting refresh...");
       await this.refreshAuth();
+      await retryDelay(retryCount);
       return this.deleteEvent(calendarId, eventId, sendUpdates, retryCount + 1);
     }
 
@@ -558,15 +598,23 @@ export class CalendarWriteClient {
       },
     });
 
-    // Handle 401 (token expired) - try to refresh and retry with limit
+    // Handle 401 (token expired) - try to refresh and retry with exponential backoff
     if (getRes.status === 401) {
-      debugLog(this.debugMode, "Token expired, attempting refresh...");
-      if (retryCount >= 2) {
+      debugLog(
+        this.debugMode,
+        `Token expired (attempt ${retryCount + 1}/${
+          MAX_RETRY_ATTEMPTS + 1
+        }), attempting refresh...`,
+      );
+      if (retryCount >= MAX_RETRY_ATTEMPTS) {
         throw new Error(
-          "Token refresh failed after multiple attempts. Please re-authenticate.",
+          `Authentication failed after ${
+            MAX_RETRY_ATTEMPTS + 1
+          } attempts. Your session may have expired or permissions were revoked. Please re-authenticate.`,
         );
       }
       await this.refreshAuth();
+      await retryDelay(retryCount);
       return this.rsvpToEvent(calendarId, eventId, status, retryCount + 1);
     }
 

@@ -30,6 +30,9 @@ import {
   Writable,
 } from "commontools";
 
+// Debug flag for development - disable in production
+const DEBUG_USPS = false;
+
 // Email type - inlined to avoid import chain issues when deploying from WIP/
 interface Email {
   id: string;
@@ -379,22 +382,28 @@ export default pattern<PatternInput, PatternOutput>(
       const analysis = generateObject({
         // Prompt must be derived to access cell values properly
         prompt: derive(imageUrl, (url) => {
-          // DEBUG: Log the URL being sent to LLM
-          console.log(
-            `[USPS LLM] Processing image URL (first 100 chars):`,
-            url?.slice(0, 100),
-          );
+          // Debug logging (gated by DEBUG_USPS flag)
+          if (DEBUG_USPS) {
+            console.log(
+              `[USPS LLM] Processing image URL (first 100 chars):`,
+              url?.slice(0, 100),
+            );
+          }
 
           if (!url) {
-            console.log(`[USPS LLM] Empty URL, returning text-only prompt`);
+            if (DEBUG_USPS) {
+              console.log(`[USPS LLM] Empty URL, returning text-only prompt`);
+            }
             return "No image URL available - please return default values";
           }
 
           // Check if it's a base64 data URL vs external URL
           const isBase64 = url.startsWith("data:");
-          console.log(
-            `[USPS LLM] Image type: ${isBase64 ? "base64" : "external URL"}`,
-          );
+          if (DEBUG_USPS) {
+            console.log(
+              `[USPS LLM] Image type: ${isBase64 ? "base64" : "external URL"}`,
+            );
+          }
 
           // NOTE: External URLs from USPS require authentication and may fail.
           // The LLM server cannot fetch authenticated URLs.

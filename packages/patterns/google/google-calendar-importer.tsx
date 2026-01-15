@@ -41,7 +41,45 @@ const env = getRecipeEnvironment();
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Debug instrumentation removed - was causing resource leak (setInterval without cleanup)
+// ========== OPTIONAL DERIVE DEBUG INSTRUMENTATION ==========
+// Set DEBUG_DERIVE=true to enable derive() call counting for performance investigation.
+// IMPORTANT: Keep disabled in production - the setInterval has no cleanup mechanism.
+const DEBUG_DERIVE = false;
+
+let deriveCallCount = 0;
+let perRowDeriveCount = 0;
+let lastLogTime = Date.now();
+const startTime = Date.now();
+
+function logDeriveCall(name: string, isPerRow = false) {
+  if (!DEBUG_DERIVE) return;
+  deriveCallCount++;
+  if (isPerRow) perRowDeriveCount++;
+  const now = Date.now();
+  const elapsed = now - startTime;
+  // Log on milestones or every second
+  if (now - lastLogTime > 1000 || deriveCallCount % 100 === 0) {
+    console.log(
+      `[DERIVE DEBUG] ${name}: total=${deriveCallCount}, perRow=${perRowDeriveCount}, elapsed=${elapsed}ms`,
+    );
+    lastLogTime = now;
+  }
+}
+
+// Only start interval if debugging is enabled
+if (DEBUG_DERIVE) {
+  try {
+    setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      console.log(
+        `[DERIVE DEBUG SUMMARY] total=${deriveCallCount}, perRow=${perRowDeriveCount}, elapsed=${elapsed}ms`,
+      );
+    }, 5000);
+  } catch {
+    // Ignore if setInterval isn't available during compilation
+  }
+}
+// ========== END DEBUG INSTRUMENTATION ==========
 
 export type CalendarEvent = {
   id: string;
@@ -747,7 +785,10 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
       ),
       events,
       calendars,
-      eventCount: derive(events, (list: CalendarEvent[]) => list?.length || 0),
+      eventCount: derive(events, (list: CalendarEvent[]) => {
+        logDeriveCall(`eventCount (length=${list?.length})`);
+        return list?.length || 0;
+      }),
       bgUpdater: calendarUpdater({ events, calendars, auth, settings }),
       // Pattern tools for omnibot (implementations at module scope)
       searchEvents: patternTool(searchEventsImpl, { events }),

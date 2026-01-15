@@ -61,6 +61,7 @@ import {
   navigateTo,
   UI,
   wish,
+  type WishState,
   Writable,
 } from "commontools";
 
@@ -210,6 +211,15 @@ export interface GoogleAuthCharm {
     ) => void;
   };
 }
+
+/**
+ * Type for unwrapped wish result inside derive/computed callbacks.
+ * WishState includes result, error, and [UI] properties.
+ * The [UI] property is accessed via the UI symbol from commontools.
+ */
+type UnwrappedWishResult = WishState<GoogleAuthCharm> & {
+  [UI]?: { props?: { $cell?: unknown } };
+};
 
 // Status colors
 const STATUS_COLORS = {
@@ -361,110 +371,117 @@ export function createGoogleAuth(
   // Inside derive callback, we can do normal JS operations (truthiness, comparisons)
   // Note: We derive from wishResult, and access auth via wr.result?.auth
   // Type annotation needed because derive() infers UIRenderable without it
-  const authInfo = derive(wishResult, (wr: any): AuthInfo => {
-    // Inside derive(), wr is unwrapped - can do normal JS operations
-    const authCell = wr?.result?.auth;
-    const authData = authCell?.get?.() ?? null;
+  const authInfo = derive(
+    wishResult,
+    (wr: UnwrappedWishResult | null | undefined): AuthInfo => {
+      // Inside derive(), wr is unwrapped - can do normal JS operations
+      const authCell = wr?.result?.auth;
+      const authData = authCell?.get?.() ?? null;
 
-    // Determine state from wish result
-    let state: AuthState = "loading";
+      // Determine state from wish result
+      let state: AuthState = "loading";
 
-    // Detect picker mode: when wish() finds multiple matches, it returns a picker UI
-    // (ct-card with ct-picker) instead of cellLinkUI (which has $cell prop).
-    // This check MUST come before wr.result check, because wish() sets result
-    // even when multiple matches exist (to the first candidate).
-    const hasPickerUI = (wr as any)?.[UI] && !(wr as any)?.[UI]?.props?.$cell;
+      // Detect picker mode: when wish() finds multiple matches, it returns a picker UI
+      // (ct-card with ct-picker) instead of cellLinkUI (which has $cell prop).
+      // This check MUST come before wr.result check, because wish() sets result
+      // even when multiple matches exist (to the first candidate).
+      const hasPickerUI = wr?.[UI] && !wr?.[UI]?.props?.$cell;
 
-    if (!wr) {
-      state = "loading";
-    } else if (wr.error) {
-      // Wish returned error - no matches found
-      state = "not-found";
-    } else if (hasPickerUI) {
-      // Multiple matches - show picker for user to choose
-      state = "selecting";
-    } else if (wr.result) {
-      // Single match - evaluate auth state
-      const email = authData?.user?.email;
-      if (email && email !== "") {
-        state = "ready"; // Will be refined below
-      } else {
-        state = "needs-login";
+      if (!wr) {
+        state = "loading";
+      } else if (wr.error) {
+        // Wish returned error - no matches found
+        state = "not-found";
+      } else if (hasPickerUI) {
+        // Multiple matches - show picker for user to choose
+        state = "selecting";
+      } else if (wr.result) {
+        // Single match - evaluate auth state
+        const email = authData?.user?.email;
+        if (email && email !== "") {
+          state = "ready"; // Will be refined below
+        } else {
+          state = "needs-login";
+        }
       }
-    }
 
-    // Check granted scopes
-    const grantedScopes: string[] = authData?.scope ?? [];
-    const missingScopes = requiredScopes.filter((key) => {
-      const scopeUrl = SCOPE_MAP[key];
-      return scopeUrl && !grantedScopes.includes(scopeUrl);
-    });
-    const hasRequiredScopes = missingScopes.length === 0;
+      // Check granted scopes
+      const grantedScopes: string[] = authData?.scope ?? [];
+      const missingScopes = requiredScopes.filter((key) => {
+        const scopeUrl = SCOPE_MAP[key];
+        return scopeUrl && !grantedScopes.includes(scopeUrl);
+      });
+      const hasRequiredScopes = missingScopes.length === 0;
 
-    // Refine state based on scopes
-    if (state === "ready" && !hasRequiredScopes) {
-      state = "missing-scopes";
-    }
+      // Refine state based on scopes
+      if (state === "ready" && !hasRequiredScopes) {
+        state = "missing-scopes";
+      }
 
-    // Check token expiry
-    const tokenExpiresAt = authData?.expiresAt || null;
-    const now = Date.now();
-    const tokenTimeRemaining = tokenExpiresAt ? tokenExpiresAt - now : null;
-    const isTokenExpired = tokenTimeRemaining !== null &&
-      tokenTimeRemaining < 0;
+      // Check token expiry
+      const tokenExpiresAt = authData?.expiresAt || null;
+      const now = Date.now();
+      const tokenTimeRemaining = tokenExpiresAt ? tokenExpiresAt - now : null;
+      const isTokenExpired = tokenTimeRemaining !== null &&
+        tokenTimeRemaining < 0;
 
-    // Calculate token expiry warning level
-    const tokenExpiryWarning: TokenExpiryWarning = tokenTimeRemaining === null
-      ? "ok"
-      : tokenTimeRemaining < 0
-      ? "expired"
-      : tokenTimeRemaining < TOKEN_WARNING_THRESHOLD_MS
-      ? "warning"
-      : "ok";
+      // Calculate token expiry warning level
+      const tokenExpiryWarning: TokenExpiryWarning = tokenTimeRemaining === null
+        ? "ok"
+        : tokenTimeRemaining < 0
+        ? "expired"
+        : tokenTimeRemaining < TOKEN_WARNING_THRESHOLD_MS
+        ? "warning"
+        : "ok";
 
-    // Format time remaining for display
-    const tokenExpiryDisplay = formatTimeRemaining(tokenTimeRemaining);
+      // Format time remaining for display
+      const tokenExpiryDisplay = formatTimeRemaining(tokenTimeRemaining);
 
-    // Refine state based on token expiry
-    if (state === "ready" && isTokenExpired) {
-      state = "token-expired";
-    }
+      // Refine state based on token expiry
+      if (state === "ready" && isTokenExpired) {
+        state = "token-expired";
+      }
 
-    // Generate status display
-    const email = authData?.user?.email ?? "";
-    const statusDotColor = STATUS_COLORS[state];
-    let statusText = STATUS_MESSAGES[state];
+      // Generate status display
+      const email = authData?.user?.email ?? "";
+      const statusDotColor = STATUS_COLORS[state];
+      let statusText = STATUS_MESSAGES[state];
 
-    if (state === "ready") {
-      statusText = `Signed in as ${email}`;
-    } else if (state === "missing-scopes") {
-      const missingNames = missingScopes.map((k) => SCOPE_DESCRIPTIONS[k]).join(
-        ", ",
-      );
-      statusText = `Missing: ${missingNames}`;
-    }
+      if (state === "ready") {
+        statusText = `Signed in as ${email}`;
+      } else if (state === "missing-scopes") {
+        const missingNames = missingScopes.map((k) => SCOPE_DESCRIPTIONS[k])
+          .join(
+            ", ",
+          );
+        statusText = `Missing: ${missingNames}`;
+      }
 
-    return {
-      state,
-      auth: authData,
-      authCell: authCell, // Writable cell for token refresh
-      email,
-      hasRequiredScopes,
-      grantedScopes,
-      missingScopes,
-      tokenExpiresAt,
-      isTokenExpired,
-      tokenTimeRemaining,
-      tokenExpiryWarning,
-      tokenExpiryDisplay,
-      statusDotColor,
-      statusText,
-      charm: (wr?.result ?? null) as GoogleAuthCharm | null,
-      // Include UI components from wished charm so fullUI doesn't need to access wishResult directly
-      userChip: wr?.result?.userChip ?? null,
-      charmUI: (wr?.result as any)?.[UI] ?? null,
-    };
-  });
+      return {
+        state,
+        auth: authData,
+        authCell: authCell ?? null, // Writable cell for token refresh
+        email,
+        hasRequiredScopes,
+        grantedScopes,
+        missingScopes,
+        tokenExpiresAt,
+        isTokenExpired,
+        tokenTimeRemaining,
+        tokenExpiryWarning,
+        tokenExpiryDisplay,
+        statusDotColor,
+        statusText,
+        charm: (wr?.result ?? null) as GoogleAuthCharm | null,
+        // Include UI components from wished charm so fullUI doesn't need to access wishResult directly
+        userChip: wr?.result?.userChip ?? null,
+        // Access [UI] symbol property from the result (charm's UI)
+        charmUI:
+          (wr?.result as (GoogleAuthCharm & { [UI]?: unknown }) | undefined)
+            ?.[UI] ?? null,
+      };
+    },
+  );
 
   // ==========================================================================
   // PRE-BOUND HANDLERS
@@ -551,11 +568,14 @@ export function createGoogleAuth(
   });
 
   // Picker UI - renders wishResult[UI] when multiple matches
-  const pickerUI = derive(wishResult as any, (wr: any) => {
-    if (!wr) return null;
-    if (wr[UI]) return wr[UI];
-    return null;
-  });
+  const pickerUI = derive(
+    wishResult,
+    (wr: UnwrappedWishResult | null | undefined) => {
+      if (!wr) return null;
+      if (wr[UI]) return wr[UI];
+      return null;
+    },
+  );
 
   // Helper to format scope list for display
   const formatScopesList = (scopes: ScopeKey[]) =>
@@ -970,7 +990,10 @@ export function createGoogleAuth(
   // Extract the writable auth cell directly from wishResult (not through derive)
   // IMPORTANT: Using computed() preserves the original cell reference for token refresh writes
   // derive() would create a read-only projection, breaking auth.update() calls in clients
-  const auth = computed(() => (wishResult as any)?.result?.auth ?? null);
+  const auth = computed(
+    (): Writable<Auth> | null =>
+      (wishResult as UnwrappedWishResult | null)?.result?.auth ?? null,
+  );
 
   return {
     // Core auth cell - WRITABLE for token refresh

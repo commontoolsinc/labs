@@ -28,6 +28,9 @@ import {
 
 const _env = getRecipeEnvironment();
 
+// Debug flag for development - disable in production
+const DEBUG_ORCHESTRATOR = false;
+
 // =============================================================================
 // SETUP REQUIREMENTS
 // =============================================================================
@@ -209,9 +212,11 @@ class GoogleDocsClient {
     // Handle 429 (rate limit) - exponential backoff
     if (status === 429 && retries > 0) {
       this.delay += this.delayIncrement;
-      console.log(
-        `[GoogleDocsClient] Rate limited, waiting ${this.delay}ms...`,
-      );
+      if (DEBUG_ORCHESTRATOR) {
+        console.log(
+          `[GoogleDocsClient] Rate limited, waiting ${this.delay}ms...`,
+        );
+      }
       await new Promise((r) => setTimeout(r, this.delay));
       return this.request(url, options, retries - 1);
     }

@@ -59,6 +59,9 @@ import type { Auth } from "./gmail-importer.tsx";
 
 const _env = getRecipeEnvironment();
 
+// Debug flag for development - disable in production
+const DEBUG_AGENT = false;
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -354,7 +357,9 @@ export interface GmailAgenticSearchOutput {
 // Handler to create a new GmailSearchRegistry charm
 const createSearchRegistryHandler = handler<unknown, Record<string, never>>(
   () => {
-    console.log("[GmailAgenticSearch] Creating new search registry charm");
+    if (DEBUG_AGENT) {
+      console.log("[GmailAgenticSearch] Creating new search registry charm");
+    }
     const registryCharm = GmailSearchRegistry({
       queries: [],
     });
@@ -368,7 +373,9 @@ const setAccountTypeHandler = handler<
   { selectedType: Writable<"default" | "personal" | "work"> }
 >((event, state) => {
   const newType = event.target.value as "default" | "personal" | "work";
-  console.log("[GmailAgenticSearch] Account type changed to:", newType);
+  if (DEBUG_AGENT) {
+    console.log("[GmailAgenticSearch] Account type changed to:", newType);
+  }
   state.selectedType.set(newType);
 });
 
@@ -382,7 +389,9 @@ const stopScanHandler = handler<
 >((_, state) => {
   state.lastScanAt.set(Date.now());
   state.isScanning.set(false);
-  console.log("[GmailAgenticSearch] Scan stopped");
+  if (DEBUG_AGENT) {
+    console.log("[GmailAgenticSearch] Scan stopped");
+  }
 });
 
 // Handler to complete scan
@@ -395,7 +404,9 @@ const completeScanHandler = handler<
 >((_, state) => {
   state.lastScanAt.set(Date.now());
   state.isScanning.set(false);
-  console.log("[GmailAgenticSearch] Scan completed");
+  if (DEBUG_AGENT) {
+    console.log("[GmailAgenticSearch] Scan completed");
+  }
 });
 
 // Handler to toggle debug log expansion
@@ -458,7 +469,9 @@ const searchGmailHandler = handler<
 
   // Check if we've hit the search limit
   if (max > 0 && currentProgress.searchCount >= max) {
-    console.log(`[SearchGmail Tool] Search limit reached (${max})`);
+    if (DEBUG_AGENT) {
+      console.log(`[SearchGmail Tool] Search limit reached (${max})`);
+    }
     addDebugLogEntry(state.debugLog, {
       type: "info",
       message: `Search limit reached (${max})`,
@@ -510,7 +523,9 @@ const searchGmailHandler = handler<
     resultData = { error: "Not authenticated", emails: [] };
   } else {
     try {
-      console.log(`[SearchGmail Tool] Searching: ${input.query}`);
+      if (DEBUG_AGENT) {
+        console.log(`[SearchGmail Tool] Searching: ${input.query}`);
+      }
 
       // Cross-charm token refresh via Stream<T> handler signature
       // The framework unwraps the opaque stream, giving us a callable .send()
@@ -523,9 +538,11 @@ const searchGmailHandler = handler<
         // The refresh happens in the auth charm's transaction context
         // Note: TypeScript types don't include onCommit, but runtime supports it
         onRefresh = async () => {
-          console.log(
-            "[SearchGmail Tool] Refreshing token via cross-charm stream...",
-          );
+          if (DEBUG_AGENT) {
+            console.log(
+              "[SearchGmail Tool] Refreshing token via cross-charm stream...",
+            );
+          }
           await new Promise<void>((resolve, reject) => {
             // Cast to bypass TS types - runtime supports onCommit (verified in cell.ts:105-108)
             (refreshStream.send as (
@@ -543,15 +560,19 @@ const searchGmailHandler = handler<
                   );
                   reject(new Error(`Token refresh failed: ${status.error}`));
                 } else {
-                  console.log(
-                    "[SearchGmail Tool] Token refresh transaction committed",
-                  );
+                  if (DEBUG_AGENT) {
+                    console.log(
+                      "[SearchGmail Tool] Token refresh transaction committed",
+                    );
+                  }
                   resolve();
                 }
               },
             );
           });
-          console.log("[SearchGmail Tool] Token refresh completed");
+          if (DEBUG_AGENT) {
+            console.log("[SearchGmail Tool] Token refresh completed");
+          }
         };
       }
 
@@ -562,7 +583,9 @@ const searchGmailHandler = handler<
       });
       const emails = await client.searchEmails(input.query, 30);
 
-      console.log(`[SearchGmail Tool] Found ${emails.length} emails`);
+      if (DEBUG_AGENT) {
+        console.log(`[SearchGmail Tool] Found ${emails.length} emails`);
+      }
 
       // Log the search results
       addDebugLogEntry(state.debugLog, {
@@ -658,9 +681,11 @@ const searchGmailHandler = handler<
           const registry = wishResult?.result;
           if (registry?.upvoteQuery) {
             const typeUrl = state.agentTypeUrl.get();
-            console.log(
-              `[SearchGmail] Upvoting community query: ${matchingCommunityQuery.query}`,
-            );
+            if (DEBUG_AGENT) {
+              console.log(
+                `[SearchGmail] Upvoting community query: ${matchingCommunityQuery.query}`,
+              );
+            }
             addDebugLogEntry(state.debugLog, {
               type: "info",
               message:
@@ -738,7 +763,9 @@ const startScanHandler = handler<
   // Validate token before starting scan
   // Cross-charm refresh works via Stream<T> handler signature pattern
   // See: community-docs/blessed/cross-charm.md
-  console.log("[GmailAgenticSearch] Validating token before scan...");
+  if (DEBUG_AGENT) {
+    console.log("[GmailAgenticSearch] Validating token before scan...");
+  }
   addDebugLogEntry(state.debugLog, {
     type: "info",
     message: "Validating Gmail token...",
@@ -754,9 +781,11 @@ const startScanHandler = handler<
   );
 
   if (!validation.valid) {
-    console.log(
-      `[GmailAgenticSearch] Token validation failed: ${validation.error}`,
-    );
+    if (DEBUG_AGENT) {
+      console.log(
+        `[GmailAgenticSearch] Token validation failed: ${validation.error}`,
+      );
+    }
     addDebugLogEntry(state.debugLog, {
       type: "error",
       message: `Token validation failed: ${validation.error}`,
@@ -772,14 +801,18 @@ const startScanHandler = handler<
   }
 
   if (validation.refreshed) {
-    console.log("[GmailAgenticSearch] Token was refreshed automatically");
+    if (DEBUG_AGENT) {
+      console.log("[GmailAgenticSearch] Token was refreshed automatically");
+    }
     addDebugLogEntry(state.debugLog, {
       type: "info",
       message: "Token was expired - refreshed automatically",
     });
   }
 
-  console.log("[GmailAgenticSearch] Token valid, starting scan");
+  if (DEBUG_AGENT) {
+    console.log("[GmailAgenticSearch] Token valid, starting scan");
+  }
   addDebugLogEntry(state.debugLog, {
     type: "info",
     message: "Token valid - starting agent...",
@@ -1040,9 +1073,11 @@ const GmailAgenticSearch = pattern<
         const signalVal = signalValue || 0;
         const lastSignalVal = lastSignalValue || 0;
 
-        console.log(
-          `[GmailAgenticSearch] itemFoundSignal derive triggered: signalValue=${signalVal}, lastSignalValue=${lastSignalVal}, queryId=${queryId}`,
-        );
+        if (DEBUG_AGENT) {
+          console.log(
+            `[GmailAgenticSearch] itemFoundSignal derive triggered: signalValue=${signalVal}, lastSignalValue=${lastSignalVal}, queryId=${queryId}`,
+          );
+        }
 
         if (signalVal > lastSignalVal) {
           if (queryId) {
@@ -1055,13 +1090,17 @@ const GmailAgenticSearch = pattern<
               [queryId]: newCount,
             });
 
-            console.log(
-              `[GmailAgenticSearch] Marked query ${queryId} as found item (now ${newCount})`,
-            );
+            if (DEBUG_AGENT) {
+              console.log(
+                `[GmailAgenticSearch] Marked query ${queryId} as found item (now ${newCount})`,
+              );
+            }
           } else {
-            console.warn(
-              "[GmailAgenticSearch] itemFoundSignal increased but no recent query to mark",
-            );
+            if (DEBUG_AGENT) {
+              console.warn(
+                "[GmailAgenticSearch] itemFoundSignal increased but no recent query to mark",
+              );
+            }
           }
           lastSignalValueCell.set(signalVal);
         }
