@@ -119,6 +119,15 @@ describe("deepEqual", () => {
       const b = [1, , , 4];
       expect(deepEqual(a, b)).toBe(true);
     });
+
+    it("returns false for hole vs explicit undefined at same index", () => {
+      // Both arrays have 3 keys, but holes and undefineds are in opposite positions.
+      // This exercises the hasOwn check that distinguishes stored undefined from holes.
+      const a = [1, undefined, , 4]; // keys: 0, 1, 3 - undefined at 1, hole at 2
+      const b = [1, , undefined, 4]; // keys: 0, 2, 3 - hole at 1, undefined at 2
+      expect(deepEqual(a, b)).toBe(false);
+      expect(deepEqual(b, a)).toBe(false);
+    });
   });
 
   describe("arrays with named properties", () => {
@@ -185,6 +194,20 @@ describe("deepEqual", () => {
 
     it("returns false for objects with different keys", () => {
       expect(deepEqual({ a: 1 }, { b: 1 })).toBe(false);
+    });
+
+    it("returns false for same key count but different keys including undefined", () => {
+      // Both have 2 keys, but different keys. Exercises hasOwn check in checkSpecificProps.
+      // Parallel to the array hole-vs-undefined test.
+      const a = { x: 1, y: undefined };
+      const b = { x: 1, z: 2 };
+      expect(deepEqual(a, b)).toBe(false);
+      expect(deepEqual(b, a)).toBe(false);
+    });
+
+    it("returns false for different keys both with undefined values", () => {
+      // Both have 1 key set to undefined, but different key names.
+      expect(deepEqual({ x: undefined }, { y: undefined })).toBe(false);
     });
 
     it("returns false for objects with different values", () => {
