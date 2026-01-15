@@ -16,7 +16,7 @@ import Counter from "./counter.tsx";
 
 export default pattern(() => {
   // Instantiate the counter pattern with default value (0)
-  const counter = Counter({ value: 0 });
+  const counter = Counter({});
 
   // Also test with a non-zero initial value
   const counterStartingAt5 = Counter({ value: 5 });

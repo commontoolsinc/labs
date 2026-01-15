@@ -91,6 +91,7 @@ const Counter = pattern<Input, Output>(({ value }) => {
           </div>
 
           <ct-hstack gap="2">
+            {/* onClick can take a Stream directly - runtime calls .send() */}
             <ct-button
               id="counter-decrement"
               variant="secondary"
@@ -98,6 +99,7 @@ const Counter = pattern<Input, Output>(({ value }) => {
             >
               - Decrement
             </ct-button>
+            {/* onClick can also take a function that calls .send() explicitly */}
             <ct-button
               id="counter-increment"
               variant="primary"
