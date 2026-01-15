@@ -37,6 +37,8 @@ export enum RequestType {
   GetGraphSnapshot = "runtime:getGraphSnapshot",
   SetPullMode = "runtime:setPullMode",
   GetLoggerCounts = "runtime:getLoggerCounts",
+  SetLoggerLevel = "runtime:setLoggerLevel",
+  SetLoggerEnabled = "runtime:setLoggerEnabled",
 
   // Page operations (main -> worker)
   GetSpaceRootPattern = "pattern:getSpaceRoot",
@@ -152,6 +154,22 @@ export interface GetLoggerCountsRequest extends BaseRequest {
   type: RequestType.GetLoggerCounts;
 }
 
+export type LogLevel = "debug" | "info" | "warn" | "error";
+
+export interface SetLoggerLevelRequest extends BaseRequest {
+  type: RequestType.SetLoggerLevel;
+  /** Logger name. If not provided, sets level for all loggers. */
+  loggerName?: string;
+  level: LogLevel;
+}
+
+export interface SetLoggerEnabledRequest extends BaseRequest {
+  type: RequestType.SetLoggerEnabled;
+  /** Logger name. If not provided, sets enabled for all loggers. */
+  loggerName?: string;
+  enabled: boolean;
+}
+
 // Logger count types for IPC (matches @commontools/utils/logger types)
 export interface LogCounts {
   debug: number;
@@ -228,6 +246,8 @@ export type IPCClientRequest =
   | GetGraphSnapshotRequest
   | SetPullModeRequest
   | GetLoggerCountsRequest
+  | SetLoggerLevelRequest
+  | SetLoggerEnabledRequest
   | IdleRequest
   | PageCreateRequest
   | PageGetSpaceDefault
@@ -343,6 +363,14 @@ export type Commands = {
   [RequestType.GetLoggerCounts]: {
     request: GetLoggerCountsRequest;
     response: LoggerCountsResponse;
+  };
+  [RequestType.SetLoggerLevel]: {
+    request: SetLoggerLevelRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.SetLoggerEnabled]: {
+    request: SetLoggerEnabledRequest;
+    response: EmptyResponse;
   };
   // Cell requests
   [RequestType.CellGet]: {

@@ -1,7 +1,7 @@
 import { DID, Identity } from "@commontools/identity";
 import { CharmManager } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
-import { getLoggerCountsBreakdown } from "@commontools/utils/logger";
+import { getLoggerCountsBreakdown, Logger } from "@commontools/utils/logger";
 import {
   type Cancel,
   convertCellsToLinks,
@@ -41,6 +41,8 @@ import {
   type PageStartRequest,
   type PageStopRequest,
   RequestType,
+  type SetLoggerEnabledRequest,
+  type SetLoggerLevelRequest,
   type SetPullModeRequest,
 } from "../protocol/mod.ts";
 import { HttpProgramResolver, Program } from "@commontools/js-compiler";
@@ -408,6 +410,34 @@ export class RuntimeProcessor {
     return { counts: getLoggerCountsBreakdown() };
   }
 
+  setLoggerLevel(request: SetLoggerLevelRequest): void {
+    const loggers = this.#getLoggers(request.loggerName);
+    for (const logger of loggers) {
+      logger.level = request.level;
+    }
+  }
+
+  setLoggerEnabled(request: SetLoggerEnabledRequest): void {
+    const loggers = this.#getLoggers(request.loggerName);
+    for (const logger of loggers) {
+      logger.disabled = !request.enabled;
+    }
+  }
+
+  #getLoggers(loggerName?: string): Logger[] {
+    const global = globalThis as unknown as {
+      commontools?: { logger?: Record<string, Logger> };
+    };
+    if (!global.commontools?.logger) {
+      return [];
+    }
+    if (loggerName) {
+      const logger = global.commontools.logger[loggerName];
+      return logger ? [logger] : [];
+    }
+    return Object.values(global.commontools.logger);
+  }
+
   #onTelemetry = (event: Event) => {
     const marker = (event as RuntimeTelemetryEvent).marker;
     self.postMessage({
@@ -462,6 +492,10 @@ export class RuntimeProcessor {
         return this.setPullMode(request);
       case RequestType.GetLoggerCounts:
         return this.getLoggerCounts(request);
+      case RequestType.SetLoggerLevel:
+        return this.setLoggerLevel(request);
+      case RequestType.SetLoggerEnabled:
+        return this.setLoggerEnabled(request);
       default:
         throw new Error(`Unknown message type: ${(request as any).type}`);
     }
