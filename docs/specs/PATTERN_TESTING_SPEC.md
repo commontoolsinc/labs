@@ -85,7 +85,7 @@ This format keeps `action()` streams and `computed()` cells separate in the type
 
 ```tsx
 /// <cts-enable />
-import { Cell, action, computed, pattern } from "commontools";
+import { action, computed, pattern, Writable } from "commontools";
 import ExpenseTracker from "./expense-tracker.tsx";
 
 // Test pattern for expense tracker
