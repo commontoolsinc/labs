@@ -1382,13 +1382,100 @@ export class XDebuggerView extends LitElement {
     return typeof total === "number" ? total : 0;
   }
 
-  private sampleLoggerCounts(): void {
-    this.loggerSample = this.getLoggerBreakdown();
+  private async getWorkerLoggerBreakdown(): Promise<
+    Record<
+      string,
+      LoggerBreakdown | number
+    > | null
+  > {
+    const runtime = this.debuggerController?.getRuntime();
+    if (!runtime) return null;
+    const rt = runtime.runtime();
+    if (!rt) return null;
+    try {
+      return await rt.getLoggerCounts();
+    } catch {
+      return null;
+    }
   }
 
-  private resetBaseline(): void {
-    this.loggerBaseline = this.getLoggerBreakdown();
-    this.sampleLoggerCounts();
+  private mergeLoggerBreakdowns(
+    main: Record<string, LoggerBreakdown | number>,
+    worker: Record<string, LoggerBreakdown | number> | null,
+  ): Record<string, LoggerBreakdown | number> {
+    if (!worker) return main;
+
+    const merged: Record<string, LoggerBreakdown | number> = {};
+    const allKeys = new Set([
+      ...Object.keys(main).filter((k) => k !== "total"),
+      ...Object.keys(worker).filter((k) => k !== "total"),
+    ]);
+
+    for (const key of allKeys) {
+      const mainVal = main[key];
+      const workerVal = worker[key];
+
+      if (typeof mainVal === "number" || typeof workerVal === "number") {
+        // Handle simple number values
+        merged[key] = (typeof mainVal === "number" ? mainVal : 0) +
+          (typeof workerVal === "number" ? workerVal : 0);
+      } else if (mainVal && workerVal) {
+        // Both have LoggerBreakdown - merge them
+        merged[key] = this.mergeBreakdown(mainVal, workerVal);
+      } else {
+        // Only one has data
+        merged[key] = mainVal ?? workerVal;
+      }
+    }
+
+    // Merge totals
+    const mainTotal = typeof main.total === "number" ? main.total : 0;
+    const workerTotal = typeof worker.total === "number" ? worker.total : 0;
+    merged.total = mainTotal + workerTotal;
+
+    return merged;
+  }
+
+  private mergeBreakdown(
+    a: LoggerBreakdown,
+    b: LoggerBreakdown,
+  ): LoggerBreakdown {
+    const merged = { total: a.total + b.total } as LoggerBreakdown;
+    const allKeys = new Set([
+      ...Object.keys(a).filter((k) => k !== "total"),
+      ...Object.keys(b).filter((k) => k !== "total"),
+    ]);
+
+    for (const key of allKeys) {
+      const aVal = a[key];
+      const bVal = b[key];
+      if (aVal && bVal) {
+        merged[key] = {
+          debug: aVal.debug + bVal.debug,
+          info: aVal.info + bVal.info,
+          warn: aVal.warn + bVal.warn,
+          error: aVal.error + bVal.error,
+          total: aVal.total + bVal.total,
+        };
+      } else {
+        merged[key] = aVal ?? bVal;
+      }
+    }
+
+    return merged;
+  }
+
+  private async sampleLoggerCounts(): Promise<void> {
+    const mainCounts = this.getLoggerBreakdown();
+    const workerCounts = await this.getWorkerLoggerBreakdown();
+    this.loggerSample = this.mergeLoggerBreakdowns(mainCounts, workerCounts);
+  }
+
+  private async resetBaseline(): Promise<void> {
+    const mainCounts = this.getLoggerBreakdown();
+    const workerCounts = await this.getWorkerLoggerBreakdown();
+    this.loggerBaseline = this.mergeLoggerBreakdowns(mainCounts, workerCounts);
+    await this.sampleLoggerCounts();
   }
 
   private toggleLogger(name: string): void {

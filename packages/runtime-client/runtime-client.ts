@@ -19,6 +19,7 @@ import {
   ErrorNotification,
   InitializationData,
   JSONValue,
+  type LoggerCountsData,
   NavigateRequestNotification,
   RequestType,
   TelemetryNotification,
@@ -204,6 +205,13 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       type: RequestType.SetPullMode,
       pullMode,
     });
+  }
+
+  async getLoggerCounts(): Promise<LoggerCountsData> {
+    const res = await this.#conn.request<RequestType.GetLoggerCounts>({
+      type: RequestType.GetLoggerCounts,
+    });
+    return res.counts;
   }
 
   async dispose(): Promise<void> {

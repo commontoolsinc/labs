@@ -1,6 +1,7 @@
 import { DID, Identity } from "@commontools/identity";
 import { CharmManager } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
+import { getLoggerCountsBreakdown } from "@commontools/utils/logger";
 import {
   type Cancel,
   convertCellsToLinks,
@@ -25,10 +26,12 @@ import {
   type CellUnsubscribeRequest,
   type GetCellRequest,
   GetGraphSnapshotRequest,
+  type GetLoggerCountsRequest,
   GraphSnapshotResponse,
   type InitializationData,
   IPCClientRequest,
   JSONValueResponse,
+  type LoggerCountsResponse,
   NotificationType,
   type PageCreateRequest,
   type PageGetRequest,
@@ -401,6 +404,10 @@ export class RuntimeProcessor {
     }
   }
 
+  getLoggerCounts(_: GetLoggerCountsRequest): LoggerCountsResponse {
+    return { counts: getLoggerCountsBreakdown() };
+  }
+
   #onTelemetry = (event: Event) => {
     const marker = (event as RuntimeTelemetryEvent).marker;
     self.postMessage({
@@ -453,6 +460,8 @@ export class RuntimeProcessor {
         return this.getGraphSnapshot(request);
       case RequestType.SetPullMode:
         return this.setPullMode(request);
+      case RequestType.GetLoggerCounts:
+        return this.getLoggerCounts(request);
       default:
         throw new Error(`Unknown message type: ${(request as any).type}`);
     }

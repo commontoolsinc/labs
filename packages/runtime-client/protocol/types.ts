@@ -36,6 +36,7 @@ export enum RequestType {
   Idle = "runtime:idle",
   GetGraphSnapshot = "runtime:getGraphSnapshot",
   SetPullMode = "runtime:setPullMode",
+  GetLoggerCounts = "runtime:getLoggerCounts",
 
   // Page operations (main -> worker)
   GetSpaceRootPattern = "pattern:getSpaceRoot",
@@ -147,6 +148,29 @@ export interface SetPullModeRequest extends BaseRequest {
   pullMode: boolean;
 }
 
+export interface GetLoggerCountsRequest extends BaseRequest {
+  type: RequestType.GetLoggerCounts;
+}
+
+// Logger count types for IPC (matches @commontools/utils/logger types)
+export interface LogCounts {
+  debug: number;
+  info: number;
+  warn: number;
+  error: number;
+  total: number;
+}
+
+export type LoggerBreakdown = {
+  [messageKey: string]: LogCounts;
+} & {
+  total: number;
+};
+
+export type LoggerCountsData = Record<string, LoggerBreakdown> & {
+  total: number;
+};
+
 export interface PageCreateRequest extends BaseRequest {
   type: RequestType.PageCreate;
   source: {
@@ -203,6 +227,7 @@ export type IPCClientRequest =
   | GetCellRequest
   | GetGraphSnapshotRequest
   | SetPullModeRequest
+  | GetLoggerCountsRequest
   | IdleRequest
   | PageCreateRequest
   | PageGetSpaceDefault
@@ -235,6 +260,10 @@ export interface PageResponse {
 
 export interface GraphSnapshotResponse {
   snapshot: SchedulerGraphSnapshot;
+}
+
+export interface LoggerCountsResponse {
+  counts: LoggerCountsData;
 }
 
 export interface CellUpdateNotification {
@@ -276,6 +305,7 @@ export type RemoteResponse =
   | JSONValueResponse
   | CellResponse
   | GraphSnapshotResponse
+  | LoggerCountsResponse
   | PageResponse;
 
 export type IPCRemoteNotification =
@@ -309,6 +339,10 @@ export type Commands = {
   [RequestType.SetPullMode]: {
     request: SetPullModeRequest;
     response: EmptyResponse;
+  };
+  [RequestType.GetLoggerCounts]: {
+    request: GetLoggerCountsRequest;
+    response: LoggerCountsResponse;
   };
   // Cell requests
   [RequestType.CellGet]: {
