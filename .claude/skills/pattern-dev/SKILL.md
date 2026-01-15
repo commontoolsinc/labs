@@ -7,7 +7,30 @@ You and the user are a team finding the efficient path to their vision.
 
 ## Always Plan First
 
-Use the `EnterPlanMode` tool—don't just create a PLAN.md file. Launch parallel Explore agents to understand context: existing patterns, relevant docs, the user's data model. Write a concrete plan. Get user approval via `ExitPlanMode` before executing.
+Use `EnterPlanMode` to plan before building. During planning:
+
+1. **Clarify requirements** — Ask the user upfront:
+   - What are the core entities? (e.g., "What are the cards? What data do they hold?")
+   - What actions are needed? (e.g., "Drag and drop? Custom columns?")
+   - How should this expose data to other patterns?
+   - Any integrations or side effects needed?
+
+2. **Design component structure** — Break into sub-patterns:
+   ```
+   packages/patterns/kanban/
+   ├── schemas.tsx      # All types
+   ├── card.tsx         # Leaf: Card pattern
+   ├── card.test.tsx
+   ├── column.tsx       # Container: Column with Cards
+   ├── column.test.tsx
+   ├── board.tsx        # Top-level: Board with Columns
+   ├── board.test.tsx
+   └── main.tsx         # Entry point
+   ```
+
+3. **Plan parallel work** — Identify independent pieces that can be built concurrently.
+
+Get user approval via `ExitPlanMode` before executing.
 
 ## Pattern Structure
 
@@ -100,21 +123,31 @@ These skills provide domain knowledge:
 
 Don't do implementation work directly—delegate to agents.
 
-## Orchestration Freedom
+## Orchestration Flow
 
-**Phases are not a strict ordering.** Break the problem apart during planning, then delegate efficiently:
+**Phases are not strict ordering.** The typical flow:
 
-1. **Plan** — Identify concepts (data model, actions, UI, integrations)
-2. **Delegate** — Use pattern-maker for each piece, potentially in parallel
-3. **Integrate** — Compose pieces, use pattern-user to deploy/test
-4. **Iterate** — If issues found, delegate back to maker or user
+### Build Phase
+1. **Make** — Use pattern-maker for each component (parallel if independent)
+2. **Critic** — Use pattern-critic to verify approach before deploying
+3. **Deploy** — Use pattern-user to deploy and test
+4. **Present** — Give user a link to try it
+
+### Feedback Loop
+5. **Gather feedback** — User tests, provides feedback
+6. **Update** — Use pattern-maker to evolve existing patterns (not redesign)
+7. **Verify** — Use pattern-critic to check updates don't regress
+8. **Redeploy** — Ask user: new instance or update existing?
+9. **Test** — Use pattern-user to help user verify changes
+
+### Checkpoints
+10. **Commit** — At milestones, offer to commit working changes
 
 Launch concurrent agents when independent:
-- Multiple concepts can progress in parallel
-- Explore agents run in parallel during planning
-- Independent pattern-maker tasks can run concurrently
+- Multiple leaf patterns can be built in parallel
+- Independent updates can proceed concurrently
 
-Pass each subagent specific files, decisions, and constraints.
+Pass each agent specific files, context, and constraints.
 
 ## Documentation
 

@@ -15,7 +15,16 @@ Use Skill('pattern-deploy') for ct CLI operations and Skill('pattern-debug') for
 
 ## Goal
 
-Deploy patterns to charms and verify they work correctly through the CLI. Debug issues by inspecting state, calling handlers, and tracing errors.
+Deploy patterns to charms and verify they work correctly through the CLI. Debug issues by inspecting state, calling handlers, and tracing errors. Help user test and iterate.
+
+## Configuration
+
+Before deploying, ensure you have:
+- **API_URL** — The toolshed API endpoint
+- **Identity key** — Path to user's key file for signing
+- **Space** — User's space/DID for storing charms
+
+If not provided, ask the user for these before proceeding.
 
 ## Key Commands
 
@@ -39,17 +48,32 @@ deno task ct charm step
 deno task ct dev packages/patterns/[name]/main.tsx --no-run
 ```
 
-## Debug Loop
+## Deploy Flow
 
-1. Deploy or update source
-2. Inspect state to verify
-3. Call handlers to test actions
-4. If errors, read output and trace back to code
-5. Fix → redeploy → verify
+### Initial Deploy
+1. Verify pattern compiles (`ct dev --no-run`)
+2. Create charm (`ct charm new`)
+3. Inspect state to verify
+4. Test handlers
+5. **Present link to user** for testing in browser
+
+### Update Existing
+Ask user: **"New instance or update existing charm?"**
+- New instance: `ct charm new`
+- Update existing: `ct charm setsrc` + `ct charm step`
+
+## Iterative Testing
+
+1. User tests in browser
+2. User provides feedback
+3. Report feedback to orchestrator
+4. After fixes applied, help user verify changes
+5. Repeat until satisfied
 
 ## Done When
 
 - Charm deploys successfully
 - State inspects as expected
 - Handlers respond correctly
+- User has link to test
 - Or: root cause identified and fix proposed
