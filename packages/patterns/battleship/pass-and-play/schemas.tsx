@@ -80,7 +80,7 @@ export function createDefaultShips2(): Ship[] {
       start: { row: 0, col: 6 },
       orientation: "horizontal",
     },
-    { type: "cruiser", start: { row: 3, col: 0 }, orientation: "horizontal" },
+    { type: "cruiser", start: { row: 6, col: 0 }, orientation: "horizontal" },
     { type: "submarine", start: { row: 7, col: 4 }, orientation: "vertical" },
     { type: "destroyer", start: { row: 9, col: 8 }, orientation: "horizontal" },
   ];
