@@ -57,9 +57,14 @@ export class Checker {
     }
   }
 
-  check(diagnostics: readonly Diagnostic[] | undefined) {
+  /**
+   * Checks diagnostics and throws if there are real errors.
+   * Returns true if there were diagnostics that were all filtered out
+   * (known false positives), false if no diagnostics at all.
+   */
+  check(diagnostics: readonly Diagnostic[] | undefined): boolean {
     if (!diagnostics || diagnostics.length === 0) {
-      return;
+      return false;
     }
     // Filter out false positives for known exported symbols
     const filtered = diagnostics.filter((diagnostic) => {
@@ -71,7 +76,8 @@ export class Checker {
       );
     });
     if (filtered.length === 0) {
-      return;
+      // All diagnostics were filtered out - they were benign
+      return true;
     }
     throw new CompilerError(
       filtered.map((diagnostic) => ({ diagnostic })),
