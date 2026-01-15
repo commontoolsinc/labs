@@ -2,6 +2,7 @@
 import {
   computed,
   Default,
+  equals,
   handler,
   ifElse,
   lift,
@@ -24,8 +25,9 @@ interface ParkingSpot {
 
 export type CommuteMode = "drive" | "bart" | "bike" | "wfh" | "other";
 
-interface Person {
-  id: string;
+// NOTE: All fields wrapped in Default<> to avoid runtime persistence bug
+// where mixed Default/non-Default fields cause 2nd+ array items to lose values.
+export interface Person {
   name: string;
   email: Default<string, "">;
   phone: Default<string, "">;
@@ -34,45 +36,45 @@ interface Person {
   spotPreferences: Default<SpotNumber[], []>;
   compatibleSpots: Default<SpotNumber[], [1, 5, 12]>;
   defaultSpot: Default<SpotNumber | null, null>;
-  priorityRank: number;
+  priorityRank: Default<number, 0>;
   totalBookings: Default<number, 0>;
   lastBookingDate: Default<string | null, null>;
-  createdAt: number;
+  createdAt: Default<number, 0>;
 }
 
 export type GuestType = "high-priority" | "best-effort";
 
-interface Guest {
-  id: string;
+// NOTE: All fields wrapped in Default<> to avoid persistence bug
+export interface Guest {
   name: string;
-  hostPersonId: string;
-  type: GuestType;
+  hostPerson: Person;
+  type: Default<GuestType, "best-effort">;
   compatibleSpots: Default<SpotNumber[], [1, 5, 12]>;
   notes: Default<string, "">;
-  createdAt: number;
+  createdAt: Default<number, 0>;
 }
 
 type RequestStatus = "pending" | "allocated" | "denied" | "cancelled";
 
-interface SpotRequest {
-  id: string;
+// NOTE: All fields wrapped in Default<> to avoid persistence bug
+export interface SpotRequest {
   date: string;
-  personId: string | null;
-  guestId: string | null;
-  requestedAt: number;
-  status: RequestStatus;
+  person: Person | null;
+  guest: Guest | null;
+  requestedAt: Default<number, 0>;
+  status: Default<RequestStatus, "pending">;
   allocatedSpot: Default<SpotNumber | null, null>;
   notes: Default<string, "">;
 }
 
-interface Allocation {
-  id: string;
+// NOTE: All fields wrapped in Default<> to avoid persistence bug
+export interface Allocation {
   date: string;
   spot: SpotNumber;
-  personId: string | null;
-  guestId: string | null;
-  allocatedAt: number;
-  wasAutoAllocated: boolean;
+  person: Person | null;
+  guest: Guest | null;
+  allocatedAt: Default<number, 0>;
+  wasAutoAllocated: Default<boolean, false>;
 }
 
 // ============ ACTION TYPES ============
@@ -89,26 +91,42 @@ export interface AddPersonEvent {
 
 export interface AddGuestEvent {
   name: string;
-  hostPersonId: string;
+  hostPerson: Person;
   type: GuestType;
   compatibleSpots?: SpotNumber[];
   notes?: string;
 }
 
 export interface RequestSpotEvent {
-  personId?: string | null;
-  guestId?: string | null;
+  person?: Person | null;
+  guest?: Guest | null;
   date: string;
   notes?: string;
 }
 
 export interface AllocateSpotEvent {
-  requestId: string;
+  request: SpotRequest;
   spotNumber: SpotNumber;
 }
 
-export interface MovePriorityEvent {
-  personId: string;
+export interface MovePriorityUpEvent {
+  person: Person;
+}
+
+export interface MovePriorityDownEvent {
+  person: Person;
+}
+
+export interface CancelRequestEvent {
+  request: SpotRequest;
+}
+
+export interface RemovePersonEvent {
+  person: Person;
+}
+
+export interface RemoveGuestEvent {
+  guest: Guest;
 }
 
 export interface RunAutoAllocateEvent {
@@ -130,7 +148,7 @@ interface Input {
   guests: Writable<Default<Guest[], []>>;
   requests: Writable<Default<SpotRequest[], []>>;
   allocations: Writable<Default<Allocation[], []>>;
-  priorityOrder: Writable<Default<string[], []>>;
+  priorityOrder: Writable<Default<Person[], []>>;
 }
 
 interface Output {
@@ -139,15 +157,15 @@ interface Output {
   guests: Guest[];
   requests: SpotRequest[];
   allocations: Allocation[];
-  priorityOrder: string[];
+  priorityOrder: Person[];
   todayDate: string;
   // Exposed action streams for testing
   addPerson: Stream<AddPersonEvent>;
   addGuest: Stream<AddGuestEvent>;
   requestSpot: Stream<RequestSpotEvent>;
   runAutoAllocate: Stream<RunAutoAllocateEvent>;
-  movePriorityUp: Stream<MovePriorityEvent>;
-  movePriorityDown: Stream<MovePriorityEvent>;
+  movePriorityUp: Stream<MovePriorityUpEvent>;
+  movePriorityDown: Stream<MovePriorityDownEvent>;
 }
 
 // ============ DATE HELPERS ============
@@ -234,13 +252,12 @@ const getAllocatedPersonName = lift(
   }): string | null => {
     const alloc = args.allocation;
     if (!alloc) return null;
-    if (alloc.personId) {
-      const person = args.people.find((p) => p.id === alloc.personId);
-      return person?.name || "Unknown";
+    // Now using direct object references
+    if (alloc.person) {
+      return alloc.person.name || "Unknown";
     }
-    if (alloc.guestId) {
-      const guest = args.guests.find((g) => g.id === alloc.guestId);
-      return guest ? `Guest: ${guest.name}` : "Unknown Guest";
+    if (alloc.guest) {
+      return `Guest: ${alloc.guest.name}`;
     }
     return null;
   },
@@ -252,13 +269,12 @@ const getRequesterName = lift(
     people: Person[];
     guests: Guest[];
   }): string => {
-    if (args.request.personId) {
-      const person = args.people.find((p) => p.id === args.request.personId);
-      return person?.name || "Unknown";
+    // Now using direct object references
+    if (args.request.person) {
+      return args.request.person.name || "Unknown";
     }
-    if (args.request.guestId) {
-      const guest = args.guests.find((g) => g.id === args.request.guestId);
-      return guest ? `Guest: ${guest.name}` : "Unknown Guest";
+    if (args.request.guest) {
+      return `Guest: ${args.request.guest.name}`;
     }
     return "Unknown";
   },
@@ -266,8 +282,8 @@ const getRequesterName = lift(
 
 const getHostName = lift(
   (args: { guest: Guest; people: Person[] }): string => {
-    const host = args.people.find((p) => p.id === args.guest.hostPersonId);
-    return host?.name || "Unknown";
+    // Now using direct object reference
+    return args.guest.hostPerson?.name || "Unknown";
   },
 );
 
@@ -353,61 +369,86 @@ const getWeekSummary = lift(
 );
 
 const getSortedPriorityList = lift(
-  (args: { people: Person[]; priorityOrder: string[] }): Person[] => {
-    return args.priorityOrder
-      .map((id) => args.people.find((p) => p.id === id))
-      .filter((p): p is Person => p !== undefined);
+  (args: { people: Person[]; priorityOrder: Person[] }): Person[] => {
+    // priorityOrder now contains Person objects directly
+    // Return them in order, filtering out any that might not be in the people array
+    return args.priorityOrder.filter((p) => p !== undefined);
   },
 );
 
-// ============ ID GENERATORS ============
-
-const generateId = (prefix: string): string => {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-};
-
 // ============ MODULE-SCOPE HANDLERS ============
 
-// Remove a person
+// Remove a person (context-based for UI buttons)
 const removePersonHandler = handler<
   unknown,
   {
     people: Writable<Person[]>;
-    priorityOrder: Writable<string[]>;
-    personId: string;
+    priorityOrder: Writable<Person[]>;
+    requests: Writable<SpotRequest[]>;
+    guests: Writable<Guest[]>;
+    person: Person;
   }
->((_event, { people, priorityOrder, personId }) => {
+>((_event, { people, priorityOrder, requests, guests, person }) => {
   const pList = people.get();
-  const idx = pList.findIndex((p) => p.id === personId);
+  const idx = pList.findIndex((p) => equals(person, p));
   if (idx >= 0) {
     people.set(pList.toSpliced(idx, 1));
   }
-  priorityOrder.set(priorityOrder.get().filter((id) => id !== personId));
-});
-
-// Remove a guest
-const removeGuestHandler = handler<
-  unknown,
-  { guests: Writable<Guest[]>; guestId: string }
->((_event, { guests, guestId }) => {
-  const gList = guests.get();
-  const idx = gList.findIndex((g) => g.id === guestId);
-  if (idx >= 0) {
-    guests.set(gList.toSpliced(idx, 1));
+  // Remove from priority order
+  const prioList = priorityOrder.get();
+  const prioIdx = prioList.findIndex((p) => equals(person, p));
+  if (prioIdx >= 0) {
+    priorityOrder.set(prioList.toSpliced(prioIdx, 1));
+  }
+  // Remove related requests
+  const reqList = requests.get();
+  const filteredReqs = reqList.filter((r) =>
+    !r.person || !equals(r.person, person)
+  );
+  if (filteredReqs.length !== reqList.length) {
+    requests.set(filteredReqs);
+  }
+  // Remove guests hosted by this person
+  const guestList = guests.get();
+  const filteredGuests = guestList.filter((g) =>
+    !g.hostPerson || !equals(g.hostPerson, person)
+  );
+  if (filteredGuests.length !== guestList.length) {
+    guests.set(filteredGuests);
   }
 });
 
-// Cancel a request
+// Remove a guest (context-based for UI buttons)
+const removeGuestHandler = handler<
+  unknown,
+  { guests: Writable<Guest[]>; requests: Writable<SpotRequest[]>; guest: Guest }
+>((_event, { guests, requests, guest }) => {
+  const gList = guests.get();
+  const idx = gList.findIndex((g) => equals(guest, g));
+  if (idx >= 0) {
+    guests.set(gList.toSpliced(idx, 1));
+  }
+  // Also remove any requests for this guest
+  const reqList = requests.get();
+  const filteredReqs = reqList.filter((r) =>
+    !r.guest || !equals(r.guest, guest)
+  );
+  if (filteredReqs.length !== reqList.length) {
+    requests.set(filteredReqs);
+  }
+});
+
+// Cancel a request (context-based for UI buttons)
 const cancelRequestHandler = handler<
   unknown,
   {
     requests: Writable<SpotRequest[]>;
     allocations: Writable<Allocation[]>;
-    requestId: string;
+    request: SpotRequest;
   }
->((_event, { requests, allocations, requestId }) => {
+>((_event, { requests, allocations, request: targetRequest }) => {
   const reqList = requests.get();
-  const idx = reqList.findIndex((r) => r.id === requestId);
+  const idx = reqList.findIndex((r) => equals(targetRequest, r));
   if (idx < 0) return;
 
   const request = reqList[idx];
@@ -419,8 +460,8 @@ const cancelRequestHandler = handler<
       (a) =>
         a.date === request.date &&
         a.spot === request.allocatedSpot &&
-        ((request.personId && a.personId === request.personId) ||
-          (request.guestId && a.guestId === request.guestId)),
+        ((request.person && a.person && equals(a.person, request.person)) ||
+          (request.guest && a.guest && equals(a.guest, request.guest))),
     );
     if (allocIdx >= 0) {
       allocations.set(allocList.toSpliced(allocIdx, 1));
@@ -432,19 +473,22 @@ const cancelRequestHandler = handler<
   requests.set(updated);
 });
 
-// Manually allocate a spot to a request
+// Manually allocate a spot to a request (context-based for UI buttons)
 const allocateSpotHandler = handler<
   unknown,
   {
     requests: Writable<SpotRequest[]>;
     allocations: Writable<Allocation[]>;
     people: Writable<Person[]>;
-    requestId: string;
+    request: SpotRequest;
     spotNumber: SpotNumber;
   }
->((_event, { requests, allocations, people, requestId, spotNumber }) => {
+>((
+  _event,
+  { requests, allocations, people, request: targetRequest, spotNumber },
+) => {
   const reqList = requests.get();
-  const idx = reqList.findIndex((r) => r.id === requestId);
+  const idx = reqList.findIndex((r) => equals(targetRequest, r));
   if (idx < 0) return;
 
   const request = reqList[idx];
@@ -456,13 +500,12 @@ const allocateSpotHandler = handler<
     .some((a) => a.date === request.date && a.spot === spotNumber);
   if (!isAvail) return;
 
-  // Create allocation
+  // Create allocation with direct object references
   const allocation: Allocation = {
-    id: generateId("alloc"),
     date: request.date,
     spot: spotNumber,
-    personId: request.personId,
-    guestId: request.guestId,
+    person: request.person,
+    guest: request.guest,
     allocatedAt: Date.now(),
     wasAutoAllocated: false,
   };
@@ -478,9 +521,11 @@ const allocateSpotHandler = handler<
   requests.set(updated);
 
   // Update person's booking count
-  if (request.personId) {
+  if (request.person) {
     const pList = people.get();
-    const pIdx = pList.findIndex((p) => p.id === request.personId);
+    const pIdx = request.person
+      ? pList.findIndex((p) => equals(request.person!, p))
+      : -1;
     if (pIdx >= 0) {
       const updatedPeople = [...pList];
       updatedPeople[pIdx] = {
@@ -495,11 +540,12 @@ const allocateSpotHandler = handler<
 
 // Move person up in priority (event-based for exposed stream)
 const movePriorityUpStreamHandler = handler<
-  MovePriorityEvent,
-  { priorityOrder: Writable<string[]> }
+  MovePriorityUpEvent,
+  { priorityOrder: Writable<Person[]> }
 >((event, { priorityOrder }) => {
+  const person = event.person;
   const order = priorityOrder.get();
-  const idx = order.indexOf(event.personId);
+  const idx = order.findIndex((p) => equals(person, p));
   if (idx <= 0) return;
 
   const newOrder = [...order];
@@ -509,11 +555,12 @@ const movePriorityUpStreamHandler = handler<
 
 // Move person down in priority (event-based for exposed stream)
 const movePriorityDownStreamHandler = handler<
-  MovePriorityEvent,
-  { priorityOrder: Writable<string[]> }
+  MovePriorityDownEvent,
+  { priorityOrder: Writable<Person[]> }
 >((event, { priorityOrder }) => {
+  const person = event.person;
   const order = priorityOrder.get();
-  const idx = order.indexOf(event.personId);
+  const idx = order.findIndex((p) => equals(person, p));
   if (idx < 0 || idx >= order.length - 1) return;
 
   const newOrder = [...order];
@@ -524,10 +571,10 @@ const movePriorityDownStreamHandler = handler<
 // Move person up in priority (context-based for UI buttons)
 const movePriorityUpHandler = handler<
   unknown,
-  { priorityOrder: Writable<string[]>; personId: string }
->((_event, { priorityOrder, personId }) => {
+  { priorityOrder: Writable<Person[]>; person: Person }
+>((_event, { priorityOrder, person }) => {
   const order = priorityOrder.get();
-  const idx = order.indexOf(personId);
+  const idx = order.findIndex((p) => equals(person, p));
   if (idx <= 0) return;
 
   const newOrder = [...order];
@@ -538,10 +585,10 @@ const movePriorityUpHandler = handler<
 // Move person down in priority (context-based for UI buttons)
 const movePriorityDownHandler = handler<
   unknown,
-  { priorityOrder: Writable<string[]>; personId: string }
->((_event, { priorityOrder, personId }) => {
+  { priorityOrder: Writable<Person[]>; person: Person }
+>((_event, { priorityOrder, person }) => {
   const order = priorityOrder.get();
-  const idx = order.indexOf(personId);
+  const idx = order.findIndex((p) => equals(person, p));
   if (idx < 0 || idx >= order.length - 1) return;
 
   const newOrder = [...order];
@@ -552,13 +599,11 @@ const movePriorityDownHandler = handler<
 // Add a person
 const addPersonHandler = handler<
   AddPersonEvent,
-  { people: Writable<Person[]>; priorityOrder: Writable<string[]> }
+  { people: Writable<Person[]>; priorityOrder: Writable<Person[]> }
 >((event, { people, priorityOrder }) => {
-  const id = generateId("person");
   const currentPeople = people.get();
 
-  people.push({
-    id,
+  const person: Person = {
     name: event.name,
     email: event.email || "",
     phone: "",
@@ -571,8 +616,10 @@ const addPersonHandler = handler<
     totalBookings: 0,
     lastBookingDate: null,
     createdAt: Date.now(),
-  });
-  priorityOrder.set([...priorityOrder.get(), id]);
+  };
+  people.push(person);
+  // Push the person object directly to priorityOrder (it's now Person[], not string[])
+  priorityOrder.set([...priorityOrder.get(), person]);
 });
 
 // Add a guest
@@ -581,9 +628,8 @@ const addGuestHandler = handler<
   { guests: Writable<Guest[]> }
 >((event, { guests }) => {
   guests.push({
-    id: generateId("guest"),
     name: event.name,
-    hostPersonId: event.hostPersonId,
+    hostPerson: event.hostPerson,
     type: event.type,
     compatibleSpots: event.compatibleSpots || [1, 5, 12],
     notes: event.notes || "",
@@ -596,21 +642,20 @@ const requestSpotHandler = handler<
   RequestSpotEvent,
   { requests: Writable<SpotRequest[]> }
 >((event, { requests }) => {
-  // Check for existing request
+  // Check for existing request using equals() for object comparison
   const existingRequest = requests.get().find(
     (r) =>
       r.date === event.date &&
-      ((event.personId && r.personId === event.personId) ||
-        (event.guestId && r.guestId === event.guestId)) &&
+      ((event.person && r.person && equals(r.person, event.person)) ||
+        (event.guest && r.guest && equals(r.guest, event.guest))) &&
       r.status !== "cancelled",
   );
   if (existingRequest) return;
 
   requests.push({
-    id: generateId("req"),
     date: event.date,
-    personId: event.personId || null,
-    guestId: event.guestId || null,
+    person: event.person || null,
+    guest: event.guest || null,
     requestedAt: Date.now(),
     status: "pending",
     allocatedSpot: null,
@@ -624,16 +669,14 @@ const runAutoAllocateHandler = handler<
   {
     requests: Writable<SpotRequest[]>;
     allocations: Writable<Allocation[]>;
-    people: Writable<Person[]>;
-    guests: Writable<Guest[]>;
-    priorityOrder: Writable<string[]>;
+    _people: Writable<Person[]>;
+    _guests: Writable<Guest[]>;
+    priorityOrder: Writable<Person[]>;
   }
->((event, { requests, allocations, people, guests, priorityOrder }) => {
+>((event, { requests, allocations, _people, _guests, priorityOrder }) => {
   const date = event.date;
   const reqList = requests.get();
   const allocList = allocations.get();
-  const peopleList = people.get();
-  const guestsList = guests.get();
   const prioOrder = priorityOrder.get();
 
   const pendingReqs = reqList.filter(
@@ -655,16 +698,15 @@ const runAutoAllocateHandler = handler<
   // Phase 1: High-priority guests
   for (
     const req of pendingReqs.filter((r) => {
-      if (!r.guestId) return false;
-      const g = guestsList.find((gg) => gg.id === r.guestId);
-      return g?.type === "high-priority";
+      if (!r.guest) return false;
+      return r.guest.type === "high-priority";
     })
   ) {
-    const guest = guestsList.find((g) => g.id === req.guestId);
+    const guest = req.guest;
     if (!guest) continue;
     const compat = (guest.compatibleSpots as SpotNumber[]) || allSpotNumbers;
     const avail = getAvailableCompatible(compat);
-    const reqIdx = updatedReqs.findIndex((r) => r.id === req.id);
+    const reqIdx = updatedReqs.findIndex((r) => equals(req, r));
     if (avail.length > 0 && reqIdx >= 0) {
       const spot = avail[0];
       usedSpots.add(spot);
@@ -674,11 +716,10 @@ const runAutoAllocateHandler = handler<
         allocatedSpot: spot,
       };
       newAllocs.push({
-        id: generateId("alloc"),
         date,
         spot,
-        personId: req.personId,
-        guestId: req.guestId,
+        person: req.person,
+        guest: req.guest,
         allocatedAt: Date.now(),
         wasAutoAllocated: true,
       });
@@ -694,21 +735,25 @@ const runAutoAllocateHandler = handler<
   const personReqs = pendingReqs
     .filter(
       (r) =>
-        r.personId &&
-        updatedReqs.find((ur) => ur.id === r.id)?.status === "pending",
+        r.person &&
+        updatedReqs.find((ur) => equals(ur, r))?.status === "pending",
     )
     .sort((a, b) => {
-      const aIdx = prioOrder.indexOf(a.personId!);
-      const bIdx = prioOrder.indexOf(b.personId!);
+      const aIdx = a.person
+        ? prioOrder.findIndex((p) => equals(p, a.person!))
+        : -1;
+      const bIdx = b.person
+        ? prioOrder.findIndex((p) => equals(p, b.person!))
+        : -1;
       return aIdx - bIdx;
     });
 
   for (const req of personReqs) {
-    const person = peopleList.find((p) => p.id === req.personId);
+    const person = req.person;
     if (!person) continue;
     const compat = (person.compatibleSpots as SpotNumber[]) || allSpotNumbers;
     const avail = getAvailableCompatible(compat);
-    const reqIdx = updatedReqs.findIndex((r) => r.id === req.id);
+    const reqIdx = updatedReqs.findIndex((r) => equals(req, r));
 
     let spot: SpotNumber | null = null;
     if (avail.length > 0) {
@@ -739,11 +784,10 @@ const runAutoAllocateHandler = handler<
         allocatedSpot: spot,
       };
       newAllocs.push({
-        id: generateId("alloc"),
         date,
         spot,
-        personId: req.personId,
-        guestId: req.guestId,
+        person: req.person,
+        guest: req.guest,
         allocatedAt: Date.now(),
         wasAutoAllocated: true,
       });
@@ -758,18 +802,17 @@ const runAutoAllocateHandler = handler<
   // Phase 3: Best-effort guests
   for (
     const req of pendingReqs.filter((r) => {
-      if (!r.guestId) return false;
-      const curr = updatedReqs.find((ur) => ur.id === r.id);
+      if (!r.guest) return false;
+      const curr = updatedReqs.find((ur) => equals(ur, r));
       if (curr?.status !== "pending") return false;
-      const g = guestsList.find((gg) => gg.id === r.guestId);
-      return g?.type === "best-effort";
+      return r.guest.type === "best-effort";
     })
   ) {
-    const guest = guestsList.find((g) => g.id === req.guestId);
+    const guest = req.guest;
     if (!guest) continue;
     const compat = (guest.compatibleSpots as SpotNumber[]) || allSpotNumbers;
     const avail = getAvailableCompatible(compat);
-    const reqIdx = updatedReqs.findIndex((r) => r.id === req.id);
+    const reqIdx = updatedReqs.findIndex((r) => equals(req, r));
     if (avail.length > 0 && reqIdx >= 0) {
       const spot = avail[0];
       usedSpots.add(spot);
@@ -779,11 +822,10 @@ const runAutoAllocateHandler = handler<
         allocatedSpot: spot,
       };
       newAllocs.push({
-        id: generateId("alloc"),
         date,
         spot,
-        personId: req.personId,
-        guestId: req.guestId,
+        person: req.person,
+        guest: req.guest,
         allocatedAt: Date.now(),
         wasAutoAllocated: true,
       });
@@ -801,6 +843,311 @@ const runAutoAllocateHandler = handler<
     allocations.push(alloc);
   }
 });
+
+// ============ UI FORM HANDLERS ============
+// These handlers wrap form state access to avoid "reactive reference outside of a reactive context" errors
+
+const addPersonFromFormHandler = handler<
+  void,
+  {
+    newPersonName: Writable<string>;
+    newPersonEmail: Writable<string>;
+    people: Writable<Person[]>;
+    priorityOrder: Writable<Person[]>;
+  }
+>((_event, { newPersonName, newPersonEmail, people, priorityOrder }) => {
+  const name = newPersonName.get().trim();
+  const email = newPersonEmail.get().trim();
+  if (!name) return;
+
+  const currentPeople = people.get();
+  const person: Person = {
+    name,
+    email,
+    phone: "",
+    usualCommuteMode: "drive",
+    livesNearby: false,
+    spotPreferences: [],
+    compatibleSpots: [1, 5, 12],
+    defaultSpot: null,
+    priorityRank: currentPeople.length + 1,
+    totalBookings: 0,
+    lastBookingDate: null,
+    createdAt: Date.now(),
+  };
+  people.push(person);
+  priorityOrder.set([...priorityOrder.get(), person]);
+
+  newPersonName.set("");
+  newPersonEmail.set("");
+});
+
+const addGuestFromFormHandler = handler<
+  void,
+  {
+    newGuestName: Writable<string>;
+    newGuestHost: Writable<string>;
+    newGuestType: Writable<GuestType>;
+    people: Writable<Person[]>;
+    guests: Writable<Guest[]>;
+  }
+>((_event, { newGuestName, newGuestHost, newGuestType, people, guests }) => {
+  const name = newGuestName.get().trim();
+  const hostPersonIdx = parseInt(newGuestHost.get(), 10);
+  const guestType = newGuestType.get();
+  const peopleList = people.get();
+  if (
+    !name ||
+    isNaN(hostPersonIdx) ||
+    hostPersonIdx < 0 ||
+    hostPersonIdx >= peopleList.length
+  ) return;
+
+  const hostPerson = peopleList[hostPersonIdx];
+  guests.push({
+    name,
+    hostPerson,
+    type: guestType,
+    compatibleSpots: [1, 5, 12],
+    notes: "",
+    createdAt: Date.now(),
+  });
+
+  newGuestName.set("");
+  newGuestHost.set("");
+  newGuestType.set("best-effort");
+});
+
+const requestSpotFromFormHandler = handler<
+  void,
+  {
+    selectedPersonForRequest: Writable<string>;
+    selectedRequestDate: Writable<string>;
+    people: Writable<Person[]>;
+    requests: Writable<SpotRequest[]>;
+  }
+>(
+  (
+    _event,
+    { selectedPersonForRequest, selectedRequestDate, people, requests },
+  ) => {
+    const personIdx = parseInt(selectedPersonForRequest.get(), 10);
+    const date = selectedRequestDate.get();
+    const peopleList = people.get();
+    if (
+      isNaN(personIdx) ||
+      personIdx < 0 ||
+      personIdx >= peopleList.length ||
+      !isWithinBookingWindow(date)
+    ) return;
+
+    const person = peopleList[personIdx];
+
+    // Check for existing request using equals()
+    const existingRequest = requests.get().find(
+      (r) =>
+        r.date === date &&
+        r.person &&
+        equals(r.person, person) &&
+        r.status !== "cancelled",
+    );
+    if (existingRequest) return;
+
+    requests.push({
+      date,
+      person,
+      guest: null,
+      requestedAt: Date.now(),
+      status: "pending",
+      allocatedSpot: null,
+      notes: "",
+    });
+  },
+);
+
+const runAutoAllocateFromFormHandler = handler<
+  void,
+  {
+    selectedRequestDate: Writable<string>;
+    requests: Writable<SpotRequest[]>;
+    allocations: Writable<Allocation[]>;
+    priorityOrder: Writable<Person[]>;
+  }
+>(
+  (
+    _event,
+    { selectedRequestDate, requests, allocations, priorityOrder },
+  ) => {
+    const date = selectedRequestDate.get();
+    const reqList = requests.get();
+    const allocList = allocations.get();
+    const prioOrder = priorityOrder.get();
+
+    const pendingReqs = reqList.filter(
+      (r) => r.date === date && r.status === "pending",
+    );
+    if (pendingReqs.length === 0) return;
+
+    const usedSpots = new Set<SpotNumber>(
+      allocList.filter((a) => a.date === date).map((a) => a.spot),
+    );
+    const allSpotNumbers: SpotNumber[] = [1, 5, 12];
+
+    const getAvailableCompatible = (compatible: SpotNumber[]): SpotNumber[] =>
+      compatible.filter((s) => !usedSpots.has(s));
+
+    const newAllocs: Allocation[] = [];
+    const updatedReqs = [...reqList];
+
+    // Phase 1: High-priority guests
+    for (
+      const req of pendingReqs.filter((r) => {
+        if (!r.guest) return false;
+        return r.guest.type === "high-priority";
+      })
+    ) {
+      const guest = req.guest;
+      if (!guest) continue;
+      const compat = (guest.compatibleSpots as SpotNumber[]) || allSpotNumbers;
+      const avail = getAvailableCompatible(compat);
+      const reqIdx = updatedReqs.findIndex((r) => equals(req, r));
+      if (avail.length > 0 && reqIdx >= 0) {
+        const spot = avail[0];
+        usedSpots.add(spot);
+        updatedReqs[reqIdx] = {
+          ...updatedReqs[reqIdx],
+          status: "allocated" as RequestStatus,
+          allocatedSpot: spot,
+        };
+        newAllocs.push({
+          date,
+          spot,
+          person: req.person,
+          guest: req.guest,
+          allocatedAt: Date.now(),
+          wasAutoAllocated: true,
+        });
+      } else if (reqIdx >= 0) {
+        updatedReqs[reqIdx] = {
+          ...updatedReqs[reqIdx],
+          status: "denied" as RequestStatus,
+        };
+      }
+    }
+
+    // Phase 2: People in priority order
+    const personReqs = pendingReqs
+      .filter(
+        (r) =>
+          r.person &&
+          updatedReqs.find((ur) => equals(ur, r))?.status === "pending",
+      )
+      .sort((a, b) => {
+        const aIdx = a.person
+          ? prioOrder.findIndex((p) => equals(p, a.person!))
+          : -1;
+        const bIdx = b.person
+          ? prioOrder.findIndex((p) => equals(p, b.person!))
+          : -1;
+        return aIdx - bIdx;
+      });
+
+    for (const req of personReqs) {
+      const person = req.person;
+      if (!person) continue;
+      const compat = (person.compatibleSpots as SpotNumber[]) || allSpotNumbers;
+      const avail = getAvailableCompatible(compat);
+      const reqIdx = updatedReqs.findIndex((r) => equals(req, r));
+
+      let spot: SpotNumber | null = null;
+      if (avail.length > 0) {
+        // Check default spot
+        if (
+          person.defaultSpot &&
+          avail.includes(person.defaultSpot as SpotNumber)
+        ) {
+          spot = person.defaultSpot as SpotNumber;
+        } else {
+          // Check preferences
+          const prefs = (person.spotPreferences as SpotNumber[]) || [];
+          for (const pref of prefs) {
+            if (avail.includes(pref)) {
+              spot = pref;
+              break;
+            }
+          }
+          if (!spot) spot = avail[0];
+        }
+      }
+
+      if (spot && reqIdx >= 0) {
+        usedSpots.add(spot);
+        updatedReqs[reqIdx] = {
+          ...updatedReqs[reqIdx],
+          status: "allocated" as RequestStatus,
+          allocatedSpot: spot,
+        };
+        newAllocs.push({
+          date,
+          spot,
+          person: req.person,
+          guest: req.guest,
+          allocatedAt: Date.now(),
+          wasAutoAllocated: true,
+        });
+      } else if (reqIdx >= 0) {
+        updatedReqs[reqIdx] = {
+          ...updatedReqs[reqIdx],
+          status: "denied" as RequestStatus,
+        };
+      }
+    }
+
+    // Phase 3: Best-effort guests
+    for (
+      const req of pendingReqs.filter((r) => {
+        if (!r.guest) return false;
+        const curr = updatedReqs.find((ur) => equals(ur, r));
+        if (curr?.status !== "pending") return false;
+        return r.guest.type === "best-effort";
+      })
+    ) {
+      const guest = req.guest;
+      if (!guest) continue;
+      const compat = (guest.compatibleSpots as SpotNumber[]) || allSpotNumbers;
+      const avail = getAvailableCompatible(compat);
+      const reqIdx = updatedReqs.findIndex((r) => equals(req, r));
+      if (avail.length > 0 && reqIdx >= 0) {
+        const spot = avail[0];
+        usedSpots.add(spot);
+        updatedReqs[reqIdx] = {
+          ...updatedReqs[reqIdx],
+          status: "allocated" as RequestStatus,
+          allocatedSpot: spot,
+        };
+        newAllocs.push({
+          date,
+          spot,
+          person: req.person,
+          guest: req.guest,
+          allocatedAt: Date.now(),
+          wasAutoAllocated: true,
+        });
+      } else if (reqIdx >= 0) {
+        updatedReqs[reqIdx] = {
+          ...updatedReqs[reqIdx],
+          status: "denied" as RequestStatus,
+        };
+      }
+    }
+
+    // Apply updates
+    requests.set(updatedReqs);
+    for (const alloc of newAllocs) {
+      allocations.push(alloc);
+    }
+  },
+);
 
 // ============ MAIN PATTERN ============
 
@@ -839,10 +1186,37 @@ export default pattern<Input, Output>(
     const personCount = computed(() => people.get().length);
     const guestCount = computed(() => guests.get().length);
 
-    // Person select items for dropdowns
+    // Person select items for dropdowns - use index as value since we removed IDs
     const personSelectItems = computed(() =>
-      people.get().map((p) => ({ label: p.name, value: p.id }))
+      people.get().map((p, idx) => ({ label: p.name, value: String(idx) }))
     );
+
+    // Create handler streams for UI form buttons
+    const addPersonFromFormStream = addPersonFromFormHandler({
+      newPersonName,
+      newPersonEmail,
+      people,
+      priorityOrder,
+    });
+    const addGuestFromFormStream = addGuestFromFormHandler({
+      newGuestName,
+      newGuestHost,
+      newGuestType,
+      people,
+      guests,
+    });
+    const requestSpotFromFormStream = requestSpotFromFormHandler({
+      selectedPersonForRequest,
+      selectedRequestDate,
+      people,
+      requests,
+    });
+    const runAutoAllocateFromFormStream = runAutoAllocateFromFormHandler({
+      selectedRequestDate,
+      requests,
+      allocations,
+      priorityOrder,
+    });
 
     // ============ UI ============
 
@@ -974,7 +1348,7 @@ export default pattern<Input, Output>(
                               requests,
                               allocations,
                               people,
-                              requestId: req.id,
+                              request: req,
                               spotNumber: spotNum,
                             })}
                           >
@@ -987,7 +1361,7 @@ export default pattern<Input, Output>(
                           onClick={cancelRequestHandler({
                             requests,
                             allocations,
-                            requestId: req.id,
+                            request: req,
                           })}
                         >
                           Cancel
@@ -1108,7 +1482,7 @@ export default pattern<Input, Output>(
                         size="sm"
                         onClick={movePriorityUpHandler({
                           priorityOrder,
-                          personId: person.id,
+                          person,
                         })}
                       >
                         ↑
@@ -1118,7 +1492,7 @@ export default pattern<Input, Output>(
                         size="sm"
                         onClick={movePriorityDownHandler({
                           priorityOrder,
-                          personId: person.id,
+                          person,
                         })}
                       >
                         ↓
@@ -1129,7 +1503,9 @@ export default pattern<Input, Output>(
                         onClick={removePersonHandler({
                           people,
                           priorityOrder,
-                          personId: person.id,
+                          requests,
+                          guests,
+                          person,
                         })}
                       >
                         ×
@@ -1170,34 +1546,7 @@ export default pattern<Input, Output>(
                       />
                       <ct-button
                         variant="primary"
-                        onClick={() => {
-                          const name = newPersonName.get().trim();
-                          const email = newPersonEmail.get().trim();
-                          if (!name) return;
-
-                          const id = generateId("person");
-                          const currentPeople = people.get();
-
-                          people.push({
-                            id,
-                            name,
-                            email,
-                            phone: "",
-                            usualCommuteMode: "drive",
-                            livesNearby: false,
-                            spotPreferences: [],
-                            compatibleSpots: [1, 5, 12],
-                            defaultSpot: null,
-                            priorityRank: currentPeople.length + 1,
-                            totalBookings: 0,
-                            lastBookingDate: null,
-                            createdAt: Date.now(),
-                          });
-                          priorityOrder.set([...priorityOrder.get(), id]);
-
-                          newPersonName.set("");
-                          newPersonEmail.set("");
-                        }}
+                        onClick={addPersonFromFormStream}
                       >
                         Add
                       </ct-button>
@@ -1231,26 +1580,7 @@ export default pattern<Input, Output>(
                       />
                       <ct-button
                         variant="primary"
-                        onClick={() => {
-                          const name = newGuestName.get().trim();
-                          const hostPersonId = newGuestHost.get();
-                          const guestType = newGuestType.get();
-                          if (!name || !hostPersonId) return;
-
-                          guests.push({
-                            id: generateId("guest"),
-                            name,
-                            hostPersonId,
-                            type: guestType,
-                            compatibleSpots: [1, 5, 12],
-                            notes: "",
-                            createdAt: Date.now(),
-                          });
-
-                          newGuestName.set("");
-                          newGuestHost.set("");
-                          newGuestType.set("best-effort");
-                        }}
+                        onClick={addGuestFromFormStream}
                       >
                         Add
                       </ct-button>
@@ -1276,31 +1606,7 @@ export default pattern<Input, Output>(
                       />
                       <ct-button
                         variant="secondary"
-                        onClick={() => {
-                          const personId = selectedPersonForRequest.get();
-                          const date = selectedRequestDate.get();
-                          if (!personId || !isWithinBookingWindow(date)) return;
-
-                          // Check for existing request
-                          const existingRequest = requests.get().find(
-                            (r) =>
-                              r.date === date &&
-                              r.personId === personId &&
-                              r.status !== "cancelled",
-                          );
-                          if (existingRequest) return;
-
-                          requests.push({
-                            id: generateId("req"),
-                            date,
-                            personId,
-                            guestId: null,
-                            requestedAt: Date.now(),
-                            status: "pending",
-                            allocatedSpot: null,
-                            notes: "",
-                          });
-                        }}
+                        onClick={requestSpotFromFormStream}
                       >
                         Request
                       </ct-button>
@@ -1320,210 +1626,7 @@ export default pattern<Input, Output>(
                       />
                       <ct-button
                         variant="primary"
-                        onClick={() => {
-                          const date = selectedRequestDate.get();
-                          const reqList = requests.get();
-                          const allocList = allocations.get();
-                          const peopleList = people.get();
-                          const guestsList = guests.get();
-                          const prioOrder = priorityOrder.get();
-
-                          const pendingReqs = reqList.filter(
-                            (r) => r.date === date && r.status === "pending",
-                          );
-                          if (pendingReqs.length === 0) return;
-
-                          const usedSpots = new Set<SpotNumber>(
-                            allocList
-                              .filter((a) => a.date === date)
-                              .map((a) => a.spot),
-                          );
-                          const allSpotNumbers: SpotNumber[] = [1, 5, 12];
-
-                          const getAvailableCompatible = (
-                            compatible: SpotNumber[],
-                          ): SpotNumber[] =>
-                            compatible.filter((s) => !usedSpots.has(s));
-
-                          const newAllocs: Allocation[] = [];
-                          const updatedReqs = [...reqList];
-
-                          // Phase 1: High-priority guests
-                          for (
-                            const req of pendingReqs.filter((r) => {
-                              if (!r.guestId) return false;
-                              const g = guestsList.find(
-                                (gg) => gg.id === r.guestId,
-                              );
-                              return g?.type === "high-priority";
-                            })
-                          ) {
-                            const guest = guestsList.find(
-                              (g) => g.id === req.guestId,
-                            );
-                            if (!guest) continue;
-                            const compat =
-                              (guest.compatibleSpots as SpotNumber[]) ||
-                              allSpotNumbers;
-                            const avail = getAvailableCompatible(compat);
-                            const reqIdx = updatedReqs.findIndex(
-                              (r) => r.id === req.id,
-                            );
-                            if (avail.length > 0 && reqIdx >= 0) {
-                              const spot = avail[0];
-                              usedSpots.add(spot);
-                              updatedReqs[reqIdx] = {
-                                ...updatedReqs[reqIdx],
-                                status: "allocated" as RequestStatus,
-                                allocatedSpot: spot,
-                              };
-                              newAllocs.push({
-                                id: generateId("alloc"),
-                                date,
-                                spot,
-                                personId: req.personId,
-                                guestId: req.guestId,
-                                allocatedAt: Date.now(),
-                                wasAutoAllocated: true,
-                              });
-                            } else if (reqIdx >= 0) {
-                              updatedReqs[reqIdx] = {
-                                ...updatedReqs[reqIdx],
-                                status: "denied" as RequestStatus,
-                              };
-                            }
-                          }
-
-                          // Phase 2: People in priority order
-                          const personReqs = pendingReqs
-                            .filter(
-                              (r) =>
-                                r.personId &&
-                                updatedReqs.find((ur) => ur.id === r.id)
-                                    ?.status === "pending",
-                            )
-                            .sort((a, b) => {
-                              const aIdx = prioOrder.indexOf(a.personId!);
-                              const bIdx = prioOrder.indexOf(b.personId!);
-                              return aIdx - bIdx;
-                            });
-
-                          for (const req of personReqs) {
-                            const person = peopleList.find(
-                              (p) => p.id === req.personId,
-                            );
-                            if (!person) continue;
-                            const compat =
-                              (person.compatibleSpots as SpotNumber[]) ||
-                              allSpotNumbers;
-                            const avail = getAvailableCompatible(compat);
-                            const reqIdx = updatedReqs.findIndex(
-                              (r) => r.id === req.id,
-                            );
-
-                            let spot: SpotNumber | null = null;
-                            if (avail.length > 0) {
-                              // Check default spot
-                              if (
-                                person.defaultSpot &&
-                                avail.includes(person.defaultSpot as SpotNumber)
-                              ) {
-                                spot = person.defaultSpot as SpotNumber;
-                              } else {
-                                // Check preferences
-                                const prefs =
-                                  (person.spotPreferences as SpotNumber[]) ||
-                                  [];
-                                for (const pref of prefs) {
-                                  if (avail.includes(pref)) {
-                                    spot = pref;
-                                    break;
-                                  }
-                                }
-                                if (!spot) spot = avail[0];
-                              }
-                            }
-
-                            if (spot && reqIdx >= 0) {
-                              usedSpots.add(spot);
-                              updatedReqs[reqIdx] = {
-                                ...updatedReqs[reqIdx],
-                                status: "allocated" as RequestStatus,
-                                allocatedSpot: spot,
-                              };
-                              newAllocs.push({
-                                id: generateId("alloc"),
-                                date,
-                                spot,
-                                personId: req.personId,
-                                guestId: req.guestId,
-                                allocatedAt: Date.now(),
-                                wasAutoAllocated: true,
-                              });
-                            } else if (reqIdx >= 0) {
-                              updatedReqs[reqIdx] = {
-                                ...updatedReqs[reqIdx],
-                                status: "denied" as RequestStatus,
-                              };
-                            }
-                          }
-
-                          // Phase 3: Best-effort guests
-                          for (
-                            const req of pendingReqs.filter((r) => {
-                              if (!r.guestId) return false;
-                              const curr = updatedReqs.find(
-                                (ur) => ur.id === r.id,
-                              );
-                              if (curr?.status !== "pending") return false;
-                              const g = guestsList.find(
-                                (gg) => gg.id === r.guestId,
-                              );
-                              return g?.type === "best-effort";
-                            })
-                          ) {
-                            const guest = guestsList.find(
-                              (g) => g.id === req.guestId,
-                            );
-                            if (!guest) continue;
-                            const compat =
-                              (guest.compatibleSpots as SpotNumber[]) ||
-                              allSpotNumbers;
-                            const avail = getAvailableCompatible(compat);
-                            const reqIdx = updatedReqs.findIndex(
-                              (r) => r.id === req.id,
-                            );
-                            if (avail.length > 0 && reqIdx >= 0) {
-                              const spot = avail[0];
-                              usedSpots.add(spot);
-                              updatedReqs[reqIdx] = {
-                                ...updatedReqs[reqIdx],
-                                status: "allocated" as RequestStatus,
-                                allocatedSpot: spot,
-                              };
-                              newAllocs.push({
-                                id: generateId("alloc"),
-                                date,
-                                spot,
-                                personId: req.personId,
-                                guestId: req.guestId,
-                                allocatedAt: Date.now(),
-                                wasAutoAllocated: true,
-                              });
-                            } else if (reqIdx >= 0) {
-                              updatedReqs[reqIdx] = {
-                                ...updatedReqs[reqIdx],
-                                status: "denied" as RequestStatus,
-                              };
-                            }
-                          }
-
-                          // Apply updates
-                          requests.set(updatedReqs);
-                          for (const alloc of newAllocs) {
-                            allocations.push(alloc);
-                          }
-                        }}
+                        onClick={runAutoAllocateFromFormStream}
                       >
                         Run Auto-Allocate
                       </ct-button>
@@ -1571,7 +1674,8 @@ export default pattern<Input, Output>(
                             size="sm"
                             onClick={removeGuestHandler({
                               guests,
-                              guestId: guest.id,
+                              requests,
+                              guest,
                             })}
                           >
                             ×
@@ -1608,8 +1712,8 @@ export default pattern<Input, Output>(
       runAutoAllocate: runAutoAllocateHandler({
         requests,
         allocations,
-        people,
-        guests,
+        _people: people,
+        _guests: guests,
         priorityOrder,
       }),
       movePriorityUp: movePriorityUpStreamHandler({ priorityOrder }),
