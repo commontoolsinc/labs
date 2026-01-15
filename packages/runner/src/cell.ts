@@ -158,6 +158,7 @@ declare module "@commontools/api" {
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
       tx?: IExtendedStorageTransaction,
+      writable?: boolean,
     ): CellResult<DeepKeyLookup<T, Path>>;
     getAsNormalizedFullLink(): NormalizedFullLink;
     getAsLink(
@@ -1131,6 +1132,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Readonly<Path>,
     tx?: IExtendedStorageTransaction,
+    writable?: boolean,
   ): CellResult<DeepKeyLookup<T, Path>> {
     if (!this.synced) this.sync(); // No await, just kicking this off
     const subPath = path || [];
@@ -1141,6 +1143,8 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
         ...this.link,
         path: [...this.path, ...subPath.map((p) => p.toString())] as string[],
       },
+      0,
+      writable,
     );
   }
 

@@ -80,6 +80,7 @@ export function createQueryResultProxy<T>(
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
   depth: number = 0,
+  writable: boolean = false,
 ): T {
   // Check recursion depth
   if (depth > MAX_RECURSION_DEPTH) {
@@ -142,10 +143,16 @@ export function createQueryResultProxy<T>(
                 }) as number;
                 if (index < length) {
                   const result = {
-                    value: createQueryResultProxy(runtime, tx, {
-                      ...link,
-                      path: [...link.path, String(index)],
-                    }, depth + 1),
+                    value: createQueryResultProxy(
+                      runtime,
+                      tx,
+                      {
+                        ...link,
+                        path: [...link.path, String(index)],
+                      },
+                      depth + 1,
+                      writable,
+                    ),
                     done: false,
                   };
                   index++;
@@ -199,12 +206,19 @@ export function createQueryResultProxy<T>(
                 tx,
                 { ...link, path: [...link.path, String(i)] },
                 depth + 1,
+                writable,
               );
             }
 
             return method.apply(copy, args);
           }
           : (...args: any[]) => {
+            if (!writable) {
+              throw new Error(
+                "This value is read-only, declare type as Writable<..> instead to get a writable version",
+              );
+            }
+
             if (!tx) {
               throw new Error(
                 "Transaction required for mutation\n" +
@@ -225,6 +239,7 @@ export function createQueryResultProxy<T>(
                   tx,
                   index,
                   { ...link, path: [...link.path, String(index)] },
+                  writable,
                 )
               );
             }
@@ -284,7 +299,13 @@ export function createQueryResultProxy<T>(
 
               diffAndUpdate(runtime, tx, resultLink, result, cause);
 
-              result = createQueryResultProxy(runtime, tx, resultLink);
+              result = createQueryResultProxy(
+                runtime,
+                tx,
+                resultLink,
+                0,
+                writable,
+              );
             }
 
             return result;
@@ -296,10 +317,17 @@ export function createQueryResultProxy<T>(
         tx,
         { ...link, path: [...link.path, prop] },
         depth + 1,
+        writable,
       );
     },
     set: (_, prop, value) => {
       if (typeof prop === "symbol") return false;
+
+      if (!writable) {
+        throw new Error(
+          "This value is read-only, declare type as Writable<..> instead to get a writable version",
+        );
+      }
 
       if (isCellResult(value)) value = value[toCell]();
 
@@ -340,13 +368,14 @@ const createProxyForArrayValue = (
   tx: IExtendedStorageTransaction | undefined,
   source: number,
   link: NormalizedFullLink,
+  writable: boolean = false,
 ): { [originalIndex]: number } => {
   const target = {
     valueOf: function () {
-      return createQueryResultProxy(runtime, tx, link);
+      return createQueryResultProxy(runtime, tx, link, 0, writable);
     },
     toString: function () {
-      return String(createQueryResultProxy(runtime, tx, link));
+      return String(createQueryResultProxy(runtime, tx, link, 0, writable));
     },
     [originalIndex]: source,
   };
