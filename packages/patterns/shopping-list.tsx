@@ -17,10 +17,15 @@ import {
   handler,
   ifElse,
   NAME,
+  navigateTo,
+  OpaqueRef,
   pattern,
+  patternTool,
+  Stream,
   UI,
   Writable,
 } from "commontools";
+import StoreMapper from "./store-mapper.tsx";
 
 // Item with optional aisle override for manual corrections
 interface ShoppingItem {
@@ -40,12 +45,17 @@ interface Input {
   storeLayout: Writable<Default<string, "">>; // Markdown store layout from Store Mapper
 }
 
+/** Shopping list with AI-powered aisle sorting. #shoppingList */
 interface Output {
   items: ShoppingItem[];
   totalCount: number;
   doneCount: number;
   remainingCount: number;
   storeLayout: string;
+  // Omnibot handlers
+  addItem: OpaqueRef<Stream<{ detail: { message: string } }>>;
+  addItemForOmnibot: OpaqueRef<Stream<{ itemText: string }>>;
+  addItems: OpaqueRef<Stream<{ itemNames: string[] }>>;
 }
 
 // Demo store layout from Andronico's on Shattuck (community-patterns)
@@ -185,6 +195,68 @@ const addItem = handler<
   });
 });
 
+// Handler for omnibot to add a single item
+const addItemForOmnibot = handler<
+  { itemText: string },
+  { items: Writable<ShoppingItem[]> }
+>(({ itemText }, { items }) => {
+  if (itemText && itemText.trim()) {
+    items.push({
+      title: itemText.trim(),
+      done: false,
+      aisleSeed: 0,
+      aisleOverride: "",
+    });
+  }
+});
+
+// Handler for omnibot to add multiple items at once
+const addItems = handler<
+  { itemNames: string[] },
+  { items: Writable<ShoppingItem[]> }
+>(({ itemNames }, { items }) => {
+  itemNames.forEach((name) => {
+    if (name && name.trim()) {
+      items.push({
+        title: name.trim(),
+        done: false,
+        aisleSeed: 0,
+        aisleOverride: "",
+      });
+    }
+  });
+});
+
+// PatternTool for omnibot to search items
+const searchItemsImpl = ({
+  items,
+  query,
+}: {
+  items: ShoppingItem[];
+  query: string;
+}) => {
+  return computed(() =>
+    items.filter((item: ShoppingItem) =>
+      item.title.toLowerCase().includes(query.toLowerCase())
+    )
+  );
+};
+
+// Handler to navigate to store mapper
+const openStoreMapper = handler<unknown, Record<string, never>>(
+  (_event, _state) => {
+    return navigateTo(
+      StoreMapper({
+        storeName: "My Store",
+        aisles: [],
+        departments: [],
+        entrances: [],
+        itemLocations: [],
+      }),
+    );
+  },
+);
+
 // Handler for removing an item
 const removeItem = handler<
   unknown,
@@ -271,6 +343,9 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
   // Store both index and title when opening correction panel
   const correctionIndex = Writable.of<number>(-1);
   const correctionTitle = Writable.of<string>("");
+
+  // Create search tool for omnibot
+  const searchItems = patternTool(searchItemsImpl, { items });
 
   // Computed for whether correction panel is open
   const isCorrecting = computed(() => correctionIndex.get() >= 0);
@@ -371,6 +446,13 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
             >
               📍 Sorted
             </ct-button>
+            <ct-button
+              variant="secondary"
+              size="sm"
+              onClick={openStoreMapper({})}
+            >
+              🗺️ Store
+            </ct-button>
           </ct-hstack>
         </ct-vstack>
 
@@ -380,7 +462,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
             {/* Input field at top - with right padding to avoid FAB */}
             <div style={{ paddingRight: "60px" }}>
               <ct-message-input
-                placeholder="Add item..."
+                placeholder="Type to add item, or ask omnibot..."
                 appearance="rounded"
                 onct-send={addItem({ items })}
               />
@@ -410,10 +492,13 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                   <ct-card>
                     <ct-hstack gap="2" align="center">
                       <ct-checkbox $checked={item.done} />
-                      <div
+                      <ct-input
+                        $value={item.title}
+                        placeholder="Enter item..."
                         style={{
                           flex: 1,
-                          color: "#111827",
+                          border: "none",
+                          background: "transparent",
                           textDecoration: ifElse(
                             item.done,
                             "line-through",
@@ -421,9 +506,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                           ),
                           opacity: ifElse(item.done, 0.6, 1),
                         }}
-                      >
-                        {item.title}
-                      </div>
+                      />
                       <ct-button
                         variant="ghost"
                         onClick={removeItem({ items, item })}
@@ -631,5 +714,10 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
     doneCount,
     remainingCount,
     storeLayout,
+    // Omnibot integration
+    addItem: addItem({ items }),
+    addItemForOmnibot: addItemForOmnibot({ items }),
+    addItems: addItems({ items }),
+    searchItems,
   };
 });
