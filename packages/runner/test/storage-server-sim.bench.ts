@@ -34,7 +34,11 @@ function setup() {
 }
 
 // ============================================================================
-// Test fixtures
+// Test fixtures and their pre-cloned versions
+//
+// We pre-create cloned versions of each fixture to simulate what happens when
+// a server round-trip re-serializes data (breaking reference equality).
+// This avoids JSON.stringify/parse in the hot path during benchmarking.
 // ============================================================================
 
 const medianComplexityA = {
@@ -66,6 +70,16 @@ const largeStringA = {
   },
 };
 
+// Pre-cloned versions (same values, different object references)
+const medianComplexityA_cloned = JSON.parse(JSON.stringify(medianComplexityA));
+const largeStringA_cloned = JSON.parse(JSON.stringify(largeStringA));
+
+// Map from original fixture to its clone for O(1) lookup
+const fixtureClones = new Map<unknown, unknown>([
+  [medianComplexityA, medianComplexityA_cloned],
+  [largeStringA, largeStringA_cloned],
+]);
+
 // ============================================================================
 // Replica.prototype.get stub for simulating server round-trips
 // ============================================================================
@@ -78,13 +92,16 @@ function stubReplicaGetWithReserialization() {
     const nurseryState = this.nursery.get(entry);
     if (nurseryState) return nurseryState;
 
-    // For heap data, simulate server re-serialization by deep-cloning `is`
+    // For heap data, simulate server re-serialization by substituting
+    // a pre-cloned version of the value (breaking reference equality)
     const heapState = this.heap.get(entry);
     if (heapState) {
       const { since: _since, ...state } = heapState;
-      // Break reference equality on the value (simulates server serialization)
       if (state.is !== undefined) {
-        return { ...state, is: JSON.parse(JSON.stringify(state.is)) };
+        // Use pre-cloned fixture if available, otherwise clone on demand
+        const cloned = fixtureClones.get(state.is) ??
+          JSON.parse(JSON.stringify(state.is));
+        return { ...state, is: cloned };
       }
       return state;
     }
