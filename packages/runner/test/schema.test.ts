@@ -3133,4 +3133,163 @@ describe("Schema Support", () => {
       expect(link1.space).toBe(space2);
     });
   });
+
+  /**
+   * Tests for validateAndTransform behavior with redirect and regular links.
+   *
+   * Chain structure:
+   *   start --redirect--> redir --redirect--> first --regular--> second --regular--> data
+   *     ^                                       ^                   ^                   ^
+   *     |                                       |                   |                   |
+   *   query from here               toCell() returns this    asCell returns this    actual value
+   *
+   * Current behavior:
+   * - All consecutive redirect links are followed until the first non-redirect cell
+   * - Without asCell: toCell() returns the first non-redirect cell (first)
+   * - With asCell: returns a Cell pointing one step further (second)
+   */
+  describe("validateAndTransform with redirect links", () => {
+    it("without asCell: toCell() returns first non-redirect cell", () => {
+      // Chain: start --redirect--> redir --redirect--> first --regular--> second --regular--> data
+      //
+      // Behavior: All redirect links are followed, toCell() stops at first non-redirect
+      // The data is fully resolved to { test: "foo" } but the cell reference stops at `first`
+
+      // data: holds the actual value
+      const data = runtime.getCell<{ test: string }>(
+        space,
+        "redirect-test-data",
+        undefined,
+        tx,
+      );
+      data.set({ test: "foo" });
+
+      // second: regular link to data
+      const second = runtime.getCell<any>(
+        space,
+        "redirect-test-second",
+        undefined,
+        tx,
+      );
+      second.setRaw(data.getAsLink());
+
+      // first: regular link to second (first non-redirect in chain)
+      const first = runtime.getCell<any>(
+        space,
+        "redirect-test-first",
+        undefined,
+        tx,
+      );
+      first.setRaw(second.getAsLink());
+
+      // redir: redirect link to first
+      const redir = runtime.getCell<any>(
+        space,
+        "redirect-test-redir",
+        undefined,
+        tx,
+      );
+      redir.setRaw(first.getAsWriteRedirectLink());
+
+      // start: redirect link to redir (entry point for query)
+      const start = runtime.getCell<any>(
+        space,
+        "redirect-test-start",
+        undefined,
+        tx,
+      );
+      start.setRaw(redir.getAsWriteRedirectLink());
+
+      const objectSchema = {
+        type: "object",
+        properties: {
+          test: { type: "string" },
+        },
+      } as const satisfies JSONSchema;
+
+      const result = start.asSchema(objectSchema).get();
+
+      // Data is fully resolved through all links
+      expect(result).toEqualIgnoringSymbols({ test: "foo" });
+
+      // toCell() returns the first non-redirect cell (`first`)
+      const cellFromResult = (result as any)[toCell]();
+      expect(isCell(cellFromResult)).toBe(true);
+      const cellFromResultLink = cellFromResult.getAsNormalizedFullLink();
+      const firstLink = first.getAsNormalizedFullLink();
+
+      expect(cellFromResultLink.id).toBe(firstLink.id);
+      expect(cellFromResultLink.path).toEqual(firstLink.path);
+    });
+
+    it("with asCell: returns Cell pointing one step past first non-redirect", () => {
+      // Chain: start --redirect--> redir --redirect--> first --regular--> second --regular--> data
+      //
+      // Behavior: All redirect links are followed, then one more regular link is followed
+      // Result is a Cell pointing to `second` (not `first`, not `data`)
+
+      // data: holds the actual value
+      const data = runtime.getCell<{ test: string }>(
+        space,
+        "redirect-test-ascell-data",
+        undefined,
+        tx,
+      );
+      data.set({ test: "foo" });
+
+      // second: regular link to data
+      const second = runtime.getCell<any>(
+        space,
+        "redirect-test-ascell-second",
+        undefined,
+        tx,
+      );
+      second.setRaw(data.getAsLink());
+
+      // first: regular link to second (first non-redirect in chain)
+      const first = runtime.getCell<any>(
+        space,
+        "redirect-test-ascell-first",
+        undefined,
+        tx,
+      );
+      first.setRaw(second.getAsLink());
+
+      // redir: redirect link to first
+      const redir = runtime.getCell<any>(
+        space,
+        "redirect-test-ascell-redir",
+        undefined,
+        tx,
+      );
+      redir.setRaw(first.getAsWriteRedirectLink());
+
+      // start: redirect link to redir (entry point for query)
+      const start = runtime.getCell<any>(
+        space,
+        "redirect-test-ascell-start",
+        undefined,
+        tx,
+      );
+      start.setRaw(redir.getAsWriteRedirectLink());
+
+      const asCellSchema = {
+        type: "object",
+        properties: {
+          test: { type: "string" },
+        },
+        asCell: true,
+      } as const satisfies JSONSchema;
+
+      const resultCell = start.asSchema(asCellSchema).get();
+      expect(isCell(resultCell)).toBe(true);
+
+      // Result Cell points to `second` (one step past the first non-redirect)
+      const resultCellLink = resultCell.getAsNormalizedFullLink();
+      const secondLink = second.getAsNormalizedFullLink();
+
+      expect(resultCellLink.id).toBe(secondLink.id);
+      expect(resultCellLink.path).toEqual(secondLink.path);
+    });
+  });
 });
