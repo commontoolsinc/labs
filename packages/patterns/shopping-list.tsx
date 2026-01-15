@@ -221,6 +221,33 @@ const closeCorrection = handler<
   correctionIndex.set(-1);
 });
 
+// Handler for selecting an aisle correction
+const selectAisle = handler<
+  unknown,
+  {
+    items: Writable<ShoppingItem[]>;
+    correctionIndex: Writable<number>;
+  }
+>((_event, { items, correctionIndex }) => {
+  const idx = correctionIndex.get();
+  if (idx >= 0) {
+    const itemsList = items.get();
+    const item = itemsList[idx];
+    if (item) {
+      const updated = itemsList.map((i, index) =>
+        index === idx
+          ? {
+            ...i,
+            aisleSeed: (i.aisleSeed || 0) + 1,
+          }
+          : i
+      );
+      items.set(updated);
+    }
+  }
+  correctionIndex.set(-1);
+});
+
 // Extract valid locations from store layout
 function extractLocations(layout: string): string[] {
   const locations: string[] = [];
@@ -559,26 +586,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
                 {validLocations.map((location) => (
                   <ct-button
                     variant="secondary"
-                    onClick={() => {
-                      // Force re-categorization by incrementing aisleSeed
-                      const idx = correctionIndex.get();
-                      if (idx >= 0) {
-                        const itemsList = items.get();
-                        const item = itemsList[idx];
-                        if (item) {
-                          const updated = itemsList.map((i, index) =>
-                            index === idx
-                              ? {
-                                ...i,
-                                aisleSeed: (i.aisleSeed || 0) + 1,
-                              }
-                              : i
-                          );
-                          items.set(updated);
-                        }
-                      }
-                      correctionIndex.set(-1);
-                    }}
+                    onClick={selectAisle({ items, correctionIndex })}
                   >
                     {location}
                   </ct-button>
