@@ -31,22 +31,11 @@ export function deepEqual(a: any, b: any): boolean {
     return false;
   }
 
-  // Common code for array and record-general equality checks.
-  function checkProps(keysToCheck: string[]) {
-    for (const key of keysToCheck) {
-      if (!(Object.hasOwn(b, key) && deepEqual(a[key], b[key]))) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
   const aIsArray = Array.isArray(a);
   const bIsArray = Array.isArray(b);
   if (!(aIsArray || bIsArray)) {
     // General record (non-array object) comparison.
-    return checkProps(keysA);
+    return checkSpecificProps(a, b, keysA);
   }
 
   if (!(aIsArray && bIsArray)) {
@@ -96,5 +85,29 @@ export function deepEqual(a: any, b: any): boolean {
   // and ES (as of ES2015) guarantees that all the indexed properties are
   // listed first in the result from `Object.keys()`, so we slice those off
   // and just check the remainder.
-  return checkProps(keysA.slice(indexCount));
+  return checkSpecificProps(a, b, keysA.slice(indexCount));
+}
+
+/**
+ * Helper for {@link deepEqual} that checks whether specific properties are
+ * deeply equal between two records. Used for general object comparison and
+ * for checking named (non-index) properties on arrays.
+ *
+ * @param a - First record (properties assumed to exist here)
+ * @param b - Second record (properties checked via `hasOwn` before access)
+ * @param keysToCheck - Property keys to compare
+ * @returns `true` if all specified properties exist on `b` and are deeply equal
+ */
+function checkSpecificProps(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+  keysToCheck: string[],
+): boolean {
+  for (const key of keysToCheck) {
+    if (!(Object.hasOwn(b, key) && deepEqual(a[key], b[key]))) {
+      return false;
+    }
+  }
+
+  return true;
 }
