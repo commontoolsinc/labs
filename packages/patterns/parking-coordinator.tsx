@@ -502,21 +502,17 @@ const allocateSpotHandler = handler<
  *
  * See: https://linear.app/common-tools/issue/CT-1173
  * See also: tutorials/making-lists.md (lines 195-224)
+ *
+ * KNOWN BUG: Despite reconstruction, there's a deeper persistence bug where
+ * array element properties (like defaultSpot) get corrupted. The last item's
+ * defaultSpot value overwrites all previous items' values. This happens on
+ * both array push and reordering operations. The only known workaround is
+ * to store arrays as JSON strings (see json-array-test.tsx pattern).
  */
-const reconstructPerson = (p: Person): Person => ({
-  name: p.name,
-  email: p.email,
-  phone: p.phone,
-  usualCommuteMode: p.usualCommuteMode,
-  livesNearby: p.livesNearby,
-  spotPreferences: [...(p.spotPreferences || [])],
-  compatibleSpots: [...(p.compatibleSpots || [])],
-  defaultSpot: p.defaultSpot,
-  priorityRank: p.priorityRank,
-  totalBookings: p.totalBookings,
-  lastBookingDate: p.lastBookingDate,
-  createdAt: p.createdAt,
-});
+// Deep clone person to avoid reactive reference issues
+// JSON round-trip ensures complete detachment from reactive system
+const reconstructPerson = (p: Person): Person =>
+  JSON.parse(JSON.stringify(p)) as Person;
 
 const movePriorityUpStreamHandler = handler<
   MovePriorityUpEvent,
@@ -593,10 +589,13 @@ const movePriorityToTopByIndex = handler<
   const order = people.get();
   if (index <= 0 || index >= order.length) return;
 
-  const newOrder = order.map(reconstructPerson);
-  // Remove the person from their current position and insert at the beginning
-  const [person] = newOrder.splice(index, 1);
-  newOrder.unshift(person);
+  // Reconstruct all people to avoid reactive reference issues
+  const reconstructed = order.map(reconstructPerson);
+  const person = reconstructed[index];
+  const before = reconstructed.slice(0, index);
+  const after = reconstructed.slice(index + 1);
+  const newOrder = [person, ...before, ...after];
+
   people.set(newOrder);
 });
 
