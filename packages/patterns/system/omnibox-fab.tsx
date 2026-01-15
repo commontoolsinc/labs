@@ -60,8 +60,37 @@ const wishTool = pattern<WishToolParameters>(
   },
 );
 
+const listMentionable = pattern<
+  { mentionable: Array<MentionableCharm> },
+  { result: Array<{ label: string; charm: MentionableCharm }> }
+>(
+  ({ mentionable }) => {
+    const result = mentionable.map((c) => ({
+      label: c[NAME]!,
+      charm: c,
+    }));
+    return { result };
+  },
+);
+
+const listRecent = pattern<
+  { recentCharms: Array<MentionableCharm> },
+  { result: Array<{ label: string; charm: MentionableCharm }> }
+>(
+  ({ recentCharms }) => {
+    const namesList = recentCharms.map((c) => ({
+      label: c[NAME]!,
+      charm: c,
+    }));
+    return { result: namesList };
+  },
+);
+
 export default pattern<OmniboxFABInput>(
   (_) => {
+    const mentionable = wish<MentionableCharm[]>("#mentionable");
+    const recentCharms = wish<MentionableCharm[]>("#recent");
+
     const omnibot = Chatbot({
       system:
         "You are a polite but efficient assistant. Think Star Trek computer - helpful and professional without unnecessary conversation. Let your actions speak for themselves.\n\nTool usage priority:\n- For patterns: listPatternIndex first\n- For existing pages/notes/content: listRecent or listMentionable to identify what they're referencing\n- Attach relevant items to conversation after instantiation/retrieval if they support ongoing tasks\n- Remove attachments when no longer relevant\n- Search web only as last resort when nothing exists in the space\n\nBe matter-of-fact. Prefer action to explanation.",
@@ -79,6 +108,8 @@ export default pattern<OmniboxFABInput>(
         listPatternIndex: patternTool(listPatternIndex),
         navigateTo: patternTool(navigateToPattern),
         wishAndNavigate: patternTool(wishTool),
+        listMentionable: patternTool(listMentionable, { mentionable }),
+        listRecent: patternTool(listRecent, { recentCharms }),
       },
     });
 
