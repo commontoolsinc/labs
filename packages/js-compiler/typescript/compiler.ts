@@ -356,9 +356,7 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       undefined,
       { before: beforeTransformers },
     );
-    // check() throws if there are real errors, returns true if all diagnostics
-    // were filtered out (known false positives like CELL_BRAND/CELL_INNER_TYPE)
-    const allDiagnosticsFiltered = checker.check(diagnostics);
+    checker.check(diagnostics);
 
     // Check for transformer diagnostics (from CommonTools pipeline)
     if (getDiagnostics) {
@@ -376,8 +374,7 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       }
     }
 
-    // Only throw if emit was skipped due to real errors, not filtered false positives
-    if (emitSkipped && !allDiagnosticsFiltered) {
+    if (emitSkipped) {
       throw new Error("Emit skipped. Check diagnostics.");
     }
 

@@ -9,8 +9,9 @@ export interface CheckerOptions {
   messageTransformer?: DiagnosticMessageTransformer;
 }
 
-// These symbols are exported from commontools but TypeScript's declaration emit
-// has trouble with unique symbols in certain contexts. Filter out false positives.
+// These symbols are exported from commontools but TypeScript's declaration
+// diagnostics have trouble with unique symbols in certain contexts.
+// Filter out these known false positives.
 const KNOWN_EXPORTED_SYMBOLS = ["CELL_BRAND", "CELL_INNER_TYPE"];
 
 export class Checker {
@@ -57,30 +58,12 @@ export class Checker {
     }
   }
 
-  /**
-   * Checks diagnostics and throws if there are real errors.
-   * Returns true if there were diagnostics that were all filtered out
-   * (known false positives), false if no diagnostics at all.
-   */
-  check(diagnostics: readonly Diagnostic[] | undefined): boolean {
+  check(diagnostics: readonly Diagnostic[] | undefined) {
     if (!diagnostics || diagnostics.length === 0) {
-      return false;
-    }
-    // Filter out false positives for known exported symbols
-    const filtered = diagnostics.filter((diagnostic) => {
-      const message = typeof diagnostic.messageText === "string"
-        ? diagnostic.messageText
-        : diagnostic.messageText.messageText;
-      return !KNOWN_EXPORTED_SYMBOLS.some((sym) =>
-        message.includes(`private name '${sym}'`)
-      );
-    });
-    if (filtered.length === 0) {
-      // All diagnostics were filtered out - they were benign
-      return true;
+      return;
     }
     throw new CompilerError(
-      filtered.map((diagnostic) => ({ diagnostic })),
+      diagnostics.map((diagnostic) => ({ diagnostic })),
       this.messageTransformer,
     );
   }
