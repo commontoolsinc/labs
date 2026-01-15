@@ -10,30 +10,20 @@ export type PageType = {
   [UI]?: CellHandle<VNode> | VNode;
 };
 
-export class PageHandle<T = PageType, R = unknown> {
-  private _rt: RuntimeClient;
+export class PageHandle<T = PageType> {
   private _conn: InitializedRuntimeConnection;
   private _cell: CellHandle<T>;
-  private _result?: CellHandle<R>;
-  private _recipeId?: string;
 
   constructor(
     rt: RuntimeClient,
     ref: PageRef,
   ) {
-    this._rt = rt;
     this._conn = rt[$conn]();
     this._cell = new CellHandle<T>(rt, ref.cell);
-    this._result = ref.result ? new CellHandle<R>(rt, ref.result) : undefined;
-    this._recipeId = ref.recipeId;
   }
 
   cell(): CellHandle<T> {
     return this._cell;
-  }
-
-  result(): CellHandle<R> | undefined {
-    return this._result;
   }
 
   id(): string {
@@ -64,8 +54,8 @@ export class PageHandle<T = PageType, R = unknown> {
   }
 }
 
-export function isPageHandle<T = unknown, R = unknown>(
+export function isPageHandle<T = unknown>(
   value: unknown,
-): value is PageHandle<T, R> {
+): value is PageHandle<T> {
   return value instanceof PageHandle;
 }
