@@ -344,6 +344,9 @@ export class RuntimeProcessor {
       throw new Error("Invalid source.");
     }
 
+    // Ensure default pattern exists before creating charms with addToList: true
+    await this.cc.ensureDefaultPattern();
+
     const charm = await this.cc.create<NameSchema>(program, {
       input: request.argument as object | undefined,
       start: request.run ?? true,
