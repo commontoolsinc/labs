@@ -1,9 +1,8 @@
 /// <cts-enable />
 import {
+  action,
   computed,
   derive,
-  handler,
-  lift,
   NAME,
   pattern,
   Stream,
@@ -35,7 +34,7 @@ export type {
 } from "./schemas.tsx";
 
 // =============================================================================
-// Lifted Functions (module scope - pure transformation logic)
+// Types
 // =============================================================================
 
 interface BoardCell {
@@ -47,12 +46,153 @@ interface BoardCell {
   gridCol: string;
 }
 
-const computeMyBoardCells = lift<{ game: GameState }, BoardCell[]>(
-  ({ game }) => {
-    const viewer = game.viewingAs;
+// =============================================================================
+// Pattern
+// =============================================================================
+
+type Input = Record<string, never>;
+
+interface Output {
+  game: Writable<GameState>;
+  fireShot: Stream<{ row: number; col: number }>;
+  passDevice: Stream<void>;
+  playerReady: Stream<void>;
+  resetGame: Stream<void>;
+}
+
+export default pattern<Input, Output>((_input) => {
+  const game = Writable.of<GameState>(createInitialState());
+
+  // ---------------------------------------------------------------------------
+  // Actions
+  // ---------------------------------------------------------------------------
+
+  const fireShot = action<{ row: number; col: number }>(({ row, col }) => {
+    const state = game.get();
+
+    // Can't fire if game is over, in transition, or awaiting pass
+    if (state.phase === "finished") return;
+    if (state.viewingAs === null) return;
+    if (state.awaitingPass) return;
+
+    // Can only fire on your turn
+    if (state.currentTurn !== state.viewingAs) return;
+
+    // Target the opponent's board
+    const targetPlayer = state.viewingAs === 1 ? 2 : 1;
+    const targetBoard = targetPlayer === 1 ? state.player1 : state.player2;
+    const shots = targetBoard.shots;
+
+    // Can't fire at same spot twice
+    if (shots[row][col] !== "empty") return;
+
+    // Check if hit
+    const hitShip = findShipAt(targetBoard.ships, { row, col });
+    const newShots = shots.map((r, ri) =>
+      r.map((c, ci) =>
+        ri === row && ci === col ? (hitShip ? "hit" : "miss") : c
+      )
+    );
+
+    const newTargetBoard = { ...targetBoard, shots: newShots };
+
+    // Build message
+    let message = "";
+    const coordStr = `${COLS[col]}${row + 1}`;
+
+    if (hitShip) {
+      if (isShipSunk(hitShip, newShots)) {
+        message = `${coordStr}: Hit! You sunk the ${SHIP_NAMES[hitShip.type]}!`;
+      } else {
+        message = `${coordStr}: Hit!`;
+      }
+    } else {
+      message = `${coordStr}: Miss.`;
+    }
+
+    // Check for win
+    const allSunk = areAllShipsSunk(targetBoard.ships, newShots);
+
+    if (allSunk) {
+      game.set({
+        ...state,
+        player1: targetPlayer === 1 ? newTargetBoard : state.player1,
+        player2: targetPlayer === 2 ? newTargetBoard : state.player2,
+        phase: "finished",
+        winner: state.currentTurn,
+        lastMessage: `${message} Player ${state.currentTurn} wins!`,
+        viewingAs: state.viewingAs,
+        awaitingPass: false,
+      });
+    } else {
+      const nextTurn = state.currentTurn === 1 ? 2 : 1;
+      game.set({
+        ...state,
+        player1: targetPlayer === 1 ? newTargetBoard : state.player1,
+        player2: targetPlayer === 2 ? newTargetBoard : state.player2,
+        currentTurn: nextTurn as 1 | 2,
+        lastMessage: message,
+        viewingAs: state.viewingAs,
+        awaitingPass: true,
+      });
+    }
+  });
+
+  const passDevice = action<void>(() => {
+    const state = game.get();
+    if (state.phase === "finished") return;
+    if (!state.awaitingPass) return;
+    game.set({
+      ...state,
+      viewingAs: null,
+      awaitingPass: false,
+    });
+  });
+
+  const playerReady = action<void>(() => {
+    const state = game.get();
+    if (state.phase === "finished") return;
+    if (state.viewingAs !== null) return;
+    game.set({
+      ...state,
+      viewingAs: state.currentTurn,
+      awaitingPass: false,
+      lastMessage:
+        `Player ${state.currentTurn}'s turn - fire at the enemy board!`,
+    });
+  });
+
+  const resetGame = action<void>(() => {
+    game.set(createInitialState());
+  });
+
+  // ---------------------------------------------------------------------------
+  // Computed Values
+  // ---------------------------------------------------------------------------
+
+  // Single computed for all display values (accessed via properties)
+  const gameStatus = computed(() => {
+    const state = game.get();
+    return {
+      lastMessage: state.lastMessage,
+      currentTurn: state.currentTurn,
+      viewingAs: state.viewingAs,
+      winner: state.winner,
+      awaitingPass: state.awaitingPass,
+    };
+  });
+
+  // Screen visibility conditions
+  const isTransition = computed(() => game.get().viewingAs === null);
+  const isFinished = computed(() => game.get().phase === "finished");
+
+  // Board cell computation
+  const myBoardCells = computed((): BoardCell[] => {
+    const state = game.get();
+    const viewer = state.viewingAs;
     if (viewer === null) return [];
 
-    const myBoard = viewer === 1 ? game.player1 : game.player2;
+    const myBoard = viewer === 1 ? state.player1 : state.player2;
     const shots = myBoard.shots;
     const shipPositions = buildShipPositions(myBoard.ships);
 
@@ -80,15 +220,14 @@ const computeMyBoardCells = lift<{ game: GameState }, BoardCell[]>(
         gridCol: `${col + 2}`,
       };
     });
-  },
-);
+  });
 
-const computeEnemyBoardCells = lift<{ game: GameState }, BoardCell[]>(
-  ({ game }) => {
-    const viewer = game.viewingAs;
+  const enemyBoardCells = computed((): BoardCell[] => {
+    const state = game.get();
+    const viewer = state.viewingAs;
     if (viewer === null) return [];
 
-    const enemyBoard = viewer === 1 ? game.player2 : game.player1;
+    const enemyBoard = viewer === 1 ? state.player2 : state.player1;
     const shots = enemyBoard.shots;
 
     return GRID_INDICES.map(({ row, col }) => {
@@ -112,173 +251,7 @@ const computeEnemyBoardCells = lift<{ game: GameState }, BoardCell[]>(
         gridCol: `${col + 2}`,
       };
     });
-  },
-);
-
-// =============================================================================
-// Handlers (module level - clean event/state separation)
-// =============================================================================
-
-// Event: coordinates to fire at, State: the game state to modify
-const fireShotHandler = handler<
-  { row: number; col: number },
-  { game: Writable<GameState> }
->(({ row, col }, { game }) => {
-  const state = game.get();
-
-  // Can't fire if game is over, in transition, or awaiting pass
-  if (state.phase === "finished") return;
-  if (state.viewingAs === null) return;
-  if (state.awaitingPass) return;
-
-  // Can only fire on your turn
-  if (state.currentTurn !== state.viewingAs) return;
-
-  // Target the opponent's board
-  const targetPlayer = state.viewingAs === 1 ? 2 : 1;
-  const targetBoard = targetPlayer === 1 ? state.player1 : state.player2;
-  const shots = targetBoard.shots;
-
-  // Can't fire at same spot twice
-  if (shots[row][col] !== "empty") return;
-
-  // Check if hit
-  const hitShip = findShipAt(targetBoard.ships, { row, col });
-  const newShots = shots.map((r, ri) =>
-    r.map((c, ci) => ri === row && ci === col ? (hitShip ? "hit" : "miss") : c)
-  );
-
-  const newTargetBoard = { ...targetBoard, shots: newShots };
-
-  // Build message
-  let message = "";
-  const coordStr = `${COLS[col]}${row + 1}`;
-
-  if (hitShip) {
-    if (isShipSunk(hitShip, newShots)) {
-      message = `${coordStr}: Hit! You sunk the ${SHIP_NAMES[hitShip.type]}!`;
-    } else {
-      message = `${coordStr}: Hit!`;
-    }
-  } else {
-    message = `${coordStr}: Miss.`;
-  }
-
-  // Check for win
-  const allSunk = areAllShipsSunk(targetBoard.ships, newShots);
-
-  if (allSunk) {
-    game.set({
-      ...state,
-      player1: targetPlayer === 1 ? newTargetBoard : state.player1,
-      player2: targetPlayer === 2 ? newTargetBoard : state.player2,
-      phase: "finished",
-      winner: state.currentTurn,
-      lastMessage: `${message} Player ${state.currentTurn} wins!`,
-      viewingAs: state.viewingAs,
-      awaitingPass: false,
-    });
-  } else {
-    const nextTurn = state.currentTurn === 1 ? 2 : 1;
-    game.set({
-      ...state,
-      player1: targetPlayer === 1 ? newTargetBoard : state.player1,
-      player2: targetPlayer === 2 ? newTargetBoard : state.player2,
-      currentTurn: nextTurn as 1 | 2,
-      lastMessage: message,
-      viewingAs: state.viewingAs, // Stay on current view to show result
-      awaitingPass: true, // Lock board, show pass button
-    });
-  }
-});
-
-// Event: void (button click), State: the game state to modify
-const passDeviceHandler = handler<void, { game: Writable<GameState> }>(
-  (_, { game }) => {
-    const state = game.get();
-    if (state.phase === "finished") return;
-    if (!state.awaitingPass) return;
-    // Go to full transition screen
-    game.set({
-      ...state,
-      viewingAs: null,
-      awaitingPass: false,
-    });
-  },
-);
-
-// Event: void (button click), State: the game state to modify
-const playerReadyHandler = handler<void, { game: Writable<GameState> }>(
-  (_, { game }) => {
-    const state = game.get();
-    if (state.phase === "finished") return;
-    if (state.viewingAs !== null) return; // Must be on transition screen
-    // Set viewingAs to whoever's turn it is
-    game.set({
-      ...state,
-      viewingAs: state.currentTurn,
-      awaitingPass: false,
-      lastMessage:
-        `Player ${state.currentTurn}'s turn - fire at the enemy board!`,
-    });
-  },
-);
-
-// Event: void (button click), State: the game state to modify
-const resetGameHandler = handler<void, { game: Writable<GameState> }>(
-  (_, { game }) => {
-    game.set(createInitialState());
-  },
-);
-
-// =============================================================================
-// Pattern
-// =============================================================================
-
-type Input = Record<string, never>;
-
-interface Output {
-  game: Writable<GameState>;
-  fireShot: Stream<{ row: number; col: number }>;
-  passDevice: Stream<void>;
-  playerReady: Stream<void>;
-  resetGame: Stream<void>;
-}
-
-export default pattern<Input, Output>((_input) => {
-  const game = Writable.of<GameState>(createInitialState());
-
-  // ---------------------------------------------------------------------------
-  // Bind handlers to this pattern's game state
-  // ---------------------------------------------------------------------------
-  const fireShot = fireShotHandler({ game });
-  const passDevice = passDeviceHandler({ game });
-  const playerReady = playerReadyHandler({ game });
-  const resetGame = resetGameHandler({ game });
-
-  // ---------------------------------------------------------------------------
-  // Computed Values - Consolidated to reduce reactive subscriptions
-  // ---------------------------------------------------------------------------
-
-  // Single computed for all display values (accessed via properties)
-  const gameStatus = computed(() => {
-    const state = game.get();
-    return {
-      lastMessage: state.lastMessage,
-      currentTurn: state.currentTurn,
-      viewingAs: state.viewingAs,
-      winner: state.winner,
-      awaitingPass: state.awaitingPass,
-    };
   });
-
-  // Screen visibility conditions
-  const isTransition = computed(() => game.get().viewingAs === null);
-  const isFinished = computed(() => game.get().phase === "finished");
-
-  // Board cell computation using lift functions
-  const myBoardCells = computeMyBoardCells({ game });
-  const enemyBoardCells = computeEnemyBoardCells({ game });
 
   // ---------------------------------------------------------------------------
   // Styles
