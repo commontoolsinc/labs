@@ -1,7 +1,10 @@
 import { css, html, LitElement, TemplateResult } from "lit";
 import { property, state } from "lit/decorators.js";
 import { ResizableDrawerController } from "../lib/resizable-drawer-controller.ts";
-import type { RuntimeTelemetryMarkerResult } from "@commontools/runtime-client";
+import type {
+  LoggerMetadata,
+  RuntimeTelemetryMarkerResult,
+} from "@commontools/runtime-client";
 import { isRecord } from "@commontools/utils/types";
 import type { DebuggerController } from "../lib/debugger-controller.ts";
 import "./SchedulerGraphView.ts"; // Register x-scheduler-graph component
@@ -802,6 +805,9 @@ export class XDebuggerView extends LitElement {
   private loggerSample: Record<string, LoggerBreakdown | number> | null = null;
 
   @state()
+  private workerLoggerMetadata: LoggerMetadata | null = null;
+
+  @state()
   private expandedLoggers = new Set<string>();
 
   @state()
@@ -1394,6 +1400,7 @@ export class XDebuggerView extends LitElement {
     if (!rt) return null;
     try {
       const result = await rt.getLoggerCounts();
+      this.workerLoggerMetadata = result.metadata;
       return result.counts;
     } catch {
       return null;
@@ -1479,24 +1486,45 @@ export class XDebuggerView extends LitElement {
     await this.sampleLoggerCounts();
   }
 
-  private toggleLogger(name: string): void {
+  private async toggleLogger(name: string): Promise<void> {
     const registry = this.getLoggerRegistry();
     const logger = registry[name];
     if (logger) {
+      // Local logger - toggle directly
       logger.disabled = !logger.disabled;
       this.requestUpdate();
+    } else if (this.workerLoggerMetadata?.[name]) {
+      // Worker logger - use IPC
+      const currentEnabled = this.workerLoggerMetadata[name].enabled;
+      const runtime = this.debuggerController?.getRuntime();
+      const rt = runtime?.runtime();
+      if (rt) {
+        await rt.setLoggerEnabled(!currentEnabled, name);
+        // Refresh metadata
+        await this.sampleLoggerCounts();
+      }
     }
   }
 
-  private setLoggerLevel(
+  private async setLoggerLevel(
     name: string,
     level: "debug" | "info" | "warn" | "error",
-  ): void {
+  ): Promise<void> {
     const registry = this.getLoggerRegistry();
     const logger = registry[name];
     if (logger) {
+      // Local logger - set directly
       logger.level = level;
       this.requestUpdate();
+    } else if (this.workerLoggerMetadata?.[name]) {
+      // Worker logger - use IPC
+      const runtime = this.debuggerController?.getRuntime();
+      const rt = runtime?.runtime();
+      if (rt) {
+        await rt.setLoggerLevel(level, name);
+        // Refresh metadata
+        await this.sampleLoggerCounts();
+      }
     }
   }
 
@@ -1571,9 +1599,15 @@ export class XDebuggerView extends LitElement {
           const loggerData = sample[name] as LoggerBreakdown;
           const baselineData = baseline?.[name] as LoggerBreakdown | undefined;
           const logger = registry[name];
+          const workerMeta = this.workerLoggerMetadata?.[name];
           const isExpanded = this.expandedLoggers.has(name);
-          const isDisabled = logger?.disabled ?? false;
-          const currentLevel = logger?.level ?? "info";
+          // Use local registry first, fall back to worker metadata
+          const isDisabled = logger
+            ? logger.disabled
+            : workerMeta
+            ? !workerMeta.enabled
+            : false;
+          const currentLevel = logger?.level ?? workerMeta?.level ?? "info";
           const delta = this.getDelta(loggerData.total, baselineData?.total);
 
           return html`
