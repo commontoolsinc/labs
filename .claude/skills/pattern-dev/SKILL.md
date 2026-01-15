@@ -101,13 +101,13 @@ Task({
 
 **Not phases, just common sense:**
 
-1. **Build** — Use pattern-maker to write code
-2. **Try it** — Use pattern-user to deploy, or just `deno task ct dev main.tsx`
-3. **Fix what's broken** — Iterate until it works
-4. **Review** — Use pattern-critic if releasing or stuck on weird bugs
+1. **Build** — Use pattern-maker to sketch and iterate locally (`ct dev`)
+2. **Review** — Use pattern-critic before deploying to catch common mistakes
+3. **Deploy** — Use pattern-user to deploy to toolshed
+4. **Fix what's broken** — Iterate with maker, re-review, redeploy
 5. **Commit** — At milestones, offer to commit
 
-Don't launch multiple parallel agents for a simple pattern. One maker, iterate.
+**Always run pattern-critic before first deploy.** It's fast (uses haiku) and catches mistakes that cause runtime errors. Skip only for tiny fixes where you're confident.
 
 ## Documentation
 
