@@ -246,8 +246,9 @@ export default pattern(() => {
   const assert_initial_no_aisles = computed(() =>
     Number(store.aisleCount) === 0
   );
-  const assert_initial_no_departments = computed(() =>
-    Number(store.deptCount) === 0
+  // With auto-populated default departments (7 total)
+  const assert_initial_default_departments = computed(() =>
+    Number(store.deptCount) === 7
   );
   const assert_initial_no_corrections = computed(() =>
     Number(store.correctionCount) === 0
@@ -400,7 +401,7 @@ export default pattern(() => {
       // === Test 1: Initial state ===
       { assertion: assert_initial_store_name },
       { assertion: assert_initial_no_aisles },
-      { assertion: assert_initial_no_departments },
+      { assertion: assert_initial_default_departments },
       { assertion: assert_initial_no_corrections },
 
       // === Test 2: Add aisles ===

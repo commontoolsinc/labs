@@ -144,24 +144,6 @@ const removeAisle = handler<
   }
 });
 
-const loadDefaultDepartments = handler<
-  unknown,
-  { departments: Writable<Department[]> }
->((_event, { departments }) => {
-  const current = departments.get();
-  const existingNames = new Set(current.map((d) => d.name));
-
-  const newDepts = DEFAULT_DEPARTMENTS.filter(
-    (d) => !existingNames.has(d.name),
-  ).map((d) => ({
-    ...d,
-    location: "unassigned" as const,
-    description: "",
-  }));
-
-  departments.set([...current, ...newDepts]);
-});
-
 // Entrance handlers
 const addEntrance = handler<
   unknown,
@@ -181,6 +163,24 @@ const removeEntrance = handler<
   const index = current.findIndex((el) => equals(entrance, el));
   if (index >= 0) {
     entrances.set(current.toSpliced(index, 1));
+  }
+});
+
+// Department location handler
+const setDepartmentLocation = handler<
+  unknown,
+  {
+    departments: Writable<Department[]>;
+    dept: Department;
+    location: WallPosition;
+  }
+>((_event, { departments, dept, location }) => {
+  const current = departments.get();
+  const index = current.findIndex((el) => equals(dept, el));
+  if (index >= 0) {
+    departments.set(
+      current.toSpliced(index, 1, { ...current[index], location }),
+    );
   }
 });
 
@@ -271,6 +271,26 @@ const hidePhoto = handler<
 
 export default pattern<Input, Output>(
   ({ storeName, aisles, departments, entrances, itemLocations }) => {
+    // Pre-load default departments if empty (using computed to safely access reactive value)
+    const _initDepts = computed(() => {
+      const current = departments.get();
+      if (current.length === 0) {
+        // Schedule the set for next tick to avoid reactive cycle
+        queueMicrotask(() => {
+          departments.set(
+            DEFAULT_DEPARTMENTS.map((d) => ({
+              ...d,
+              location: "unassigned" as const,
+              description: "",
+            })),
+          );
+        });
+      }
+      return true;
+    });
+    // Force evaluation of the computed
+    void _initDepts;
+
     // UI state
     const currentSection = Writable.of<
       "map" | "aisles" | "departments" | "corrections" | "outline"
@@ -1430,9 +1450,11 @@ export default pattern<Input, Output>(
                           Aisle {aisle.name}
                         </div>
                         <ct-vstack gap="1" style="flex: 1;">
-                          <ct-input
+                          <ct-textarea
                             $value={aisle.description}
                             placeholder="Description (e.g., Bread & Cereal)"
+                            rows={3}
+                            auto-resize
                           />
                         </ct-vstack>
                         <ct-button
@@ -1717,18 +1739,6 @@ export default pattern<Input, Output>(
             <ct-tab-panel value="departments">
               <ct-vscroll flex showScrollbar fadeEdges>
                 <ct-vstack gap="2" style="padding: 1rem; max-width: 800px;">
-                  {/* Load defaults button */}
-                  {ifElse(
-                    computed(() => departments.get().length === 0),
-                    <ct-button
-                      variant="primary"
-                      onClick={loadDefaultDepartments({ departments })}
-                    >
-                      Load Common Departments
-                    </ct-button>,
-                    null,
-                  )}
-
                   {/* Department list */}
                   {departments.map((dept) => (
                     <ct-card>
@@ -1758,29 +1768,333 @@ export default pattern<Input, Output>(
                             {dept.location}
                           </span>
                         </ct-hstack>
-                        <ct-select
-                          $value={dept.location}
-                          items={[
-                            { label: "Unassigned", value: "unassigned" },
-                            { label: "Front Left", value: "front-left" },
-                            { label: "Front Center", value: "front-center" },
-                            { label: "Front Right", value: "front-right" },
-                            { label: "Back Left", value: "back-left" },
-                            { label: "Back Center", value: "back-center" },
-                            { label: "Back Right", value: "back-right" },
-                            { label: "Left Front", value: "left-front" },
-                            { label: "Left Center", value: "left-center" },
-                            { label: "Left Back", value: "left-back" },
-                            { label: "Right Front", value: "right-front" },
-                            { label: "Right Center", value: "right-center" },
-                            { label: "Right Back", value: "right-back" },
-                            {
-                              label: "In Center Aisles",
-                              value: "in-center-aisle",
-                            },
-                            { label: "Not In Store", value: "not-in-store" },
-                          ]}
-                        />
+                        {/* Location button grid */}
+                        <ct-vstack gap="1">
+                          {/* Front wall */}
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "4px",
+                              alignItems: "center",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <span
+                              style={{
+                                width: "50px",
+                                fontSize: "11px",
+                                fontWeight: 600,
+                                color: "#3b82f6",
+                              }}
+                            >
+                              Front:
+                            </span>
+                            <ct-button
+                              size="sm"
+                              variant={derive(
+                                dept.location,
+                                (l) =>
+                                  l === "front-left" ? "primary" : "outline",
+                              )}
+                              className="wall-btn-front"
+                              onClick={setDepartmentLocation({
+                                departments,
+                                dept,
+                                location: "front-left",
+                              })}
+                            >
+                              L
+                            </ct-button>
+                            <ct-button
+                              size="sm"
+                              variant={derive(
+                                dept.location,
+                                (l) =>
+                                  l === "front-center" ? "primary" : "outline",
+                              )}
+                              className="wall-btn-front"
+                              onClick={setDepartmentLocation({
+                                departments,
+                                dept,
+                                location: "front-center",
+                              })}
+                            >
+                              C
+                            </ct-button>
+                            <ct-button
+                              size="sm"
+                              variant={derive(
+                                dept.location,
+                                (l) =>
+                                  l === "front-right" ? "primary" : "outline",
+                              )}
+                              className="wall-btn-front"
+                              onClick={setDepartmentLocation({
+                                departments,
+                                dept,
+                                location: "front-right",
+                              })}
+                            >
+                              R
+                            </ct-button>
+                          </div>
+                          {/* Back wall */}
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "4px",
+                              alignItems: "center",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <span
+                              style={{
+                                width: "50px",
+                                fontSize: "11px",
+                                fontWeight: 600,
+                                color: "#f97316",
+                              }}
+                            >
+                              Back:
+                            </span>
+                            <ct-button
+                              size="sm"
+                              variant={derive(
+                                dept.location,
+                                (l) =>
+                                  l === "back-left" ? "primary" : "outline",
+                              )}
+                              className="wall-btn-back"
+                              onClick={setDepartmentLocation({
+                                departments,
+                                dept,
+                                location: "back-left",
+                              })}
+                            >
+                              L
+                            </ct-button>
+                            <ct-button
+                              size="sm"
+                              variant={derive(
+                                dept.location,
+                                (l) =>
+                                  l === "back-center" ? "primary" : "outline",
+                              )}
+                              className="wall-btn-back"
+                              onClick={setDepartmentLocation({
+                                departments,
+                                dept,
+                                location: "back-center",
+                              })}
+                            >
+                              C
+                            </ct-button>
+                            <ct-button
+                              size="sm"
+                              variant={derive(
+                                dept.location,
+                                (l) =>
+                                  l === "back-right" ? "primary" : "outline",
+                              )}
+                              className="wall-btn-back"
+                              onClick={setDepartmentLocation({
+                                departments,
+                                dept,
+                                location: "back-right",
+                              })}
+                            >
+                              R
+                            </ct-button>
+                          </div>
+                          {/* Left wall */}
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "4px",
+                              alignItems: "center",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <span
+                              style={{
+                                width: "50px",
+                                fontSize: "11px",
+                                fontWeight: 600,
+                                color: "#10b981",
+                              }}
+                            >
+                              Left:
+                            </span>
+                            <ct-button
+                              size="sm"
+                              variant={derive(
+                                dept.location,
+                                (l) =>
+                                  l === "left-front" ? "primary" : "outline",
+                              )}
+                              className="wall-btn-left"
+                              onClick={setDepartmentLocation({
+                                departments,
+                                dept,
+                                location: "left-front",
+                              })}
+                            >
+                              Fr
+                            </ct-button>
+                            <ct-button
+                              size="sm"
+                              variant={derive(
+                                dept.location,
+                                (l) =>
+                                  l === "left-center" ? "primary" : "outline",
+                              )}
+                              className="wall-btn-left"
+                              onClick={setDepartmentLocation({
+                                departments,
+                                dept,
+                                location: "left-center",
+                              })}
+                            >
+                              C
+                            </ct-button>
+                            <ct-button
+                              size="sm"
+                              variant={derive(
+                                dept.location,
+                                (l) =>
+                                  l === "left-back" ? "primary" : "outline",
+                              )}
+                              className="wall-btn-left"
+                              onClick={setDepartmentLocation({
+                                departments,
+                                dept,
+                                location: "left-back",
+                              })}
+                            >
+                              Bk
+                            </ct-button>
+                          </div>
+                          {/* Right wall */}
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "4px",
+                              alignItems: "center",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <span
+                              style={{
+                                width: "50px",
+                                fontSize: "11px",
+                                fontWeight: 600,
+                                color: "#a855f7",
+                              }}
+                            >
+                              Right:
+                            </span>
+                            <ct-button
+                              size="sm"
+                              variant={derive(
+                                dept.location,
+                                (l) =>
+                                  l === "right-front" ? "primary" : "outline",
+                              )}
+                              className="wall-btn-right"
+                              onClick={setDepartmentLocation({
+                                departments,
+                                dept,
+                                location: "right-front",
+                              })}
+                            >
+                              Fr
+                            </ct-button>
+                            <ct-button
+                              size="sm"
+                              variant={derive(
+                                dept.location,
+                                (l) =>
+                                  l === "right-center" ? "primary" : "outline",
+                              )}
+                              className="wall-btn-right"
+                              onClick={setDepartmentLocation({
+                                departments,
+                                dept,
+                                location: "right-center",
+                              })}
+                            >
+                              C
+                            </ct-button>
+                            <ct-button
+                              size="sm"
+                              variant={derive(
+                                dept.location,
+                                (l) =>
+                                  l === "right-back" ? "primary" : "outline",
+                              )}
+                              className="wall-btn-right"
+                              onClick={setDepartmentLocation({
+                                departments,
+                                dept,
+                                location: "right-back",
+                              })}
+                            >
+                              Bk
+                            </ct-button>
+                          </div>
+                          {/* Special locations */}
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "4px",
+                              alignItems: "center",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <span
+                              style={{
+                                width: "50px",
+                                fontSize: "11px",
+                                fontWeight: 600,
+                                color: "#6b7280",
+                              }}
+                            >
+                              Other:
+                            </span>
+                            <ct-button
+                              size="sm"
+                              variant={derive(
+                                dept.location,
+                                (l) =>
+                                  l === "in-center-aisle"
+                                    ? "primary"
+                                    : "outline",
+                              )}
+                              onClick={setDepartmentLocation({
+                                departments,
+                                dept,
+                                location: "in-center-aisle",
+                              })}
+                            >
+                              Center
+                            </ct-button>
+                            <ct-button
+                              size="sm"
+                              variant={derive(
+                                dept.location,
+                                (l) =>
+                                  l === "not-in-store" ? "primary" : "outline",
+                              )}
+                              onClick={setDepartmentLocation({
+                                departments,
+                                dept,
+                                location: "not-in-store",
+                              })}
+                            >
+                              N/A
+                            </ct-button>
+                          </div>
+                        </ct-vstack>
                         <ct-input
                           $value={dept.description}
                           placeholder="Description (optional)"
@@ -1788,21 +2102,6 @@ export default pattern<Input, Output>(
                       </ct-vstack>
                     </ct-card>
                   ))}
-
-                  {ifElse(
-                    computed(() => departments.get().length === 0),
-                    <div
-                      style={{
-                        textAlign: "center",
-                        color: "var(--ct-color-gray-500)",
-                        padding: "2rem",
-                      }}
-                    >
-                      No departments yet. Click "Load Common Departments" to
-                      start.
-                    </div>,
-                    null,
-                  )}
                 </ct-vstack>
               </ct-vscroll>
             </ct-tab-panel>
@@ -1841,9 +2140,8 @@ export default pattern<Input, Output>(
                           if (item && aisle) {
                             const current = itemLocations.get();
                             const filtered = current.filter(
-                              (loc) =>
-                                loc.itemName.toLowerCase() !==
-                                  item.toLowerCase(),
+                              (loc) => loc.itemName.toLowerCase() !==
+                                item.toLowerCase(),
                             );
                             filtered.push({
                               itemName: item,
