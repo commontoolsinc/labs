@@ -39,6 +39,7 @@ deno check \
   packages/patterns/deprecated \
   packages/patterns/examples \
   packages/patterns/gideon-tests \
+  packages/patterns/google \
   packages/patterns/integration \
   packages/patterns/notes \
   packages/patterns/record \
@@ -55,6 +56,3 @@ deno check \
   packages/static/test \
   packages/toolshed \
   packages/utils
-
-# TODO(@jkomoros): Fix type errors in google patterns and re-enable checking
-# Excluded: packages/patterns/google (WIP patterns with ~12 type errors)

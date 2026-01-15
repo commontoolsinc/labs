@@ -19,7 +19,6 @@ import {
   // wish,  // TEMPORARILY DISABLED - may cause self-referential loop
 } from "commontools";
 import GmailAgenticSearch, {
-  type GmailAgenticSearchInput,
   type SearchProgress,
 } from "./gmail-agentic-search.tsx";
 import { defineItemSchema, InferItem, listTool } from "./util/agentic-tools.ts";

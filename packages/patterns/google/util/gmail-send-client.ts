@@ -134,6 +134,7 @@ function base64UrlEncode(str: string): string {
  */
 function encodeHeaderValue(value: string): string {
   // Check if value contains non-ASCII characters
+  // deno-lint-ignore no-control-regex
   if (!/^[\x00-\x7F]*$/.test(value)) {
     // Use UTF-8 B (base64) encoding for non-ASCII
     const utf8Bytes = unescape(encodeURIComponent(value));

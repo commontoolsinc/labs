@@ -284,8 +284,8 @@ export default pattern<Input, Output>(
         hasAuth && hasMessages && hasChanges && !processing,
     );
 
-    // Common system labels that are useful
-    const systemLabelIds = [
+    // Common system labels that are useful (prefixed with _ as not currently used)
+    const _systemLabelIds = [
       "INBOX",
       "STARRED",
       "IMPORTANT",
@@ -323,6 +323,7 @@ export default pattern<Input, Output>(
               }}
             >
               <button
+                type="button"
                 onClick={fetchLabels({ auth, availableLabels, loadingLabels })}
                 disabled={loadingLabels}
                 style={{
@@ -375,6 +376,7 @@ export default pattern<Input, Output>(
                   </div>
                 </div>
                 <button
+                  type="button"
                   onClick={dismissResult({ result })}
                   style={{
                     background: "none",
@@ -425,6 +427,7 @@ export default pattern<Input, Output>(
                   </div>
                 </div>
                 <button
+                  type="button"
                   onClick={dismissResult({ result })}
                   style={{
                     background: "none",
@@ -502,6 +505,7 @@ export default pattern<Input, Output>(
                         rem.includes(label.id));
                       return (
                         <button
+                          type="button"
                           onClick={toggleAddLabel({
                             labelsToAdd,
                             labelId: label.id,
@@ -568,6 +572,7 @@ export default pattern<Input, Output>(
                         add.includes(label.id));
                       return (
                         <button
+                          type="button"
                           onClick={toggleRemoveLabel({
                             labelsToRemove,
                             labelId: label.id,
@@ -626,6 +631,7 @@ export default pattern<Input, Output>(
 
           {/* Apply button */}
           <button
+            type="button"
             onClick={prepareOperation({
               messageIds,
               labelsToAdd,
@@ -843,6 +849,7 @@ export default pattern<Input, Output>(
                   }}
                 >
                   <button
+                    type="button"
                     onClick={cancelOperation({ pendingOp })}
                     disabled={processing}
                     style={{
@@ -859,6 +866,7 @@ export default pattern<Input, Output>(
                     Cancel
                   </button>
                   <button
+                    type="button"
                     onClick={confirmOperation({
                       pendingOp,
                       auth,

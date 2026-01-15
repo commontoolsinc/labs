@@ -46,7 +46,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 let deriveCallCount = 0;
 let perRowDeriveCount = 0;
 let lastLogTime = Date.now();
-let startTime = Date.now();
+const startTime = Date.now();
 
 function logDeriveCall(name: string, isPerRow = false) {
   deriveCallCount++;
@@ -245,7 +245,7 @@ class CalendarClient {
     options.headers.set("Authorization", `Bearer ${token}`);
 
     const res = await fetch(url, options);
-    let { ok, status, statusText } = res;
+    const { ok, status, statusText } = res;
 
     if (ok) {
       debugLog(this.debugMode, `${url}: ${status} ${statusText}`);
@@ -420,13 +420,13 @@ const toggleDebugMode = handler<
   },
 );
 
-const nextPage = handler<unknown, { currentPage: Writable<number> }>(
+const _nextPage = handler<unknown, { currentPage: Writable<number> }>(
   (_, { currentPage }) => {
     currentPage.set(currentPage.get() + 1);
   },
 );
 
-const prevPage = handler<unknown, { currentPage: Writable<number> }>(
+const _prevPage = handler<unknown, { currentPage: Writable<number> }>(
   (_, { currentPage }) => {
     const current = currentPage.get();
     if (current > 0) {
@@ -559,13 +559,13 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
       upcomingEvents,
       (evts: CalendarEvent[]) => evts.length,
     );
-    const maxPageNum = derive(
+    const _maxPageNum = derive(
       totalUpcoming,
       (total: number) => Math.max(0, Math.ceil(total / PAGE_SIZE) - 1),
     );
 
     // Paginated events for display - use computed with events Cell directly
-    const paginatedEvents = computed(() => {
+    const _paginatedEvents = computed(() => {
       const allEvents = events.get() || [];
       const now = new Date();
       const upcoming = [...allEvents]

@@ -241,7 +241,7 @@ export class GmailClient {
   /**
    * Alias for listMessages - for backwards compatibility with gmail-importer.
    */
-  async fetchEmail(
+  fetchEmail(
     maxResults: number = 100,
     gmailFilterQuery: string = "in:INBOX",
   ): Promise<{ id: string; threadId?: string }[]> {

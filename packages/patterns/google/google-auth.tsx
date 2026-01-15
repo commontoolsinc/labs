@@ -802,6 +802,7 @@ export default pattern<Input, Output>(
                     automatically.
                   </p>
                   <button
+                    type="button"
                     onClick={handleRefresh({ auth })}
                     style={{
                       padding: "10px 20px",
@@ -887,6 +888,7 @@ export default pattern<Input, Output>(
                       </p>
                     </div>
                     <button
+                      type="button"
                       onClick={handleRefresh({ auth })}
                       style={{
                         padding: "8px 16px",

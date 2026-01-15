@@ -39,7 +39,7 @@ import {
   Writable,
 } from "commontools";
 import {
-  type AccountType,
+  type AccountType as _AccountType,
   createGoogleAuth as createGoogleAuthUtil,
   type ScopeKey,
 } from "./util/google-auth-manager.tsx";
@@ -57,7 +57,7 @@ import type {
 export type { Auth } from "./gmail-importer.tsx";
 import type { Auth } from "./gmail-importer.tsx";
 
-const env = getRecipeEnvironment();
+const _env = getRecipeEnvironment();
 
 // ============================================================================
 // TYPES
@@ -150,14 +150,17 @@ export interface GmailAgenticSearchInput {
   suggestedQueries?: Default<string[], []>;
 
   // JSON schema for agent's structured output
-  resultSchema?: Default<object, {}>;
+  resultSchema?: Default<object, Record<string, never>>;
 
   // Account type for multi-account support
   // "default" = any #googleAuth, "personal" = #googleAuthPersonal, "work" = #googleAuthWork
   accountType?: Default<"default" | "personal" | "work", "default">;
 
   // Additional tools beyond searchGmail
-  additionalTools?: Default<Record<string, ToolDefinition>, {}>;
+  additionalTools?: Default<
+    Record<string, ToolDefinition>,
+    Record<string, never>
+  >;
 
   // UI customization
   title?: Default<string, "Gmail Agentic Search">;
@@ -859,13 +862,14 @@ const flagForShareHandler = handler<
 });
 
 // Handler to flag a query for sharing (runs PII screening)
-const flagQueryForSharingHandler = handler<
+// Prefixed with _ as not currently used in pattern body - preserved for future use
+const _flagQueryForSharingHandler = handler<
   { queryId: string },
   {
     localQueries: Writable<LocalQuery[]>;
     pendingSubmissions: Writable<PendingSubmission[]>;
   }
->(async (input, state) => {
+>((input, state) => {
   const queries = state.localQueries.get() || [];
   const query = queries.find((q) => q.id === input.queryId);
   if (!query) return;
@@ -895,7 +899,8 @@ const flagQueryForSharingHandler = handler<
 });
 
 // Handler to approve a pending submission
-const approvePendingSubmissionHandler = handler<
+// Prefixed with _ as not currently used in pattern body - preserved for future use
+const _approvePendingSubmissionHandler = handler<
   { localQueryId: string },
   { pendingSubmissions: Writable<PendingSubmission[]> }
 >((input, state) => {
@@ -909,7 +914,8 @@ const approvePendingSubmissionHandler = handler<
 });
 
 // Handler to reject/cancel a pending submission
-const rejectPendingSubmissionHandler = handler<
+// Prefixed with _ as not currently used in pattern body - preserved for future use
+const _rejectPendingSubmissionHandler = handler<
   { localQueryId: string },
   {
     pendingSubmissions: Writable<PendingSubmission[]>;
@@ -931,7 +937,8 @@ const rejectPendingSubmissionHandler = handler<
 });
 
 // Handler to update the sanitized query manually
-const updateSanitizedQueryHandler = handler<
+// Prefixed with _ as not currently used in pattern body - preserved for future use
+const _updateSanitizedQueryHandler = handler<
   { localQueryId: string; sanitizedQuery: string },
   { pendingSubmissions: Writable<PendingSubmission[]> }
 >((input, state) => {
@@ -968,7 +975,7 @@ const GmailAgenticSearch = pattern<
     searchProgress, // Can be passed in for parent coordination
     debugLog, // Debug log for tracking agent activity
     auth: inputAuth, // CT-1085 workaround: direct auth input
-    accountType, // Multi-account support: "default" | "personal" | "work"
+    accountType: _accountType, // Multi-account support: "default" | "personal" | "work" (prefixed with _ as read-only input, using selectedAccountType instead)
     // Shared search strings support
     agentTypeUrl,
     localQueries: localQueriesInput, // Renamed: input may be read-only
@@ -1079,7 +1086,7 @@ const GmailAgenticSearch = pattern<
       auth: wishedAuth,
       fullUI: authFullUI,
       isReady: wishedAuthReady,
-      currentEmail: wishedEmail,
+      currentEmail: _wishedEmail, // Prefixed with _ as not currently used directly
       wishResult,
       createAuth: createGoogleAuthAction,
     } = createGoogleAuthUtil({

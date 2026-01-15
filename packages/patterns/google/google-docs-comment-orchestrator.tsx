@@ -8,7 +8,6 @@ import {
   handler,
   ifElse,
   NAME,
-  navigateTo,
   pattern,
   UI,
   Writable,
@@ -27,7 +26,7 @@ import {
   type ScopeKey,
 } from "./util/google-auth-manager.tsx";
 
-const env = getRecipeEnvironment();
+const _env = getRecipeEnvironment();
 
 // =============================================================================
 // SETUP REQUIREMENTS
@@ -145,7 +144,9 @@ interface Input {
   docContent?: Writable<Default<string, "">>;
 
   // Per-comment state (keyed by comment ID)
-  commentStates?: Writable<Default<Record<string, CommentState>, {}>>;
+  commentStates?: Writable<
+    Default<Record<string, CommentState>, Record<string, never>>
+  >;
 
   // UI state
   expandedCommentId?: Writable<Default<string | null, null>>;
@@ -580,13 +581,14 @@ export default pattern<Input, Output>(
       authInfo,
       fullUI: authFullUI,
       isReady: isAuthenticated,
-      currentEmail,
+      currentEmail: _currentEmail, // Prefixed with _ as not currently used in UI
     } = createGoogleAuth({
       requiredScopes: ["drive", "docs"] as ScopeKey[],
     });
 
     // Fetch button disabled when not authenticated or fetching
-    const fetchButtonDisabled = derive(
+    // Prefixed with _ as not currently used - preserved for potential future UI binding
+    const _fetchButtonDisabled = derive(
       [isAuthenticated, isFetchingCell],
       ([authenticated, fetching]: [boolean, boolean]) =>
         !authenticated || fetching,

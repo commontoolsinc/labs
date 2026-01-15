@@ -110,7 +110,7 @@ export default pattern<Input, Output>(({ auth, selectedScopes }) => {
         </div>
 
         {/* Embed the base auth UI */}
-        {baseAuth}
+        {baseAuth as any}
 
         {/* Prominent favorite CTA */}
         {computed(() => baseAuth.auth?.user?.email) && (

@@ -54,12 +54,10 @@
  */
 
 import {
-  computed,
   derive,
   handler,
   ifElse,
   navigateTo,
-  OpaqueRef,
   UI,
   wish,
   Writable,
@@ -341,7 +339,7 @@ export function createGoogleAuth(
   // IMPORTANT: wish() requires a string value, NOT a Cell. Passing a Cell
   // causes wish() to never resolve, leaving the pattern stuck in "loading" state.
   // For static accountType (the common case), compute the string directly.
-  // TODO: For reactive account switching (Writable<AccountType>), we need a different
+  // TODO(@jkomoros): For reactive account switching (Writable<AccountType>), we need a different
   // approach since wish() doesn't support Cell query values.
   const tag = accountType === "personal"
     ? "#googleAuthPersonal"
@@ -353,14 +351,16 @@ export function createGoogleAuth(
   const wishResult = wish<GoogleAuthCharm>({ query: tag });
 
   // Convert required scope keys to URLs for comparison
-  const requiredScopeUrls = requiredScopes
+  // Note: This is for potential future use in scope URL matching
+  const _requiredScopeUrls = requiredScopes
     .map((key) => SCOPE_MAP[key])
     .filter(Boolean);
 
   // Use derive() instead of computed() - derive() properly unwraps OpaqueRef
   // Inside derive callback, we can do normal JS operations (truthiness, comparisons)
   // Note: We derive from wishResult, and access auth via wr.result?.auth
-  const authInfo = derive(wishResult, (wr): AuthInfo => {
+  // Type annotation needed because derive() infers UIRenderable without it
+  const authInfo = derive(wishResult, (wr: any): AuthInfo => {
     // Inside derive(), wr is unwrapped - can do normal JS operations
     const authCell = wr?.result?.auth;
     const authData = authCell?.get?.() ?? null;
@@ -576,6 +576,7 @@ export function createGoogleAuth(
   // "Connect" button - uses pre-bound handler, defined outside derive
   const connectButton = (
     <button
+      type="button"
       onClick={boundCreateAuth}
       style={{
         padding: "10px 20px",
@@ -595,6 +596,7 @@ export function createGoogleAuth(
   // "Add new account" button (outline style)
   const addAccountButton = (
     <button
+      type="button"
       onClick={boundCreateAuth}
       style={{
         marginTop: "12px",
@@ -614,6 +616,7 @@ export function createGoogleAuth(
   // "Manage this account" button
   const manageAccountButton = (
     <button
+      type="button"
       onClick={boundGoToAuth}
       style={{
         padding: "6px 12px",
@@ -632,6 +635,7 @@ export function createGoogleAuth(
   // "Use different account" button
   const useDifferentAccountButton = (
     <button
+      type="button"
       onClick={boundCreateAuth}
       style={{
         padding: "6px 12px",
@@ -650,6 +654,7 @@ export function createGoogleAuth(
   // "Switch" button for ready state
   const switchButton = (
     <button
+      type="button"
       onClick={boundGoToAuth}
       style={{
         background: "none",
@@ -668,6 +673,7 @@ export function createGoogleAuth(
   // "+ Add" button for ready state
   const addButton = (
     <button
+      type="button"
       onClick={boundCreateAuth}
       style={{
         background: "none",
@@ -869,7 +875,7 @@ export function createGoogleAuth(
           </div>
         </div>
         <div style={{ backgroundColor: "white" }}>
-          {info.charmUI}
+          {info.charmUI as any}
         </div>
         {actionButtonsRow}
       </div>
@@ -899,7 +905,7 @@ export function createGoogleAuth(
               : "1px solid #10b981",
           }}
         >
-          {info.userChip}
+          {info.userChip as any}
           <div
             style={{
               marginLeft: "auto",

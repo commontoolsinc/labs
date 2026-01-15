@@ -200,6 +200,7 @@ export default pattern<{
                   const color = getCalendarColor(name);
                   return (
                     <button
+                      type="button"
                       // Pass the Cell from outer scope, not the destructured value
                       onClick={toggleCalendar({
                         calendarName: name,

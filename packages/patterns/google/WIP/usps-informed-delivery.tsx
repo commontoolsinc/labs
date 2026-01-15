@@ -18,16 +18,13 @@
  * 2. Deploy this pattern and it will connect via wish()
  */
 import {
-  computed,
   Default,
   derive,
   generateObject,
   handler,
   ifElse,
   NAME,
-  Opaque,
   pattern,
-  str,
   UI,
   wish,
   Writable,
@@ -212,8 +209,9 @@ function normalizeName(name: string): string {
 
 /**
  * Check if two names are likely the same person (fuzzy match).
+ * Prefixed with _ as not currently used - preserved for future use.
  */
-function namesMatch(name1: string, name2: string): boolean {
+function _namesMatch(name1: string, name2: string): boolean {
   const n1 = normalizeName(name1);
   const n2 = normalizeName(name2);
 
@@ -290,9 +288,9 @@ interface PatternOutput {
 }
 
 export default pattern<PatternInput, PatternOutput>(
-  ({ settings, mailPieces, householdMembers, linkedEmails }) => {
-    // Local state
-    const processing = Writable.of(false);
+  ({ settings: _settings, mailPieces, householdMembers, linkedEmails }) => {
+    // Local state - prefixed with _ as not currently used directly
+    const _processing = Writable.of(false);
 
     // Check if linkedEmails is provided (manual linking via CT CLI)
     const hasLinkedEmails = derive(
@@ -464,8 +462,8 @@ If you cannot read the image clearly, make your best guess based on what you can
         pieces?.filter((p) => p.isLikelySpam)?.length || 0,
     );
 
-    // Group mail by date
-    const mailByDate = derive(mailPieces, (pieces: MailPiece[]) => {
+    // Group mail by date - prefixed with _ as not currently used in UI
+    const _mailByDate = derive(mailPieces, (pieces: MailPiece[]) => {
       const groups: Record<string, MailPiece[]> = {};
       for (const piece of pieces || []) {
         const date = new Date(piece.emailDate).toLocaleDateString();
@@ -746,6 +744,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                       {ifElse(
                         derive(member, (m: HouseholdMember) => !m.isConfirmed),
                         <button
+                          type="button"
                           onClick={confirmMember({ member })}
                           style={{
                             padding: "4px 8px",
@@ -762,6 +761,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                         null,
                       )}
                       <button
+                        type="button"
                         onClick={deleteMember({ householdMembers, member })}
                         style={{
                           padding: "4px 8px",

@@ -55,7 +55,7 @@ const turndown = new TurndownService({
   emDelimiter: "*",
 });
 
-const env = getRecipeEnvironment();
+const _env = getRecipeEnvironment();
 
 turndown.addRule("removeStyleTags", {
   filter: ["style"],
@@ -123,7 +123,8 @@ function debugWarn(debugMode: boolean, ...args: unknown[]) {
   if (debugMode) console.warn("[GmailImporter]", ...args);
 }
 
-const updateLimit = handler<
+// Prefixed with _ as not currently used - preserved for potential future UI binding
+const _updateLimit = handler<
   { detail: { value: string } },
   { limit: Writable<number> }
 >(
@@ -932,7 +933,8 @@ export async function process(
   };
 }
 
-const updateGmailFilterQuery = handler<
+// Prefixed with _ as not currently used - preserved for potential future UI binding
+const _updateGmailFilterQuery = handler<
   { detail: { value: string } },
   { gmailFilterQuery: Writable<string> }
 >(
