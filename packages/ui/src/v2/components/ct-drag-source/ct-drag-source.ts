@@ -93,22 +93,14 @@ export class CTDragSource extends BaseElement {
       return;
     }
 
-    // Prevent default and capture pointer for drag
-    e.preventDefault();
+    // Don't preventDefault or setPointerCapture here - wait until we confirm
+    // it's a drag. This allows clicks to work on non-interactive content.
 
     // Store initial position
     this._startX = e.clientX;
     this._startY = e.clientY;
     this._pointerId = e.pointerId;
     this._isTracking = true;
-
-    // Capture pointer events
-    const cellContext = this.shadowRoot?.querySelector(
-      "ct-cell-context",
-    ) as HTMLElement;
-    if (cellContext) {
-      cellContext.setPointerCapture(e.pointerId);
-    }
 
     // Add document-level listeners for move and up
     document.addEventListener("pointermove", this._boundPointerMove);
@@ -174,6 +166,17 @@ export class CTDragSource extends BaseElement {
       return;
     }
 
+    // Now that we're actually dragging, capture the pointer and add dragging class
+    const cellContext = this.shadowRoot?.querySelector(
+      "ct-cell-context",
+    ) as HTMLElement;
+    if (cellContext) {
+      if (this._pointerId !== undefined) {
+        cellContext.setPointerCapture(this._pointerId);
+      }
+      cellContext.classList.add("dragging");
+    }
+
     // Create preview element
     this._preview = this._createPreview();
     document.body.appendChild(this._preview);
@@ -181,12 +184,6 @@ export class CTDragSource extends BaseElement {
     // Position preview near cursor
     this._preview.style.left = `${e.clientX + 10}px`;
     this._preview.style.top = `${e.clientY + 10}px`;
-
-    // Add dragging class to source
-    const cellContext = this.shadowRoot?.querySelector("ct-cell-context");
-    if (cellContext) {
-      cellContext.classList.add("dragging");
-    }
 
     // Start drag in drag state
     startDrag({
