@@ -138,7 +138,7 @@ export default pattern<Input, Output>((_input) => {
     }
   });
 
-  const passDevice = action<void>(() => {
+  const passDevice = action(() => {
     const state = game.get();
     if (state.phase === "finished") return;
     if (!state.awaitingPass) return;
@@ -149,7 +149,7 @@ export default pattern<Input, Output>((_input) => {
     });
   });
 
-  const playerReady = action<void>(() => {
+  const playerReady = action(() => {
     const state = game.get();
     if (state.phase === "finished") return;
     if (state.viewingAs !== null) return;
@@ -162,7 +162,7 @@ export default pattern<Input, Output>((_input) => {
     });
   });
 
-  const resetGame = action<void>(() => {
+  const resetGame = action(() => {
     game.set(createInitialState());
   });
 
@@ -585,7 +585,7 @@ export default pattern<Input, Output>((_input) => {
 
         {/* Reset button (always visible) */}
         <div style={{ textAlign: "center", marginTop: "30px" }}>
-          <ct-button onClick={resetGame}>New Game</ct-button>
+          <ct-button onClick={resetGame}>Reset Game</ct-button>
         </div>
       </div>
     ),
