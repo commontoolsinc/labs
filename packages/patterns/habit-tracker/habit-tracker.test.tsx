@@ -1,186 +1,228 @@
 /// <cts-enable />
 /**
- * Test Pattern: Habit Tracker
+ * Habit Tracker Pattern Tests
  *
- * Tests the core functionality of the habit-tracker pattern:
- * - Initial state (no habits, no logs)
- * - Adding habits
- * - Toggling habit completion (creates log)
- * - Toggling habit again (uncompletes)
+ * Tests core functionality:
+ * - Initial state
+ * - Adding habits (with validation)
+ * - Toggling habit completion
  * - Deleting habits
+ * - Default values
  *
- * Run: deno task ct test packages/patterns/habit-tracker.test.tsx --verbose
+ * Run: deno task ct test packages/patterns/habit-tracker/habit-tracker.test.tsx --verbose
+ *
+ * NOTE: Uses .filter(() => true).length instead of .length directly due to
+ * a reactivity tracking bug where direct .length access doesn't register
+ * dependencies. See packages/patterns/gideon-tests/array-length-repro.test.tsx
  */
 import { action, computed, pattern } from "commontools";
-import HabitTracker, { type Habit } from "./habit-tracker.tsx";
+import HabitTracker from "./habit-tracker.tsx";
+import type { Habit, HabitLog } from "./schemas.tsx";
 
-// Module-level type for habit log
-interface HabitLog {
-  habitName: string;
-  date: string;
-  completed: boolean;
-}
+// Helper to get array length with proper reactivity tracking
+const len = <T,>(arr: T[]): number => arr.filter(() => true).length;
 
 export default pattern(() => {
-  // Instantiate the habit tracker pattern with empty initial state
-  // Pass plain values - runtime creates writable cells automatically
   const subject = HabitTracker({ habits: [], logs: [] });
 
-  // ==========================================================================
-  // Actions - using action() to trigger stream sends
-  // ==========================================================================
+  // === Actions ===
 
-  // Add a habit
-  const action_add_habit = action(() => {
+  const action_add_exercise = action(() => {
     subject.addHabit.send({ name: "Exercise", icon: "🏃" });
   });
 
-  // Add a second habit for deletion test
-  const action_add_second_habit = action(() => {
+  const action_add_read = action(() => {
     subject.addHabit.send({ name: "Read", icon: "📚" });
   });
 
-  // Toggle habit completion (marks as complete)
-  const action_toggle_habit_complete = action(() => {
+  const action_add_empty_name = action(() => {
+    subject.addHabit.send({ name: "   ", icon: "❌" });
+  });
+
+  const action_add_with_default_icon = action(() => {
+    subject.addHabit.send({ name: "Meditate", icon: "" });
+  });
+
+  const action_toggle_exercise = action(() => {
     subject.toggleHabit.send({ habitName: "Exercise" });
   });
 
-  // Toggle habit again (should uncomplete)
-  const action_toggle_habit_uncomplete = action(() => {
-    subject.toggleHabit.send({ habitName: "Exercise" });
+  const action_toggle_nonexistent = action(() => {
+    subject.toggleHabit.send({ habitName: "NonExistent" });
   });
 
-  // Delete the second habit by name
-  const action_delete_habit = action(() => {
+  const action_delete_read = action(() => {
     subject.deleteHabit.send({
       habit: { name: "Read", icon: "📚", color: "#3b82f6" },
     });
   });
 
-  // ==========================================================================
-  // Assertions - computed booleans
-  // ==========================================================================
-
-  // Test 1: Initial state - no habits
-  // Note: Using filter().length for proper reactivity tracking
-  const assert_initial_no_habits = computed(() => {
-    return subject.habits.filter(() => true).length === 0;
+  const action_delete_nonexistent = action(() => {
+    subject.deleteHabit.send({
+      habit: { name: "NonExistent", icon: "?", color: "#000" },
+    });
   });
 
-  // Test 1: Initial state - no logs
-  const assert_initial_no_logs = computed(() => {
-    return subject.logs.filter(() => true).length === 0;
+  // === Assertions ===
+
+  // Initial state
+  const assert_initial_no_habits = computed(
+    () => len(subject.habits) === 0,
+  );
+
+  const assert_initial_no_logs = computed(
+    () => len(subject.logs) === 0,
+  );
+
+  const assert_today_date_format = computed(() => {
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    return dateRegex.test(subject.todayDate);
   });
 
-  // Test 2: After adding first habit
-  // Note: Using filter().length instead of direct .length for better reactivity
-  const assert_has_one_habit = computed(() => {
-    const habits = subject.habits.filter(() => true);
-    return habits.length === 1;
-  });
+  // After adding first habit
+  const assert_one_habit = computed(
+    () => len(subject.habits) === 1,
+  );
 
-  const assert_habit_name_correct = computed(
+  const assert_exercise_name = computed(
     () => subject.habits[0]?.name === "Exercise",
   );
 
-  const assert_habit_icon_correct = computed(
+  const assert_exercise_icon = computed(
     () => subject.habits[0]?.icon === "🏃",
   );
 
-  // Test 3: After toggling habit (completion creates log)
-  const assert_log_created = computed(() => {
-    return subject.logs.filter(() => true).length === 1;
+  const assert_exercise_default_color = computed(
+    () => subject.habits[0]?.color === "#3b82f6",
+  );
+
+  // Empty name should not add habit
+  const assert_still_one_habit_after_empty = computed(
+    () => len(subject.habits) === 1,
+  );
+
+  // Default icon when empty string provided
+  const assert_two_habits = computed(
+    () => len(subject.habits) === 2,
+  );
+
+  const assert_meditate_default_icon = computed(() => {
+    const meditate = subject.habits.find((h: Habit) => h.name === "Meditate");
+    return meditate?.icon === "✓";
   });
 
-  const assert_log_completed_true = computed(() => {
-    const log = subject.logs.find(
-      (l: HabitLog) => l.habitName === "Exercise",
-    );
+  // After toggling habit (creates log)
+  const assert_one_log = computed(
+    () => len(subject.logs) === 1,
+  );
+
+  const assert_log_completed = computed(() => {
+    const log = subject.logs.find((l: HabitLog) => l.habitName === "Exercise");
     return log?.completed === true;
   });
 
-  const assert_log_habitName_correct = computed(() => {
-    const log = subject.logs[0];
-    return log?.habitName === "Exercise";
-  });
+  const assert_log_habitName = computed(
+    () => subject.logs[0]?.habitName === "Exercise",
+  );
 
-  const assert_log_date_is_today = computed(() => {
-    const log = subject.logs[0];
-    return log?.date === subject.todayDate;
-  });
+  const assert_log_date_is_today = computed(
+    () => subject.logs[0]?.date === subject.todayDate,
+  );
 
-  // Test 4: After toggling again (should uncomplete - toggle existing log)
-  const assert_log_completed_false = computed(() => {
-    const log = subject.logs.find(
-      (l: HabitLog) => l.habitName === "Exercise",
-    );
+  // Toggling nonexistent habit should not create log
+  const assert_still_one_log_after_nonexistent = computed(
+    () => len(subject.logs) === 1,
+  );
+
+  // After toggling again (uncompletes)
+  const assert_log_uncompleted = computed(() => {
+    const log = subject.logs.find((l: HabitLog) => l.habitName === "Exercise");
     return log?.completed === false;
   });
 
-  // Still only one log (toggling updates existing, doesn't create new)
-  const assert_still_one_log = computed(() => {
-    return subject.logs.filter(() => true).length === 1;
-  });
+  const assert_still_one_log_after_toggle = computed(
+    () => len(subject.logs) === 1,
+  );
 
-  // Test 5: After adding second habit
-  const assert_has_two_habits = computed(() => {
-    return subject.habits.filter(() => true).length === 2;
-  });
+  // After adding second habit
+  const assert_three_habits = computed(
+    () => len(subject.habits) === 3,
+  );
 
-  const assert_second_habit_exists = computed(() => {
-    return subject.habits.some((h: Habit) => h.name === "Read");
-  });
+  const assert_read_exists = computed(
+    () => subject.habits.some((h: Habit) => h.name === "Read"),
+  );
 
-  // Test 5: After deleting second habit
-  const assert_back_to_one_habit = computed(() => {
-    return subject.habits.filter(() => true).length === 1;
-  });
+  // After deleting habit
+  const assert_two_habits_after_delete = computed(
+    () => len(subject.habits) === 2,
+  );
 
-  const assert_read_habit_deleted = computed(() => {
-    return !subject.habits.some((h: Habit) => h.name === "Read");
-  });
+  const assert_read_deleted = computed(
+    () => !subject.habits.some((h: Habit) => h.name === "Read"),
+  );
 
-  const assert_exercise_habit_remains = computed(() => {
-    return subject.habits.some((h: Habit) => h.name === "Exercise");
-  });
+  const assert_exercise_remains = computed(
+    () => subject.habits.some((h: Habit) => h.name === "Exercise"),
+  );
 
-  // ==========================================================================
-  // Test Sequence
-  // ==========================================================================
+  // Deleting nonexistent should not change count
+  const assert_still_two_habits = computed(
+    () => len(subject.habits) === 2,
+  );
+
   return {
     tests: [
-      // === Test 1: Initial state - no habits, no logs ===
+      // Initial state
       { assertion: assert_initial_no_habits },
       { assertion: assert_initial_no_logs },
+      { assertion: assert_today_date_format },
 
-      // === Test 2: Add habit - verify habit count increases ===
-      { action: action_add_habit },
-      { assertion: assert_has_one_habit },
-      { assertion: assert_habit_name_correct },
-      { assertion: assert_habit_icon_correct },
+      // Add first habit
+      { action: action_add_exercise },
+      { assertion: assert_one_habit },
+      { assertion: assert_exercise_name },
+      { assertion: assert_exercise_icon },
+      { assertion: assert_exercise_default_color },
 
-      // === Test 3: Toggle habit completion - verify log is created ===
-      { action: action_toggle_habit_complete },
-      { assertion: assert_log_created },
-      { assertion: assert_log_completed_true },
-      { assertion: assert_log_habitName_correct },
+      // Empty name rejected
+      { action: action_add_empty_name },
+      { assertion: assert_still_one_habit_after_empty },
+
+      // Default icon applied
+      { action: action_add_with_default_icon },
+      { assertion: assert_two_habits },
+      { assertion: assert_meditate_default_icon },
+
+      // Toggle creates log
+      { action: action_toggle_exercise },
+      { assertion: assert_one_log },
+      { assertion: assert_log_completed },
+      { assertion: assert_log_habitName },
       { assertion: assert_log_date_is_today },
 
-      // === Test 4: Toggle habit uncomplete - verify completion toggles off ===
-      { action: action_toggle_habit_uncomplete },
-      { assertion: assert_still_one_log },
-      { assertion: assert_log_completed_false },
+      // Toggle nonexistent habit
+      { action: action_toggle_nonexistent },
+      { assertion: assert_still_one_log_after_nonexistent },
 
-      // === Test 5: Delete habit - verify habit count decreases ===
-      { action: action_add_second_habit },
-      { assertion: assert_has_two_habits },
-      { assertion: assert_second_habit_exists },
-      { action: action_delete_habit },
-      { assertion: assert_back_to_one_habit },
-      { assertion: assert_read_habit_deleted },
-      { assertion: assert_exercise_habit_remains },
+      // Toggle again uncompletes
+      { action: action_toggle_exercise },
+      { assertion: assert_still_one_log_after_toggle },
+      { assertion: assert_log_uncompleted },
+
+      // Add and delete habit
+      { action: action_add_read },
+      { assertion: assert_three_habits },
+      { assertion: assert_read_exists },
+      { action: action_delete_read },
+      { assertion: assert_two_habits_after_delete },
+      { assertion: assert_read_deleted },
+      { assertion: assert_exercise_remains },
+
+      // Delete nonexistent habit
+      { action: action_delete_nonexistent },
+      { assertion: assert_still_two_habits },
     ],
-    // Expose subject for debugging
     subject,
   };
 });
