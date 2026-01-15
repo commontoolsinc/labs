@@ -16,6 +16,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  Stream,
   UI,
   Writable,
 } from "commontools";
@@ -42,6 +43,10 @@ interface LobbyOutput {
   player2: PlayerData | null;
   shots: ShotsState;
   gameState: GameState;
+  // Streams for testing and programmatic control
+  joinPlayer1: Stream<{ name: string }>;
+  joinPlayer2: Stream<{ name: string }>;
+  reset: Stream<void>;
 }
 
 // Module-level function for navigation (pattern from Scrabble)
@@ -201,6 +206,94 @@ const resetLobby = handler<
   console.log("[resetLobby] Game state reset complete");
 });
 
+// Programmatic handler for joining as Player 1 (for testing)
+const joinPlayer1Handler = handler<
+  { name: string },
+  {
+    player1: Writable<PlayerData | null>;
+    player2: Writable<PlayerData | null>;
+    shots: Writable<ShotsState>;
+    gameState: Writable<GameState>;
+  }
+>(({ name }, { player1, player2, shots, gameState }) => {
+  if (!name || !name.trim()) return;
+
+  const playerData: PlayerData = {
+    name: name.trim(),
+    ships: generateRandomShips(),
+    color: getRandomColor(0),
+    joinedAt: Date.now(),
+  };
+
+  player1.set(playerData);
+
+  // Check if both players have joined
+  const p1 = player1.get();
+  const p2 = player2.get();
+
+  if (p1 && p2) {
+    gameState.set({
+      phase: "playing",
+      currentTurn: 1,
+      winner: null,
+      lastMessage: `${p1.name}'s turn - fire at the enemy fleet!`,
+    });
+    shots.set(createInitialShots());
+  }
+});
+
+// Programmatic handler for joining as Player 2 (for testing)
+const joinPlayer2Handler = handler<
+  { name: string },
+  {
+    player1: Writable<PlayerData | null>;
+    player2: Writable<PlayerData | null>;
+    shots: Writable<ShotsState>;
+    gameState: Writable<GameState>;
+  }
+>(({ name }, { player1, player2, shots, gameState }) => {
+  if (!name || !name.trim()) return;
+
+  const playerData: PlayerData = {
+    name: name.trim(),
+    ships: generateRandomShips(),
+    color: getRandomColor(1),
+    joinedAt: Date.now(),
+  };
+
+  player2.set(playerData);
+
+  // Check if both players have joined
+  const p1 = player1.get();
+  const p2 = player2.get();
+
+  if (p1 && p2) {
+    gameState.set({
+      phase: "playing",
+      currentTurn: 1,
+      winner: null,
+      lastMessage: `${p1.name}'s turn - fire at the enemy fleet!`,
+    });
+    shots.set(createInitialShots());
+  }
+});
+
+// Programmatic reset handler (for testing)
+const resetHandler = handler<
+  void,
+  {
+    player1: Writable<PlayerData | null>;
+    player2: Writable<PlayerData | null>;
+    shots: Writable<ShotsState>;
+    gameState: Writable<GameState>;
+  }
+>((_event, { player1, player2, shots, gameState }) => {
+  player1.set(null);
+  player2.set(null);
+  shots.set(createInitialShots());
+  gameState.set(INITIAL_GAME_STATE);
+});
+
 const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
   ({ gameName, player1, player2, shots, gameState }) => {
     // Separate name inputs for each player slot
@@ -216,6 +309,21 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
     // Game state
     const gameStateData = computed(() => gameState.get());
     const isGameStarted = computed(() => gameStateData.phase === "playing");
+
+    // Programmatic handlers for testing
+    const joinPlayer1 = joinPlayer1Handler({
+      player1,
+      player2,
+      shots,
+      gameState,
+    });
+    const joinPlayer2 = joinPlayer2Handler({
+      player1,
+      player2,
+      shots,
+      gameState,
+    });
+    const reset = resetHandler({ player1, player2, shots, gameState });
 
     return {
       [NAME]: computed(() => `${gameName} - Lobby`),
@@ -554,6 +662,10 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
       player2: player2Data,
       shots: computed(() => shots.get()),
       gameState: gameStateData,
+      // Streams for testing and programmatic control
+      joinPlayer1,
+      joinPlayer2,
+      reset,
     };
   },
 );
