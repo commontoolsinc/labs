@@ -99,13 +99,26 @@ export function createInitialShots(): ShotsState {
 /**
  * Lobby pattern owns all shared game state.
  * Uses proper typed Cells instead of JSON strings.
+ *
+ * Note: shots and gameState use inline default object literals
+ * to provide initial values for the complex state objects.
  */
 export interface LobbyState {
   gameName: Default<string, "Battleship">;
   player1: Writable<Default<PlayerData | null, null>>;
   player2: Writable<Default<PlayerData | null, null>>;
-  shots: Writable<ShotsState>;
-  gameState: Writable<GameState>;
+  shots: Writable<
+    Default<
+      ShotsState,
+      { 1: []; 2: [] }
+    >
+  >;
+  gameState: Writable<
+    Default<
+      GameState,
+      { phase: "waiting"; currentTurn: 1; winner: null; lastMessage: "" }
+    >
+  >;
 }
 
 /**
