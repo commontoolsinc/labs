@@ -65,6 +65,7 @@
   "lint": {
     "exclude": [
       ".beads/",
+      "./packages/patterns/google",
       "./packages/static/assets",
       "./packages/ui/src/v2/components/ct-outliner",
       "./packages/vendor-astral"

@@ -4,6 +4,11 @@
 >
 > These patterns are experimental and may have bugs or incomplete features. They
 > are being actively developed and tested.
+>
+> <!-- TODO(@jkomoros): Fix type errors - ~12 TypeScript errors related to -->
+> <!-- wish() return types, UIRenderable compatibility, etc. -->
+> <!-- TODO(@jkomoros): Fix lint issues - ~79 deno lint violations -->
+> <!-- (unused vars, missing button types, untagged TODOs, etc.) -->
 
 This folder contains patterns for integrating with Google services (Gmail,
 Calendar, Docs) via OAuth authentication.
