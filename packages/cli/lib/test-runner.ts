@@ -19,6 +19,10 @@
  *   { action: action(() => game.start.send(undefined)) },
  *   { assertion: computed(() => game.phase === "started") },
  * ]
+ *
+ * Note: By default, test patterns can only import from their own directory or
+ * subdirectories. To enable imports from sibling directories (e.g., `../shared/`),
+ * use the --root option to specify a common ancestor directory.
  */
 
 import { Identity } from "@commontools/identity";
@@ -26,29 +30,8 @@ import { Engine, Runtime } from "@commontools/runner";
 import type { Cell, Recipe, Stream } from "@commontools/runner";
 import type { OpaqueRef } from "@commontools/api";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
-import { basename, dirname, join } from "@std/path";
+import { basename } from "@std/path";
 import { timeout } from "@commontools/utils/sleep";
-
-/**
- * Find the project root by walking up from a file path looking for deno.json.
- * This enables relative imports like `../shared/utils.tsx` in test files.
- */
-function findProjectRoot(filePath: string): string {
-  let dir = dirname(filePath);
-
-  while (dir !== "/" && dir !== ".") {
-    try {
-      Deno.statSync(join(dir, "deno.json"));
-      return dir;
-    } catch {
-      // deno.json doesn't exist at this level, continue up
-    }
-    dir = dirname(dir);
-  }
-
-  // Fallback: use the test file's directory (original behavior)
-  return dirname(filePath);
-}
 
 /**
  * A test step is an object with either an 'assertion' or 'action' property.
@@ -76,6 +59,8 @@ export interface TestRunResult {
 export interface TestRunnerOptions {
   timeout?: number;
   verbose?: boolean;
+  /** Root directory for resolving imports. If not provided, uses the test file's directory. */
+  root?: string;
 }
 
 /**
@@ -106,10 +91,8 @@ export async function runTestPattern(
 
   try {
     // 2. Compile the test pattern
-    // Use project root to enable relative imports like ../shared/utils.tsx
-    const projectRoot = findProjectRoot(testPath);
     const program = await engine.resolve(
-      new FileSystemProgramResolver(testPath, projectRoot),
+      new FileSystemProgramResolver(testPath, options.root),
     );
     const { main } = await engine.process(program, {
       noCheck: false,
@@ -279,11 +262,23 @@ export async function runTestPattern(
       totalDurationMs: performance.now() - startTime,
     };
   } catch (err) {
+    let errorMessage = err instanceof Error ? err.message : String(err);
+
+    // Add helpful hint for import resolution errors when --root wasn't provided
+    if (
+      errorMessage.includes("No such file or directory") &&
+      errorMessage.includes("readfile") &&
+      !options.root
+    ) {
+      errorMessage +=
+        "\n    Hint: If the test imports from sibling directories (e.g., ../shared/), use --root to specify a common ancestor.";
+    }
+
     return {
       path: testPath,
       results: [],
       totalDurationMs: performance.now() - startTime,
-      error: err instanceof Error ? err.message : String(err),
+      error: errorMessage,
     };
   } finally {
     // 6. Cleanup
