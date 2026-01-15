@@ -1,7 +1,7 @@
 ---
 name: pattern-maker
 description: Writes pattern code in small increments. Sketch, run, iterate.
-tools: Skill, Bash, Glob, Grep, Read, Edit, Write
+tools: Skill, Bash, Glob, Grep, Read, Edit, Write, AskUserQuestion
 model: sonnet
 hooks:
   PostToolUse:
