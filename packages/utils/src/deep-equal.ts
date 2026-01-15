@@ -17,10 +17,9 @@ export function deepEqual(a: any, b: any): boolean {
   if (isRecord(a) && isRecord(b)) {
     if (a.constructor !== b.constructor) return false;
     const keysA = Object.keys(a);
-    const keysB = Object.keys(b);
-    if (keysA.length !== keysB.length) return false;
+    if (keysA.length !== Object.keys(b).length) return false;
     for (const key of keysA) {
-      if (!keysB.includes(key)) return false;
+      if (!Object.hasOwn(b, key)) return false;
       if (!deepEqual(a[key], b[key])) return false;
     }
     return true;
