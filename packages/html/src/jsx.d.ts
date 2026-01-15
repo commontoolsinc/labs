@@ -5,10 +5,9 @@ import type {
   Cell,
   CELL_LIKE,
   CellLike,
-  Props,
+  JSXElement,
   RenderNode,
   Stream,
-  VNode,
 } from "commontools";
 
 /**
@@ -3585,6 +3584,9 @@ interface CTToolsChipAttributes<T> extends CTHTMLAttributes<T> {
   "tools"?:
     | { name: string; description?: string; schema?: unknown }[]
     | Record<string, { handler?: unknown; pattern?: unknown } | any>;
+  "$tools"?:
+    | { name: string; description?: string; schema?: unknown }[]
+    | Record<string, { handler?: unknown; pattern?: unknown } | any>;
 }
 
 interface CTHeadingAttributes<T> extends CTHTMLAttributes<T> {
@@ -4414,16 +4416,10 @@ interface DOMIntrinsicElements {
 declare global {
   namespace JSX {
     // The output of a JSX renderer is a JSX.Element.
-    // Our renderer (`@commontools/api#h`) outputs
-    // `VNode`s. Redefine `JSX.Element` here as a `VNode`
-    // for consistency.
-    interface Element extends VNode {
-      type: "vnode";
-      name: string;
-      props: Props;
-      children?: RenderNode;
-      $UI?: VNode;
-    }
+    // Our renderer (`@commontools/api#h`) outputs `VNode`s,
+    // but also accepts cells containing objects with [UI] properties
+    // (patterns used as components return OpaqueCell<{[UI]: VNode}>).
+    type Element = JSXElement;
 
     interface IntrinsicElements extends DOMIntrinsicElements {
       //[elemName: string]: any;

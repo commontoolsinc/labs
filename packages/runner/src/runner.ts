@@ -1239,7 +1239,7 @@ export class Runner {
             unsafe_binding: {
               recipe,
               materialize: (path: readonly PropertyKey[]) =>
-                processCell.getAsQueryResult(path),
+                processCell.getAsQueryResult(path, tx),
               space: processCell.space,
               tx,
             },
@@ -1260,7 +1260,11 @@ export class Runner {
 
           const argument = module.argumentSchema
             ? inputsCell.asSchema(module.argumentSchema).get()
-            : inputsCell.getAsQueryResult([], tx);
+            : inputsCell.getAsQueryResult(
+              [],
+              tx,
+              (module as { writableProxy?: boolean }).writableProxy,
+            );
           const result = fn(argument);
 
           const postRun = (result: any) => {

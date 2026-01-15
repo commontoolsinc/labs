@@ -11,7 +11,7 @@ import {
 import { decrement, increment, nth, previous } from "./counter-handlers.ts";
 
 interface RecipeState {
-  value: Default<number, 0>;
+  value?: Default<number, 0>;
 }
 
 /** The output of a #counter */
@@ -23,7 +23,7 @@ interface RecipeOutput {
   decrement: Stream<void>;
 }
 
-export default pattern<RecipeState, RecipeOutput>((state) => {
+const Counter = pattern<RecipeState, RecipeOutput>((state) => {
   return {
     [NAME]: computed(() => `Simple counter: ${state.value}`),
     [UI]: (
@@ -49,3 +49,11 @@ export default pattern<RecipeState, RecipeOutput>((state) => {
     decrement: decrement(state),
   };
 });
+
+const _CounterView = pattern<void, { [UI]: VNode }>(() => {
+  return {
+    [UI]: <Counter />,
+  };
+});
+
+export default Counter;

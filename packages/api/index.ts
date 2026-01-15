@@ -927,6 +927,10 @@ type StripCellInner<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - i
  * Conceptually: T | AnyCell<T> at any nesting level, but we use OpaqueRef
  * for backward compatibility since it has the recursive proxy behavior that
  * allows property access (e.g., Opaque<{foo: string}> includes {foo: Opaque<string>}).
+ *
+ * Special cases for JSX:
+ * - Opaque<VNode> also accepts JSXElement
+ * - Opaque<UIRenderable> also accepts JSXElement (for .map() callbacks returning JSX)
  */
 export type Opaque<T> =
   | T
@@ -941,6 +945,10 @@ export type Opaque<T> =
   | ComparableCell<T>
   | ReadonlyCell<T>
   | WriteonlyCell<T>
+  // Special case: When T includes VNode or UIRenderable (even with null/undefined),
+  // also accept JSXElement. Use NonNullable to handle VNode | undefined.
+  | ([NonNullable<T>] extends [VNode] ? JSXElement : never)
+  | ([NonNullable<T>] extends [UIRenderable] ? JSXElement : never)
   | (T extends Array<infer U> ? Array<Opaque<U>>
     : T extends object ? { [K in keyof T]: Opaque<T[K]> }
     : T);
@@ -1747,11 +1755,24 @@ export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;
 
 // Internal-only helper to create VDOM nodes
 export type HFunction = {
+  // Overload for string element names - returns VNode
   (
-    name: string | ((...args: any[]) => VNode),
+    name: string,
     props: { [key: string]: any } | null,
     ...children: RenderNode[]
   ): VNode;
+  // Overload for function components - returns whatever the component returns
+  <R extends JSXElement>(
+    name: (props: any) => R,
+    props: { [key: string]: any } | null,
+    ...children: RenderNode[]
+  ): R;
+  // Union overload for when type is not narrowed (used by jsx-runtime)
+  (
+    name: string | ((props: any) => JSXElement),
+    props: { [key: string]: any } | null,
+    ...children: RenderNode[]
+  ): JSXElement;
   fragment({ children }: { children: RenderNode[] }): VNode;
 };
 
@@ -2106,8 +2127,10 @@ export type Props = {
 /** A child in a view can be one of a few things */
 export type RenderNode =
   | InnerRenderNode
-  | AnyBrandedCell<InnerRenderNode>
-  | AnyBrandedCell<UIRenderable>
+  | JSXElement
+  | AnyBrandedCell<
+    InnerRenderNode | UIRenderable | JSXElement | null | undefined
+  >
   | Array<RenderNode>;
 
 type InnerRenderNode =
@@ -2119,9 +2142,18 @@ type InnerRenderNode =
   | null;
 
 /** An object that can be rendered via its [UI] property */
-type UIRenderable = {
+export type UIRenderable = {
   [UI]: VNode;
 };
+
+/**
+ * JSX element type - the result of a JSX expression.
+ * Can be a VNode, or a cell containing something with a [UI] property.
+ */
+export type JSXElement =
+  | VNode
+  | AnyBrandedCell<UIRenderable>
+  | OpaqueRef<UIRenderable>;
 
 /** A "virtual view node", e.g. a virtual DOM element */
 export type VNode = {

@@ -30,7 +30,11 @@ export const getCompilerOptions = (): CompilerOptions => {
 
     removeComments: true,
     noEmitOnError: true,
-    declaration: true,
+    // Note: declaration emit is disabled because TypeScript's declaration emit
+    // has trouble with unique symbols (CELL_BRAND, CELL_INNER_TYPE) in exported
+    // types, causing emit to skip entirely. Declaration checking is done
+    // explicitly via checker.declarationCheck() instead.
+    declaration: false,
     // Enable source map generation.
     sourceMap: true,
     // We want the source map to include the original TypeScript files

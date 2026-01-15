@@ -100,9 +100,6 @@ export class XHeaderView extends BaseView {
   isLoggedIn = false;
 
   @property()
-  showShellCharmListView = false;
-
-  @property()
   showDebuggerView = false;
 
   @property()
@@ -117,16 +114,6 @@ export class XHeaderView extends BaseView {
       this.keyStore.clear().catch(console.error);
     }
     this.command({ type: "set-identity", identity: undefined });
-  }
-
-  private handleToggleClick(e: Event) {
-    e.preventDefault();
-    e.stopPropagation();
-    this.command({
-      type: "set-config",
-      key: "showShellCharmListView",
-      value: !this.showShellCharmListView,
-    });
   }
 
   private handleDebuggerToggleClick(e: Event) {
@@ -156,13 +143,15 @@ export class XHeaderView extends BaseView {
   override render() {
     const spaceLink = this.spaceName
       ? html`
-        <x-charm-link .spaceName="${this.spaceName}">${this
+        <x-charm-link id="header-space-link" .spaceName="${this.spaceName}"
+        >${this
           .spaceName}</x-charm-link>
       `
       : null;
     const charmLink = this.charmId && this.spaceName
       ? html`
         <x-charm-link
+          id="header-charm-link"
           .charmId="${this.charmId}"
           .spaceName="${this.spaceName}"
         >${this.charmTitle || this.charmId}</x-charm-link>
@@ -202,16 +191,6 @@ export class XHeaderView extends BaseView {
                   ></x-favorite-button>
                 `
                 : null}
-              <x-button
-                class="emoji-button"
-                size="small"
-                @click="${this.handleToggleClick}"
-                title="${this.showShellCharmListView
-                  ? "Show Default Pattern"
-                  : "Show All Charms"}"
-              >
-                ${this.showShellCharmListView ? "📋" : "🔍"}
-              </x-button>
               <x-button
                 class="emoji-button"
                 size="small"

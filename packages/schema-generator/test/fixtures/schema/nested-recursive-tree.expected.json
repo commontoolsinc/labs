@@ -1,5 +1,4 @@
 {
-  "$ref": "#/$defs/TreeNode",
   "$defs": {
     "TreeBranch": {
       "properties": {
@@ -33,5 +32,6 @@
       ],
       "type": "object"
     }
-  }
+  },
+  "$ref": "#/$defs/TreeNode"
 }

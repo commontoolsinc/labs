@@ -6,8 +6,16 @@ user-invocable: false
 
 # Test Sub-Pattern
 
+## Prerequisite Check
+Before writing tests, verify the pattern has:
+- `pattern<Input, Output>()` (not single-type `pattern<State>()`)
+- Actions typed as `Stream<T>` in Output interface
+- Bound handlers returned from the pattern
+
+If missing, fix the pattern first - tests can't call `.send()` without proper Output types.
+
 ## Read First
-- `docs/common/workflows/pattern-testing.md` - Full test file format and assertions
+- `docs/common/workflows/pattern-testing.md` - Full test file format and prerequisites
 
 ## Test Command
 ```bash
