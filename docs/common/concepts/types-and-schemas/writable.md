@@ -59,3 +59,20 @@ const counter2 = Counter({ count: sharedCount });
 For most cases, pass plain values. Use `Writable.of()` when you intentionally want multiple patterns to share the same underlying state.
 
 Note: The `Writable<T>` annotation in a pattern's type signature indicates write intent within that pattern, but doesn't affect how input values are coerced. Plain values always become owned state that the pattern can modify—the pattern can pass these to handlers with `Writable<>` inputs, making them effectively writable regardless of the signature.
+
+### Storing References to Cells
+
+When storing a "pointer" to a Cell (e.g., tracking which item is selected), **box the reference** in an object:
+
+```typescript
+// ✅ Correct - Boxed reference
+interface Input {
+  selected: Writable<{ item: Item }>;
+}
+selected.set({ item });
+const { item } = selected.get();
+```
+
+Why: When you store a Cell directly, link chain resolution means `.set()` writes to the *target* instead of changing which item is referenced. Boxing breaks the chain.
+
+See [Cell Reference Overwrite](../../../development/debugging/gotchas/cell-reference-overwrite.md) for details.

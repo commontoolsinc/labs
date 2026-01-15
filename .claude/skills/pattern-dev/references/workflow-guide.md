@@ -230,8 +230,9 @@ Use `derive()` judiciously for expensive operations.
 2. **Wrong Cell type in handler** - Type errors
 3. **Conditionals in JSX** - Use `ifElse()` instead
 4. **Calling `llm()` from handler** - Only works in recipe body
+5. **Storing Cell references directly** - Box them: `{ item }` instead of `item`
 
-**Solution:** Read the relevant `docs/common/*.md` file.
+**Solution:** Read the relevant `docs/common/*.md` file or check `docs/development/debugging/gotchas/`.
 
 ## Resources
 

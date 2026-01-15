@@ -26,6 +26,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | "Function creation is not allowed in pattern context" | Helper function inside pattern | Move function to module scope ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | "lift() should not be immediately invoked inside a pattern" | `lift(...)(args)` inside pattern | Use `computed()` instead, or define lift() at module scope ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | Click handler does nothing, ID lookup fails silently | Using custom `id` property for lookups | Use `equals()` for identity, not custom IDs ([gotchas/custom-id-property-pitfall](gotchas/custom-id-property-pitfall.md)) |
+| Selection overwrites item data, `.set()` changes wrong value | Storing Cell reference directly | Box the reference: `{ item }` instead of `item` ([gotchas/cell-reference-overwrite](gotchas/cell-reference-overwrite.md)) |
 
 ---
 
@@ -46,6 +47,7 @@ These issues compile without errors but fail at runtime.
 - [Stream.of() / .subscribe() Don't Exist](gotchas/stream-subscribe-dont-exist.md) - Bound handlers ARE streams
 - [handler() or Function Inside Pattern](gotchas/handler-inside-pattern.md) - Module scope requirement
 - [Custom `id` Property Pitfall](gotchas/custom-id-property-pitfall.md) - Use `equals()` for identity
+- [Cell Reference Overwrite](gotchas/cell-reference-overwrite.md) - Box references with `{ item }`
 
 ### Error Categories
 
