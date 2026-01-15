@@ -65,6 +65,65 @@ const medianComplexityD = JSON.parse(JSON.stringify(medianComplexityA));
 medianComplexityD.items[0].done = true;
 
 // ============================================================================
+// Many small objects fixtures - 20 arrays × 15 objects × 15 properties = 4,500
+// properties. Tests deepEqual performance on wide, shallow object graphs.
+// Note: Originally tried 100 × 25 × 25 = 62,500 properties but that caused OOM
+// when running benchmarks with many iterations. Can tune these numbers to find
+// a sweet spot that stresses the comparison without exhausting memory.
+// ============================================================================
+
+function buildSmallObject(groupIdx: number, objIdx: number) {
+  const obj: Record<string, string | number | boolean | null> = {};
+  for (let p = 0; p < 15; p++) {
+    const key = `prop_${p}`;
+    switch (p % 5) {
+      case 0:
+        obj[key] = groupIdx * 1000 + objIdx * 15 + p;
+        break;
+      case 1:
+        obj[key] = `val_${groupIdx}_${objIdx}_${p}`;
+        break;
+      case 2:
+        obj[key] = p % 2 === 0;
+        break;
+      case 3:
+        obj[key] = null;
+        break;
+      case 4:
+        obj[key] = (groupIdx + objIdx + p) * 0.123;
+        break;
+    }
+  }
+  return obj;
+}
+
+function buildManySmallObjects(): {
+  groups: Record<string, string | number | boolean | null>[][];
+} {
+  const groups: Record<string, string | number | boolean | null>[][] = [];
+  for (let g = 0; g < 20; g++) {
+    const group: Record<string, string | number | boolean | null>[] = [];
+    for (let o = 0; o < 15; o++) {
+      group.push(buildSmallObject(g, o));
+    }
+    groups.push(group);
+  }
+  return { groups };
+}
+
+// Identical structure (for "equal" case)
+const manySmallObjectsA = buildManySmallObjects();
+const manySmallObjectsB = JSON.parse(JSON.stringify(manySmallObjectsA));
+
+// Different value at last property of last object (for "unequal late" case)
+const manySmallObjectsC = JSON.parse(JSON.stringify(manySmallObjectsA));
+manySmallObjectsC.groups[19][14].prop_14 = "DIFFERENT_VALUE";
+
+// Different value at first property of first object (for "unequal early" case)
+const manySmallObjectsD = JSON.parse(JSON.stringify(manySmallObjectsA));
+manySmallObjectsD.groups[0][0].prop_0 = -999999;
+
+// ============================================================================
 // Large string fixtures - 100k character strings, difference at last character
 // Tests worst case for deepEqual (no short-circuit, maximum traversal)
 // ============================================================================
@@ -1264,6 +1323,76 @@ Deno.bench(
   () => {
     for (let i = 0; i < 1000; i++) {
       const _result = deepEqual(medianComplexityA, medianComplexityD);
+    }
+  },
+);
+
+// ============================================================================
+// Value comparison: JSON.stringify vs deepEqual (many small objects)
+//
+// Tests comparison performance on wide, shallow object graphs with many
+// properties spread across many small objects (4,500 properties total).
+// ============================================================================
+
+Deno.bench(
+  "Compare - JSON.stringify, many small objects equal (100x)",
+  { group: "value-comparison-small-objects" },
+  () => {
+    for (let i = 0; i < 100; i++) {
+      const _result = JSON.stringify(manySmallObjectsA) ===
+        JSON.stringify(manySmallObjectsB);
+    }
+  },
+);
+
+Deno.bench(
+  "Compare - deepEqual, many small objects equal (100x)",
+  { group: "value-comparison-small-objects" },
+  () => {
+    for (let i = 0; i < 100; i++) {
+      const _result = deepEqual(manySmallObjectsA, manySmallObjectsB);
+    }
+  },
+);
+
+Deno.bench(
+  "Compare - JSON.stringify, many small objects unequal late (100x)",
+  { group: "value-comparison-small-objects" },
+  () => {
+    for (let i = 0; i < 100; i++) {
+      const _result = JSON.stringify(manySmallObjectsA) ===
+        JSON.stringify(manySmallObjectsC);
+    }
+  },
+);
+
+Deno.bench(
+  "Compare - deepEqual, many small objects unequal late (100x)",
+  { group: "value-comparison-small-objects" },
+  () => {
+    for (let i = 0; i < 100; i++) {
+      const _result = deepEqual(manySmallObjectsA, manySmallObjectsC);
+    }
+  },
+);
+
+Deno.bench(
+  "Compare - JSON.stringify, many small objects unequal early (100x)",
+  { group: "value-comparison-small-objects" },
+  () => {
+    for (let i = 0; i < 100; i++) {
+      const _result = JSON.stringify(manySmallObjectsA) ===
+        JSON.stringify(manySmallObjectsD);
+    }
+  },
+);
+
+Deno.bench(
+  "Compare - deepEqual, many small objects unequal early (100x)",
+  { group: "value-comparison-small-objects" },
+  () => {
+    for (let i = 0; i < 100; i++) {
+      const _result = deepEqual(manySmallObjectsA, manySmallObjectsD);
     }
   },
 );
