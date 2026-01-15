@@ -573,7 +573,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       options,
     );
     const elapsed = performance.now() - begin;
-    if (elapsed > 10) {
+    if (elapsed > 50) {
       logger.warn(
         `get >${Math.floor(elapsed - (elapsed % 10))}ms`,
         `get() took ${Math.floor(elapsed)}ms`,
