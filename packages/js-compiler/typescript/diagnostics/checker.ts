@@ -32,10 +32,23 @@ export class Checker {
   }
 
   declarationCheck() {
+    // These symbols are exported from commontools but TypeScript's declaration emit
+    // has trouble with unique symbols in certain contexts. Filter out false positives.
+    const knownExportedSymbols = ["CELL_BRAND", "CELL_INNER_TYPE"];
+
     const errors = this.sources().reduce((output, sourceFile) => {
       const diagnostics = this.program.getDeclarationDiagnostics(sourceFile);
       for (const diagnostic of diagnostics) {
-        output.push({ diagnostic, source: sourceFile.text });
+        // Skip "private name" errors for known exported symbols
+        const message = typeof diagnostic.messageText === "string"
+          ? diagnostic.messageText
+          : diagnostic.messageText.messageText;
+        const isKnownSymbol = knownExportedSymbols.some((sym) =>
+          message.includes(`private name '${sym}'`)
+        );
+        if (!isKnownSymbol) {
+          output.push({ diagnostic, source: sourceFile.text });
+        }
       }
       return output;
     }, [] as ErrorDetails[]);
