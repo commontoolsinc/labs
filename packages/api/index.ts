@@ -1567,6 +1567,9 @@ export type HandlerFunction = {
  * computed(() => expr) becomes derive({}, () => expr) with closure extraction.
  */
 export type ActionFunction = {
+  // Overload 1: Zero-parameter callback returns Stream<void>
+  (fn: () => void): Stream<void>;
+  // Overload 2: Parameterized callback returns Stream<T>
   <T>(fn: (event: T) => void): Stream<T>;
 };
 
