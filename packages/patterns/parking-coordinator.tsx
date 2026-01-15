@@ -28,7 +28,7 @@ export type CommuteMode = "drive" | "bart" | "bike" | "wfh" | "other";
 // NOTE: All fields wrapped in Default<> to avoid runtime persistence bug
 // where mixed Default/non-Default fields cause 2nd+ array items to lose values.
 export interface Person {
-  name: string;
+  name: Default<string, "">;
   email: Default<string, "">;
   phone: Default<string, "">;
   usualCommuteMode: Default<CommuteMode, "drive">;
@@ -46,7 +46,7 @@ export type GuestType = "high-priority" | "best-effort";
 
 // NOTE: All fields wrapped in Default<> to avoid persistence bug
 export interface Guest {
-  name: string;
+  name: Default<string, "">;
   hostPerson: Person;
   type: Default<GuestType, "best-effort">;
   compatibleSpots: Default<SpotNumber[], [1, 5, 12]>;
@@ -148,7 +148,6 @@ interface Input {
   guests: Writable<Default<Guest[], []>>;
   requests: Writable<Default<SpotRequest[], []>>;
   allocations: Writable<Default<Allocation[], []>>;
-  priorityOrder: Writable<Default<Person[], []>>;
 }
 
 interface Output {
@@ -157,7 +156,6 @@ interface Output {
   guests: Guest[];
   requests: SpotRequest[];
   allocations: Allocation[];
-  priorityOrder: Person[];
   todayDate: string;
   // Exposed action streams for testing
   addPerson: Stream<AddPersonEvent>;
@@ -291,6 +289,17 @@ const isArrayEmpty = lift((arr: unknown[]): boolean => arr.length === 0);
 
 const isNumberZero = lift((n: number): boolean => n === 0);
 
+const isFirstInList = lift((idx: number): boolean => idx === 0);
+
+const isLastInList = lift(
+  (args: { idx: number; length: number }): boolean =>
+    args.idx >= args.length - 1,
+);
+
+const formatGuestType = lift((type: GuestType): string =>
+  type === "high-priority" ? "High Priority" : "Best Effort"
+);
+
 // Lifted helpers for conditional rendering (to avoid computed() inside .map())
 const isPendingGreaterThanZero = lift(
   (day: { pending: number }): boolean => day.pending > 0,
@@ -368,13 +377,9 @@ const getWeekSummary = lift(
   },
 );
 
-const getSortedPriorityList = lift(
-  (args: { people: Person[]; priorityOrder: Person[] }): Person[] => {
-    // priorityOrder now contains Person objects directly
-    // Return them in order, filtering out any that might not be in the people array
-    return args.priorityOrder.filter((p) => p !== undefined);
-  },
-);
+// Note: Removed getSortedPriorityList - we now use people array directly
+// since its order IS the priority order. Using lift() would return an
+// OpaqueRef that doesn't work with JSX .map().
 
 // ============ MODULE-SCOPE HANDLERS ============
 
@@ -383,22 +388,15 @@ const removePersonHandler = handler<
   unknown,
   {
     people: Writable<Person[]>;
-    priorityOrder: Writable<Person[]>;
     requests: Writable<SpotRequest[]>;
     guests: Writable<Guest[]>;
     person: Person;
   }
->((_event, { people, priorityOrder, requests, guests, person }) => {
+>((_event, { people, requests, guests, person }) => {
   const pList = people.get();
   const idx = pList.findIndex((p) => equals(person, p));
   if (idx >= 0) {
     people.set(pList.toSpliced(idx, 1));
-  }
-  // Remove from priority order
-  const prioList = priorityOrder.get();
-  const prioIdx = prioList.findIndex((p) => equals(person, p));
-  if (prioIdx >= 0) {
-    priorityOrder.set(prioList.toSpliced(prioIdx, 1));
   }
   // Remove related requests
   const reqList = requests.get();
@@ -539,68 +537,99 @@ const allocateSpotHandler = handler<
 });
 
 // Move person up in priority (event-based for exposed stream)
+/**
+ * WORKAROUND for CT-1173: Array persistence bug
+ *
+ * When array elements are obtained via .get() on a Writable<Person[]>, they
+ * contain internal proxy symbols (like Symbol("toCell")) that interfere with
+ * persistence. When you .set() an array containing these proxy objects, the
+ * persistence layer can lose field values on second+ items.
+ *
+ * The fix is to explicitly reconstruct each object as a plain JavaScript object,
+ * stripping the proxy symbols. This ensures all field values persist correctly.
+ *
+ * See: https://linear.app/common-tools/issue/CT-1173
+ * See also: tutorials/making-lists.md (lines 195-224)
+ */
+const reconstructPerson = (p: Person): Person => ({
+  name: p.name,
+  email: p.email,
+  phone: p.phone,
+  usualCommuteMode: p.usualCommuteMode,
+  livesNearby: p.livesNearby,
+  spotPreferences: [...(p.spotPreferences || [])],
+  compatibleSpots: [...(p.compatibleSpots || [])],
+  defaultSpot: p.defaultSpot,
+  priorityRank: p.priorityRank,
+  totalBookings: p.totalBookings,
+  lastBookingDate: p.lastBookingDate,
+  createdAt: p.createdAt,
+});
+
 const movePriorityUpStreamHandler = handler<
   MovePriorityUpEvent,
-  { priorityOrder: Writable<Person[]> }
->((event, { priorityOrder }) => {
+  { people: Writable<Person[]> }
+>((event, { people }) => {
   const person = event.person;
-  const order = priorityOrder.get();
+  const order = people.get();
   const idx = order.findIndex((p) => equals(person, p));
   if (idx <= 0) return;
 
-  const newOrder = [...order];
+  const newOrder = order.map(reconstructPerson);
   [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
-  priorityOrder.set(newOrder);
+  people.set(newOrder);
 });
 
 // Move person down in priority (event-based for exposed stream)
 const movePriorityDownStreamHandler = handler<
   MovePriorityDownEvent,
-  { priorityOrder: Writable<Person[]> }
->((event, { priorityOrder }) => {
+  { people: Writable<Person[]> }
+>((event, { people }) => {
   const person = event.person;
-  const order = priorityOrder.get();
+  const order = people.get();
   const idx = order.findIndex((p) => equals(person, p));
   if (idx < 0 || idx >= order.length - 1) return;
 
-  const newOrder = [...order];
+  const newOrder = order.map(reconstructPerson);
   [newOrder[idx], newOrder[idx + 1]] = [newOrder[idx + 1], newOrder[idx]];
-  priorityOrder.set(newOrder);
+  people.set(newOrder);
 });
 
 // Move person up in priority (context-based for UI buttons)
 const movePriorityUpHandler = handler<
   unknown,
-  { priorityOrder: Writable<Person[]>; person: Person }
->((_event, { priorityOrder, person }) => {
-  const order = priorityOrder.get();
+  { people: Writable<Person[]>; person: Person }
+>((_event, { people, person }) => {
+  const order = people.get();
   const idx = order.findIndex((p) => equals(person, p));
   if (idx <= 0) return;
 
-  const newOrder = [...order];
+  // Reconstruct all objects to strip proxy symbols, then swap
+  const newOrder = order.map(reconstructPerson);
   [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
-  priorityOrder.set(newOrder);
+  people.set(newOrder);
 });
 
 // Move person down in priority (context-based for UI buttons)
 const movePriorityDownHandler = handler<
   unknown,
-  { priorityOrder: Writable<Person[]>; person: Person }
->((_event, { priorityOrder, person }) => {
-  const order = priorityOrder.get();
+  { people: Writable<Person[]>; person: Person }
+>((_event, { people, person }) => {
+  const order = people.get();
   const idx = order.findIndex((p) => equals(person, p));
   if (idx < 0 || idx >= order.length - 1) return;
 
-  const newOrder = [...order];
+  // Reconstruct all objects to strip proxy symbols, then swap
+  const newOrder = order.map(reconstructPerson);
   [newOrder[idx], newOrder[idx + 1]] = [newOrder[idx + 1], newOrder[idx]];
-  priorityOrder.set(newOrder);
+  people.set(newOrder);
 });
 
 // Add a person
 const addPersonHandler = handler<
   AddPersonEvent,
-  { people: Writable<Person[]>; priorityOrder: Writable<Person[]> }
->((event, { people, priorityOrder }) => {
+  { people: Writable<Person[]> }
+>((event, { people }) => {
   const currentPeople = people.get();
 
   const person: Person = {
@@ -618,8 +647,6 @@ const addPersonHandler = handler<
     createdAt: Date.now(),
   };
   people.push(person);
-  // Push the person object directly to priorityOrder (it's now Person[], not string[])
-  priorityOrder.set([...priorityOrder.get(), person]);
 });
 
 // Add a guest
@@ -669,15 +696,14 @@ const runAutoAllocateHandler = handler<
   {
     requests: Writable<SpotRequest[]>;
     allocations: Writable<Allocation[]>;
-    _people: Writable<Person[]>;
+    people: Writable<Person[]>;
     _guests: Writable<Guest[]>;
-    priorityOrder: Writable<Person[]>;
   }
->((event, { requests, allocations, _people, _guests, priorityOrder }) => {
+>((event, { requests, allocations, people, _guests }) => {
   const date = event.date;
   const reqList = requests.get();
   const allocList = allocations.get();
-  const prioOrder = priorityOrder.get();
+  const prioOrder = people.get();
 
   const pendingReqs = reqList.filter(
     (r) => r.date === date && r.status === "pending",
@@ -853,9 +879,8 @@ const addPersonFromFormHandler = handler<
     newPersonName: Writable<string>;
     newPersonEmail: Writable<string>;
     people: Writable<Person[]>;
-    priorityOrder: Writable<Person[]>;
   }
->((_event, { newPersonName, newPersonEmail, people, priorityOrder }) => {
+>((_event, { newPersonName, newPersonEmail, people }) => {
   const name = newPersonName.get().trim();
   const email = newPersonEmail.get().trim();
   if (!name) return;
@@ -876,7 +901,6 @@ const addPersonFromFormHandler = handler<
     createdAt: Date.now(),
   };
   people.push(person);
-  priorityOrder.set([...priorityOrder.get(), person]);
 
   newPersonName.set("");
   newPersonEmail.set("");
@@ -971,17 +995,17 @@ const runAutoAllocateFromFormHandler = handler<
     selectedRequestDate: Writable<string>;
     requests: Writable<SpotRequest[]>;
     allocations: Writable<Allocation[]>;
-    priorityOrder: Writable<Person[]>;
+    people: Writable<Person[]>;
   }
 >(
   (
     _event,
-    { selectedRequestDate, requests, allocations, priorityOrder },
+    { selectedRequestDate, requests, allocations, people },
   ) => {
     const date = selectedRequestDate.get();
     const reqList = requests.get();
     const allocList = allocations.get();
-    const prioOrder = priorityOrder.get();
+    const prioOrder = people.get();
 
     const pendingReqs = reqList.filter(
       (r) => r.date === date && r.status === "pending",
@@ -1152,7 +1176,7 @@ const runAutoAllocateFromFormHandler = handler<
 // ============ MAIN PATTERN ============
 
 export default pattern<Input, Output>(
-  ({ spots, people, guests, requests, allocations, priorityOrder }) => {
+  ({ spots, people, guests, requests, allocations }) => {
     const todayDate = getTodayDate();
 
     // Tab state
@@ -1172,7 +1196,10 @@ export default pattern<Input, Output>(
     const todayAvailable = getTodayAvailableCount({ allocations, spots });
     const todayPendingCount = getTodayPendingCount({ requests });
     const weekSummary = getWeekSummary({ allocations, requests, spots });
-    const sortedPriority = getSortedPriorityList({ people, priorityOrder });
+    // Note: Using people directly instead of lift() result
+    // The people array order IS the priority order, no transformation needed
+    // Using lift() would return an OpaqueRef that doesn't work with JSX .map()
+    const sortedPriority = people;
     const todayPending = getPendingRequestsForDate({
       requests,
       date: todayDate,
@@ -1196,7 +1223,6 @@ export default pattern<Input, Output>(
       newPersonName,
       newPersonEmail,
       people,
-      priorityOrder,
     });
     const addGuestFromFormStream = addGuestFromFormHandler({
       newGuestName,
@@ -1215,7 +1241,7 @@ export default pattern<Input, Output>(
       selectedRequestDate,
       requests,
       allocations,
-      priorityOrder,
+      people,
     });
 
     // ============ UI ============
@@ -1373,9 +1399,27 @@ export default pattern<Input, Output>(
 
                 {ifElse(
                   isArrayEmpty(todayPending),
-                  <div style="text-align: center; color: var(--ct-color-gray-500); padding: 1rem;">
-                    No pending requests for today
-                  </div>,
+                  ifElse(
+                    isNumberZero(personCount),
+                    <ct-card style="background: var(--ct-color-blue-50); border: 1px solid var(--ct-color-blue-200);">
+                      <ct-vstack
+                        gap="2"
+                        style="text-align: center; padding: 1rem;"
+                      >
+                        <span style="font-size: 1.5rem;">🚗</span>
+                        <span style="font-weight: 600; color: var(--ct-color-blue-700);">
+                          Get Started
+                        </span>
+                        <span style="color: var(--ct-color-gray-600); font-size: 0.875rem;">
+                          Add team members in the Admin tab to begin
+                          coordinating parking spots.
+                        </span>
+                      </ct-vstack>
+                    </ct-card>,
+                    <div style="text-align: center; color: var(--ct-color-gray-500); padding: 1rem;">
+                      No pending requests for today
+                    </div>,
+                  ),
                   null,
                 )}
               </ct-vstack>,
@@ -1480,8 +1524,9 @@ export default pattern<Input, Output>(
                       <ct-button
                         variant="ghost"
                         size="sm"
+                        disabled={isFirstInList(idx)}
                         onClick={movePriorityUpHandler({
-                          priorityOrder,
+                          people,
                           person,
                         })}
                       >
@@ -1490,8 +1535,9 @@ export default pattern<Input, Output>(
                       <ct-button
                         variant="ghost"
                         size="sm"
+                        disabled={isLastInList({ idx, length: personCount })}
                         onClick={movePriorityDownHandler({
-                          priorityOrder,
+                          people,
                           person,
                         })}
                       >
@@ -1502,7 +1548,6 @@ export default pattern<Input, Output>(
                         size="sm"
                         onClick={removePersonHandler({
                           people,
-                          priorityOrder,
                           requests,
                           guests,
                           person,
@@ -1573,9 +1618,10 @@ export default pattern<Input, Output>(
                       <ct-select
                         $value={newGuestType}
                         items={[
-                          { label: "High Priority", value: "high-priority" },
                           { label: "Best Effort", value: "best-effort" },
+                          { label: "High Priority", value: "high-priority" },
                         ]}
+                        placeholder="Priority"
                         style="width: 140px;"
                       />
                       <ct-button
@@ -1667,7 +1713,7 @@ export default pattern<Input, Output>(
                               ),
                             }}
                           >
-                            {guest.type}
+                            {formatGuestType(guest.type)}
                           </span>
                           <ct-button
                             variant="ghost"
@@ -1703,21 +1749,19 @@ export default pattern<Input, Output>(
       guests,
       requests,
       allocations,
-      priorityOrder,
       todayDate,
       // Exposed action streams for testing
-      addPerson: addPersonHandler({ people, priorityOrder }),
+      addPerson: addPersonHandler({ people }),
       addGuest: addGuestHandler({ guests }),
       requestSpot: requestSpotHandler({ requests }),
       runAutoAllocate: runAutoAllocateHandler({
         requests,
         allocations,
-        _people: people,
+        people,
         _guests: guests,
-        priorityOrder,
       }),
-      movePriorityUp: movePriorityUpStreamHandler({ priorityOrder }),
-      movePriorityDown: movePriorityDownStreamHandler({ priorityOrder }),
+      movePriorityUp: movePriorityUpStreamHandler({ people }),
+      movePriorityDown: movePriorityDownStreamHandler({ people }),
     };
   },
 );
