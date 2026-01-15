@@ -16,6 +16,7 @@ deno check recipes/[!_]*.ts*
 # Ignore ct-outliner until re-added
 deno check packages/ui/src/v2/components/*[!outliner]/*.ts*
 
+# Check core packages
 deno check \
   packages/api \
   packages/background-charm-service \
@@ -31,22 +32,6 @@ deno check \
   packages/js-compiler \
   packages/llm \
   packages/memory \
-  packages/patterns/*.ts \
-  packages/patterns/*.tsx \
-  packages/patterns/battleship \
-  packages/patterns/budget-tracker \
-  packages/patterns/contacts \
-  packages/patterns/deprecated \
-  packages/patterns/examples \
-  packages/patterns/gideon-tests \
-  packages/patterns/google \
-  packages/patterns/integration \
-  packages/patterns/notes \
-  packages/patterns/record \
-  packages/patterns/scrabble \
-  packages/patterns/system \
-  packages/patterns/test \
-  packages/patterns/weekly-calendar \
   packages/runner \
   packages/runtime-client \
   packages/seeder \
@@ -56,3 +41,24 @@ deno check \
   packages/static/test \
   packages/toolshed \
   packages/utils
+
+# Check patterns separately to avoid OOM in CI
+deno check \
+  packages/patterns/*.ts \
+  packages/patterns/*.tsx \
+  packages/patterns/battleship \
+  packages/patterns/budget-tracker \
+  packages/patterns/contacts \
+  packages/patterns/deprecated \
+  packages/patterns/examples \
+  packages/patterns/gideon-tests \
+  packages/patterns/integration \
+  packages/patterns/notes \
+  packages/patterns/record \
+  packages/patterns/scrabble \
+  packages/patterns/system \
+  packages/patterns/test \
+  packages/patterns/weekly-calendar
+
+# Check google patterns separately (large package)
+deno check packages/patterns/google
