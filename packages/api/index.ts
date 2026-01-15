@@ -2124,14 +2124,13 @@ export type Props = {
     | Stream<any>;
 };
 
-/** Valid renderable content for JSX children */
-type Renderable = InnerRenderNode | UIRenderable | JSXElement;
-
 /** A child in a view can be one of a few things */
 export type RenderNode =
   | InnerRenderNode
-  | AnyBrandedCell<Renderable | null | undefined>
-  | OpaqueRef<Renderable | null | undefined>
+  | JSXElement
+  | AnyBrandedCell<
+    InnerRenderNode | UIRenderable | JSXElement | null | undefined
+  >
   | Array<RenderNode>;
 
 type InnerRenderNode =

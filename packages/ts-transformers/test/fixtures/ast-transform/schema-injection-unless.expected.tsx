@@ -90,59 +90,16 @@ export default recipe({
                     type: "object",
                     properties: {}
                 }, {
-                    $ref: "#/$defs/Renderable",
+                    $ref: "#/$defs/UIRenderable",
                     asOpaque: true
                 }, {
-                    $ref: "#/$defs/Renderable",
-                    asOpaque: true
-                }, {
-                    $ref: "#/$defs/Renderable",
-                    asOpaque: true
-                }, {
-                    $ref: "#/$defs/Renderable",
-                    asOpaque: true
-                }, {
-                    $ref: "#/$defs/Renderable",
-                    asOpaque: true
-                }, {
-                    $ref: "#/$defs/Renderable",
-                    asOpaque: true
-                }, {
-                    $ref: "#/$defs/Renderable",
-                    asOpaque: true
-                }, {
-                    $ref: "#/$defs/Renderable",
-                    asOpaque: true
+                    type: "object",
+                    properties: {}
                 }, {
                     type: "array",
                     items: {
                         $ref: "#/$defs/RenderNode"
                     }
-                }, {
-                    type: "null"
-                }]
-        },
-        Renderable: {
-            anyOf: [{
-                    type: "string"
-                }, {
-                    type: "number"
-                }, {
-                    type: "boolean",
-                    "enum": [false]
-                }, {
-                    type: "boolean",
-                    "enum": [true]
-                }, {
-                    $ref: "#/$defs/VNode"
-                }, {
-                    $ref: "#/$defs/UIRenderable"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
                 }, {
                     type: "null"
                 }]
