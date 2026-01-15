@@ -289,13 +289,6 @@ const isArrayEmpty = lift((arr: unknown[]): boolean => arr.length === 0);
 
 const isNumberZero = lift((n: number): boolean => n === 0);
 
-const isFirstInList = lift((idx: number): boolean => idx === 0);
-
-const isLastInList = lift(
-  (args: { idx: number; length: number }): boolean =>
-    args.idx >= args.length - 1,
-);
-
 const formatGuestType = lift((type: GuestType): string =>
   type === "high-priority" ? "High Priority" : "Best Effort"
 );
@@ -303,14 +296,6 @@ const formatGuestType = lift((type: GuestType): string =>
 // Lifted helpers for conditional rendering (to avoid computed() inside .map())
 const isPendingGreaterThanZero = lift(
   (day: { pending: number }): boolean => day.pending > 0,
-);
-
-const personLivesNearby = lift((person: Person): boolean =>
-  person.livesNearby === true
-);
-
-const personHasDefaultSpot = lift((person: Person): boolean =>
-  person.defaultSpot !== null
 );
 
 const isGuestHighPriority = lift((guest: Guest): boolean =>
@@ -383,16 +368,23 @@ const getWeekSummary = lift(
 
 // ============ MODULE-SCOPE HANDLERS ============
 
-// Remove a person (context-based for UI buttons)
-const removePersonHandler = handler<
-  unknown,
+/**
+ * Remove a person (event-based for stream pattern)
+ *
+ * WORKAROUND for rendering issue: Creating handler bindings inside .map()
+ * with person from callback causes only the first card to render.
+ * Using event-based handlers with .send() in arrow functions fixes this.
+ * See: movePriorityUpStreamHandler for the same pattern.
+ */
+const removePersonStreamHandler = handler<
+  RemovePersonEvent,
   {
     people: Writable<Person[]>;
     requests: Writable<SpotRequest[]>;
     guests: Writable<Guest[]>;
-    person: Person;
   }
->((_event, { people, requests, guests, person }) => {
+>((event, { people, requests, guests }) => {
+  const person = event.person;
   const pList = people.get();
   const idx = pList.findIndex((p) => equals(person, p));
   if (idx >= 0) {
@@ -400,16 +392,16 @@ const removePersonHandler = handler<
   }
   // Remove related requests
   const reqList = requests.get();
-  const filteredReqs = reqList.filter((r) =>
-    !r.person || !equals(r.person, person)
+  const filteredReqs = reqList.filter(
+    (r) => !r.person || !equals(r.person, person),
   );
   if (filteredReqs.length !== reqList.length) {
     requests.set(filteredReqs);
   }
   // Remove guests hosted by this person
   const guestList = guests.get();
-  const filteredGuests = guestList.filter((g) =>
-    !g.hostPerson || !equals(g.hostPerson, person)
+  const filteredGuests = guestList.filter(
+    (g) => !g.hostPerson || !equals(g.hostPerson, person),
   );
   if (filteredGuests.length !== guestList.length) {
     guests.set(filteredGuests);
@@ -590,36 +582,6 @@ const movePriorityDownStreamHandler = handler<
   const idx = order.findIndex((p) => equals(person, p));
   if (idx < 0 || idx >= order.length - 1) return;
 
-  const newOrder = order.map(reconstructPerson);
-  [newOrder[idx], newOrder[idx + 1]] = [newOrder[idx + 1], newOrder[idx]];
-  people.set(newOrder);
-});
-
-// Move person up in priority (context-based for UI buttons)
-const movePriorityUpHandler = handler<
-  unknown,
-  { people: Writable<Person[]>; person: Person }
->((_event, { people, person }) => {
-  const order = people.get();
-  const idx = order.findIndex((p) => equals(person, p));
-  if (idx <= 0) return;
-
-  // Reconstruct all objects to strip proxy symbols, then swap
-  const newOrder = order.map(reconstructPerson);
-  [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
-  people.set(newOrder);
-});
-
-// Move person down in priority (context-based for UI buttons)
-const movePriorityDownHandler = handler<
-  unknown,
-  { people: Writable<Person[]>; person: Person }
->((_event, { people, person }) => {
-  const order = people.get();
-  const idx = order.findIndex((p) => equals(person, p));
-  if (idx < 0 || idx >= order.length - 1) return;
-
-  // Reconstruct all objects to strip proxy symbols, then swap
   const newOrder = order.map(reconstructPerson);
   [newOrder[idx], newOrder[idx + 1]] = [newOrder[idx + 1], newOrder[idx]];
   people.set(newOrder);
@@ -1244,6 +1206,21 @@ export default pattern<Input, Output>(
       people,
     });
 
+    /**
+     * Priority control streams for People tab
+     *
+     * WORKAROUND: Creating handler bindings inside .map() with person from
+     * callback causes only the first card to render. Using pre-created
+     * streams and calling .send() in onClick arrow functions fixes this.
+     */
+    const movePriorityUpStream = movePriorityUpStreamHandler({ people });
+    const movePriorityDownStream = movePriorityDownStreamHandler({ people });
+    const removePersonStream = removePersonStreamHandler({
+      people,
+      requests,
+      guests,
+    });
+
     // ============ UI ============
 
     return {
@@ -1493,65 +1470,44 @@ export default pattern<Input, Output>(
                   Higher position = gets spot first. Use arrows to reorder.
                 </p>
 
-                {sortedPriority.map((person, idx) => (
+                {
+                  /*
+                   * Person cards with priority controls
+                   *
+                   * WORKAROUND: Use pre-created handler streams and call .send()
+                   * in onClick arrow functions instead of creating handlers
+                   * inline in .map(). Creating handlers inside .map() with
+                   * person from the callback causes rendering issues where
+                   * only the first card renders.
+                   */
+                }
+                {sortedPriority.map((person) => (
                   <ct-card>
                     <ct-hstack gap="2" align="center">
-                      <span style="font-size: 1.25rem; font-weight: bold; min-width: 30px; color: var(--ct-color-gray-400);">
-                        {idx + 1}
-                      </span>
                       <ct-vstack gap="0" style="flex: 1;">
                         <span style="font-weight: 500;">{person.name}</span>
-                        <ct-hstack gap="2">
-                          <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
-                            {person.usualCommuteMode || "drive"}
-                          </span>
-                          {ifElse(
-                            personLivesNearby(person),
-                            <span style="font-size: 0.625rem; background: var(--ct-color-cyan-100); color: var(--ct-color-cyan-700); padding: 0.125rem 0.5rem; border-radius: 999px;">
-                              Nearby
-                            </span>,
-                            null,
-                          )}
-                          {ifElse(
-                            personHasDefaultSpot(person),
-                            <span style="font-size: 0.625rem; background: var(--ct-color-gray-100); color: var(--ct-color-gray-700); padding: 0.125rem 0.5rem; border-radius: 999px;">
-                              Default: #{person.defaultSpot}
-                            </span>,
-                            null,
-                          )}
-                        </ct-hstack>
+                        <span style="font-size: 0.75rem; color: var(--ct-color-gray-500);">
+                          {person.usualCommuteMode || "drive"}
+                        </span>
                       </ct-vstack>
                       <ct-button
                         variant="ghost"
                         size="sm"
-                        disabled={isFirstInList(idx)}
-                        onClick={movePriorityUpHandler({
-                          people,
-                          person,
-                        })}
+                        onClick={() => movePriorityUpStream.send({ person })}
                       >
                         ↑
                       </ct-button>
                       <ct-button
                         variant="ghost"
                         size="sm"
-                        disabled={isLastInList({ idx, length: personCount })}
-                        onClick={movePriorityDownHandler({
-                          people,
-                          person,
-                        })}
+                        onClick={() => movePriorityDownStream.send({ person })}
                       >
                         ↓
                       </ct-button>
                       <ct-button
                         variant="ghost"
                         size="sm"
-                        onClick={removePersonHandler({
-                          people,
-                          requests,
-                          guests,
-                          person,
-                        })}
+                        onClick={() => removePersonStream.send({ person })}
                       >
                         ×
                       </ct-button>

@@ -30,7 +30,6 @@ export default pattern(() => {
     guests: Writable.of([]),
     requests: Writable.of([]),
     allocations: Writable.of([]),
-    priorityOrder: Writable.of([]),
   });
 
   // ============ INITIAL STATE ASSERTIONS ============
@@ -98,8 +97,8 @@ export default pattern(() => {
     return Array.isArray(people) && people.length === 3;
   });
 
-  const assert_priority_order_has_3 = computed(() => {
-    const order = coordinator.priorityOrder;
+  const assert_people_order_has_3 = computed(() => {
+    const order = coordinator.people;
     return Array.isArray(order) && order.length === 3;
   });
 
@@ -193,15 +192,15 @@ export default pattern(() => {
   // ============ PRIORITY REORDER TEST ============
 
   const action_move_third_person_up = action(() => {
-    // Move whoever is third up (priorityOrder is now Person[])
-    const order = coordinator.priorityOrder;
+    // Move whoever is third up (people array order is the priority order)
+    const order = coordinator.people;
     if (order.length >= 3) {
       coordinator.movePriorityUp.send({ person: order[2] });
     }
   });
 
   const assert_order_changed = computed(() => {
-    const order = coordinator.priorityOrder;
+    const order = coordinator.people;
     // After moving third up, positions 1 and 2 should be swapped
     return order.length === 3;
   });
@@ -241,7 +240,7 @@ export default pattern(() => {
       { action: action_add_person_bob },
       { action: action_add_person_charlie },
       { assertion: assert_has_3_people },
-      { assertion: assert_priority_order_has_3 },
+      { assertion: assert_people_order_has_3 },
 
       // Create requests
       { action: action_alice_requests_spot },
