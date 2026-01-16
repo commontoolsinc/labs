@@ -1184,6 +1184,8 @@ export type JSONSchemaObj = {
   readonly asOpaque?: boolean;
   // streams are what handler returns. if you pass that to another handler/lift and declare it as asSteam, you can call .send on it
   readonly asStream?: boolean;
+  // tells the query engine not to traverse into this schema (used for array items when only accessing .length)
+  readonly asStub?: boolean;
   // temporarily used to assign labels like "confidential"
   readonly ifc?: { classification?: string[]; integrity?: string[] };
 };

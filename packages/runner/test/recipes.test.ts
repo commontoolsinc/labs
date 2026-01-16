@@ -2054,6 +2054,116 @@ describe("Recipe Runner", () => {
     expect(typeof treePattern).toBe("function");
   });
 
+  it("should reactively update derive that reads array.length with asStub items", async () => {
+    // This test verifies that when accessing only array properties like .length,
+    // the items: { asStub: true } schema correctly allows reactive updates.
+    // This mimics the transformation output for: computed(() => items.length)
+
+    // First lift: produces an array based on a count input
+    const generateItems = lift(
+      // Input schema
+      {
+        type: "object",
+        properties: {
+          count: { type: "number" },
+        },
+        required: ["count"],
+      } as const satisfies JSONSchema,
+      // Output schema
+      {
+        type: "array",
+        items: { type: "object", properties: { id: { type: "number" } } },
+      } as const satisfies JSONSchema,
+      // Compute function
+      ({ count }) => Array.from({ length: count }, (_, i) => ({ id: i })),
+    );
+
+    // Second lift: reads only the array's length (uses asStub for items)
+    // This mimics what computed(() => items.length) compiles to
+    // asStub tells the query engine not to traverse the items
+    const computeLength = lift(
+      // Input schema with asStub
+      {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: { asStub: true },
+          },
+        },
+        required: ["items"],
+      } as const satisfies JSONSchema,
+      // Output schema
+      { type: "number" } as const satisfies JSONSchema,
+      // Compute function - reads .length from the array
+      ({ items }: { items: unknown[] }) => items.length,
+    );
+
+    const lengthRecipe = recipe<{ count: number }>(
+      "Array length with asStub",
+      ({ count }) => {
+        const items = generateItems({ count });
+        const length = computeLength({ items });
+        return { items, length };
+      },
+    );
+
+    // Create input cell
+    const countCell = runtime.getCell<number>(
+      space,
+      "asStub array length test - count",
+      undefined,
+      tx,
+    );
+    countCell.set(3);
+
+    const resultCell = runtime.getCell<{
+      items: Array<{ id: number }>;
+      length: number;
+    }>(
+      space,
+      "should reactively update derive that reads array.length with asStub items",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(
+      tx,
+      lengthRecipe,
+      { count: countCell },
+      resultCell,
+    );
+    tx.commit();
+    tx = runtime.edit();
+
+    let value = await result.pull();
+
+    // Initial state: 3 items
+    expect(value.items).toHaveLength(3);
+    expect(value.length).toBe(3);
+
+    // Update count to 5
+    countCell.withTx(tx).send(5);
+    tx.commit();
+    tx = runtime.edit();
+
+    value = await result.pull();
+
+    // The length lift should have updated reactively
+    expect(value.items).toHaveLength(5);
+    expect(value.length).toBe(5);
+
+    // Update count to 0
+    countCell.withTx(tx).send(0);
+    tx.commit();
+    tx = runtime.edit();
+
+    value = await result.pull();
+
+    expect(value.items).toHaveLength(0);
+    expect(value.length).toBe(0);
+  });
+
   it("should run dynamically instantiated recipes before reading their outputs", async () => {
     // This test reproduces a bug where:
     // 1. A lift dynamically instantiates recipes and pushes them to an array

@@ -558,8 +558,7 @@ export default pattern(({ items, showInactive }) => {
                         tags: {
                             type: "array",
                             items: {
-                                not: true,
-                                asOpaque: true
+                                asStub: true
                             }
                         }
                     },
