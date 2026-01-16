@@ -34,7 +34,7 @@ interface Input {
 
 /** #book #article #reading */
 interface Output {
-  [NAME]: ReturnType<typeof computed>;
+  [NAME]: string;
   [UI]: VNode;
   item: ReadingItem;
 }
