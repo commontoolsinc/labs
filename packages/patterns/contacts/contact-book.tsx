@@ -1,5 +1,6 @@
 /// <cts-enable />
 import {
+  action,
   computed,
   Default,
   equals,
@@ -13,7 +14,7 @@ import {
 
 import ContactDetail, { type Contact } from "./contact-detail.tsx";
 
-const matchesSearch = (contact: Contact, query: string): boolean => {
+export const matchesSearch = (contact: Contact, query: string): boolean => {
   if (!query) return true;
   const q = query.toLowerCase();
   const name = (contact.name || "").toLowerCase();
@@ -40,9 +41,6 @@ interface Output {
 
 export default pattern<Input, Output>(({ contacts, relationships }) => {
   const searchQuery = Writable.of("");
-  const newRelationFrom = Writable.of("");
-  const newRelationTo = Writable.of("");
-  const newRelationLabel = Writable.of("");
 
   const contactCount = computed(() => contacts.get().length);
 
@@ -50,6 +48,36 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
     () =>
       contacts.map((c) => ({ label: c.name || "(unnamed)", value: c.name })),
   );
+
+  const onAddContact = action(() => {
+    contacts.push({
+      name: "",
+      email: "",
+      phone: "",
+      company: "",
+      tags: [],
+      notes: "",
+      createdAt: Date.now(),
+    });
+  });
+
+  const newRelationFrom = Writable.of("");
+  const newRelationTo = Writable.of("");
+  const newRelationLabel = Writable.of("");
+  const onNewRelation = action(() => {
+    const from = newRelationFrom.get();
+    const to = newRelationTo.get();
+    if (from && to && from !== to) {
+      relationships.push({
+        fromName: from,
+        toName: to,
+        label: newRelationLabel.get(),
+      });
+      newRelationFrom.set("");
+      newRelationTo.set("");
+      newRelationLabel.set("");
+    }
+  });
 
   return {
     [NAME]: "Contact Book",
@@ -82,14 +110,24 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
                   );
               });
 
+              const onClick = action(() => {
+                const detail = ContactDetail({ contact });
+                return navigateTo(detail);
+              });
+
+              const onDelete = action(() => {
+                const current = contacts.get();
+                const idx = current.findIndex((c) => equals(contact, c));
+                if (idx >= 0) {
+                  contacts.set(current.toSpliced(idx, 1));
+                }
+              });
+
               return ifElse(
                 isVisible,
                 <ct-card
                   style="cursor: pointer;"
-                  onClick={() => {
-                    const detail = ContactDetail({ contact });
-                    return navigateTo(detail);
-                  }}
+                  onClick={onClick}
                 >
                   <ct-hstack gap="2" align="start">
                     <ct-vstack gap="1" style="flex: 1;">
@@ -118,15 +156,7 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
                     </ct-vstack>
                     <ct-button
                       variant="ghost"
-                      onClick={() => {
-                        const current = contacts.get();
-                        const idx = current.findIndex((c) =>
-                          equals(contact, c)
-                        );
-                        if (idx >= 0) {
-                          contacts.set(current.toSpliced(idx, 1));
-                        }
-                      }}
+                      onClick={onDelete}
                     >
                       ×
                     </ct-button>
@@ -150,17 +180,7 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
           <ct-hstack gap="2">
             <ct-button
               variant="primary"
-              onClick={() => {
-                contacts.push({
-                  name: "",
-                  email: "",
-                  phone: "",
-                  company: "",
-                  tags: [],
-                  notes: "",
-                  createdAt: Date.now(),
-                });
-              }}
+              onClick={onAddContact}
             >
               Add Contact
             </ct-button>
@@ -185,20 +205,7 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
               style="width: 100px;"
             />
             <ct-button
-              onClick={() => {
-                const from = newRelationFrom.get();
-                const to = newRelationTo.get();
-                if (from && to && from !== to) {
-                  relationships.push({
-                    fromName: from,
-                    toName: to,
-                    label: newRelationLabel.get(),
-                  });
-                  newRelationFrom.set("");
-                  newRelationTo.set("");
-                  newRelationLabel.set("");
-                }
-              }}
+              onClick={onNewRelation}
             >
               Link
             </ct-button>
