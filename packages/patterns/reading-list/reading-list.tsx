@@ -129,13 +129,7 @@ export default pattern<Input, Output>(({ items }) => {
 
               return isVisible
                 ? (
-                  <ct-card
-                    style="cursor: pointer;"
-                    onClick={() => {
-                      const detail = ReadingItemDetail({ item });
-                      return navigateTo(detail);
-                    }}
-                  >
+                  <ct-card>
                     <ct-hstack gap="2" align="center">
                       <span style="font-size: 1.5rem;">
                         {getTypeEmoji(item.type)}
@@ -160,6 +154,15 @@ export default pattern<Input, Output>(({ items }) => {
                           )}
                         </ct-hstack>
                       </ct-vstack>
+                      <ct-button
+                        variant="secondary"
+                        onClick={() => {
+                          const detail = ReadingItemDetail({ item });
+                          return navigateTo(detail);
+                        }}
+                      >
+                        Edit
+                      </ct-button>
                       <ct-button
                         variant="ghost"
                         onClick={() => removeItem.send({ item })}

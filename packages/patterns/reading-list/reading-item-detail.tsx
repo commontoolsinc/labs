@@ -9,9 +9,6 @@ import {
   Writable,
 } from "commontools";
 
-/** Wrap all fields of T in Writable<> for write access */
-type Cellify<T> = { [K in keyof T]: Writable<T[K]> };
-
 export type ItemType = "book" | "article" | "paper" | "video";
 export type ItemStatus = "want" | "reading" | "finished" | "abandoned";
 
@@ -29,7 +26,7 @@ export interface ReadingItem {
 }
 
 interface Input {
-  item: Cellify<ReadingItem>;
+  item: Writable<ReadingItem>;
 }
 
 /** #book #article #reading */
@@ -41,11 +38,11 @@ interface Output {
 
 export default pattern<Input, Output>(({ item }) => {
   return {
-    [NAME]: computed(() => `Reading: ${item.title}`),
+    [NAME]: computed(() => `Reading: ${item.key("title").get()}`),
     [UI]: (
       <ct-screen>
         <ct-vstack slot="header">
-          <ct-heading level={4}>{item.title || "New Item"}</ct-heading>
+          <ct-heading level={4}>{item.key("title") || "New Item"}</ct-heading>
         </ct-vstack>
 
         <ct-vscroll flex showScrollbar fadeEdges>
@@ -56,14 +53,17 @@ export default pattern<Input, Output>(({ item }) => {
                   <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                     Title
                   </label>
-                  <ct-input $value={item.title} placeholder="Title" />
+                  <ct-input $value={item.key("title")} placeholder="Title" />
                 </ct-vstack>
 
                 <ct-vstack gap="1">
                   <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                     Author
                   </label>
-                  <ct-input $value={item.author} placeholder="Author name" />
+                  <ct-input
+                    $value={item.key("author")}
+                    placeholder="Author name"
+                  />
                 </ct-vstack>
 
                 <ct-vstack gap="1">
@@ -71,7 +71,7 @@ export default pattern<Input, Output>(({ item }) => {
                     URL
                   </label>
                   <ct-input
-                    $value={item.url}
+                    $value={item.key("url")}
                     placeholder="https://..."
                     type="url"
                   />
@@ -83,7 +83,7 @@ export default pattern<Input, Output>(({ item }) => {
                       Type
                     </label>
                     <ct-select
-                      $value={item.type}
+                      $value={item.key("type")}
                       items={[
                         { label: "📄 Article", value: "article" },
                         { label: "📚 Book", value: "book" },
@@ -98,7 +98,7 @@ export default pattern<Input, Output>(({ item }) => {
                       Status
                     </label>
                     <ct-select
-                      $value={item.status}
+                      $value={item.key("status")}
                       items={[
                         { label: "Want to read", value: "want" },
                         { label: "Reading", value: "reading" },
@@ -114,7 +114,7 @@ export default pattern<Input, Output>(({ item }) => {
                     Rating
                   </label>
                   <ct-select
-                    $value={item.rating}
+                    $value={item.key("rating")}
                     items={[
                       { label: "No rating", value: null },
                       { label: "★☆☆☆☆ (1)", value: 1 },
@@ -134,7 +134,7 @@ export default pattern<Input, Output>(({ item }) => {
                   Notes
                 </label>
                 <ct-textarea
-                  $value={item.notes}
+                  $value={item.key("notes")}
                   placeholder="Your thoughts, highlights, quotes..."
                   rows={8}
                 />
