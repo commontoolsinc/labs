@@ -4,6 +4,7 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { assert, unclaimed } from "@commontools/memory/fact";
 import * as Attestation from "../src/storage/transaction/attestation.ts";
+import type { INotFoundError } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("attestation test");
 const space = signer.did();
@@ -315,6 +316,31 @@ describe("Attestation Module", () => {
 
       // Original source should be unmodified
       expect(source.value.modified.target).toBe("old");
+    });
+
+    it("should set NotFoundError.path to last valid parent for writes to non-existent nested path", () => {
+      // Source has { user: { name: "Alice" } } - no "settings" key
+      const source = {
+        address: {
+          id: "test:notfound-path",
+          type: "application/json",
+          path: [],
+        },
+        value: { user: { name: "Alice" } },
+      } as const;
+
+      // Try to write to ["user", "settings", "theme"] - "settings" doesn't exist
+      const result = Attestation.write(source, {
+        id: "test:notfound-path",
+        type: "application/json",
+        path: ["user", "settings", "theme"],
+      }, "dark");
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.name).toBe("NotFoundError");
+      // The path should point to the last EXISTING location: ["user"]
+      // (the parent that exists, not the path we tried to access)
+      expect((result.error as INotFoundError).path).toEqual(["user"]);
     });
   });
 

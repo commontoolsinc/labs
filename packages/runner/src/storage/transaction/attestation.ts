@@ -225,8 +225,7 @@ export const write = (
 
   if ("error" in result) {
     // Map error position to full address path
-    // result.error.at is the index where we TRIED to write but failed
-    // For NotFoundError, we want the path to the LAST VALID location (parent of undefined)
+    // result.error.at is the depth where we found an error; errorPath includes that level
     const errorPath = address.path.slice(
       0,
       source.address.path.length + result.error.at,
