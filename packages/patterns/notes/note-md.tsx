@@ -32,6 +32,45 @@ const goToEdit = handler<void, { sourceNote: any }>((_ev, { sourceNote }) => {
   }
 });
 
+// Handler for checkbox toggle in markdown
+const handleCheckboxToggle = handler<
+  { detail: { index: number; checked: boolean } },
+  { sourceNote: any }
+>((event, { sourceNote }) => {
+  if (!sourceNote) return;
+
+  // sourceNote is a cell reference from allCharms.find()
+  // Access content via the cell's property
+  const content = sourceNote?.content ?? "";
+  const { index, checked } = event.detail;
+
+  // Find all checkbox patterns in the content
+  const checkboxPattern = /- \[([ xX])\]/g;
+  let match;
+  let currentIndex = 0;
+  let result = content;
+
+  // Need to reset lastIndex since we're reusing the regex
+  checkboxPattern.lastIndex = 0;
+
+  while ((match = checkboxPattern.exec(content)) !== null) {
+    if (currentIndex === index) {
+      // Found the checkbox to toggle
+      const newCheckbox = checked ? "- [x]" : "- [ ]";
+      result = content.slice(0, match.index) +
+        newCheckbox +
+        content.slice(match.index + match[0].length);
+      break;
+    }
+    currentIndex++;
+  }
+
+  // Update the source note's content using .key() for write access
+  if (result !== content) {
+    sourceNote.key("content").set(result);
+  }
+});
+
 interface NoteData {
   title?: string;
   content?: string;
@@ -85,12 +124,20 @@ export default pattern<Input, Output>(({ note }) => {
     return allCharms.find((charm: any) => charm?.noteId === myNoteId);
   });
 
+  // Bind checkbox toggle handler with sourceNote
+  const boundCheckboxToggle = handleCheckboxToggle({
+    sourceNote: sourceNote as any,
+  });
+
   // Scrollable content with markdown + backlinks (for print support)
   const markdownViewer = (
     <ct-vscroll flex showScrollbar fadeEdges>
       <div style={{ padding: "1rem", minHeight: "100%" }}>
         {/* Markdown content with wiki-links converted to clickable links */}
-        <ct-markdown content={processedContent} />
+        <ct-markdown
+          content={processedContent}
+          onct-checkbox-change={boundCheckboxToggle}
+        />
 
         {/* Backlinks section - ct-chips at bottom */}
         <div
