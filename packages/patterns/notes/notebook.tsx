@@ -1729,178 +1729,157 @@ const Notebook = pattern<Input, Output>(
             </ct-vstack>
           </div>
 
-          {/* New Notebook Prompt Modal - Use CSS display to keep DOM alive for reactivity */}
-          <div
-            style={{
-              display: computed(() =>
-                showNewNotebookPrompt.get() ? "flex" : "none"
-              ),
-              position: "fixed",
-              inset: "0",
-              background: "rgba(0,0,0,0.5)",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: "9999",
-            }}
+          {/* New Notebook Prompt Modal */}
+          <ct-modal
+            $open={showNewNotebookPrompt}
+            dismissable
+            size="sm"
+            label="New Notebook"
           >
-            <ct-card style={{ minWidth: "320px", padding: "24px" }}>
-              <ct-vstack gap="4">
-                <h3 style={{ margin: 0 }}>New Notebook</h3>
-                <ct-input
-                  $value={newNotebookName}
-                  placeholder="Enter notebook name..."
-                />
-                <ct-hstack gap="2" style={{ justifyContent: "flex-end" }}>
-                  <ct-button
-                    variant="ghost"
-                    onClick={cancelNewNotebookPrompt({
-                      showNewNotebookPrompt,
-                      newNotebookName,
-                      pendingNotebookAction,
-                      selectedAddNotebook,
-                      selectedMoveNotebook,
-                    })}
-                  >
-                    Cancel
-                  </ct-button>
-                  <ct-button
-                    variant="primary"
-                    onClick={createNotebookFromPrompt({
-                      newNotebookName,
-                      showNewNotebookPrompt,
-                      pendingNotebookAction,
-                      selectedNoteIndices,
-                      notes,
-                      allCharms,
-                      notebooks,
-                    })}
-                  >
-                    Create
-                  </ct-button>
-                </ct-hstack>
-              </ct-vstack>
-            </ct-card>
-          </div>
+            <span slot="header">New Notebook</span>
+            <ct-input
+              $value={newNotebookName}
+              placeholder="Enter notebook name..."
+            />
+            <ct-hstack
+              slot="footer"
+              gap="2"
+              style={{ justifyContent: "flex-end" }}
+            >
+              <ct-button
+                variant="ghost"
+                onClick={cancelNewNotebookPrompt({
+                  showNewNotebookPrompt,
+                  newNotebookName,
+                  pendingNotebookAction,
+                  selectedAddNotebook,
+                  selectedMoveNotebook,
+                })}
+              >
+                Cancel
+              </ct-button>
+              <ct-button
+                variant="primary"
+                onClick={createNotebookFromPrompt({
+                  newNotebookName,
+                  showNewNotebookPrompt,
+                  pendingNotebookAction,
+                  selectedNoteIndices,
+                  notes,
+                  allCharms,
+                  notebooks,
+                })}
+              >
+                Create
+              </ct-button>
+            </ct-hstack>
+          </ct-modal>
 
           {/* New Note Prompt Modal */}
-          <div
-            style={{
-              display: computed(() =>
-                showNewNotePrompt.get() ? "flex" : "none"
-              ),
-              position: "fixed",
-              inset: "0",
-              background: "rgba(0,0,0,0.5)",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: "9999",
-            }}
+          <ct-modal
+            $open={showNewNotePrompt}
+            dismissable
+            size="sm"
+            label="New Note"
           >
-            <ct-card style={{ minWidth: "320px", padding: "24px" }}>
-              <ct-vstack gap="4">
-                <h3 style={{ margin: 0 }}>New Note</h3>
-                <ct-input
-                  $value={newNoteTitle}
-                  placeholder="Enter note title..."
-                />
-                <ct-hstack gap="2" style={{ justifyContent: "flex-end" }}>
-                  <ct-button
-                    variant="ghost"
-                    onClick={cancelNewNotePrompt({
-                      showNewNotePrompt,
-                      newNoteTitle,
-                      usedCreateAnotherNote,
-                    })}
-                  >
-                    Cancel
-                  </ct-button>
-                  <ct-button
-                    variant="ghost"
-                    onClick={createNoteAndContinue({
-                      newNoteTitle,
-                      notes,
-                      allCharms,
-                      usedCreateAnotherNote,
-                    })}
-                  >
-                    Create Another
-                  </ct-button>
-                  <ct-button
-                    variant="primary"
-                    onClick={createNoteAndOpen({
-                      newNoteTitle,
-                      showNewNotePrompt,
-                      notes,
-                      allCharms,
-                      usedCreateAnotherNote,
-                    })}
-                  >
-                    Create
-                  </ct-button>
-                </ct-hstack>
-              </ct-vstack>
-            </ct-card>
-          </div>
+            <span slot="header">New Note</span>
+            <ct-input
+              $value={newNoteTitle}
+              placeholder="Enter note title..."
+            />
+            <ct-hstack
+              slot="footer"
+              gap="2"
+              style={{ justifyContent: "flex-end" }}
+            >
+              <ct-button
+                variant="ghost"
+                onClick={cancelNewNotePrompt({
+                  showNewNotePrompt,
+                  newNoteTitle,
+                  usedCreateAnotherNote,
+                })}
+              >
+                Cancel
+              </ct-button>
+              <ct-button
+                variant="ghost"
+                onClick={createNoteAndContinue({
+                  newNoteTitle,
+                  notes,
+                  allCharms,
+                  usedCreateAnotherNote,
+                })}
+              >
+                Create Another
+              </ct-button>
+              <ct-button
+                variant="primary"
+                onClick={createNoteAndOpen({
+                  newNoteTitle,
+                  showNewNotePrompt,
+                  notes,
+                  allCharms,
+                  usedCreateAnotherNote,
+                })}
+              >
+                Create
+              </ct-button>
+            </ct-hstack>
+          </ct-modal>
 
           {/* New Nested Notebook Prompt Modal */}
-          <div
-            style={{
-              display: computed(() =>
-                showNewNestedNotebookPrompt.get() ? "flex" : "none"
-              ),
-              position: "fixed",
-              inset: "0",
-              background: "rgba(0,0,0,0.5)",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: "9999",
-            }}
+          <ct-modal
+            $open={showNewNestedNotebookPrompt}
+            dismissable
+            size="sm"
+            label="New Notebook"
           >
-            <ct-card style={{ minWidth: "320px", padding: "24px" }}>
-              <ct-vstack gap="4">
-                <h3 style={{ margin: 0 }}>New Notebook</h3>
-                <ct-input
-                  $value={newNestedNotebookTitle}
-                  placeholder="Enter notebook title..."
-                />
-                <ct-hstack gap="2" style={{ justifyContent: "flex-end" }}>
-                  <ct-button
-                    variant="ghost"
-                    onClick={cancelNewNestedNotebookPrompt({
-                      showNewNestedNotebookPrompt,
-                      newNestedNotebookTitle,
-                      usedCreateAnotherNotebook,
-                    })}
-                  >
-                    Cancel
-                  </ct-button>
-                  <ct-button
-                    variant="ghost"
-                    onClick={createNestedNotebookAndContinue({
-                      newNestedNotebookTitle,
-                      notes,
-                      allCharms,
-                      usedCreateAnotherNotebook,
-                    })}
-                  >
-                    Create Another
-                  </ct-button>
-                  <ct-button
-                    variant="primary"
-                    onClick={createNestedNotebookAndOpen({
-                      newNestedNotebookTitle,
-                      showNewNestedNotebookPrompt,
-                      notes,
-                      allCharms,
-                      usedCreateAnotherNotebook,
-                    })}
-                  >
-                    Create
-                  </ct-button>
-                </ct-hstack>
-              </ct-vstack>
-            </ct-card>
-          </div>
+            <span slot="header">New Notebook</span>
+            <ct-input
+              $value={newNestedNotebookTitle}
+              placeholder="Enter notebook title..."
+            />
+            <ct-hstack
+              slot="footer"
+              gap="2"
+              style={{ justifyContent: "flex-end" }}
+            >
+              <ct-button
+                variant="ghost"
+                onClick={cancelNewNestedNotebookPrompt({
+                  showNewNestedNotebookPrompt,
+                  newNestedNotebookTitle,
+                  usedCreateAnotherNotebook,
+                })}
+              >
+                Cancel
+              </ct-button>
+              <ct-button
+                variant="ghost"
+                onClick={createNestedNotebookAndContinue({
+                  newNestedNotebookTitle,
+                  notes,
+                  allCharms,
+                  usedCreateAnotherNotebook,
+                })}
+              >
+                Create Another
+              </ct-button>
+              <ct-button
+                variant="primary"
+                onClick={createNestedNotebookAndOpen({
+                  newNestedNotebookTitle,
+                  showNewNestedNotebookPrompt,
+                  notes,
+                  allCharms,
+                  usedCreateAnotherNotebook,
+                })}
+              >
+                Create
+              </ct-button>
+            </ct-hstack>
+          </ct-modal>
 
           {/* Backlinks footer - show charms that link to this notebook */}
           <ct-hstack
