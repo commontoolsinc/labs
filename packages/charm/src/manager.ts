@@ -188,8 +188,11 @@ export class CharmManager {
       );
     }
 
+    // Send each charm and wait for transaction commit
     for (const charm of newCharms) {
-      addCharmHandler.send({ charm });
+      await new Promise<void>((resolve) => {
+        addCharmHandler.send({ charm }, () => resolve());
+      });
     }
 
     await this.runtime.idle();
