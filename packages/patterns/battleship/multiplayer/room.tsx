@@ -8,12 +8,13 @@
  * - Ships are only visible on your own board
  * - Shots you've fired are visible on enemy board
  *
- * See: battleship-lobby.tsx for the lobby entry point
+ * Uses properly typed Cells instead of JSON serialization.
+ *
+ * See: lobby.tsx for the lobby entry point
  */
 
 import {
   computed,
-  Default,
   derive,
   handler,
   lift,
@@ -28,38 +29,18 @@ import {
   buildShipPositions,
   COLS,
   findShipAt,
-  GameStateData,
+  type GameState,
   getInitials,
   GRID_INDICES,
   isShipSunk,
-  parseGameStateJson,
-  parsePlayerJson,
-  parseShotsJson,
-  PlayerData,
+  type PlayerData,
+  type RoomInput,
+  type RoomOutput,
   ROWS,
   SHIP_NAMES,
-  ShotsData,
-  SquareState,
-} from "./types.ts";
-
-// =============================================================================
-// GAME ROOM PATTERN
-// =============================================================================
-
-interface GameInput {
-  gameName: Default<string, "Battleship">;
-  player1Json: Writable<Default<string, "null">>;
-  player2Json: Writable<Default<string, "null">>;
-  shotsJson: Writable<Default<string, "{}">>;
-  gameStateJson: Writable<Default<string, "{}">>;
-  myName: Default<string, "">;
-  myPlayerNumber: Default<number, 1>;
-}
-
-interface GameOutput {
-  myName: string;
-  myPlayerNumber: number;
-}
+  type ShotsState,
+  type SquareState,
+} from "./schemas.tsx";
 
 // =============================================================================
 // HANDLERS
@@ -70,11 +51,11 @@ const fireShot = handler<
   {
     row: number;
     col: number;
-    myPlayerNumber: number;
-    player1Json: Writable<string>;
-    player2Json: Writable<string>;
-    shotsJson: Writable<string>;
-    gameStateJson: Writable<string>;
+    myPlayerNumber: 1 | 2;
+    player1: Writable<PlayerData | null>;
+    player2: Writable<PlayerData | null>;
+    shots: Writable<ShotsState>;
+    gameState: Writable<GameState>;
   }
 >(
   (
@@ -83,59 +64,56 @@ const fireShot = handler<
       row,
       col,
       myPlayerNumber,
-      player1Json,
-      player2Json,
-      shotsJson,
-      gameStateJson,
+      player1,
+      player2,
+      shots,
+      gameState,
     },
   ) => {
-    const gameState = parseGameStateJson(gameStateJson.get());
+    const state = gameState.get();
 
     // Can't fire if game is over
-    if (gameState.phase === "finished") return;
+    if (state.phase === "finished") return;
 
     // Can only fire on your turn
-    if (gameState.currentTurn !== myPlayerNumber) return;
+    if (state.currentTurn !== myPlayerNumber) return;
 
     // Get current shots
-    const shots = parseShotsJson(shotsJson.get());
+    const currentShots = shots.get();
 
     // Target the opponent's board (shots are stored as "shots received by player X")
     const targetPlayerNum = myPlayerNumber === 1 ? 2 : 1;
-    const targetShots = shots[String(targetPlayerNum)];
+    const targetShots = currentShots[targetPlayerNum];
 
     // Can't fire at same spot twice
     if (targetShots[row]?.[col] !== "empty") return;
 
-    // Get opponent's ships
-    const opponentJson = targetPlayerNum === 1
-      ? player1Json.get()
-      : player2Json.get();
-    const opponentData = parsePlayerJson(opponentJson);
+    // Get opponent's data directly (no JSON parsing!)
+    const opponentData = targetPlayerNum === 1 ? player1.get() : player2.get();
     if (!opponentData) return;
 
     // Check if hit
     const hitShip = findShipAt(opponentData.ships, { row, col });
 
     // Update shots grid
-    const newShots = targetShots.map((r, ri) =>
+    const newTargetShots = targetShots.map((r, ri) =>
       r.map((c, ci) =>
         ri === row && ci === col ? (hitShip ? "hit" : "miss") : c
       )
-    );
+    ) as SquareState[][];
 
-    const updatedShotsData: ShotsData = {
-      ...shots,
-      [String(targetPlayerNum)]: newShots,
+    const updatedShotsData: ShotsState = {
+      ...currentShots,
+      [targetPlayerNum]: newTargetShots,
     };
-    shotsJson.set(JSON.stringify(updatedShotsData));
+    shots.set(updatedShotsData);
 
     // Build message
     let message = "";
     const coordStr = `${COLS[col]}${row + 1}`;
 
     if (hitShip) {
-      if (isShipSunk(hitShip, newShots)) {
+      if (isShipSunk(hitShip, newTargetShots)) {
         message = `${coordStr}: Hit! You sunk the ${SHIP_NAMES[hitShip.type]}!`;
       } else {
         message = `${coordStr}: Hit!`;
@@ -145,38 +123,32 @@ const fireShot = handler<
     }
 
     // Check for win
-    const allSunk = areAllShipsSunk(opponentData.ships, newShots);
+    const allSunk = areAllShipsSunk(opponentData.ships, newTargetShots);
 
     if (allSunk) {
-      // Get winner's name
-      const winnerJson = myPlayerNumber === 1
-        ? player1Json.get()
-        : player2Json.get();
-      const winnerData = parsePlayerJson(winnerJson);
+      // Get winner's data directly
+      const winnerData = myPlayerNumber === 1 ? player1.get() : player2.get();
       const winnerName = winnerData?.name || `Player ${myPlayerNumber}`;
 
-      const newState: GameStateData = {
-        ...gameState,
+      const newState: GameState = {
+        ...state,
         phase: "finished",
-        winner: myPlayerNumber as 1 | 2,
+        winner: myPlayerNumber,
         lastMessage: `${message} ${winnerName} wins!`,
       };
-      gameStateJson.set(JSON.stringify(newState));
+      gameState.set(newState);
     } else {
       // Switch turns
       const nextTurn = myPlayerNumber === 1 ? 2 : 1;
-      const nextPlayerJson = nextTurn === 1
-        ? player1Json.get()
-        : player2Json.get();
-      const nextPlayerData = parsePlayerJson(nextPlayerJson);
+      const nextPlayerData = nextTurn === 1 ? player1.get() : player2.get();
       const nextPlayerName = nextPlayerData?.name || `Player ${nextTurn}`;
 
-      const newState: GameStateData = {
-        ...gameState,
-        currentTurn: nextTurn as 1 | 2,
+      const newState: GameState = {
+        ...state,
+        currentTurn: nextTurn,
         lastMessage: `${message} ${nextPlayerName}'s turn.`,
       };
-      gameStateJson.set(JSON.stringify(newState));
+      gameState.set(newState);
     }
   },
 );
@@ -185,35 +157,25 @@ const fireShot = handler<
 // LIFT FUNCTIONS
 // =============================================================================
 
-// Parse my player data based on myPlayerNumber
-const parseMyData = lift<
-  { player1Json: string; player2Json: string; myPlayerNumber: number },
+// Get my player data based on myPlayerNumber (direct access, no parsing)
+const getMyData = lift<
+  {
+    player1: PlayerData | null;
+    player2: PlayerData | null;
+    myPlayerNumber: 1 | 2;
+  },
   PlayerData | null
->(({ player1Json, player2Json, myPlayerNumber }) => {
-  const playerJson = myPlayerNumber === 1 ? player1Json : player2Json;
-  return parsePlayerJson(playerJson);
+>(({ player1, player2, myPlayerNumber }) => {
+  return myPlayerNumber === 1 ? player1 : player2;
 });
 
-// Parse both players for display
-const parsePlayer1 = lift<{ player1Json: string }, PlayerData | null>(
-  ({ player1Json }) => parsePlayerJson(player1Json),
-);
-
-const parsePlayer2 = lift<{ player2Json: string }, PlayerData | null>(
-  ({ player2Json }) => parsePlayerJson(player2Json),
-);
-
-const parseState = lift<{ gameStateJson: string }, GameStateData>(
-  ({ gameStateJson }) => parseGameStateJson(gameStateJson),
-);
-
-// Parse my board cells (my ships + shots I received)
-const parseMyBoardCells = lift<
+// Compute my board cells (my ships + shots I received)
+const computeMyBoardCells = lift<
   {
-    player1Json: string;
-    player2Json: string;
-    shotsJson: string;
-    myPlayerNumber: number;
+    player1: PlayerData | null;
+    player2: PlayerData | null;
+    shots: ShotsState;
+    myPlayerNumber: 1 | 2;
   },
   {
     row: number;
@@ -223,13 +185,10 @@ const parseMyBoardCells = lift<
     gridRow: string;
     gridCol: string;
   }[]
->(({ player1Json, player2Json, shotsJson, myPlayerNumber }) => {
-  const playerJson = myPlayerNumber === 1 ? player1Json : player2Json;
-  const playerData = parsePlayerJson(playerJson);
-  const shots = parseShotsJson(shotsJson);
-
+>(({ player1, player2, shots, myPlayerNumber }) => {
+  const playerData = myPlayerNumber === 1 ? player1 : player2;
   const myShips = playerData?.ships || [];
-  const myShots = shots[String(myPlayerNumber)] || [];
+  const myShots = shots[myPlayerNumber] || [];
   const shipPositions = buildShipPositions(myShips);
 
   return GRID_INDICES.map(({ row, col }) => {
@@ -254,12 +213,12 @@ const parseMyBoardCells = lift<
   });
 });
 
-// Parse enemy board cells (shots I've fired - no ships visible!)
-const parseEnemyBoardCells = lift<
+// Compute enemy board cells (shots I've fired - no ships visible!)
+const computeEnemyBoardCells = lift<
   {
-    shotsJson: string;
-    gameStateJson: string;
-    myPlayerNumber: number;
+    shots: ShotsState;
+    gameState: GameState;
+    myPlayerNumber: 1 | 2;
   },
   {
     row: number;
@@ -270,13 +229,11 @@ const parseEnemyBoardCells = lift<
     gridCol: string;
     cursor: string;
   }[]
->(({ shotsJson, gameStateJson, myPlayerNumber }) => {
-  const shots = parseShotsJson(shotsJson);
-  const gameState = parseGameStateJson(gameStateJson);
+>(({ shots, gameState, myPlayerNumber }) => {
   const isFinished = gameState.phase === "finished";
 
   const oppNum = myPlayerNumber === 1 ? 2 : 1;
-  const oppShots = shots[String(oppNum)] || [];
+  const oppShots = shots[oppNum] || [];
 
   return GRID_INDICES.map(({ row, col }) => {
     const shotState: SquareState = oppShots[row]?.[col] ?? "empty";
@@ -303,39 +260,46 @@ const parseEnemyBoardCells = lift<
 // PATTERN
 // =============================================================================
 
-const BattleshipRoom = pattern<GameInput, GameOutput>(
+const BattleshipRoom = pattern<RoomInput, RoomOutput>(
   ({
     gameName: _gameName,
-    player1Json,
-    player2Json,
-    shotsJson,
-    gameStateJson,
+    player1,
+    player2,
+    shots,
+    gameState,
     myName,
     myPlayerNumber,
   }) => {
-    // Parse shared state reactively using lift functions
-    const player1 = parsePlayer1({ player1Json });
-    const player2 = parsePlayer2({ player2Json });
-    const gameState = parseState({ gameStateJson });
-    const myData = parseMyData({ player1Json, player2Json, myPlayerNumber });
+    // Get typed data directly (no JSON parsing)
+    const player1Data = computed(() => player1.get());
+    const player2Data = computed(() => player2.get());
+    const gameStateData = computed(() => gameState.get());
+    const shotsData = computed(() => shots.get());
 
-    // Board cells via lift (all logic inside the lift function)
-    const myBoardCells = parseMyBoardCells({
-      player1Json,
-      player2Json,
-      shotsJson,
+    // My player data via lift
+    const myData = getMyData({
+      player1: player1Data,
+      player2: player2Data,
       myPlayerNumber,
     });
-    const enemyBoardCells = parseEnemyBoardCells({
-      shotsJson,
-      gameStateJson,
+
+    // Board cells via lift (all logic inside the lift function)
+    const myBoardCells = computeMyBoardCells({
+      player1: player1Data,
+      player2: player2Data,
+      shots: shotsData,
+      myPlayerNumber,
+    });
+    const enemyBoardCells = computeEnemyBoardCells({
+      shots: shotsData,
+      gameState: gameStateData,
       myPlayerNumber,
     });
 
     // Derived values for display
     const myColor = derive(myData, (md) => md?.color || "#3b82f6");
     const showTurnIndicator = derive(
-      gameState,
+      gameStateData,
       (gs) =>
         gs.currentTurn === myPlayerNumber && gs.phase !== "finished"
           ? "block"
@@ -343,37 +307,37 @@ const BattleshipRoom = pattern<GameInput, GameOutput>(
     );
 
     // Player display values
-    const player1Color = derive(player1, (p) => p?.color || "#3b82f6");
-    const player1Name = derive(player1, (p) => p?.name || "Player 1");
+    const player1Color = derive(player1Data, (p) => p?.color || "#3b82f6");
+    const player1Name = derive(player1Data, (p) => p?.name || "Player 1");
     const player1Initials = derive(
-      player1,
+      player1Data,
       (p) => getInitials(p?.name || "P1"),
     );
     const player1BgColor = derive(
-      gameState,
+      gameStateData,
       (gs) => gs.currentTurn === 1 ? "#1e40af" : "#1e293b",
     );
     const player1Status = derive(
-      gameState,
+      gameStateData,
       (gs) => gs.currentTurn === 1 ? "Active" : "Waiting",
     );
 
-    const player2Color = derive(player2, (p) => p?.color || "#ef4444");
-    const player2Name = derive(player2, (p) => p?.name || "Player 2");
+    const player2Color = derive(player2Data, (p) => p?.color || "#ef4444");
+    const player2Name = derive(player2Data, (p) => p?.name || "Player 2");
     const player2Initials = derive(
-      player2,
+      player2Data,
       (p) => getInitials(p?.name || "P2"),
     );
     const player2BgColor = derive(
-      gameState,
+      gameStateData,
       (gs) => gs.currentTurn === 2 ? "#1e40af" : "#1e293b",
     );
     const player2Status = derive(
-      gameState,
+      gameStateData,
       (gs) => gs.currentTurn === 2 ? "Active" : "Waiting",
     );
 
-    const lastMessage = derive(gameState, (gs) => gs.lastMessage);
+    const lastMessage = derive(gameStateData, (gs) => gs.lastMessage);
 
     // Styles
     const gridContainerStyle = {
@@ -407,7 +371,7 @@ const BattleshipRoom = pattern<GameInput, GameOutput>(
     };
 
     // Status display - use derive chains for reactive values
-    const statusBgColor = derive(gameState, (gs) => {
+    const statusBgColor = derive(gameStateData, (gs) => {
       const finished = gs.phase === "finished";
       const won = gs.winner === myPlayerNumber;
       const myTurn = gs.currentTurn === myPlayerNumber;
@@ -418,7 +382,7 @@ const BattleshipRoom = pattern<GameInput, GameOutput>(
         : "#1e293b";
     });
 
-    const statusMessage = derive(gameState, (gs) => {
+    const statusMessage = derive(gameStateData, (gs) => {
       const finished = gs.phase === "finished";
       const won = gs.winner === myPlayerNumber;
       const myTurn = gs.currentTurn === myPlayerNumber;
@@ -611,10 +575,10 @@ const BattleshipRoom = pattern<GameInput, GameOutput>(
                       row: cell.row,
                       col: cell.col,
                       myPlayerNumber,
-                      player1Json,
-                      player2Json,
-                      shotsJson,
-                      gameStateJson,
+                      player1,
+                      player2,
+                      shots,
+                      gameState,
                     })}
                   >
                     {cell.content}
