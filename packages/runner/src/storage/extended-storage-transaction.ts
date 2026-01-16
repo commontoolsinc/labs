@@ -124,13 +124,29 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       (writeResult.error.name === "NotFoundError")
     ) {
       // Create parent entries if needed
-      const lastValidPath = writeResult.error.name === "NotFoundError"
+      // When errorPath exists and has length > 1, we need to find the actual parent
+      // that exists. The errorPath includes the key that wasn't found, but we need
+      // to read from the parent that DOES exist.
+      const errorPath = writeResult.error.name === "NotFoundError"
         ? writeResult.error.path
         : undefined;
-      const currentValue = this.readValueOrThrow({
-        ...address,
-        path: lastValidPath ?? [],
-      }, { meta: ignoreReadForScheduling });
+      // For deeply nested paths (length > 1), slice to get the actual parent path
+      // For shallow paths or undefined, keep original behavior
+      const lastValidPath = errorPath && errorPath.length > 1
+        ? errorPath.slice(0, -1)
+        : errorPath;
+      // When we sliced the error path, use readOrThrow at the sliced path
+      // (which already includes "value" prefix from writeValueOrThrow).
+      // Otherwise, use readValueOrThrow for backward compatibility.
+      const currentValue = errorPath && errorPath.length > 1
+        ? this.readOrThrow({
+          ...address,
+          path: lastValidPath ?? [],
+        }, { meta: ignoreReadForScheduling })
+        : this.readValueOrThrow({
+          ...address,
+          path: lastValidPath ?? [],
+        }, { meta: ignoreReadForScheduling });
       const valueObj = lastValidPath === undefined ? {} : currentValue;
       if (!isRecord(valueObj)) {
         // This should have already been caught as type mismatch error
