@@ -527,6 +527,9 @@ interface GoogleCalendarImporterInput {
     maxResults: 100;
     debugMode: false;
   }>;
+  // Optional: Link auth directly from a Google Auth charm when wish() is unavailable
+  // Use: ct charm link googleAuthCharm/auth calendarImporterCharm/linkedAuth
+  linkedAuth?: Auth;
 }
 
 /** Google Calendar event importer. #calendarEvents */
@@ -538,7 +541,7 @@ interface Output {
 }
 
 const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
-  ({ settings }) => {
+  ({ settings, linkedAuth }) => {
     const events = Writable.of<Confidential<CalendarEvent[]>>([]);
     const calendars = Writable.of<Calendar[]>([]);
     const fetching = Writable.of(false);
@@ -546,9 +549,43 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
     const PAGE_SIZE = 10;
 
     // Use createGoogleAuth utility for auth management
-    const { auth, fullUI, isReady, currentEmail } = createGoogleAuth({
+    const {
+      auth: wishedAuth,
+      fullUI,
+      isReady: wishedIsReady,
+      currentEmail: wishedCurrentEmail,
+    } = createGoogleAuth({
       requiredScopes: ["calendar"] as ScopeKey[],
     });
+
+    // Check if linkedAuth is provided (for manual linking when wish() is unavailable)
+    const hasLinkedAuth = derive(
+      { linkedAuth },
+      ({ linkedAuth: la }) => !!(la?.token),
+    );
+    const linkedAuthEmail = derive(
+      { linkedAuth },
+      ({ linkedAuth: la }) => la?.user?.email || "",
+    );
+
+    // Use linkedAuth if provided, otherwise use wished auth
+    // This allows manual linking via CLI when wish() is unavailable (e.g., favorites disabled)
+    // Note: We wrap linkedAuth in Writable.of outside of reactive context
+    const linkedAuthCell = Writable.of<Auth | null>(null);
+    computed(() => {
+      if (linkedAuth?.token) {
+        linkedAuthCell.set(linkedAuth as any);
+      }
+    });
+
+    // Choose auth source based on linkedAuth availability
+    const auth = ifElse(hasLinkedAuth, linkedAuthCell, wishedAuth) as any;
+    const isReady = ifElse(hasLinkedAuth, hasLinkedAuth, wishedIsReady);
+    const currentEmail = ifElse(
+      hasLinkedAuth,
+      linkedAuthEmail,
+      wishedCurrentEmail,
+    );
 
     // Computed values for pagination
     const upcomingEvents = derive(events, (evts: CalendarEvent[]) => {
