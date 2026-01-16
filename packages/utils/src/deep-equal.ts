@@ -25,13 +25,14 @@ export function deepEqual(a: any, b: any): boolean {
   // Note: Even if they have the same `constructor`, it's technically possible
   // for `a` and `b` to have different prototypes, in which case it's possible
   // for this function to decide, ultimately, that they are "equal" in some
-  // cases where, in some sort of plane of pure existence we'd want to say they
+  // cases where, in some sort of plane of pure existence, we'd want to say they
   // aren't. However, practically speaking, all such cases are going to be from
   // some code intentionally doing something that's probably a bad idea for
   // other reasons, and we'll probably never actually encounter this in the real
   // world. And, very notably, in the case of stuff ending up here from
   // comparisons done regarding stored data, that's all normalized anyway, so
-  // we'll only be getting plain objects and arrays.
+  // we'll only be getting plain objects, normal arrays, and trusted instances
+  // made by the storage system.
   if (a.constructor !== b.constructor) return false;
 
   const keysA = Object.keys(a);
