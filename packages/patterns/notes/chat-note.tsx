@@ -257,16 +257,18 @@ const handleTitleKeydown = handler<
 });
 
 // Handler for Generate button - triggers LLM generation
+// Event type matches both onClick (unknown) and onct-submit ({ value: string })
 const handleGenerate = handler<
-  void,
+  { value?: string },
   {
     content: Writable<string>;
     llmSystem: Writable<string>;
     llmMessages: Writable<LLMMessage[]>;
     isGenerating: Writable<boolean>;
     mentionable: any;
+    beforeAIInsert: Writable<string>;
   }
->((_, state) => {
+>((_event, state) => {
   const currentContent = state.content.get();
 
   // Parse entire content into messages - get raw array from mentionable
@@ -294,7 +296,11 @@ const handleGenerate = handler<
   const separator = currentContent.endsWith("\n")
     ? "---\n## AI\n"
     : "\n---\n## AI\n";
-  state.content.set(currentContent + separator);
+  const newContent = currentContent + separator;
+  state.content.set(newContent);
+
+  // Save the prefix for streaming display
+  state.beforeAIInsert.set(newContent);
 
   // Set up the LLM call
   state.llmSystem.set(system);
@@ -362,36 +368,36 @@ const ChatNote = pattern<Input, Output>(
       model: model,
     });
 
-    // Watch for LLM streaming and completion, update content reactively
-    const _llmWatcher = derive(
-      [
-        isGenerating,
-        llmResponse.pending,
-        llmResponse.result,
-        llmResponse.partial,
-      ],
-      ([generating, pending, result, partial]) => {
-        if (!generating) return null;
+    // Track content before AI insertion point for streaming display
+    const beforeAIInsert = Writable.of<string>("");
 
-        const currentContent = content.get();
-
-        // Find the position after "## AI\n" to insert streaming content
-        const aiHeaderIndex = currentContent.lastIndexOf("## AI\n");
-        if (aiHeaderIndex === -1) return null;
-
-        const insertPos = aiHeaderIndex + "## AI\n".length;
-        const beforeInsert = currentContent.slice(0, insertPos);
-
-        // During streaming, show partial result
-        if (pending && partial) {
-          content.set(beforeInsert + partial);
+    // Watch for LLM streaming partial updates
+    const _streamingWatcher = derive(
+      [isGenerating, llmResponse.partial],
+      ([generating, partial]) => {
+        if (generating && partial) {
+          const prefix = beforeAIInsert.get();
+          if (prefix) {
+            content.set(prefix + partial);
+          }
         }
+        return null;
+      },
+    );
 
+    // Watch for LLM completion
+    const _completionWatcher = derive(
+      [isGenerating, llmResponse.pending, llmResponse.result],
+      ([generating, pending, result]) => {
         // When complete, finalize with result and closing separator
         if (!pending && result && generating) {
-          content.set(beforeInsert + result + "\n---\n");
+          const prefix = beforeAIInsert.get();
+          if (prefix) {
+            content.set(prefix + result + "\n---\n");
+          }
           isGenerating.set(false);
           llmMessages.set([]);
+          beforeAIInsert.set("");
         }
 
         return null;
@@ -433,29 +439,6 @@ const ChatNote = pattern<Input, Output>(
       if (lastSection.match(/^##\s*(?:AI|Assistant)\b/i)) return false;
 
       return true;
-    });
-
-    // Handlers with state bindings
-    const generateHandler = handleGenerate({
-      content,
-      llmSystem,
-      llmMessages,
-      isGenerating,
-      mentionable,
-    });
-
-    const cancelHandler = handleCancelGeneration({
-      isGenerating,
-      llmMessages,
-    });
-
-    // Handler for Cmd+Enter from editor
-    const submitHandler = handleGenerate({
-      content,
-      llmSystem,
-      llmMessages,
-      isGenerating,
-      mentionable,
     });
 
     // Model change handler
@@ -562,7 +545,14 @@ const ChatNote = pattern<Input, Output>(
               <ct-button
                 variant="primary"
                 size="sm"
-                onClick={generateHandler}
+                onClick={handleGenerate({
+                  content,
+                  llmSystem,
+                  llmMessages,
+                  isGenerating,
+                  mentionable,
+                  beforeAIInsert,
+                })}
                 disabled={computed(() => !canGenerate)}
                 style={{
                   display: computed(() => (showGenerating ? "none" : "flex")),
@@ -578,19 +568,53 @@ const ChatNote = pattern<Input, Output>(
                 align="center"
                 style={{
                   display: computed(() => (showGenerating ? "flex" : "none")),
+                  flexShrink: 0,
                 }}
               >
-                <ct-loader show-elapsed />
+                <ct-loader show-elapsed style={{ flexShrink: 0 }} />
                 <ct-button
                   variant="secondary"
                   size="sm"
-                  onClick={cancelHandler}
+                  onClick={handleCancelGeneration({
+                    isGenerating,
+                    llmMessages,
+                  })}
+                  style={{ flexShrink: 0 }}
                 >
                   Cancel
                 </ct-button>
               </ct-hstack>
             </ct-hstack>
           </ct-vstack>
+
+          {/* Keyboard shortcut: Cmd+Enter to generate */}
+          <ct-keybind
+            code="Enter"
+            meta
+            ignore-editable={false}
+            onct-keybind={handleGenerate({
+              content,
+              llmSystem,
+              llmMessages,
+              isGenerating,
+              mentionable,
+              beforeAIInsert,
+            })}
+          />
+          {/* Keyboard shortcut: Ctrl+Enter to generate (Windows/Linux) */}
+          <ct-keybind
+            code="Enter"
+            ctrl
+            ignore-editable={false}
+            onct-keybind={handleGenerate({
+              content,
+              llmSystem,
+              llmMessages,
+              isGenerating,
+              mentionable,
+              beforeAIInsert,
+            })}
+          />
 
           {/* Editor */}
           <ct-code-editor
@@ -600,7 +624,6 @@ const ChatNote = pattern<Input, Output>(
             $pattern={patternJson}
             onbacklink-click={handleCharmLinkClick({})}
             onbacklink-create={handleNewBacklink({ mentionable, allCharms })}
-            onct-submit={submitHandler}
             language="text/markdown"
             theme="light"
             wordWrap
