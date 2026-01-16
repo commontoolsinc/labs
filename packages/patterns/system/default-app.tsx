@@ -57,7 +57,9 @@ const removeCharm = handler<
   }
 >((_, state) => {
   const allCharmsValue = state.allCharms.get();
-  const index = allCharmsValue.findIndex((c: any) => state.charm.equals(c));
+  const index = allCharmsValue.findIndex((c: any) =>
+    c && state.charm.equals(c)
+  );
 
   if (index !== -1) {
     const charmListCopy = [...allCharmsValue];
@@ -183,6 +185,7 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
   // NOTE: Use truthy check, not === true, because charm.isHidden is a proxy object
   const visibleCharms = computed(() =>
     allCharms.get().filter((charm) => {
+      if (!charm) return false;
       if (charm.isHidden) return false;
       const name = charm[NAME];
       return typeof name === "string" && name.length > 0;
