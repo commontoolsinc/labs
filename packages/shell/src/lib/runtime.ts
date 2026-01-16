@@ -186,6 +186,11 @@ export class RuntimeInternals extends EventTarget {
       const rootPattern = await this.getSpaceRootPattern();
       const patternCell = rootPattern.cell();
 
+      // Don't add the default pattern to its own allCharms list
+      if (charmCell.id() === patternCell.id()) {
+        return;
+      }
+
       // Get the allCharms list to check if charm is already present
       const allCharmsCell = patternCell.asSchema<{ allCharms: CellHandle[] }>({
         type: "object",
