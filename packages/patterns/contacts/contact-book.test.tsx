@@ -20,8 +20,8 @@ const len = <T,>(arr: T[]): number => arr.filter(() => true).length;
 
 const testContact: Contact = {
   name: "Conrad Common",
-  email: "conrad@common.com",
-  company: "Common",
+  email: "conrad@testmail.io",
+  company: "Widgets Inc",
   notes: "Common",
   tags: [
     "common",
@@ -41,11 +41,11 @@ export default pattern(() => {
   );
 
   const assert_email_query_matches = computed(() =>
-    matchesSearch(testContact, "common")
+    matchesSearch(testContact, "testmail")
   );
 
   const assert_company_query_matches = computed(() =>
-    matchesSearch(testContact, "common")
+    matchesSearch(testContact, "widgets")
   );
 
   const contactBook = ContactBook({ contacts: [], relationships: [] });
