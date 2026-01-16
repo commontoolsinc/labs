@@ -699,6 +699,35 @@ export class CharmManager {
     return charm;
   }
 
+  /**
+   * Get a cell reference suitable for creating reactive links.
+   * Unlike get(), this returns a cell that preserves the resultRef indirection,
+   * ensuring that reads through a link will re-resolve on each access.
+   *
+   * For charms: returns processCell.key("resultRef") (NOT resolved)
+   * For non-charms: returns the cell as-is
+   */
+  async getCellForLinking(
+    id: string,
+  ): Promise<{ cell: Cell<unknown>; isCharm: boolean }> {
+    const charm = this.runtime.getCellFromEntityId(this.space, { "/": id });
+    await charm.sync();
+
+    // Check if this is a charm by looking for source cell with recipe
+    const processCell = charm.getSourceCell();
+    if (processCell) {
+      const recipeId = processCell.get()?.[TYPE];
+      if (recipeId) {
+        // It's a charm - start it and return the resultRef cell WITHOUT resolving
+        await this.runtime.start(charm);
+        return { cell: processCell.key("resultRef"), isCharm: true };
+      }
+    }
+
+    // Not a charm - return cell as-is
+    return { cell: charm, isCharm: false };
+  }
+
   // note: removing a charm doesn't clean up the charm's cells
   async remove(charm: Cell<unknown>) {
     const charmsCell = await this.getCharms();
@@ -870,12 +899,8 @@ export class CharmManager {
     targetCharmId: string,
     targetPath: (string | number)[],
   ): Promise<void> {
-    // Get source cell (charm or arbitrary cell)
-    const { cell: sourceCell, isCharm: _ } = await getCellByIdOrCharm(
-      this,
-      sourceCharmId,
-      "Source",
-    );
+    // Get source cell for linking - preserves resultRef indirection for reactive updates
+    const { cell: sourceCell } = await this.getCellForLinking(sourceCharmId);
 
     // Get target cell (charm or arbitrary cell)
     const { cell: targetCell, isCharm: targetIsCharm } =
@@ -891,7 +916,8 @@ export class CharmManager {
       // FIXME: types
       // deno-lint-ignore no-explicit-any
       let sourceResultCell = sourceCell.withTx(tx) as Cell<any>;
-      // For charms, manager.get() already returns the result cell, so no need to add "result"
+      // For charms, getCellForLinking() returns the resultRef cell (unresolved),
+      // so path navigation goes through the reactive reference
 
       for (const segment of sourcePath) {
         sourceResultCell = sourceResultCell.key(segment);
