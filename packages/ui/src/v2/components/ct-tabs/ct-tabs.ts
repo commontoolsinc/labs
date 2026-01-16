@@ -136,6 +136,12 @@ export class CTTabs extends BaseElement {
     this._lastKnownValue = this._cellController.getValue();
     // Initialize tab selection
     this.updateTabSelection();
+
+    // Listen for slotchange to handle tabs being added after initial render
+    const slot = this.shadowRoot?.querySelector("slot");
+    if (slot) {
+      slot.addEventListener("slotchange", this.handleSlotChange);
+    }
   }
 
   override willUpdate(
@@ -182,11 +188,15 @@ export class CTTabs extends BaseElement {
     const panels = this.getTabPanels();
     const currentValue = this._cellController.getValue();
 
+    // Track if any tab matches the current value
+    let hasMatch = false;
+
     // Update tabs - use property access instead of getAttribute
     // because JSX sets properties, not attributes
     tabs.forEach((tab) => {
       const tabValue = (tab as CTTab).value;
       if (tabValue === currentValue) {
+        hasMatch = true;
         tab.setAttribute("aria-selected", "true");
         tab.setAttribute("data-selected", "true");
         (tab as CTTab).selected = true;
@@ -211,7 +221,18 @@ export class CTTabs extends BaseElement {
         (panel as CTTabPanel).hidden = true;
       }
     });
+
+    // If no tab matched the current value, default to first enabled tab
+    if (!hasMatch && tabs.length > 0) {
+      this.selectFirst();
+    }
   }
+
+  private handleSlotChange = () => {
+    // When slot content changes, re-run tab selection
+    // This handles the case where tabs are added after initial render
+    this.updateTabSelection();
+  };
 
   private handleTabClick = (event: CustomEvent<{ tab: Element }>) => {
     const tab = event.detail.tab as CTTab;

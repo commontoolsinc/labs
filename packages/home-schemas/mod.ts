@@ -27,3 +27,5 @@ export {
   type JournalSnapshot,
   journalSnapshotSchema,
 } from "./journal.ts";
+
+export { type Home, homeSchema } from "./home.ts";

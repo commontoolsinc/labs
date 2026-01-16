@@ -24,8 +24,10 @@ import {
   type CellSetRequest,
   type CellSubscribeRequest,
   type CellUnsubscribeRequest,
+  type EnsureHomePatternRunningRequest,
   type GetCellRequest,
   GetGraphSnapshotRequest,
+  type GetHomeSpaceCellRequest,
   type GetLoggerCountsRequest,
   GraphSnapshotResponse,
   type InitializationData,
@@ -132,6 +134,18 @@ export class RuntimeProcessor {
           console.warn("Navigating cross-space, not adding to charms list.");
         } else {
           charmManager!.add([target]);
+
+          // Track as recently used (async, fire-and-forget)
+          RuntimeProcessor.trackRecentCharm(charmManager!, target).catch(
+            (e: unknown) => {
+              console.error(
+                "[RuntimeProcessor] Failed to track recent charm:",
+                {
+                  error: e instanceof Error ? e.message : e,
+                },
+              );
+            },
+          );
         }
 
         self.postMessage({
@@ -271,6 +285,47 @@ export class RuntimeProcessor {
     };
   }
 
+  handleGetHomeSpaceCell(_request: GetHomeSpaceCellRequest): CellResponse {
+    const homeSpaceCell = this.runtime.getHomeSpaceCell();
+    return {
+      cell: createCellRef(homeSpaceCell),
+    };
+  }
+
+  /**
+   * Ensure the home space's default pattern is running and return a CellRef to it.
+   * This is needed for favorites operations which require the pattern to be active.
+   */
+  async handleEnsureHomePatternRunning(
+    _request: EnsureHomePatternRunningRequest,
+  ): Promise<CellResponse> {
+    const homeSpaceCell = this.runtime.getHomeSpaceCell();
+    await homeSpaceCell.sync();
+
+    const defaultPatternCell = homeSpaceCell.key("defaultPattern");
+    await defaultPatternCell.sync();
+
+    // Check that defaultPattern exists
+    const patternLink = defaultPatternCell.get();
+    if (!patternLink) {
+      throw new Error(
+        "Home space defaultPattern not initialized. Visit home space first.",
+      );
+    }
+
+    // Resolve and start the pattern to ensure it's running
+    const charmCell = defaultPatternCell.resolveAsCell();
+    if (charmCell) {
+      await this.runtime.start(charmCell);
+      await this.runtime.idle();
+    }
+
+    // Return the resolved pattern cell
+    return {
+      cell: createCellRef(charmCell || defaultPatternCell),
+    };
+  }
+
   async handleIdle(): Promise<void> {
     await this.runtime.idle();
   }
@@ -350,8 +405,8 @@ export class RuntimeProcessor {
     return { value: true };
   }
 
-  handlePageGetAll(): CellResponse {
-    const charmsCell = this.charmManager.getCharms();
+  async handlePageGetAll(): Promise<CellResponse> {
+    const charmsCell = await this.charmManager.getCharms();
     return {
       cell: createCellRef(charmsCell),
     };
@@ -431,6 +486,24 @@ export class RuntimeProcessor {
     });
   };
 
+  private static async trackRecentCharm(
+    charmManager: CharmManager,
+    target: unknown,
+  ): Promise<void> {
+    const defaultPattern = await charmManager.getDefaultPattern();
+    if (!defaultPattern) return;
+
+    const cell = defaultPattern.asSchema({
+      type: "object",
+      properties: {
+        trackRecent: { asStream: true },
+      },
+      required: ["trackRecent"],
+    });
+    const handler = cell.key("trackRecent");
+    handler.send({ charm: target });
+  }
+
   async handleRequest(
     request: IPCClientRequest,
   ): Promise<RemoteResponse | void> {
@@ -449,6 +522,10 @@ export class RuntimeProcessor {
         return this.handleCellUnsubscribe(request);
       case RequestType.GetCell:
         return this.handleGetCell(request);
+      case RequestType.GetHomeSpaceCell:
+        return this.handleGetHomeSpaceCell(request);
+      case RequestType.EnsureHomePatternRunning:
+        return await this.handleEnsureHomePatternRunning(request);
       case RequestType.Idle:
         return await this.handleIdle();
       case RequestType.PageCreate:
@@ -468,7 +545,7 @@ export class RuntimeProcessor {
       case RequestType.PageStop:
         return await this.handlePageStop(request);
       case RequestType.PageGetAll:
-        return this.handlePageGetAll();
+        return await this.handlePageGetAll();
       case RequestType.PageSynced:
         return await this.handlePageSynced();
       case RequestType.GetGraphSnapshot:

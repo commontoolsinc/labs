@@ -71,9 +71,10 @@ export class CharmsController<T = unknown> {
     return new CharmController(this.#manager, cell);
   }
 
-  getAllCharms() {
+  async getAllCharms() {
     this.disposeCheck();
-    const charms = this.#manager.getCharms().get();
+    const charmsCell = await this.#manager.getCharms();
+    const charms = charmsCell.get();
     return charms.map((charm) => new CharmController(this.#manager, charm));
   }
 
@@ -218,13 +219,6 @@ export class CharmsController<T = unknown> {
 
       // Run pattern setup within same transaction
       this.#manager.runtime.run(tx, recipe, {}, charmCell);
-
-      // Add to charms list within same transaction
-      const charmsCell = this.#manager.getCharms().withTx(tx);
-      const currentCharms = charmsCell.get();
-      if (!currentCharms.some((c) => c.equals(charmCell))) {
-        charmsCell.push(charmCell);
-      }
 
       // Link as default pattern within same transaction
       defaultPatternCell.set(charmCell.withTx(tx));
