@@ -2,7 +2,6 @@
 import {
   action,
   computed,
-  derive,
   NAME,
   pattern,
   Stream,
@@ -292,8 +291,8 @@ export default pattern<Input, Output>((_input) => {
   // ---------------------------------------------------------------------------
 
   // Compute display styles for each screen - CSS changes instead of DOM swap
-  const transitionDisplay = derive(isTransition, (t) => t ? "flex" : "none");
-  const victoryDisplay = derive(isFinished, (f) => f ? "flex" : "none");
+  const transitionDisplay = computed(() => isTransition ? "flex" : "none");
+  const victoryDisplay = computed(() => isFinished ? "flex" : "none");
   const gameDisplay = computed(() => {
     const state = game.get();
     const showGame = state.phase !== "finished" && state.viewingAs !== null;
@@ -383,7 +382,7 @@ export default pattern<Input, Output>((_input) => {
       {/* Pass button (shown after firing) */}
       <div
         style={{
-          display: derive(gameStatus.awaitingPass, (a) => a ? "block" : "none"),
+          display: computed(() => gameStatus.awaitingPass ? "block" : "none"),
           textAlign: "center",
           padding: "16px",
           marginBottom: "20px",
