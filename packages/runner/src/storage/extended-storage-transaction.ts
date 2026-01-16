@@ -127,16 +127,23 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       const lastValidPath = writeResult.error.name === "NotFoundError"
         ? writeResult.error.path
         : undefined;
-      const currentValue = this.readValueOrThrow({
-        ...address,
-        path: lastValidPath ?? [],
-      }, { meta: ignoreReadForScheduling });
-      const valueObj = lastValidPath === undefined ? {} : currentValue;
-      if (!isRecord(valueObj)) {
-        // This should have already been caught as type mismatch error
-        throw new Error(
-          `Value at path ${address.path.join("/")} is not an object`,
-        );
+      // When document doesn't exist (lastValidPath is undefined), we don't need to read.
+      // When nested path exists, read current value to preserve other properties.
+      let valueObj: Record<string, JSONValue>;
+      if (lastValidPath === undefined) {
+        valueObj = {};
+      } else {
+        const currentValue = this.readOrThrow({
+          ...address,
+          path: lastValidPath,
+        }, { meta: ignoreReadForScheduling });
+        if (!isRecord(currentValue)) {
+          // This should have already been caught as type mismatch error
+          throw new Error(
+            `Value at path ${address.path.join("/")} is not an object`,
+          );
+        }
+        valueObj = currentValue as Record<string, JSONValue>;
       }
       const remainingPath = address.path.slice(lastValidPath?.length ?? 0);
       if (remainingPath.length === 0) {
@@ -145,13 +152,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         );
       }
       const lastKey = remainingPath.pop()!;
-      let nextValue = valueObj;
+      let nextValue: Record<string, JSONValue> = valueObj;
       for (const key of remainingPath) {
         nextValue =
           nextValue[key] =
-            (Number.isInteger(Number(key)) ? [] : {}) as typeof nextValue;
+            (Number.isInteger(Number(key)) ? [] : {}) as Record<
+              string,
+              JSONValue
+            >;
       }
-      nextValue[lastKey] = value;
+      nextValue[lastKey] = value as JSONValue;
       const parentAddress = { ...address, path: lastValidPath ?? [] };
       const writeResultRetry = this.tx.write(parentAddress, valueObj);
       logResult(
