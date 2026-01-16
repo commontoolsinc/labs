@@ -320,10 +320,17 @@ export default pattern<PatternInput, PatternOutput>(
       (emails: Email[]) => emails?.length || 0,
     );
 
-    // Check if auth is connected by checking if linkedAuth has a token
+    // Check if connected - either linkedAuth is provided or gmailImporter found auth via wish
+    // We check emailCount > 0 OR if the importer is actively fetching
     const isConnected = derive(
-      { linkedAuth },
-      ({ linkedAuth: la }) => !!(la?.token),
+      { linkedAuth, gmailImporter },
+      ({ linkedAuth: la, gmailImporter: gi }) => {
+        // If linkedAuth has a token, we're connected
+        if (la?.token) return true;
+        // Otherwise check if gmailImporter has found auth (emailCount will be defined, even if 0)
+        // The importer uses wish() internally to find favorited google-auth
+        return gi?.emailCount !== undefined;
+      },
     );
 
     // ==========================================================================
