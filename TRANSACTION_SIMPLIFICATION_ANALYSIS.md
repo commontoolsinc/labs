@@ -2,13 +2,19 @@
 
 ## Executive Summary
 
-The runner package's transaction system has a three-layer architecture (Transaction → Journal → Chronicle) that is over-engineered for the common case. The system optimizes for concurrent overlapping transactions, but in practice:
+The runner package's transaction system has a three-layer architecture
+(Transaction → Journal → Chronicle) that is over-engineered for the common case.
+The system optimizes for concurrent overlapping transactions, but in practice:
 
 - Clients rarely create overlapping concurrent transactions
-- It's acceptable for one transaction to fail at commit if it reads a document another wrote to
-- The Reader/Writer abstraction adds complexity but is never used as separate objects in production
+- It's acceptable for one transaction to fail at commit if it reads a document
+  another wrote to
+- The Reader/Writer abstraction adds complexity but is never used as separate
+  objects in production
 
-**Key Finding**: The actual API surface used in production is much simpler than the provided abstraction layer, indicating significant opportunity for simplification.
+**Key Finding**: The actual API surface used in production is much simpler than
+the provided abstraction layer, indicating significant opportunity for
+simplification.
 
 ---
 
@@ -25,12 +31,14 @@ Chronicle (transaction/chronicle.ts) [one per MemorySpace]
 ```
 
 #### Layer 1: StorageTransaction
+
 - **File**: `packages/runner/src/storage/transaction.ts:70-116`
 - **Role**: Thin state machine wrapper (ready → pending → done)
 - **Caches**: Single writer reference in `EditableState` (line 46)
 - **Delegates**: All operations to Journal
 
 #### Layer 2: Journal
+
 - **File**: `packages/runner/src/storage/transaction/journal.ts:52-100`
 - **Role**: Coordinates multiple memory spaces
 - **Maintains**:
@@ -40,6 +48,7 @@ Chronicle (transaction/chronicle.ts) [one per MemorySpace]
   - `Activity[]` - for scheduler reactivity tracking (line 25)
 
 #### Layer 3: Chronicle
+
 - **File**: `packages/runner/src/storage/transaction/chronicle.ts:56-294`
 - **Role**: Transaction state for a single memory space
 - **Maintains**:
@@ -47,7 +56,8 @@ Chronicle (transaction/chronicle.ts) [one per MemorySpace]
   - `Novelty` - pending writes (working copy pattern)
   - `Changes` - per-document merged state
 
-**Chronicle is well-designed**. The working copy pattern (CT-1123) eliminated O(N²) behavior.
+**Chronicle is well-designed**. The working copy pattern (CT-1123) eliminated
+O(N²) behavior.
 
 ---
 
@@ -61,7 +71,7 @@ Chronicle (transaction/chronicle.ts) [one per MemorySpace]
 class StorageTransaction {
   #state: State;
   #storage: IStorageManager;
-  #branches: Map<MemorySpace, Chronicle>;  // Direct Chronicle access
+  #branches: Map<MemorySpace, Chronicle>; // Direct Chronicle access
   #activity: Activity[];
 
   read(address: IMemorySpaceAddress): Result<IAttestation, ReadError> {
@@ -70,7 +80,10 @@ class StorageTransaction {
     return chronicle.read(address);
   }
 
-  write(address: IMemorySpaceAddress, value?: JSONValue): Result<IAttestation, WriteError> {
+  write(
+    address: IMemorySpaceAddress,
+    value?: JSONValue,
+  ): Result<IAttestation, WriteError> {
     const chronicle = this.#getOrCreateChronicle(address.space);
     this.#activity.push({ write: address });
     return chronicle.write(address, value);
@@ -100,12 +113,14 @@ class StorageTransaction {
 ```
 
 **Benefits**:
+
 - Eliminates ~200 lines of Reader/Writer code
 - Removes two map structures (readers, writers)
 - Clearer flow: Transaction → Chronicle (one hop instead of two)
 - Reads optimized: single map lookup instead of reader cache + branch lookup
 
 **Keeps**:
+
 - Chronicle (well-designed, working copy pattern is excellent)
 - History and Novelty (core transaction state)
 - Activity tracking (needed for scheduler)
@@ -161,7 +176,8 @@ Total:                       ~1550 lines (-500 lines, -24%)
 
 ## Conclusion
 
-By flattening to two layers (Transaction → Chronicle) and removing the unused Reader/Writer classes, we can:
+By flattening to two layers (Transaction → Chronicle) and removing the unused
+Reader/Writer classes, we can:
 
 - Reduce code by ~24% (500 lines)
 - Optimize the hot path (reads)

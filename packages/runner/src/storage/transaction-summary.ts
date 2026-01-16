@@ -6,9 +6,11 @@
  */
 
 import type {
+  Activity,
+  IAttestation,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
-  ITransactionJournal,
+  StorageTransactionStatus,
 } from "./interface.ts";
 import type { MemorySpace } from "../runtime.ts";
 
@@ -64,13 +66,12 @@ export function summarizeTransaction(
   space?: MemorySpace,
 ): TransactionSummary {
   const status = tx.status();
-  const journal = status.journal;
 
   // Summarize activity
-  const activity = summarizeActivity(journal);
+  const activity = summarizeActivity(status.activity);
 
   // Extract actual writes with values
-  const writes = space ? extractWrites(journal, space) : [];
+  const writes = space ? extractWrites(status, space) : [];
 
   // Generate summary
   const summary = generateSummary(activity, writes, status.status);
@@ -169,14 +170,13 @@ export function debugTransactionWrites(
   tx: IExtendedStorageTransaction,
 ): string {
   const status = tx.status();
-  const journal = status.journal;
 
   const parts: string[] = [];
   parts.push("=== Transaction Debug ===");
 
   // List all write operations from activity
   const writes: IMemorySpaceAddress[] = [];
-  for (const activity of journal.activity()) {
+  for (const activity of status.activity) {
     if ("write" in activity && activity.write) {
       writes.push(activity.write);
     }
@@ -197,7 +197,8 @@ export function debugTransactionWrites(
   }
 
   for (const space of spaces) {
-    const noveltyCount = Array.from(journal.novelty(space)).length;
+    const chronicle = status.branches.get(space);
+    const noveltyCount = chronicle ? Array.from(chronicle.novelty()).length : 0;
     parts.push(`  ${space}: ${noveltyCount} attestation(s)`);
   }
 
@@ -205,19 +206,19 @@ export function debugTransactionWrites(
 }
 
 /**
- * Summarize activity from transaction journal
+ * Summarize activity from transaction activity log
  */
-function summarizeActivity(journal: ITransactionJournal): {
+function summarizeActivity(activity: Activity[]): {
   reads: number;
   writes: number;
 } {
   let reads = 0;
   let writes = 0;
 
-  for (const activity of journal.activity()) {
-    if ("read" in activity) {
+  for (const act of activity) {
+    if ("read" in act) {
       reads++;
-    } else if ("write" in activity) {
+    } else if ("write" in act) {
       writes++;
     }
   }
@@ -229,12 +230,17 @@ function summarizeActivity(journal: ITransactionJournal): {
  * Extract actual writes with their values from novelty attestations
  */
 function extractWrites(
-  journal: ITransactionJournal,
+  status: StorageTransactionStatus,
   space: MemorySpace,
 ): WriteDetail[] {
+  const chronicle = status.branches.get(space);
+  if (!chronicle) {
+    return [];
+  }
+
   // Build a map of previous values from history
   const previousValues = new Map<string, unknown>();
-  for (const attestation of journal.history(space)) {
+  for (const attestation of chronicle.history()) {
     const key = `${attestation.address.id}:${
       attestation.address.path.join(".")
     }`;
@@ -243,7 +249,7 @@ function extractWrites(
 
   const writes: WriteDetail[] = [];
 
-  for (const attestation of journal.novelty(space)) {
+  for (const attestation of chronicle.novelty()) {
     const fullObjectId = attestation.address.id;
     const path = attestation.address.path.join(".");
     const value = attestation.value;

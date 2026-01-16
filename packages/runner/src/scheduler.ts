@@ -2540,7 +2540,7 @@ export function txToReactivityLog(
   tx: IExtendedStorageTransaction,
 ): ReactivityLog {
   const log: ReactivityLog = { reads: [], writes: [] };
-  for (const activity of tx.journal.activity()) {
+  for (const activity of tx.status().activity) {
     if ("read" in activity && activity.read) {
       if (activity.read.meta?.[ignoreReadForSchedulingMarker]) continue;
       const address = {
