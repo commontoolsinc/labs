@@ -112,12 +112,9 @@ const setAtPath = (
       if (newLen < root.length || newLen < 0 || !Number.isFinite(newLen)) {
         return { ok: root.slice(0, newLen) };
       } else {
-        // Extension: create dense array with nulls (not sparse)
-        // Sparse arrays cause undefined entries that break downstream consumers
+        // Extension: create array with new length (sparse slots become undefined in JSON)
         const extended = [...root];
-        while (extended.length < newLen) {
-          extended.push(null);
-        }
+        extended.length = newLen;
         return { ok: extended };
       }
     }
@@ -133,9 +130,11 @@ const setAtPath = (
     if (rest.length === 0) {
       if (root[index] === value) return { ok: root }; // noop
       const newArray = [...root];
-      // Use null instead of undefined/delete to avoid sparse array holes
-      // This preserves array indices while remaining JSON-compatible
-      newArray[index] = value === undefined ? null : value;
+      if (value === undefined) {
+        delete newArray[index]; // creates hole, not splice
+      } else {
+        newArray[index] = value;
+      }
       return { ok: newArray };
     }
 
