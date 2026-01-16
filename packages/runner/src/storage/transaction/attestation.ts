@@ -1,3 +1,4 @@
+import { deepEqual } from "@commontools/utils/deep-equal";
 import { isRecord } from "@commontools/utils/types";
 import type {
   IAttestation,
@@ -326,12 +327,9 @@ export const claim = (
   const source = attest(state);
   const actual = read(source, address)?.ok?.value;
 
-  // Fast path: reference equality check avoids expensive JSON.stringify
+  // Fast path: reference equality check avoids expensive comparison
   // when the replica state hasn't changed since the original read
-  if (
-    expected === actual ||
-    JSON.stringify(expected) === JSON.stringify(actual)
-  ) {
+  if (expected === actual || deepEqual(expected, actual)) {
     return { ok: state };
   } else {
     return {

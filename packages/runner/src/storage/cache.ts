@@ -161,7 +161,8 @@ export class NoCache<Model extends object, Address>
   }
 }
 
-class Nursery implements SyncPush<State> {
+// Exported for testing/benchmarking purposes
+export class Nursery implements SyncPush<State> {
   static put(_before?: State, after?: State) {
     return after;
   }
@@ -178,15 +179,14 @@ class Nursery implements SyncPush<State> {
    * to `heap` anyway.
    *
    * Optimized: checks reference equality and value reference equality before
-   * falling back to expensive JSON.stringify comparison.
+   * falling back to deepEqual comparison.
    */
   static evict(before?: State, after?: State) {
-    return before == undefined ? undefined : after === undefined
+    return before == undefined
+      ? undefined
+      : after === undefined
       ? before
-      // Fast path: reference equality checks before JSON.stringify
-      : before === after ||
-          before.is === after.is ||
-          JSON.stringify(before) === JSON.stringify(after)
+      : before === after || deepEqual(before.is, after.is)
       ? undefined
       : before;
   }

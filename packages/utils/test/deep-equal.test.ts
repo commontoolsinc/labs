@@ -94,6 +94,89 @@ describe("deepEqual", () => {
     });
   });
 
+  describe("sparse arrays", () => {
+    it("returns true for equal sparse arrays", () => {
+      const a = [1, , 3];
+      const b = [1, , 3];
+      expect(deepEqual(a, b)).toBe(true);
+    });
+
+    it("returns false when hole vs value at same index", () => {
+      const a = [1, , 3];
+      const b = [1, 2, 3];
+      expect(deepEqual(a, b)).toBe(false);
+      expect(deepEqual(b, a)).toBe(false);
+    });
+
+    it("returns false for holes at different positions", () => {
+      const a = [1, , 3];
+      const b = [, 2, 3];
+      expect(deepEqual(a, b)).toBe(false);
+    });
+
+    it("returns true for multiple holes in same positions", () => {
+      const a = [1, , , 4];
+      const b = [1, , , 4];
+      expect(deepEqual(a, b)).toBe(true);
+    });
+
+    it("returns false for hole vs explicit undefined at same index", () => {
+      // Both arrays have 3 keys, but holes and undefineds are in opposite positions.
+      // This exercises the hasOwn check that distinguishes stored undefined from holes.
+      const a = [1, undefined, , 4]; // keys: 0, 1, 3 - undefined at 1, hole at 2
+      const b = [1, , undefined, 4]; // keys: 0, 2, 3 - hole at 1, undefined at 2
+      expect(deepEqual(a, b)).toBe(false);
+      expect(deepEqual(b, a)).toBe(false);
+    });
+  });
+
+  describe("arrays with named properties", () => {
+    it("returns true for arrays with equal named properties", () => {
+      const a = Object.assign([1, 2], { foo: "bar" });
+      const b = Object.assign([1, 2], { foo: "bar" });
+      expect(deepEqual(a, b)).toBe(true);
+    });
+
+    it("returns false for arrays with different named property values", () => {
+      const a = Object.assign([1, 2], { foo: "bar" });
+      const b = Object.assign([1, 2], { foo: "baz" });
+      expect(deepEqual(a, b)).toBe(false);
+    });
+
+    it("returns false for arrays with different named property keys", () => {
+      const a = Object.assign([1, 2], { foo: "x" });
+      const b = Object.assign([1, 2], { bar: "x" });
+      expect(deepEqual(a, b)).toBe(false);
+    });
+
+    it("returns false when one array has named properties and other does not", () => {
+      const a = Object.assign([1, 2], { foo: "bar" });
+      const b = [1, 2];
+      expect(deepEqual(a, b)).toBe(false);
+      expect(deepEqual(b, a)).toBe(false);
+    });
+
+    it("handles sparse arrays with named properties", () => {
+      const a = Object.assign([1, , 3], { foo: "bar" });
+      const b = Object.assign([1, , 3], { foo: "bar" });
+      expect(deepEqual(a, b)).toBe(true);
+
+      const c = Object.assign([1, , 3], { foo: "bar" });
+      const d = Object.assign([1, 2, 3], { foo: "bar" });
+      expect(deepEqual(c, d)).toBe(false);
+    });
+
+    it("returns false when hole + named property balances key count with dense array", () => {
+      // Both have 3 keys, but structured differently:
+      // a: indices 0,2 + named 'foo' = 3 keys
+      // b: indices 0,1,2 = 3 keys
+      const a = Object.assign([1, , 3], { foo: "bar" });
+      const b = [1, 2, 3];
+      expect(deepEqual(a, b)).toBe(false);
+      expect(deepEqual(b, a)).toBe(false);
+    });
+  });
+
   describe("objects", () => {
     it("returns true for identical objects", () => {
       expect(deepEqual({ a: 1, b: 2 }, { a: 1, b: 2 })).toBe(true);
@@ -111,6 +194,20 @@ describe("deepEqual", () => {
 
     it("returns false for objects with different keys", () => {
       expect(deepEqual({ a: 1 }, { b: 1 })).toBe(false);
+    });
+
+    it("returns false for same key count but different keys including undefined", () => {
+      // Both have 2 keys, but different keys. Exercises hasOwn check in checkSpecificProps.
+      // Parallel to the array hole-vs-undefined test.
+      const a = { x: 1, y: undefined };
+      const b = { x: 1, z: 2 };
+      expect(deepEqual(a, b)).toBe(false);
+      expect(deepEqual(b, a)).toBe(false);
+    });
+
+    it("returns false for different keys both with undefined values", () => {
+      // Both have 1 key set to undefined, but different key names.
+      expect(deepEqual({ x: undefined }, { y: undefined })).toBe(false);
     });
 
     it("returns false for objects with different values", () => {

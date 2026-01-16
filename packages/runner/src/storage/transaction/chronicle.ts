@@ -26,7 +26,6 @@ import {
   load,
   NotFound,
   read,
-  StateInconsistency,
   TypeMismatchError,
   UnsupportedMediaTypeError,
   write,
@@ -356,73 +355,6 @@ class History {
     return candidate;
   }
 
-  /**
-   * Claims a new read invariant while ensuring consistency with all the
-   * previous invariants.
-   */
-  claim(
-    attestation: IAttestation,
-  ): Result<IAttestation, IStorageTransactionInconsistent> {
-    // Track which invariants to delete after consistency check
-    const obsolete = new Set<IAttestation>();
-
-    for (const candidate of this) {
-      // If we have an existing invariant that is either child or a parent of
-      // the new one two must be consistent with one another otherwise we are in
-      // an inconsistent state.
-      if (Address.intersects(attestation.address, candidate.address)) {
-        // Always read at the more specific (longer) path for consistency check
-        const address =
-          attestation.address.path.length > candidate.address.path.length
-            ? attestation.address
-            : candidate.address;
-
-        const expected = read(candidate, address).ok?.value;
-        const actual = read(attestation, address).ok?.value;
-
-        // Fast path: reference equality check avoids expensive JSON.stringify
-        if (
-          expected !== actual &&
-          JSON.stringify(expected) !== JSON.stringify(actual)
-        ) {
-          return {
-            error: StateInconsistency({
-              address,
-              expected,
-              actual,
-            }),
-          };
-        }
-
-        // If consistent, determine which invariant(s) to keep
-        if (attestation.address.path.length === candidate.address.path.length) {
-          // Same exact address - replace the existing invariant
-          // No need to mark as obsolete, just overwrite
-          continue;
-        } else if (candidate.address === address) {
-          // New invariant is a child of existing candidate (candidate is parent)
-          // Drop the child invariant as it's redundant with the parent
-          obsolete.add(attestation);
-        } else if (attestation.address === address) {
-          // New invariant is a parent of existing candidate (candidate is child)
-          // Delete the child candidate as it's redundant with the new parent
-          obsolete.add(candidate);
-        }
-      }
-    }
-
-    if (!obsolete.has(attestation)) {
-      this.put(attestation);
-    }
-
-    // Delete redundant child invariants
-    for (const attestation of obsolete) {
-      this.delete(attestation);
-    }
-
-    return { ok: attestation };
-  }
-
   put(attestation: IAttestation) {
     const key = Address.toString(attestation.address);
     // Only store the first read - subsequent reads at the same address are ignored
@@ -430,9 +362,6 @@ class History {
     if (!this.#model.has(key)) {
       this.#model.set(key, attestation);
     }
-  }
-  delete(attestation: IAttestation) {
-    this.#model.delete(Address.toString(attestation.address));
   }
 }
 
