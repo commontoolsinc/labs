@@ -52,7 +52,7 @@ export default pattern<Input, Output>(({ items }) => {
   const hasNoItems = computed(() => items.get().length === 0);
 
   return {
-    [NAME]: "Todo List",
+    [NAME]: computed(() => `Todo List (${items.get().length})`),
     [UI]: (
       <ct-screen>
         <ct-vstack slot="header" gap="1">
