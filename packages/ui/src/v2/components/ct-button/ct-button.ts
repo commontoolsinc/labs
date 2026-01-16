@@ -332,11 +332,13 @@ export class CTButton extends BaseElement {
     }
 
     override render() {
-      const classes = {
+      const classes: { [key: string]: true } = {
         button: true,
-        [this.variant]: true,
-        [this.size]: true,
       };
+      if (typeof this.variant === "string" && this.variant) {
+        classes[this.variant] = true;
+      }
+      if (typeof this.size === "string" && this.size) classes[this.size] = true;
 
       return html`
         <button
