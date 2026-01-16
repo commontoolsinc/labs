@@ -119,18 +119,29 @@ export class XQuickJumpView extends BaseView {
       );
 
       // Sync all cells in parallel to fetch their data (without running them)
-      await Promise.all(charmCells.map((cell) => cell.sync()));
+      // Use allSettled so one failing sync doesn't prevent listing others
+      const results = await Promise.allSettled(
+        charmCells.map((cell) => cell.sync()),
+      );
 
-      // Extract id and name from each cell
+      // Extract id and name from successfully synced cells
       const items: CharmItem[] = [];
-      for (const cell of charmCells) {
+      charmCells.forEach((cell, index) => {
+        const result = results[index];
+        if (result.status === "rejected") {
+          console.error(
+            `[QuickJumpView] Failed to sync charm ${cell.id()}:`,
+            result.reason,
+          );
+          return;
+        }
         const id = cell.id();
         const data = cell.get() as Record<string, unknown> | undefined;
         const name = data && typeof data[NAME] === "string"
           ? data[NAME]
           : "Untitled Charm";
         items.push({ id, name });
-      }
+      });
 
       return items;
     },
