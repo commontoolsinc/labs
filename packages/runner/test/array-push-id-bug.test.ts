@@ -7,7 +7,6 @@
  */
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { ID } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createQueryResultProxy } from "../src/query-result-proxy.ts";
 import { popFrame, pushFrame } from "../src/builder/recipe.ts";
