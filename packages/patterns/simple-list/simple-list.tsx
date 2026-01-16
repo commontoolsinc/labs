@@ -16,16 +16,9 @@ import {
   type VNode,
   Writable,
 } from "commontools";
+import type { ModuleMetadata } from "../container-protocol.ts";
+
 // ===== Self-Describing Metadata =====
-// ModuleMetadata type inlined to avoid parent directory import issues
-interface ModuleMetadata {
-  type: string;
-  label: string;
-  icon: string;
-  allowMultiple?: boolean;
-  schema?: Record<string, unknown>;
-  fieldMapping?: string[];
-}
 export const MODULE_METADATA: ModuleMetadata = {
   type: "simple-list",
   label: "Simple List",
