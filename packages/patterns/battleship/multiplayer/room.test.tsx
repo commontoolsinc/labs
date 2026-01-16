@@ -93,7 +93,7 @@ export default pattern(() => {
   });
 
   // Fire at ship (hit) - row 0, col 0 has Bob's destroyer
-  const action_fire_hit = action(() => {
+  const _action_fire_hit = action(() => {
     room.fireShot.send({ row: 0, col: 0 });
   });
 
@@ -109,7 +109,7 @@ export default pattern(() => {
 
   // Sink the destroyer by hitting row 0, col 1 (second cell)
   // First we need to switch turns back to player 1
-  const action_fire_sink_ship = action(() => {
+  const _action_fire_sink_ship = action(() => {
     room.fireShot.send({ row: 0, col: 1 });
   });
 
@@ -170,13 +170,13 @@ export default pattern(() => {
   // Assertions - After Hit
   // ==========================================================================
 
-  const assert_hit_recorded = computed(() => {
+  const _assert_hit_recorded = computed(() => {
     const shots = shotsCell.get();
     // Player 1 fired at player 2's board at 0,0 where destroyer is
     return shots[2][0][0] === "hit";
   });
 
-  const assert_message_contains_hit = computed(() =>
+  const _assert_message_contains_hit = computed(() =>
     gameStateCell.get().lastMessage.includes("Hit")
   );
 
@@ -204,7 +204,6 @@ export default pattern(() => {
       { action: action_fire_wrong_turn },
       { assertion: assert_no_new_shot_recorded },
       { assertion: assert_still_player2_turn },
-
       // Note: To test hits, we'd need to switch turns back to player 1.
       // The current test structure doesn't support player 2 actions easily
       // since the room is bound to player 1. A more complete test would

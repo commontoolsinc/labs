@@ -13,14 +13,7 @@
  * See: lobby.tsx for the lobby entry point
  */
 
-import {
-  action,
-  computed,
-  NAME,
-  pattern,
-  UI,
-  Writable,
-} from "commontools";
+import { action, computed, NAME, pattern, UI } from "commontools";
 
 import {
   areAllShipsSunk,
@@ -31,7 +24,6 @@ import {
   getInitials,
   GRID_INDICES,
   isShipSunk,
-  type PlayerData,
   type RoomInput,
   type RoomOutput,
   ROWS,
@@ -119,7 +111,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
 
       // Get ships array, filtering out any undefined elements (can happen with reactive proxies)
       const ships = (opponentData.ships || []).filter(
-        (s): s is NonNullable<typeof s> => s != null && s.type != null
+        (s): s is NonNullable<typeof s> => s != null && s.type != null,
       );
       if (ships.length === 0) {
         console.warn("[fireShot] No valid ships found in opponent data");
@@ -148,7 +140,9 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
 
       if (hitShip) {
         if (isShipSunk(hitShip, newTargetShots)) {
-          message = `${coordStr}: Hit! You sunk the ${SHIP_NAMES[hitShip.type]}!`;
+          message = `${coordStr}: Hit! You sunk the ${
+            SHIP_NAMES[hitShip.type]
+          }!`;
         } else {
           message = `${coordStr}: Hit!`;
         }
@@ -157,7 +151,8 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
       }
 
       // Check for win (use filtered ships array)
-      const allSunk = ships.length > 0 && areAllShipsSunk(ships, newTargetShots);
+      const allSunk = ships.length > 0 &&
+        areAllShipsSunk(ships, newTargetShots);
 
       if (allSunk) {
         // Get winner's data directly
@@ -317,8 +312,8 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
         bgColor: finished
           ? (won ? "#166534" : "#991b1b")
           : myTurn
-            ? "#1e40af"
-            : "#1e293b",
+          ? "#1e40af"
+          : "#1e293b",
         message: finished
           ? (won
             ? "Victory! You sunk all enemy ships!"
@@ -509,7 +504,8 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                       backgroundColor: cell.bgColor,
                       cursor: cell.cursor,
                     }}
-                    onClick={() => fireShot.send({ row: cell.row, col: cell.col })}
+                    onClick={() =>
+                      fireShot.send({ row: cell.row, col: cell.col })}
                   >
                     {cell.content}
                   </div>
