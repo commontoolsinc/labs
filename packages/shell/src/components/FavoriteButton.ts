@@ -1,7 +1,8 @@
 import { css, html, LitElement, PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import { RuntimeInternals } from "../lib/runtime.ts";
-import type { FavoriteEntry } from "@commontools/runtime-client";
+import type { CellHandle } from "@commontools/runtime-client";
+import type { FavoriteEntry } from "@commontools/home-schemas";
 
 /**
  * Favorite button component.
@@ -43,7 +44,7 @@ export class XFavoriteButtonElement extends LitElement {
 
   // Server favorites from subscription
   @state()
-  private _serverFavorites: FavoriteEntry[] = [];
+  private _serverFavorites: readonly FavoriteEntry[] = [];
 
   // Local state for favoriting, used for optimistic updates
   // between user click and server sync
@@ -107,7 +108,9 @@ export class XFavoriteButtonElement extends LitElement {
     }
     // Fall back to server state
     if (!this.charmId) return false;
-    return this._serverFavorites.some((f) => f.charmId === this.charmId);
+    return this._serverFavorites.some(
+      (f) => (f.cell as unknown as CellHandle<unknown>).id() === this.charmId,
+    );
   }
 
   private async _handleFavoriteClick(e: Event) {

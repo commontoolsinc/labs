@@ -6,30 +6,22 @@
  */
 
 import { DID } from "@commontools/identity";
-import { CellHandle, isCellHandle } from "./cell-handle.ts";
+import { CellHandle } from "./cell-handle.ts";
 import { RuntimeClient } from "./runtime-client.ts";
 import type { CellRef } from "./protocol/types.ts";
-
-/** Favorite entry as returned by getFavorites and subscribeFavorites */
-export type FavoriteEntry = {
-  charmId: string;
-  tag: string;
-  userTags: string[];
-};
-
-/** Expected shape of the home pattern's exported properties */
-type HomePatternExports = {
-  favorites: unknown[];
-  addFavorite: unknown;
-  removeFavorite: unknown;
-};
+import {
+  FavoriteEntry,
+  favoriteListSchema,
+  Home,
+  homeSchema,
+} from "@commontools/home-schemas";
 
 type HandlerName = "addFavorite" | "removeFavorite";
 
 export class FavoritesManager {
   #rt: RuntimeClient;
   #currentSpaceDID: DID;
-  #homePatternCell: CellHandle<HomePatternExports> | null = null;
+  #homePatternCell: CellHandle<Home> | null = null;
 
   constructor(
     rt: RuntimeClient,
@@ -61,27 +53,17 @@ export class FavoritesManager {
   }
 
   /**
-   * Check if a charm is in favorites.
-   * @param charmId - The entity ID of the charm to check
-   * @returns true if the charm is a favorite
-   */
-  async isFavorite(charmId: string): Promise<boolean> {
-    const favorites = await this.getFavorites();
-    return favorites.some((f) => f.charmId === charmId);
-  }
-
-  /**
    * Get all favorites.
-   * @returns Array of favorite entries with charmId, tag, and userTags
+   * @returns Array of favorite entries with cell, tag, and userTags
    */
-  async getFavorites(): Promise<FavoriteEntry[]> {
-    const defaultPattern = await this.#getDefaultPattern();
+  async getFavorites(): Promise<readonly FavoriteEntry[]> {
+    const defaultPattern = await this.#getHomePattern();
 
-    const favoritesCell = defaultPattern.key("favorites");
+    const favoritesCell = defaultPattern.key("favorites").asSchema(
+      favoriteListSchema,
+    ) as CellHandle<readonly FavoriteEntry[]>;
     await favoritesCell.sync();
-    const favoritesValue = favoritesCell.get();
-
-    return this.#transformFavoritesToEntriesAsync(favoritesValue);
+    return favoritesCell.get() ?? [];
   }
 
   /**
@@ -89,11 +71,11 @@ export class FavoritesManager {
    * Callback is called immediately with current favorites (may be empty if not ready),
    * and again whenever favorites change.
    * @param callback - Function called with current favorites array
-   * @param onError - Optional callback for errors during subscription or transform
+   * @param onError - Optional callback for errors during subscription
    * @returns Unsubscribe function
    */
   subscribeFavorites(
-    callback: (favorites: FavoriteEntry[]) => void,
+    callback: (favorites: readonly FavoriteEntry[]) => void,
     onError?: (error: Error) => void,
   ): () => void {
     let unsubscribeFavorites: (() => void) | undefined;
@@ -102,45 +84,13 @@ export class FavoritesManager {
     const setupSubscription = async () => {
       if (isDisposed) return;
 
-      // Use ensureHomePatternRunning to get the resolved, running pattern cell
-      if (!this.#homePatternCell) {
-        // Type boundary: ensureHomePatternRunning returns unknown, we cast to expected shape
-        const cell = await this.#rt.ensureHomePatternRunning();
-        this.#homePatternCell = cell as CellHandle<HomePatternExports>;
-      }
-
-      await this.#homePatternCell.sync();
-
-      if (isDisposed) return;
-
       // Subscribe to the favorites property
-      const favoritesCell = this.#homePatternCell.key("favorites");
+      const favoritesCell = (await this.#getHomePattern()).key("favorites")
+        .asSchema(favoriteListSchema) as CellHandle<readonly FavoriteEntry[]>;
       unsubscribeFavorites = favoritesCell.subscribe(
-        (favoritesValue: unknown) => {
+        (favoritesValue) => {
           if (isDisposed) return;
-
-          // Transform entries - need to sync each CellHandle first
-          this.#transformFavoritesToEntriesAsync(favoritesValue)
-            .then((entries: FavoriteEntry[]) => {
-              if (isDisposed) return;
-              callback(entries);
-            })
-            .catch((error) => {
-              const err = error instanceof Error
-                ? error
-                : new Error(String(error));
-              if (onError) {
-                onError(err);
-              } else {
-                console.error(
-                  "[FavoritesManager] favorites transform failed:",
-                  err,
-                );
-              }
-              if (!isDisposed) {
-                callback([]);
-              }
-            });
+          callback(favoritesValue ?? []);
         },
       );
     };
@@ -172,71 +122,10 @@ export class FavoritesManager {
   }
 
   /**
-   * Transform raw favorites value to FavoriteEntry array.
-   * Syncs each CellHandle before extracting values.
-   *
-   * Favorites are stored as an array of CellHandles, each pointing to
-   * a favorite entry object with { cell, tag, userTags }.
-   */
-  async #transformFavoritesToEntriesAsync(
-    favoritesValue: unknown,
-  ): Promise<FavoriteEntry[]> {
-    if (!favoritesValue || !Array.isArray(favoritesValue)) {
-      return [];
-    }
-
-    const entries: FavoriteEntry[] = [];
-
-    for (const favItem of favoritesValue) {
-      if (!isCellHandle(favItem)) {
-        console.warn(
-          "[FavoritesManager] Skipping non-CellHandle item in favorites",
-        );
-        continue;
-      }
-
-      // Sync the CellHandle to get the favorite entry value
-      await favItem.sync();
-      const favValue = favItem.get() as
-        | { cell?: unknown; tag?: string; userTags?: unknown }
-        | undefined;
-
-      if (!favValue || typeof favValue !== "object") {
-        console.warn(
-          "[FavoritesManager] Skipping invalid favorite entry:",
-          favValue,
-        );
-        continue;
-      }
-
-      // Extract charmId from the cell reference
-      // CellHandle.id() already strips the "of:" prefix
-      const charmId = isCellHandle(favValue.cell) ? favValue.cell.id() : "";
-
-      // Extract tag
-      const tag = favValue.tag || "";
-
-      // Extract userTags - may be an array or a CellHandle
-      let userTags: string[] = [];
-      if (Array.isArray(favValue.userTags)) {
-        userTags = favValue.userTags;
-      } else if (isCellHandle(favValue.userTags)) {
-        await favValue.userTags.sync();
-        const ut = favValue.userTags.get();
-        if (Array.isArray(ut)) userTags = ut;
-      }
-
-      entries.push({ charmId, tag, userTags });
-    }
-
-    return entries;
-  }
-
-  /**
    * Get the home space's defaultPattern cell.
    * Throws if defaultPattern can't be initialized.
    */
-  async #getDefaultPattern(): Promise<CellHandle<HomePatternExports>> {
+  async #getHomePattern(): Promise<CellHandle<Home>> {
     // Use ensureHomePatternRunning which:
     // 1. Gets the home space cell
     // 2. Resolves the defaultPattern cell reference
@@ -245,7 +134,7 @@ export class FavoritesManager {
     if (!this.#homePatternCell) {
       // Type boundary: ensureHomePatternRunning returns unknown, we cast to expected shape
       const cell = await this.#rt.ensureHomePatternRunning();
-      this.#homePatternCell = cell as CellHandle<HomePatternExports>;
+      this.#homePatternCell = cell.asSchema(homeSchema);
     }
 
     await this.#homePatternCell.sync();
@@ -257,7 +146,7 @@ export class FavoritesManager {
    * @param handlerName - Name of the handler (e.g., "addFavorite")
    */
   async #getHandler(handlerName: HandlerName): Promise<CellHandle<unknown>> {
-    const defaultPattern = await this.#getDefaultPattern();
+    const defaultPattern = await this.#getHomePattern();
 
     // Apply schema to mark the handler as a stream
     const patternWithSchema = defaultPattern.asSchema({
