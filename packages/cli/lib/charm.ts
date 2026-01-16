@@ -150,6 +150,10 @@ export async function newCharm(
 
   const program = await getProgramFromFile(manager, entry);
   const charm = await charms.create(program, options);
+
+  // Explicitly add the charm to the space's allCharms list
+  await manager.add([charm.getCell()]);
+
   return charm.id;
 }
 
