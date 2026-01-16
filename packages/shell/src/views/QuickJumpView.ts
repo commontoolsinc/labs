@@ -4,7 +4,8 @@ import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { Task } from "@lit/task";
 import { navigate } from "../../shared/mod.ts";
-import { PageHandle } from "@commontools/runtime-client";
+import { CellHandle, isCellHandle } from "@commontools/runtime-client";
+import { NAME } from "@commontools/runner/shared";
 
 type CharmItem = { id: string; name: string };
 
@@ -106,26 +107,43 @@ export class XQuickJumpView extends BaseView {
       if (!rt) return undefined;
       await rt.synced();
 
-      const charmsListCell = await rt.getCharmsListCell();
+      const charmsListCell = await rt.getCharmsListCell<CellHandle>();
       await charmsListCell.sync();
 
-      const charmsList = charmsListCell.get() as any[];
-      if (!charmsList) return [];
+      const charmsList = charmsListCell.get();
+      if (!charmsList || !Array.isArray(charmsList)) return [];
 
-      // @TODO(runtime-worker-refactor)
-      /*
-      const handles: PageHandle[] = [];
-      for (const charmData of charmsList) {
-        const id = isCellHandle(charmData) ? charmData.id() : charmData?.$ID;
-        if (id) {
-          const charm = await rt.getPattern(id);
-          if (charm) {
-            handles.push(charm);
-          }
+      // Extract CellHandles from the charms list
+      const charmCells = charmsList.filter(
+        (item): item is CellHandle => isCellHandle(item),
+      );
+
+      // Sync all cells in parallel to fetch their data (without running them)
+      // Use allSettled so one failing sync doesn't prevent listing others
+      const results = await Promise.allSettled(
+        charmCells.map((cell) => cell.sync()),
+      );
+
+      // Extract id and name from successfully synced cells
+      const items: CharmItem[] = [];
+      charmCells.forEach((cell, index) => {
+        const result = results[index];
+        if (result.status === "rejected") {
+          console.error(
+            `[QuickJumpView] Failed to sync charm ${cell.id()}:`,
+            result.reason,
+          );
+          return;
         }
-      }
-      */
-      return [];
+        const id = cell.id();
+        const data = cell.get() as Record<string, unknown> | undefined;
+        const name = data && typeof data[NAME] === "string"
+          ? data[NAME]
+          : "Untitled Charm";
+        items.push({ id, name });
+      });
+
+      return items;
     },
     args: () => [this.rt],
   });
@@ -156,11 +174,8 @@ export class XQuickJumpView extends BaseView {
   }
 
   private getItems(): CharmItem[] {
-    const list = this._charms.value || [];
-    return list.map((c: PageHandle) => ({
-      id: c.id(),
-      name: c.name() ?? "Untitled Charm",
-    }));
+    const items = this._charms.value;
+    return items ? [...items] : [];
   }
 
   private containsInsensitive(a: string, b: string): boolean {

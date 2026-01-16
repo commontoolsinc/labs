@@ -23,6 +23,7 @@ import { ensureNotRenderThread } from "@commontools/utils/env";
 import {
   charmListSchema,
   charmSourceCellSchema,
+  defaultPatternHandlersSchema,
   NameSchema,
   nameSchema,
   processSchema,
@@ -174,12 +175,8 @@ export class CharmManager {
       throw new Error("Cannot add charms: default pattern not available");
     }
 
-    const cell = defaultPattern.asSchema({
-      type: "object",
-      properties: {
-        addCharm: { asStream: true },
-      },
-    });
+    // Use the shared schema that declares addCharm as a stream handler
+    const cell = defaultPattern.asSchema(defaultPatternHandlersSchema);
 
     const addCharmHandler = cell.key("addCharm").get();
     if (!isStream(addCharmHandler)) {

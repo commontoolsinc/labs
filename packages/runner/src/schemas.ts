@@ -104,3 +104,15 @@ export const stringArraySchema = {
   type: "array",
   items: { type: "string" },
 } as const satisfies JSONSchema;
+
+// Schema for DefaultCharmList pattern handlers
+// Used by CharmManager to discover and call addCharm/trackRecent handlers
+export const defaultPatternHandlersSchema = {
+  type: "object",
+  properties: {
+    allCharms: charmListSchema,
+    addCharm: { asStream: true },
+    trackRecent: { asStream: true },
+  },
+  required: ["addCharm", "trackRecent"],
+} as const satisfies JSONSchema;
