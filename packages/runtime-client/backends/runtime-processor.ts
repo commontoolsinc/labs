@@ -5,6 +5,7 @@ import { getLoggerCountsBreakdown, Logger } from "@commontools/utils/logger";
 import {
   type Cancel,
   convertCellsToLinks,
+  isStream,
   Runtime,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
@@ -499,7 +500,13 @@ export class RuntimeProcessor {
 
     // Use the shared schema that declares trackRecent as a stream handler
     const cell = defaultPattern.asSchema(defaultPatternHandlersSchema);
-    const handler = cell.key("trackRecent");
+    const handler = cell.key("trackRecent").get();
+    if (!isStream(handler)) {
+      console.warn(
+        "[RuntimeProcessor] trackRecent handler not found on default pattern",
+      );
+      return;
+    }
     handler.send({ charm: target });
   }
 

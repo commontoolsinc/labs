@@ -114,4 +114,5 @@ export const defaultPatternHandlersSchema = {
     addCharm: { asStream: true },
     trackRecent: { asStream: true },
   },
+  required: ["addCharm", "trackRecent"],
 } as const satisfies JSONSchema;
