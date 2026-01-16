@@ -33,6 +33,13 @@ type MinimalCharm = {
 const DEFAULT_SYSTEM_PROMPT =
   `You are Claude, a helpful AI assistant created by Anthropic. You are direct, helpful, and thoughtful in your responses. You aim to be truthful and you acknowledge uncertainty when relevant. You engage naturally with the human while maintaining appropriate boundaries.`;
 
+// Available models for selection
+const MODELS = [
+  { id: "anthropic:claude-sonnet-4-5", label: "Sonnet 4.5" },
+  { id: "anthropic:claude-haiku-4-5", label: "Haiku 4.5" },
+  { id: "anthropic:claude-opus-4-1", label: "Opus 4.1" },
+] as const;
+
 type Input = {
   title?: Writable<Default<string, "Chat Note">>;
   content?: Writable<Default<string, "">>;
@@ -42,6 +49,8 @@ type Input = {
   linkPattern?: Writable<Default<string, "">>;
   /** Parent notebook reference (passed via SELF from notebook.tsx) */
   parentNotebook?: any;
+  /** Selected model for generation. Defaults to Sonnet 4.5 */
+  model?: Writable<Default<string, "anthropic:claude-sonnet-4-5">>;
 };
 
 type LLMMessage = {
@@ -314,6 +323,14 @@ const goToParent = handler<Record<string, never>, { self: any }>(
   },
 );
 
+// Handler for model selection change
+const handleModelChange = handler<
+  { target: { value: string } },
+  { model: Writable<string> }
+>(({ target }, { model }) => {
+  model.set(target.value);
+});
+
 const ChatNote = pattern<Input, Output>(
   ({
     title,
@@ -322,6 +339,7 @@ const ChatNote = pattern<Input, Output>(
     noteId,
     linkPattern,
     parentNotebook: parentNotebookProp,
+    model,
     [SELF]: self,
   }) => {
     const { allCharms } = wish<{ allCharms: MinimalCharm[] }>("/");
@@ -341,6 +359,7 @@ const ChatNote = pattern<Input, Output>(
     const llmResponse = generateText({
       system: llmSystem,
       messages: llmMessages,
+      model: model,
     });
 
     // Watch for LLM streaming and completion, update content reactively
@@ -430,6 +449,18 @@ const ChatNote = pattern<Input, Output>(
       llmMessages,
     });
 
+    // Handler for Cmd+Enter from editor
+    const submitHandler = handleGenerate({
+      content,
+      llmSystem,
+      llmMessages,
+      isGenerating,
+      mentionable,
+    });
+
+    // Model change handler
+    const modelChangeHandler = handleModelChange({ model });
+
     return {
       [NAME]: computed(() => `💬 ${title.get()}`),
       [UI]: (
@@ -510,6 +541,23 @@ const ChatNote = pattern<Input, Output>(
                 />
               </div>
 
+              {/* Model selector */}
+              <select
+                value={model}
+                onChange={modelChangeHandler}
+                style={{
+                  display: computed(() => (showGenerating ? "none" : "block")),
+                  padding: "4px 8px",
+                  fontSize: "13px",
+                  borderRadius: "6px",
+                  border: "1px solid var(--ct-color-border, #e5e5e7)",
+                  background: "var(--ct-color-bg, white)",
+                  cursor: "pointer",
+                }}
+              >
+                {MODELS.map((m) => <option value={m.id}>{m.label}</option>)}
+              </select>
+
               {/* Generate button - shown when not generating */}
               <ct-button
                 variant="primary"
@@ -519,6 +567,7 @@ const ChatNote = pattern<Input, Output>(
                 style={{
                   display: computed(() => (showGenerating ? "none" : "flex")),
                 }}
+                title="Generate (Cmd+Enter)"
               >
                 Generate
               </ct-button>
@@ -551,6 +600,7 @@ const ChatNote = pattern<Input, Output>(
             $pattern={patternJson}
             onbacklink-click={handleCharmLinkClick({})}
             onbacklink-create={handleNewBacklink({ mentionable, allCharms })}
+            onct-submit={submitHandler}
             language="text/markdown"
             theme="light"
             wordWrap
