@@ -50,6 +50,8 @@ type Input = {
   noteId?: Default<string, "">;
   /** Pattern JSON for [[wiki-links]]. Defaults to creating new Notes. */
   linkPattern?: Writable<Default<string, "">>;
+  /** Parent notebook reference (passed via SELF from notebook.tsx) */
+  parentNotebook?: any;
 };
 
 /** Represents a small #note a user took to remember some text. */
@@ -299,7 +301,16 @@ const menuAllNotebooks = handler<
 });
 
 const Note = pattern<Input, Output>(
-  ({ title, content, isHidden, noteId, linkPattern }) => {
+  (
+    {
+      title,
+      content,
+      isHidden,
+      noteId,
+      linkPattern,
+      parentNotebook: parentNotebookProp,
+    },
+  ) => {
     const { allCharms } = wish<{ allCharms: MinimalCharm[] }>("/");
     const mentionable = wish<Default<MentionableCharm[], []>>(
       "#mentionable",
@@ -357,8 +368,12 @@ const Note = pattern<Input, Output>(
       });
     });
 
-    // Find parent notebook: prioritize most recently visited, fall back to first
+    // Find parent notebook: use explicit prop if provided, else fall back to wish-based lookup
     const parentNotebook = computed(() => {
+      // If parent was passed explicitly via SELF, use it
+      if (parentNotebookProp) return parentNotebookProp;
+
+      // Fallback: search for containing notebook (backward compatibility)
       if (containingNotebooks.length === 0) return null;
 
       // Find most recent notebook that contains this note
