@@ -71,9 +71,10 @@ export class CharmsController<T = unknown> {
     return new CharmController(this.#manager, cell);
   }
 
-  getAllCharms() {
+  async getAllCharms() {
     this.disposeCheck();
-    const charms = this.#manager.getCharms().get();
+    const charmsCell = await this.#manager.getCharms();
+    const charms = charmsCell.get();
     return charms.map((charm) => new CharmController(this.#manager, charm));
   }
 

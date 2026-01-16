@@ -3,7 +3,6 @@ import {
   Classification,
   EntityId,
   getEntityId,
-  type IExtendedStorageTransaction,
   isCell,
   isLink,
   isStream,
@@ -18,7 +17,6 @@ import {
   TYPE,
   URI,
 } from "@commontools/runner";
-import { ALL_CHARMS_ID } from "../../runner/src/builtins/well-known.ts";
 import { type Session } from "@commontools/identity";
 import { isRecord } from "@commontools/utils/types";
 import { ensureNotRenderThread } from "@commontools/utils/env";
@@ -59,11 +57,10 @@ function filterOutCell(
 export class CharmManager {
   private space: MemorySpace;
 
-  private charms: Cell<Cell<unknown>[]>;
   private spaceCell: Cell<SpaceCellContents>;
 
   /**
-   * Promise resolved when the charm manager gets the charm list.
+   * Promise resolved when the charm manager is ready.
    */
   ready: Promise<void>;
 
@@ -73,13 +70,6 @@ export class CharmManager {
   ) {
     this.space = this.session.space;
 
-    // Use the well-known ALL_CHARMS_ID entity for the charms cell
-    this.charms = this.runtime.getCellFromEntityId(
-      this.space,
-      { "/": ALL_CHARMS_ID },
-      [],
-      charmListSchema,
-    );
     // Use the space DID as the cause - it's derived from the space name
     // and consistently available everywhere
     const isHomeSpace = this.space === this.runtime.userIdentityDID;
@@ -91,20 +81,9 @@ export class CharmManager {
 
     // Note: allCharms and recentCharms are now managed by the default pattern,
     // not directly on the space cell. The space cell only contains a link to defaultPattern.
-    const linkSpaceCellContents = syncSpaceCellContents.then(() =>
-      this.runtime.editWithRetry((_tx) => {
-        // Space cell structure is now minimal - defaultPattern will be linked later
-      })
-    );
-
-    // Initialize all cells in parallel. linkSpaceCellContents already
-    // depends on syncSpaceCellContents internally, so ordering is preserved.
-    // Note: Default pattern creation is handled by CharmsController.ensureDefaultPattern()
+    // Default pattern creation is handled by CharmsController.ensureDefaultPattern()
     // which is called by CLI/shell entry points. CharmManager doesn't auto-create it.
-    this.ready = Promise.all([
-      this.syncCharms(this.charms),
-      linkSpaceCellContents,
-    ]).then(() => {});
+    this.ready = syncSpaceCellContents.then(() => {});
   }
 
   getSpace(): MemorySpace {
@@ -167,27 +146,26 @@ export class CharmManager {
     );
   }
 
-  // FIXME(ja): this says it returns a list of charm, but it isn't! you will
-  // have to call .get() to get the actual charm (this is missing the schema)
-  // how can we fix the type here?
-  getCharms(): Cell<Cell<unknown>[]> {
-    // Start syncing if not already syncing. Will trigger a change to the list
-    // once loaded.
-    this.syncCharms(this.charms);
-    return this.charms;
-  }
+  /**
+   * Get the cell containing the list of all charms in this space.
+   * Reads from the default pattern's allCharms export.
+   */
+  async getCharms(): Promise<Cell<Cell<unknown>[]>> {
+    const defaultPattern = await this.getDefaultPattern();
+    if (!defaultPattern) {
+      // Return empty array cell if no default pattern
+      return this.runtime.getCell(this.space, "empty-charms", charmListSchema);
+    }
 
-  private addCharms(
-    newCharms: Cell<unknown>[],
-    tx: IExtendedStorageTransaction,
-  ) {
-    const charms = this.charms.withTx(tx);
-
-    newCharms.forEach((charm) => {
-      if (!charms.get().some((otherCharm) => otherCharm.equals(charm))) {
-        charms.push(charm);
-      }
+    const cell = defaultPattern.asSchema({
+      type: "object",
+      properties: {
+        allCharms: charmListSchema,
+      },
     });
+    const charmsCell = cell.key("allCharms") as Cell<Cell<unknown>[]>;
+    await this.syncCharms(charmsCell);
+    return charmsCell;
   }
 
   async add(newCharms: Cell<unknown>[]): Promise<void> {
@@ -295,7 +273,8 @@ export class CharmManager {
    */
   async getReadingFrom(charm: Cell<unknown>): Promise<Cell<unknown>[]> {
     // Get all charms that might be referenced
-    const allCharms = this.getCharms().get();
+    const charmsCell = await this.getCharms();
+    const allCharms = charmsCell.get();
     const result: Cell<unknown>[] = [];
     const seenEntityIds = new Set<string>(); // Track entities we've already processed
     const maxDepth = 10; // Prevent infinite recursion
@@ -488,7 +467,8 @@ export class CharmManager {
    */
   async getReadByCharms(charm: Cell<unknown>): Promise<Cell<unknown>[]> {
     // Get all charms to check
-    const allCharms = this.getCharms().get();
+    const charmsCell = await this.getCharms();
+    const allCharms = charmsCell.get();
     const result: Cell<unknown>[] = [];
     const seenEntityIds = new Set<string>(); // Track entities we've already processed
     const maxDepth = 10; // Prevent infinite recursion
@@ -717,7 +697,8 @@ export class CharmManager {
 
   // note: removing a charm doesn't clean up the charm's cells
   async remove(charm: Cell<unknown>) {
-    await this.syncCharms(this.charms);
+    const charmsCell = await this.getCharms();
+    await this.syncCharms(charmsCell);
 
     // Check if this is the default pattern and clear the link
     const defaultPattern = await this.getDefaultPattern();
@@ -729,7 +710,7 @@ export class CharmManager {
     }
 
     const { ok } = await this.runtime.editWithRetry((tx) => {
-      const charms = this.charms.withTx(tx);
+      const charms = charmsCell.withTx(tx);
 
       // Remove from main list
       const newCharms = filterOutCell(charms, charm);
@@ -871,9 +852,10 @@ export class CharmManager {
 
   // Returns the charm from our active charm list if it is present,
   // or undefined if it is not
-  getActiveCharm(charmCell: Cell<unknown>) {
+  async getActiveCharm(charmCell: Cell<unknown>) {
+    const charmsCell = await this.getCharms();
     const resolved = charmCell.resolveAsCell();
-    return this.charms.get().find((charm) =>
+    return charmsCell.get().find((charm) =>
       charm.resolveAsCell().equals(resolved)
     );
   }
@@ -965,8 +947,9 @@ async function getCellByIdOrCharm(
       const cell = await manager.getCellById({ "/": cellId });
 
       // Check if this cell is actually a charm by looking at the charms list
-      const charms = manager.getCharms().get();
-      const isActuallyCharm = charms.some((charm) => {
+      const charmsCell = await manager.getCharms();
+      const charms = charmsCell.get();
+      const isActuallyCharm = charms.some((charm: Cell<unknown>) => {
         const id = charmId(charm);
         // If we can't get the charm ID, it's not a valid charm
         if (!id) return false;

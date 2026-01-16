@@ -405,8 +405,8 @@ export class RuntimeProcessor {
     return { value: true };
   }
 
-  handlePageGetAll(): CellResponse {
-    const charmsCell = this.charmManager.getCharms();
+  async handlePageGetAll(): Promise<CellResponse> {
+    const charmsCell = await this.charmManager.getCharms();
     return {
       cell: createCellRef(charmsCell),
     };
@@ -545,7 +545,7 @@ export class RuntimeProcessor {
       case RequestType.PageStop:
         return await this.handlePageStop(request);
       case RequestType.PageGetAll:
-        return this.handlePageGetAll();
+        return await this.handlePageGetAll();
       case RequestType.PageSynced:
         return await this.handlePageSynced();
       case RequestType.GetGraphSnapshot:

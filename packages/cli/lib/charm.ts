@@ -67,7 +67,8 @@ export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
         runtime.storageManager.synced().then(async () => {
           try {
             const mgr = charmManagerRef.current!;
-            const list = mgr.getCharms().get();
+            const charmsCell = await mgr.getCharms();
+            const list = charmsCell.get();
             const exists = list.some((c) => charmId(c) === id);
             if (!exists) {
               await mgr.add([target]);
@@ -113,8 +114,9 @@ export async function listCharms(
 ): Promise<{ id: string; name?: string; recipeName?: string }[]> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
+  const allCharms = await charms.getAllCharms();
   return Promise.all(
-    charms.getAllCharms().map(async (charm) => {
+    allCharms.map(async (charm) => {
       return {
         id: charm.id,
         name: charm.name(),
