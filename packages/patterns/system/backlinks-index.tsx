@@ -41,13 +41,16 @@ const computeIndex = lift<
     // Reset backlinks for charms that support it.
     // Many charms don't have backlinks (e.g., auth charms, google patterns),
     // so we safely skip them with optional chaining.
+    // Also skip undefined/null entries that may exist in the array.
     for (const c of cs) {
+      if (!c) continue;
       c.backlinks?.set?.([]);
     }
 
     // Populate backlinks from mentioned references.
     // Again, use optional chaining since not all charms support backlinks.
     for (const c of cs) {
+      if (!c) continue;
       const mentions = c.mentioned ?? [];
       for (const m of mentions) {
         m?.backlinks?.push?.(c);
@@ -79,6 +82,8 @@ const computeMentionable = lift<
   const cs = charmList ?? [];
   const out: MentionableCharm[] = [];
   for (const c of cs) {
+    // Skip undefined/null entries that may exist in the array
+    if (!c) continue;
     // Skip charms explicitly marked as not mentionable (like note-md viewer charms)
     // Note: We check isMentionable === false, not isHidden, because notes in
     // notebooks are hidden but should still be mentionable
