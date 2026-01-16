@@ -1,9 +1,8 @@
 /// <cts-enable />
 import {
+  action,
   computed,
   Default,
-  equals,
-  handler,
   NAME,
   navigateTo,
   pattern,
@@ -19,6 +18,9 @@ import ReadingItemDetail, {
   type ReadingItem,
 } from "./reading-item-detail.tsx";
 
+// Re-export types for consumers and tests
+export type { ItemStatus, ItemType, ReadingItem };
+
 // Pre-computed item data for rendering (avoids closure issues in .map())
 interface ItemDisplayData {
   item: ReadingItem;
@@ -27,7 +29,7 @@ interface ItemDisplayData {
 }
 
 interface Input {
-  items: Writable<Default<ReadingItem[], []>>;
+  items?: Writable<Default<ReadingItem[], []>>;
 }
 
 interface Output {
@@ -54,54 +56,43 @@ const renderStars = (rating: number | null): string => {
   return "★".repeat(rating) + "☆".repeat(5 - rating);
 };
 
-// ===== Handlers at module scope =====
-
-const addItem = handler<
-  { title: string; author: string; type: ItemType },
-  {
-    items: Writable<ReadingItem[]>;
-    newTitle: Writable<string>;
-    newAuthor: Writable<string>;
-  }
->(({ title, author, type }, { items, newTitle, newAuthor }) => {
-  const trimmedTitle = title.trim();
-  if (trimmedTitle) {
-    items.push({
-      title: trimmedTitle,
-      author: author.trim(),
-      url: "",
-      type,
-      status: "want",
-      rating: null,
-      notes: "",
-      addedAt: Date.now(),
-      finishedAt: null,
-    });
-    newTitle.set("");
-    newAuthor.set("");
-  }
-});
-
-const removeItem = handler<
-  { item: ReadingItem },
-  { items: Writable<ReadingItem[]> }
->(({ item }, { items }) => {
-  const current = items.get();
-  const idx = current.findIndex((i) => equals(item, i));
-  if (idx >= 0) {
-    items.set(current.toSpliced(idx, 1));
-  }
-});
-
 export default pattern<Input, Output>(({ items }) => {
   const filterStatus = Writable.of<ItemStatus | "all">("all");
   const newTitle = Writable.of("");
   const newAuthor = Writable.of("");
   const newType = Writable.of<ItemType>("article");
 
-  // Bind handlers with their required context
-  const boundAddItem = addItem({ items, newTitle, newAuthor });
-  const boundRemoveItem = removeItem({ items });
+  // Pattern-body actions - preferred for single-use handlers
+  const addItem = action(
+    (
+      { title, author, type }: {
+        title: string;
+        author: string;
+        type: ItemType;
+      },
+    ) => {
+      const trimmedTitle = title.trim();
+      if (trimmedTitle) {
+        items.push({
+          title: trimmedTitle,
+          author: author.trim(),
+          url: "",
+          type,
+          status: "want",
+          rating: null,
+          notes: "",
+          addedAt: Date.now(),
+          finishedAt: null,
+        });
+        newTitle.set("");
+        newAuthor.set("");
+      }
+    },
+  );
+
+  const removeItem = action(({ item }: { item: ReadingItem }) => {
+    items.remove(item);
+  });
 
   // Computed values
   const totalCount = computed(() => items.get().length);
@@ -131,7 +122,7 @@ export default pattern<Input, Output>(({ items }) => {
   });
 
   return {
-    [NAME]: "Reading List",
+    [NAME]: computed(() => `Reading List (${items.get().length})`),
     [UI]: (
       <ct-screen>
         <ct-vstack slot="header" gap="2">
@@ -186,7 +177,7 @@ export default pattern<Input, Output>(({ items }) => {
                   </ct-vstack>
                   <ct-button
                     variant="ghost"
-                    onClick={() => boundRemoveItem.send({ item: data.item })}
+                    onClick={() => removeItem.send({ item: data.item })}
                   >
                     ×
                   </ct-button>
@@ -229,7 +220,7 @@ export default pattern<Input, Output>(({ items }) => {
             <ct-button
               variant="primary"
               onClick={() =>
-                boundAddItem.send({
+                addItem.send({
                   title: newTitle.get(),
                   author: newAuthor.get(),
                   type: newType.get(),
@@ -243,7 +234,7 @@ export default pattern<Input, Output>(({ items }) => {
     ),
     items,
     totalCount,
-    addItem: boundAddItem,
-    removeItem: boundRemoveItem,
+    addItem,
+    removeItem,
   };
 });
