@@ -12,7 +12,7 @@ import {
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { charmId, CharmManager, extractUserCode } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { setLLMUrl } from "@commontools/llm";
 import { isObject } from "@commontools/utils/types";
@@ -195,7 +195,9 @@ export async function saveCharmRecipe(
       if (name[0] !== "/") {
         throw new Error("Ungrounded file in recipe.");
       }
-      await Deno.writeTextFile(join(outPath, name.substring(1)), contents);
+      const outFilePath = join(outPath, name.substring(1));
+      await Deno.mkdir(dirname(outFilePath), { recursive: true });
+      await Deno.writeTextFile(outFilePath, contents);
     }
   } else {
     throw new Error(
