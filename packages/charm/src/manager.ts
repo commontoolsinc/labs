@@ -196,6 +196,7 @@ export class CharmManager {
     }
 
     await this.runtime.idle();
+    await this.synced();
   }
 
   syncCharms(cell: Cell<Cell<unknown>[]>) {
