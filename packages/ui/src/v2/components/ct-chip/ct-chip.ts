@@ -52,132 +52,130 @@ export class CTChip extends BaseElement {
         font-size: 0.8125rem;
         line-height: 1;
         user-select: none;
-        transition:
-          background-color var(--ct-theme-animation-duration, 200ms) ease,
-          border-color var(--ct-theme-animation-duration, 200ms) ease;
-        }
-
-        .chip.interactive {
-          cursor: pointer;
-        }
-
-        .chip.interactive:hover {
-          background: var(
-            --ct-theme-color-surface-hover,
-            var(--ct-color-gray-200, #eeeeee)
-          );
-        }
-
-        /* Variant: primary (blue - for mentions) */
-        .chip.primary {
-          background: var(
-            --ct-theme-color-primary-surface,
-            var(--ct-color-blue-50, #eff6ff)
-          );
-          border-color: var(
-            --ct-theme-color-primary,
-            var(--ct-color-blue-200, #bfdbfe)
-          );
-          color: var(
-            --ct-theme-color-primary,
-            var(--ct-color-blue-700, #1d4ed8)
-          );
-        }
-
-        /* Variant: accent (purple - for clipboard) */
-        .chip.accent {
-          background: var(
-            --ct-theme-color-accent-surface,
-            var(--ct-color-purple-50, #faf5ff)
-          );
-          border-color: var(
-            --ct-theme-color-accent,
-            var(--ct-color-purple-200, #e9d5ff)
-          );
-          color: var(
-            --ct-theme-color-accent,
-            var(--ct-color-purple-700, #7c3aed)
-          );
-        }
-
-        .chip-icon {
-          display: flex;
-          align-items: center;
-          font-size: 0.8125rem;
-          line-height: 1;
-        }
-
-        .chip-label {
-          max-width: 200px;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        .chip-remove {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 0.75rem;
-          height: 0.75rem;
-          border-radius: 50%;
-          cursor: pointer;
-          transition: background-color 0.1s;
-          color: currentColor;
-          opacity: 0.6;
-        }
-
-        .chip-remove:hover {
-          background: rgba(0, 0, 0, 0.1);
-          opacity: 1;
-        }
-      `,
-    ];
-
-    @property({ type: String })
-    label = "";
-
-    @property({ type: String })
-    variant: "default" | "primary" | "accent" = "default";
-
-    @property({ type: Boolean })
-    removable = false;
-
-    @property({ type: Boolean })
-    interactive = false;
-
-    private _handleRemove(e: Event): void {
-      e.stopPropagation();
-      this.emit("ct-remove");
-    }
-
-    private _handleClick(): void {
-      if (this.interactive) {
-        this.emit("ct-click");
+        transition: border-color var(--ct-theme-animation-duration, 200ms) ease;
       }
-    }
 
-    override render() {
-      const classes = [
-        "chip",
-        this.variant,
-        this.interactive && "interactive",
-      ].filter(Boolean).join(" ");
+      .chip.interactive {
+        cursor: pointer;
+      }
 
-      return html`
-        <div class="${classes}" @click="${this._handleClick}">
-          <slot name="icon" class="chip-icon"></slot>
-          <span class="chip-label">
-            <slot>${this.label}</slot>
-          </span>
-          ${this.removable
-            ? html`
-              <span class="chip-remove" @click="${this._handleRemove}">×</span>
-            `
-            : ""}
-        </div>
-      `;
+      .chip.interactive:hover {
+        background: var(
+          --ct-theme-color-surface-hover,
+          var(--ct-color-gray-200, #eeeeee)
+        );
+      }
+
+      /* Variant: primary (blue - for mentions) */
+      .chip.primary {
+        background: var(
+          --ct-theme-color-primary-surface,
+          var(--ct-color-blue-50, #eff6ff)
+        );
+        border-color: var(
+          --ct-theme-color-primary,
+          var(--ct-color-blue-200, #bfdbfe)
+        );
+        color: var(
+          --ct-theme-color-primary,
+          var(--ct-color-blue-700, #1d4ed8)
+        );
+      }
+
+      /* Variant: accent (purple - for clipboard) */
+      .chip.accent {
+        background: var(
+          --ct-theme-color-accent-surface,
+          var(--ct-color-purple-50, #faf5ff)
+        );
+        border-color: var(
+          --ct-theme-color-accent,
+          var(--ct-color-purple-200, #e9d5ff)
+        );
+        color: var(
+          --ct-theme-color-accent,
+          var(--ct-color-purple-700, #7c3aed)
+        );
+      }
+
+      .chip-icon {
+        display: flex;
+        align-items: center;
+        font-size: 0.8125rem;
+        line-height: 1;
+      }
+
+      .chip-label {
+        max-width: 200px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .chip-remove {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 0.75rem;
+        height: 0.75rem;
+        border-radius: 50%;
+        cursor: pointer;
+        transition: background-color 0.1s;
+        color: currentColor;
+        opacity: 0.6;
+      }
+
+      .chip-remove:hover {
+        background: rgba(0, 0, 0, 0.1);
+        opacity: 1;
+      }
+    `,
+  ];
+
+  @property({ type: String })
+  label = "";
+
+  @property({ type: String })
+  variant: "default" | "primary" | "accent" = "default";
+
+  @property({ type: Boolean })
+  removable = false;
+
+  @property({ type: Boolean })
+  interactive = false;
+
+  private _handleRemove(e: Event): void {
+    e.stopPropagation();
+    this.emit("ct-remove");
+  }
+
+  private _handleClick(): void {
+    if (this.interactive) {
+      this.emit("ct-click");
     }
   }
 
-  customElements.define("ct-chip", CTChip);
+  override render() {
+    const classes = [
+      "chip",
+      this.variant,
+      this.interactive && "interactive",
+    ].filter(Boolean).join(" ");
+
+    return html`
+      <div class="${classes}" @click="${this._handleClick}">
+        <slot name="icon" class="chip-icon"></slot>
+        <span class="chip-label">
+          <slot>${this.label}</slot>
+        </span>
+        ${this.removable
+          ? html`
+            <span class="chip-remove" @click="${this._handleRemove}">×</span>
+          `
+          : ""}
+      </div>
+    `;
+  }
+}
+
+customElements.define("ct-chip", CTChip);
