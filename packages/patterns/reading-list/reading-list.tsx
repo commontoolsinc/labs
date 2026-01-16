@@ -21,13 +21,6 @@ import ReadingItemDetail, {
 // Re-export types for consumers and tests
 export type { ItemStatus, ItemType, ReadingItem };
 
-// Pre-computed item data for rendering (avoids closure issues in .map())
-interface ItemDisplayData {
-  item: ReadingItem;
-  typeEmoji: string;
-  stars: string;
-}
-
 interface Input {
   items?: Writable<Default<ReadingItem[], []>>;
 }
@@ -48,7 +41,7 @@ const TYPE_EMOJI: Record<ItemType, string> = {
   video: "🎬",
 };
 
-// Pure helper functions (used inside computed())
+// Pure helper functions - can be called directly in JSX
 const getTypeEmoji = (t: ItemType): string => TYPE_EMOJI[t] || "📄";
 
 const renderStars = (rating: number | null): string => {
@@ -97,28 +90,12 @@ export default pattern<Input, Output>(({ items }) => {
   // Computed values
   const totalCount = computed(() => items.get().length);
 
-  // Pre-compute filtered items with display data to avoid closure issues in .map()
-  const filteredDisplayData = computed((): ItemDisplayData[] => {
-    const itemList = items.get();
-    const status = filterStatus.get();
-
-    const filtered = status === "all"
-      ? itemList
-      : itemList.filter((item) => item.status === status);
-
-    return filtered.map((item) => ({
-      item,
-      typeEmoji: getTypeEmoji(item.type),
-      stars: renderStars(item.rating),
-    }));
-  });
-
-  // Compute hasNoFilteredItems directly from source data (not from another computed)
+  // For empty state display
   const hasNoFilteredItems = computed(() => {
-    const itemList = items.get();
     const status = filterStatus.get();
-    if (status === "all") return itemList.length === 0;
-    return itemList.filter((item) => item.status === status).length === 0;
+    return status === "all"
+      ? items.get().length === 0
+      : items.get().filter((item) => item.status === status).length === 0;
   });
 
   return {
@@ -143,47 +120,57 @@ export default pattern<Input, Output>(({ items }) => {
 
         <ct-vscroll flex showScrollbar fadeEdges>
           <ct-vstack gap="2" style="padding: 1rem;">
-            {filteredDisplayData.map((data) => (
-              <ct-card
-                style="cursor: pointer;"
-                onClick={() => {
-                  const detail = ReadingItemDetail({ item: data.item });
-                  return navigateTo(detail);
-                }}
-              >
-                <ct-hstack gap="2" align="center">
-                  <span style="font-size: 1.5rem;">
-                    {data.typeEmoji}
-                  </span>
-                  <ct-vstack gap="0" style="flex: 1;">
-                    <span style="font-weight: 500;">
-                      {data.item.title || "(untitled)"}
-                    </span>
-                    {data.item.author && (
-                      <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
-                        by {data.item.author}
-                      </span>
-                    )}
-                    <ct-hstack gap="2" align="center">
-                      <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
-                        {data.item.status}
-                      </span>
-                      {data.stars && (
-                        <span style="font-size: 0.75rem; color: var(--ct-color-warning-500);">
-                          {data.stars}
-                        </span>
-                      )}
-                    </ct-hstack>
-                  </ct-vstack>
-                  <ct-button
-                    variant="ghost"
-                    onClick={() => removeItem.send({ item: data.item })}
+            {items.map((item) => {
+              // Use computed() to check visibility - callbacks inside .map() are allowed
+              const isVisible = computed(() => {
+                const status = filterStatus.get();
+                return status === "all" || item.status === status;
+              });
+
+              return isVisible
+                ? (
+                  <ct-card
+                    style="cursor: pointer;"
+                    onClick={() => {
+                      const detail = ReadingItemDetail({ item });
+                      return navigateTo(detail);
+                    }}
                   >
-                    ×
-                  </ct-button>
-                </ct-hstack>
-              </ct-card>
-            ))}
+                    <ct-hstack gap="2" align="center">
+                      <span style="font-size: 1.5rem;">
+                        {getTypeEmoji(item.type)}
+                      </span>
+                      <ct-vstack gap="0" style="flex: 1;">
+                        <span style="font-weight: 500;">
+                          {item.title || "(untitled)"}
+                        </span>
+                        {item.author && (
+                          <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
+                            by {item.author}
+                          </span>
+                        )}
+                        <ct-hstack gap="2" align="center">
+                          <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
+                            {item.status}
+                          </span>
+                          {renderStars(item.rating) && (
+                            <span style="font-size: 0.75rem; color: var(--ct-color-warning-500);">
+                              {renderStars(item.rating)}
+                            </span>
+                          )}
+                        </ct-hstack>
+                      </ct-vstack>
+                      <ct-button
+                        variant="ghost"
+                        onClick={() => removeItem.send({ item })}
+                      >
+                        ×
+                      </ct-button>
+                    </ct-hstack>
+                  </ct-card>
+                )
+                : null;
+            })}
 
             {hasNoFilteredItems
               ? (
