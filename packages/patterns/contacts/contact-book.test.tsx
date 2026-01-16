@@ -11,9 +11,12 @@
  *
  * Run: deno task ct test packages/patterns/counter/counter.test.tsx --verbose
  */
-import { computed, pattern } from "commontools";
-import { matchesSearch } from "./contact-book.tsx";
+import { action, computed, pattern } from "commontools";
+import { default as ContactBook, matchesSearch } from "./contact-book.tsx";
 import { type Contact } from "./contact-detail.tsx";
+
+// Helper to get array length with proper reactivity tracking
+const len = <T,>(arr: T[]): number => arr.filter(() => true).length;
 
 const testContact: Contact = {
   name: "Conrad Common",
@@ -45,6 +48,16 @@ export default pattern(() => {
     matchesSearch(testContact, "common")
   );
 
+  const contactBook = ContactBook({ contacts: [], relationships: [] });
+
+  const action_add_contact = action(() => {
+    contactBook.onAddContact.send();
+  });
+
+  const assert_one_contact = computed(
+    () => len(contactBook.contacts) == 1,
+  );
+
   // ==========================================================================
   // Test Sequence
   // ==========================================================================
@@ -54,6 +67,9 @@ export default pattern(() => {
       { assertion: assert_name_query_matches },
       { assertion: assert_email_query_matches },
       { assertion: assert_company_query_matches },
+
+      { action: action_add_contact },
+      { assertion: assert_one_contact },
     ],
   };
 });

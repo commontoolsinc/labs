@@ -8,6 +8,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  Stream,
   UI,
   Writable,
 } from "commontools";
@@ -37,6 +38,7 @@ interface Input {
 interface Output {
   contacts: Contact[];
   relationships: Relationship[];
+  onAddContact: Stream<void>;
 }
 
 export default pattern<Input, Output>(({ contacts, relationships }) => {
@@ -215,5 +217,6 @@ export default pattern<Input, Output>(({ contacts, relationships }) => {
     ),
     contacts,
     relationships,
+    onAddContact,
   };
 });
