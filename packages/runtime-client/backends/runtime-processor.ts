@@ -10,7 +10,11 @@ import {
   RuntimeTelemetryEvent,
   setRecipeEnvironment,
 } from "@commontools/runner";
-import { NameSchema, nameSchema } from "@commontools/runner/schemas";
+import {
+  defaultPatternHandlersSchema,
+  NameSchema,
+  nameSchema,
+} from "@commontools/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
 import {
   type NormalizedFullLink,
@@ -493,13 +497,8 @@ export class RuntimeProcessor {
     const defaultPattern = await charmManager.getDefaultPattern();
     if (!defaultPattern) return;
 
-    const cell = defaultPattern.asSchema({
-      type: "object",
-      properties: {
-        trackRecent: { asStream: true },
-      },
-      required: ["trackRecent"],
-    });
+    // Use the shared schema that declares trackRecent as a stream handler
+    const cell = defaultPattern.asSchema(defaultPatternHandlersSchema);
     const handler = cell.key("trackRecent");
     handler.send({ charm: target });
   }
