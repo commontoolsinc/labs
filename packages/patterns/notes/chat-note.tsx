@@ -1,8 +1,8 @@
 /// <cts-enable />
 import {
   computed,
-  derive,
   type Default,
+  derive,
   generateText,
   handler,
   NAME,
@@ -30,7 +30,8 @@ type MinimalCharm = {
 };
 
 // Default system prompt - based on leaked/inferred Claude system prompt style
-const DEFAULT_SYSTEM_PROMPT = `You are Claude, a helpful AI assistant created by Anthropic. You are direct, helpful, and thoughtful in your responses. You aim to be truthful and you acknowledge uncertainty when relevant. You engage naturally with the human while maintaining appropriate boundaries.`;
+const DEFAULT_SYSTEM_PROMPT =
+  `You are Claude, a helpful AI assistant created by Anthropic. You are direct, helpful, and thoughtful in your responses. You aim to be truthful and you acknowledge uncertainty when relevant. You engage naturally with the human while maintaining appropriate boundaries.`;
 
 type Input = {
   title?: Writable<Default<string, "Chat Note">>;
@@ -150,8 +151,8 @@ function expandWikiLinks(
     // Find the charm by ID
     const charm = mentionable?.find((c: any) => {
       // Check various ways the ID might be stored
-      const charmId =
-        c?.id || c?.noteId || (c as any)?.$id || (c as any)?.["$ID"];
+      const charmId = c?.id || c?.noteId || (c as any)?.$id ||
+        (c as any)?.["$ID"];
       return charmId === id;
     });
 
@@ -531,7 +532,11 @@ const ChatNote = pattern<Input, Output>(
                 }}
               >
                 <ct-loader show-elapsed />
-                <ct-button variant="secondary" size="sm" onClick={cancelHandler}>
+                <ct-button
+                  variant="secondary"
+                  size="sm"
+                  onClick={cancelHandler}
+                >
                   Cancel
                 </ct-button>
               </ct-hstack>
