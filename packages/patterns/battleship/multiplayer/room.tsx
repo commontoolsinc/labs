@@ -14,8 +14,8 @@
  */
 
 import {
+  action,
   computed,
-  handler,
   NAME,
   pattern,
   UI,
@@ -41,124 +41,6 @@ import {
 } from "./schemas.tsx";
 
 // =============================================================================
-// HANDLERS
-// =============================================================================
-
-/**
- * Fire a shot at the enemy board.
- *
- * Event payload: { row, col } - the target coordinates
- * State binding: myPlayerNumber + shared game state cells
- *
- * This design allows:
- * - Single handler bound once per room (not 100 handlers per cell)
- * - Testing via room.fireShot.send({ row: 0, col: 0 })
- */
-const fireShotHandler = handler<
-  { row: number; col: number },
-  {
-    myPlayerNumber: 1 | 2;
-    player1: Writable<PlayerData | null>;
-    player2: Writable<PlayerData | null>;
-    shots: Writable<ShotsState>;
-    gameState: Writable<GameState>;
-  }
->(
-  (
-    { row, col },
-    {
-      myPlayerNumber,
-      player1,
-      player2,
-      shots,
-      gameState,
-    },
-  ) => {
-    const state = gameState.get();
-
-    // Can't fire if game is over
-    if (state.phase === "finished") return;
-
-    // Can only fire on your turn
-    if (state.currentTurn !== myPlayerNumber) return;
-
-    // Get current shots
-    const currentShots = shots.get();
-
-    // Target the opponent's board (shots are stored as "shots received by player X")
-    const targetPlayerNum = myPlayerNumber === 1 ? 2 : 1;
-    const targetShots = currentShots[targetPlayerNum];
-
-    // Can't fire at same spot twice
-    if (targetShots[row]?.[col] !== "empty") return;
-
-    // Get opponent's data directly (no JSON parsing!)
-    const opponentData = targetPlayerNum === 1 ? player1.get() : player2.get();
-    if (!opponentData) return;
-
-    // Check if hit
-    const hitShip = findShipAt(opponentData.ships, { row, col });
-
-    // Update shots grid
-    const newTargetShots = targetShots.map((r, ri) =>
-      r.map((c, ci) =>
-        ri === row && ci === col ? (hitShip ? "hit" : "miss") : c
-      )
-    ) as SquareState[][];
-
-    const updatedShotsData: ShotsState = {
-      ...currentShots,
-      [targetPlayerNum]: newTargetShots,
-    };
-    shots.set(updatedShotsData);
-
-    // Build message
-    let message = "";
-    const coordStr = `${COLS[col]}${row + 1}`;
-
-    if (hitShip) {
-      if (isShipSunk(hitShip, newTargetShots)) {
-        message = `${coordStr}: Hit! You sunk the ${SHIP_NAMES[hitShip.type]}!`;
-      } else {
-        message = `${coordStr}: Hit!`;
-      }
-    } else {
-      message = `${coordStr}: Miss.`;
-    }
-
-    // Check for win
-    const allSunk = areAllShipsSunk(opponentData.ships, newTargetShots);
-
-    if (allSunk) {
-      // Get winner's data directly
-      const winnerData = myPlayerNumber === 1 ? player1.get() : player2.get();
-      const winnerName = winnerData?.name || `Player ${myPlayerNumber}`;
-
-      const newState: GameState = {
-        ...state,
-        phase: "finished",
-        winner: myPlayerNumber,
-        lastMessage: `${message} ${winnerName} wins!`,
-      };
-      gameState.set(newState);
-    } else {
-      // Switch turns
-      const nextTurn = myPlayerNumber === 1 ? 2 : 1;
-      const nextPlayerData = nextTurn === 1 ? player1.get() : player2.get();
-      const nextPlayerName = nextPlayerData?.name || `Player ${nextTurn}`;
-
-      const newState: GameState = {
-        ...state,
-        currentTurn: nextTurn,
-        lastMessage: `${message} ${nextPlayerName}'s turn.`,
-      };
-      gameState.set(newState);
-    }
-  },
-);
-
-
-// =============================================================================
 // PATTERN
 // =============================================================================
 
@@ -172,22 +54,107 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
     myName,
     myPlayerNumber,
   }) => {
-    // Bind the fireShot handler once with shared state
-    // UI calls fireShot.send({ row, col }) instead of creating 100 handlers
-    const fireShot = fireShotHandler({
-      myPlayerNumber: myPlayerNumber as 1 | 2,
-      player1,
-      player2,
-      shots,
-      gameState,
+    // Cast once for use throughout
+    const playerNum = myPlayerNumber as 1 | 2;
+
+    // Fire shot action - closes over pattern state directly
+    const fireShot = action<{ row: number; col: number }>(({ row, col }) => {
+      const state = gameState.get();
+
+      // Can't fire if game is over
+      if (state.phase === "finished") return;
+
+      // Can only fire on your turn
+      if (state.currentTurn !== playerNum) return;
+
+      // Get current shots
+      const currentShots = shots.get();
+
+      // Target the opponent's board (shots are stored as "shots received by player X")
+      const targetPlayerNum = playerNum === 1 ? 2 : 1;
+      const targetShots = currentShots[targetPlayerNum];
+
+      // Can't fire at same spot twice
+      if (targetShots[row]?.[col] !== "empty") return;
+
+      // Get opponent's data directly
+      const opponentData = targetPlayerNum === 1
+        ? player1.get()
+        : player2.get();
+      if (!opponentData) return;
+
+      // Check if hit
+      const hitShip = findShipAt(opponentData.ships, { row, col });
+
+      // Update shots grid
+      const newTargetShots = targetShots.map((r, ri) =>
+        r.map((c, ci) =>
+          ri === row && ci === col ? (hitShip ? "hit" : "miss") : c
+        )
+      ) as SquareState[][];
+
+      const updatedShotsData: ShotsState = {
+        ...currentShots,
+        [targetPlayerNum]: newTargetShots,
+      };
+      shots.set(updatedShotsData);
+
+      // Build message
+      let message = "";
+      const coordStr = `${COLS[col]}${row + 1}`;
+
+      if (hitShip) {
+        if (isShipSunk(hitShip, newTargetShots)) {
+          message = `${coordStr}: Hit! You sunk the ${SHIP_NAMES[hitShip.type]}!`;
+        } else {
+          message = `${coordStr}: Hit!`;
+        }
+      } else {
+        message = `${coordStr}: Miss.`;
+      }
+
+      // Check for win
+      const allSunk = areAllShipsSunk(opponentData.ships, newTargetShots);
+
+      if (allSunk) {
+        // Get winner's data directly
+        const winnerData = playerNum === 1 ? player1.get() : player2.get();
+        const winnerName = winnerData?.name || `Player ${playerNum}`;
+
+        const newState: GameState = {
+          ...state,
+          phase: "finished",
+          winner: playerNum,
+          lastMessage: `${message} ${winnerName} wins!`,
+        };
+        gameState.set(newState);
+      } else {
+        // Switch turns
+        const nextTurn = playerNum === 1 ? 2 : 1;
+        const nextPlayerData = nextTurn === 1 ? player1.get() : player2.get();
+        const nextPlayerName = nextPlayerData?.name || `Player ${nextTurn}`;
+
+        const newState: GameState = {
+          ...state,
+          currentTurn: nextTurn,
+          lastMessage: `${message} ${nextPlayerName}'s turn.`,
+        };
+        gameState.set(newState);
+      }
     });
 
     // Board cells computed directly
     const myBoardCells = computed(() => {
       const playerNum = myPlayerNumber as 1 | 2;
       const playerData = playerNum === 1 ? player1.get() : player2.get();
-      const myShips = playerData?.ships || [];
       const currentShots = shots.get();
+
+      // Guard against null state during hydration
+      if (!playerData || !currentShots) {
+        return [];
+      }
+
+      const myShips = playerData.ships || [];
       const myShots = currentShots[playerNum] || [];
       const shipPositions = buildShipPositions(myShips);
 
@@ -220,8 +187,14 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
     const enemyBoardCells = computed(() => {
       const playerNum = myPlayerNumber as 1 | 2;
       const gs = gameState.get();
-      const isFinished = gs.phase === "finished";
       const currentShots = shots.get();
+
+      // Guard against null state during hydration
+      if (!gs || !currentShots) {
+        return [];
+      }
+
+      const isFinished = gs.phase === "finished";
       const oppNum = playerNum === 1 ? 2 : 1;
       const oppShots = currentShots[oppNum] || [];
 
@@ -257,6 +230,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
     });
     const showTurnIndicator = computed(() => {
       const gs = gameState.get();
+      if (!gs) return "none";
       return gs.currentTurn === myPlayerNumber && gs.phase !== "finished"
         ? "block"
         : "none";
@@ -268,26 +242,34 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
     const player1Initials = computed(() =>
       getInitials(player1.get()?.name || "P1")
     );
-    const player1BgColor = computed(() =>
-      gameState.get().currentTurn === 1 ? "#1e40af" : "#1e293b"
-    );
-    const player1Status = computed(() =>
-      gameState.get().currentTurn === 1 ? "Active" : "Waiting"
-    );
+    const player1BgColor = computed(() => {
+      const gs = gameState.get();
+      if (!gs) return "#1e293b";
+      return gs.currentTurn === 1 ? "#1e40af" : "#1e293b";
+    });
+    const player1Status = computed(() => {
+      const gs = gameState.get();
+      if (!gs) return "Waiting";
+      return gs.currentTurn === 1 ? "Active" : "Waiting";
+    });
 
     const player2Color = computed(() => player2.get()?.color || "#ef4444");
     const player2Name = computed(() => player2.get()?.name || "Player 2");
     const player2Initials = computed(() =>
       getInitials(player2.get()?.name || "P2")
     );
-    const player2BgColor = computed(() =>
-      gameState.get().currentTurn === 2 ? "#1e40af" : "#1e293b"
-    );
-    const player2Status = computed(() =>
-      gameState.get().currentTurn === 2 ? "Active" : "Waiting"
-    );
+    const player2BgColor = computed(() => {
+      const gs = gameState.get();
+      if (!gs) return "#1e293b";
+      return gs.currentTurn === 2 ? "#1e40af" : "#1e293b";
+    });
+    const player2Status = computed(() => {
+      const gs = gameState.get();
+      if (!gs) return "Waiting";
+      return gs.currentTurn === 2 ? "Active" : "Waiting";
+    });
 
-    const lastMessage = computed(() => gameState.get().lastMessage);
+    const lastMessage = computed(() => gameState.get()?.lastMessage || "");
 
     // Styles
     const gridContainerStyle = {
@@ -323,6 +305,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
     // Status display computed values
     const statusBgColor = computed(() => {
       const gs = gameState.get();
+      if (!gs) return "#1e293b";
       const finished = gs.phase === "finished";
       const won = gs.winner === myPlayerNumber;
       const myTurn = gs.currentTurn === myPlayerNumber;
@@ -335,6 +318,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
 
     const statusMessage = computed(() => {
       const gs = gameState.get();
+      if (!gs) return "Loading...";
       const finished = gs.phase === "finished";
       const won = gs.winner === myPlayerNumber;
       const myTurn = gs.currentTurn === myPlayerNumber;
