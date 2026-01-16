@@ -159,6 +159,14 @@ export class RuntimeInternals extends EventTarget {
     const { cell } = e;
     const charmId = cell.id();
     logger.log("navigate", `Navigating to charm: ${charmId}`);
+
+    // Add charm to allCharms list if in the same space (best-effort, async)
+    if (cell.space() === this.#space) {
+      this.#ensureCharmInList(cell).catch((err) => {
+        logger.warn("add-charm-failed", `Failed to add charm to list: ${err}`);
+      });
+    }
+
     if (cell.space() === this.#space && this.#spaceName) {
       navigate({
         spaceName: this.#spaceName,
@@ -168,6 +176,56 @@ export class RuntimeInternals extends EventTarget {
       navigate({ spaceDid: cell.space(), charmId: cell.id() });
     }
   };
+
+  /**
+   * Ensure a charm is in the allCharms list. If not present, add it via the
+   * default pattern's addCharm handler.
+   */
+  async #ensureCharmInList(charmCell: CellHandle): Promise<void> {
+    try {
+      const rootPattern = await this.getSpaceRootPattern();
+      const patternCell = rootPattern.cell();
+
+      // Get the allCharms list to check if charm is already present
+      const allCharmsCell = patternCell.asSchema<{ allCharms: CellHandle[] }>({
+        type: "object",
+        properties: {
+          allCharms: { type: "array" },
+        },
+      }).key("allCharms");
+
+      await allCharmsCell.sync();
+      const allCharms = allCharmsCell.get() ?? [];
+
+      // Check if charm is already in the list
+      const charmId = charmCell.id();
+      const exists = allCharms.some((c) => c.id() === charmId);
+      if (exists) {
+        return;
+      }
+
+      // Add via the addCharm handler
+      const addCharmHandler = patternCell.asSchema<{
+        addCharm: unknown;
+      }>({
+        type: "object",
+        properties: {
+          addCharm: { asStream: true },
+        },
+      }).key("addCharm");
+
+      await addCharmHandler.send({ charm: charmCell } as unknown);
+      logger.log("add-charm", `Added charm ${charmId} to allCharms list`);
+    } catch (err) {
+      // Non-fatal: charm navigation still works even if we can't add to list
+      logger.warn(
+        "add-charm-error",
+        `Could not add charm to list: ${
+          err instanceof Error ? err.message : err
+        }`,
+      );
+    }
+  }
 
   #onError = (event: RuntimeClientEvents["error"][0]) => {
     console.error("[RuntimeClient Error]", event);
