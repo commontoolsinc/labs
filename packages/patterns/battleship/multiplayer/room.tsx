@@ -41,6 +41,40 @@ import {
 } from "./schemas.tsx";
 
 // =============================================================================
+// STATIC STYLES (at module scope - safe because they're plain objects, not JSX)
+// =============================================================================
+
+const headerCellStyle = {
+  backgroundColor: "#1a1a2e",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  color: "#888",
+  fontSize: "12px",
+  fontWeight: "bold",
+  height: "30px",
+};
+
+const baseCellStyle = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  color: "#fff",
+  fontSize: "16px",
+  fontWeight: "bold",
+  height: "32px",
+  width: "32px",
+};
+
+const gridContainerStyle = {
+  display: "grid",
+  gridTemplateColumns: "30px repeat(10, 32px)",
+  gap: "2px",
+  backgroundColor: "#000",
+  padding: "2px",
+};
+
+// =============================================================================
 // PATTERN
 // =============================================================================
 
@@ -223,113 +257,68 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
       });
     });
 
-    // Computed values for display - access source cells directly inside computed()
+    // Consolidated computed values - reduces subscription overhead
     const myColor = computed(() => {
       const data = myPlayerNumber === 1 ? player1.get() : player2.get();
       return data?.color || "#3b82f6";
     });
-    const showTurnIndicator = computed(() => {
+
+    // Consolidated player 1 display data
+    const player1Display = computed(() => {
+      const p1 = player1.get();
       const gs = gameState.get();
-      if (!gs) return "none";
-      return gs.currentTurn === myPlayerNumber && gs.phase !== "finished"
-        ? "block"
-        : "none";
+      return {
+        color: p1?.color || "#3b82f6",
+        name: p1?.name || "Player 1",
+        initials: getInitials(p1?.name || "P1"),
+        bgColor: gs?.currentTurn === 1 ? "#1e40af" : "#1e293b",
+        status: gs?.currentTurn === 1 ? "Active" : "Waiting",
+      };
     });
 
-    // Player display values - access source cells directly inside computed()
-    const player1Color = computed(() => player1.get()?.color || "#3b82f6");
-    const player1Name = computed(() => player1.get()?.name || "Player 1");
-    const player1Initials = computed(() =>
-      getInitials(player1.get()?.name || "P1")
-    );
-    const player1BgColor = computed(() => {
+    // Consolidated player 2 display data
+    const player2Display = computed(() => {
+      const p2 = player2.get();
       const gs = gameState.get();
-      if (!gs) return "#1e293b";
-      return gs.currentTurn === 1 ? "#1e40af" : "#1e293b";
-    });
-    const player1Status = computed(() => {
-      const gs = gameState.get();
-      if (!gs) return "Waiting";
-      return gs.currentTurn === 1 ? "Active" : "Waiting";
+      return {
+        color: p2?.color || "#ef4444",
+        name: p2?.name || "Player 2",
+        initials: getInitials(p2?.name || "P2"),
+        bgColor: gs?.currentTurn === 2 ? "#1e40af" : "#1e293b",
+        status: gs?.currentTurn === 2 ? "Active" : "Waiting",
+      };
     });
 
-    const player2Color = computed(() => player2.get()?.color || "#ef4444");
-    const player2Name = computed(() => player2.get()?.name || "Player 2");
-    const player2Initials = computed(() =>
-      getInitials(player2.get()?.name || "P2")
-    );
-    const player2BgColor = computed(() => {
+    // Consolidated status display data
+    const statusDisplay = computed(() => {
       const gs = gameState.get();
-      if (!gs) return "#1e293b";
-      return gs.currentTurn === 2 ? "#1e40af" : "#1e293b";
-    });
-    const player2Status = computed(() => {
-      const gs = gameState.get();
-      if (!gs) return "Waiting";
-      return gs.currentTurn === 2 ? "Active" : "Waiting";
-    });
-
-    const lastMessage = computed(() => gameState.get()?.lastMessage || "");
-
-    // Styles
-    const gridContainerStyle = {
-      display: "grid",
-      gridTemplateColumns: "30px repeat(10, 32px)",
-      gap: "2px",
-      backgroundColor: "#000",
-      padding: "2px",
-    };
-
-    const headerCellStyle = {
-      backgroundColor: "#1a1a2e",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      color: "#888",
-      fontSize: "12px",
-      fontWeight: "bold",
-      height: "30px",
-    };
-
-    const baseCellStyle = {
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      color: "#fff",
-      fontSize: "16px",
-      fontWeight: "bold",
-      height: "32px",
-      width: "32px",
-    };
-
-    // Status display computed values
-    const statusBgColor = computed(() => {
-      const gs = gameState.get();
-      if (!gs) return "#1e293b";
-      const finished = gs.phase === "finished";
-      const won = gs.winner === myPlayerNumber;
-      const myTurn = gs.currentTurn === myPlayerNumber;
-      return finished
-        ? (won ? "#166534" : "#991b1b")
-        : myTurn
-        ? "#1e40af"
-        : "#1e293b";
-    });
-
-    const statusMessage = computed(() => {
-      const gs = gameState.get();
-      if (!gs) return "Loading...";
-      const finished = gs.phase === "finished";
-      const won = gs.winner === myPlayerNumber;
-      const myTurn = gs.currentTurn === myPlayerNumber;
-      if (finished) {
-        return won
-          ? "Victory! You sunk all enemy ships!"
-          : "Defeat. Your fleet was destroyed.";
+      if (!gs) {
+        return {
+          showTurnIndicator: "none",
+          bgColor: "#1e293b",
+          message: "Loading...",
+          lastMessage: "",
+        };
       }
-      return myTurn
-        ? "Your turn - fire at the enemy fleet!"
-        : "Waiting for opponent...";
+      const finished = gs.phase === "finished";
+      const won = gs.winner === myPlayerNumber;
+      const myTurn = gs.currentTurn === myPlayerNumber;
+      return {
+        showTurnIndicator: myTurn && !finished ? "block" : "none",
+        bgColor: finished
+          ? (won ? "#166534" : "#991b1b")
+          : myTurn
+            ? "#1e40af"
+            : "#1e293b",
+        message: finished
+          ? (won
+            ? "Victory! You sunk all enemy ships!"
+            : "Defeat. Your fleet was destroyed.")
+          : (myTurn
+            ? "Your turn - fire at the enemy fleet!"
+            : "Waiting for opponent..."),
+        lastMessage: gs.lastMessage || "",
+      };
     });
 
     return {
@@ -399,20 +388,20 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
             style={{
               textAlign: "center",
               padding: "16px",
-              backgroundColor: statusBgColor,
+              backgroundColor: statusDisplay.bgColor,
               borderRadius: "8px",
               marginBottom: "20px",
               fontSize: "18px",
               fontWeight: "500",
             }}
           >
-            {statusMessage}
+            {statusDisplay.message}
           </div>
 
           {/* Turn indicator */}
           <div
             style={{
-              display: showTurnIndicator,
+              display: statusDisplay.showTurnIndicator,
               textAlign: "center",
               marginBottom: "12px",
             }}
@@ -441,7 +430,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
               flexWrap: "wrap",
             }}
           >
-            {/* My Board (left) */}
+            {/* My Board (left) - uses pre-computed headers from module scope */}
             <div style={{ display: "inline-block" }}>
               <h3 style={{ textAlign: "center", margin: "0 0 8px 0" }}>
                 Your Fleet
@@ -453,6 +442,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                 ))}
                 {ROWS.map((rowIdx) => (
                   <div
+                    key={rowIdx}
                     style={{
                       ...headerCellStyle,
                       gridRow: `${rowIdx + 2}`,
@@ -462,8 +452,9 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                     {rowIdx + 1}
                   </div>
                 ))}
-                {myBoardCells.map((cell) => (
+                {myBoardCells.map((cell, idx) => (
                   <div
+                    key={idx}
                     style={{
                       ...baseCellStyle,
                       gridRow: cell.gridRow,
@@ -477,7 +468,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
               </div>
             </div>
 
-            {/* Enemy Board (right) */}
+            {/* Enemy Board (right) - uses event delegation for clicks */}
             <div style={{ display: "inline-block" }}>
               <h3 style={{ textAlign: "center", margin: "0 0 8px 0" }}>
                 Enemy Waters
@@ -489,6 +480,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                 ))}
                 {ROWS.map((rowIdx) => (
                   <div
+                    key={rowIdx}
                     style={{
                       ...headerCellStyle,
                       gridRow: `${rowIdx + 2}`,
@@ -498,8 +490,9 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                     {rowIdx + 1}
                   </div>
                 ))}
-                {enemyBoardCells.map((cell) => (
+                {enemyBoardCells.map((cell, idx) => (
                   <div
+                    key={idx}
                     style={{
                       ...baseCellStyle,
                       gridRow: cell.gridRow,
@@ -609,7 +602,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                 alignItems: "center",
                 gap: "8px",
                 padding: "8px 16px",
-                backgroundColor: player1BgColor,
+                backgroundColor: player1Display.bgColor,
                 borderRadius: "8px",
                 border: myPlayerNumber === 1
                   ? "2px solid #fbbf24"
@@ -621,7 +614,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                   width: "32px",
                   height: "32px",
                   borderRadius: "50%",
-                  backgroundColor: player1Color,
+                  backgroundColor: player1Display.color,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -629,15 +622,15 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                   fontSize: "12px",
                 }}
               >
-                {player1Initials}
+                {player1Display.initials}
               </div>
               <div>
                 <div style={{ fontWeight: "600", fontSize: "14px" }}>
-                  {player1Name}
+                  {player1Display.name}
                   {myPlayerNumber === 1 ? " (you)" : ""}
                 </div>
                 <div style={{ fontSize: "12px", color: "#94a3b8" }}>
-                  {player1Status}
+                  {player1Display.status}
                 </div>
               </div>
             </div>
@@ -660,7 +653,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                 alignItems: "center",
                 gap: "8px",
                 padding: "8px 16px",
-                backgroundColor: player2BgColor,
+                backgroundColor: player2Display.bgColor,
                 borderRadius: "8px",
                 border: myPlayerNumber === 2
                   ? "2px solid #fbbf24"
@@ -672,7 +665,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                   width: "32px",
                   height: "32px",
                   borderRadius: "50%",
-                  backgroundColor: player2Color,
+                  backgroundColor: player2Display.color,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -680,15 +673,15 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                   fontSize: "12px",
                 }}
               >
-                {player2Initials}
+                {player2Display.initials}
               </div>
               <div>
                 <div style={{ fontWeight: "600", fontSize: "14px" }}>
-                  {player2Name}
+                  {player2Display.name}
                   {myPlayerNumber === 2 ? " (you)" : ""}
                 </div>
                 <div style={{ fontSize: "12px", color: "#94a3b8" }}>
-                  {player2Status}
+                  {player2Display.status}
                 </div>
               </div>
             </div>
@@ -706,7 +699,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
               color: "#94a3b8",
             }}
           >
-            {lastMessage}
+            {statusDisplay.lastMessage}
           </div>
         </div>
       ),
