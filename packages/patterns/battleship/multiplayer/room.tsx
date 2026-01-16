@@ -117,8 +117,17 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
         : player2.get();
       if (!opponentData) return;
 
+      // Get ships array, filtering out any undefined elements (can happen with reactive proxies)
+      const ships = (opponentData.ships || []).filter(
+        (s): s is NonNullable<typeof s> => s != null && s.type != null
+      );
+      if (ships.length === 0) {
+        console.warn("[fireShot] No valid ships found in opponent data");
+        return;
+      }
+
       // Check if hit
-      const hitShip = findShipAt(opponentData.ships, { row, col });
+      const hitShip = findShipAt(ships, { row, col });
 
       // Update shots grid
       const newTargetShots = targetShots.map((r, ri) =>
@@ -147,8 +156,8 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
         message = `${coordStr}: Miss.`;
       }
 
-      // Check for win
-      const allSunk = areAllShipsSunk(opponentData.ships, newTargetShots);
+      // Check for win (use filtered ships array)
+      const allSunk = ships.length > 0 && areAllShipsSunk(ships, newTargetShots);
 
       if (allSunk) {
         // Get winner's data directly
