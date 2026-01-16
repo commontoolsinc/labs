@@ -3,7 +3,6 @@ import {
   cell,
   derive,
   handler,
-  ID,
   JSONSchema,
   NAME,
   recipe,
@@ -84,7 +83,9 @@ const pushObjectsHandler = handler(
   },
   ({ value }, { array }) => {
     console.log("Pushing object:", { count: value.count });
-    array.push({ count: value.count, [ID]: value.count });
+    // Note: [ID] should be added automatically by the runtime via
+    // recursivelyAddIDIfNeeded - we don't need to add it manually anymore
+    array.push({ count: value.count });
   },
 );
 

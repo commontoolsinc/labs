@@ -1715,7 +1715,7 @@ function validateStaticData(value: unknown): void {
  * @param value - The value to add IDs to.
  * @returns The value with IDs added.
  */
-function recursivelyAddIDIfNeeded<T>(
+export function recursivelyAddIDIfNeeded<T>(
   value: T,
   frame: Frame | undefined,
   seen: Map<unknown, unknown> = new Map(),
