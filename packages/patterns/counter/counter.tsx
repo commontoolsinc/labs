@@ -86,8 +86,8 @@ const Counter = pattern<Input, Output>(({ value }) => {
             {value}
           </div>
 
-          <div style={{ color: "var(--ct-color-gray-500)" }}>
-            The {ordinalDisplay} number
+          <div id="counter-result" style={{ color: "var(--ct-color-gray-500)" }}>
+            Counter is the {ordinalDisplay} number
           </div>
 
           <ct-hstack gap="2">
