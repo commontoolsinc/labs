@@ -6,7 +6,7 @@ import { toCell } from "./back-to-cell.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
-import { type Cell, createCell } from "./cell.ts";
+import { type Cell, createCell, recursivelyAddIDIfNeeded } from "./cell.ts";
 import { type Runtime } from "./runtime.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { toURI } from "./uri-utils.ts";
@@ -261,13 +261,18 @@ export function createQueryResultProxy<T>(
               );
             }
 
-            // Turn any newly added elements into cells. And if there was a
-            // change at all, update the cell.
-            diffAndUpdate(runtime, tx, link, copy, {
+            // Turn any newly added elements into cells by adding [ID] symbols.
+            // This ensures objects get stored as separate entity documents
+            // rather than inline data, which is critical for persistence.
+            const frame = getTopFrame();
+            const processedCopy = recursivelyAddIDIfNeeded(copy, frame);
+
+            // And if there was a change at all, update the cell.
+            diffAndUpdate(runtime, tx, link, processedCopy, {
               parent: { id: link.id, space: link.space },
               method: prop,
               call: new Error().stack,
-              context: getTopFrame()?.cause ?? "unknown",
+              context: frame?.cause ?? "unknown",
             });
 
             // Update target from store
