@@ -39,3 +39,5 @@ export const counterWithDelayedIncrement = recipe<DelayedCounterArgs>(
     };
   },
 );
+
+export default counterWithDelayedIncrement;

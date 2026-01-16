@@ -7,14 +7,15 @@ import {
   RuntimeProgram,
   type Stream,
   UI,
+  VNode,
 } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { charmId, CharmManager, extractUserCode } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
-import { join } from "@std/path";
-import { isVNode, type VNode } from "@commontools/html";
+import { dirname, join } from "@std/path";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { setLLMUrl } from "@commontools/llm";
+import { isObject } from "@commontools/utils/types";
 
 export interface EntryConfig {
   mainPath: string;
@@ -66,7 +67,8 @@ export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
         runtime.storageManager.synced().then(async () => {
           try {
             const mgr = charmManagerRef.current!;
-            const list = mgr.getCharms().get();
+            const charmsCell = await mgr.getCharms();
+            const list = charmsCell.get();
             const exists = list.some((c) => charmId(c) === id);
             if (!exists) {
               await mgr.add([target]);
@@ -112,8 +114,9 @@ export async function listCharms(
 ): Promise<{ id: string; name?: string; recipeName?: string }[]> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
+  const allCharms = await charms.getAllCharms();
   return Promise.all(
-    charms.getAllCharms().map(async (charm) => {
+    allCharms.map(async (charm) => {
       return {
         id: charm.id,
         name: charm.name(),
@@ -149,6 +152,10 @@ export async function newCharm(
 
   const program = await getProgramFromFile(manager, entry);
   const charm = await charms.create(program, options);
+
+  // Explicitly add the charm to the space's allCharms list
+  await manager.add([charm.getCell()]);
+
   return charm.id;
 }
 
@@ -194,7 +201,9 @@ export async function saveCharmRecipe(
       if (name[0] !== "/") {
         throw new Error("Ungrounded file in recipe.");
       }
-      await Deno.writeTextFile(join(outPath, name.substring(1)), contents);
+      const outFilePath = join(outPath, name.substring(1));
+      await Deno.mkdir(dirname(outFilePath), { recursive: true });
+      await Deno.writeTextFile(outFilePath, contents);
     }
   } else {
     throw new Error(
@@ -450,7 +459,7 @@ export function formatViewTree(view: unknown): string {
     last: boolean,
   ): string => {
     const branch = last ? "└─ " : "├─ ";
-    if (!isVNode(node)) {
+    if (!isVNodeLike(node)) {
       return `${prefix}${branch}${String(node)}`;
     }
 
@@ -542,7 +551,8 @@ export async function callCharmHandler<T = any>(
   }
 
   // Send the event to trigger the handler
-  handlerStream.send(args);
+  // Type assertion needed because TypeScript can't verify the conditional type at this generic callsite
+  (handlerStream.send as (event: T) => void)(args);
 
   // Wait for processing to complete
   await manager.runtime.idle();
@@ -562,4 +572,14 @@ export async function removeCharm(
   if (!removed) {
     throw new Error(`Charm "${config.charm}" not found`);
   }
+}
+
+function isVNodeLike(value: unknown): value is VNode {
+  const visited = new Set<object>();
+  while (isObject(value) && UI in value) {
+    if (visited.has(value)) return false; // Cycle detected
+    visited.add(value);
+    value = value[UI];
+  }
+  return (value as VNode)?.type === "vnode";
 }

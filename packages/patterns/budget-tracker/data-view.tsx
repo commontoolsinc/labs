@@ -8,7 +8,7 @@
 import { computed, NAME, OpaqueRef, pattern, UI } from "commontools";
 import { type CategoryBudget, type Expense } from "./schemas.tsx";
 
-// Sub-patterns use OpaqueRef for read-only access (no Cell<> needed)
+// Sub-patterns use OpaqueRef for read-only access (no Writable<> needed)
 interface Input {
   expenses: OpaqueRef<Expense[]>;
   budgets: OpaqueRef<CategoryBudget[]>;
@@ -18,16 +18,14 @@ interface Input {
 export default pattern<Input>(({ expenses, budgets }) => {
   // Computed values
   const totalSpent = computed(() => {
-    const exp = expenses as unknown as Expense[];
-    if (!Array.isArray(exp)) return 0;
-    return exp.reduce((sum, e) => sum + (e.amount || 0), 0);
+    if (!Array.isArray(expenses)) return 0;
+    return expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
   });
 
   const spentByCategory = computed(() => {
-    const exp = expenses as unknown as Expense[];
-    if (!Array.isArray(exp)) return {};
+    if (!Array.isArray(expenses)) return {};
     const result: Record<string, number> = {};
-    for (const expense of exp) {
+    for (const expense of expenses) {
       const cat = expense.category || "Other";
       result[cat] = (result[cat] || 0) + (expense.amount || 0);
     }
@@ -36,19 +34,18 @@ export default pattern<Input>(({ expenses, budgets }) => {
 
   const budgetStatus = computed(() => {
     const spent = spentByCategory;
-    const budgetList = budgets as unknown as CategoryBudget[];
     if (!spent || typeof spent !== "object") return [];
 
     const allCategories = new Set<string>(Object.keys(spent));
-    if (Array.isArray(budgetList)) {
-      for (const b of budgetList) {
+    if (Array.isArray(budgets)) {
+      for (const b of budgets) {
         allCategories.add(b.category);
       }
     }
 
     const budgetMap = new Map<string, number>();
-    if (Array.isArray(budgetList)) {
-      for (const b of budgetList) {
+    if (Array.isArray(budgets)) {
+      for (const b of budgets) {
         budgetMap.set(b.category, b.limit);
       }
     }

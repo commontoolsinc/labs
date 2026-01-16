@@ -2,7 +2,8 @@ import { css, html, type TemplateResult } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import type { ButtonSize, ButtonVariant } from "../ct-button/ct-button.ts";
-import { type Cell } from "@commontools/runner";
+import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
+import type { Schema } from "@commontools/api";
 import { createArrayCellController } from "../../core/cell-controller.ts";
 import { consume } from "@lit/context";
 import {
@@ -13,6 +14,27 @@ import {
 } from "../theme-context.ts";
 import { formatFileSize } from "../../utils/image-compression.ts";
 import "../ct-button/ct-button.ts";
+
+// Schema for FileData array
+const FileDataArraySchema = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      id: { type: "string" },
+      name: { type: "string" },
+      url: { type: "string" },
+      data: { type: "string" },
+      timestamp: { type: "number" },
+      size: { type: "number" },
+      type: { type: "string" },
+      width: { type: "number" },
+      height: { type: "number" },
+      metadata: { type: "object" },
+    },
+    required: ["id", "name", "url", "data", "timestamp", "size", "type"],
+  },
+} as const satisfies JSONSchema;
 
 /**
  * Generic file data structure
@@ -29,8 +51,14 @@ export interface FileData {
   // Optional metadata (can be populated by subclasses)
   width?: number;
   height?: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
+
+// Type validation: ensure schema matches interface
+type _ValidateFileData = Schema<
+  typeof FileDataArraySchema
+>[number] extends FileData ? true : never;
+const _validateFileData: _ValidateFileData = true;
 
 /**
  * CTFileInput - Generic file upload component
@@ -235,7 +263,7 @@ export class CTFileInput extends BaseElement {
   maxSizeBytes?: number;
 
   @property({ type: Array })
-  files: Cell<FileData[]> | FileData[] = [];
+  files: CellHandle<FileData[]> | FileData[] = [];
 
   @property({ type: Boolean })
   protected loading = false;
@@ -245,9 +273,7 @@ export class CTFileInput extends BaseElement {
   @property({ attribute: false })
   declare theme?: CTTheme;
 
-  protected _changeGroup = crypto.randomUUID();
   protected _cellController = createArrayCellController<FileData>(this, {
-    changeGroup: this._changeGroup,
     onChange: (_newFiles: FileData[], _oldFiles: FileData[]) => {
       this.requestUpdate();
     },
@@ -520,7 +546,7 @@ export class CTFileInput extends BaseElement {
     // If the files property itself changed (e.g., switched to a different cell)
     if (changedProperties.has("files")) {
       // Bind the new value (Cell or plain array) to the controller
-      this._cellController.bind(this.files);
+      this._cellController.bind(this.files, FileDataArraySchema);
     }
   }
 
@@ -534,7 +560,7 @@ export class CTFileInput extends BaseElement {
 
   override firstUpdated() {
     // Bind the initial value to the cell controller
-    this._cellController.bind(this.files);
+    this._cellController.bind(this.files, FileDataArraySchema);
 
     // Apply theme after first render
     applyThemeToElement(this, this.theme ?? defaultTheme);

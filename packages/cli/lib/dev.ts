@@ -19,12 +19,14 @@ async function createRuntime() {
 
 export interface ProcessOptions {
   main: string;
+  rootPath?: string;
   run: boolean;
   check: boolean;
   output?: string;
   filename?: string;
   showTransformed?: boolean;
   mainExport?: string;
+  verboseErrors?: boolean;
 }
 
 export async function process(
@@ -37,7 +39,7 @@ export async function process(
     : undefined;
   const engine = new Engine(await createRuntime());
   const program = await engine.resolve(
-    new FileSystemProgramResolver(options.main),
+    new FileSystemProgramResolver(options.main, options.rootPath),
   );
   if (options.mainExport) {
     program.mainExport = options.mainExport;
@@ -50,6 +52,7 @@ export async function process(
     noRun: !options.run,
     filename,
     getTransformedProgram,
+    verboseErrors: options.verboseErrors,
   });
 
   if (options.output) {

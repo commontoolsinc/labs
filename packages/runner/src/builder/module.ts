@@ -96,7 +96,9 @@ export function parseStackFrame(
   };
 }
 
-/** Extract the first source location from a stack trace that isn't from this file */
+/** Extract the first source location from a stack trace that isn't from this file.
+ * If a source map is available, maps the position back to the original source.
+ */
 function getExternalSourceLocation(): string | null {
   const stack = new Error().stack;
   if (!stack) return null;
@@ -118,6 +120,12 @@ function getExternalSourceLocation(): string | null {
   for (const line of lines) {
     const frame = parseStackFrame(line);
     if (frame && frame.file !== thisFile) {
+      // Try to map via source maps if available
+      const harness = getTopFrame()?.runtime?.harness;
+      const mapped = harness?.mapPosition(frame.file, frame.line, frame.col);
+      if (mapped?.source && mapped?.line != null) {
+        return `${mapped.source}:${mapped.line}:${mapped.column ?? 0}`;
+      }
       return `${frame.file}:${frame.line}:${frame.col}`;
     }
   }
@@ -180,6 +188,7 @@ function handlerInternal<E, T>(
   stateSchema?: JSONSchema | { proxy: true },
   handler?: (event: E, props: T) => any,
 ): HandlerFactory<T, E> {
+  let writableProxy = false;
   if (typeof eventSchema === "function") {
     if (
       stateSchema && typeof stateSchema === "object" &&
@@ -187,6 +196,7 @@ function handlerInternal<E, T>(
     ) {
       handler = eventSchema;
       eventSchema = stateSchema = undefined;
+      writableProxy = true;
     } else {
       throw new Error(
         "Handler requires schemas or CTS transformer\n" +
@@ -228,6 +238,7 @@ function handlerInternal<E, T>(
     bind: (inputs: Opaque<StripCell<T>>) => factory(inputs),
     toJSON: () => moduleToJSON(module),
     ...(schema !== undefined ? { argumentSchema: schema } : {}),
+    ...(writableProxy ? { writableProxy: true } : {}),
   };
 
   const factory = Object.assign((props: Opaque<StripCell<T>>): Stream<E> => {
@@ -335,15 +346,26 @@ export const computed: <T>(fn: () => T) => OpaqueRef<T> = <T>(fn: () => T) =>
  * CTS transformer rewrites action() calls to handler() calls. If this function
  * is reached, it means CTS is not enabled.
  *
+ * @example Zero-parameter action (most common)
+ * ```ts
+ * const increment = action(() => count.set(count.get() + 1));
+ * // Returns Stream<void>
+ * ```
+ *
+ * @example Action with event data
+ * ```ts
+ * const selectItem = action((id: string) => selected.set(id));
+ * // Returns Stream<string>
+ * ```
+ *
  * @param _event - A function that receives an event and performs side effects
  * @throws Error if called directly (CTS must be enabled for action() to work)
  */
-export function action<T>(
-  _event: (event: T) => void,
-): HandlerFactory<T, void>;
-export function action<T>(
-  _event: (event: T) => void,
-): HandlerFactory<T, void> {
+// Overload 1: Zero-parameter callback returns Stream<void>
+export function action(_event: () => void): Stream<void>;
+// Overload 2: Parameterized callback returns Stream<T>
+export function action<T>(_event: (event: T) => void): Stream<T>;
+export function action<T>(_event: (event?: T) => void): Stream<T> {
   throw new Error(
     "action() must be used with CTS enabled - add /// <cts-enable /> to your file",
   );

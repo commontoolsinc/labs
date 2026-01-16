@@ -5,7 +5,15 @@
  *
  * Access via: wish({ query: "#journal" })
  */
-import { Cell, computed, handler, NAME, pattern, UI, wish } from "commontools";
+import {
+  computed,
+  handler,
+  NAME,
+  pattern,
+  UI,
+  wish,
+  Writable,
+} from "commontools";
 
 // Raw journal entry as stored - subject is a cell link, not a Cell
 type JournalEntry = {
@@ -65,12 +73,13 @@ function eventTypeEmoji(eventType: string | undefined): string {
 
 const clearJournal = handler<
   Record<string, never>,
-  { journal: Cell<JournalEntry[]> }
+  { journal: Writable<JournalEntry[]> }
 >((_, { journal }) => {
   journal.set([]);
 });
 
 export default pattern<Record<string, never>>((_) => {
+  // Use wish() to access journal from home.tsx via defaultPattern
   const journalResult = wish<Array<JournalEntry>>({
     query: "#journal",
   });
@@ -227,7 +236,7 @@ export default pattern<Record<string, never>>((_) => {
                     flexWrap: "wrap",
                   }}
                 >
-                  {entry.tags.map((tag) => (
+                  {entry.tags.map((tag: string) => (
                     <span
                       style={{
                         fontSize: "0.8em",

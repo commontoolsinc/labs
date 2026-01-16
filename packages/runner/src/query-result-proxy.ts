@@ -1,11 +1,12 @@
 import { refer } from "merkle-reference/json";
 import { isRecord } from "@commontools/utils/types";
 import { getTopFrame } from "./builder/recipe.ts";
+import { isStreamValue } from "./builder/types.ts";
 import { toCell } from "./back-to-cell.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
-import { type Cell, createCell } from "./cell.ts";
+import { type Cell, createCell, recursivelyAddIDIfNeeded } from "./cell.ts";
 import { type Runtime } from "./runtime.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { toURI } from "./uri-utils.ts";
@@ -79,6 +80,7 @@ export function createQueryResultProxy<T>(
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
   depth: number = 0,
+  writable: boolean = false,
 ): T {
   // Check recursion depth
   if (depth > MAX_RECURSION_DEPTH) {
@@ -92,6 +94,14 @@ export function createQueryResultProxy<T>(
   const readTx = (txStatus?.status === "ready" && tx) ? tx : runtime.edit();
   link = resolveLink(runtime, readTx, link);
   const value = readTx.readValueOrThrow(link) as any;
+
+  // If the value is a stream marker ({ $stream: true }), return a Cell with
+  // stream kind so that .send() is available. This handles the case where a
+  // pattern's Output type wasn't explicitly specified, causing the capture
+  // schema to lose the asStream information.
+  if (isStreamValue(value)) {
+    return createCell(runtime, link, tx, false, "stream") as T;
+  }
 
   if (!isRecord(value) || Object.isFrozen(value)) return value;
 
@@ -133,10 +143,16 @@ export function createQueryResultProxy<T>(
                 }) as number;
                 if (index < length) {
                   const result = {
-                    value: createQueryResultProxy(runtime, tx, {
-                      ...link,
-                      path: [...link.path, String(index)],
-                    }, depth + 1),
+                    value: createQueryResultProxy(
+                      runtime,
+                      tx,
+                      {
+                        ...link,
+                        path: [...link.path, String(index)],
+                      },
+                      depth + 1,
+                      writable,
+                    ),
                     done: false,
                   };
                   index++;
@@ -190,12 +206,19 @@ export function createQueryResultProxy<T>(
                 tx,
                 { ...link, path: [...link.path, String(i)] },
                 depth + 1,
+                writable,
               );
             }
 
             return method.apply(copy, args);
           }
           : (...args: any[]) => {
+            if (!writable) {
+              throw new Error(
+                "This value is read-only, declare type as Writable<..> instead to get a writable version",
+              );
+            }
+
             if (!tx) {
               throw new Error(
                 "Transaction required for mutation\n" +
@@ -216,6 +239,7 @@ export function createQueryResultProxy<T>(
                   tx,
                   index,
                   { ...link, path: [...link.path, String(index)] },
+                  writable,
                 )
               );
             }
@@ -237,13 +261,18 @@ export function createQueryResultProxy<T>(
               );
             }
 
-            // Turn any newly added elements into cells. And if there was a
-            // change at all, update the cell.
-            diffAndUpdate(runtime, tx, link, copy, {
+            // Turn any newly added elements into cells by adding [ID] symbols.
+            // This ensures objects get stored as separate entity documents
+            // rather than inline data, which is critical for persistence.
+            const frame = getTopFrame();
+            const processedCopy = recursivelyAddIDIfNeeded(copy, frame);
+
+            // And if there was a change at all, update the cell.
+            diffAndUpdate(runtime, tx, link, processedCopy, {
               parent: { id: link.id, space: link.space },
               method: prop,
               call: new Error().stack,
-              context: getTopFrame()?.cause ?? "unknown",
+              context: frame?.cause ?? "unknown",
             });
 
             // Update target from store
@@ -275,7 +304,13 @@ export function createQueryResultProxy<T>(
 
               diffAndUpdate(runtime, tx, resultLink, result, cause);
 
-              result = createQueryResultProxy(runtime, tx, resultLink);
+              result = createQueryResultProxy(
+                runtime,
+                tx,
+                resultLink,
+                0,
+                writable,
+              );
             }
 
             return result;
@@ -287,10 +322,17 @@ export function createQueryResultProxy<T>(
         tx,
         { ...link, path: [...link.path, prop] },
         depth + 1,
+        writable,
       );
     },
     set: (_, prop, value) => {
       if (typeof prop === "symbol") return false;
+
+      if (!writable) {
+        throw new Error(
+          "This value is read-only, declare type as Writable<..> instead to get a writable version",
+        );
+      }
 
       if (isCellResult(value)) value = value[toCell]();
 
@@ -331,13 +373,14 @@ const createProxyForArrayValue = (
   tx: IExtendedStorageTransaction | undefined,
   source: number,
   link: NormalizedFullLink,
+  writable: boolean = false,
 ): { [originalIndex]: number } => {
   const target = {
     valueOf: function () {
-      return createQueryResultProxy(runtime, tx, link);
+      return createQueryResultProxy(runtime, tx, link, 0, writable);
     },
     toString: function () {
-      return String(createQueryResultProxy(runtime, tx, link));
+      return String(createQueryResultProxy(runtime, tx, link, 0, writable));
     },
     [originalIndex]: source,
   };

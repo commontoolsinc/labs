@@ -80,10 +80,12 @@ const normalizeSettings = (input: SettingsConfig | undefined) => {
   };
 };
 
+const liftNormalizeSettings = lift(normalizeSettings);
+
 export const counterWithHierarchicalDefaults = recipe<HierarchicalDefaultsArgs>(
   "Counter With Hierarchical Defaults",
   ({ value, settings }) => {
-    const resolvedSettings = lift(normalizeSettings)(settings);
+    const resolvedSettings = liftNormalizeSettings(settings);
     const labelCell = resolvedSettings.key("label");
     const stepCell = resolvedSettings.key("step");
     const formattingCell = resolvedSettings.key("formatting");
@@ -109,3 +111,5 @@ export const counterWithHierarchicalDefaults = recipe<HierarchicalDefaultsArgs>(
     };
   },
 );
+
+export default counterWithHierarchicalDefaults;

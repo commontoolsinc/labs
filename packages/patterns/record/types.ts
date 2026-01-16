@@ -57,11 +57,13 @@ export type SubCharmType =
   | "link"
   // Wave 3
   | "location"
+  | "location-track"
   | "relationship"
   | "giftprefs"
   | "timing"
   | "age-category"
   | "dietary-restrictions"
+  | "gender"
   // Contact modules (with labels, support multiple instances)
   | "email"
   | "phone"
@@ -73,6 +75,12 @@ export type SubCharmType =
   | "simple-list"
   // Photo module (with settings)
   | "photo"
+  // Custom field (generic property/value pairs)
+  | "custom-field"
+  // Occurrence tracking
+  | "occurrence-tracker"
+  // Text import module (for file-based extraction sources)
+  | "text-import"
   // Controller modules (internal, not user-addable)
   | "type-picker"
   | "extractor";

@@ -15,8 +15,15 @@ import {
   Source,
   TypeScriptCompiler,
 } from "@commontools/js-compiler";
-import { UnsafeEvalIsolate, UnsafeEvalRuntime } from "./eval-runtime.ts";
-import { CommonToolsTransformerPipeline } from "@commontools/ts-transformers";
+import {
+  MappedPosition,
+  UnsafeEvalIsolate,
+  UnsafeEvalRuntime,
+} from "./eval-runtime.ts";
+import {
+  CommonToolsTransformerPipeline,
+  OpaqueRefErrorTransformer,
+} from "@commontools/ts-transformers";
 import * as RuntimeModules from "./runtime-modules.ts";
 import { Runtime } from "../runtime.ts";
 import { refer } from "@commontools/memory/reference";
@@ -155,6 +162,12 @@ export class Engine extends EventTarget implements Harness {
     const { compiler, isolate, runtimeExports, exportsCallback } = await this
       .getInternals();
     const resolvedProgram = await this.resolve(resolver);
+
+    // Create diagnostic message transformer for clearer error messages
+    const diagnosticMessageTransformer = new OpaqueRefErrorTransformer({
+      verbose: options.verboseErrors,
+    });
+
     const output = await compiler.compile(resolvedProgram, {
       filename,
       noCheck: options.noCheck,
@@ -162,8 +175,14 @@ export class Engine extends EventTarget implements Harness {
       runtimeModules: Engine.runtimeModuleNames(),
       bundleExportAll: true,
       getTransformedProgram: options.getTransformedProgram,
-      beforeTransformers: (program) =>
-        new CommonToolsTransformerPipeline().toFactories(program),
+      diagnosticMessageTransformer,
+      beforeTransformers: (program) => {
+        const pipeline = new CommonToolsTransformerPipeline();
+        return {
+          factories: pipeline.toFactories(program),
+          getDiagnostics: () => pipeline.getDiagnostics(),
+        };
+      },
     });
 
     if (!options.noRun) {
@@ -219,6 +238,17 @@ export class Engine extends EventTarget implements Harness {
 
   getInvocation(source: string): HarnessedFunction {
     return eval(source);
+  }
+
+  // Map a single position to its original source location.
+  // Returns null if no source map is loaded for the filename.
+  mapPosition(
+    filename: string,
+    line: number,
+    column: number,
+  ): MappedPosition | null {
+    if (!this.internals) return null;
+    return this.internals.isolate.mapPosition(filename, line, column);
   }
 
   // Returns a map of runtime module types.

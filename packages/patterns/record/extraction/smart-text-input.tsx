@@ -25,12 +25,12 @@
  */
 
 import {
-  Cell,
   computed,
   generateText,
   handler,
   ifElse,
   type ImageData,
+  Writable,
 } from "commontools";
 
 // ===== Types =====
@@ -51,9 +51,9 @@ const DEFAULT_MAX_TEXT_FILE_SIZE = 1 * 1024 * 1024; // 1MB limit for text files
 
 export interface SmartTextInputInput {
   // Required: Target text cell (bidirectional binding)
-  // Accepts both Cell<string> and pattern input types (OpaqueCell)
+  // Accepts both Writable<string> and pattern input types (OpaqueCell)
   // deno-lint-ignore no-explicit-any
-  $value: any; // Cell<string> | OpaqueCell - framework handles type coercion
+  $value: any; // Writable<string> | OpaqueCell - framework handles type coercion
 
   // Optional configuration
   placeholder?: string;
@@ -64,7 +64,7 @@ export interface SmartTextInputInput {
 
 export interface SmartTextInputOutput {
   // State
-  value: Cell<string>;
+  value: Writable<string>;
   pending: boolean;
   error: string | null;
 
@@ -117,11 +117,11 @@ function decodeBase64ToText(dataUrl: string): string {
 const handleFileUpload = handler<
   { detail: { files: FileData[] } },
   {
-    previewText: Cell<string | null>;
-    previewSource: Cell<"file" | "image" | null>;
-    previewFileName: Cell<string | null>;
-    fileError: Cell<string | null>;
-    uploadedImage: Cell<ImageData[]>;
+    previewText: Writable<string | null>;
+    previewSource: Writable<"file" | "image" | null>;
+    previewFileName: Writable<string | null>;
+    fileError: Writable<string | null>;
+    uploadedImage: Writable<ImageData[]>;
     maxTextFileSizeBytes: number;
   }
 >(
@@ -189,11 +189,11 @@ const handleFileUpload = handler<
 const handleCommitPreview = handler<
   unknown,
   {
-    $value: Cell<string>;
-    previewText: Cell<string | null>;
-    previewSource: Cell<"file" | "image" | null>;
-    previewFileName: Cell<string | null>;
-    uploadedImage: Cell<ImageData[]>;
+    $value: Writable<string>;
+    previewText: Writable<string | null>;
+    previewSource: Writable<"file" | "image" | null>;
+    previewFileName: Writable<string | null>;
+    uploadedImage: Writable<ImageData[]>;
     // deno-lint-ignore no-explicit-any
     ocrResult: any; // The ocr.result reactive value
   }
@@ -237,11 +237,11 @@ const handleCommitPreview = handler<
 const handleCancelPreview = handler<
   unknown,
   {
-    previewText: Cell<string | null>;
-    previewSource: Cell<"file" | "image" | null>;
-    previewFileName: Cell<string | null>;
-    uploadedImage: Cell<ImageData[]>; // Image array to clear
-    fileError: Cell<string | null>;
+    previewText: Writable<string | null>;
+    previewSource: Writable<"file" | "image" | null>;
+    previewFileName: Writable<string | null>;
+    uploadedImage: Writable<ImageData[]>; // Image array to clear
+    fileError: Writable<string | null>;
   }
 >(
   (
@@ -265,8 +265,8 @@ const handleCancelPreview = handler<
 const handleImageChange = handler<
   { detail: { images: ImageData[] } },
   {
-    previewText: Cell<string | null>;
-    fileError: Cell<string | null>;
+    previewText: Writable<string | null>;
+    fileError: Writable<string | null>;
   }
 >(({ detail }, { previewText, fileError }) => {
   // NOTE: The $images binding handles data flow - this handler only clears state
@@ -300,15 +300,15 @@ export function SmartTextInput(
   // ===== Internal State =====
 
   // Preview state (for file upload or OCR result)
-  const previewText = Cell.of<string | null>(null);
-  const previewSource = Cell.of<"file" | "image" | null>(null);
-  const previewFileName = Cell.of<string | null>(null);
+  const previewText = Writable.of<string | null>(null);
+  const previewSource = Writable.of<"file" | "image" | null>(null);
+  const previewFileName = Writable.of<string | null>(null);
 
   // File error state (for user feedback)
-  const fileError = Cell.of<string | null>(null);
+  const fileError = Writable.of<string | null>(null);
 
   // Image array for ct-image-input binding
-  const imageArray = Cell.of<ImageData[]>([]);
+  const imageArray = Writable.of<ImageData[]>([]);
 
   // ===== OCR Processing =====
 
@@ -687,8 +687,8 @@ export function SmartTextInput(
 
   return {
     value: $value,
-    pending: isPending as unknown as boolean,
-    error: errorMessage as unknown as string | null,
+    pending: isPending,
+    error: errorMessage,
     ui: {
       complete,
       textArea,

@@ -31,3 +31,5 @@ export const counterWithHistory = recipe<HistoryCounterArgs>(
     };
   },
 );
+
+export default counterWithHistory;

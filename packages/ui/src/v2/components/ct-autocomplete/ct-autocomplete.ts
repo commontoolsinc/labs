@@ -9,8 +9,26 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
-import { type Cell } from "@commontools/runner";
+import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
+import type { Schema } from "@commontools/api";
+import { stringArraySchema, stringSchema } from "@commontools/runner/schemas";
 import { createCellController } from "../../core/cell-controller.ts";
+
+// Schema for AutocompleteItem array
+const AutocompleteItemArraySchema = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      value: { type: "string" },
+      label: { type: "string" },
+      group: { type: "string" },
+      searchAliases: { type: "array", items: { type: "string" } },
+      data: {},
+    },
+    required: ["value"],
+  },
+} as const satisfies JSONSchema;
 
 /**
  * AutocompleteItem - Item format for ct-autocomplete
@@ -41,6 +59,12 @@ export interface AutocompleteItem {
    */
   data?: unknown;
 }
+
+// Type validation: ensure schema matches interface
+type _ValidateAutocompleteItem = Schema<
+  typeof AutocompleteItemArraySchema
+>[number] extends AutocompleteItem ? true : never;
+const _validateAutocompleteItem: _ValidateAutocompleteItem = true;
 
 /**
  * Pre-processed item with search words for fast matching.
@@ -106,8 +130,8 @@ function processItem(item: AutocompleteItem): ProcessedItem {
  * @attr {boolean} multiple - Enable multi-select mode (default: false)
  * @attr {boolean} disabled - Whether the component is disabled
  *
- * @prop {AutocompleteItem[]|Cell<AutocompleteItem[]>} items - Items to choose from (supports Cell binding for reactive updates)
- * @prop {Cell<string>|Cell<string[]>|string|string[]} value - Selected value(s) - supports Cell binding
+ * @prop {CellHandle<AutocompleteItem[]> | AutocompleteItem[]} items - Items to choose from
+ * @prop {CellHandle<string>|CellHandle<string[]>|string|string[]} value - Selected value(s) - supports Cell binding
  *
  * @fires ct-change - Fired when value changes: { value, oldValue }
  * @fires ct-select - Fired when an item is selected: { value, label, group?, isCustom, data? }
@@ -332,10 +356,10 @@ export class CTAutocomplete extends BaseElement {
     };
 
     // Public properties
-    declare items: AutocompleteItem[] | Cell<AutocompleteItem[]>;
+    declare items: AutocompleteItem[] | CellHandle<AutocompleteItem[]>;
     declare value:
-      | Cell<string>
-      | Cell<string[]>
+      | CellHandle<string>
+      | CellHandle<string[]>
       | string
       | string[]
       | undefined;
@@ -347,10 +371,8 @@ export class CTAutocomplete extends BaseElement {
 
     // Cell controller for value binding
     // Note: Don't call requestUpdate() in onChange - cell controller already does it
-    private _changeGroup = crypto.randomUUID();
     private _cellController = createCellController<string | string[]>(this, {
       timing: { strategy: "debounce", delay: 50 },
-      changeGroup: this._changeGroup,
       onChange: (newValue, oldValue) => {
         this.emit("ct-change", { value: newValue, oldValue });
       },
@@ -457,12 +479,15 @@ export class CTAutocomplete extends BaseElement {
       this._input = this.shadowRoot?.querySelector("input") || null;
       this._dropdown = this.shadowRoot?.querySelector(".dropdown") || null;
 
-      // Initialize cell controller bindings
+      // Initialize cell controller bindings with appropriate schemas
+      const valueSchema = this.multiple ? stringArraySchema : stringSchema;
       this._cellController.bind(
-        this.value as Cell<string | string[]> | string | string[],
+        this.value as CellHandle<string | string[]> | string | string[],
+        valueSchema,
       );
       this._itemsCellController.bind(
-        this.items as Cell<AutocompleteItem[]> | AutocompleteItem[],
+        this.items as CellHandle<AutocompleteItem[]> | AutocompleteItem[],
+        AutocompleteItemArraySchema,
       );
 
       applyThemeToElement(this, this.theme ?? defaultTheme);
@@ -473,15 +498,18 @@ export class CTAutocomplete extends BaseElement {
 
       // If the value property itself changed (e.g., switched to a different cell)
       if (changedProperties.has("value")) {
+        const valueSchema = this.multiple ? stringArraySchema : stringSchema;
         this._cellController.bind(
-          this.value as Cell<string | string[]> | string | string[],
+          this.value as CellHandle<string | string[]> | string | string[],
+          valueSchema,
         );
       }
 
       // If the items property changed (e.g., switched to a different cell or array)
       if (changedProperties.has("items")) {
         this._itemsCellController.bind(
-          this.items as Cell<AutocompleteItem[]> | AutocompleteItem[],
+          this.items as CellHandle<AutocompleteItem[]> | AutocompleteItem[],
+          AutocompleteItemArraySchema,
         );
       }
 
@@ -663,25 +691,6 @@ export class CTAutocomplete extends BaseElement {
       return queryWords.every((queryWord) =>
         processed.words.some((itemWord) => itemWord.startsWith(queryWord))
       );
-    }
-
-    // Legacy helper for compatibility - wraps the optimized version
-    private _itemMatchesQuery(item: AutocompleteItem, query: string): boolean {
-      const processed = this._processedItems.find((p) => p.item === item);
-      if (processed) {
-        const queryWords = splitIntoWords(query);
-        return this._processedItemMatchesQuery(processed, queryWords);
-      }
-      // Fallback for items not in processed list
-      const label = (item.label || item.value).toLowerCase();
-      return label.includes(query.toLowerCase());
-    }
-
-    // Get the set of already-selected values (for multi-select)
-    private get _selectedValues(): Set<string> {
-      if (!this.multiple) return new Set();
-      const selected = (this._getCurrentValue() as string[] | undefined) || [];
-      return new Set(selected);
     }
 
     // Memoized getters - return cached values computed in willUpdate

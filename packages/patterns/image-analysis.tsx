@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   generateText,
   ifElse,
@@ -9,6 +8,7 @@ import {
   pattern,
   UI,
   VNode,
+  Writable,
 } from "commontools";
 
 /**
@@ -21,8 +21,8 @@ type ImageChatInput = {
 };
 
 type ImageChatOutput = {
-  images: Cell<ImageData[]>;
-  prompt: Cell<string>;
+  images: Writable<ImageData[]>;
+  prompt: Writable<string>;
   response: string | undefined;
   pending: boolean | undefined;
   ui: VNode;
@@ -30,8 +30,8 @@ type ImageChatOutput = {
 
 export default pattern<ImageChatInput, ImageChatOutput>(
   ({ systemPrompt, model }) => {
-    const images = Cell.of<ImageData[]>([]);
-    const prompt = Cell.of<string>("");
+    const images = Writable.of<ImageData[]>([]);
+    const prompt = Writable.of<string>("");
 
     // Build content parts array with text and images
     const contentParts = computed(() => {
@@ -99,27 +99,22 @@ export default pattern<ImageChatInput, ImageChatOutput>(
             </ct-cell-context>
 
             {/* Response */}
-            <ct-cell-context
-              $cell={result as unknown as any}
-              label="LLM Response"
-            >
-              {ifElse(
-                pending,
+            {ifElse(
+              pending,
+              <ct-card>
+                <div>Analyzing...</div>
+              </ct-card>,
+              ifElse(
+                result,
                 <ct-card>
-                  <div>Analyzing...</div>
+                  <ct-vstack gap="2">
+                    <ct-heading level={5}>Response</ct-heading>
+                    <div style="white-space: pre-wrap;">{result}</div>
+                  </ct-vstack>
                 </ct-card>,
-                ifElse(
-                  result,
-                  <ct-card>
-                    <ct-vstack gap="2">
-                      <ct-heading level={5}>Response</ct-heading>
-                      <div style="white-space: pre-wrap;">{result}</div>
-                    </ct-vstack>
-                  </ct-card>,
-                  null,
-                ),
-              )}
-            </ct-cell-context>
+                null,
+              ),
+            )}
           </ct-vstack>
         </ct-vscroll>
       </ct-screen>

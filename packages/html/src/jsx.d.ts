@@ -5,9 +5,9 @@ import type {
   Cell,
   CELL_LIKE,
   CellLike,
-  Props,
+  JSXElement,
   RenderNode,
-  VNode,
+  Stream,
 } from "commontools";
 
 /**
@@ -2840,9 +2840,10 @@ type CTEvent<T> = {
 };
 
 type EventHandler<T> =
-  | CellLike<CTEvent<T>>
+  | CellLike<CTEvent<T> | T>
   | ((event: CTEvent<T>) => void)
-  | (() => void);
+  | (() => void)
+  | Stream<T>;
 
 // `Charm` is not a recipe type.
 type Charm = any;
@@ -2922,6 +2923,7 @@ interface CTCharmElement extends CTHTMLElement {}
 interface CTIFrameElement extends CTHTMLElement {}
 interface CTVoiceInputElement extends CTHTMLElement {}
 interface CTAudioVisualizerElement extends CTHTMLElement {}
+interface CTLocationElement extends CTHTMLElement {}
 
 // Tab components
 interface CTTabsElement extends CTHTMLElement {}
@@ -3030,6 +3032,19 @@ interface CTAudioVisualizerAttributes<T> extends CTHTMLAttributes<T> {
   "maxHeight"?: number;
   "color"?: string;
   "smoothing"?: number;
+}
+
+interface CTLocationAttributes<T> extends CTHTMLAttributes<T> {
+  "$location"?: CellLike<any>;
+  "enableHighAccuracy"?: boolean;
+  "timeout"?: number;
+  "maximumAge"?: number;
+  "continuous"?: boolean;
+  "disabled"?: boolean;
+  "onct-location-start"?: EventHandler<any>;
+  "onct-location-update"?: EventHandler<any>;
+  "onct-location-error"?: EventHandler<any>;
+  "onct-change"?: EventHandler<any>;
 }
 
 interface CTChatAttributes<T> extends CTHTMLAttributes<T> {
@@ -3220,6 +3235,7 @@ interface CTFileDownloadAttributes<T> extends CTHTMLAttributes<T> {
   "$filename"?: CellLike<string>;
   "filename"?: string;
   "mime-type"?: string;
+  "mimeType"?: string;
   "base64"?: boolean;
   "variant"?:
     | "primary"
@@ -3232,7 +3248,11 @@ interface CTFileDownloadAttributes<T> extends CTHTMLAttributes<T> {
   "size"?: "default" | "sm" | "lg" | "icon" | "md";
   "disabled"?: boolean;
   "feedback-duration"?: number;
+  "feedbackDuration"?: number;
   "icon-only"?: boolean;
+  "iconOnly"?: boolean;
+  "allow-autosave"?: boolean;
+  "allowAutosave"?: boolean;
 }
 
 interface CTIframeAttributes<T> extends CTHTMLAttributes<T> {
@@ -3304,7 +3324,7 @@ interface CTFabAttributes<T> extends CTHTMLAttributes<T> {
   "variant"?: "default" | "primary";
   "position"?: "bottom-right" | "bottom-left" | "top-right" | "top-left";
   "pending"?: boolean;
-  "$previewMessage"?: CellLike<string>;
+  "$previewMessage"?: CellLike<string | null>;
 }
 
 interface CTModalAttributes<T> extends CTHTMLAttributes<T> {
@@ -3313,10 +3333,10 @@ interface CTModalAttributes<T> extends CTHTMLAttributes<T> {
   "size"?: "sm" | "md" | "lg" | "full";
   "prevent-scroll"?: boolean;
   "label"?: string;
-  "onct-modal-open"?: (event: CustomEvent) => void;
-  "onct-modal-close"?: (event: CustomEvent<{ reason: string }>) => void;
-  "onct-modal-opened"?: (event: CustomEvent) => void;
-  "onct-modal-closed"?: (event: CustomEvent) => void;
+  "onct-modal-open"?: EventHandler<void>;
+  "onct-modal-close"?: EventHandler<{ reason: string }>;
+  "onct-modal-opened"?: EventHandler<void>;
+  "onct-modal-closed"?: EventHandler<void>;
 }
 
 interface CTModalProviderAttributes<T> extends CTHTMLAttributes<T> {}
@@ -3327,7 +3347,7 @@ interface CTChevronButtonAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 interface CTInputAttributes<T> extends CTHTMLAttributes<T> {
-  "$value"?: CellLike<string>;
+  "$value"?: CellLike<string | number | null>;
   "customStyle"?: string; // bf: I think this is going to go away one day soon
   "type"?:
     | "text"
@@ -3562,6 +3582,9 @@ interface CTToolsChipAttributes<T> extends CTHTMLAttributes<T> {
    * - Native map: { [toolName]: { handler?: any, pattern?: any } | any }
    */
   "tools"?:
+    | { name: string; description?: string; schema?: unknown }[]
+    | Record<string, { handler?: unknown; pattern?: unknown } | any>;
+  "$tools"?:
     | { name: string; description?: string; schema?: unknown }[]
     | Record<string, { handler?: unknown; pattern?: unknown } | any>;
 }
@@ -3892,6 +3915,93 @@ interface CTToolCallAttributes<T> extends CTHTMLAttributes<T> {
   "result"?: any | CellLike<any>;
   "expanded"?: boolean | CellLike<boolean>;
 }
+
+// Map component types
+interface CTMapLatLng {
+  lat: number;
+  lng: number;
+}
+
+interface CTMapBounds {
+  north: number;
+  south: number;
+  east: number;
+  west: number;
+}
+
+interface CTMapMarker {
+  position: CTMapLatLng;
+  title?: string;
+  description?: string;
+  icon?: string;
+  popup?: any;
+  draggable?: boolean;
+}
+
+interface CTMapCircle {
+  center: CTMapLatLng;
+  radius: number;
+  color?: string;
+  fillOpacity?: number;
+  strokeWidth?: number;
+  title?: string;
+  description?: string;
+  popup?: any;
+}
+
+interface CTMapPolyline {
+  points: CTMapLatLng[];
+  color?: string;
+  strokeWidth?: number;
+  dashArray?: string;
+}
+
+interface CTMapValue {
+  markers?: CTMapMarker[];
+  circles?: CTMapCircle[];
+  polylines?: CTMapPolyline[];
+}
+
+interface CTMapAttributes<T> extends CTHTMLAttributes<T> {
+  "value"?: CTMapValue | CellLike<CTMapValue>;
+  "$value"?: CTMapValue | CellLike<CTMapValue>;
+  "center"?: CTMapLatLng | CellLike<CTMapLatLng | null> | null;
+  "$center"?: CTMapLatLng | CellLike<CTMapLatLng | null> | null;
+  "zoom"?: number | CellLike<number | null> | null;
+  "$zoom"?: number | CellLike<number | null> | null;
+  "bounds"?: CTMapBounds | CellLike<CTMapBounds | null> | null;
+  "$bounds"?: CTMapBounds | CellLike<CTMapBounds | null> | null;
+  "fitToBounds"?: boolean | CellLike<boolean>;
+  "interactive"?: boolean | CellLike<boolean>;
+  "onct-click"?: (event: CustomEvent<{ lat: number; lng: number }>) => void;
+  "onct-bounds-change"?: (
+    event: CustomEvent<
+      { bounds: CTMapBounds; center: CTMapLatLng; zoom: number }
+    >,
+  ) => void;
+  "onct-marker-click"?: (
+    event: CustomEvent<
+      { marker: CTMapMarker; index: number; lat: number; lng: number }
+    >,
+  ) => void;
+  "onct-marker-drag-end"?: (
+    event: CustomEvent<
+      {
+        marker: CTMapMarker;
+        index: number;
+        position: CTMapLatLng;
+        oldPosition: CTMapLatLng;
+      }
+    >,
+  ) => void;
+  "onct-circle-click"?: (
+    event: CustomEvent<
+      { circle: CTMapCircle; index: number; lat: number; lng: number }
+    >,
+  ) => void;
+}
+
+interface CTMapElement extends CTHTMLElement {}
 
 /**
  * Typings for native DOM elements.
@@ -4306,16 +4416,10 @@ interface DOMIntrinsicElements {
 declare global {
   namespace JSX {
     // The output of a JSX renderer is a JSX.Element.
-    // Our renderer (`@commontools/api#h`) outputs
-    // `VNode`s. Redefine `JSX.Element` here as a `VNode`
-    // for consistency.
-    interface Element extends VNode {
-      type: "vnode";
-      name: string;
-      props: Props;
-      children?: RenderNode;
-      $UI?: VNode;
-    }
+    // Our renderer (`@commontools/api#h`) outputs `VNode`s,
+    // but also accepts cells containing objects with [UI] properties
+    // (patterns used as components return OpaqueCell<{[UI]: VNode}>).
+    type Element = JSXElement;
 
     interface IntrinsicElements extends DOMIntrinsicElements {
       //[elemName: string]: any;
@@ -4539,6 +4643,10 @@ declare global {
         CTAudioVisualizerAttributes<CTAudioVisualizerElement>,
         CTAudioVisualizerElement
       >;
+      "ct-location": CTDOM.DetailedHTMLProps<
+        CTLocationAttributes<CTLocationElement>,
+        CTLocationElement
+      >;
       "ct-fragment": CTDOM.DetailedHTMLProps<
         CTHTMLAttributes<CTFragmentElement>,
         CTFragmentElement
@@ -4696,6 +4804,12 @@ declare global {
       "ct-tool-call": CTDOM.DetailedHTMLProps<
         CTToolCallAttributes<CTToolCallElement>,
         CTToolCallElement
+      >;
+
+      // Map component
+      "ct-map": CTDOM.DetailedHTMLProps<
+        CTMapAttributes<CTMapElement>,
+        CTMapElement
       >;
     }
   }

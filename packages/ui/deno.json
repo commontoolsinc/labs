@@ -21,6 +21,8 @@
     "@codemirror/lang-html": "npm:@codemirror/lang-html@^6.4.9",
     "@codemirror/lang-json": "npm:@codemirror/lang-json@^6.0.1",
     "@codemirror/theme-one-dark": "npm:@codemirror/theme-one-dark@^6.1.2",
-    "@codemirror/autocomplete": "npm:@codemirror/autocomplete@^6.15.0"
+    "@codemirror/autocomplete": "npm:@codemirror/autocomplete@^6.15.0",
+    "leaflet": "npm:leaflet@^1.9.4",
+    "@types/leaflet": "npm:@types/leaflet@^1.9.21"
   }
 }

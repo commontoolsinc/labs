@@ -18,8 +18,8 @@ export default recipe<State>("ArrayDestructureShorthand", ({ items }) => {
         ))}
 
         {/* Multiple array destructured params */}
-        {items.map(([item, count]) => (
-          <div key={item}>
+        {items.map(([item, count], index) => (
+          <div key={index}>
             {item}: {count}
           </div>
         ))}

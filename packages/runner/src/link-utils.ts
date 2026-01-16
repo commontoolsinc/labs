@@ -206,6 +206,8 @@ export function createSigilLinkFromParsedLink(
     baseSpace?: MemorySpace;
     includeSchema?: boolean;
     overwrite?: "redirect" | "this"; // default is "this"
+    keepStreams?: boolean;
+    keepAsCell?: boolean;
   } = {},
 ): SigilLink {
   // Create the base structure
@@ -241,8 +243,8 @@ export function createSigilLinkFromParsedLink(
 
   // Include schema if requested
   if (options.includeSchema && link.schema !== undefined) {
-    reference.schema = sanitizeSchemaForLinks(link.schema);
-    reference.rootSchema = sanitizeSchemaForLinks(link.rootSchema);
+    reference.schema = sanitizeSchemaForLinks(link.schema, options);
+    reference.rootSchema = sanitizeSchemaForLinks(link.rootSchema, options);
   }
 
   // Option overrides link value
@@ -386,15 +388,15 @@ export function createDataCellURI(
  */
 export function sanitizeSchemaForLinks(
   schema: JSONSchema,
-  options?: { keepStreams?: boolean },
+  options?: { keepAsCell?: boolean; keepStreams?: boolean },
 ): JSONSchema;
 export function sanitizeSchemaForLinks(
   schema: JSONSchema | undefined,
-  options?: { keepStreams?: boolean },
+  options?: { keepAsCell?: boolean; keepStreams?: boolean },
 ): JSONSchema | undefined;
 export function sanitizeSchemaForLinks(
   schema: JSONSchema | undefined,
-  options: { keepStreams?: boolean } = {},
+  options?: { keepAsCell?: boolean; keepStreams?: boolean },
 ): JSONSchema | undefined {
   if (
     schema === null ||
@@ -422,7 +424,7 @@ export function sanitizeSchemaForLinks(
     defs: {},
     defCounter: 0,
     reservedNames: existingDefNames,
-    options,
+    options: options ?? {},
   };
 
   const result = recursiveStripAsCellAndStreamFromSchema(schema, context, 0);
@@ -452,7 +454,7 @@ interface SanitizeContext {
   // Reserved def names (from existing $defs in input schema)
   reservedNames: Set<string>;
   // Options
-  options: { keepStreams?: boolean };
+  options: { keepStreams?: boolean; keepAsCell?: boolean };
 }
 
 function recursiveStripAsCellAndStreamFromSchema(
@@ -503,7 +505,7 @@ function recursiveStripAsCellAndStreamFromSchema(
   const result: any = { ...schema };
 
   // Remove asCell and asStream flags from this level
-  delete result.asCell;
+  if (!context.options.keepAsCell) delete result.asCell;
   if (!context.options.keepStreams) delete result.asStream;
 
   // Recursively process all object properties

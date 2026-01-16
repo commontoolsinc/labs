@@ -6,9 +6,9 @@ import {
   startDrag,
   updateDragPointer,
 } from "../../core/drag-state.ts";
-import { render } from "@commontools/html";
-import { UI } from "@commontools/runner";
-import type { Cell } from "@commontools/runner";
+import { render } from "@commontools/html/client";
+import { UI } from "@commontools/runtime-client";
+import type { CellHandle } from "@commontools/runtime-client";
 import "../ct-cell-context/ct-cell-context.ts";
 import "../ct-cell-link/ct-cell-link.ts";
 
@@ -20,17 +20,17 @@ import "../ct-cell-link/ct-cell-link.ts";
  *
  * @element ct-drag-source
  *
- * @property {Cell} cell - Required: the cell being dragged
+ * @property {CellHandle} cell - Required: the cell being dragged
  * @property {string} type - Optional: type identifier for filtering drop zones
  * @property {boolean} disabled - Disable dragging
  *
- * @fires ct-drag-start - Fired when drag starts with { cell: Cell }
- * @fires ct-drag-end - Fired when drag ends with { cell: Cell, dropped: boolean }
+ * @fires ct-drag-start - Fired when drag starts with { cell: CellHandle }
+ * @fires ct-drag-end - Fired when drag ends with { cell: CellHandle, dropped: boolean }
  *
  * @slot - Default slot for draggable content
  *
  * @example
- * <ct-drag-source .cell=${myCell} type="item">
+ * <ct-drag-source .cell=${myCellHandle} type="item">
  *   <div>Drag me!</div>
  * </ct-drag-source>
  */
@@ -59,7 +59,7 @@ export class CTDragSource extends BaseElement {
   ];
 
   @property({ attribute: false })
-  cell?: Cell;
+  cell?: CellHandle;
 
   @property({ type: String })
   type?: string;
@@ -93,22 +93,14 @@ export class CTDragSource extends BaseElement {
       return;
     }
 
-    // Prevent default and capture pointer for drag
-    e.preventDefault();
+    // Don't preventDefault or setPointerCapture here - wait until we confirm
+    // it's a drag. This allows clicks to work on non-interactive content.
 
     // Store initial position
     this._startX = e.clientX;
     this._startY = e.clientY;
     this._pointerId = e.pointerId;
     this._isTracking = true;
-
-    // Capture pointer events
-    const cellContext = this.shadowRoot?.querySelector(
-      "ct-cell-context",
-    ) as HTMLElement;
-    if (cellContext) {
-      cellContext.setPointerCapture(e.pointerId);
-    }
 
     // Add document-level listeners for move and up
     document.addEventListener("pointermove", this._boundPointerMove);
@@ -174,6 +166,17 @@ export class CTDragSource extends BaseElement {
       return;
     }
 
+    // Now that we're actually dragging, capture the pointer and add dragging class
+    const cellContext = this.shadowRoot?.querySelector(
+      "ct-cell-context",
+    ) as HTMLElement;
+    if (cellContext) {
+      if (this._pointerId !== undefined) {
+        cellContext.setPointerCapture(this._pointerId);
+      }
+      cellContext.classList.add("dragging");
+    }
+
     // Create preview element
     this._preview = this._createPreview();
     document.body.appendChild(this._preview);
@@ -181,12 +184,6 @@ export class CTDragSource extends BaseElement {
     // Position preview near cursor
     this._preview.style.left = `${e.clientX + 10}px`;
     this._preview.style.top = `${e.clientY + 10}px`;
-
-    // Add dragging class to source
-    const cellContext = this.shadowRoot?.querySelector("ct-cell-context");
-    if (cellContext) {
-      cellContext.classList.add("dragging");
-    }
 
     // Start drag in drag state
     startDrag({

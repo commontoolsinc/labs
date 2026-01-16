@@ -865,7 +865,7 @@ export default recipe<{
                 <label>Import Limit</label>
                 <ct-input
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
-                  value={settings.limit}
+                  value={String(settings.limit)}
                   placeholder="count of emails to import"
                   onct-input={updateLimit({ limit: settings.limit })}
                 />

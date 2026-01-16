@@ -174,6 +174,64 @@ const formatCohortCount = (count: number): string => {
   return `${sanitized} ${plural}`;
 };
 
+// Module-scope lift definitions
+const liftSanitizeEvents = lift((value: FeatureUsageInput[] | undefined) =>
+  sanitizeEvents(value)
+);
+
+const liftDefaultDelta = lift((value: number | undefined) => {
+  const sanitized = sanitizeCount(value, 1);
+  return sanitized === 0 ? 1 : sanitized;
+});
+
+const liftComputeMetrics = lift((list: FeatureUsageBucket[] | undefined) => {
+  const buckets = Array.isArray(list) ? list : [];
+  const featureTotals = computeFeatureTotals(buckets);
+  const cohortTotals = computeCohortTotals(buckets);
+  const matrix = computeMatrix(buckets);
+  const total = buckets.reduce((sum, entry) => sum + entry.count, 0);
+  const topFeature = pickTopEntry(featureTotals);
+  const topCohort = pickTopEntry(cohortTotals);
+  const snapshot: UsageMetricsSnapshot = {
+    total,
+    features: featureTotals,
+    cohorts: cohortTotals,
+    featureCount: Object.keys(featureTotals).length,
+    cohortCount: Object.keys(cohortTotals).length,
+    topFeature: topFeature.name,
+    topFeatureCount: topFeature.count,
+    topCohort: topCohort.name,
+    topCohortCount: topCohort.count,
+  };
+  return {
+    featureTotals,
+    cohortTotals,
+    matrix,
+    total,
+    topFeature,
+    topCohort,
+    snapshot,
+  } as MetricsData;
+});
+
+const liftFormatTopFeature = lift((entry: TopEntry | undefined) =>
+  entry ? formatTopFeature(entry) : formatTopFeature({
+    name: "none",
+    count: 0,
+  })
+);
+
+const liftFormatCohortCount = lift((count: number | undefined) =>
+  formatCohortCount(typeof count === "number" ? count : 0)
+);
+
+const liftNormalizeLastEvent = lift((value: string | undefined) => {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value;
+  }
+  return "none";
+});
+
 const recordFeatureUsage = handler(
   (
     event: FeatureUsageEvent | undefined,
@@ -229,44 +287,11 @@ export const featureUsageAnalytics = recipe<FeatureUsageArgs>(
   ({ events, defaultDelta }) => {
     const lastEvent = cell("none");
 
-    const usageBuckets = lift((value: FeatureUsageInput[] | undefined) =>
-      sanitizeEvents(value)
-    )(events);
+    const usageBuckets = liftSanitizeEvents(events);
 
-    const defaultDeltaValue = lift((value: number | undefined) => {
-      const sanitized = sanitizeCount(value, 1);
-      return sanitized === 0 ? 1 : sanitized;
-    })(defaultDelta);
+    const defaultDeltaValue = liftDefaultDelta(defaultDelta);
 
-    const metricsData = lift((list: FeatureUsageBucket[] | undefined) => {
-      const buckets = Array.isArray(list) ? list : [];
-      const featureTotals = computeFeatureTotals(buckets);
-      const cohortTotals = computeCohortTotals(buckets);
-      const matrix = computeMatrix(buckets);
-      const total = buckets.reduce((sum, entry) => sum + entry.count, 0);
-      const topFeature = pickTopEntry(featureTotals);
-      const topCohort = pickTopEntry(cohortTotals);
-      const snapshot: UsageMetricsSnapshot = {
-        total,
-        features: featureTotals,
-        cohorts: cohortTotals,
-        featureCount: Object.keys(featureTotals).length,
-        cohortCount: Object.keys(cohortTotals).length,
-        topFeature: topFeature.name,
-        topFeatureCount: topFeature.count,
-        topCohort: topCohort.name,
-        topCohortCount: topCohort.count,
-      };
-      return {
-        featureTotals,
-        cohortTotals,
-        matrix,
-        total,
-        topFeature,
-        topCohort,
-        snapshot,
-      } as MetricsData;
-    })(usageBuckets);
+    const metricsData = liftComputeMetrics(usageBuckets);
 
     const featureTotals = derive(metricsData, (view) => view.featureTotals);
     const cohortTotals = derive(metricsData, (view) => view.cohortTotals);
@@ -284,23 +309,11 @@ export const featureUsageAnalytics = recipe<FeatureUsageArgs>(
       (totals) => Object.keys(totals).length,
     );
 
-    const topFeatureLabel = lift((entry: TopEntry | undefined) =>
-      entry ? formatTopFeature(entry) : formatTopFeature({
-        name: "none",
-        count: 0,
-      })
-    )(topFeatureEntry);
+    const topFeatureLabel = liftFormatTopFeature(topFeatureEntry);
 
-    const cohortLabel = lift((count: number | undefined) =>
-      formatCohortCount(typeof count === "number" ? count : 0)
-    )(cohortCount);
+    const cohortLabel = liftFormatCohortCount(cohortCount);
 
-    const lastEventView = lift((value: string | undefined) => {
-      if (typeof value === "string" && value.trim().length > 0) {
-        return value;
-      }
-      return "none";
-    })(lastEvent);
+    const lastEventView = liftNormalizeLastEvent(lastEvent);
 
     const statusLabel =
       str`Top feature ${topFeatureLabel} across ${cohortLabel}`;
@@ -330,3 +343,5 @@ export const featureUsageAnalytics = recipe<FeatureUsageArgs>(
     };
   },
 );
+
+export default featureUsageAnalytics;

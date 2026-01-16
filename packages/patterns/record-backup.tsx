@@ -13,7 +13,6 @@
  * - Per-module error handling on import
  */
 import {
-  Cell,
   computed,
   type Default,
   handler,
@@ -24,6 +23,7 @@ import {
   pattern,
   UI,
   wish,
+  Writable,
 } from "commontools";
 
 import { createSubCharm, getDefinition } from "./record/registry.ts";
@@ -417,9 +417,9 @@ function createModuleFromData(
 const importRecords = handler<
   Record<string, never>,
   {
-    importJson: Cell<string>;
-    allCharms: Cell<RecordCharm[]>;
-    importResult: Cell<ImportResult | null>;
+    importJson: Writable<string>;
+    allCharms: Writable<RecordCharm[]>;
+    importResult: Writable<ImportResult | null>;
   }
 >((_, { importJson, allCharms, importResult }) => {
   const jsonText = importJson.get();
@@ -574,7 +574,7 @@ const importRecords = handler<
  */
 const clearImportResult = handler<
   Record<string, never>,
-  { importResult: Cell<ImportResult | null> }
+  { importResult: Writable<ImportResult | null> }
 >((_, { importResult }) => {
   importResult.set(null);
 });
@@ -584,7 +584,7 @@ const clearImportResult = handler<
  */
 const handleFileUpload = handler<
   { detail: { files: Array<{ data: string; name: string }> } },
-  { importJson: Cell<string> }
+  { importJson: Writable<string> }
 >(({ detail }, { importJson }) => {
   const files = detail?.files;
   if (!files || files.length === 0) return;
@@ -615,33 +615,32 @@ export default pattern<Input, Output>(({ importJson }) => {
   const recordCount = countRecords({ exportData });
 
   // Import result state
-  const importResult = Cell.of<ImportResult | null>(null);
+  const importResult = Writable.of<ImportResult | null>(null);
 
-  // Computed values for import result display using lift
-  const hasImportResult = lift(
-    ({ r }: { r: ImportResult | null }) => r !== null,
-  )({ r: importResult });
+  // Computed values for import result display
+  const hasImportResult = computed(() => importResult.get() !== null);
 
-  const importResultBg = lift(({ r }: { r: ImportResult | null }) =>
-    r?.success ? "#f0fdf4" : "#fef2f2"
-  )({ r: importResult });
+  const importResultBg = computed(() =>
+    importResult.get()?.success ? "#f0fdf4" : "#fef2f2"
+  );
 
-  const importResultBorder = lift(({ r }: { r: ImportResult | null }) =>
-    `1px solid ${r?.success ? "#86efac" : "#fca5a5"}`
-  )({ r: importResult });
+  const importResultBorder = computed(() =>
+    `1px solid ${importResult.get()?.success ? "#86efac" : "#fca5a5"}`
+  );
 
-  const importResultTitle = lift(({ r }: { r: ImportResult | null }) =>
-    r?.success ? "Import Complete" : "Import Issues"
-  )({ r: importResult });
+  const importResultTitle = computed(() =>
+    importResult.get()?.success ? "Import Complete" : "Import Issues"
+  );
 
-  const importResultMessage = lift(({ r }: { r: ImportResult | null }) => {
+  const importResultMessage = computed(() => {
+    const r = importResult.get();
     if (!r) return "";
     const msg = `Imported ${r.imported || 0} record(s)`;
     if (r.failed > 0) {
       return `${msg}, ${r.failed} module(s) failed`;
     }
     return msg;
-  })({ r: importResult });
+  });
 
   return {
     [NAME]: computed(() => `Record Backup (${recordCount} records)`),
@@ -668,8 +667,9 @@ export default pattern<Input, Output>(({ importJson }) => {
                   filename={`record-backup-${
                     new Date().toISOString().slice(0, 10)
                   }.json`}
-                  mime-type="application/json"
+                  mimeType="application/json"
                   variant="primary"
+                  allowAutosave
                 >
                   Download Backup
                 </ct-file-download>

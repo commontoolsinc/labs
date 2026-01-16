@@ -3,29 +3,40 @@
  * TypePicker Module - Controller pattern for selecting record type
  *
  * This is a "controller module" - it doesn't just store data, it ACTS on
- * the parent container's state. It uses the ContainerCoordinationContext
- * protocol to modify the parent's entries list.
+ * the parent container's state by receiving parent Cells as top-level inputs.
  *
  * Key architecture:
- * - Receives ContainerCoordinationContext as INPUT
- * - Context's entries/trashedEntries are Cells that survive serialization
- * - Can call .get() and .set() on context Cells from handlers
+ * - Receives Cells (entries, trashedEntries) as TOP-LEVEL pattern inputs
+ * - CTS handles Cell serialization correctly when they're top-level props
+ * - linkPatternJson is a serializable string (no functions!)
+ * - Can call .get() and .set() on input Cells from handlers
  * - Trashes itself after applying a template
+ *
+ * IMPORTANT: Cells must be top-level props, not nested in a context object!
+ * When nested inside a plain object, CTS serialization fails.
  *
  * See: community-docs/superstitions/2025-12-19-auto-init-use-two-lift-pattern.md
  */
 
-import { Cell, type Default, handler, NAME, pattern, UI } from "commontools";
-import type {
-  ContainerCoordinationContext,
-  ModuleMetadata,
-} from "./container-protocol.ts";
+import {
+  type Default,
+  handler,
+  NAME,
+  pattern,
+  UI,
+  Writable,
+} from "commontools";
+import type { ModuleMetadata } from "./container-protocol.ts";
 import {
   createTemplateModules,
   getTemplateList,
   type TemplateDefinition,
 } from "./record/template-registry.ts";
+import Note from "./notes/note.tsx";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
+
+// Filter function at module scope to avoid transformer errors
+const isNotBlankTemplate = (t: TemplateDefinition): boolean => t.id !== "blank";
 
 // ===== Self-Describing Metadata =====
 export const MODULE_METADATA: ModuleMetadata = {
@@ -38,8 +49,11 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 
 interface TypePickerInput {
-  // Container coordination context - passed from parent
-  context: ContainerCoordinationContext<SubCharmEntry>;
+  // Cells at top level - CTS handles these correctly for serialization
+  // (When nested inside a plain object, serialization fails)
+  entries: Writable<SubCharmEntry[]>;
+  trashedEntries: Writable<TrashedSubCharmEntry[]>;
+  linkPatternJson?: string;
   // Internal state
   dismissed?: Default<boolean, false>;
 }
@@ -56,13 +70,12 @@ interface TypePickerOutput {
 const applyTemplate = handler<
   unknown,
   {
-    entries: Cell<SubCharmEntry[]>;
-    trashedEntries: Cell<TrashedSubCharmEntry[]>;
-    // deno-lint-ignore no-explicit-any
-    createModule: any;
+    entries: Writable<SubCharmEntry[]>;
+    trashedEntries: Writable<TrashedSubCharmEntry[]>;
+    linkPatternJson: string | undefined;
     templateId: string;
   }
->((_event, { entries, trashedEntries, createModule, templateId }) => {
+>((_event, { entries, trashedEntries, linkPatternJson, templateId }) => {
   const current = entries.get() || [];
 
   // Find and keep the notes module (should be first)
@@ -75,8 +88,8 @@ const applyTemplate = handler<
   // Find self by type (there should only be one type-picker)
   const selfEntry = current.find((e) => e?.type === "type-picker");
 
-  // Create factory for Notes using context's createModule
-  const createNotesCharm = () => createModule("notes");
+  // Create factory for Notes that uses the linkPatternJson for wiki-links
+  const createNotesCharm = () => Note({ linkPattern: linkPatternJson });
 
   // Create template modules (skip notes since we keep existing one)
   const templateEntries = createTemplateModules(templateId, createNotesCharm);
@@ -106,8 +119,8 @@ const applyTemplate = handler<
 const dismiss = handler<
   unknown,
   {
-    entries: Cell<SubCharmEntry[]>;
-    trashedEntries: Cell<TrashedSubCharmEntry[]>;
+    entries: Writable<SubCharmEntry[]>;
+    trashedEntries: Writable<TrashedSubCharmEntry[]>;
   }
 >((_event, { entries, trashedEntries }) => {
   const current = entries.get() || [];
@@ -130,14 +143,11 @@ const dismiss = handler<
 // ===== The Pattern =====
 
 export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
-  ({ context, dismissed }) => {
-    // Extract context components for handlers
-    const { entries, trashedEntries, createModule } = context;
+  ({ entries, trashedEntries, linkPatternJson, dismissed }) => {
+    // Props are now at top level - CTS handles Cell serialization correctly
 
     // Get templates to display (excluding blank)
-    const templates = getTemplateList().filter(
-      (t: TemplateDefinition) => t.id !== "blank",
-    );
+    const templates = getTemplateList().filter(isNotBlankTemplate);
 
     return {
       [NAME]: "Choose Type",
@@ -173,7 +183,7 @@ export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
               }}
               title="Dismiss (can restore from trash)"
             >
-              ✕
+              {"\u2715"}
             </button>
           </div>
           <div
@@ -189,7 +199,7 @@ export const TypePickerModule = pattern<TypePickerInput, TypePickerOutput>(
                 onClick={applyTemplate({
                   entries,
                   trashedEntries,
-                  createModule,
+                  linkPatternJson,
                   templateId: template.id,
                 })}
                 style={{

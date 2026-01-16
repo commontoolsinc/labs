@@ -2,7 +2,8 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { createRef, type Ref, ref } from "lit/directives/ref.js";
 import { BaseElement } from "../../core/base-element.ts";
-import { type Cell } from "@commontools/runner";
+import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
+import type { Schema } from "@commontools/api";
 import { createCellController } from "../../core/cell-controller.ts";
 import { consume } from "@lit/context";
 import {
@@ -15,6 +16,35 @@ import { classMap } from "lit/directives/class-map.js";
 import "../ct-audio-visualizer/ct-audio-visualizer.ts";
 import type { CTAudioVisualizer } from "../ct-audio-visualizer/ct-audio-visualizer.ts";
 import { convertToWav } from "../../utils/audio-conversion.ts";
+
+// Schema for TranscriptionData
+const TranscriptionDataSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    text: { type: "string" },
+    chunks: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          timestamp: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 2,
+            maxItems: 2,
+          },
+          text: { type: "string" },
+        },
+        required: ["timestamp", "text"],
+      },
+    },
+    audioData: { type: "string" },
+    duration: { type: "number" },
+    timestamp: { type: "number" },
+  },
+  required: ["id", "text", "duration", "timestamp"],
+} as const satisfies JSONSchema;
 
 /**
  * Recording state machine to prevent race conditions
@@ -30,7 +60,7 @@ type RecordingState =
  * Timestamped segment of transcription
  */
 export interface TranscriptionChunk {
-  timestamp: [number, number]; // [start_seconds, end_seconds]
+  timestamp: number[]; // [start_seconds, end_seconds]
   text: string;
 }
 
@@ -45,6 +75,12 @@ export interface TranscriptionData {
   duration: number; // Recording duration in seconds
   timestamp: number; // Unix timestamp when recorded
 }
+
+// Type validation: ensure schema matches interface
+type _ValidateTranscriptionData = Schema<
+  typeof TranscriptionDataSchema
+> extends TranscriptionData ? true : never;
+const _validateTranscriptionData: _ValidateTranscriptionData = true;
 
 /**
  * CTVoiceInput - Voice recording and transcription component
@@ -226,8 +262,10 @@ export class CTVoiceInput extends BaseElement {
   ];
 
   @property({ attribute: false })
-  transcription: Cell<TranscriptionData | null> | TranscriptionData | null =
-    null;
+  transcription:
+    | CellHandle<TranscriptionData | null>
+    | TranscriptionData
+    | null = null;
 
   @property({ type: String })
   recordingMode: "hold" | "toggle" = "hold";
@@ -270,12 +308,10 @@ export class CTVoiceInput extends BaseElement {
   @property({ attribute: false })
   declare theme?: CTTheme;
 
-  private _changeGroup = crypto.randomUUID();
   private _cellController = createCellController<TranscriptionData | null>(
     this,
     {
       timing: { strategy: "immediate" },
-      changeGroup: this._changeGroup,
       onChange: (newValue) => {
         this.emit("ct-change", { transcription: newValue });
       },
@@ -299,7 +335,7 @@ export class CTVoiceInput extends BaseElement {
   ) {
     super.firstUpdated(changedProperties);
     this._updateThemeProperties();
-    this._cellController.bind(this.transcription);
+    this._cellController.bind(this.transcription, TranscriptionDataSchema);
   }
 
   override updated(
@@ -315,7 +351,7 @@ export class CTVoiceInput extends BaseElement {
     super.willUpdate(changedProperties);
 
     if (changedProperties.has("transcription")) {
-      this._cellController.bind(this.transcription);
+      this._cellController.bind(this.transcription, TranscriptionDataSchema);
     }
   }
 

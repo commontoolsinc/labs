@@ -1,4 +1,5 @@
 export type {
+  DiagnosticSeverity,
   TransformationContext,
   TransformationDiagnostic,
   TransformationOptions,
@@ -7,9 +8,17 @@ export type {
 export { Pipeline, transformCtDirective, Transformer } from "./core/mod.ts";
 
 export {
+  CastValidationTransformer,
   OpaqueRefJSXTransformer,
+  PatternContextValidationTransformer,
   SchemaGeneratorTransformer,
   SchemaInjectionTransformer,
 } from "./transformers/mod.ts";
 export { ClosureTransformer } from "./closures/transformer.ts";
 export { CommonToolsTransformerPipeline } from "./ct-pipeline.ts";
+export {
+  CompositeDiagnosticTransformer,
+  type DiagnosticMessageTransformer,
+  OpaqueRefErrorTransformer,
+  type OpaqueRefErrorTransformerOptions,
+} from "./diagnostics/mod.ts";

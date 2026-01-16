@@ -5,17 +5,17 @@
  *
  * @reviewed 2025-12-10 docs-rationalization
  */
-import { Cell, handler, NAME, pattern, UI, wish } from "commontools";
+import { handler, NAME, pattern, UI, wish, Writable } from "commontools";
 
 type Favorite = {
-  cell: Cell<{ [NAME]?: string }>;
+  cell: Writable<{ [NAME]?: string }>;
   tag: string;
-  userTags: Cell<string[]>;
+  userTags: Writable<string[]>;
 };
 
 const onRemoveFavorite = handler<
   Record<string, never>,
-  { favorites: Cell<Array<Favorite>>; item: Cell<unknown> }
+  { favorites: Writable<Array<Favorite>>; item: Writable<unknown> }
 >((_, { favorites, item }) => {
   favorites.set([
     ...favorites.get().filter((f: Favorite) => !f.cell.equals(item)),
@@ -24,12 +24,13 @@ const onRemoveFavorite = handler<
 
 const onUpdateUserTags = handler<
   { detail: { tags: string[] } },
-  { userTags: Cell<string[]> }
+  { userTags: Writable<string[]> }
 >(({ detail }, { userTags }) => {
   userTags.set(detail?.tags ?? []);
 });
 
 export default pattern<Record<string, never>>((_) => {
+  // Use wish() to access favorites from home.tsx via defaultPattern
   const wishResult = wish<Array<Favorite>>({ query: "#favorites" });
 
   return {

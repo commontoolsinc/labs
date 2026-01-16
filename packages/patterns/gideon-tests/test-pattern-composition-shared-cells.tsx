@@ -27,7 +27,6 @@
  * 7. Verify it disappears from "Basic List" too
  */
 import {
-  Cell,
   computed,
   Default,
   derive,
@@ -36,6 +35,7 @@ import {
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 interface ShoppingItem {
@@ -44,42 +44,46 @@ interface ShoppingItem {
   category: Default<string, "Uncategorized">;
 }
 
+// Handlers at module scope
+const removeItem = handler<
+  unknown,
+  {
+    items: Writable<Array<Writable<ShoppingItem>>>;
+    item: Writable<ShoppingItem>;
+  }
+>(
+  (_event, { items: itemsList, item }) => {
+    const current = itemsList.get();
+    const index = current.findIndex((el) => el.equals(item));
+    if (index >= 0) {
+      itemsList.set(current.toSpliced(index, 1));
+    }
+  },
+);
+
+const addItem = handler<
+  { detail: { message: string } },
+  { items: Writable<ShoppingItem[]> }
+>(
+  ({ detail }, { items: itemsList }) => {
+    const input = detail?.message?.trim();
+    if (input) {
+      const [title, category = "Uncategorized"] = input.split(":");
+      itemsList.push({
+        title: title.trim(),
+        done: false,
+        category: category.trim(),
+      });
+    }
+  },
+);
+
 // Sub-pattern 1: Basic list view
 interface BasicListInput {
-  items: Cell<ShoppingItem[]>;
+  items: Writable<ShoppingItem[]>;
 }
 
 const BasicList = pattern<BasicListInput>(({ items }) => {
-  const removeItem = handler<
-    unknown,
-    { items: Cell<Array<Cell<ShoppingItem>>>; item: Cell<ShoppingItem> }
-  >(
-    (_event, { items: itemsList, item }) => {
-      const current = itemsList.get();
-      const index = current.findIndex((el) => el.equals(item));
-      if (index >= 0) {
-        itemsList.set(current.toSpliced(index, 1));
-      }
-    },
-  );
-
-  const addItem = handler<
-    { detail: { message: string } },
-    { items: Cell<ShoppingItem[]> }
-  >(
-    ({ detail }, { items: itemsList }) => {
-      const input = detail?.message?.trim();
-      if (input) {
-        const [title, category = "Uncategorized"] = input.split(":");
-        itemsList.push({
-          title: title.trim(),
-          done: false,
-          category: category.trim(),
-        });
-      }
-    },
-  );
-
   return {
     [NAME]: "Basic Shopping List",
     [UI]: (
@@ -122,7 +126,7 @@ const BasicList = pattern<BasicListInput>(({ items }) => {
 
 // Sub-pattern 2: Categorized view
 interface CategoryListInput {
-  items: Cell<ShoppingItem[]>;
+  items: Writable<ShoppingItem[]>;
 }
 
 const CategoryList = pattern<CategoryListInput>(({ items }) => {
@@ -135,19 +139,6 @@ const CategoryList = pattern<CategoryListInput>(({ items }) => {
         cats.add(item.category || "Uncategorized");
       }
       return Array.from(cats).sort();
-    },
-  );
-
-  const removeItem = handler<
-    unknown,
-    { items: Cell<Array<Cell<ShoppingItem>>>; item: Cell<ShoppingItem> }
-  >(
-    (_event, { items: itemsList, item }) => {
-      const current = itemsList.get();
-      const index = current.findIndex((el) => el.equals(item));
-      if (index >= 0) {
-        itemsList.set(current.toSpliced(index, 1));
-      }
     },
   );
 

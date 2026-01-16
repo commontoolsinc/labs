@@ -1,7 +1,15 @@
 /// <cts-enable />
-import { Cell, Default, handler, NAME, pattern, UI, VNode } from "commontools";
+import {
+  Default,
+  handler,
+  NAME,
+  pattern,
+  UI,
+  VNode,
+  Writable,
+} from "commontools";
 
-const increment = handler<unknown, { value: Cell<number> }>((_, state) => {
+const increment = handler<unknown, { value: Writable<number> }>((_, state) => {
   state.value.set(state.value.get() + 1);
 });
 

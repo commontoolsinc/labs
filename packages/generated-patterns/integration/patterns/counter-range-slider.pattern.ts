@@ -161,41 +161,52 @@ const nudgeSlider = handler(
   },
 );
 
+const liftSliderState = lift(
+  toSchema<
+    { min: Cell<number>; max: Cell<number>; value: Cell<number> }
+  >(),
+  toSchema<
+    { min: number; max: number; span: number; value: number }
+  >(),
+  ({ min, max, value }) => {
+    const rawMin = min.get();
+    const rawMax = max.get();
+    const minValue = toFiniteNumber(rawMin, 0);
+    const maxCandidate = toFiniteNumber(rawMax, minValue + 100);
+    const maxValue = maxCandidate > minValue ? maxCandidate : minValue + 100;
+    const current = clampNumber(
+      toFiniteNumber(value.get(), minValue),
+      minValue,
+      maxValue,
+    );
+    const span = maxValue - minValue;
+    return {
+      min: minValue,
+      max: maxValue,
+      span: span > 0 ? span : 1,
+      value: current,
+    };
+  },
+);
+
+const liftStepSize = lift((raw: number | undefined) => {
+  const normalized = toFiniteNumber(raw, 1);
+  return normalized > 0 ? normalized : 1;
+});
+
+const liftInteractionCount = lift((count: number | undefined) =>
+  toFiniteNumber(count, 0)
+);
+
+const liftSanitizeSnapshots = lift(sanitizeSnapshots);
+
 export const counterRangeSliderSimulation = recipe<RangeSliderArgs>(
   "Counter Range Slider Simulation",
   ({ min, max, value, step }) => {
     const interactions = cell(0);
     const history = cell<SliderSnapshot[]>([]);
 
-    const sliderState = lift(
-      toSchema<
-        { min: Cell<number>; max: Cell<number>; value: Cell<number> }
-      >(),
-      toSchema<
-        { min: number; max: number; span: number; value: number }
-      >(),
-      ({ min, max, value }) => {
-        const rawMin = min.get();
-        const rawMax = max.get();
-        const minValue = toFiniteNumber(rawMin, 0);
-        const maxCandidate = toFiniteNumber(rawMax, minValue + 100);
-        const maxValue = maxCandidate > minValue
-          ? maxCandidate
-          : minValue + 100;
-        const current = clampNumber(
-          toFiniteNumber(value.get(), minValue),
-          minValue,
-          maxValue,
-        );
-        const span = maxValue - minValue;
-        return {
-          min: minValue,
-          max: maxValue,
-          span: span > 0 ? span : 1,
-          value: current,
-        };
-      },
-    )({ min, max, value });
+    const sliderState = liftSliderState({ min, max, value });
 
     const currentValue = derive(sliderState, (state) => state.value);
     const minView = derive(sliderState, (state) => state.min);
@@ -205,15 +216,10 @@ export const counterRangeSliderSimulation = recipe<RangeSliderArgs>(
       (state) => computePercentage(state.value, state.min, state.max),
     );
 
-    const stepSize = lift((raw: number | undefined) => {
-      const normalized = toFiniteNumber(raw, 1);
-      return normalized > 0 ? normalized : 1;
-    })(step);
+    const stepSize = liftStepSize(step);
 
-    const interactionCount = lift((count: number | undefined) =>
-      toFiniteNumber(count, 0)
-    )(interactions);
-    const historyView = lift(sanitizeSnapshots)(history);
+    const interactionCount = liftInteractionCount(interactions);
+    const historyView = liftSanitizeSnapshots(history);
     const rangeSummary = str`Range ${minView} to ${maxView}`;
     const label = str`Slider at ${currentValue} (${percentage}%)`;
 
@@ -247,3 +253,5 @@ export const counterRangeSliderSimulation = recipe<RangeSliderArgs>(
     };
   },
 );
+
+export default counterRangeSliderSimulation;

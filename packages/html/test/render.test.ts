@@ -1,8 +1,8 @@
 import { beforeEach, describe, it } from "@std/testing/bdd";
-import { UI, VNode } from "@commontools/runner";
+import { UI, VNode } from "@commontools/runtime-client";
 import { render, renderImpl } from "../src/render.ts";
+import { sanitizeEvent } from "../src/render-utils.ts";
 import * as assert from "./assert.ts";
-import { serializableEvent } from "../src/render.ts";
 import { MockDoc } from "../src/mock-doc.ts";
 import { h } from "../src/h.ts";
 
@@ -35,7 +35,7 @@ describe("render", () => {
     );
 
     const parent = document.getElementById("root")!;
-    render(parent, renderable, renderOptions);
+    render(parent, renderable as unknown as VNode, renderOptions);
 
     assert.equal(
       parent.getElementsByTagName("div")[0]!.getAttribute("id"),
@@ -146,7 +146,7 @@ describe("renderImpl", () => {
   });
 });
 
-describe("serializableEvent", () => {
+describe("sanitizeEvent", () => {
   function isPlainSerializableObject(obj: unknown): boolean {
     if (typeof obj !== "object" || obj === null) return true; // primitives are serializable
     if (Array.isArray(obj)) {
@@ -163,7 +163,7 @@ describe("serializableEvent", () => {
 
   it("serializes a basic Event", () => {
     const event = new Event("test");
-    const result = serializableEvent(event);
+    const result = sanitizeEvent(event);
     assert.matchObject(result, { type: "test" });
     assert.equal(
       isPlainSerializableObject(result),
@@ -188,7 +188,7 @@ describe("serializableEvent", () => {
       metaKey: true,
       shiftKey: false,
     });
-    const result = serializableEvent(event);
+    const result = sanitizeEvent(event);
     assert.matchObject(result, {
       type: "keydown",
       key: "a",
@@ -220,7 +220,7 @@ describe("serializableEvent", () => {
       metaKey: false,
       shiftKey: true,
     });
-    const result = serializableEvent(event);
+    const result = sanitizeEvent(event);
     assert.matchObject(result, {
       type: "click",
       button: 0,
@@ -252,7 +252,7 @@ describe("serializableEvent", () => {
       inputType: "insertText",
     });
     Object.defineProperty(event, "target", { value: input });
-    const result = serializableEvent(event) as object;
+    const result = sanitizeEvent(event) as object;
     assert.matchObject(result, {
       type: "input",
       data: "h",
@@ -279,7 +279,7 @@ describe("serializableEvent", () => {
 
   it("serializes a CustomEvent with detail", () => {
     const event = new CustomEvent("custom", { detail: { foo: [42, 43] } });
-    const result = serializableEvent(event) as object;
+    const result = sanitizeEvent(event) as object;
     assert.matchObject(result, {
       type: "custom",
       detail: { foo: [42, 43] },
@@ -322,7 +322,7 @@ describe("serializableEvent", () => {
     (select as HTMLSelectElement).selectedOptions = [option1, option3];
     const event = new Event("change");
     Object.defineProperty(event, "target", { value: select });
-    const result = serializableEvent(event) as object;
+    const result = sanitizeEvent(event) as object;
     assert.matchObject(result, {
       type: "change",
       target: {
@@ -373,7 +373,7 @@ describe("serializableEvent", () => {
     const event = new Event("change");
 
     Object.defineProperty(event, "target", { value: select });
-    const result = serializableEvent(event) as object;
+    const result = sanitizeEvent(event) as object;
     assert.matchObject(result, {
       type: "change",
       target: {
@@ -407,7 +407,7 @@ describe("serializableEvent", () => {
     div.setAttribute("data-name", "test");
     const event = new Event("click");
     Object.defineProperty(event, "target", { value: div });
-    const result = serializableEvent(event) as object;
+    const result = sanitizeEvent(event) as object;
     assert.matchObject(result, {
       type: "click",
       target: {
@@ -890,7 +890,7 @@ describe("dataset attributes", () => {
 });
 
 describe("cycle detection", () => {
-  it("detects direct [UI] self-reference cycle and skips rendering", () => {
+  it("detects direct [UI] self-reference cycle and renders placeholder", () => {
     const { renderOptions, document } = mock;
     // Create a VNode that references itself via [UI]
     const selfRefNode: VNode = {
@@ -905,12 +905,13 @@ describe("cycle detection", () => {
     const parent = document.getElementById("root")!;
     const cancel = renderImpl(parent, selfRefNode, renderOptions);
 
-    // Cyclic [UI] references are detected by isVNode and nothing is rendered
-    assert.equal(parent.children.length, 0);
+    // Cyclic [UI] references are detected and render a placeholder
+    assert.equal(parent.children.length, 1);
+    assert.equal(parent.children[0].textContent, "🔄");
     cancel();
   });
 
-  it("detects indirect [UI] chain cycle (A -> B -> A) and skips rendering", () => {
+  it("detects indirect [UI] chain cycle (A -> B -> A) and renders placeholder", () => {
     const { renderOptions, document } = mock;
     // Create two VNodes that reference each other via [UI]
     const nodeA: VNode = {
@@ -932,8 +933,9 @@ describe("cycle detection", () => {
     const parent = document.getElementById("root")!;
     const cancel = renderImpl(parent, nodeA, renderOptions);
 
-    // Cyclic [UI] references are detected by isVNode and nothing is rendered
-    assert.equal(parent.children.length, 0);
+    // Cyclic [UI] references are detected and render a placeholder
+    assert.equal(parent.children.length, 1);
+    assert.equal(parent.children[0].textContent, "🔄");
     cancel();
   });
 
@@ -1056,5 +1058,130 @@ describe("cycle detection", () => {
     const span = innerDiv?.getElementsByTagName("span")[0];
     assert.equal(span?.textContent, "🔄");
     cancel();
+  });
+});
+
+describe("bidirectional binding validation", () => {
+  it("throws when $value is a primitive string", () => {
+    assert.throws(
+      () => h("ct-input", { $value: "hello" }),
+      "Should throw for primitive string $value",
+    );
+  });
+
+  it("throws when $value is a primitive number", () => {
+    assert.throws(
+      () => h("ct-input", { $value: 42 }),
+      "Should throw for primitive number $value",
+    );
+  });
+
+  it("throws when $checked is a primitive boolean", () => {
+    assert.throws(
+      () => h("ct-checkbox", { $checked: true }),
+      "Should throw for primitive boolean $checked",
+    );
+  });
+
+  it("throws when $value is null", () => {
+    assert.throws(
+      () => h("ct-input", { $value: null }),
+      "Should throw for null $value",
+    );
+  });
+
+  it("throws when $value is undefined", () => {
+    assert.throws(
+      () => h("ct-input", { $value: undefined }),
+      "Should throw for undefined $value",
+    );
+  });
+
+  it("throws when $value is a plain object (not a Cell)", () => {
+    assert.throws(
+      () => h("ct-input", { $value: { someData: "test" } }),
+      "Should throw for plain object $value",
+    );
+  });
+
+  it("throws when $value is an array (not a Cell)", () => {
+    assert.throws(
+      () => h("ct-input", { $value: [1, 2, 3] }),
+      "Should throw for array $value",
+    );
+  });
+
+  it("does not throw for regular (non-$) props with any value", () => {
+    // Regular props should not be validated
+    const vnode = h("div", {
+      value: "string",
+      count: 42,
+      checked: true,
+      data: { nested: "object" },
+    });
+    assert.equal(vnode.type, "vnode");
+    assert.equal(vnode.name, "div");
+  });
+
+  it("allows null props object", () => {
+    const vnode = h("div", null, "child");
+    assert.equal(vnode.type, "vnode");
+    assert.equal(vnode.name, "div");
+  });
+
+  it("error message mentions $value property name", () => {
+    let errorMessage = "";
+    try {
+      h("ct-input", { $value: "test" });
+    } catch (e) {
+      errorMessage = (e as Error).message;
+    }
+    assert.equal(
+      errorMessage.includes("$value"),
+      true,
+      "Error message should mention the property name",
+    );
+  });
+
+  it("error message mentions $checked property name", () => {
+    let errorMessage = "";
+    try {
+      h("ct-checkbox", { $checked: false });
+    } catch (e) {
+      errorMessage = (e as Error).message;
+    }
+    assert.equal(
+      errorMessage.includes("$checked"),
+      true,
+      "Error message should mention the property name",
+    );
+  });
+
+  it("error message for $checked includes checkbox example", () => {
+    let errorMessage = "";
+    try {
+      h("ct-checkbox", { $checked: false });
+    } catch (e) {
+      errorMessage = (e as Error).message;
+    }
+    assert.equal(
+      errorMessage.includes("ct-checkbox"),
+      true,
+      "Error message for $checked should include checkbox example",
+    );
+  });
+
+  it("error message for $value includes input example", () => {
+    let errorMessage = "";
+    try {
+      h("ct-input", { $value: "test" });
+    } catch (e) {
+      errorMessage = (e as Error).message;
+    }
+    assert.equal(
+      errorMessage.includes("ct-input"),
+      true,
+      "Error message for $value should include input example",
+    );
   });
 });

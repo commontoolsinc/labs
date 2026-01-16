@@ -11,7 +11,7 @@
  */
 
 import { h } from "./h.ts";
-import type { RenderNode, VNode } from "@commontools/api";
+import type { JSXElement, RenderNode, VNode } from "@commontools/api";
 
 /**
  * Props type for JSX elements in development mode, including children and debug info
@@ -47,13 +47,13 @@ export interface Source {
  * @returns A virtual DOM node
  */
 export function jsxDEV(
-  type: string | ((props: any) => VNode),
+  type: string | ((props: any) => JSXElement),
   props: JSXDevProps | null,
   _key?: string | number,
   _isStaticChildren?: boolean,
   __source?: Source,
   __self?: any,
-): VNode {
+): JSXElement {
   const { children, ...restProps } = props ?? {};
 
   // Convert children to array format expected by h()

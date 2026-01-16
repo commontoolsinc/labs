@@ -18,6 +18,7 @@ import {
   isRecipe,
   NAME,
   schema,
+  SELF,
   TYPE,
   UI,
 } from "./types.ts";
@@ -108,9 +109,11 @@ export const createBuilder = (): {
 
       // Cell creation
       cell: cellConstructorFactory<AsCell>("cell").of,
+      equals: cellConstructorFactory<AsCell>("cell").equals,
 
       // Cell constructors with static methods
       Cell: cellConstructorFactory<AsCell>("cell"),
+      Writable: cellConstructorFactory<AsCell>("cell"), // Alias for Cell with clearer semantics
       OpaqueCell: cellConstructorFactory<AsOpaqueCell>("opaque"),
       Stream: cellConstructorFactory<AsStream>("stream"),
       ComparableCell: cellConstructorFactory<AsComparableCell>("comparable"),
@@ -129,6 +132,7 @@ export const createBuilder = (): {
       // Constants
       ID,
       ID_FIELD,
+      SELF,
       TYPE,
       NAME,
       UI,

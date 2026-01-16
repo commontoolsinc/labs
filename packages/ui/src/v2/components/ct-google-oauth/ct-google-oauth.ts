@@ -1,6 +1,6 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
-import { Cell } from "@commontools/runner";
+import { CellHandle } from "@commontools/runtime-client";
 import { CTCharm } from "../ct-charm/ct-charm.ts";
 
 export interface AuthData {
@@ -22,7 +22,7 @@ export interface AuthData {
  *
  * @element ct-google-oauth
  *
- * @attr {Cell<AuthData>} auth - Cell containing authentication data
+ * @attr {CellHandle<AuthData>} auth - Cell containing authentication data
  * @attr {string[]} scopes - Array of OAuth scopes to request
  *
  * @example
@@ -37,7 +37,7 @@ export class CTGoogleOauth extends BaseElement {
     scopes: { type: Array },
   };
 
-  declare auth: Cell<AuthData>;
+  declare auth: CellHandle<AuthData>;
   declare authStatus: string;
   declare isLoading: boolean;
   declare authResult: Record<string, unknown> | null;
@@ -63,7 +63,7 @@ export class CTGoogleOauth extends BaseElement {
     this.authStatus = "Initiating OAuth flow...";
     this.authResult = null;
 
-    const authCellId = JSON.stringify(this.auth.getAsLink());
+    const authCellId = JSON.stringify(this.auth.ref());
 
     const container = CTCharm.findCharmContainer(this);
     if (!container) {

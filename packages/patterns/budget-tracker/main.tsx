@@ -1,13 +1,13 @@
 /// <cts-enable />
-import { Cell, Default, NAME, pattern, UI } from "commontools";
+import { Default, NAME, pattern, UI, Writable } from "commontools";
 import { type CategoryBudget, type Expense } from "./schemas.tsx";
 import DataView from "./data-view.tsx";
 import ExpenseForm from "./expense-form.tsx";
 
 // Use SINGLE type parameter to avoid conflict bug with sub-pattern rendering
 interface State {
-  expenses: Cell<Default<Expense[], []>>;
-  budgets: Cell<Default<CategoryBudget[], []>>;
+  expenses: Writable<Default<Expense[], []>>;
+  budgets: Writable<Default<CategoryBudget[], []>>;
 }
 
 export default pattern<State>(({ expenses, budgets }) => {

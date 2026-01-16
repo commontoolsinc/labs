@@ -31,7 +31,7 @@ OpaqueRef is a type representing reactive values in CommonTools. It wraps:
   lift/handler/derive functions
 
 ```typescript
-const count = Cell.of(0); // count is OpaqueRef<number>
+const count = Writable.of(0); // count is OpaqueRef<number>
 ```
 
 ### Important Scope Limitation
@@ -160,7 +160,7 @@ Each element/property is transformed independently when used in JSX:
 
 2. **Array Methods** - Not yet supported:
    ```typescript
-   const items = Cell.of([1, 2, 3]);
+   const items = Writable.of([1, 2, 3]);
    const doubled = items.map((x) => x * 2); // ❌ Not transformed
    const filtered = items.filter((x) => x > 2); // ❌ Not transformed
    ```
@@ -169,7 +169,7 @@ Each element/property is transformed independently when used in JSX:
 
 3. **Async Operations** - Not yet supported:
    ```typescript
-   const url = Cell.of("https://api.example.com");
+   const url = Writable.of("https://api.example.com");
    const data = await fetch(url); // ❌ Not transformed
    ```
    **Why:** Async operations with OpaqueRef require special handling for promise
@@ -177,7 +177,7 @@ Each element/property is transformed independently when used in JSX:
 
 4. **Destructuring** - Extracts values, losing reactivity:
    ```typescript
-   const user = Cell.of({ name: "John", age: 25 });
+   const user = Writable.of({ name: "John", age: 25 });
    const { name, age } = user; // ❌ name and age are plain values, not OpaqueRef
    ```
    **Why:** Destructuring extracts the current value, breaking the reactive

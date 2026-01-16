@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   type Default,
   generateText,
@@ -9,10 +8,13 @@ import {
   navigateTo,
   pattern,
   patternTool,
+  type PatternToolResult,
+  SELF,
   Stream,
   UI,
   type VNode,
   wish,
+  Writable,
 } from "commontools";
 import NoteMd from "./note-md.tsx";
 
@@ -43,24 +45,29 @@ type NoteCharm = {
 };
 
 type Input = {
-  title?: Cell<Default<string, "Untitled Note">>;
-  content?: Cell<Default<string, "">>;
+  title?: Writable<Default<string, "Untitled Note">>;
+  content?: Writable<Default<string, "">>;
   isHidden?: Default<boolean, false>;
   noteId?: Default<string, "">;
   /** Pattern JSON for [[wiki-links]]. Defaults to creating new Notes. */
-  linkPattern?: Cell<Default<string, "">>;
+  linkPattern?: Writable<Default<string, "">>;
+  /** Parent notebook reference (passed via SELF from notebook.tsx) */
+  parentNotebook?: any;
 };
 
 /** Represents a small #note a user took to remember some text. */
 type Output = {
+  [NAME]?: string;
+  [UI]: VNode;
   mentioned: Default<Array<MentionableCharm>, []>;
   backlinks: MentionableCharm[];
+  parentNotebook: any; // Reference to parent notebook (set on navigation for back link)
 
   content: Default<string, "">;
   isHidden: Default<boolean, false>;
   noteId: Default<string, "">;
-  grep: Stream<{ query: string }>;
-  translate: Stream<{ language: string }>;
+  grep: PatternToolResult<{ content: string }>;
+  translate: PatternToolResult<{ content: string }>;
   editContent: Stream<{ detail: { value: string } }>;
   /** Minimal UI for embedding in containers like Record. Use via ct-render variant="embedded". */
   embeddedUI: VNode;
@@ -68,7 +75,7 @@ type Output = {
 
 const _updateTitle = handler<
   { detail: { value: string } },
-  { title: Cell<string> }
+  { title: Writable<string> }
 >(
   (event, state) => {
     state.title.set(event.detail?.value ?? "");
@@ -77,7 +84,7 @@ const _updateTitle = handler<
 
 const _updateContent = handler<
   { detail: { value: string } },
-  { content: Cell<string> }
+  { content: Writable<string> }
 >(
   (event, state) => {
     state.content.set(event.detail?.value ?? "");
@@ -87,7 +94,7 @@ const _updateContent = handler<
 const handleCharmLinkClick = handler<
   {
     detail: {
-      charm: Cell<MentionableCharm>;
+      charm: Writable<MentionableCharm>;
     };
   },
   Record<string, never>
@@ -100,31 +107,31 @@ const handleNewBacklink = handler<
     detail: {
       text: string;
       charmId: any;
-      charm: Cell<MentionableCharm>;
+      charm: Writable<MentionableCharm>;
       navigate: boolean;
     };
   },
   {
-    mentionable: Cell<MentionableCharm[]>;
-    allCharms: Cell<MinimalCharm[]>;
+    mentionable: Writable<MentionableCharm[]>;
+    allCharms: Writable<MinimalCharm[]>;
   }
 >(({ detail }, { mentionable, allCharms }) => {
   console.log("new charm", detail.text, detail.charmId);
 
   // Push to allCharms so it appears in default-app (this was the missing piece!)
-  allCharms.push(detail.charm as unknown as MinimalCharm);
+  allCharms.push(detail.charm);
 
   if (detail.navigate) {
     return navigateTo(detail.charm);
   } else {
-    mentionable.push(detail.charm as unknown as MentionableCharm);
+    mentionable.push(detail.charm);
   }
 });
 
 /** This edits the content */
 const handleEditContent = handler<
-  { detail: { value: string }; result?: Cell<string> },
-  { content: Cell<string> }
+  { detail: { value: string }; result?: Writable<string> },
+  { content: Writable<string> }
 >(
   ({ detail, result }, { content }) => {
     content.set(detail.value);
@@ -132,7 +139,10 @@ const handleEditContent = handler<
   },
 );
 
-const handleCharmLinkClicked = handler<void, { charm: Cell<MentionableCharm> }>(
+const handleCharmLinkClicked = handler<
+  void,
+  { charm: Writable<MentionableCharm> }
+>(
   (_, { charm }) => {
     return navigateTo(charm);
   },
@@ -141,7 +151,7 @@ const handleCharmLinkClicked = handler<void, { charm: Cell<MentionableCharm> }>(
 // Handler to start editing title
 const startEditingTitle = handler<
   Record<string, never>,
-  { isEditingTitle: Cell<boolean> }
+  { isEditingTitle: Writable<boolean> }
 >((_, { isEditingTitle }) => {
   isEditingTitle.set(true);
 });
@@ -149,7 +159,7 @@ const startEditingTitle = handler<
 // Handler to stop editing title
 const stopEditingTitle = handler<
   Record<string, never>,
-  { isEditingTitle: Cell<boolean> }
+  { isEditingTitle: Writable<boolean> }
 >((_, { isEditingTitle }) => {
   isEditingTitle.set(false);
 });
@@ -157,7 +167,7 @@ const stopEditingTitle = handler<
 // Handler for keydown on title input (Enter to save)
 const handleTitleKeydown = handler<
   { key?: string },
-  { isEditingTitle: Cell<boolean> }
+  { isEditingTitle: Writable<boolean> }
 >((event, { isEditingTitle }) => {
   if (event?.key === "Enter") {
     isEditingTitle.set(false);
@@ -165,12 +175,12 @@ const handleTitleKeydown = handler<
 });
 
 // Toggle dropdown menu
-const toggleMenu = handler<void, { menuOpen: Cell<boolean> }>(
+const toggleMenu = handler<void, { menuOpen: Writable<boolean> }>(
   (_, { menuOpen }) => menuOpen.set(!menuOpen.get()),
 );
 
 // Close dropdown menu
-const closeMenu = handler<void, { menuOpen: Cell<boolean> }>(
+const closeMenu = handler<void, { menuOpen: Writable<boolean> }>(
   (_, { menuOpen }) => menuOpen.set(false),
 );
 
@@ -178,8 +188,8 @@ const closeMenu = handler<void, { menuOpen: Cell<boolean> }>(
 const createNewNote = handler<
   void,
   {
-    allCharms: Cell<MinimalCharm[]>;
-    parentNotebook: Cell<NotebookCharm | null>;
+    allCharms: Writable<MinimalCharm[]>;
+    parentNotebook: Writable<NotebookCharm | null>;
   }
 >((_, { allCharms, parentNotebook }) => {
   const notebook = parentNotebook?.get?.();
@@ -190,7 +200,7 @@ const createNewNote = handler<
     noteId: generateId(),
     isHidden: !!notebook, // Hide from default-app if in a notebook
   });
-  allCharms.push(note as unknown as MinimalCharm);
+  allCharms.push(note);
 
   // Add to parent notebook using Cell.key() pattern
   if (notebook) {
@@ -201,8 +211,8 @@ const createNewNote = handler<
     );
     if (nbIndex >= 0) {
       const notebookCell = allCharms.key(nbIndex);
-      const notesCell = notebookCell.key("notes") as Cell<NoteCharm[]>;
-      notesCell.push(note as unknown as NoteCharm);
+      const notesCell = notebookCell.key("notes");
+      notesCell.push(note);
     }
   }
 
@@ -212,21 +222,80 @@ const createNewNote = handler<
 // Menu: Navigate to a notebook
 const menuGoToNotebook = handler<
   void,
-  { menuOpen: Cell<boolean>; notebook: Cell<MinimalCharm> }
+  { menuOpen: Writable<boolean>; notebook: Writable<MinimalCharm> }
 >((_, { menuOpen, notebook }) => {
   menuOpen.set(false);
   return navigateTo(notebook);
 });
 
 // Navigate to parent notebook
-const goToParent = handler<void, { parent: Cell<NotebookCharm> }>(
-  (_, { parent }) => navigateTo(parent),
+const goToParent = handler<Record<string, never>, { self: any }>(
+  (_, { self }) => {
+    const p = (self as any).parentNotebook;
+    if (p) navigateTo(p);
+  },
 );
+
+// Handler that creates NoteMd dynamically when clicked (not during pattern construction)
+// This avoids the sub-recipe serialization issue with $pattern
+const goToViewer = handler<
+  void,
+  {
+    title: Writable<string>;
+    content: Writable<string>;
+    backlinks: Writable<MentionableCharm[]>;
+    noteId: Writable<string>;
+    self: any;
+  }
+>((_, state) => {
+  return navigateTo(
+    NoteMd({
+      note: {
+        title: state.title,
+        content: state.content,
+        backlinks: state.backlinks,
+        noteId: state.noteId,
+      },
+      // Pass direct reference to source note for Edit button
+      sourceNoteRef: state.self,
+      // Pass content Writable for checkbox updates
+      content: state.content,
+    }),
+  );
+});
+
+// Grep function for patternTool - filters content lines by query
+const grepFn = (
+  { query, content }: { query: string; content: string },
+) => {
+  return computed(() => {
+    return content.split("\n").filter((c) => c.includes(query));
+  });
+};
+
+// Translate function for patternTool - translates content to specified language
+const translateFn = (
+  { language, content }: {
+    language: string;
+    content: string;
+  },
+) => {
+  const genResult = generateText({
+    system: computed(() => `Translate the content to ${language}.`),
+    prompt: computed(() => `<to_translate>${content}</to_translate>`),
+  });
+
+  return computed(() => {
+    if (genResult.pending) return undefined;
+    if (genResult.result == null) return "Error occurred";
+    return genResult.result;
+  });
+};
 
 // Menu: All Notes (find existing only - can't create due to circular imports)
 const menuAllNotebooks = handler<
   void,
-  { menuOpen: Cell<boolean>; allCharms: Cell<MinimalCharm[]> }
+  { menuOpen: Writable<boolean>; allCharms: Writable<MinimalCharm[]> }
 >((_, { menuOpen, allCharms }) => {
   menuOpen.set(false);
   const charms = allCharms.get();
@@ -242,26 +311,36 @@ const menuAllNotebooks = handler<
 });
 
 const Note = pattern<Input, Output>(
-  ({ title, content, isHidden, noteId, linkPattern }) => {
+  (
+    {
+      title,
+      content,
+      isHidden,
+      noteId,
+      linkPattern,
+      parentNotebook: parentNotebookProp,
+      [SELF]: self,
+    },
+  ) => {
     const { allCharms } = wish<{ allCharms: MinimalCharm[] }>("/");
     const mentionable = wish<Default<MentionableCharm[], []>>(
       "#mentionable",
     );
     const recentCharms = wish<MinimalCharm[]>("#recent");
-    const mentioned = Cell.of<MentionableCharm[]>([]);
+    const mentioned = Writable.of<MentionableCharm[]>([]);
 
     // Dropdown menu state
-    const menuOpen = Cell.of(false);
+    const menuOpen = Writable.of(false);
 
     // State for inline title editing
-    const isEditingTitle = Cell.of<boolean>(false);
+    const isEditingTitle = Writable.of<boolean>(false);
 
     // Filter to find all notebooks (using 📓 prefix in NAME)
     const notebooks = computed(() =>
       allCharms.filter((charm: any) => {
         const name = charm?.[NAME];
         return typeof name === "string" && name.startsWith("📓");
-      }) as unknown as NotebookCharm[]
+      })
     );
 
     // Check if "All Notes" charm exists in the space
@@ -300,8 +379,16 @@ const Note = pattern<Input, Output>(
       });
     });
 
-    // Find parent notebook: prioritize most recently visited, fall back to first
+    // Find parent notebook: use explicit prop if provided, else fall back to wish-based lookup
     const parentNotebook = computed(() => {
+      // Read from self.parentNotebook for reactive updates when navigating
+      const selfParent = (self as any)?.parentNotebook;
+      if (selfParent) return selfParent;
+
+      // If parent was passed explicitly as prop, use it
+      if (parentNotebookProp) return parentNotebookProp;
+
+      // Fallback: search for containing notebook (backward compatibility)
       if (containingNotebooks.length === 0) return null;
 
       // Find most recent notebook that contains this note
@@ -318,10 +405,10 @@ const Note = pattern<Input, Output>(
     });
 
     // populated in backlinks-index.tsx
-    const backlinks = Cell.of<MentionableCharm[]>([]);
+    const backlinks = Writable.of<MentionableCharm[]>([]);
 
     // Use provided linkPattern or default to creating new Notes
-    // linkPattern is a Cell<string> - access reactively, not as raw string
+    // linkPattern is a Writable<string> - access reactively, not as raw string
     const patternJson = computed(() => {
       // deno-lint-ignore no-explicit-any
       const lpValue = (linkPattern as any)?.get?.() ?? linkPattern;
@@ -346,29 +433,6 @@ const Note = pattern<Input, Output>(
       />
     );
 
-    // Handler that creates NoteMd dynamically when clicked (not during pattern construction)
-    // This avoids the sub-recipe serialization issue with $pattern
-    const goToViewer = handler<
-      void,
-      {
-        title: Cell<string>;
-        content: Cell<string>;
-        backlinks: Cell<MentionableCharm[]>;
-        noteId: Cell<string>;
-      }
-    >((_, state) => {
-      return navigateTo(
-        NoteMd({
-          note: {
-            title: state.title,
-            content: state.content,
-            backlinks: state.backlinks,
-            noteId: state.noteId,
-          },
-        }),
-      );
-    });
-
     return {
       [NAME]: computed(() => `📝 ${title.get()}`),
       [UI]: (
@@ -381,27 +445,40 @@ const Note = pattern<Input, Output>(
               borderBottom: "1px solid var(--ct-color-border, #e5e5e7)",
             }}
           >
+            {/* Parent notebook chip - shows where we navigated from */}
+            <ct-hstack
+              gap="2"
+              align="center"
+              style={{
+                display: computed(() => {
+                  const p = (self as any).parentNotebook;
+                  return p ? "flex" : "none";
+                }),
+                marginBottom: "4px",
+              }}
+            >
+              <span
+                style={{
+                  fontSize: "13px",
+                  color: "var(--ct-color-text-secondary)",
+                }}
+              >
+                In:
+              </span>
+              <ct-chip
+                label={computed(() => {
+                  const p = (self as any).parentNotebook;
+                  return p?.[NAME] ?? p?.title ?? "Notebook";
+                })}
+                interactive
+                onct-click={goToParent({ self })}
+              />
+            </ct-hstack>
+
             <ct-hstack
               gap="3"
               style={{ alignItems: "center" }}
             >
-              {/* Parent notebook button */}
-              <ct-button
-                variant="ghost"
-                onClick={goToParent({ parent: parentNotebook })}
-                style={{
-                  display: computed(() => (parentNotebook ? "flex" : "none")),
-                  alignItems: "center",
-                  padding: "6px 8px",
-                  fontSize: "16px",
-                }}
-                title={computed(() =>
-                  `Go to ${parentNotebook?.[NAME] ?? "notebook"}`
-                )}
-              >
-                ⬆️
-              </ct-button>
-
               {/* Editable Title - click to edit */}
               <div
                 style={{
@@ -442,7 +519,13 @@ const Note = pattern<Input, Output>(
               {/* View Mode button */}
               <ct-button
                 variant="ghost"
-                onClick={goToViewer({ title, content, backlinks, noteId })}
+                onClick={goToViewer({
+                  title,
+                  content,
+                  backlinks,
+                  noteId,
+                  self,
+                })}
                 style={{
                   alignItems: "center",
                   padding: "6px 12px",
@@ -570,36 +653,11 @@ const Note = pattern<Input, Output>(
       content,
       mentioned,
       backlinks,
+      parentNotebook,
       isHidden,
       noteId,
-      grep: patternTool(
-        ({ query, content }: { query: string; content: string }) => {
-          return computed(() => {
-            return content.split("\n").filter((c) => c.includes(query));
-          });
-        },
-        { content },
-      ),
-      translate: patternTool(
-        (
-          { language, content }: {
-            language: string;
-            content: string;
-          },
-        ) => {
-          const genResult = generateText({
-            system: computed(() => `Translate the content to ${language}.`),
-            prompt: computed(() => `<to_translate>${content}</to_translate>`),
-          });
-
-          return computed(() => {
-            if (genResult.pending) return undefined;
-            if (genResult.result == null) return "Error occured";
-            return genResult.result;
-          });
-        },
-        { content },
-      ),
+      grep: patternTool(grepFn, { content }),
+      translate: patternTool(translateFn, { content }),
       editContent: handleEditContent({ content }),
       // Minimal UI for embedding in containers (e.g., Record modules)
       embeddedUI: editorUI,

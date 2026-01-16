@@ -2,10 +2,10 @@
 import {
   Cell,
   cell,
+  computed,
   Default,
   derive,
   handler,
-  lift,
   recipe,
   str,
 } from "commontools";
@@ -35,6 +35,44 @@ interface ComplexUnionArgs {
 }
 
 const READY_NOTE = "ready";
+
+const normalizeUnionState = (
+  value: CounterUnionState | undefined,
+): CounterUnionState => {
+  if (!value) {
+    return {
+      status: "loading" as const,
+      attempts: 0,
+      note: "booting",
+    } satisfies LoadingState;
+  }
+  if (value.status === "loading") {
+    return {
+      status: "loading" as const,
+      attempts: value.attempts,
+      note: value.note,
+    } satisfies LoadingState;
+  }
+  return {
+    status: "ready" as const,
+    attempts: value.attempts,
+    note: value.note,
+    value: value.value,
+    history: Array.isArray(value.history) ? value.history : [value.value],
+  } satisfies ReadyState;
+};
+
+const extractReadyValue = (current: CounterUnionState): number =>
+  current.status === "ready" ? current.value : 0;
+
+const extractHistoryView = (current: CounterUnionState): number[] =>
+  current.status === "ready" ? current.history : [];
+
+const extractAttemptCount = (current: CounterUnionState): number =>
+  current.attempts;
+
+const countHistory = (items: number[] | undefined): number =>
+  Array.isArray(items) ? items.length : 0;
 
 const pushTransition = (
   logCell: Cell<string[]>,
@@ -140,45 +178,15 @@ export const counterWithComplexUnionState = recipe<ComplexUnionArgs>(
   "Counter With Complex Union State",
   ({ state, initialValue }) => {
     const defaultReadyNote = cell(READY_NOTE);
-    const unionState = lift((value: CounterUnionState | undefined) => {
-      if (!value) {
-        return {
-          status: "loading" as const,
-          attempts: 0,
-          note: "booting",
-        } satisfies LoadingState;
-      }
-      if (value.status === "loading") {
-        return {
-          status: "loading" as const,
-          attempts: value.attempts,
-          note: value.note,
-        } satisfies LoadingState;
-      }
-      return {
-        status: "ready" as const,
-        attempts: value.attempts,
-        note: value.note,
-        value: value.value,
-        history: Array.isArray(value.history) ? value.history : [value.value],
-      } satisfies ReadyState;
-    })(state);
+    const unionState = computed(() => normalizeUnionState(state));
 
     const transitions = cell<string[]>([]);
 
     const mode = derive(unionState, (current) => current.status);
-    const readyValue = lift((current: CounterUnionState) =>
-      current.status === "ready" ? current.value : 0
-    )(unionState);
-    const historyView = lift((current: CounterUnionState) =>
-      current.status === "ready" ? current.history : []
-    )(unionState);
-    const attemptCount = lift((current: CounterUnionState) => current.attempts)(
-      unionState,
-    );
-    const historyCount = lift((items: number[] | undefined) =>
-      Array.isArray(items) ? items.length : 0
-    )(historyView);
+    const readyValue = computed(() => extractReadyValue(unionState));
+    const historyView = computed(() => extractHistoryView(unionState));
+    const attemptCount = computed(() => extractAttemptCount(unionState));
+    const historyCount = computed(() => countHistory(historyView));
     const summary =
       str`mode:${mode} value:${readyValue} attempts:${attemptCount} history:${historyCount}`;
 
@@ -201,3 +209,5 @@ export const counterWithComplexUnionState = recipe<ComplexUnionArgs>(
     };
   },
 );
+
+export default counterWithComplexUnionState;

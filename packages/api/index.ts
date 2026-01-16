@@ -16,6 +16,10 @@ export declare const TYPE: "$TYPE";
 export declare const NAME: "$NAME";
 export declare const UI: "$UI";
 
+// Symbol for accessing self-reference in patterns
+export declare const SELF: unique symbol;
+export type SELF = typeof SELF;
+
 // ============================================================================
 // Cell Brand System
 // ============================================================================
@@ -25,6 +29,13 @@ export declare const UI: "$UI";
  * Each cell variant has a unique combination of capability flags.
  */
 export declare const CELL_BRAND: unique symbol;
+
+/**
+ * Symbol for phantom property that enables type inference from AnyBrandedCell.
+ * This property doesn't exist at runtime - it's purely for TypeScript's benefit.
+ * See packages/api/STRIPCELL_TYPE_INFERENCE_FIX.md for details.
+ */
+export declare const CELL_INNER_TYPE: unique symbol;
 
 /**
  * Minimal cell type with just the brand, no methods.
@@ -40,8 +51,14 @@ export type CellKind =
   | "writeonly";
 
 // `string` acts as `any`, e.g. when wanting to match any kind of cell
+// The [CELL_INNER_TYPE] property is a phantom property that enables TypeScript
+// to infer T when using `AnyBrandedCell<infer U>`. Without it, T is a phantom
+// type parameter and TypeScript produces `unknown` when trying to infer it.
+// The property must be non-optional so that plain types like `string[]` don't
+// accidentally match AnyBrandedCell.
 export type AnyBrandedCell<T, Kind extends string = string> = {
   [CELL_BRAND]: Kind;
+  readonly [CELL_INNER_TYPE]: T;
 };
 
 export type BrandedCell<T, Kind extends CellKind> = AnyBrandedCell<T, Kind>;
@@ -111,7 +128,9 @@ export interface IWritable<T, C extends AnyBrandedCell<any>> {
  * Streamable cells can send events.
  */
 export interface IStreamable<T> {
-  send(event: AnyCellWrapping<T>): void;
+  send(
+    ...args: T extends void ? [] | [AnyCellWrapping<T>] : [AnyCellWrapping<T>]
+  ): void;
 }
 
 // Lightweight HKT, so we can pass cell types to IKeyable<>.
@@ -182,18 +201,215 @@ export type Apply<F extends HKT, A> = (F & { _A: A })["type"];
  * const superCell: IKeyableCell<unknown> = sub; // OK (out T)
  */
 export interface IKeyable<out T, Wrap extends HKT> {
-  key<K extends PropertyKey>(
+  /**
+   * Navigate to nested properties by one or more keys.
+   *
+   * @example
+   * cell.key("user")                      // Cell<User>
+   * cell.key("user", "profile")           // Cell<Profile>
+   * cell.key("user", "profile", "name")   // Cell<string>
+   */
+  // Overloads to avoid recursive type evaluation which causes stack overflow
+  // Zero keys
+  key(this: IsThisObject): Apply<Wrap, T>;
+  // One key
+  key<K1 extends keyof T>(this: IsThisObject, k1: K1): Apply<Wrap, T[K1]>;
+  // Two keys
+  key<K1 extends keyof T, K2 extends keyof T[K1]>(
     this: IsThisObject,
-    valueKey: K,
-  ): KeyResultType<T, K, Wrap>;
+    k1: K1,
+    k2: K2,
+  ): Apply<Wrap, T[K1][K2]>;
+  // Three keys
+  key<
+    K1 extends keyof T,
+    K2 extends keyof T[K1],
+    K3 extends keyof T[K1][K2],
+  >(this: IsThisObject, k1: K1, k2: K2, k3: K3): Apply<Wrap, T[K1][K2][K3]>;
+  // Four keys
+  key<
+    K1 extends keyof T,
+    K2 extends keyof T[K1],
+    K3 extends keyof T[K1][K2],
+    K4 extends keyof T[K1][K2][K3],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+  ): Apply<Wrap, T[K1][K2][K3][K4]>;
+  // Five keys
+  key<
+    K1 extends keyof T,
+    K2 extends keyof T[K1],
+    K3 extends keyof T[K1][K2],
+    K4 extends keyof T[K1][K2][K3],
+    K5 extends keyof T[K1][K2][K3][K4],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+  ): Apply<Wrap, T[K1][K2][K3][K4][K5]>;
+  // Six keys
+  key<
+    K1 extends keyof T,
+    K2 extends keyof T[K1],
+    K3 extends keyof T[K1][K2],
+    K4 extends keyof T[K1][K2][K3],
+    K5 extends keyof T[K1][K2][K3][K4],
+    K6 extends keyof T[K1][K2][K3][K4][K5],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+    k6: K6,
+  ): Apply<Wrap, T[K1][K2][K3][K4][K5][K6]>;
+  // Seven keys
+  key<
+    K1 extends keyof T,
+    K2 extends keyof T[K1],
+    K3 extends keyof T[K1][K2],
+    K4 extends keyof T[K1][K2][K3],
+    K5 extends keyof T[K1][K2][K3][K4],
+    K6 extends keyof T[K1][K2][K3][K4][K5],
+    K7 extends keyof T[K1][K2][K3][K4][K5][K6],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+    k6: K6,
+    k7: K7,
+  ): Apply<Wrap, T[K1][K2][K3][K4][K5][K6][K7]>;
+  // Eight keys
+  key<
+    K1 extends keyof T,
+    K2 extends keyof T[K1],
+    K3 extends keyof T[K1][K2],
+    K4 extends keyof T[K1][K2][K3],
+    K5 extends keyof T[K1][K2][K3][K4],
+    K6 extends keyof T[K1][K2][K3][K4][K5],
+    K7 extends keyof T[K1][K2][K3][K4][K5][K6],
+    K8 extends keyof T[K1][K2][K3][K4][K5][K6][K7],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+    k6: K6,
+    k7: K7,
+    k8: K8,
+  ): Apply<Wrap, T[K1][K2][K3][K4][K5][K6][K7][K8]>;
+  // Nine keys
+  key<
+    K1 extends keyof T,
+    K2 extends keyof T[K1],
+    K3 extends keyof T[K1][K2],
+    K4 extends keyof T[K1][K2][K3],
+    K5 extends keyof T[K1][K2][K3][K4],
+    K6 extends keyof T[K1][K2][K3][K4][K5],
+    K7 extends keyof T[K1][K2][K3][K4][K5][K6],
+    K8 extends keyof T[K1][K2][K3][K4][K5][K6][K7],
+    K9 extends keyof T[K1][K2][K3][K4][K5][K6][K7][K8],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+    k6: K6,
+    k7: K7,
+    k8: K8,
+    k9: K9,
+  ): Apply<Wrap, T[K1][K2][K3][K4][K5][K6][K7][K8][K9]>;
+  // Ten keys
+  key<
+    K1 extends keyof T,
+    K2 extends keyof T[K1],
+    K3 extends keyof T[K1][K2],
+    K4 extends keyof T[K1][K2][K3],
+    K5 extends keyof T[K1][K2][K3][K4],
+    K6 extends keyof T[K1][K2][K3][K4][K5],
+    K7 extends keyof T[K1][K2][K3][K4][K5][K6],
+    K8 extends keyof T[K1][K2][K3][K4][K5][K6][K7],
+    K9 extends keyof T[K1][K2][K3][K4][K5][K6][K7][K8],
+    K10 extends keyof T[K1][K2][K3][K4][K5][K6][K7][K8][K9],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+    k6: K6,
+    k7: K7,
+    k8: K8,
+    k9: K9,
+    k10: K10,
+  ): Apply<Wrap, T[K1][K2][K3][K4][K5][K6][K7][K8][K9][K10]>;
+  // Fallback for 11+ keys or unknown keys
+  key(...keys: PropertyKey[]): Apply<Wrap, any>;
 }
 
-export type KeyResultType<T, K, Wrap extends HKT> = [unknown] extends [K]
-  ? Apply<Wrap, any> // variance guard for K = any
-  : [0] extends [1 & T] ? Apply<Wrap, any> // keep any as-is
-  : T extends AnyBrandedCell<any, any> // wrapping a cell? delegate to it's .key
-    ? (T extends { key(k: K): infer R } ? R : Apply<Wrap, never>)
-  : Apply<Wrap, K extends keyof T ? T[K] : any>; // select key, fallback to any
+/**
+ * Helper to wrap a type, but preserve Cell/Stream types as-is to avoid double-wrapping.
+ * Uses non-distributive conditionals to handle union types correctly.
+ */
+export type WrapOrPreserve<T, Wrap extends HKT> = [T] extends [Cell<any>] ? T
+  : [T] extends [Stream<any>] ? T
+  : [T] extends [ComparableCell<any>] ? T
+  : [T] extends [ReadonlyCell<any>] ? T
+  : [T] extends [WriteonlyCell<any>] ? T
+  : [T] extends [OpaqueCell<any>] ? T
+  : Apply<Wrap, T>;
+
+/**
+ * Result type for key() - chains multiple key lookups.
+ * Supports single key: cell.key("a") or multiple: cell.key("a", "b", "c")
+ * When the final value is already a Cell/Stream type, returns it as-is.
+ */
+export type KeyResultType<
+  T,
+  Keys extends readonly PropertyKey[],
+  Wrap extends HKT,
+> = Keys extends readonly [] ? WrapOrPreserve<T, Wrap>
+  : Keys extends readonly [
+    infer First extends PropertyKey,
+    ...infer Rest extends readonly PropertyKey[],
+  ] ? [unknown] extends [First] ? Apply<Wrap, any> // variance guard
+    : [0] extends [1 & T] ? Apply<Wrap, any> // keep any as-is
+    : First extends keyof T ? KeyResultType<T[First], Rest, Wrap>
+    : Apply<Wrap, any> // unknown key fallback
+  : Apply<Wrap, any>;
+
+/**
+ * Result type for key() on OpaqueCell - chains multiple key lookups.
+ */
+export type KeyResultTypeOpaque<
+  T,
+  Keys extends readonly PropertyKey[],
+> = Keys extends readonly [] ? OpaqueCell<T>
+  : Keys extends readonly [
+    infer First extends PropertyKey,
+    ...infer Rest extends readonly PropertyKey[],
+  ] ? [unknown] extends [First] ? OpaqueCell<any>
+    : [0] extends [1 & T] ? OpaqueCell<any>
+    : First extends keyof UnwrapCell<T>
+      ? KeyResultTypeOpaque<UnwrapCell<T>[First], Rest>
+    : OpaqueCell<any>
+  : OpaqueCell<any>;
 
 /**
  * Cells that support key() for property access - OpaqueCell variant.
@@ -202,15 +418,145 @@ export type KeyResultType<T, K, Wrap extends HKT> = [unknown] extends [K]
  * Note: And for now it always returns an OpaqueRef<>, until we clean this up.
  */
 export interface IKeyableOpaque<T> {
-  key<K extends PropertyKey>(
+  /**
+   * Navigate to nested properties by one or more keys.
+   */
+  // Overloads to avoid recursive type evaluation which causes stack overflow
+  key(this: IsThisObject): OpaqueCell<T>;
+  key<K1 extends keyof UnwrapCell<T>>(
     this: IsThisObject,
-    valueKey: K,
-  ): unknown extends K ? OpaqueCell<any>
-    : K extends keyof UnwrapCell<T> ? (0 extends (1 & T) ? OpaqueCell<any>
-        : UnwrapCell<T>[K] extends never ? OpaqueCell<any>
-        : UnwrapCell<T>[K] extends AnyBrandedCell<infer U> ? OpaqueCell<U>
-        : OpaqueCell<UnwrapCell<T>[K]>)
-    : OpaqueCell<any>;
+    k1: K1,
+  ): OpaqueCell<UnwrapCell<T>[K1]>;
+  key<K1 extends keyof UnwrapCell<T>, K2 extends keyof UnwrapCell<T>[K1]>(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+  ): OpaqueCell<UnwrapCell<T>[K1][K2]>;
+  key<
+    K1 extends keyof UnwrapCell<T>,
+    K2 extends keyof UnwrapCell<T>[K1],
+    K3 extends keyof UnwrapCell<T>[K1][K2],
+  >(this: IsThisObject, k1: K1, k2: K2, k3: K3): OpaqueCell<
+    UnwrapCell<T>[K1][K2][K3]
+  >;
+  key<
+    K1 extends keyof UnwrapCell<T>,
+    K2 extends keyof UnwrapCell<T>[K1],
+    K3 extends keyof UnwrapCell<T>[K1][K2],
+    K4 extends keyof UnwrapCell<T>[K1][K2][K3],
+  >(this: IsThisObject, k1: K1, k2: K2, k3: K3, k4: K4): OpaqueCell<
+    UnwrapCell<T>[K1][K2][K3][K4]
+  >;
+  key<
+    K1 extends keyof UnwrapCell<T>,
+    K2 extends keyof UnwrapCell<T>[K1],
+    K3 extends keyof UnwrapCell<T>[K1][K2],
+    K4 extends keyof UnwrapCell<T>[K1][K2][K3],
+    K5 extends keyof UnwrapCell<T>[K1][K2][K3][K4],
+  >(this: IsThisObject, k1: K1, k2: K2, k3: K3, k4: K4, k5: K5): OpaqueCell<
+    UnwrapCell<T>[K1][K2][K3][K4][K5]
+  >;
+  key<
+    K1 extends keyof UnwrapCell<T>,
+    K2 extends keyof UnwrapCell<T>[K1],
+    K3 extends keyof UnwrapCell<T>[K1][K2],
+    K4 extends keyof UnwrapCell<T>[K1][K2][K3],
+    K5 extends keyof UnwrapCell<T>[K1][K2][K3][K4],
+    K6 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+    k6: K6,
+  ): OpaqueCell<UnwrapCell<T>[K1][K2][K3][K4][K5][K6]>;
+  key<
+    K1 extends keyof UnwrapCell<T>,
+    K2 extends keyof UnwrapCell<T>[K1],
+    K3 extends keyof UnwrapCell<T>[K1][K2],
+    K4 extends keyof UnwrapCell<T>[K1][K2][K3],
+    K5 extends keyof UnwrapCell<T>[K1][K2][K3][K4],
+    K6 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5],
+    K7 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5][K6],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+    k6: K6,
+    k7: K7,
+  ): OpaqueCell<UnwrapCell<T>[K1][K2][K3][K4][K5][K6][K7]>;
+  key<
+    K1 extends keyof UnwrapCell<T>,
+    K2 extends keyof UnwrapCell<T>[K1],
+    K3 extends keyof UnwrapCell<T>[K1][K2],
+    K4 extends keyof UnwrapCell<T>[K1][K2][K3],
+    K5 extends keyof UnwrapCell<T>[K1][K2][K3][K4],
+    K6 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5],
+    K7 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5][K6],
+    K8 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5][K6][K7],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+    k6: K6,
+    k7: K7,
+    k8: K8,
+  ): OpaqueCell<UnwrapCell<T>[K1][K2][K3][K4][K5][K6][K7][K8]>;
+  key<
+    K1 extends keyof UnwrapCell<T>,
+    K2 extends keyof UnwrapCell<T>[K1],
+    K3 extends keyof UnwrapCell<T>[K1][K2],
+    K4 extends keyof UnwrapCell<T>[K1][K2][K3],
+    K5 extends keyof UnwrapCell<T>[K1][K2][K3][K4],
+    K6 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5],
+    K7 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5][K6],
+    K8 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5][K6][K7],
+    K9 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5][K6][K7][K8],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+    k6: K6,
+    k7: K7,
+    k8: K8,
+    k9: K9,
+  ): OpaqueCell<UnwrapCell<T>[K1][K2][K3][K4][K5][K6][K7][K8][K9]>;
+  key<
+    K1 extends keyof UnwrapCell<T>,
+    K2 extends keyof UnwrapCell<T>[K1],
+    K3 extends keyof UnwrapCell<T>[K1][K2],
+    K4 extends keyof UnwrapCell<T>[K1][K2][K3],
+    K5 extends keyof UnwrapCell<T>[K1][K2][K3][K4],
+    K6 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5],
+    K7 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5][K6],
+    K8 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5][K6][K7],
+    K9 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5][K6][K7][K8],
+    K10 extends keyof UnwrapCell<T>[K1][K2][K3][K4][K5][K6][K7][K8][K9],
+  >(
+    this: IsThisObject,
+    k1: K1,
+    k2: K2,
+    k3: K3,
+    k4: K4,
+    k5: K5,
+    k6: K6,
+    k7: K7,
+    k8: K8,
+    k9: K9,
+    k10: K10,
+  ): OpaqueCell<UnwrapCell<T>[K1][K2][K3][K4][K5][K6][K7][K8][K9][K10]>;
+  key(...keys: PropertyKey[]): OpaqueCell<any>;
 }
 
 /**
@@ -407,6 +753,14 @@ export interface Cell<T = unknown> extends BrandedCell<T, "cell">, ICell<T> {}
 export declare const Cell: CellTypeConstructor<AsCell>;
 
 /**
+ * Writable<T> is an alias for Cell<T> that better expresses the semantic meaning.
+ * In patterns, requesting data as Writable<T> means "I need write access" -
+ * all data in patterns is reactive by default, whether wrapped or not.
+ */
+export type Writable<T = unknown> = Cell<T>;
+export declare const Writable: CellTypeConstructor<AsCell>;
+
+/**
  * Stream-only cell - can only send events, not read or write.
  * Has .send() only
  * Does NOT have .key()/.equals()/.get()/.set()/.resolveAsCell()
@@ -538,12 +892,31 @@ type MaybeCellWrapped<T> =
 export declare const CELL_LIKE: unique symbol;
 
 /**
- * Helper type to transform Cell<T> to Opaque<T> in pattern/lift/handler inputs
+ * Helper type to transform Cell<T> to Opaque<T> in pattern/lift/handler inputs.
+ * Preserves Stream<T> since Streams are callable interfaces (.send()), not data containers.
+ *
+ * Implementation is non-distributive by default to preserve union types like RenderNode
+ * that intentionally contain AnyBrandedCell as a data variant. However, for optional cell
+ * properties like `title?: Writable<string>` (which expand to `Writable<string> | undefined`),
+ * we extract the cell parts, strip them, and recombine with the non-cell parts.
+ *
+ * See packages/api/STRIPCELL_TYPE_INFERENCE_FIX.md for details.
  */
-export type StripCell<T> = T extends AnyBrandedCell<infer U> ? StripCell<U>
-  : T extends ArrayBuffer | ArrayBufferView | URL | Date ? T
-  : T extends Array<infer U> ? StripCell<U>[]
-  : T extends object ? { [K in keyof T]: StripCell<T[K]> }
+export type StripCell<T> =
+  // Handle optional cell properties: "SomeCell | undefined" pattern
+  // Strip the cell part, preserve undefined only if it was present
+  [T] extends [AnyBrandedCell<any> | undefined]
+    ? StripCellInner<Exclude<T, undefined>> | Extract<T, undefined>
+    // Non-distributive for everything else (preserves unions like RenderNode)
+    : StripCellInner<T>;
+
+type StripCellInner<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - it's a callable interface
+  : [T] extends [AnyBrandedCell<infer U>] ? StripCell<U>
+  : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
+  : [T] extends [Array<infer U>] ? StripCell<U>[]
+  // deno-lint-ignore ban-types
+  : [T] extends [Function] ? T // Preserve function types
+  : [T] extends [object] ? { [K in keyof T]: StripCell<T[K]> }
   : T;
 
 /**
@@ -554,6 +927,10 @@ export type StripCell<T> = T extends AnyBrandedCell<infer U> ? StripCell<U>
  * Conceptually: T | AnyCell<T> at any nesting level, but we use OpaqueRef
  * for backward compatibility since it has the recursive proxy behavior that
  * allows property access (e.g., Opaque<{foo: string}> includes {foo: Opaque<string>}).
+ *
+ * Special cases for JSX:
+ * - Opaque<VNode> also accepts JSXElement
+ * - Opaque<UIRenderable> also accepts JSXElement (for .map() callbacks returning JSX)
  */
 export type Opaque<T> =
   | T
@@ -568,6 +945,10 @@ export type Opaque<T> =
   | ComparableCell<T>
   | ReadonlyCell<T>
   | WriteonlyCell<T>
+  // Special case: When T includes VNode or UIRenderable (even with null/undefined),
+  // also accept JSXElement. Use NonNullable to handle VNode | undefined.
+  | ([NonNullable<T>] extends [VNode] ? JSXElement : never)
+  | ([NonNullable<T>] extends [UIRenderable] ? JSXElement : never)
   | (T extends Array<infer U> ? Array<Opaque<U>>
     : T extends object ? { [K in keyof T]: Opaque<T[K]> }
     : T);
@@ -884,7 +1265,7 @@ export interface ImageData {
 export type BuiltInLLMTool =
   & { description?: string }
   & (
-    | { pattern: Recipe; handler?: never }
+    | { pattern: Recipe; handler?: never; extraParams?: Record<string, any> }
     | { handler: Stream<any> | OpaqueRef<any>; pattern?: never }
   );
 
@@ -910,7 +1291,7 @@ export interface BuiltInLLMParams {
    * Context cells to make available to the LLM.
    * These cells appear in the system prompt with their schemas and current values.
    */
-  context?: Record<string, Cell<any>>;
+  context?: Record<string, AnyCell<any>>;
 }
 
 export interface BuiltInLLMState {
@@ -966,7 +1347,7 @@ export type BuiltInGenerateObjectParams =
 
 export type BuiltInGenerateTextParams =
   | {
-    prompt: string;
+    prompt: BuiltInLLMContent;
     messages?: never;
     context?: Record<string, any>;
     system?: string;
@@ -1013,17 +1394,24 @@ export interface BuiltInCompileAndRunState<T> {
 
 // Function type definitions
 export type PatternFunction = {
+  // Primary overload: T and R inferred from function
   <T, R>(
-    fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+    fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
   ): RecipeFactory<StripCell<T>, StripCell<R>>;
 
+  // Single type param overload: T explicit, R inferred
+  // SELF is typed as `never` - using it will produce a type error
+  // Use pattern<T, R>() with both type params for typed SELF access
   <T>(
-    fn: (input: OpaqueRef<Required<T>>) => any,
-  ): RecipeFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
+    fn: (input: OpaqueRef<Required<T>> & { [SELF]: never }) => any,
+  ): RecipeFactory<StripCell<T>, any>;
 
+  // Schema-based overload with explicit argument and result schemas
   <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
     fn: (
-      input: OpaqueRef<Required<Schema<IS>>>,
+      input: OpaqueRef<Required<Schema<IS>>> & {
+        [SELF]: OpaqueRef<Schema<OS>>;
+      },
     ) => Opaque<Schema<OS>>,
     argumentSchema: IS,
     resultSchema: OS,
@@ -1034,55 +1422,79 @@ export type PatternFunction = {
 export type RecipeFunction = {
   // Function-only overload
   <T, R>(
-    fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+    fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
   ): RecipeFactory<StripCell<T>, StripCell<R>>;
 
   <T>(
-    fn: (input: OpaqueRef<Required<T>>) => any,
+    fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<any> }) => any,
   ): RecipeFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
 
   <S extends JSONSchema>(
     argumentSchema: S,
-    fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => any,
+    fn: (
+      input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
+        [SELF]: OpaqueRef<any>;
+      },
+    ) => any,
   ): RecipeFactory<SchemaWithoutCell<S>, StripCell<ReturnType<typeof fn>>>;
 
   <S extends JSONSchema, R>(
     argumentSchema: S,
-    fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => Opaque<R>,
+    fn: (
+      input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
+        [SELF]: OpaqueRef<R>;
+      },
+    ) => Opaque<R>,
   ): RecipeFactory<SchemaWithoutCell<S>, StripCell<R>>;
 
   <S extends JSONSchema, RS extends JSONSchema>(
     argumentSchema: S,
     resultSchema: RS,
     fn: (
-      input: OpaqueRef<Required<SchemaWithoutCell<S>>>,
+      input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
+        [SELF]: OpaqueRef<SchemaWithoutCell<RS>>;
+      },
     ) => Opaque<SchemaWithoutCell<RS>>,
   ): RecipeFactory<SchemaWithoutCell<S>, SchemaWithoutCell<RS>>;
 
   <T>(
     argumentSchema: string | JSONSchema,
-    fn: (input: OpaqueRef<Required<T>>) => any,
+    fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<any> }) => any,
   ): RecipeFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
 
   <T, R>(
     argumentSchema: string | JSONSchema,
-    fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+    fn: (
+      input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> },
+    ) => Opaque<R>,
   ): RecipeFactory<StripCell<T>, StripCell<R>>;
 
   <T, R>(
     argumentSchema: string | JSONSchema,
     resultSchema: JSONSchema,
-    fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+    fn: (
+      input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> },
+    ) => Opaque<R>,
   ): RecipeFactory<StripCell<T>, StripCell<R>>;
 };
 
+/**
+ * Result of patternTool() - an LLM tool definition with a pattern and optional pre-filled params.
+ * This is the actual runtime return type, not a cast.
+ */
+export interface PatternToolResult<E = Record<PropertyKey, never>> {
+  pattern: Recipe;
+  extraParams: E;
+}
+
 export type PatternToolFunction = <
   T,
-  E extends Partial<T> = Record<PropertyKey, never>,
+  E extends object = Record<PropertyKey, never>,
 >(
   fnOrRecipe: ((input: OpaqueRef<Required<T>>) => any) | RecipeFactory<T, any>,
-  extraParams?: Opaque<E>,
-) => OpaqueRef<Omit<T, keyof E>>;
+  // Validate that E (after stripping cells) is a subset of T
+  extraParams?: StripCell<E> extends Partial<T> ? Opaque<E> : never,
+) => PatternToolResult<E>;
 
 export type LiftFunction = {
   <T extends JSONSchema = JSONSchema, R extends JSONSchema = JSONSchema>(
@@ -1155,7 +1567,10 @@ export type HandlerFunction = {
  * computed(() => expr) becomes derive({}, () => expr) with closure extraction.
  */
 export type ActionFunction = {
-  <T>(fn: (event: T) => void): HandlerFactory<T, void>;
+  // Overload 1: Zero-parameter callback returns Stream<void>
+  (fn: () => void): Stream<void>;
+  // Overload 2: Parameterized callback returns Stream<T>
+  <T>(fn: (event: T) => void): Stream<T>;
 };
 
 /**
@@ -1343,11 +1758,24 @@ export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;
 
 // Internal-only helper to create VDOM nodes
 export type HFunction = {
+  // Overload for string element names - returns VNode
   (
-    name: string | ((...args: any[]) => VNode),
+    name: string,
     props: { [key: string]: any } | null,
     ...children: RenderNode[]
   ): VNode;
+  // Overload for function components - returns whatever the component returns
+  <R extends JSXElement>(
+    name: (props: any) => R,
+    props: { [key: string]: any } | null,
+    ...children: RenderNode[]
+  ): R;
+  // Union overload for when type is not narrowed (used by jsx-runtime)
+  (
+    name: string | ((props: any) => JSXElement),
+    props: { [key: string]: any } | null,
+    ...children: RenderNode[]
+  ): JSXElement;
   fragment({ children }: { children: RenderNode[] }): VNode;
 };
 
@@ -1364,6 +1792,16 @@ export interface RecipeEnvironment {
 }
 
 export type GetRecipeEnvironmentFunction = () => RecipeEnvironment;
+
+/**
+ * Compare two cells or values for equality after resolving, i.e. after
+ * following all links in case we have cells pointing to other cells.
+ * This is a standalone export of the equals function from Cell/Writable.
+ */
+export type EqualsFunction = (
+  a: AnyCell<any> | object,
+  b: AnyCell<any> | object,
+) => boolean;
 
 // Re-export all function types as values for destructuring imports
 // These will be implemented by the factory
@@ -1395,6 +1833,7 @@ export declare const wish: WishFunction;
 export declare const createNodeFactory: CreateNodeFactoryFunction;
 /** @deprecated Use Cell.of(defaultValue?) instead */
 export declare const cell: CellTypeConstructor<AsCell>["of"];
+export declare const equals: EqualsFunction;
 export declare const byRef: ByRefFunction;
 export declare const getRecipeEnvironment: GetRecipeEnvironmentFunction;
 
@@ -1691,7 +2130,10 @@ export type Props = {
 /** A child in a view can be one of a few things */
 export type RenderNode =
   | InnerRenderNode
-  | AnyBrandedCell<InnerRenderNode>
+  | JSXElement
+  | AnyBrandedCell<
+    InnerRenderNode | UIRenderable | JSXElement | null | undefined
+  >
   | Array<RenderNode>;
 
 type InnerRenderNode =
@@ -1699,7 +2141,22 @@ type InnerRenderNode =
   | string
   | number
   | boolean
-  | undefined;
+  | undefined
+  | null;
+
+/** An object that can be rendered via its [UI] property */
+export type UIRenderable = {
+  [UI]: VNode;
+};
+
+/**
+ * JSX element type - the result of a JSX expression.
+ * Can be a VNode, or a cell containing something with a [UI] property.
+ */
+export type JSXElement =
+  | VNode
+  | AnyBrandedCell<UIRenderable>
+  | OpaqueRef<UIRenderable>;
 
 /** A "virtual view node", e.g. a virtual DOM element */
 export type VNode = {

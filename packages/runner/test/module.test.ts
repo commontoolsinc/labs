@@ -9,6 +9,7 @@ import {
   type JSONSchema,
   type Module,
   type OpaqueRef,
+  type Stream,
 } from "../src/builder/types.ts";
 import {
   action,
@@ -259,6 +260,51 @@ describe("module", () => {
           void data;
         });
       }).toThrow("action() must be used with CTS enabled");
+    });
+
+    it("infers Stream<void> for zero-parameter callbacks (type test)", () => {
+      // This test verifies that TypeScript correctly infers Stream<void> for
+      // zero-parameter action callbacks, rather than Stream<unknown>.
+      //
+      // The test passes if it compiles. Previously, action(() => {...}) would
+      // infer Stream<unknown>, causing type errors when assigned to Stream<void>.
+      //
+      // action() throws at runtime (requires CTS transformer), so we wrap calls
+      // in a never-executed block. TypeScript still type-checks dead code.
+
+      // This function is never called - it exists only for type checking
+      function _typeTest(): void {
+        // These would throw at runtime, but this function is never called.
+        // If the overloads are wrong, these lines fail to compile.
+
+        // Zero-parameter callback should infer Stream<void>, not Stream<unknown>
+        const _voidAction: Stream<void> = action(() => {
+          console.log("side effect");
+        });
+
+        // Parameterized callback should infer Stream<string>
+        const _stringAction: Stream<string> = action((_e: string) => {
+          console.log("side effect");
+        });
+
+        // Complex type parameter
+        const _complexAction: Stream<{ id: number; name: string }> = action(
+          (_e: { id: number; name: string }) => {
+            console.log("side effect");
+          },
+        );
+
+        // Suppress unused variable warnings
+        void _voidAction;
+        void _stringAction;
+        void _complexAction;
+      }
+
+      // Suppress unused function warning - the function exists only for type checking
+      void _typeTest;
+
+      // If we reach here, the types compiled correctly
+      expect(true).toBe(true);
     });
   });
 

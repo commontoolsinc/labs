@@ -1,51 +1,11 @@
 {
-  "type": "object",
   "properties": {
-    "stringConfig": {
-      "type": "object",
-      "properties": {
-        "theme": {
-          "type": "string"
-        },
-        "language": {
-          "type": "string"
-        },
-        "timezone": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "theme",
-        "language",
-        "timezone"
-      ]
-    },
-    "numberLimits": {
-      "type": "object",
-      "properties": {
-        "cpu": {
-          "type": "number"
-        },
-        "memory": {
-          "type": "number"
-        },
-        "disk": {
-          "type": "number"
-        }
-      },
-      "required": [
-        "cpu",
-        "memory",
-        "disk"
-      ]
-    },
     "booleanFeatures": {
-      "type": "object",
       "properties": {
-        "auth": {
+        "api": {
           "type": "boolean"
         },
-        "api": {
+        "auth": {
           "type": "boolean"
         },
         "ui": {
@@ -53,16 +13,34 @@
         }
       },
       "required": [
-        "auth",
         "api",
+        "auth",
         "ui"
-      ]
+      ],
+      "type": "object"
+    },
+    "numberLimits": {
+      "properties": {
+        "cpu": {
+          "type": "number"
+        },
+        "disk": {
+          "type": "number"
+        },
+        "memory": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "cpu",
+        "disk",
+        "memory"
+      ],
+      "type": "object"
     },
     "objectHandlers": {
-      "type": "object",
       "properties": {
         "create": {
-          "type": "object",
           "properties": {
             "enabled": {
               "type": "boolean"
@@ -70,21 +48,10 @@
           },
           "required": [
             "enabled"
-          ]
-        },
-        "update": {
-          "type": "object",
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "enabled"
-          ]
+          ],
+          "type": "object"
         },
         "delete": {
-          "type": "object",
           "properties": {
             "enabled": {
               "type": "boolean"
@@ -92,20 +59,53 @@
           },
           "required": [
             "enabled"
-          ]
+          ],
+          "type": "object"
+        },
+        "update": {
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "enabled"
+          ],
+          "type": "object"
         }
       },
       "required": [
         "create",
-        "update",
-        "delete"
-      ]
+        "delete",
+        "update"
+      ],
+      "type": "object"
+    },
+    "stringConfig": {
+      "properties": {
+        "language": {
+          "type": "string"
+        },
+        "theme": {
+          "type": "string"
+        },
+        "timezone": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "language",
+        "theme",
+        "timezone"
+      ],
+      "type": "object"
     }
   },
   "required": [
-    "stringConfig",
-    "numberLimits",
     "booleanFeatures",
-    "objectHandlers"
-  ]
+    "numberLimits",
+    "objectHandlers",
+    "stringConfig"
+  ],
+  "type": "object"
 }

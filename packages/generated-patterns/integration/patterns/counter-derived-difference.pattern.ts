@@ -142,6 +142,26 @@ const setStep = handler(
   },
 );
 
+const liftSanitizeInteger = lift((value: number | undefined) =>
+  sanitizeInteger(value, 0)
+);
+const liftSanitizeStep = lift((value: number | undefined) =>
+  sanitizeStep(value, 1)
+);
+const liftDifferenceSummary = lift(
+  toSchema<{ primary: Cell<number>; secondary: Cell<number> }>(),
+  toSchema<{ primary: number; secondary: number; difference: number }>(),
+  ({ primary, secondary }) => {
+    const primaryValue = sanitizeInteger(primary.get(), 0);
+    const secondaryValue = sanitizeInteger(secondary.get(), 0);
+    return {
+      primary: primaryValue,
+      secondary: secondaryValue,
+      difference: primaryValue - secondaryValue,
+    };
+  },
+);
+
 export const counterWithDerivedDifference = recipe<DerivedDifferenceArgs>(
   "Counter With Derived Difference",
   ({ primary, secondary, primaryStep, secondaryStep }) => {
@@ -149,33 +169,13 @@ export const counterWithDerivedDifference = recipe<DerivedDifferenceArgs>(
     const differenceHistory = cell<number[]>([], { type: "array" });
     const auditLog = cell<DifferenceAudit[]>([], { type: "array" });
 
-    const primaryValue = lift((value: number | undefined) =>
-      sanitizeInteger(value, 0)
-    )(primary);
-    const secondaryValue = lift((value: number | undefined) =>
-      sanitizeInteger(value, 0)
-    )(secondary);
+    const primaryValue = liftSanitizeInteger(primary);
+    const secondaryValue = liftSanitizeInteger(secondary);
 
-    const primaryStepValue = lift((value: number | undefined) =>
-      sanitizeStep(value, 1)
-    )(primaryStep);
-    const secondaryStepValue = lift((value: number | undefined) =>
-      sanitizeStep(value, 1)
-    )(secondaryStep);
+    const primaryStepValue = liftSanitizeStep(primaryStep);
+    const secondaryStepValue = liftSanitizeStep(secondaryStep);
 
-    const differenceSummary = lift(
-      toSchema<{ primary: Cell<number>; secondary: Cell<number> }>(),
-      toSchema<{ primary: number; secondary: number; difference: number }>(),
-      ({ primary, secondary }) => {
-        const primaryValue = sanitizeInteger(primary.get(), 0);
-        const secondaryValue = sanitizeInteger(secondary.get(), 0);
-        return {
-          primary: primaryValue,
-          secondary: secondaryValue,
-          difference: primaryValue - secondaryValue,
-        };
-      },
-    )({
+    const differenceSummary = liftDifferenceSummary({
       primary: primaryValue,
       secondary: secondaryValue,
     });
@@ -226,3 +226,5 @@ export const counterWithDerivedDifference = recipe<DerivedDifferenceArgs>(
     };
   },
 );
+
+export default counterWithDerivedDifference;

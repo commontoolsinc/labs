@@ -227,6 +227,23 @@ const applyAdjustment = handler(
   },
 );
 
+const liftSanitizeGroups = lift((input: CanonicalGroupInput[] | undefined) =>
+  sanitizeGroups(input)
+);
+const liftSignatureText = lift((items: string[] | undefined) => {
+  const entries = sanitizeStringList(items);
+  return entries.length === 0 ? "none" : entries.join(" | ");
+});
+const liftSanitizeStringList = lift((entries: string[] | undefined) =>
+  sanitizeStringList(entries)
+);
+const liftNonNegativeOperations = lift((count: number | undefined) =>
+  Math.max(0, toInteger(count, 0))
+);
+const liftSanitizeString = lift((value: string | undefined) =>
+  sanitizeString(value, "none")
+);
+
 /** Pattern computing canonical view of nested counters for stable assertions. */
 export const counterWithDerivedCanonicalForm = recipe<CanonicalFormArgs>(
   "Counter With Derived Canonical Form",
@@ -235,31 +252,20 @@ export const counterWithDerivedCanonicalForm = recipe<CanonicalFormArgs>(
     const lastMutation = cell("none");
     const operations = cell(0);
 
-    const groupsView = lift((input: CanonicalGroupInput[] | undefined) =>
-      sanitizeGroups(input)
-    )(groups);
+    const groupsView = liftSanitizeGroups(groups);
 
     const canonical = derive(groupsView, canonicalizeGroups);
 
     const totalValue = derive(canonical, (form) => form.totalValue);
     const signatureList = derive(canonical, (form) => form.signature);
 
-    const signatureText = lift((items: string[] | undefined) => {
-      const entries = sanitizeStringList(items);
-      return entries.length === 0 ? "none" : entries.join(" | ");
-    })(signatureList);
+    const signatureText = liftSignatureText(signatureList);
 
-    const historyView = lift((entries: string[] | undefined) =>
-      sanitizeStringList(entries)
-    )(history);
+    const historyView = liftSanitizeStringList(history);
 
-    const operationsView = lift((count: number | undefined) =>
-      Math.max(0, toInteger(count, 0))
-    )(operations);
+    const operationsView = liftNonNegativeOperations(operations);
 
-    const lastMutationView = lift((value: string | undefined) =>
-      sanitizeString(value, "none")
-    )(lastMutation);
+    const lastMutationView = liftSanitizeString(lastMutation);
 
     const canonicalLabel =
       str`Canonical total ${totalValue} -> ${signatureText}`;
@@ -285,3 +291,5 @@ export const counterWithDerivedCanonicalForm = recipe<CanonicalFormArgs>(
     };
   },
 );
+
+export default counterWithDerivedCanonicalForm;

@@ -323,92 +323,106 @@ const restoreAsset = handler(
   },
 );
 
+const liftSanitizeAssetList = lift(sanitizeAssetList);
+
+const liftStageBuckets = lift((entries: AssetRecord[]): LifecycleBucket[] => {
+  const buckets = lifecycleStages.map((stage) => ({
+    stage,
+    label: stageLabels[stage],
+    count: 0,
+    assets: [] as AssetSnapshot[],
+  }));
+  const lookup = new Map<AssetStage, LifecycleBucket>();
+  for (const bucket of buckets) lookup.set(bucket.stage, bucket);
+  for (const asset of entries) {
+    const bucket = lookup.get(asset.stage);
+    if (!bucket) continue;
+    bucket.count += 1;
+    bucket.assets.push({
+      id: asset.id,
+      name: asset.name,
+      owner: asset.owner,
+      stageLabel: stageLabels[asset.stage],
+    });
+  }
+  return buckets;
+});
+
+const liftStageCounts = lift((entries: AssetRecord[]): StageCountMap => {
+  const counts = createEmptyCounts();
+  for (const asset of entries) {
+    counts[asset.stage] += 1;
+  }
+  return counts;
+});
+
+const liftTotalAssets = lift((counts: StageCountMap) =>
+  lifecycleStages.reduce((sum, stage) => sum + counts[stage], 0)
+);
+
+const liftActiveCount = lift((counts: StageCountMap) =>
+  counts.procured + counts.in_service + counts.maintenance
+);
+
+const liftLifecycleProgress = lift(
+  (input: { active: number; total: number }) => {
+    if (input.total === 0) return 0;
+    return Math.round((input.active / input.total) * 100);
+  },
+);
+
+const liftActiveAssetIds = lift((entries: AssetRecord[]) =>
+  entries.filter((asset) => asset.stage !== "retired").map((asset) => asset.id)
+);
+
+const liftTransitionHistory = lift((entries: TransitionEntry[]) =>
+  entries.map((entry) => ({
+    sequence: entry.sequence,
+    assetId: entry.assetId,
+    from: stageLabels[entry.from],
+    to: stageLabels[entry.to],
+    message: entry.message,
+  }))
+);
+
+const liftTransitionMessages = lift((entries: TransitionEntry[]) =>
+  entries.map((entry) => entry.message)
+);
+
+const liftBusiestStage = lift((buckets: LifecycleBucket[]) => {
+  let current: { label: string; count: number } = {
+    label: "Procured",
+    count: 0,
+  };
+  for (const bucket of buckets) {
+    if (bucket.count > current.count) {
+      current = { label: bucket.label, count: bucket.count };
+    }
+  }
+  return current;
+});
+
 export const assetLifecycleTracker = recipe<AssetLifecycleTrackerArgs>(
   "Asset Lifecycle Tracker",
   ({ assets }) => {
     const transitionLog = cell<TransitionEntry[]>([]);
 
-    const assetsView = lift(sanitizeAssetList)(assets);
-    const stageBuckets = lift((entries: AssetRecord[]): LifecycleBucket[] => {
-      const buckets = lifecycleStages.map((stage) => ({
-        stage,
-        label: stageLabels[stage],
-        count: 0,
-        assets: [] as AssetSnapshot[],
-      }));
-      const lookup = new Map<AssetStage, LifecycleBucket>();
-      for (const bucket of buckets) lookup.set(bucket.stage, bucket);
-      for (const asset of entries) {
-        const bucket = lookup.get(asset.stage);
-        if (!bucket) continue;
-        bucket.count += 1;
-        bucket.assets.push({
-          id: asset.id,
-          name: asset.name,
-          owner: asset.owner,
-          stageLabel: stageLabels[asset.stage],
-        });
-      }
-      return buckets;
-    })(assetsView);
-
-    const stageCounts = lift((entries: AssetRecord[]): StageCountMap => {
-      const counts = createEmptyCounts();
-      for (const asset of entries) {
-        counts[asset.stage] += 1;
-      }
-      return counts;
-    })(assetsView);
-
-    const totalAssets = lift((counts: StageCountMap) =>
-      lifecycleStages.reduce((sum, stage) => sum + counts[stage], 0)
-    )(stageCounts);
-
-    const activeCount = lift((counts: StageCountMap) =>
-      counts.procured + counts.in_service + counts.maintenance
-    )(stageCounts);
-
-    const lifecycleProgress = lift(
-      (input: { active: number; total: number }) => {
-        if (input.total === 0) return 0;
-        return Math.round((input.active / input.total) * 100);
-      },
-    )({ active: activeCount, total: totalAssets });
+    const assetsView = liftSanitizeAssetList(assets);
+    const stageBuckets = liftStageBuckets(assetsView);
+    const stageCounts = liftStageCounts(assetsView);
+    const totalAssets = liftTotalAssets(stageCounts);
+    const activeCount = liftActiveCount(stageCounts);
+    const lifecycleProgress = liftLifecycleProgress({
+      active: activeCount,
+      total: totalAssets,
+    });
 
     const lifecycleLabel = str`${activeCount} active of ${totalAssets} assets`;
 
-    const activeAssetIds = lift((entries: AssetRecord[]) =>
-      entries.filter((asset) => asset.stage !== "retired").map((asset) =>
-        asset.id
-      )
-    )(assetsView);
-
-    const transitionHistory = lift((entries: TransitionEntry[]) =>
-      entries.map((entry) => ({
-        sequence: entry.sequence,
-        assetId: entry.assetId,
-        from: stageLabels[entry.from],
-        to: stageLabels[entry.to],
-        message: entry.message,
-      }))
-    )(transitionLog);
-
-    const transitionMessages = lift((entries: TransitionEntry[]) =>
-      entries.map((entry) => entry.message)
-    )(transitionLog);
-
-    const busiestStage = lift((buckets: LifecycleBucket[]) => {
-      let current: { label: string; count: number } = {
-        label: "Procured",
-        count: 0,
-      };
-      for (const bucket of buckets) {
-        if (bucket.count > current.count) {
-          current = { label: bucket.label, count: bucket.count };
-        }
-      }
-      return current;
-    })(stageBuckets);
+    const activeAssetIds = liftActiveAssetIds(assetsView);
+    const transitionHistory = liftTransitionHistory(transitionLog);
+    const transitionMessages = liftTransitionMessages(transitionLog);
+    const busiestStage = liftBusiestStage(stageBuckets);
 
     return {
       assets,
@@ -439,3 +453,5 @@ export type {
   StageCountMap,
   TransitionEntry,
 };
+
+export default assetLifecycleTracker;

@@ -16,13 +16,21 @@
  * ReadOnlyAddressError. The issue is not the handler definition or the button itself,
  * but the cell references captured at the point of handler binding inside derive().
  */
-import { Cell, Default, derive, handler, NAME, pattern, UI } from "commontools";
+import {
+  Default,
+  derive,
+  handler,
+  NAME,
+  pattern,
+  UI,
+  Writable,
+} from "commontools";
 
 interface State {
   count: Default<number, 0>;
 }
 
-const incrementHandler = handler<unknown, { count: Cell<number> }>(
+const incrementHandler = handler<unknown, { count: Writable<number> }>(
   (_event, { count }) => {
     count.set(count.get() + 1);
   },

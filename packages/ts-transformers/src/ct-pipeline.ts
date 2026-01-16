@@ -1,26 +1,67 @@
 import {
+  CastValidationTransformer,
+  OpaqueGetValidationTransformer,
   OpaqueRefJSXTransformer,
+  PatternContextValidationTransformer,
   SchemaGeneratorTransformer,
   SchemaInjectionTransformer,
 } from "./transformers/mod.ts";
 import { ClosureTransformer } from "./closures/transformer.ts";
 import { ComputedTransformer } from "./computed/transformer.ts";
-import { Pipeline, TransformationOptions } from "./core/mod.ts";
+import {
+  Pipeline,
+  TransformationDiagnostic,
+  TransformationOptions,
+} from "./core/mod.ts";
 
 export class CommonToolsTransformerPipeline extends Pipeline {
+  private readonly diagnosticsCollector: TransformationDiagnostic[] = [];
+
   constructor(options: TransformationOptions = {}) {
-    const ops = {
+    const ops: TransformationOptions = {
       typeRegistry: new WeakMap(),
       mapCallbackRegistry: new WeakSet(),
       schemaHints: new WeakMap(),
       ...options,
     };
+
+    // Create a shared diagnostics collector
+    const sharedOps: TransformationOptions = {
+      ...ops,
+      diagnosticsCollector: [],
+    };
+
     super([
-      new OpaqueRefJSXTransformer(ops),
-      new ComputedTransformer(ops),
-      new ClosureTransformer(ops),
-      new SchemaInjectionTransformer(ops),
-      new SchemaGeneratorTransformer(ops),
+      // Validation transformers run first to catch errors early
+      new CastValidationTransformer(sharedOps),
+      new OpaqueGetValidationTransformer(sharedOps),
+      new PatternContextValidationTransformer(sharedOps),
+      // Then the regular transformation pipeline
+      new OpaqueRefJSXTransformer(sharedOps),
+      new ComputedTransformer(sharedOps),
+      new ClosureTransformer(sharedOps),
+      new SchemaInjectionTransformer(sharedOps),
+      new SchemaGeneratorTransformer(sharedOps),
     ]);
+
+    // Store reference to shared collector
+    // Note: We need to access it after construction, so we store the array reference
+    this.diagnosticsCollector = sharedOps.diagnosticsCollector!;
+  }
+
+  /**
+   * Returns all diagnostics collected during transformation.
+   * Call this after running the pipeline to get errors and warnings.
+   */
+  getDiagnostics(): readonly TransformationDiagnostic[] {
+    return this.diagnosticsCollector;
+  }
+
+  /**
+   * Clears accumulated diagnostics.
+   * Call this if reusing the pipeline for multiple files.
+   */
+  clearDiagnostics(): void {
+    this.diagnosticsCollector.length = 0;
   }
 }

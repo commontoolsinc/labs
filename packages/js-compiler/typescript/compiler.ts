@@ -24,7 +24,12 @@ import { getCompilerOptions, TARGET } from "./options.ts";
 import { bundleAMDOutput } from "./bundler/mod.ts";
 import { parseSourceMap } from "../source-map.ts";
 import { resolveProgram } from "./resolver.ts";
-import { Checker } from "./diagnostics/mod.ts";
+import {
+  Checker,
+  type DiagnosticMessageTransformer,
+  TransformerDiagnosticInfo,
+  TransformerError,
+} from "./diagnostics/mod.ts";
 
 const DEBUG_VIRTUAL_FS = false;
 const VFS_TYPES_DIR = "$types/";
@@ -208,6 +213,23 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
   }
 }
 
+/**
+ * Result from a transformer pipeline that can include diagnostics.
+ */
+export interface TransformerPipelineResult {
+  factories: ts.TransformerFactory<ts.SourceFile>[];
+  getDiagnostics?: () => readonly TransformerDiagnosticInfo[];
+}
+
+/**
+ * Type for beforeTransformers - can return either:
+ * - An array of transformer factories (legacy/simple case)
+ * - A TransformerPipelineResult with factories and optional getDiagnostics
+ */
+export type BeforeTransformersResult =
+  | ts.TransformerFactory<ts.SourceFile>[]
+  | TransformerPipelineResult;
+
 export interface TypeScriptCompilerOptions {
   // Filename for the output JS, used internally
   // with source maps.
@@ -220,9 +242,11 @@ export interface TypeScriptCompilerOptions {
   // and its corresponding type definitions.
   runtimeModules?: string[];
   // Transformations to run before JS transforms.
+  // Can return either an array of transformer factories (simple case)
+  // or a TransformerPipelineResult with factories and getDiagnostics.
   beforeTransformers?: (
     program: ts.Program,
-  ) => ts.TransformerFactory<ts.SourceFile>[];
+  ) => BeforeTransformersResult;
   // Return the transformed program.
   getTransformedProgram?: (program: Program) => void;
   // Whether the bundling process results in the bundle, upon invocation,
@@ -241,6 +265,9 @@ export interface TypeScriptCompilerOptions {
   //     { main: Record<string, any>, exportMap: Record<string, Record<string, any>> }`
   // ```
   bundleExportAll?: true;
+  // Optional transformer for diagnostic error messages.
+  // Allows converting confusing TypeScript errors into clearer messages.
+  diagnosticMessageTransformer?: DiagnosticMessageTransformer;
 }
 
 export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
@@ -301,7 +328,9 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       host,
     );
 
-    const checker = new Checker(tsProgram);
+    const checker = new Checker(tsProgram, {
+      messageTransformer: inputOptions.diagnosticMessageTransformer,
+    });
     if (!noCheck) {
       checker.typeCheck();
     }
@@ -314,10 +343,11 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       throw new Error("Missing main source.");
     }
 
-    const { beforeTransformers, sourceCollector } = createTransformers(
-      tsProgram,
-      inputOptions,
-    );
+    const { beforeTransformers, sourceCollector, getDiagnostics } =
+      createTransformers(
+        tsProgram,
+        inputOptions,
+      );
 
     const { diagnostics, emittedFiles: _, emitSkipped } = tsProgram.emit(
       mainSource,
@@ -327,6 +357,22 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       { before: beforeTransformers },
     );
     checker.check(diagnostics);
+
+    // Check for transformer diagnostics (from CommonTools pipeline)
+    if (getDiagnostics) {
+      const transformerDiagnostics = getDiagnostics();
+      const errors = transformerDiagnostics.filter((d) =>
+        d.severity === "error"
+      );
+      if (errors.length > 0) {
+        // Build a map of file names to source contents for error rendering
+        const sources = new Map<string, string>();
+        for (const file of program.files) {
+          sources.set(file.name, file.contents);
+        }
+        throw new TransformerError(errors, sources);
+      }
+    }
 
     if (emitSkipped) {
       throw new Error("Emit skipped. Check diagnostics.");
@@ -388,16 +434,29 @@ function createTransformers(
 ): {
   beforeTransformers: ts.TransformerFactory<ts.SourceFile>[];
   sourceCollector?: SourceCollector;
+  getDiagnostics?: () => readonly TransformerDiagnosticInfo[];
 } {
-  const beforeTransformers = options.beforeTransformers
-    ? options.beforeTransformers(program)
-    : [];
+  let factories: ts.TransformerFactory<ts.SourceFile>[] = [];
+  let getDiagnostics: (() => readonly TransformerDiagnosticInfo[]) | undefined;
+
+  if (options.beforeTransformers) {
+    const result = options.beforeTransformers(program);
+    if (Array.isArray(result)) {
+      // Legacy: array of transformer factories
+      factories = result;
+    } else {
+      // New: TransformerPipelineResult with factories and getDiagnostics
+      factories = result.factories;
+      getDiagnostics = result.getDiagnostics;
+    }
+  }
 
   const out: ReturnType<typeof createTransformers> = {
-    beforeTransformers,
+    beforeTransformers: factories,
+    getDiagnostics,
   };
 
-  if (beforeTransformers.length && options.getTransformedProgram) {
+  if (factories.length && options.getTransformedProgram) {
     out.sourceCollector = new SourceCollector();
     out.beforeTransformers.push(out.sourceCollector.transformer());
   }

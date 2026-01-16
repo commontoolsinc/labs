@@ -38,7 +38,6 @@
  */
 
 import {
-  Cell,
   Default,
   derive,
   fetchData,
@@ -46,15 +45,16 @@ import {
   NAME,
   recipe,
   UI,
+  Writable,
 } from "commontools";
 
 // Handler WITH await (supposedly blocks UI)
 const testWithAwait = handler<
   unknown,
   {
-    awaitStatus: Cell<string>;
-    awaitResult: Cell<string>;
-    awaitCount: Cell<number>;
+    awaitStatus: Writable<string>;
+    awaitResult: Writable<string>;
+    awaitCount: Writable<number>;
   }
 >(async (_args, state) => {
   // Increment counter to show how many times this was triggered
@@ -80,8 +80,8 @@ const testWithAwait = handler<
 const testWithoutAwait = handler<
   unknown,
   {
-    fetchTrigger: Cell<number>;
-    fetchCount: Cell<number>;
+    fetchTrigger: Writable<number>;
+    fetchCount: Writable<number>;
   }
 >((_args, state) => {
   // Increment counter to show how many times this was triggered
@@ -93,7 +93,7 @@ const testWithoutAwait = handler<
 });
 
 // Simple counter increment to test UI responsiveness
-const incrementCounter = handler<unknown, { counter: Cell<number> }>(
+const incrementCounter = handler<unknown, { counter: Writable<number> }>(
   (_args, state) => {
     state.counter.set(state.counter.get() + 1);
   },
@@ -103,12 +103,12 @@ const incrementCounter = handler<unknown, { counter: Cell<number> }>(
 const resetAll = handler<
   unknown,
   {
-    awaitStatus: Cell<string>;
-    awaitResult: Cell<string>;
-    awaitCount: Cell<number>;
-    fetchTrigger: Cell<number>;
-    fetchCount: Cell<number>;
-    counter: Cell<number>;
+    awaitStatus: Writable<string>;
+    awaitResult: Writable<string>;
+    awaitCount: Writable<number>;
+    fetchTrigger: Writable<number>;
+    fetchCount: Writable<number>;
+    counter: Writable<number>;
   }
 >((_args, state) => {
   state.awaitStatus.set("Ready");

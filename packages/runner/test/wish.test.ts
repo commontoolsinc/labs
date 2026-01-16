@@ -7,6 +7,7 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { ALL_CHARMS_ID } from "../src/builtins/well-known.ts";
 import { UI } from "../src/builder/types.ts";
+import { parseWishTarget } from "../src/builtins/wish.ts";
 
 const signer = await Identity.fromPassphrase("wish built-in tests");
 const space = signer.did();
@@ -38,7 +39,7 @@ describe("wish built-in", () => {
   });
 
   it("resolves the well known all charms cell", async () => {
-    const allCharmsCell = runtime.getCellFromEntityId(
+    const allCharmsCell = runtime.getCellFromEntityId<unknown[]>(
       space,
       { "/": ALL_CHARMS_ID },
       [],
@@ -106,8 +107,13 @@ describe("wish built-in", () => {
     ];
     allCharmsCell.withTx(tx).set(charmsData);
 
+    // Set up the space cell with defaultPattern that links to allCharms
     const spaceCell = runtime.getCell(space, space).withTx(tx);
-    (spaceCell as any).key("allCharms").set(allCharmsCell.withTx(tx));
+    const defaultPatternCell = runtime.getCell(space, "default-pattern").withTx(
+      tx,
+    );
+    (defaultPatternCell as any).key("allCharms").set(allCharmsCell.withTx(tx));
+    (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
     await tx.commit();
     await runtime.idle();
@@ -236,7 +242,13 @@ describe("wish built-in", () => {
     }).withTx(tx);
     const recentData = [{ name: "Charm A" }, { name: "Charm B" }];
     recentCharmsCell.set(recentData);
-    (spaceCell as any).key("recentCharms").set(recentCharmsCell);
+
+    // Set up defaultPattern to own recentCharms
+    const defaultPatternCell = runtime.getCell(space, "default-pattern").withTx(
+      tx,
+    );
+    (defaultPatternCell as any).key("recentCharms").set(recentCharmsCell);
+    (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
     await tx.commit();
     await runtime.idle();
@@ -394,7 +406,7 @@ describe("wish built-in", () => {
 
   describe("object-based wish syntax", () => {
     it("resolves allCharms using tag parameter", async () => {
-      const allCharmsCell = runtime.getCellFromEntityId(
+      const allCharmsCell = runtime.getCellFromEntityId<unknown[]>(
         space,
         { "/": ALL_CHARMS_ID },
         [],
@@ -404,9 +416,15 @@ describe("wish built-in", () => {
       const charmsData = [{ name: "Alpha", title: "Alpha" }];
       allCharmsCell.withTx(tx).set(charmsData);
 
+      // Set up defaultPattern to own allCharms
       const spaceCell = runtime.getCell<{ allCharms?: unknown[] }>(space, space)
         .withTx(tx);
-      spaceCell.key("allCharms").set(allCharmsCell.withTx(tx));
+      const defaultPatternCell = runtime.getCell(space, "default-pattern")
+        .withTx(tx);
+      (defaultPatternCell as any).key("allCharms").set(
+        allCharmsCell.withTx(tx),
+      );
+      (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
       await tx.commit();
       await runtime.idle();
@@ -435,7 +453,7 @@ describe("wish built-in", () => {
     });
 
     it("resolves nested paths using tag and path parameters", async () => {
-      const allCharmsCell = runtime.getCellFromEntityId(
+      const allCharmsCell = runtime.getCellFromEntityId<unknown[]>(
         space,
         { "/": ALL_CHARMS_ID },
         [],
@@ -448,9 +466,15 @@ describe("wish built-in", () => {
       ];
       allCharmsCell.withTx(tx).set(charmsData);
 
+      // Set up defaultPattern to own allCharms
       const spaceCell = runtime.getCell<{ allCharms?: unknown[] }>(space, space)
         .withTx(tx);
-      spaceCell.key("allCharms").set(allCharmsCell.withTx(tx));
+      const defaultPatternCell = runtime.getCell(space, "default-pattern")
+        .withTx(tx);
+      (defaultPatternCell as any).key("allCharms").set(
+        allCharmsCell.withTx(tx),
+      );
+      (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
       await tx.commit();
       await runtime.idle();
@@ -858,9 +882,15 @@ describe("wish built-in", () => {
     });
 
     it("resolves #favorites from home space when pattern runs in different space", async () => {
-      // Setup: Add favorites to home space
+      // Setup: Add favorites to home space through defaultPattern
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
-      const favoritesCell = homeSpaceCell.key("favorites");
+      const defaultPatternCell = runtime.getCell(
+        userIdentity.did(),
+        "default-pattern",
+        undefined,
+        tx,
+      );
+      const favoritesCell = defaultPatternCell.key("favorites");
       const favoriteItem = runtime.getCell(
         userIdentity.did(),
         "favorite-item",
@@ -871,6 +901,7 @@ describe("wish built-in", () => {
       favoritesCell.set([
         { cell: favoriteItem, tag: "test favorite" },
       ]);
+      (homeSpaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
       await tx.commit();
       await runtime.idle();
@@ -963,9 +994,15 @@ describe("wish built-in", () => {
     });
 
     it("resolves mixed tags (#favorites from home, / from pattern) in single pattern", async () => {
-      // Setup: Favorites in home space
+      // Setup: Favorites in home space through defaultPattern
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
-      const favoritesCell = homeSpaceCell.key("favorites");
+      const defaultPatternCell = runtime.getCell(
+        userIdentity.did(),
+        "default-pattern",
+        undefined,
+        tx,
+      );
+      const favoritesCell = defaultPatternCell.key("favorites");
       const favoriteItem = runtime.getCell(
         userIdentity.did(),
         "favorite-mixed",
@@ -974,6 +1011,7 @@ describe("wish built-in", () => {
       );
       favoriteItem.set({ type: "favorite" });
       favoritesCell.set([{ cell: favoriteItem, tag: "mixed test" }]);
+      (homeSpaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
       await tx.commit();
       await runtime.idle();
@@ -1023,9 +1061,15 @@ describe("wish built-in", () => {
     });
 
     it("resolves hashtag search in home space favorites from different pattern space", async () => {
-      // Setup: Favorites with tags in home space
+      // Setup: Favorites with tags in home space through defaultPattern
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
-      const favoritesCell = homeSpaceCell.key("favorites");
+      const defaultPatternCell = runtime.getCell(
+        userIdentity.did(),
+        "default-pattern",
+        undefined,
+        tx,
+      );
+      const favoritesCell = defaultPatternCell.key("favorites");
       const favoriteItem1 = runtime.getCell(
         userIdentity.did(),
         "hashtag-item-1",
@@ -1045,6 +1089,7 @@ describe("wish built-in", () => {
         { cell: favoriteItem1, tag: "#myTag #awesome" },
         { cell: favoriteItem2, tag: "no hashtag here" },
       ]);
+      (homeSpaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
       await tx.commit();
       await runtime.idle();
@@ -1096,12 +1141,19 @@ describe("wish built-in", () => {
       // Setup the charm (but don't start it yet)
       runtime.setup(tx, counterRecipe, {}, charmCell);
 
-      // Setup 3: Add charm to favorites
+      // Setup 3: Add charm to favorites through defaultPattern
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
-      const favoritesCell = homeSpaceCell.key("favorites");
+      const defaultPatternCell = runtime.getCell(
+        userIdentity.did(),
+        "default-pattern",
+        undefined,
+        tx,
+      );
+      const favoritesCell = defaultPatternCell.key("favorites");
       favoritesCell.set([
         { cell: charmCell, tag: "#counterCharm test charm" },
       ]);
+      (homeSpaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
       await tx.commit();
       await runtime.idle();
@@ -1137,5 +1189,53 @@ describe("wish built-in", () => {
         expect("count" in charmData || "increment" in charmData).toBe(true);
       }
     });
+  });
+});
+
+describe("parseWishTarget", () => {
+  it("parses absolute paths starting with /", () => {
+    const result = parseWishTarget("/allCharms");
+    expect(result).toEqual({ key: "/", path: ["allCharms"] });
+  });
+
+  it("parses nested absolute paths", () => {
+    const result = parseWishTarget("/allCharms/0/title");
+    expect(result).toEqual({ key: "/", path: ["allCharms", "0", "title"] });
+  });
+
+  it("parses hash tag targets", () => {
+    const result = parseWishTarget("#favorites");
+    expect(result).toEqual({ key: "#favorites", path: [] });
+  });
+
+  it("parses hash tag targets with path", () => {
+    const result = parseWishTarget("#favorites/list/0");
+    expect(result).toEqual({ key: "#favorites", path: ["list", "0"] });
+  });
+
+  it("trims whitespace", () => {
+    const result = parseWishTarget("  /allCharms  ");
+    expect(result).toEqual({ key: "/", path: ["allCharms"] });
+  });
+
+  it("filters empty segments", () => {
+    const result = parseWishTarget("/allCharms//nested/");
+    expect(result).toEqual({ key: "/", path: ["allCharms", "nested"] });
+  });
+
+  it("throws on empty string", () => {
+    expect(() => parseWishTarget("")).toThrow('Wish target "" is empty');
+  });
+
+  it("throws on whitespace-only string", () => {
+    expect(() => parseWishTarget("   ")).toThrow("is empty");
+  });
+
+  it("throws on unrecognized path format", () => {
+    expect(() => parseWishTarget("noSlashOrHash")).toThrow("is not recognized");
+  });
+
+  it("throws on hash-only target", () => {
+    expect(() => parseWishTarget("#")).toThrow("is not recognized");
   });
 });

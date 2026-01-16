@@ -2,7 +2,7 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
-import { type Cell } from "@commontools/runner";
+import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 import "../ct-chat-message/ct-chat-message.ts";
 import "../ct-tool-call/ct-tool-call.ts";
@@ -20,12 +20,44 @@ import {
   themeContext,
 } from "../theme-context.ts";
 
+const BuiltInLLMMessagesArraySchema = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      role: { type: "string" },
+      content: {
+        anyOf: [{
+          type: "array",
+          items: {
+            anyOf: [{
+              type: "object",
+              properties: {
+                // This should be anyOf with const values for type
+                type: { type: "string" },
+                text: { type: "string" },
+                image: { type: "string" },
+                toolCallId: { type: "string" },
+                toolName: { type: "string" },
+                input: { type: "object" },
+                output: {},
+              },
+              required: ["type"],
+            }, { type: "string" }],
+          },
+        }, { type: "string" }],
+      },
+    },
+    required: ["role", "content"],
+  },
+} as const satisfies JSONSchema;
+
 /**
  * CTChat - Chat container that handles message flow and tool call correlation
  *
  * @element ct-chat
  *
- * @prop {Cell<BuiltInLLMMessage[]>|BuiltInLLMMessage[]} messages - Messages array or Cell containing messages
+ * @prop {CellHandle<BuiltInLLMMessage[]>|BuiltInLLMMessage[]} messages - Messages array or Cell containing messages
  * @prop {boolean} pending - Show animated typing indicator for assistant response
  * @prop {CTTheme} theme - Theme configuration for chat components
  *
@@ -147,7 +179,7 @@ export class CTChat extends BaseElement {
   });
 
   @property({ type: Array })
-  declare messages: Cell<BuiltInLLMMessage[]> | BuiltInLLMMessage[];
+  declare messages: CellHandle<BuiltInLLMMessage[]> | BuiltInLLMMessage[];
 
   @property({ type: Boolean, reflect: true })
   declare pending: boolean;
@@ -179,7 +211,7 @@ export class CTChat extends BaseElement {
   override firstUpdated(changedProperties: Map<string, any>) {
     super.firstUpdated(changedProperties);
     // Initialize cell controller binding
-    this._cellController.bind(this.messages);
+    this._cellController.bind(this.messages, BuiltInLLMMessagesArraySchema);
     // Compute and apply theme on first render
     const source = this.theme && Object.keys(this.theme).length > 0
       ? this.theme
@@ -217,7 +249,7 @@ export class CTChat extends BaseElement {
     // If the messages property itself changed (e.g., switched to a different cell)
     if (changedProperties.has("messages")) {
       // Bind the new messages (Cell or plain array) to the controller
-      this._cellController.bind(this.messages);
+      this._cellController.bind(this.messages, BuiltInLLMMessagesArraySchema);
     }
 
     // If the theme property or provided theme changed, recompute

@@ -1,0 +1,55 @@
+{
+  "properties": {
+    "first": {
+      "properties": {
+        "data": {
+          "type": "string"
+        },
+        "extraParams": {
+          "properties": {
+            "alpha": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "alpha"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "data",
+        "extraParams"
+      ],
+      "type": "object"
+    },
+    "second": {
+      "properties": {
+        "data": {
+          "type": "string"
+        },
+        "extraParams": {
+          "properties": {
+            "beta": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "beta"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "data",
+        "extraParams"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "first",
+    "second"
+  ],
+  "type": "object"
+}

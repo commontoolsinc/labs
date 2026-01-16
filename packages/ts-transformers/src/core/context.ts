@@ -45,16 +45,25 @@ export class TransformationContext {
   }
 
   reportDiagnostic(input: DiagnosticInput): void {
-    const location = this.sourceFile.getLineAndCharacterOfPosition(
-      input.node.getStart(),
-    );
-    this.diagnostics.push({
+    const start = input.node.getStart();
+    const length = input.node.getEnd() - start;
+    const location = this.sourceFile.getLineAndCharacterOfPosition(start);
+    const diagnostic: TransformationDiagnostic = {
+      severity: input.severity ?? "error",
       type: input.type,
       message: input.message,
       fileName: this.sourceFile.fileName,
       line: location.line + 1,
       column: location.character + 1,
-    });
+      start,
+      length,
+    };
+    this.diagnostics.push(diagnostic);
+
+    // Also push to shared collector if provided
+    if (this.options.diagnosticsCollector) {
+      this.options.diagnosticsCollector.push(diagnostic);
+    }
   }
 
   /**

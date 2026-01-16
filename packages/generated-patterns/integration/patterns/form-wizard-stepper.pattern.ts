@@ -269,160 +269,186 @@ const buildProgressLabel = (
   return `${label} (${position} of ${total})`;
 };
 
+// Module-scope lift definitions
+const liftSanitizeSteps = lift(sanitizeSteps);
+
+const liftStepCount = lift((list: WizardStep[]) => list.length);
+
+const liftActiveIndex = lift(
+  (input: { index: number | undefined; count: number }) => {
+    return clampIndex(input.index, input.count);
+  },
+);
+
+const liftValuesView = lift(
+  (input: { values: FieldValueMap | undefined; steps: WizardStep[] }) =>
+    sanitizeFieldValues(input.values, input.steps),
+);
+
+const liftStepStates = lift(
+  (
+    input: {
+      steps: WizardStep[];
+      values: FieldValueMap;
+      index: number;
+    },
+  ) => evaluateStepStates(input.steps, input.values, input.index),
+);
+
+const liftActiveStep = lift(
+  (input: { steps: WizardStep[]; index: number }) => {
+    if (input.steps.length === 0) return undefined;
+    return input.steps[input.index];
+  },
+);
+
+const liftCanAdvance = lift(
+  (input: { states: WizardStepState[]; index: number }) => {
+    const active = input.states[input.index];
+    return active ? active.remaining.length === 0 : false;
+  },
+);
+
+const liftProgress = lift(
+  (input: { step?: WizardStep; index: number; count: number }) =>
+    buildProgressLabel(input.step, input.index, input.count),
+);
+
+const liftBlockMessage = lift((value: string | null) => value ?? "");
+
+const advanceStep = handler(
+  (
+    _event: unknown,
+    context: {
+      stepsView: Cell<WizardStep[]>;
+      fieldValues: Cell<FieldValueMap>;
+      currentStepIndex: Cell<number>;
+      blockReason: Cell<string | null>;
+    },
+  ) => {
+    const stepsList = context.stepsView.get();
+    if (stepsList.length === 0) return;
+    const sanitizedValues = sanitizeFieldValues(
+      context.fieldValues.get(),
+      stepsList,
+    );
+    const currentIndex = clampIndex(
+      context.currentStepIndex.get(),
+      stepsList.length,
+    );
+    const step = stepsList[currentIndex];
+    const missing = collectMissingFields(step, sanitizedValues);
+    if (missing.length > 0) {
+      context.fieldValues.set(sanitizedValues);
+      context.currentStepIndex.set(currentIndex);
+      context.blockReason.set(formatBlockMessage(step, missing));
+      return;
+    }
+    const nextIndex = Math.min(currentIndex + 1, stepsList.length - 1);
+    context.fieldValues.set(sanitizedValues);
+    context.currentStepIndex.set(nextIndex);
+    context.blockReason.set(null);
+  },
+);
+
+const retreatStep = handler(
+  (
+    _event: unknown,
+    context: {
+      stepsView: Cell<WizardStep[]>;
+      currentStepIndex: Cell<number>;
+      blockReason: Cell<string | null>;
+    },
+  ) => {
+    const stepsList = context.stepsView.get();
+    if (stepsList.length === 0) return;
+    const currentIndex = clampIndex(
+      context.currentStepIndex.get(),
+      stepsList.length,
+    );
+    const previousIndex = Math.max(currentIndex - 1, 0);
+    context.currentStepIndex.set(previousIndex);
+    context.blockReason.set(null);
+  },
+);
+
+const updateField = handler(
+  (
+    event: UpdateFieldEvent | undefined,
+    context: {
+      stepsView: Cell<WizardStep[]>;
+      fieldValues: Cell<FieldValueMap>;
+      currentStepIndex: Cell<number>;
+      blockReason: Cell<string | null>;
+    },
+  ) => {
+    const stepsList = context.stepsView.get();
+    if (stepsList.length === 0) return;
+    const sanitizedValues = sanitizeFieldValues(
+      context.fieldValues.get(),
+      stepsList,
+    );
+    const fallbackIndex = clampIndex(
+      context.currentStepIndex.get(),
+      stepsList.length,
+    );
+    const fallbackStep = stepsList[fallbackIndex];
+    const explicitStepId = sanitizeIdentifier(event?.stepId);
+    const targetStep = stepsList.find((entry) => entry.id === explicitStepId) ??
+      fallbackStep;
+    if (!targetStep) return;
+    const fieldId = sanitizeIdentifier(event?.fieldId);
+    if (!fieldId) return;
+    const field = targetStep.fields.find((entry) => entry.id === fieldId);
+    if (!field) return;
+    const value = sanitizeFieldValue(event?.value);
+    const nextValues = sanitizeFieldValues(sanitizedValues, stepsList);
+    nextValues[targetStep.id][field.id] = value;
+    context.fieldValues.set(nextValues);
+    context.blockReason.set(null);
+  },
+);
+
 export const formWizardStepper = recipe<FormWizardStepperArgs>(
   "Form Wizard Stepper",
   ({ steps, currentStepIndex, fieldValues }) => {
     const blockReason = cell<string | null>(null);
 
-    const stepsView = lift(sanitizeSteps)(steps);
-    const stepCount = lift((list: WizardStep[]) => list.length)(stepsView);
+    const stepsView = liftSanitizeSteps(steps);
+    const stepCount = liftStepCount(stepsView);
 
-    const activeIndex = lift(
-      (input: { index: number | undefined; count: number }) => {
-        return clampIndex(input.index, input.count);
-      },
-    )({ index: currentStepIndex, count: stepCount });
+    const activeIndex = liftActiveIndex({
+      index: currentStepIndex,
+      count: stepCount,
+    });
 
-    const valuesView = lift(
-      (input: { values: FieldValueMap | undefined; steps: WizardStep[] }) =>
-        sanitizeFieldValues(input.values, input.steps),
-    )({ values: fieldValues, steps: stepsView });
+    const valuesView = liftValuesView({
+      values: fieldValues,
+      steps: stepsView,
+    });
 
-    const stepStates = lift(
-      (
-        input: {
-          steps: WizardStep[];
-          values: FieldValueMap;
-          index: number;
-        },
-      ) => evaluateStepStates(input.steps, input.values, input.index),
-    )({ steps: stepsView, values: valuesView, index: activeIndex });
+    const stepStates = liftStepStates({
+      steps: stepsView,
+      values: valuesView,
+      index: activeIndex,
+    });
 
-    const activeStep = lift(
-      (input: { steps: WizardStep[]; index: number }) => {
-        if (input.steps.length === 0) return undefined;
-        return input.steps[input.index];
-      },
-    )({ steps: stepsView, index: activeIndex });
+    const activeStep = liftActiveStep({ steps: stepsView, index: activeIndex });
 
-    const canAdvance = lift(
-      (input: { states: WizardStepState[]; index: number }) => {
-        const active = input.states[input.index];
-        return active ? active.remaining.length === 0 : false;
-      },
-    )({ states: stepStates, index: activeIndex });
+    const canAdvance = liftCanAdvance({
+      states: stepStates,
+      index: activeIndex,
+    });
 
-    const progress = lift(
-      (input: { step?: WizardStep; index: number; count: number }) =>
-        buildProgressLabel(input.step, input.index, input.count),
-    )({ step: activeStep, index: activeIndex, count: stepCount });
+    const progress = liftProgress({
+      step: activeStep,
+      index: activeIndex,
+      count: stepCount,
+    });
 
     const progressSummary = str`${progress}`;
 
-    const blockMessage = lift((value: string | null) => value ?? "")(
-      blockReason,
-    );
-
-    const handlerContext = {
-      stepsView,
-      fieldValues,
-      currentStepIndex,
-      blockReason,
-    } as const;
-
-    const advanceStep = handler(
-      (
-        _event: unknown,
-        context: {
-          stepsView: Cell<WizardStep[]>;
-          fieldValues: Cell<FieldValueMap>;
-          currentStepIndex: Cell<number>;
-          blockReason: Cell<string | null>;
-        },
-      ) => {
-        const stepsList = context.stepsView.get();
-        if (stepsList.length === 0) return;
-        const sanitizedValues = sanitizeFieldValues(
-          context.fieldValues.get(),
-          stepsList,
-        );
-        const currentIndex = clampIndex(
-          context.currentStepIndex.get(),
-          stepsList.length,
-        );
-        const step = stepsList[currentIndex];
-        const missing = collectMissingFields(step, sanitizedValues);
-        if (missing.length > 0) {
-          context.fieldValues.set(sanitizedValues);
-          context.currentStepIndex.set(currentIndex);
-          context.blockReason.set(formatBlockMessage(step, missing));
-          return;
-        }
-        const nextIndex = Math.min(currentIndex + 1, stepsList.length - 1);
-        context.fieldValues.set(sanitizedValues);
-        context.currentStepIndex.set(nextIndex);
-        context.blockReason.set(null);
-      },
-    );
-
-    const retreatStep = handler(
-      (
-        _event: unknown,
-        context: {
-          stepsView: Cell<WizardStep[]>;
-          currentStepIndex: Cell<number>;
-          blockReason: Cell<string | null>;
-        },
-      ) => {
-        const stepsList = context.stepsView.get();
-        if (stepsList.length === 0) return;
-        const currentIndex = clampIndex(
-          context.currentStepIndex.get(),
-          stepsList.length,
-        );
-        const previousIndex = Math.max(currentIndex - 1, 0);
-        context.currentStepIndex.set(previousIndex);
-        context.blockReason.set(null);
-      },
-    );
-
-    const updateField = handler(
-      (
-        event: UpdateFieldEvent | undefined,
-        context: {
-          stepsView: Cell<WizardStep[]>;
-          fieldValues: Cell<FieldValueMap>;
-          currentStepIndex: Cell<number>;
-          blockReason: Cell<string | null>;
-        },
-      ) => {
-        const stepsList = context.stepsView.get();
-        if (stepsList.length === 0) return;
-        const sanitizedValues = sanitizeFieldValues(
-          context.fieldValues.get(),
-          stepsList,
-        );
-        const fallbackIndex = clampIndex(
-          context.currentStepIndex.get(),
-          stepsList.length,
-        );
-        const fallbackStep = stepsList[fallbackIndex];
-        const explicitStepId = sanitizeIdentifier(event?.stepId);
-        const targetStep =
-          stepsList.find((entry) => entry.id === explicitStepId) ??
-            fallbackStep;
-        if (!targetStep) return;
-        const fieldId = sanitizeIdentifier(event?.fieldId);
-        if (!fieldId) return;
-        const field = targetStep.fields.find((entry) => entry.id === fieldId);
-        if (!field) return;
-        const value = sanitizeFieldValue(event?.value);
-        const nextValues = sanitizeFieldValues(sanitizedValues, stepsList);
-        nextValues[targetStep.id][field.id] = value;
-        context.fieldValues.set(nextValues);
-        context.blockReason.set(null);
-      },
-    );
+    const blockMessage = liftBlockMessage(blockReason);
 
     return {
       steps,
@@ -436,9 +462,25 @@ export const formWizardStepper = recipe<FormWizardStepperArgs>(
       canAdvance,
       progressSummary,
       blockMessage,
-      advanceStep: advanceStep(handlerContext as never),
-      retreatStep: retreatStep(handlerContext as never),
-      updateField: updateField(handlerContext as never),
+      advanceStep: advanceStep({
+        stepsView,
+        fieldValues,
+        currentStepIndex,
+        blockReason,
+      }),
+      retreatStep: retreatStep({
+        stepsView,
+        currentStepIndex,
+        blockReason,
+      }),
+      updateField: updateField({
+        stepsView,
+        fieldValues,
+        currentStepIndex,
+        blockReason,
+      }),
     };
   },
 );
+
+export default formWizardStepper;

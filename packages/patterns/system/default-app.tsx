@@ -1,15 +1,14 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
+  equals,
   handler,
   ifElse,
-  lift,
   NAME,
   navigateTo,
   pattern,
   UI,
-  wish,
+  Writable,
 } from "commontools";
 
 import { default as Note } from "../notes/note.tsx";
@@ -17,6 +16,10 @@ import { default as Note } from "../notes/note.tsx";
 // Simple random ID generator (crypto.randomUUID not available in pattern env)
 const generateId = () =>
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
+
+// Maximum number of recent charms to track
+const MAX_RECENT_CHARMS = 10;
+
 import BacklinksIndex, { type MentionableCharm } from "./backlinks-index.tsx";
 import OmniboxFAB from "./omnibox-fab.tsx";
 import Notebook from "../notes/notebook.tsx";
@@ -41,7 +44,7 @@ interface CharmsListOutput {
 
 const _visit = handler<
   Record<string, never>,
-  { charm: Cell<MinimalCharm> }
+  { charm: Writable<MinimalCharm> }
 >((_, state) => {
   return navigateTo(state.charm);
 }, { proxy: true });
@@ -49,12 +52,14 @@ const _visit = handler<
 const removeCharm = handler<
   Record<string, never>,
   {
-    charm: Cell<MinimalCharm>;
-    allCharms: Cell<MinimalCharm[]>;
+    charm: Writable<MinimalCharm>;
+    allCharms: Writable<MinimalCharm[]>;
   }
 >((_, state) => {
   const allCharmsValue = state.allCharms.get();
-  const index = allCharmsValue.findIndex((c: any) => state.charm.equals(c));
+  const index = allCharmsValue.findIndex((c: any) =>
+    c && state.charm.equals(c)
+  );
 
   if (index !== -1) {
     const charmListCopy = [...allCharmsValue];
@@ -67,17 +72,15 @@ const removeCharm = handler<
 
 // Handler for dropping a note onto a notebook row
 const dropOntoNotebook = handler<
-  { detail: { sourceCell: Cell<unknown> } },
-  { notebook: Cell<{ notes?: unknown[] }> }
+  { detail: { sourceCell: Writable<unknown> } },
+  { notebook: Writable<{ notes?: unknown[] }> }
 >((event, { notebook }) => {
   const sourceCell = event.detail.sourceCell;
   const notesCell = notebook.key("notes");
   const notesList = notesCell.get() ?? [];
 
-  // Prevent duplicates using Cell.equals
-  const alreadyExists = notesList.some((n) =>
-    Cell.equals(sourceCell, n as any)
-  );
+  // Prevent duplicates using Writable.equals
+  const alreadyExists = notesList.some((n) => equals(sourceCell, n as any));
   if (alreadyExists) return;
 
   // Hide from Patterns list
@@ -87,24 +90,24 @@ const dropOntoNotebook = handler<
   notesCell.push(sourceCell);
 });
 
-const toggleFab = handler<any, { fabExpanded: Cell<boolean> }>(
+const toggleFab = handler<any, { fabExpanded: Writable<boolean> }>(
   (_, { fabExpanded }) => {
     fabExpanded.set(!fabExpanded.get());
   },
 );
 
 // Toggle dropdown menu
-const toggleMenu = handler<void, { menuOpen: Cell<boolean> }>(
+const toggleMenu = handler<void, { menuOpen: Writable<boolean> }>(
   (_, { menuOpen }) => menuOpen.set(!menuOpen.get()),
 );
 
 // Close dropdown menu (for backdrop click)
-const closeMenu = handler<void, { menuOpen: Cell<boolean> }>(
+const closeMenu = handler<void, { menuOpen: Writable<boolean> }>(
   (_, { menuOpen }) => menuOpen.set(false),
 );
 
 // Menu: New Note
-const menuNewNote = handler<void, { menuOpen: Cell<boolean> }>(
+const menuNewNote = handler<void, { menuOpen: Writable<boolean> }>(
   (_, { menuOpen }) => {
     menuOpen.set(false);
     return navigateTo(Note({
@@ -116,7 +119,7 @@ const menuNewNote = handler<void, { menuOpen: Cell<boolean> }>(
 );
 
 // Menu: New Notebook
-const menuNewNotebook = handler<void, { menuOpen: Cell<boolean> }>(
+const menuNewNotebook = handler<void, { menuOpen: Writable<boolean> }>(
   (_, { menuOpen }) => {
     menuOpen.set(false);
     return navigateTo(Notebook({ title: "New Notebook" }));
@@ -124,7 +127,7 @@ const menuNewNotebook = handler<void, { menuOpen: Cell<boolean> }>(
 );
 
 // Helper to find existing All Notes charm
-const findAllNotebooksCharm = (allCharms: Cell<MinimalCharm[]>) => {
+const findAllNotebooksCharm = (allCharms: Writable<MinimalCharm[]>) => {
   const charms = allCharms.get();
   return charms.find((charm: any) => {
     const name = charm?.[NAME];
@@ -135,7 +138,7 @@ const findAllNotebooksCharm = (allCharms: Cell<MinimalCharm[]>) => {
 // Menu: All Notes
 const menuAllNotebooks = handler<
   void,
-  { menuOpen: Cell<boolean>; allCharms: Cell<MinimalCharm[]> }
+  { menuOpen: Writable<boolean>; allCharms: Writable<MinimalCharm[]> }
 >((_, { menuOpen, allCharms }) => {
   menuOpen.set(false);
   const existing = findAllNotebooksCharm(allCharms);
@@ -145,19 +148,46 @@ const menuAllNotebooks = handler<
   return navigateTo(NotesImportExport({ importMarkdown: "" }));
 });
 
+// Handler: Add charm to allCharms if not already present
+const addCharm = handler<
+  { charm: MentionableCharm },
+  { allCharms: Writable<MentionableCharm[]> }
+>(({ charm }, { allCharms }) => {
+  const current = allCharms.get();
+  if (!current.some((c) => equals(c, charm))) {
+    allCharms.push(charm);
+  }
+});
+
+// Handler: Track charm as recently used (add to front, maintain max)
+const trackRecent = handler<
+  { charm: MentionableCharm },
+  { recentCharms: Writable<MentionableCharm[]> }
+>(({ charm }, { recentCharms }) => {
+  const current = recentCharms.get();
+  // Remove if already present
+  const filtered = current.filter((c) => !equals(c, charm));
+  // Add to front and limit to max
+  const updated = [charm, ...filtered].slice(0, MAX_RECENT_CHARMS);
+  recentCharms.set(updated);
+});
+
 export default pattern<CharmsListInput, CharmsListOutput>((_) => {
-  const { allCharms } = wish<{ allCharms: MentionableCharm[] }>("/");
+  // OWN the data cells (not from wish)
+  const allCharms = Writable.of<MentionableCharm[]>([]);
+  const recentCharms = Writable.of<MentionableCharm[]>([]);
 
   // Dropdown menu state
-  const menuOpen = Cell.of(false);
+  const menuOpen = Writable.of(false);
 
   // Filter out hidden charms and charms without resolved NAME
   // (prevents transient hash-only pills during reactive updates)
   // NOTE: Use truthy check, not === true, because charm.isHidden is a proxy object
   const visibleCharms = computed(() =>
-    allCharms.filter((charm) => {
+    allCharms.get().filter((charm) => {
+      if (!charm) return false;
       if (charm.isHidden) return false;
-      const name = (charm as any)?.[NAME];
+      const name = charm[NAME];
       return typeof name === "string" && name.length > 0;
     })
   );
@@ -165,7 +195,7 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
   const index = BacklinksIndex({ allCharms });
 
   const fab = OmniboxFAB({
-    mentionable: index.mentionable as unknown as Cell<MentionableCharm[]>,
+    mentionable: index.mentionable,
   });
 
   return {
@@ -282,12 +312,12 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
               <tbody>
                 {visibleCharms.map((charm) => {
                   // Check if charm is a notebook by NAME prefix (isNotebook prop not reliable through proxy)
-                  const isNotebook = lift((args: { c: unknown }) => {
-                    const name = (args.c as any)?.[NAME];
+                  const isNotebook = computed(() => {
+                    const name = charm[NAME];
                     const result = typeof name === "string" &&
                       name.startsWith("📓");
                     return result;
-                  })({ c: charm });
+                  });
 
                   const dragHandle = (
                     <ct-drag-source $cell={charm} type="note">
@@ -344,5 +374,13 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
     ),
     sidebarUI: undefined,
     fabUI: fab[UI],
+
+    // Exported data
+    allCharms,
+    recentCharms,
+
+    // Exported handlers (bound to state cells for external callers)
+    addCharm: addCharm({ allCharms }),
+    trackRecent: trackRecent({ recentCharms }),
   };
 });

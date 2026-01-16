@@ -137,19 +137,19 @@ const summarizeGroups = (groups: NestedGroup[] | undefined) => {
   });
 };
 
+const liftAllNotes = lift((items: { notes: string[] }[] | undefined) => {
+  const collections = Array.isArray(items) ? items : [];
+  return collections.flatMap((item) => {
+    return item.notes.filter((note) => typeof note === "string" && note !== "");
+  });
+});
+
 export const counterWithNestedArrayObjects = recipe<NestedArrayArgs>(
   "Counter With Nested Array Objects",
   ({ groups }) => {
     const totals = derive(groups, countTotals);
     const summaries = derive(groups, summarizeGroups);
-    const allNotes = lift((items: { notes: string[] }[] | undefined) => {
-      const collections = Array.isArray(items) ? items : [];
-      return collections.flatMap((item) => {
-        return item.notes.filter((note) =>
-          typeof note === "string" && note !== ""
-        );
-      });
-    })(summaries);
+    const allNotes = liftAllNotes(summaries);
 
     const headline = str`Nested total ${totals}`;
 
@@ -164,3 +164,5 @@ export const counterWithNestedArrayObjects = recipe<NestedArrayArgs>(
     };
   },
 );
+
+export default counterWithNestedArrayObjects;

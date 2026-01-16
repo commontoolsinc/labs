@@ -78,6 +78,10 @@ const reorderItems = handler(
   },
 );
 
+const liftSize = lift((values: number[] | undefined) =>
+  normalizeItems(values).length
+);
+
 export const counterWithReorderableList = recipe<ReorderableListArgs>(
   "Counter With Reorderable List",
   ({ items }) => {
@@ -86,9 +90,7 @@ export const counterWithReorderableList = recipe<ReorderableListArgs>(
       (values): PositionState[] =>
         normalizeItems(values).map((value, index) => ({ index, value })),
     );
-    const size = lift((values: number[] | undefined) =>
-      normalizeItems(values).length
-    )(items);
+    const size = liftSize(items);
     const orderText = derive(
       items,
       (values) => {
@@ -109,3 +111,5 @@ export const counterWithReorderableList = recipe<ReorderableListArgs>(
     };
   },
 );
+
+export default counterWithReorderableList;

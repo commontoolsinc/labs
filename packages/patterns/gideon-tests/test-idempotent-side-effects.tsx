@@ -25,7 +25,6 @@
  * - Idempotent: Check-before-write ensures no actual change after first run, system settles
  */
 import {
-  Cell,
   computed,
   Default,
   handler,
@@ -33,6 +32,7 @@ import {
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 interface TestInput {
@@ -41,14 +41,16 @@ interface TestInput {
 }
 
 interface TestOutput {
-  triggerCount: Cell<number>;
+  // Note: Output types describe the inner value type, not the cell wrapper
+  // The pattern returns OpaqueCell<number>, so the output is `number`
+  triggerCount: number;
   nonIdempotentRunCount: number;
   idempotentRunCount: number;
   nonIdempotentData: unknown[];
   idempotentData: Record<string, unknown>;
 }
 
-const incrementTrigger = handler<unknown, { triggerCount: Cell<number> }>(
+const incrementTrigger = handler<unknown, { triggerCount: Writable<number> }>(
   (_args, state) => {
     state.triggerCount.set(state.triggerCount.get() + 1);
   },
@@ -56,11 +58,11 @@ const incrementTrigger = handler<unknown, { triggerCount: Cell<number> }>(
 
 export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
   // Shared state for tracking
-  const nonIdempotentArray = Cell.of<unknown[]>([]);
-  const nonIdempotentCounter = Cell.of(0);
+  const nonIdempotentArray = Writable.of<unknown[]>([]);
+  const nonIdempotentCounter = Writable.of(0);
 
-  const idempotentMap = Cell.of<Record<string, unknown>>({});
-  const idempotentCounter = Cell.of(0);
+  const idempotentMap = Writable.of<Record<string, unknown>>({});
+  const idempotentCounter = Writable.of(0);
 
   // Computed values for conditional rendering
   const isThrashing = computed(() => nonIdempotentCounter.get() > 10);
@@ -288,7 +290,7 @@ export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
         </div>
       </div>
     ),
-    triggerCount: triggerCount as unknown as Cell<number>,
+    triggerCount,
     nonIdempotentRunCount: nonIdempotentCounter,
     idempotentRunCount: idempotentCounter,
     nonIdempotentData: nonIdempotentArray,

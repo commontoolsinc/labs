@@ -12,7 +12,7 @@ import {
   type CTTheme,
   themeContext,
 } from "../theme-context.ts";
-import { type Cell, isCell } from "@commontools/runner";
+import { type CellHandle, isCellHandle } from "@commontools/runtime-client";
 
 export type MarkdownVariant = "default" | "inverse";
 
@@ -21,12 +21,14 @@ export type MarkdownVariant = "default" | "inverse";
  *
  * @element ct-markdown
  *
- * @attr {string} content - The markdown content to render (string or Cell<string>)
+ * @attr {string} content - The markdown content to render (string or CellHandle<string>)
  * @attr {string} variant - Visual variant: "default" or "inverse" (for light text on dark bg)
  * @attr {boolean} streaming - Shows a blinking cursor at the end (for streaming content)
  * @attr {boolean} compact - Reduces paragraph spacing for more compact display
  *
  * @csspart content - The markdown content wrapper
+ *
+ * @fires ct-checkbox-change - Fired when a task list checkbox is toggled. Detail: { index: number, checked: boolean }
  *
  * @cssprop [--ct-markdown-inverse-border=rgba(255,255,255,0.3)] - Border color for inverse variant
  * @cssprop [--ct-markdown-inverse-surface=rgba(255,255,255,0.2)] - Surface color for inverse variant (code blocks)
@@ -365,12 +367,13 @@ export class CTMarkdown extends BaseElement {
       /* Task lists */
       .markdown-content input[type="checkbox"] {
         margin-right: 0.5em;
+        cursor: pointer;
       }
     `,
   ];
 
   @property({ attribute: false })
-  declare content: Cell<string> | string;
+  declare content: CellHandle<string> | string;
 
   @property({ type: String, reflect: true })
   declare variant: MarkdownVariant;
@@ -396,7 +399,7 @@ export class CTMarkdown extends BaseElement {
   }
 
   private _getContentValue(): string {
-    if (isCell(this.content)) {
+    if (isCellHandle<string>(this.content)) {
       return this.content.get() ?? "";
     }
     return this.content ?? "";
@@ -516,8 +519,8 @@ export class CTMarkdown extends BaseElement {
       }
 
       // Subscribe to new Cell if it's a Cell
-      if (this.content && isCell(this.content)) {
-        this._unsubscribe = this.content.sink(() => {
+      if (this.content && isCellHandle(this.content)) {
+        this._unsubscribe = this.content.subscribe(() => {
           this.requestUpdate();
         });
       }
@@ -539,7 +542,46 @@ export class CTMarkdown extends BaseElement {
     if (changedProperties.has("theme") && this.theme) {
       this._updateThemeProperties();
     }
+
+    // Attach click handlers to checkboxes after content is rendered
+    this._attachCheckboxHandlers();
   }
+
+  private _attachCheckboxHandlers() {
+    const container = this.shadowRoot?.querySelector(".markdown-content");
+    if (!container) return;
+
+    const checkboxes = container.querySelectorAll('input[type="checkbox"]');
+    checkboxes.forEach((checkbox, index) => {
+      const inputEl = checkbox as HTMLInputElement;
+
+      // Remove the disabled attribute that marked adds by default
+      inputEl.removeAttribute("disabled");
+
+      // Remove existing handler to prevent duplicates
+      inputEl.removeEventListener("change", this._handleCheckboxChange);
+
+      // Store index as data attribute for retrieval in handler
+      inputEl.dataset.checkboxIndex = String(index);
+
+      // Add new handler
+      inputEl.addEventListener("change", this._handleCheckboxChange);
+    });
+  }
+
+  private _handleCheckboxChange = (event: Event) => {
+    const checkbox = event.target as HTMLInputElement;
+    const index = parseInt(checkbox.dataset.checkboxIndex ?? "0", 10);
+    const checked = checkbox.checked;
+
+    this.dispatchEvent(
+      new CustomEvent("ct-checkbox-change", {
+        detail: { index, checked },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  };
 
   override disconnectedCallback() {
     super.disconnectedCallback();

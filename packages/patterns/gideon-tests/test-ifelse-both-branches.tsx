@@ -25,7 +25,6 @@
  * - The hidden branch's counter stays frozen until it becomes visible
  */
 import {
-  Cell,
   computed,
   Default,
   handler,
@@ -33,6 +32,7 @@ import {
   NAME,
   pattern,
   UI,
+  Writable,
 } from "commontools";
 
 interface Input {
@@ -49,7 +49,7 @@ interface Output {
 
 const toggle = handler<
   unknown,
-  { condition: Cell<boolean>; toggleCount: Cell<number> }
+  { condition: Writable<boolean>; toggleCount: Writable<number> }
 >((_event, { condition, toggleCount }) => {
   condition.set(!condition.get());
   toggleCount.set(toggleCount.get() + 1);
@@ -57,8 +57,8 @@ const toggle = handler<
 
 export default pattern<Input, Output>(({ condition, toggleCount }) => {
   // Internal cells for tracking eval counts - NOT pattern inputs
-  const trueBranchEvalCount = Cell.of(0);
-  const falseBranchEvalCount = Cell.of(0);
+  const trueBranchEvalCount = Writable.of(0);
+  const falseBranchEvalCount = Writable.of(0);
 
   // TRUE BRANCH: Increment internal counter each time this computed runs
   // Close over condition to create reactive dependency

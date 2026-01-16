@@ -5,10 +5,29 @@ import { dev } from "./dev.ts";
 import { init } from "./init.ts";
 import { charm } from "./charm.ts";
 import { identity } from "./identity.ts";
+import { test } from "./test.ts";
+
+const mainDescription = `Tool for running programs on common fabric.
+
+QUICK START:
+  ct dev ./pattern.tsx              # Type-check and test locally
+  ct charm new ./pattern.tsx ...    # Deploy to a space
+  ct charm --help                   # Help for deployed patterns (with tips)
+
+FIRST TIME SETUP:
+  ct id new > claude.key            # Create identity key
+  export CT_IDENTITY=./claude.key   # Set default identity
+  export CT_API_URL=http://localhost:8000  # Set default API URL
+
+LOCAL DEVELOPMENT:
+  ./scripts/start-local-dev.sh      # Start local servers
+  ./scripts/stop-local-dev.sh       # Stop local servers
+
+Run 'ct <command> --help' for command-specific help.`;
 
 export const main = new Command()
   .name("ct")
-  .description("Tool for running programs on common fabric.")
+  .description(mainDescription)
   .version("0.0.1")
   // Add global help subcommand to all commands
   // like `ct foo help` -- this is OK, but the most appealing
@@ -27,4 +46,5 @@ export const main = new Command()
   .command("charm", charm)
   .command("dev", dev)
   .command("id", identity)
-  .command("init", init);
+  .command("init", init)
+  .command("test", test);

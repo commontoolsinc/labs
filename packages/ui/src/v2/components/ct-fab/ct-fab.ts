@@ -1,9 +1,10 @@
 import { css, html, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import type { Cell } from "@commontools/runner";
-import { isCell } from "@commontools/runner";
+import type { CellHandle } from "@commontools/runtime-client";
+import { isCellHandle } from "@commontools/runtime-client";
 import { fabAnimations } from "./styles.ts";
+import { stringSchema } from "@commontools/runner/schemas";
 
 /**
  * A morphing floating action button that expands into a panel.
@@ -352,7 +353,11 @@ export class CTFab extends BaseElement {
          * Latest message to show as preview notification
          */
         @property({ type: Object, attribute: false })
-        declare previewMessage: Cell<string> | string | undefined;
+        declare previewMessage: CellHandle<string> | string | undefined;
+
+        // The resolved value from `previewMessage`
+        @state()
+        _resolvedPreviewMessage: string | undefined;
 
         /**
          * Whether the FAB is in pending/loading state
@@ -406,22 +411,29 @@ export class CTFab extends BaseElement {
 
           // Handle preview message Cell subscription
           if (changedProperties.has("previewMessage")) {
+            this._resolvedPreviewMessage = undefined;
             if (this._previewUnsubscribe) {
               this._previewUnsubscribe();
               this._previewUnsubscribe = null;
             }
 
-            if (this.previewMessage && isCell(this.previewMessage)) {
-              this._previewUnsubscribe = this.previewMessage.sink(() => {
-                const msg = (this.previewMessage as Cell<string>).get();
-                if (msg && !this.expanded) {
-                  this._showPreviewNotification();
-                }
-              });
+            if (
+              this.previewMessage && isCellHandle<string>(this.previewMessage)
+            ) {
+              this._previewUnsubscribe = this.previewMessage
+                .asSchema<string>(stringSchema)
+                .subscribe(
+                  (value) => {
+                    this._resolvedPreviewMessage = value;
+                    if (this._resolvedPreviewMessage && !this.expanded) {
+                      this._showPreviewNotification();
+                    }
+                  },
+                );
             } else if (
               this.previewMessage && typeof this.previewMessage === "string"
             ) {
-              // Handle plain string case
+              this._resolvedPreviewMessage = this.previewMessage;
               if (this.previewMessage && !this.expanded) {
                 this._showPreviewNotification();
               }
@@ -497,10 +509,7 @@ export class CTFab extends BaseElement {
         }
 
         override render() {
-          const previewMsg = this.previewMessage && isCell(this.previewMessage)
-            ? this.previewMessage.get()
-            : this.previewMessage;
-
+          const previewMsg = this._resolvedPreviewMessage;
           return html`
             <!-- Backdrop -->
             <div

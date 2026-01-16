@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  Cell,
   computed,
   generateObject,
   NAME,
@@ -9,6 +8,7 @@ import {
   str,
   toSchema,
   UI,
+  Writable,
 } from "commontools";
 import { readWebpage, searchWeb } from "./system/common-tools.tsx";
 
@@ -31,9 +31,9 @@ export default pattern<
   { question: string; context?: { [id: string]: any } },
   {
     question: string;
-    result: Cell<ResearchResult | undefined>;
+    result: Writable<ResearchResult | undefined>;
     pending: boolean;
-    error: string | undefined;
+    error: unknown;
   }
 >(({ question, context }) => {
   const research = generateObject({
@@ -68,7 +68,7 @@ Be thorough - search for multiple aspects of the question and read several sourc
         />
         {computed(() => {
           if (research.pending) return <div>Researching...</div>;
-          if (research.error) return <div>Error: {research.error}</div>;
+          if (research.error) return <div>Error: {String(research.error)}</div>;
           if (!research.result) return <div>No results</div>;
           return (
             <div>

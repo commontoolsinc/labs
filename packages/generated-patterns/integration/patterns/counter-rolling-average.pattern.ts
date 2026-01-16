@@ -33,21 +33,27 @@ const recordAndAverage = handler(
   },
 );
 
+const liftAverage = lift((entries: number[] | undefined) => {
+  const list = Array.isArray(entries) ? entries : [];
+  if (list.length === 0) return 0;
+  const total = list.reduce((sum, item) => sum + item, 0);
+  return total / list.length;
+});
+
+const liftCurrentValue = lift((count: number | undefined) =>
+  typeof count === "number" ? count : 0
+);
+
+const liftHistoryView = lift((entries: number[] | undefined) =>
+  Array.isArray(entries) ? entries : []
+);
+
 export const counterWithRollingAverage = recipe<RollingAverageArgs>(
   "Counter With Rolling Average",
   ({ value, history, window }) => {
-    const average = lift((entries: number[] | undefined) => {
-      const list = Array.isArray(entries) ? entries : [];
-      if (list.length === 0) return 0;
-      const total = list.reduce((sum, item) => sum + item, 0);
-      return total / list.length;
-    })(history);
-    const currentValue = lift((count: number | undefined) =>
-      typeof count === "number" ? count : 0
-    )(value);
-    const historyView = lift((entries: number[] | undefined) =>
-      Array.isArray(entries) ? entries : []
-    )(history);
+    const average = liftAverage(history);
+    const currentValue = liftCurrentValue(value);
+    const historyView = liftHistoryView(history);
 
     return {
       value,
@@ -61,3 +67,5 @@ export const counterWithRollingAverage = recipe<RollingAverageArgs>(
     };
   },
 );
+
+export default counterWithRollingAverage;

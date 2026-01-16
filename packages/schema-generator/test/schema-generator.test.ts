@@ -230,4 +230,58 @@ interface HasImage {
       });
     });
   });
+
+  describe("non-serializable type rejection", () => {
+    it("throws error for Map type", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+interface HasMap {
+  data: Map<string, number>;
+}`;
+      const { type, checker } = await getTypeFromCode(code, "HasMap");
+
+      expect(() => generator.generateSchema(type, checker)).toThrow(
+        /Map cannot be used in pattern inputs\/outputs because it is not JSON-serializable/,
+      );
+    });
+
+    it("throws error for Set type", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+interface HasSet {
+  items: Set<string>;
+}`;
+      const { type, checker } = await getTypeFromCode(code, "HasSet");
+
+      expect(() => generator.generateSchema(type, checker)).toThrow(
+        /Set cannot be used in pattern inputs\/outputs because it is not JSON-serializable/,
+      );
+    });
+
+    it("throws error for WeakMap type", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+interface HasWeakMap {
+  cache: WeakMap<object, string>;
+}`;
+      const { type, checker } = await getTypeFromCode(code, "HasWeakMap");
+
+      expect(() => generator.generateSchema(type, checker)).toThrow(
+        /WeakMap cannot be used in pattern inputs\/outputs because it is not JSON-serializable/,
+      );
+    });
+
+    it("throws error for WeakSet type", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+interface HasWeakSet {
+  seen: WeakSet<object>;
+}`;
+      const { type, checker } = await getTypeFromCode(code, "HasWeakSet");
+
+      expect(() => generator.generateSchema(type, checker)).toThrow(
+        /WeakSet cannot be used in pattern inputs\/outputs because it is not JSON-serializable/,
+      );
+    });
+  });
 });

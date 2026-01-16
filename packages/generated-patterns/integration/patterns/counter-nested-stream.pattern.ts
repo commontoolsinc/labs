@@ -28,3 +28,5 @@ export const counterWithNestedStream = recipe<NestedStreamArgs>(
     };
   },
 );
+
+export default counterWithNestedStream;

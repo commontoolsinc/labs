@@ -242,53 +242,83 @@ const assignParticipant = handler(
   },
 );
 
+const liftToNormalizedVariants = lift(toNormalizedVariants);
+
+const liftSanitizeAssignments = lift(
+  (input: {
+    assignments: AssignmentMap | undefined;
+    variants: NormalizedVariant[];
+  }) => sanitizeAssignments(input.assignments, input.variants),
+);
+
+const liftCountAssignments = lift(
+  (input: {
+    variants: NormalizedVariant[];
+    assignments: AssignmentMap;
+  }) => countAssignments(input.variants, input.assignments),
+);
+
+const liftTotalAssignments = lift((record: Record<string, number>) =>
+  Object.values(record).reduce((sum, value) => sum + value, 0)
+);
+
+const liftComputeAllocation = lift(
+  (input: {
+    variants: NormalizedVariant[];
+    counts: Record<string, number>;
+  }) => computeAllocation(input.variants, input.counts),
+);
+
+const liftComputeBalance = lift(computeBalance);
+
+const liftVariantManifest = lift(
+  (entries: NormalizedVariant[]) =>
+    entries.map((entry) => ({ name: entry.name, weight: entry.weight })),
+);
+
+const liftAssignmentHistoryView = lift((entries: string[] | undefined) =>
+  Array.isArray(entries) ? entries : []
+);
+
+const liftBuildSummaryText = lift(
+  (input: { entries: AllocationEntry[]; total: number }) =>
+    buildSummaryText(input.entries, input.total),
+);
+
 export const experimentAssignmentPattern = recipe<ExperimentAssignmentArgs>(
   "Experiment Assignment Pattern",
   ({ variants, assignments }) => {
     const assignmentHistory = cell<string[]>([]);
 
-    const normalizedVariants = lift(toNormalizedVariants)(variants);
+    const normalizedVariants = liftToNormalizedVariants(variants);
 
-    const assignmentMap = lift(
-      (input: {
-        assignments: AssignmentMap | undefined;
-        variants: NormalizedVariant[];
-      }) => sanitizeAssignments(input.assignments, input.variants),
-    )({ assignments, variants: normalizedVariants });
+    const assignmentMap = liftSanitizeAssignments({
+      assignments,
+      variants: normalizedVariants,
+    });
 
-    const counts = lift(
-      (input: {
-        variants: NormalizedVariant[];
-        assignments: AssignmentMap;
-      }) => countAssignments(input.variants, input.assignments),
-    )({ variants: normalizedVariants, assignments: assignmentMap });
+    const counts = liftCountAssignments({
+      variants: normalizedVariants,
+      assignments: assignmentMap,
+    });
 
-    const totalAssignments = lift((record: Record<string, number>) =>
-      Object.values(record).reduce((sum, value) => sum + value, 0)
-    )(counts);
+    const totalAssignments = liftTotalAssignments(counts);
 
-    const allocation = lift(
-      (input: {
-        variants: NormalizedVariant[];
-        counts: Record<string, number>;
-      }) => computeAllocation(input.variants, input.counts),
-    )({ variants: normalizedVariants, counts });
+    const allocation = liftComputeAllocation({
+      variants: normalizedVariants,
+      counts,
+    });
 
-    const balance = lift(computeBalance)(allocation);
+    const balance = liftComputeBalance(allocation);
 
-    const variantManifest = lift(
-      (entries: NormalizedVariant[]) =>
-        entries.map((entry) => ({ name: entry.name, weight: entry.weight })),
-    )(normalizedVariants);
+    const variantManifest = liftVariantManifest(normalizedVariants);
 
-    const assignmentHistoryView = lift((entries: string[] | undefined) =>
-      Array.isArray(entries) ? entries : []
-    )(assignmentHistory);
+    const assignmentHistoryView = liftAssignmentHistoryView(assignmentHistory);
 
-    const summaryText = lift(
-      (input: { entries: AllocationEntry[]; total: number }) =>
-        buildSummaryText(input.entries, input.total),
-    )({ entries: allocation, total: totalAssignments });
+    const summaryText = liftBuildSummaryText({
+      entries: allocation,
+      total: totalAssignments,
+    });
 
     const label = str`${summaryText}`;
 
@@ -309,3 +339,5 @@ export const experimentAssignmentPattern = recipe<ExperimentAssignmentArgs>(
     };
   },
 );
+
+export default experimentAssignmentPattern;

@@ -13,7 +13,6 @@
  */
 
 import {
-  Cell,
   computed,
   type Default,
   handler,
@@ -21,9 +20,11 @@ import {
   lift,
   NAME,
   pattern,
+  SELF,
   str,
   toSchema,
   UI,
+  Writable,
 } from "commontools";
 import {
   createSubCharm,
@@ -37,7 +38,6 @@ import { inferTypeFromModules } from "./record/template-registry.ts";
 import { TypePickerModule } from "./type-picker.tsx";
 import { ExtractorModule } from "./record/extraction/extractor-module.tsx";
 import { getResultSchema } from "./record/extraction/schema-utils.ts";
-import type { ContainerCoordinationContext } from "./container-protocol.ts";
 import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
 
 // ===== Standard Labels for Smart Defaults =====
@@ -91,6 +91,8 @@ interface RecordOutput {
   title?: Default<string, "">;
   subCharms?: Default<SubCharmEntry[], []>;
   trashedSubCharms?: Default<TrashedSubCharmEntry[], []>;
+  /** Self-reference for sub-charms to access their parent Record */
+  parentRecord?: RecordOutput | null;
 }
 
 // ===== Auto-Initialize Notes + TypePicker (Two-Lift Pattern) =====
@@ -109,8 +111,8 @@ const storeInitialCharms = lift(
     notesSchema: unknown;
     typePickerCharm: unknown;
     typePickerSchema: unknown;
-    subCharms: Cell<SubCharmEntry[]>;
-    isInitialized: Cell<boolean>;
+    subCharms: Writable<SubCharmEntry[]>;
+    isInitialized: Writable<boolean>;
   }>(),
   undefined,
   ({
@@ -143,9 +145,9 @@ const storeInitialCharms = lift(
 const initializeRecord = lift(
   toSchema<{
     currentCharms: SubCharmEntry[]; // Unwrapped value, not Cell
-    subCharms: Cell<SubCharmEntry[]>;
-    trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
-    isInitialized: Cell<boolean>;
+    subCharms: Writable<SubCharmEntry[]>;
+    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
+    isInitialized: Writable<boolean>;
     recordPatternJson: string; // Computed that returns Record JSON string
   }>(),
   undefined,
@@ -163,26 +165,17 @@ const initializeRecord = lift(
       // Pass recordPatternJson so [[wiki-links]] create Record charms instead of Note charms
       const notesCharm = Note({ linkPattern: recordPatternJson });
 
-      // Build ContainerCoordinationContext for TypePicker
-      const context: ContainerCoordinationContext<SubCharmEntry> = {
-        entries: subCharms,
-        trashedEntries: trashedSubCharms as Cell<
-          (SubCharmEntry & { trashedAt: string })[]
-        >,
-        createModule: (type: string) => {
-          if (type === "notes") {
-            return Note({ linkPattern: recordPatternJson });
-          }
-          return createSubCharm(type);
-        },
-      };
-
       // Capture schema for dynamic discovery
       const notesSchema = getResultSchema(notesCharm);
 
-      // TypePicker uses the ContainerCoordinationContext protocol
+      // TypePicker receives Cells as top-level props (CTS handles serialization correctly)
+      // NOTE: Cells must be top-level, not nested in a context object!
       // deno-lint-ignore no-explicit-any
-      const typePickerCharm = TypePickerModule({ context } as any);
+      const typePickerCharm = TypePickerModule({
+        entries: subCharms,
+        trashedEntries: trashedSubCharms,
+        linkPatternJson: recordPatternJson,
+      } as any);
 
       // Capture schema for dynamic discovery
       const typePickerSchema = getResultSchema(typePickerCharm);
@@ -213,7 +206,7 @@ const moduleHasSettings = lift(
 // Toggle pin state for a sub-charm - uses entry reference, not index
 const togglePin = handler<
   unknown,
-  { subCharms: Cell<SubCharmEntry[]>; index: number }
+  { subCharms: Writable<SubCharmEntry[]>; index: number }
 >((_event, { subCharms: sc, index }) => {
   const current = sc.get() || [];
   const entry = current[index];
@@ -227,7 +220,7 @@ const togglePin = handler<
 // Toggle collapsed state for a sub-charm - uses index for reliable lookup
 const toggleCollapsed = handler<
   unknown,
-  { subCharms: Cell<SubCharmEntry[]>; index: number }
+  { subCharms: Writable<SubCharmEntry[]>; index: number }
 >((_event, { subCharms: sc, index }) => {
   const current = sc.get() || [];
   const entry = current[index];
@@ -242,7 +235,7 @@ const toggleCollapsed = handler<
 // Simple index-based approach: tracks which index is expanded (ephemeral UI state)
 const toggleExpanded = handler<
   unknown,
-  { expandedIndex: Cell<number | undefined>; index: number }
+  { expandedIndex: Writable<number | undefined>; index: number }
 >((_event, { expandedIndex, index }) => {
   const current = expandedIndex.get();
   if (current === index) {
@@ -257,20 +250,21 @@ const toggleExpanded = handler<
 // Close expanded module (used by Escape key and backdrop click)
 const closeExpanded = handler<
   unknown,
-  { expandedIndex: Cell<number | undefined> }
+  { expandedIndex: Writable<number | undefined> }
 >((_event, { expandedIndex }) => {
   expandedIndex.set(undefined);
 });
 
 // Add a new sub-charm
 // Note: Receives recordPatternJson to create Notes with correct wiki-link target
-// Note: Controller modules (extractor) also receive parent Cells
+// Note: Controller modules (extractor) also receive parent Cells and title
 const addSubCharm = handler<
   { detail: { value: string } },
   {
-    subCharms: Cell<SubCharmEntry[]>;
-    trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
-    selectedAddType: Cell<string>;
+    subCharms: Writable<SubCharmEntry[]>;
+    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
+    title: Writable<string>;
+    selectedAddType: Writable<string>;
     recordPatternJson: string;
   }
 >((
@@ -278,6 +272,7 @@ const addSubCharm = handler<
   {
     subCharms: sc,
     trashedSubCharms: trash,
+    title,
     selectedAddType: sat,
     recordPatternJson,
   },
@@ -294,13 +289,14 @@ const addSubCharm = handler<
 
   // Special case: create Note (rendered via ct-render variant="embedded")
   // Pass recordPatternJson so [[wiki-links]] create Record charms instead of Note charms
-  // Special case: create ExtractorModule as controller with parent Cells
+  // Special case: create ExtractorModule as controller with parent Cells and title
   const charm = type === "notes"
     ? Note({ linkPattern: recordPatternJson })
     : type === "extractor"
     ? ExtractorModule({
       parentSubCharms: sc,
       parentTrashedSubCharms: trash,
+      parentTitle: title,
     } as any)
     : createSubCharm(type, initialValues);
 
@@ -321,10 +317,10 @@ const addSubCharm = handler<
 const trashSubCharm = handler<
   unknown,
   {
-    subCharms: Cell<SubCharmEntry[]>;
-    trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
-    expandedIndex: Cell<number | undefined>;
-    settingsModuleIndex: Cell<number | undefined>;
+    subCharms: Writable<SubCharmEntry[]>;
+    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
+    expandedIndex: Writable<number | undefined>;
+    settingsModuleIndex: Writable<number | undefined>;
     index: number;
   }
 >((
@@ -378,8 +374,8 @@ const trashSubCharm = handler<
 const restoreSubCharm = handler<
   unknown,
   {
-    subCharms: Cell<SubCharmEntry[]>;
-    trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
+    subCharms: Writable<SubCharmEntry[]>;
+    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
     trashIndex: number;
   }
 >((_event, { subCharms: sc, trashedSubCharms: trash, trashIndex }) => {
@@ -401,7 +397,7 @@ const restoreSubCharm = handler<
 const permanentlyDelete = handler<
   unknown,
   {
-    trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
+    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
     trashIndex: number;
   }
 >((_event, { trashedSubCharms: trash, trashIndex }) => {
@@ -416,7 +412,7 @@ const permanentlyDelete = handler<
 // Empty all trash
 const emptyTrash = handler<
   unknown,
-  { trashedSubCharms: Cell<TrashedSubCharmEntry[]> }
+  { trashedSubCharms: Writable<TrashedSubCharmEntry[]> }
 >((_event, { trashedSubCharms: trash }) => {
   trash.set([]);
 });
@@ -425,9 +421,9 @@ const emptyTrash = handler<
 const openNoteEditor = handler<
   unknown,
   {
-    subCharms: Cell<SubCharmEntry[]>;
-    editingNoteIndex: Cell<number | undefined>;
-    editingNoteText: Cell<string | undefined>;
+    subCharms: Writable<SubCharmEntry[]>;
+    editingNoteIndex: Writable<number | undefined>;
+    editingNoteText: Writable<string | undefined>;
     index: number;
   }
 >((_event, { subCharms, editingNoteIndex, editingNoteText, index }) => {
@@ -442,9 +438,9 @@ const openNoteEditor = handler<
 const saveNote = handler<
   unknown,
   {
-    subCharms: Cell<SubCharmEntry[]>;
-    editingNoteIndex: Cell<number | undefined>;
-    editingNoteText: Cell<string | undefined>;
+    subCharms: Writable<SubCharmEntry[]>;
+    editingNoteIndex: Writable<number | undefined>;
+    editingNoteText: Writable<string | undefined>;
   }
 >((_event, { subCharms: sc, editingNoteIndex, editingNoteText }) => {
   const index = editingNoteIndex.get();
@@ -468,10 +464,10 @@ const saveNote = handler<
 
 // Close the note editor without saving
 const closeNoteEditor = handler<
-  unknown,
+  { reason: string },
   {
-    editingNoteIndex: Cell<number | undefined>;
-    editingNoteText: Cell<string | undefined>;
+    editingNoteIndex: Writable<number | undefined>;
+    editingNoteText: Writable<string | undefined>;
   }
 >((_event, { editingNoteIndex, editingNoteText }) => {
   editingNoteIndex.set(undefined);
@@ -482,7 +478,7 @@ const closeNoteEditor = handler<
 const openSettings = handler<
   unknown,
   {
-    settingsModuleIndex: Cell<number | undefined>;
+    settingsModuleIndex: Writable<number | undefined>;
     index: number;
   }
 >((_event, { settingsModuleIndex, index }) => {
@@ -491,14 +487,14 @@ const openSettings = handler<
 
 // Close the settings modal
 const closeSettings = handler<
-  unknown,
-  { settingsModuleIndex: Cell<number | undefined> }
+  { reason: string },
+  { settingsModuleIndex: Writable<number | undefined> }
 >((_event, { settingsModuleIndex }) => {
   settingsModuleIndex.set(undefined);
 });
 
 // Toggle trash section expanded/collapsed
-const toggleTrashExpanded = handler<unknown, { expanded: Cell<boolean> }>(
+const toggleTrashExpanded = handler<unknown, { expanded: Writable<boolean> }>(
   (_event, { expanded }) => expanded.set(!expanded.get()),
 );
 
@@ -510,10 +506,10 @@ const toggleTrashExpanded = handler<unknown, { expanded: Cell<boolean> }>(
 // Get a structured summary of all modules in this record
 // Returns module types, their data, and schemas for LLM context
 const handleGetSummary = handler<
-  { result?: Cell<unknown> },
+  { result?: Writable<unknown> },
   {
-    title: Cell<string>;
-    subCharms: Cell<SubCharmEntry[]>;
+    title: Writable<string>;
+    subCharms: Writable<SubCharmEntry[]>;
   }
 >(({ result }, { title, subCharms }) => {
   const modules = subCharms.get() || [];
@@ -549,6 +545,9 @@ const handleGetSummary = handler<
         }
         if (charm?.url !== undefined) moduleData.url = charm.url;
         if (charm?.notes !== undefined) moduleData.notes = charm.notes;
+        if (charm?.occurrences !== undefined) {
+          moduleData.occurrences = charm.occurrences;
+        }
       } catch {
         // Ignore errors from charms without expected fields
       }
@@ -577,15 +576,16 @@ const handleAddModule = handler<
   {
     type: string;
     initialData?: Record<string, unknown>;
-    result?: Cell<unknown>;
+    result?: Writable<unknown>;
   },
   {
-    subCharms: Cell<SubCharmEntry[]>;
-    trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
+    subCharms: Writable<SubCharmEntry[]>;
+    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
+    title: Writable<string>;
   }
 >((
   { type, initialData, result },
-  { subCharms: sc, trashedSubCharms: trash },
+  { subCharms: sc, trashedSubCharms: trash, title },
 ) => {
   if (!type) {
     if (result) {
@@ -627,10 +627,11 @@ const handleAddModule = handler<
     }
     return;
   } else if (type === "extractor") {
-    // ExtractorModule needs parent Cells
+    // ExtractorModule needs parent Cells and title
     charm = ExtractorModule({
       parentSubCharms: sc,
       parentTrashedSubCharms: trash,
+      parentTitle: title,
       // deno-lint-ignore no-explicit-any
     } as any);
   } else {
@@ -663,8 +664,8 @@ const handleAddModule = handler<
 // field: field name to update
 // value: new value
 const handleUpdateModule = handler<
-  { index: number; field: string; value: unknown; result?: Cell<unknown> },
-  { subCharms: Cell<SubCharmEntry[]> }
+  { index: number; field: string; value: unknown; result?: Writable<unknown> },
+  { subCharms: Writable<SubCharmEntry[]> }
 >(({ index, field, value, result }, { subCharms: sc }) => {
   const current = sc.get() || [];
 
@@ -727,10 +728,10 @@ const handleUpdateModule = handler<
 
 // Remove a module (move to trash)
 const handleRemoveModule = handler<
-  { index: number; result?: Cell<unknown> },
+  { index: number; result?: Writable<unknown> },
   {
-    subCharms: Cell<SubCharmEntry[]>;
-    trashedSubCharms: Cell<TrashedSubCharmEntry[]>;
+    subCharms: Writable<SubCharmEntry[]>;
+    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
   }
 >(({ index, result }, { subCharms: sc, trashedSubCharms: trash }) => {
   const current = sc.get() || [];
@@ -770,8 +771,8 @@ const handleRemoveModule = handler<
 
 // Set the record title
 const handleSetTitle = handler<
-  { newTitle: string; result?: Cell<unknown> },
-  { title: Cell<string> }
+  { newTitle: string; result?: Writable<unknown> },
+  { title: Writable<string> }
 >(({ newTitle, result }, { title }) => {
   if (newTitle === undefined || newTitle === null) {
     if (result) {
@@ -785,7 +786,7 @@ const handleSetTitle = handler<
 
 // List available module types that can be added
 const handleListModuleTypes = handler<
-  { result?: Cell<unknown> },
+  { result?: Writable<unknown> },
   Record<string, never>
 >(({ result }) => {
   const types = getAddableTypes().map((def) => ({
@@ -801,7 +802,7 @@ const handleListModuleTypes = handler<
 // Used by '+' button in module headers for email/phone/address
 const createSibling = handler<
   unknown,
-  { subCharms: Cell<SubCharmEntry[]>; index: number }
+  { subCharms: Writable<SubCharmEntry[]>; index: number }
 >((_event, { subCharms: sc, index }) => {
   const current = sc.get() || [];
   const entry = current[index];
@@ -825,12 +826,27 @@ const createSibling = handler<
   sc.set(updated);
 });
 
+// ===== Module-scope helper function =====
+// Plain helper to get display info - NOT a lift function
+// This is called inside computed() blocks after values are accessed
+function getDisplayInfo(
+  type: string,
+  charmLabel?: string,
+): { icon: string; label: string; allowMultiple: boolean } {
+  const def = getDefinition(type);
+  return {
+    icon: def?.icon || "📋",
+    label: charmLabel || def?.label || type,
+    allowMultiple: def?.allowMultiple || false,
+  };
+}
+
 // ===== The Record Pattern =====
 const Record = pattern<RecordInput, RecordOutput>(
-  ({ title, subCharms, trashedSubCharms }) => {
+  ({ title, subCharms, trashedSubCharms, [SELF]: self }) => {
     // Local state
-    const selectedAddType = Cell.of<string>("");
-    const trashExpanded = Cell.of(false);
+    const selectedAddType = Writable.of<string>("");
+    const trashExpanded = Writable.of(false);
 
     // Note editor modal state
     // NOTE: In the future, this should use a <ct-modal> component instead of inline implementation.
@@ -839,18 +855,18 @@ const Record = pattern<RecordInput, RecordOutput>(
     //     <content />
     //   </ct-modal>
     // With features: backdrop blur, escape key, focus trap, centered positioning, animations
-    // IMPORTANT: Don't use Cell.of(null) - it creates a cell pointing to null, not primitive null.
-    // Use Cell.of() without argument so .get() returns undefined (falsy) initially.
+    // IMPORTANT: Don't use Writable.of(null) - it creates a cell pointing to null, not primitive null.
+    // Use Writable.of() without argument so .get() returns undefined (falsy) initially.
     // We store the INDEX instead of the entry to decouple modal state from array updates.
-    const editingNoteIndex = Cell.of<number | undefined>();
-    const editingNoteText = Cell.of<string>();
+    const editingNoteIndex = Writable.of<number | undefined>();
+    const editingNoteText = Writable.of<string>();
 
     // Expanded (maximized) module state - ephemeral, not persisted
     // Simple index-based tracking - just stores which index is expanded
-    const expandedIndex = Cell.of<number | undefined>();
+    const expandedIndex = Writable.of<number | undefined>();
 
     // Settings modal state - tracks which module's settings are being edited
-    const settingsModuleIndex = Cell.of<number | undefined>();
+    const settingsModuleIndex = Writable.of<number | undefined>();
 
     // Create Record pattern JSON for wiki-links in Notes
     // Using computed() defers evaluation until render time, avoiding circular dependency
@@ -858,7 +874,7 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // ===== Auto-initialize Notes + TypePicker =====
     // Capture return value to force lift execution (fixes wiki-link creation)
-    const isInitialized = Cell.of(false);
+    const isInitialized = Writable.of(false);
     const _initialized = initializeRecord({
       currentCharms: subCharms,
       subCharms,
@@ -874,83 +890,72 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // Entry with index for rendering - preserves charm references (no spreading!)
     // isExpanded is pre-computed to avoid closure issues inside .map() callbacks
-    // displayInfo is pre-computed to avoid calling getModuleDisplay inside .map() JSX
+    // displayInfo is computed using module-scope lift() that properly unwraps Cell values
     type EntryWithIndex = {
       entry: SubCharmEntry;
       index: number;
       isExpanded: boolean;
-      displayInfo: { icon: string; label: string };
+      displayInfo: { icon: string; label: string; allowMultiple: boolean };
       isPinned: boolean;
+      allowMultiple: boolean;
     };
 
     // Pre-compute entries with their indices AND expanded state for stable reference during render
     // IMPORTANT: We do NOT spread entry properties - that breaks charm rendering
     // IMPORTANT: isExpanded must be computed here, not inside .map() - closures over cells in .map() don't work correctly
-    // IMPORTANT: displayInfo must be computed here to avoid calling lift inside .map() JSX
-    const {
-      pinnedEntries,
-      unpinnedEntries,
-      allEntries,
-      pinnedCount,
-      hasUnpinned,
-      hasExpandedModule,
-    } = lift(
-      (
-        { sc, expandedIdx }: {
-          sc: SubCharmEntry[];
-          expandedIdx: number | undefined;
-        },
-      ) => {
-        const entries = (sc || []).map((entry, index) => {
-          // Compute displayInfo inline (same logic as getModuleDisplay)
-          const def = getDefinition(entry.type);
+    // IMPORTANT: displayInfo uses getDisplayInfo (plain helper) - this works because
+    //   computed() transforms .map() callbacks to properly unwrap reactive values
+    const allEntriesWithIndex = computed(() => {
+      const expandedIdx = expandedIndex.get();
+      // Note: Don't use fallback (|| []) as it breaks CTS transformer's mapWithPattern
+      // subCharms is guaranteed to be an array by the Default type
+      return subCharms.map((entry, index) => {
+        // Get display info using plain helper function
+        // This works because CTS transforms .map() to properly unwrap reactive values
+        const displayInfo = getDisplayInfo(
+          entry.type,
           // deno-lint-ignore no-explicit-any
-          const charmLabel = (entry.charm as any)?.label;
-          const displayInfo = {
-            icon: def?.icon || "📋",
-            label: charmLabel || def?.label || entry.type,
-          };
-          return {
-            entry,
-            index,
-            isExpanded: expandedIdx === index,
-            displayInfo,
-            isPinned: entry.pinned || false,
-          };
-        });
-        const pinned = entries.filter((item) => item.entry?.pinned);
-        const unpinned = entries.filter((item) => !item.entry?.pinned);
+          (entry.charm as any)?.label,
+        );
         return {
-          pinnedEntries: pinned,
-          unpinnedEntries: unpinned,
-          allEntries: entries,
-          pinnedCount: pinned.length,
-          hasUnpinned: unpinned.length > 0,
-          hasExpandedModule: expandedIdx !== undefined,
+          entry,
+          index,
+          isExpanded: expandedIdx === index,
+          displayInfo,
+          isPinned: entry.pinned || false,
+          allowMultiple: displayInfo.allowMultiple,
         };
-      },
-    )({ sc: subCharms, expandedIdx: expandedIndex });
+      });
+    });
+
+    // Separate pinned from unpinned entries
+    const pinnedEntries = computed(() =>
+      allEntriesWithIndex.filter((item) => item.entry?.pinned)
+    );
+    const unpinnedEntries = computed(() =>
+      allEntriesWithIndex.filter((item) => !item.entry?.pinned)
+    );
+    const pinnedCount = computed(() => pinnedEntries.length);
+    const hasUnpinned = computed(() => unpinnedEntries.length > 0);
+    const hasExpandedModule = computed(() => expandedIndex.get() !== undefined);
+    const allEntries = allEntriesWithIndex;
 
     // Check if there are any module types available to add
     // (always true unless registry is empty - multiple of same type allowed)
     const hasTypesToAdd = getAddableTypes().length > 0;
 
-    // Extract just the module types - only recomputes when types change
-    const moduleTypes = lift((
-      { sc }: { sc: SubCharmEntry[] },
-    ) => [...new Set((sc || []).map((e) => e?.type).filter(Boolean))])({
-      sc: subCharms,
-    });
-
     // Build dropdown items from registry, separating new types from existing ones
-    // Now only recomputes when moduleTypes changes (not every subCharms change)
-    const addSelectItems = lift(({ types }: { types: string[] }) => {
-      const existingTypes = new Set(types);
+    // Note: Don't use fallback (|| []) as it breaks CTS transformer's mapWithPattern
+    const addSelectItems = computed(() => {
+      const types = [...new Set(subCharms.map((e) => e?.type).filter(Boolean))];
+      const existingTypes = new Set<string>(types);
       const allTypes = getAddableTypes();
 
-      const newTypes = allTypes.filter((def) => !existingTypes.has(def.type));
+      const newTypes = allTypes.filter((def) =>
+        !existingTypes.has(String(def.type))
+      );
       const existingTypesDefs = allTypes.filter((def) =>
-        existingTypes.has(def.type)
+        existingTypes.has(String(def.type))
       );
 
       const items: { value: string; label: string; disabled?: boolean }[] = [];
@@ -971,154 +976,109 @@ const Record = pattern<RecordInput, RecordOutput>(
       }
 
       return items;
-    })({ types: moduleTypes });
+    });
 
     // Infer record type from modules (data-up philosophy)
-    const inferredType = lift(({ sc }: { sc: SubCharmEntry[] }) => {
-      const moduleTypes = (sc || []).map((e) => e?.type).filter(Boolean);
-      return inferTypeFromModules(moduleTypes as string[]);
-    })({ sc: subCharms });
+    const inferredType = computed(() => {
+      const types = subCharms.map((e) => e?.type).filter(Boolean) as string[];
+      return inferTypeFromModules(types);
+    });
 
     // Check for manual icon override from record-icon module
-    const manualIcon = lift(({ sc }: { sc: SubCharmEntry[] }) => {
-      const iconModule = (sc || []).find((e) => e?.type === "record-icon");
+    // Note: Don't use fallback (|| []) as it breaks CTS transformer's method replacement
+    const manualIcon = computed(() => {
+      const iconModule = subCharms.find((e) => e?.type === "record-icon");
       if (!iconModule) return null;
-
-      try {
-        // Access the icon field from the charm pattern output
-        // deno-lint-ignore no-explicit-any
-        const charm = iconModule.charm as any;
-        const iconValue = charm?.icon;
-        // Return the icon if it's a non-empty string, otherwise null
-        return typeof iconValue === "string" && iconValue.trim()
-          ? iconValue.trim()
-          : null;
-      } catch {
-        return null;
-      }
-    })({ sc: subCharms });
+      // deno-lint-ignore no-explicit-any
+      const iconValue = (iconModule.charm as any)?.icon;
+      if (!iconValue) return null;
+      return typeof iconValue === "string" && iconValue.trim()
+        ? iconValue.trim()
+        : null;
+    });
 
     // Extract icon: manual icon takes precedence over inferred type
-    const recordIcon = lift(
-      ({
-        manual,
-        inferred,
-      }: {
-        manual: string | null;
-        inferred: { icon: string };
-      }) => manual || inferred?.icon || "\u{1F4CB}",
-    )({ manual: manualIcon, inferred: inferredType });
+    const recordIcon = computed(() => {
+      const manual = manualIcon;
+      const inferred = inferredType;
+      return manual || inferred?.icon || "\u{1F4CB}";
+    });
 
     // Extract nicknames from nickname modules for display in NAME
-    const nicknamesList = lift(({ sc }: { sc: SubCharmEntry[] }) => {
-      const nicknameModules = (sc || []).filter((e) => e?.type === "nickname");
+    // Note: Don't use fallback (|| []) as it breaks CTS transformer's method replacement
+    const nicknamesList = computed(() => {
+      const nicknameModules = subCharms.filter((e) => e?.type === "nickname");
       const nicknames: string[] = [];
       for (const mod of nicknameModules) {
         try {
-          // Access the nickname field from the charm pattern output
           // deno-lint-ignore no-explicit-any
-          const charm = mod.charm as any;
-          const nicknameValue = charm?.nickname;
+          const nicknameValue = (mod.charm as any)?.nickname;
           if (typeof nicknameValue === "string" && nicknameValue.trim()) {
             nicknames.push(nicknameValue.trim());
           }
         } catch {
-          // Ignore errors from charms without nickname field
+          // Ignore errors
         }
       }
       return nicknames;
-    })({ sc: subCharms });
+    });
 
     // Build display name with nickname alias if present
-    const displayNameWithAlias = lift(
-      ({
-        name,
-        nicknames,
-      }: {
-        name: string;
-        nicknames: string[];
-      }) => {
-        if (nicknames.length === 0) return name;
-        // Show all nicknames as aliases (aka Liz, Beth, Lizzie)
-        return `${name} (aka ${nicknames.join(", ")})`;
-      },
-    )({ name: displayName, nicknames: nicknamesList });
+    const displayNameWithAlias = computed(() => {
+      const name = displayName;
+      const nicknames = nicknamesList;
+      if (nicknames.length === 0) return name;
+      // Show all nicknames as aliases (aka Liz, Beth, Lizzie)
+      return `${name} (aka ${nicknames.join(", ")})`;
+    });
 
     // ===== Trash Section Computed Values =====
 
-    // Pre-compute trashed entries with displayInfo to avoid calling getModuleDisplay in .map() JSX
-    type TrashedEntryWithDisplay = {
-      entry: TrashedSubCharmEntry;
-      trashIndex: number;
-      displayInfo: { icon: string; label: string };
-    };
-    const trashedEntriesWithDisplay = lift(
-      ({ t }: { t: TrashedSubCharmEntry[] }) => {
-        return (t || []).map((entry, trashIndex) => {
-          // Compute displayInfo inline (same logic as getModuleDisplay)
-          const def = getDefinition(entry.type);
+    // Pre-compute trashed entries with displayInfo using getDisplayInfo helper
+    // Note: Don't use fallback (|| []) as it breaks CTS transformer's mapWithPattern
+    const trashedEntriesWithDisplay = computed(() => {
+      return trashedSubCharms.map((entry, trashIndex) => {
+        // Get display info using plain helper function
+        const displayInfo = getDisplayInfo(
+          entry.type,
           // deno-lint-ignore no-explicit-any
-          const charmLabel = (entry.charm as any)?.label;
-          const displayInfo = {
-            icon: def?.icon || "📋",
-            label: charmLabel || def?.label || entry.type,
-          };
-          return { entry, trashIndex, displayInfo };
-        });
-      },
-    )({ t: trashedSubCharms });
+          (entry.charm as any)?.label,
+        );
+        return { entry, trashIndex, displayInfo };
+      });
+    });
 
     // Compute trash count directly
-    const trashCount = lift(({ t }: { t: TrashedSubCharmEntry[] }) =>
-      (t || []).length
-    )({ t: trashedSubCharms });
+    const trashCount = computed(() => (trashedSubCharms || []).length);
 
     // Check if there are any trashed items
-    const hasTrash = lift(({ t }: { t: TrashedSubCharmEntry[] }) =>
-      (t || []).length > 0
-    )({ t: trashedSubCharms });
+    const hasTrash = computed(() => (trashedSubCharms || []).length > 0);
 
     // ===== Settings Modal Computed Values =====
 
     // Get the settings UI for the currently selected module (if any)
-    const currentSettingsUI = lift(
-      ({
-        idx,
-        sc,
-      }: {
-        idx: number | undefined;
-        sc: SubCharmEntry[];
-      }) => {
-        if (idx === undefined) return null;
-        const entry = sc?.[idx];
-        if (!entry) return null;
-        // Access settingsUI from the charm output
-        // deno-lint-ignore no-explicit-any
-        return (entry.charm as any)?.settingsUI || null;
-      },
-    )({ idx: settingsModuleIndex, sc: subCharms });
+    const currentSettingsUI = computed(() => {
+      const idx = settingsModuleIndex.get();
+      if (idx === undefined) return null;
+      const entry = subCharms[idx];
+      if (!entry) return null;
+      // deno-lint-ignore no-explicit-any
+      return (entry.charm as any)?.settingsUI || null;
+    });
 
     // Get display info for the module whose settings are open
-    const settingsModuleDisplay = lift(
-      ({
-        idx,
-        sc,
-      }: {
-        idx: number | undefined;
-        sc: SubCharmEntry[];
-      }) => {
-        if (idx === undefined) return { icon: "", label: "Settings" };
-        const entry = sc?.[idx];
-        if (!entry) return { icon: "", label: "Settings" };
-        const def = getDefinition(entry.type);
+    const settingsModuleDisplay = computed(() => {
+      const idx = settingsModuleIndex.get();
+      if (idx === undefined) return { icon: "", label: "Settings" };
+      const entry = subCharms[idx];
+      if (!entry) return { icon: "", label: "Settings" };
+      // Use plain helper function to get display info
+      return getDisplayInfo(
+        entry.type,
         // deno-lint-ignore no-explicit-any
-        const charmLabel = (entry.charm as any)?.label;
-        return {
-          icon: def?.icon || "📋",
-          label: charmLabel || def?.label || entry.type,
-        };
-      },
-    )({ idx: settingsModuleIndex, sc: subCharms });
+        (entry.charm as any)?.label,
+      );
+    });
 
     // ===== Main UI =====
     return {
@@ -1147,6 +1107,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                 onct-change={addSubCharm({
                   subCharms,
                   trashedSubCharms,
+                  title,
                   selectedAddType,
                   recordPatternJson,
                 })}
@@ -1179,7 +1140,16 @@ const Record = pattern<RecordInput, RecordOutput>(
                   }}
                 >
                   {pinnedEntries.map(
-                    ({ entry, index, isExpanded, displayInfo, isPinned }) => {
+                    (
+                      {
+                        entry,
+                        index,
+                        isExpanded,
+                        displayInfo,
+                        isPinned,
+                        allowMultiple,
+                      },
+                    ) => {
                       return (
                         <div
                           style={isExpanded
@@ -1277,7 +1247,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 }}
                               >
                                 {ifElse(
-                                  getDefinition(entry.type)?.allowMultiple,
+                                  allowMultiple,
                                   <button
                                     type="button"
                                     onClick={createSibling({
@@ -1435,13 +1405,12 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 minHeight: isExpanded ? "0" : "auto",
                               }}
                             >
-                              <ct-render
-                                $cell={entry.charm}
-                                variant={getDefinition(entry.type)
-                                    ?.hasEmbeddedUI
-                                  ? "embedded"
-                                  : undefined}
-                              />
+                              {computed(() => {
+                                const charm = entry.charm as any;
+                                // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
+                                return charm?.embeddedUI ??
+                                  <ct-render $cell={entry.charm} />;
+                              })}
                             </div>,
                             null,
                           )}
@@ -1462,7 +1431,16 @@ const Record = pattern<RecordInput, RecordOutput>(
                     }}
                   >
                     {unpinnedEntries.map(
-                      ({ entry, index, isExpanded, displayInfo, isPinned }) => {
+                      (
+                        {
+                          entry,
+                          index,
+                          isExpanded,
+                          displayInfo,
+                          isPinned,
+                          allowMultiple,
+                        },
+                      ) => {
                         return (
                           <div
                             style={isExpanded
@@ -1563,7 +1541,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   }}
                                 >
                                   {ifElse(
-                                    getDefinition(entry.type)?.allowMultiple,
+                                    allowMultiple,
                                     <button
                                       type="button"
                                       onClick={createSibling({
@@ -1721,13 +1699,12 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   minHeight: isExpanded ? "0" : "auto",
                                 }}
                               >
-                                <ct-render
-                                  $cell={entry.charm}
-                                  variant={getDefinition(entry.type)
-                                      ?.hasEmbeddedUI
-                                    ? "embedded"
-                                    : undefined}
-                                />
+                                {computed(() => {
+                                  const charm = entry.charm as any;
+                                  // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
+                                  return charm?.embeddedUI ??
+                                    <ct-render $cell={entry.charm} />;
+                                })}
                               </div>,
                               null,
                             )}
@@ -1748,7 +1725,16 @@ const Record = pattern<RecordInput, RecordOutput>(
                 }}
               >
                 {allEntries.map(
-                  ({ entry, index, isExpanded, displayInfo, isPinned }) => {
+                  (
+                    {
+                      entry,
+                      index,
+                      isExpanded,
+                      displayInfo,
+                      isPinned,
+                      allowMultiple,
+                    },
+                  ) => {
                     return (
                       <div
                         style={isExpanded
@@ -1845,7 +1831,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                               }}
                             >
                               {ifElse(
-                                getDefinition(entry.type)?.allowMultiple,
+                                allowMultiple,
                                 <button
                                   type="button"
                                   onClick={createSibling({ subCharms, index })}
@@ -2000,12 +1986,12 @@ const Record = pattern<RecordInput, RecordOutput>(
                               minHeight: isExpanded ? "0" : "auto",
                             }}
                           >
-                            <ct-render
-                              $cell={entry.charm}
-                              variant={getDefinition(entry.type)?.hasEmbeddedUI
-                                ? "embedded"
-                                : undefined}
-                            />
+                            {computed(() => {
+                              const charm = entry.charm as any;
+                              // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
+                              return charm?.embeddedUI ??
+                                <ct-render $cell={entry.charm} />;
+                            })}
                           </div>,
                           null,
                         )}
@@ -2279,11 +2265,14 @@ const Record = pattern<RecordInput, RecordOutput>(
       title,
       subCharms,
       trashedSubCharms,
+      // Self-reference for sub-charms to access their parent Record
+      // Enables cleaner parent-child relationships than ContainerCoordinationContext
+      parentRecord: self,
       "#record": true,
       // LLM-callable streams for Omnibot integration
       // Omnibot can invoke these via: invoke({ "@link": "/of:record-id/getSummary" }, {})
       getSummary: handleGetSummary({ title, subCharms }),
-      addModule: handleAddModule({ subCharms, trashedSubCharms }),
+      addModule: handleAddModule({ subCharms, trashedSubCharms, title }),
       updateModule: handleUpdateModule({ subCharms }),
       removeModule: handleRemoveModule({ subCharms, trashedSubCharms }),
       setTitle: handleSetTitle({ title }),

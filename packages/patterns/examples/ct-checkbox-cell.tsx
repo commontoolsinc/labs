@@ -1,28 +1,37 @@
 /// <cts-enable />
-import { Cell, Default, handler, ifElse, NAME, pattern, UI } from "commontools";
+import {
+  Default,
+  handler,
+  ifElse,
+  NAME,
+  pattern,
+  UI,
+  Writable,
+} from "commontools";
 
 interface CheckboxDemoInput {
-  simpleEnabled: Cell<Default<boolean, false>>;
-  trackedEnabled: Cell<Default<boolean, false>>;
+  simpleEnabled: Writable<Default<boolean, false>>;
+  trackedEnabled: Writable<Default<boolean, false>>;
 }
 
 interface CheckboxDemoOutput extends CheckboxDemoInput {}
 
+// Handler for checkbox changes - only needed when you want additional logic
+// Defined at module scope as required by the pattern system
+const toggleWithLogging = handler<
+  { detail: { checked: boolean } },
+  { enabled: Writable<boolean> }
+>(
+  ({ detail }, { enabled }) => {
+    const newValue = detail?.checked ?? false;
+    enabled.set(newValue);
+    // Additional side effects
+    console.log("Checkbox toggled to:", newValue);
+  },
+);
+
 export default pattern<CheckboxDemoInput, CheckboxDemoOutput>(
   ({ simpleEnabled, trackedEnabled }) => {
-    // Handler for checkbox changes - only needed when you want additional logic
-    const toggleWithLogging = handler<
-      { detail: { checked: boolean } },
-      { enabled: Cell<boolean> }
-    >(
-      ({ detail }, { enabled }) => {
-        const newValue = detail?.checked ?? false;
-        enabled.set(newValue);
-        // Additional side effects
-        console.log("Checkbox toggled to:", newValue);
-      },
-    );
-
     return {
       [NAME]: "Checkbox Demo",
       [UI]: (
@@ -72,7 +81,7 @@ export default pattern<CheckboxDemoInput, CheckboxDemoOutput>(
           <ct-card>
             <h4>Key Takeaway</h4>
             <p>
-              <strong>$checked automatically updates the Cell</strong>{" "}
+              <strong>$checked automatically updates the Writable</strong>{" "}
               - you don't need a handler unless you want to add extra logic
               beyond just updating the value.
             </p>

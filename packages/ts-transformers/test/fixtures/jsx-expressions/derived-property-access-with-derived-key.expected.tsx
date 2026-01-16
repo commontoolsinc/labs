@@ -41,32 +41,30 @@ export default recipe({
     type: "object",
     properties: {
         $UI: {
-            $ref: "#/$defs/Element"
+            $ref: "#/$defs/JSXElement"
         }
     },
     required: ["$UI"],
     $defs: {
-        Element: {
+        JSXElement: {
+            anyOf: [{
+                    $ref: "#/$defs/VNode"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }]
+        },
+        UIRenderable: {
             type: "object",
             properties: {
-                type: {
-                    type: "string",
-                    "enum": ["vnode"]
-                },
-                name: {
-                    type: "string"
-                },
-                props: {
-                    $ref: "#/$defs/Props"
-                },
-                children: {
-                    $ref: "#/$defs/RenderNode"
-                },
                 $UI: {
                     $ref: "#/$defs/VNode"
                 }
             },
-            required: ["type", "name", "props"]
+            required: ["$UI"]
         },
         VNode: {
             type: "object",
@@ -107,10 +105,18 @@ export default recipe({
                     type: "object",
                     properties: {}
                 }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
                     type: "array",
                     items: {
                         $ref: "#/$defs/RenderNode"
                     }
+                }, {
+                    type: "null"
                 }]
         },
         Props: {
@@ -457,27 +463,25 @@ export default recipe({
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, {
-                type: "object",
-                properties: {
-                    type: {
-                        type: "string",
-                        "enum": ["vnode"]
-                    },
-                    name: {
-                        type: "string"
-                    },
-                    props: {
-                        $ref: "#/$defs/Props"
-                    },
-                    children: {
-                        $ref: "#/$defs/RenderNode"
-                    },
-                    $UI: {
+                anyOf: [{
                         $ref: "#/$defs/VNode"
-                    }
-                },
-                required: ["type", "name", "props"],
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
                 $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "#/$defs/VNode"
+                            }
+                        },
+                        required: ["$UI"]
+                    },
                     VNode: {
                         type: "object",
                         properties: {
@@ -517,10 +521,18 @@ export default recipe({
                                 type: "object",
                                 properties: {}
                             }, {
+                                $ref: "#/$defs/UIRenderable",
+                                asOpaque: true
+                            }, {
+                                type: "object",
+                                properties: {}
+                            }, {
                                 type: "array",
                                 items: {
                                     $ref: "#/$defs/RenderNode"
                                 }
+                            }, {
+                                type: "null"
                             }]
                     },
                     Props: {
@@ -678,27 +690,25 @@ export default recipe({
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, {
-                type: "object",
-                properties: {
-                    type: {
-                        type: "string",
-                        "enum": ["vnode"]
-                    },
-                    name: {
-                        type: "string"
-                    },
-                    props: {
-                        $ref: "#/$defs/Props"
-                    },
-                    children: {
-                        $ref: "#/$defs/RenderNode"
-                    },
-                    $UI: {
+                anyOf: [{
                         $ref: "#/$defs/VNode"
-                    }
-                },
-                required: ["type", "name", "props"],
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }],
                 $defs: {
+                    UIRenderable: {
+                        type: "object",
+                        properties: {
+                            $UI: {
+                                $ref: "#/$defs/VNode"
+                            }
+                        },
+                        required: ["$UI"]
+                    },
                     VNode: {
                         type: "object",
                         properties: {
@@ -738,10 +748,18 @@ export default recipe({
                                 type: "object",
                                 properties: {}
                             }, {
+                                $ref: "#/$defs/UIRenderable",
+                                asOpaque: true
+                            }, {
+                                type: "object",
+                                properties: {}
+                            }, {
                                 type: "array",
                                 items: {
                                     $ref: "#/$defs/RenderNode"
                                 }
+                            }, {
+                                type: "null"
                             }]
                     },
                     Props: {

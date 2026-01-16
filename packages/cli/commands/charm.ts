@@ -28,6 +28,20 @@ import { absPath } from "../lib/utils.ts";
 import { parsePath } from "@commontools/charm/ops";
 import { UI } from "@commontools/runner";
 
+// Hint system: print helpful next-step suggestions after operations
+let quietMode = false;
+
+export function setQuietMode(quiet: boolean) {
+  quietMode = quiet;
+}
+
+function hint(message: string, showQuietTip = true) {
+  if (!quietMode) {
+    const quietTip = showQuietTip ? "\n\n(Use --quiet to suppress hints)" : "";
+    console.error(`\n${message}${quietTip}`);
+  }
+}
+
 // Override usage, since we do not "require" args that can be reflected by env vars.
 const spaceUsage =
   `--identity <identity> --url <url> --api-url <api-url> --space <space>`;
@@ -42,10 +56,26 @@ const EX_URL = `--url ${RAW_EX_URL}`;
 const EX_COMP = `--api-url ${RAW_EX_COMP.apiUrl} --space ${RAW_EX_COMP.space}`;
 const EX_COMP_CHARM = `${EX_COMP} --charm ${RAW_EX_COMP.charm!}`;
 
+// Enhanced description with workflow tips
+const charmDescription = `Interact with charms running on a server.
+
+COMMON WORKFLOWS:
+  Deploy:    ct charm new ./pattern.tsx -i ./claude.key -a http://localhost:8000 -s my-space
+  Update:    ct charm setsrc --charm <ID> ./pattern.tsx -i ./claude.key -a http://localhost:8000 -s my-space
+  Test:      ct charm call --charm <ID> handlerName -i ./claude.key -a http://localhost:8000 -s my-space
+  Inspect:   ct charm inspect --charm <ID> -i ./claude.key -a http://localhost:8000 -s my-space
+
+TIPS:
+  • Use 'setsrc' for iteration, not repeated 'new' (avoids clutter)
+  • After 'set', run 'step' to trigger computed value updates
+  • Path format: forward slashes only (items/0/name, not items[0].name)
+  • JSON values: strings need quotes: echo '"hello"' | ct charm set ...`;
+
 export const charm = new Command()
   .name("charm")
-  .description(`Interact with charms running on a server.`)
+  .description(charmDescription)
   .default("help")
+  .globalOption("-q,--quiet", "Suppress hints and next-step suggestions")
   .globalOption(
     "-u,--url <url:string>",
     "URL representing a host, space, and charm.",
@@ -116,20 +146,25 @@ export const charm = new Command()
     "--root <path:string>",
     "Root directory for resolving imports. Allows imports from parent directories within this root.",
   )
-  .action(
-    async (options, main) =>
-      render(
-        await newCharm(
-          parseSpaceOptions(options),
-          {
-            mainPath: absPath(main),
-            mainExport: options.mainExport,
-            rootPath: options.root ? absPath(options.root) : undefined,
-          },
-          { start: options.start },
-        ),
-      ),
-  )
+  .action(async (options, main) => {
+    setQuietMode(!!options.quiet);
+    const spaceConfig = parseSpaceOptions(options);
+    const charmId = await newCharm(
+      spaceConfig,
+      {
+        mainPath: absPath(main),
+        mainExport: options.mainExport,
+        rootPath: options.root ? absPath(options.root) : undefined,
+      },
+      { start: options.start },
+    );
+    render(charmId);
+    hint(`NEXT STEPS:
+  → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${charmId}
+  → Update code:     ct charm setsrc --charm ${charmId} ${main} ...
+  → Test a handler:  ct charm call --charm ${charmId} <handlerName> ...
+  → Inspect state:   ct charm inspect --charm ${charmId} ...`);
+  })
   /* charm step */
   .command("step", "Run a single scheduling step: start → idle → synced → stop")
   .usage(charmUsage)
@@ -201,13 +236,20 @@ export const charm = new Command()
     "Root directory for resolving imports. Allows imports from parent directories within this root.",
   )
   .arguments("<main:string>")
-  .action((options, mainPath) =>
-    setCharmRecipe(parseCharmOptions(options), {
+  .action(async (options, mainPath) => {
+    setQuietMode(!!options.quiet);
+    const charmConfig = parseCharmOptions(options);
+    await setCharmRecipe(charmConfig, {
       mainPath: absPath(mainPath),
       mainExport: options.mainExport,
       rootPath: options.root ? absPath(options.root) : undefined,
-    })
-  )
+    });
+    render(`Updated source for charm ${charmConfig.charm}`);
+    hint(`NEXT STEPS:
+  → Test in browser: ${charmConfig.apiUrl}/${charmConfig.space}/${charmConfig.charm}
+  → Test a handler:  ct charm call --charm ${charmConfig.charm} <handlerName> ...
+  → Check state:     ct charm inspect --charm ${charmConfig.charm} ...`);
+  })
   /* charm inspect */
   .command("inspect", "Inspect detailed information about a charm")
   .usage(charmUsage)
@@ -374,7 +416,13 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
     }
   })
   /* charm link */
-  .command("link", "Link a field from one charm to another")
+  .command(
+    "link",
+    `Link a field from one charm to another for reactive data flow.
+
+WELL-KNOWN IDS: System-level data (like allCharms) can be linked using
+well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
+  )
   .usage(spaceUsage)
   .example(
     `ct charm link ${EX_ID} ${EX_COMP} bafycharm1/outputEmails bafycharm2/emails`,
@@ -386,10 +434,11 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
   )
   .example(
     `ct charm link ${EX_ID} ${EX_COMP} baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye bafycharm1/allCharms`,
-    `Link well-known charms list to charm field.`,
+    `Link well-known "allCharms" list to a charm field.`,
   )
   .arguments("<source:string> <target:string>")
   .action(async (options, sourceRef, targetRef) => {
+    setQuietMode(!!options.quiet);
     const spaceConfig = parseSpaceOptions(options);
 
     // Parse source and target references - handle both charmId/path and well-known IDs
@@ -417,9 +466,18 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
     );
 
     render(`Linked ${sourceRef} to ${targetRef}`);
+    hint(`NEXT STEPS:
+  → Visualize connections: ct charm map -i ... -a ... -s ...
+  → Inspect target charm:  ct charm inspect --charm ${target.charmId} ...`);
   })
   /* charm get */
-  .command("get", "Get a value from a charm at a specific path")
+  .command(
+    "get",
+    `Get a value from a charm at a specific path.
+
+PATH FORMAT: Use forward slashes and numeric indices for arrays.
+  ✓ items/0/name    ✓ config/db/host    ✗ items[0].name`,
+  )
   .usage(charmUsage)
   .example(
     `ct charm get ${EX_ID} ${EX_COMP_CHARM} name`,
@@ -441,7 +499,15 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
     render(value, { json: true });
   })
   /* charm set */
-  .command("set", "Set a value in a charm at a specific path")
+  .command(
+    "set",
+    `Set a value in a charm at a specific path. Reads JSON from stdin.
+
+PATH FORMAT: Use forward slashes and numeric indices for arrays.
+  ✓ items/0/name    ✓ config/db/host    ✗ items[0].name
+
+JSON VALUES: Strings need quotes: echo '"hello"' | ct charm set ...`,
+  )
   .usage(charmUsage)
   .example(
     `echo '"New Name"' | ct charm set ${EX_ID} ${EX_COMP_CHARM} name`,
@@ -455,6 +521,7 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
   .option("--input", "Write to the charm's input cell instead of result cell")
   .arguments("<path:string>")
   .action(async (options, pathString) => {
+    setQuietMode(!!options.quiet);
     const charmConfig = parseCharmOptions(options);
     const pathSegments = parsePath(pathString);
     const value = await drainStdin();
@@ -462,6 +529,9 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
       input: options.input,
     });
     render(`Set value at path: ${pathString}`);
+    hint(
+      `TIP: Computed values may be stale. Run 'ct charm step --charm ${charmConfig.charm} ...' to trigger recomputation.`,
+    );
   })
   /* charm map */
   .command("map", "Display a visual map of all charms and their connections")
@@ -501,10 +571,14 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
   .option("-c,--charm <charm:string>", "The target charm ID.")
   .arguments("<handler:string> [args:string]")
   .action(async (options, handlerName, argsJson) => {
+    setQuietMode(!!options.quiet);
     const charmConfig = parseCharmOptions(options);
     const args = argsJson ? JSON.parse(argsJson) : await drainStdin();
     await callCharmHandler(charmConfig, handlerName, args);
     render(`Called handler "${handlerName}" on charm ${charmConfig.charm}`);
+    hint(`NEXT STEPS:
+  → Verify state:  ct charm get --charm ${charmConfig.charm} <path> ...
+  → Full inspect:  ct charm inspect --charm ${charmConfig.charm} ...`);
   })
   /* charm rm */
   .command("rm", "Remove a charm")

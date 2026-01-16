@@ -6,13 +6,13 @@
  * like Record. Provides interactive star rating with toggle-off support.
  */
 import {
-  Cell,
   computed,
   type Default,
   handler,
   NAME,
   recipe,
   UI,
+  Writable,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
@@ -35,7 +35,7 @@ export const MODULE_METADATA: ModuleMetadata = {
 // ===== Types =====
 export interface RatingModuleInput {
   /** Rating from 1-5 stars */
-  rating: Cell<Default<number | null, null>>;
+  rating: Writable<Default<number | null, null>>;
 }
 
 // ===== Handlers =====
@@ -43,7 +43,7 @@ export interface RatingModuleInput {
 // Handler for rating selection - value is passed in context
 const setRating = handler<
   unknown,
-  { rating: Cell<number | null>; value: number }
+  { rating: Writable<number | null>; value: number }
 >((_event, { rating, value }) => {
   const current = rating.get();
   // Toggle off if clicking the same rating

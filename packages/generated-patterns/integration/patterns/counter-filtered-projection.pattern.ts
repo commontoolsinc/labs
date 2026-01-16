@@ -63,40 +63,50 @@ const updateThreshold = handler(
   },
 );
 
+const liftSanitizedCounters = lift((entries: number[] | undefined) => {
+  if (!Array.isArray(entries)) return [] as number[];
+  return entries.map((entry) => asNumber(entry) ?? 0);
+});
+
+const liftThresholdValue = lift((input: number | undefined) =>
+  readThreshold(input, 0)
+);
+
+const liftFiltered = lift(
+  (inputs: { values: number[]; threshold: number }): number[] =>
+    inputs.values.filter((value) => value >= inputs.threshold),
+);
+
+const liftExcluded = lift(
+  (inputs: { values: number[]; threshold: number }): number[] =>
+    inputs.values.filter((value) => value < inputs.threshold),
+);
+
+const liftJoinedValues = lift((values: number[]) => values.join(", "));
+
 export const counterWithFilteredProjection = recipe<FilteredProjectionArgs>(
   "Counter With Filtered Projection",
   ({ counters, threshold }) => {
-    const sanitizedCounters = lift((entries: number[] | undefined) => {
-      if (!Array.isArray(entries)) return [] as number[];
-      return entries.map((entry) => asNumber(entry) ?? 0);
-    })(counters);
+    const sanitizedCounters = liftSanitizedCounters(counters);
 
-    const thresholdValue = lift((input: number | undefined) =>
-      readThreshold(input, 0)
-    )(threshold);
+    const thresholdValue = liftThresholdValue(threshold);
 
-    const filtered = lift(
-      (
-        inputs: { values: number[]; threshold: number },
-      ): number[] => inputs.values.filter((value) => value >= inputs.threshold),
-    )({ values: sanitizedCounters, threshold: thresholdValue });
+    const filtered = liftFiltered({
+      values: sanitizedCounters,
+      threshold: thresholdValue,
+    });
 
-    const excluded = lift(
-      (
-        inputs: { values: number[]; threshold: number },
-      ): number[] => inputs.values.filter((value) => value < inputs.threshold),
-    )({ values: sanitizedCounters, threshold: thresholdValue });
+    const excluded = liftExcluded({
+      values: sanitizedCounters,
+      threshold: thresholdValue,
+    });
 
     const totalCount = derive(sanitizedCounters, (values) => values.length);
     const filteredCount = derive(filtered, (values) => values.length);
     const excludedCount = derive(excluded, (values) => values.length);
 
-    const filteredLabel = lift((values: number[]) => values.join(", "))(
-      filtered,
-    );
-    const excludedLabel = lift((values: number[]) => values.join(", "))(
-      excluded,
-    );
+    const filteredLabel = liftJoinedValues(filtered);
+    const excludedLabel = liftJoinedValues(excluded);
 
     const summary =
       str`Filtered ${filteredCount} of ${totalCount} >= ${thresholdValue}`;
@@ -120,3 +130,5 @@ export const counterWithFilteredProjection = recipe<FilteredProjectionArgs>(
     };
   },
 );
+
+export default counterWithFilteredProjection;

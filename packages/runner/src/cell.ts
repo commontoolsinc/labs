@@ -1,4 +1,10 @@
-import { type Immutable, isObject, isRecord } from "@commontools/utils/types";
+import {
+  type Immutable,
+  isFunction,
+  isObject,
+  isRecord,
+} from "@commontools/utils/types";
+import { toDeepStorableValue, toStorableValue } from "./value-codec.ts";
 import type { MemorySpace } from "@commontools/memory/interface";
 import { getTopFrame, recipe } from "./builder/recipe.ts";
 import { createNodeFactory } from "./builder/module.ts";
@@ -6,7 +12,6 @@ import {
   type AnyCell,
   type AnyCellWrapping,
   type Apply,
-  type AsCell,
   type Cell,
   type CellKind,
   type CellTypeConstructor,
@@ -20,7 +25,6 @@ import {
   type IsThisObject,
   type IStreamable,
   type JSONSchema,
-  type KeyResultType,
   type NodeFactory,
   type NodeRef,
   type Opaque,
@@ -28,6 +32,7 @@ import {
   type OpaqueRef,
   type RecipeFactory,
   type Schema,
+  SELF,
   type Stream,
   TYPE,
 } from "./builder/types.ts";
@@ -82,48 +87,14 @@ import {
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { getLogger } from "@commontools/utils/logger";
+import { ensureNotRenderThread } from "@commontools/utils/env";
+ensureNotRenderThread();
 
 const logger = getLogger("cell");
 
 type SinkOptions = {
   changeGroup?: ChangeGroup;
 };
-
-/**
- * Deeply traverse a value to access all properties.
- * This is used by pull() to ensure all nested values are read,
- * which registers them as dependencies for pull-based scheduling.
- * Works with query result proxies which trigger reads on property access.
- */
-function deepTraverse(value: unknown, seen = new WeakSet<object>()): void {
-  if (value === null || value === undefined) return;
-  if (typeof value !== "object") return;
-
-  // Avoid infinite loops with circular references
-  if (seen.has(value)) return;
-  seen.add(value);
-
-  try {
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        deepTraverse(item, seen);
-      }
-    } else {
-      for (const key in value) {
-        if (Object.prototype.hasOwnProperty.call(value, key)) {
-          try {
-            deepTraverse((value as Record<string, unknown>)[key], seen);
-          } catch {
-            // Ignore errors from accessing individual properties (e.g., link cycles)
-          }
-        }
-      }
-    }
-  } catch {
-    // Ignore errors from traversal (e.g., link cycles)
-    // We've already registered the dependencies we can access
-  }
-}
 
 // Shared map factory instance for all cells
 let mapFactory: NodeFactory<any, any> | undefined;
@@ -148,12 +119,19 @@ declare module "@commontools/api" {
   }
 
   /**
-   * Augment Streamable to add onCommit callback support
+   * Augment Streamable to add onCommit callback support.
+   * Event is optional only when T is void (matching public API).
    */
   interface IStreamable<T> {
     send(
-      value: AnyCellWrapping<T> | T,
-      onCommit?: (tx: IExtendedStorageTransaction) => void,
+      ...args: T extends void ? [] | [AnyCellWrapping<T> | T] | [
+          AnyCellWrapping<T> | T,
+          (tx: IExtendedStorageTransaction) => void,
+        ]
+        : [AnyCellWrapping<T> | T] | [
+          AnyCellWrapping<T> | T,
+          (tx: IExtendedStorageTransaction) => void,
+        ]
     ): void;
   }
 
@@ -180,6 +158,7 @@ declare module "@commontools/api" {
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
       tx?: IExtendedStorageTransaction,
+      writable?: boolean,
     ): CellResult<DeepKeyLookup<T, Path>>;
     getAsNormalizedFullLink(): NormalizedFullLink;
     getAsLink(
@@ -187,6 +166,8 @@ declare module "@commontools/api" {
         base?: Cell<any>;
         baseSpace?: MemorySpace;
         includeSchema?: boolean;
+        keepStreams?: boolean;
+        keepAsCell?: boolean;
       },
     ): SigilLink;
     getAsWriteRedirectLink(
@@ -250,6 +231,9 @@ declare module "@commontools/api" {
 
     // TODO(seefeld): Remove once default schemas are properly propagated
     setInitialValue(value: T): void;
+
+    /** Set the self-reference for SELF symbol support in patterns */
+    setSelfRef(selfRef: OpaqueRef<any>): void;
   }
 
   interface ICreatable<C extends AnyBrandedCell<any>> {
@@ -297,6 +281,8 @@ const cellMethods = new Set<keyof ICell<unknown>>([
   "connect",
   "export",
   "getAsOpaqueRefProxy",
+  "setInitialValue",
+  "setSelfRef",
 ]);
 
 export function createCell<T>(
@@ -354,6 +340,9 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   private _frame: Frame | undefined;
 
   private _kind: CellKind;
+
+  // Self-reference for pattern SELF symbol support
+  private _selfRef?: OpaqueRef<any>;
 
   constructor(
     public readonly runtime: Runtime,
@@ -584,7 +573,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       options,
     );
     const elapsed = performance.now() - begin;
-    if (elapsed > 10) {
+    if (elapsed > 50) {
       logger.warn(
         `get >${Math.floor(elapsed - (elapsed % 10))}ms`,
         `get() took ${Math.floor(elapsed)}ms`,
@@ -752,10 +741,17 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   }
 
   send(
-    event: AnyCellWrapping<T>,
-    onCommit?: (tx: IExtendedStorageTransaction) => void,
+    ...args: T extends void ? [] | [AnyCellWrapping<T>] | [
+        AnyCellWrapping<T>,
+        (tx: IExtendedStorageTransaction) => void,
+      ]
+      : [AnyCellWrapping<T>] | [
+        AnyCellWrapping<T>,
+        (tx: IExtendedStorageTransaction) => void,
+      ]
   ): void {
-    this.set(event, onCommit);
+    const [event, onCommit] = args;
+    this.set(event as AnyCellWrapping<T>, onCommit);
   }
 
   update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(
@@ -943,38 +939,59 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     return areLinksSame(this, other);
   }
 
-  key<K extends PropertyKey>(
-    valueKey: K,
-  ): KeyResultType<T, K, AsCell> {
-    // Get child schema if we have one
-    const childSchema = this._link.schema
-      ? this.runtime.cfc.getSchemaAtPath(
-        this._link.schema,
-        [valueKey.toString()],
-        this._link.rootSchema,
-      )
-      : undefined;
+  /**
+   * Navigate to nested properties by one or more keys.
+   *
+   * @example
+   * cell.key("user")                      // Cell<User>
+   * cell.key("user", "profile")           // Cell<Profile>
+   * cell.key("user", "profile", "name")   // Cell<string>
+   */
+  key(...keys: PropertyKey[]): Cell<any> {
+    let currentLink = this._link;
+    let childSchema: JSONSchema | undefined;
 
-    // Create a child link with extended path
-    // When we have a childSchema, we need to preserve the rootSchema that contains $defs
-    // for resolving $ref references. If rootSchema wasn't set, fall back to the parent schema.
-    const childLink: NormalizedLink = {
-      ...this._link,
-      path: [...this._link.path, valueKey.toString()] as string[],
-      schema: childSchema,
-      rootSchema: childSchema
-        ? (this._link.rootSchema ?? this._link.schema)
-        : undefined,
-    };
+    for (const key of keys) {
+      // Get child schema if we have one
+      childSchema = currentLink.schema
+        ? this.runtime.cfc.getSchemaAtPath(
+          currentLink.schema,
+          [key.toString()],
+          currentLink.rootSchema,
+        )
+        : undefined;
+
+      // Create a child link with extended path
+      // When we have a childSchema, we need to preserve the rootSchema that contains $defs
+      // for resolving $ref references. If rootSchema wasn't set, fall back to the parent schema.
+      currentLink = {
+        ...currentLink,
+        path: [...currentLink.path, key.toString()] as string[],
+        schema: childSchema,
+        rootSchema: childSchema
+          ? (currentLink.rootSchema ?? currentLink.schema)
+          : undefined,
+      };
+    }
+
+    // Determine the kind based on schema flags
+    let kind: CellKind = this._kind;
+    if (isObject(childSchema)) {
+      if (childSchema.asStream) {
+        kind = "stream";
+      } else if (childSchema.asCell) {
+        kind = "cell";
+      }
+    }
 
     return new CellImpl(
       this.runtime,
       this.tx,
-      childLink,
+      currentLink,
       this.synced,
       this._causeContainer,
-      this._kind,
-    ) as unknown as KeyResultType<T, K, AsCell>;
+      kind,
+    ) as unknown as Cell<any>;
   }
 
   asSchema<S extends JSONSchema = JSONSchema>(
@@ -1115,6 +1132,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Readonly<Path>,
     tx?: IExtendedStorageTransaction,
+    writable?: boolean,
   ): CellResult<DeepKeyLookup<T, Path>> {
     if (!this.synced) this.sync(); // No await, just kicking this off
     const subPath = path || [];
@@ -1125,6 +1143,8 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
         ...this.link,
         path: [...this.path, ...subPath.map((p) => p.toString())] as string[],
       },
+      0,
+      writable,
     );
   }
 
@@ -1137,6 +1157,8 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       base?: Cell<any>;
       baseSpace?: MemorySpace;
       includeSchema?: boolean;
+      keepStreams?: boolean;
+      keepAsCell?: boolean;
     },
   ): SigilLink {
     return createSigilLinkFromParsedLink(this.link, {
@@ -1179,7 +1201,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     if (!this.synced) this.sync();
 
     try {
-      value = JSON.parse(JSON.stringify(value));
+      value = toDeepStorableValue(value);
     } catch (e) {
       console.error("Can't set raw value, it's not JSON serializable", e);
       return;
@@ -1349,6 +1371,14 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   }
 
   /**
+   * Set the self-reference for pattern SELF symbol support.
+   * This allows patterns to access their own output via the SELF symbol.
+   */
+  setSelfRef(selfRef: OpaqueRef<any>): void {
+    this._selfRef = selfRef;
+  }
+
+  /**
    * Wrap this cell in a proxy that provides OpaqueRef behavior.
    * The proxy adds Symbol.iterator, Symbol.toPrimitive, and toCell support,
    * and recursively wraps child cells accessed via property access.
@@ -1382,6 +1412,9 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
           return () => self;
         } else if (prop === isOpaqueRefMarker) {
           return true;
+        } else if (prop === SELF) {
+          // Return the self-reference if set (for pattern SELF symbol support)
+          return (self as unknown as CellImpl<T>)._selfRef;
         } else if (typeof prop === "string" || typeof prop === "number") {
           // Recursive property access - wrap the child cell
           const nestedCell = self.key(prop) as Cell<T>;
@@ -1562,6 +1595,114 @@ function subscribeToReferencedDocs<T>(
 }
 
 /**
+ * Deeply traverse a value to access all properties.
+ * This is used by pull() to ensure all nested values are read,
+ * which registers them as dependencies for pull-based scheduling.
+ * Works with query result proxies which trigger reads on property access.
+ */
+function deepTraverse(value: unknown, seen = new WeakSet<object>()): void {
+  if (value === null || value === undefined) return;
+  if (typeof value !== "object") return;
+
+  // Avoid infinite loops with circular references
+  if (seen.has(value)) return;
+  seen.add(value);
+
+  try {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        deepTraverse(item, seen);
+      }
+    } else {
+      for (const key in value) {
+        if (Object.prototype.hasOwnProperty.call(value, key)) {
+          try {
+            deepTraverse((value as Record<string, unknown>)[key], seen);
+          } catch {
+            // Ignore errors from accessing individual properties (e.g., link cycles)
+          }
+        }
+      }
+    }
+  } catch {
+    // Ignore errors from traversal (e.g., link cycles)
+    // We've already registered the dependencies we can access
+  }
+}
+
+/**
+ * Validates that a value contains only static data (no cells or cell-like objects)
+ * and has no circular references. Used by Cell.of() to ensure only serializable
+ * static data is passed.
+ *
+ * Note: Shared references (same object at multiple paths) are allowed.
+ * Only true cycles (object referencing an ancestor) are rejected.
+ *
+ * @param value - The value to validate
+ * @throws Error if value contains cells or has circular references
+ */
+function validateStaticData(value: unknown): void {
+  // Track ancestors in current path (for cycle detection)
+  // Shared references are fine - only cycles back to ancestors are errors
+  const ancestors = new Set<object>();
+
+  function traverse(val: unknown, path: string[]): void {
+    // Primitives are always fine
+    if (val === null || val === undefined) return;
+    if (typeof val !== "object" && typeof val !== "function") return;
+
+    const obj = val as object;
+
+    // Check for cells and cell-like objects first (before cycle check)
+    if (isCell(obj)) {
+      throw new Error(
+        `Cell.of() only accepts static data, but found a reactive value (Cell) at path '${
+          path.join(".")
+        }'.\n` +
+          "help: use Cell references as handler parameters or in computed() closures instead of embedding them in Cell.of() values",
+      );
+    }
+
+    if (isCellResultForDereferencing(obj)) {
+      throw new Error(
+        `Cell.of() only accepts static data, but found a reactive value (CellResult) at path '${
+          path.join(".")
+        }'.\n` +
+          "help: use .get() to extract the value first, or pass Cell references as handler parameters",
+      );
+    }
+
+    // Check for cycles - only ancestors in current path, not all seen objects
+    if (ancestors.has(obj)) {
+      throw new Error(
+        `Cell.of() does not accept circular references. Cycle detected at path '${
+          path.join(".")
+        }'.\n` +
+          "help: restructure your data to avoid circular references",
+      );
+    }
+
+    ancestors.add(obj);
+
+    // Traverse arrays and objects
+    if (Array.isArray(obj)) {
+      for (let i = 0; i < obj.length; i++) {
+        traverse(obj[i], [...path, String(i)]);
+      }
+    } else {
+      for (const key of Object.keys(obj)) {
+        traverse((obj as Record<string, unknown>)[key], [...path, key]);
+      }
+    }
+
+    // Remove from ancestors when backtracking (shared refs at other paths are ok)
+    ancestors.delete(obj);
+  }
+
+  traverse(value, []);
+}
+
+/**
  * Recursively adds IDs elements in arrays, unless they are already a link.
  *
  * This ensures that mutable arrays only consist of links to documents, at least
@@ -1574,7 +1715,7 @@ function subscribeToReferencedDocs<T>(
  * @param value - The value to add IDs to.
  * @returns The value with IDs added.
  */
-function recursivelyAddIDIfNeeded<T>(
+export function recursivelyAddIDIfNeeded<T>(
   value: T,
   frame: Frame | undefined,
   seen: Map<unknown, unknown> = new Map(),
@@ -1582,11 +1723,37 @@ function recursivelyAddIDIfNeeded<T>(
   // Can't add IDs without frame.
   if (!frame) return value;
 
-  // Not a record, no need to add IDs. Already a link, no need to add IDs.
-  if (!isRecord(value) || isCellLink(value)) return value;
-
-  // Already seen, return previously annotated result.
+  // Already seen, return previously annotated result. Check this before
+  // toStorableValue() to handle circular references properly.
   if (seen.has(value)) return seen.get(value) as T;
+
+  // Cell links pass through unchanged.
+  if (isCellLink(value)) {
+    return value;
+  }
+
+  // Convert value to storable form. This handles:
+  // - Primitives (e.g., -0 → 0, reject NaN/Infinity/Symbol/BigInt)
+  // - Instances (e.g., Error → @Error wrapper)
+  // - Objects/arrays with toJSON() methods
+  // - Sparse arrays (densified with null in holes)
+  const converted = toStorableValue(value);
+  const convertedIsRecord = isRecord(converted);
+
+  // If conversion changed the value, cache the result so shared references
+  // are preserved and we avoid redundant toJSON() calls.
+  if (converted !== value) {
+    const result = convertedIsRecord
+      ? recursivelyAddIDIfNeeded(converted as T, frame, seen)
+      : converted as T;
+    seen.set(value, result);
+    return result;
+  }
+
+  // Primitives that didn't need conversion don't need further processing.
+  if (!convertedIsRecord) {
+    return converted as T;
+  }
 
   if (Array.isArray(value)) {
     const result: unknown[] = [];
@@ -1607,20 +1774,23 @@ function recursivelyAddIDIfNeeded<T>(
     }));
     return result as T;
   } else {
+    // At this point we know `value` is a non-array record (we returned early
+    // for primitives and `Array.isArray` was false).
+    const valueRecord = value as Record<string, unknown>;
     const result: Record<string, unknown> = {};
 
     // Set before traversing, otherwise we'll infinite recurse.
     seen.set(value, result);
 
-    Object.entries(value).forEach(([key, v]) => {
+    Object.entries(valueRecord).forEach(([key, v]) => {
       result[key] = recursivelyAddIDIfNeeded(v, frame, seen);
     });
 
     // Copy supported symbols from original value.
     [ID, ID_FIELD].forEach((symbol) => {
-      if (symbol in value) {
+      if (symbol in valueRecord) {
         (result as IDFields)[symbol as keyof IDFields] =
-          value[symbol as keyof IDFields];
+          (valueRecord as IDFields)[symbol as keyof IDFields];
       }
     });
 
@@ -1636,6 +1806,12 @@ function recursivelyAddIDIfNeeded<T>(
  */
 export function convertCellsToLinks(
   value: readonly any[] | Record<string, any> | any,
+  options: {
+    includeSchema?: boolean;
+    keepStreams?: boolean;
+    keepAsCell?: boolean;
+    doNotConvertCellResults?: boolean;
+  } = {},
   path: string[] = [],
   seen: Map<any, string[]> = new Map(),
 ): any {
@@ -1647,41 +1823,40 @@ export function convertCellsToLinks(
     };
   }
 
-  if (isCellResultForDereferencing(value)) {
-    value = getCellOrThrow(value).getAsLink();
+  // Early-return cases
+  if (!options.doNotConvertCellResults && isCellResultForDereferencing(value)) {
+    return getCellOrThrow(value).getAsLink(options);
   } else if (isCell(value)) {
-    value = value.getAsLink();
-  } else if (isRecord(value) || typeof value === "function") {
-    // Only add here, otherwise they are literals or already cells:
-    seen.set(value, path);
-
-    // Process toJSON if it exists like JSON.stringify does.
-    if ("toJSON" in value && typeof value.toJSON === "function") {
-      value = value.toJSON();
-      if (!isRecord(value)) return value;
-      // Fall through to process, so even if there is a .toJSON on the
-      // result we don't call it again.
-    } else if (typeof value === "function") {
-      // Handle functions without toJSON like JSON.stringify does.
-      value = undefined;
-    }
-
-    // Recursively process arrays and objects.
-    if (Array.isArray(value)) {
-      value = value.map((value, index) =>
-        convertCellsToLinks(value, [...path, String(index)], seen)
-      );
-    } else {
-      value = Object.fromEntries(
-        Object.entries(value).map(([key, value]) => [
-          key,
-          convertCellsToLinks(value, [...path, String(key)], seen),
-        ]),
-      );
-    }
+    return value.getAsLink(options);
+  } else if (!(isRecord(value) || isFunction(value))) {
+    return value;
   }
 
-  return value;
+  // At this point `value` is a non-`null` object(ish) thing.
+
+  seen.set(value, path); // ...which needs to be tracked for circularity.
+
+  // Convert the (top level of) the value to something JSON-encodable if not
+  // already JSON-encodable, or throw if it's neither already valid nor
+  // convertible.
+  value = toStorableValue(value);
+
+  // Recursively process arrays and objects, if we ended up with one of those.
+  if (!isRecord(value)) {
+    // `toStorableValue()` converted this into a primitive value of some sort.
+    return value;
+  } else if (Array.isArray(value)) {
+    return value.map((value, index) =>
+      convertCellsToLinks(value, options, [...path, String(index)], seen)
+    );
+  } else {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, value]) => [
+        key,
+        convertCellsToLinks(value, options, [...path, String(key)], seen),
+      ]),
+    );
+  }
 }
 
 /**
@@ -1739,6 +1914,11 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
         throw new Error(
           "Can't invoke Cell.of() outside of a recipe/handler/lift context",
         );
+      }
+
+      // Validate that value contains only static data (no cells or cycles)
+      if (value !== undefined) {
+        validateStaticData(value);
       }
 
       // Convert schema to object form and merge default value if value is defined

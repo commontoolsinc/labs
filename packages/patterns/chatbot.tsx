@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   BuiltInLLMMessage,
-  Cell,
   computed,
   Default,
   fetchData,
@@ -10,11 +9,11 @@ import {
   llmDialog,
   NAME,
   pattern,
-  patternTool,
   Stream,
   UI,
   VNode,
   wish,
+  Writable,
 } from "commontools";
 import { type MentionableCharm } from "./system/backlinks-index.tsx";
 
@@ -45,8 +44,8 @@ const clearChat = handler(
   (
     _: never,
     { messages, pending }: {
-      messages: Cell<Array<BuiltInLLMMessage>>;
-      pending: Cell<boolean | undefined>;
+      messages: Writable<Array<BuiltInLLMMessage>>;
+      pending: Writable<boolean | undefined>;
     },
   ) => {
     messages.set([]);
@@ -55,7 +54,7 @@ const clearChat = handler(
 );
 
 type ChatInput = {
-  messages?: Cell<Default<Array<BuiltInLLMMessage>, []>>;
+  messages?: Writable<Default<Array<BuiltInLLMMessage>, []>>;
   tools?: any;
   theme?: any;
   system?: string;
@@ -77,7 +76,7 @@ type ChatOutput = {
   clearChat: Stream<void>;
   cancelGeneration: Stream<void>;
   title?: string;
-  pinnedCells: Array<PromptAttachment>;
+  pinnedCells: Array<{ path: string; name: string }>;
   tools: any;
   ui: {
     chatLog: VNode;
@@ -123,48 +122,11 @@ export const TitleGenerator = pattern<
   return title;
 });
 
-const listMentionable = pattern<
-  { mentionable: Array<MentionableCharm> },
-  { result: Array<{ label: string; cell: Cell<unknown> }> }
->(
-  ({ mentionable }) => {
-    const result = mentionable.map((charm) => ({
-      label: charm[NAME]!,
-      cell: charm,
-    }));
-    return { result };
-  },
-);
-
-const listRecent = pattern<
-  { recentCharms: Array<MentionableCharm> },
-  { result: Array<{ label: string; cell: Cell<unknown> }> }
->(
-  ({ recentCharms }) => {
-    const namesList = recentCharms.map((charm) => ({
-      label: charm[NAME]!,
-      cell: charm,
-    }));
-    return { result: namesList };
-  },
-);
-
 export default pattern<ChatInput, ChatOutput>(
   ({ messages, tools, theme, system }) => {
-    const model = Cell.of<string>("anthropic:claude-sonnet-4-5");
+    const model = Writable.of<string>("anthropic:claude-sonnet-4-5");
     const mentionable = wish<MentionableCharm[]>("#mentionable");
-    const recentCharms = wish<MentionableCharm[]>("#recent");
-
-    const assistantTools = {
-      listMentionable: patternTool(listMentionable, { mentionable }),
-      listRecent: patternTool(listRecent, { recentCharms }),
-    };
-
-    // Merge static and assistant tools
-    const mergedTools = computed(() => ({
-      ...tools,
-      ...assistantTools,
-    }));
+    const recentCharms = wish<{ [NAME]: string }[]>("#recent");
 
     const latest = computed(() => recentCharms[0]);
     const latestName = computed(() => recentCharms[0]?.[NAME] ?? "latest");
@@ -181,7 +143,7 @@ export default pattern<ChatInput, ChatOutput>(
           return system ?? "You are a polite but efficient assistant.";
         }),
         messages,
-        tools: mergedTools,
+        tools,
         model,
         context: computed(() => ({
           [latestName]: latest,
@@ -230,7 +192,6 @@ export default pattern<ChatInput, ChatOutput>(
           theme={theme}
           $messages={messages}
           pending={pending}
-          tools={flattenedTools}
         />
       </ct-vscroll>
     );
@@ -240,7 +201,7 @@ export default pattern<ChatInput, ChatOutput>(
         <ct-cell-context $cell={pinnedCells}>
           <ct-attachments-bar pinnedCells={pinnedCells} />
         </ct-cell-context>
-        <ct-tools-chip tools={flattenedTools} />
+        <ct-tools-chip $tools={flattenedTools} />
         <ct-button
           variant="pill"
           type="button"

@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   BuiltInLLMContent,
-  Cell,
   Default,
   derive,
   generateText,
@@ -9,6 +8,7 @@ import {
   NAME,
   recipe,
   UI,
+  Writable,
 } from "commontools";
 
 type LLMTestInput = {
@@ -22,7 +22,7 @@ type LLMTestResult = {
 
 const askQuestion = handler<
   { detail: { message: string } },
-  { question: Cell<string> }
+  { question: Writable<string> }
 >((event, { question }) => {
   const userQuestion = event.detail?.message?.trim();
   if (userQuestion) {
@@ -31,7 +31,7 @@ const askQuestion = handler<
 });
 
 export default recipe<LLMTestInput>(({ title }) => {
-  const question = Cell.of("");
+  const question = Writable.of("");
 
   const llmResponse = generateText({
     system:

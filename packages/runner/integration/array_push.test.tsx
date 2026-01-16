@@ -3,7 +3,6 @@ import {
   cell,
   derive,
   handler,
-  ID,
   JSONSchema,
   NAME,
   recipe,
@@ -43,48 +42,59 @@ const OutputSchema = {
   ],
 } as const satisfies JSONSchema;
 
+// Handlers moved to module scope
+const pushNumbersHandler = handler(
+  {
+    type: "object",
+    properties: { value: { type: "number" } },
+    required: ["value"],
+  },
+  {
+    type: "object",
+    properties: {
+      array: { type: "array", items: { type: "number" }, asCell: true },
+    },
+    required: ["array"],
+  },
+  ({ value }, { array }) => {
+    console.log("Pushing value:", value);
+    array.push(value);
+  },
+);
+
+const pushObjectsHandler = handler(
+  {
+    type: "object",
+    properties: {
+      value: { type: "object", properties: { count: { type: "number" } } },
+    },
+    required: ["value"],
+  },
+  {
+    type: "object",
+    properties: {
+      array: {
+        type: "array",
+        items: { type: "object", properties: { count: { type: "number" } } },
+        asCell: true,
+      },
+    },
+    required: ["array"],
+  },
+  ({ value }, { array }) => {
+    console.log("Pushing object:", { count: value.count });
+    // Note: [ID] should be added automatically by the runtime via
+    // recursivelyAddIDIfNeeded - we don't need to add it manually anymore
+    array.push({ count: value.count });
+  },
+);
+
 export default recipe(
   InputSchema,
   OutputSchema,
   () => {
     const my_numbers_array = cell<number[]>([]);
     const my_objects_array = cell<{ count: number }[]>([]);
-
-    const pushNumbersHandler = handler({
-      type: "object",
-      properties: { value: { type: "number" } },
-      required: ["value"],
-    }, {
-      type: "object",
-      properties: {
-        array: { type: "array", items: { type: "number" }, asCell: true },
-      },
-      required: ["array"],
-    }, ({ value }, { array }) => {
-      console.log("Pushing value:", value);
-      array.push(value);
-    });
-
-    const pushObjectsHandler = handler({
-      type: "object",
-      properties: {
-        value: { type: "object", properties: { count: { type: "number" } } },
-      },
-      required: ["value"],
-    }, {
-      type: "object",
-      properties: {
-        array: {
-          type: "array",
-          items: { type: "object", properties: { count: { type: "number" } } },
-          asCell: true,
-        },
-      },
-      required: ["array"],
-    }, ({ value }, { array }) => {
-      console.log("Pushing object:", { count: value.count });
-      array.push({ count: value.count, [ID]: value.count });
-    });
 
     // Return the recipe
     return {

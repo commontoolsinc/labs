@@ -1,12 +1,29 @@
 import { Command } from "@cliffy/command";
-import { join } from "@std/path";
+import { isAbsolute, join } from "@std/path";
 import { render } from "../lib/render.ts";
 import { process } from "../lib/dev.ts";
 import { isRecord } from "@commontools/utils/types";
 
+const devDescription = `Compile and execute patterns for debugging.
+
+The pattern is processed through ts-transformers, which converts reactive
+constructs (computed, handler, JSX) into runtime-compatible code.
+
+COMMON USAGE:
+  ct dev ./pattern.tsx              # Compile, transform, and execute
+  ct dev ./pattern.tsx --no-run     # Type-check only (fast validation)
+  ct dev ./pattern.tsx --show-transformed   # See transformed output
+
+TIPS:
+  • Use --no-run for quick type-checking during development
+  • Use --show-transformed to debug transformation issues - shows how
+    ts-transformers converts your code (e.g., .map() → .mapWithPattern())
+  • Transformation errors often stem from reactive constructs the compiler
+    doesn't recognize; inspecting transformed output helps identify these`;
+
 export const dev = new Command()
   .name("dev")
-  .description("Compile and execute recipes for debugging.")
+  .description(devDescription)
   .example(
     "ct dev ./recipe.tsx",
     "Locally compile and evaluate a recipe, printing export default to stdout.",
@@ -37,16 +54,24 @@ export const dev = new Command()
     "--main-export <export:string>",
     'Named export from entry for recipe definition. Defaults to "default".',
   )
+  .option(
+    "--verbose-errors",
+    "Show original TypeScript error messages in addition to simplified hints.",
+  )
   .arguments("<main:string>")
   .action(async (options, main) => {
+    const mainPath = isAbsolute(main) ? main : join(Deno.cwd(), main);
+
     const { main: exports } = await process({
-      main: join(Deno.cwd(), main),
+      main: mainPath,
+      rootPath: Deno.cwd(),
       check: options.check,
       run: options.run,
       output: options.output,
       filename: options.filename,
       showTransformed: options.showTransformed,
       mainExport: options.mainExport,
+      verboseErrors: options.verboseErrors,
     });
     // If --show-transformed is used, the transformed source is already printed to stdout
     // and we don't want to print the JSON output

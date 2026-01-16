@@ -40,6 +40,36 @@ const mirrorPipeline: PipelineFn = (value) => {
   };
 };
 
+const liftSwitchCountView = lift((value: number | undefined) =>
+  typeof value === "number" ? value : 0
+);
+
+const liftSafeCount = lift((value: number | undefined) =>
+  typeof value === "number" ? value : 0
+);
+
+const liftSafeMode = lift((value: PipelineMode | undefined) =>
+  value === "mirror" ? "mirror" : "double"
+);
+
+const liftPipelineResult = lift((inputs: {
+  mode: PipelineMode | undefined;
+  value: number | undefined;
+}): PipelineResult => {
+  const sanitizedMode = inputs.mode === "mirror" ? "mirror" : "double";
+  const pipeline = sanitizedMode === "mirror" ? mirrorPipeline : doublePipeline;
+  const value = typeof inputs.value === "number" ? inputs.value : 0;
+  return pipeline(value);
+});
+
+const liftMappedValue = lift((result: PipelineResult) => result.mapped);
+
+const liftStatus = lift((result: PipelineResult) => result.status);
+
+const liftHistoryView = lift((history: PipelineMode[] | undefined) =>
+  Array.isArray(history) ? history : []
+);
+
 const adjustCount = handler(
   (
     event: { amount?: number } | undefined,
@@ -57,79 +87,58 @@ const adjustCount = handler(
  * backed mode cell. The active pipeline reference changes without rebuilding
  * the surrounding reactive graph.
  */
+const togglePipeline = handler(
+  (
+    event: { mode?: PipelineMode } | undefined,
+    context: {
+      mode: Cell<PipelineMode>;
+      switches: Cell<number>;
+      history: Cell<PipelineMode[]>;
+    },
+  ) => {
+    const current = context.mode.get();
+    const currentMode = current === "mirror" ? "mirror" : "double";
+    const requested = event?.mode;
+    const next = requested === "mirror"
+      ? "mirror"
+      : requested === "double"
+      ? "double"
+      : currentMode === "mirror"
+      ? "double"
+      : "mirror";
+
+    if (next !== currentMode) {
+      context.mode.set(next);
+      const switchCount = context.switches.get();
+      const steps = typeof switchCount === "number" ? switchCount : 0;
+      context.switches.set(steps + 1);
+    }
+
+    const historyState = context.history.get() ?? [];
+    context.history.set([...historyState, next]);
+  },
+);
+
 export const counterWithToggledDerivePipelines = recipe<TogglePipelineArgs>(
   "Counter With Toggled Derive Pipelines",
   ({ count, mode }) => {
     const switchCount = cell(0);
     const pipelineHistory = cell<PipelineMode[]>([]);
-    let historyState: PipelineMode[] = [];
-    const switchCountView = lift((value: number | undefined) =>
-      typeof value === "number" ? value : 0
-    )(switchCount);
-    const historyView = lift((_: number) => historyState)(switchCountView);
+    const switchCountView = liftSwitchCountView(switchCount);
+    const historyView = liftHistoryView(pipelineHistory);
 
-    const safeCount = lift((value: number | undefined) =>
-      typeof value === "number" ? value : 0
-    )(count);
-    const safeMode = lift((value: PipelineMode | undefined) =>
-      value === "mirror" ? "mirror" : "double"
-    )(mode);
+    const safeCount = liftSafeCount(count);
+    const safeMode = liftSafeMode(mode);
 
     const pipelineName = safeMode;
 
-    const pipelineResult = lift((inputs: {
-      mode: PipelineMode | undefined;
-      value: number | undefined;
-    }): PipelineResult => {
-      const sanitizedMode = inputs.mode === "mirror" ? "mirror" : "double";
-      const pipeline = sanitizedMode === "mirror"
-        ? mirrorPipeline
-        : doublePipeline;
-      const value = typeof inputs.value === "number" ? inputs.value : 0;
-      return pipeline(value);
-    })({
+    const pipelineResult = liftPipelineResult({
       mode: safeMode,
       value: safeCount,
     });
 
-    const mappedValue = lift((result: PipelineResult) => result.mapped)(
-      pipelineResult,
-    );
-    const status = lift((result: PipelineResult) => result.status)(
-      pipelineResult,
-    );
-
-    const togglePipeline = handler(
-      (
-        event: { mode?: PipelineMode } | undefined,
-        context: {
-          mode: Cell<PipelineMode>;
-          switches: Cell<number>;
-          history: Cell<PipelineMode[]>;
-        },
-      ) => {
-        const current = context.mode.get();
-        const currentMode = current === "mirror" ? "mirror" : "double";
-        const requested = event?.mode;
-        const next = requested === "mirror"
-          ? "mirror"
-          : requested === "double"
-          ? "double"
-          : currentMode === "mirror"
-          ? "double"
-          : "mirror";
-
-        if (next !== currentMode) {
-          context.mode.set(next);
-          const switchCount = context.switches.get();
-          const steps = typeof switchCount === "number" ? switchCount : 0;
-          context.switches.set(steps + 1);
-        }
-
-        historyState = [...historyState, next];
-        context.history.set(historyState);
-      },
-    );
+    const mappedValue = liftMappedValue(pipelineResult);
+    const status = liftStatus(pipelineResult);
 
     return {
       count,
@@ -149,3 +158,5 @@ export const counterWithToggledDerivePipelines = recipe<TogglePipelineArgs>(
     };
   },
 );
+
+export default counterWithToggledDerivePipelines;

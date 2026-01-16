@@ -1,13 +1,13 @@
 /// <cts-enable />
-import { Cell, Default, NAME, recipe, UI } from "commontools";
+import { Default, NAME, recipe, UI, Writable } from "commontools";
 
 interface Item {
   title: string;
 }
 
 interface ListInput {
-  title: Cell<Default<string, "My List">>;
-  items: Cell<Default<Item[], []>>;
+  title: Writable<Default<string, "My List">>;
+  items: Writable<Default<Item[], []>>;
 }
 
 interface ListOutput extends ListInput {}
@@ -27,7 +27,7 @@ export default recipe<ListInput, ListOutput>(
 
           <ct-card>
             <ct-list
-              // $ prefix implied passing a Cell<Item[]> rather than just the Item[] itself
+              // $ prefix implied passing a Writable<Item[]> rather than just the Item[] itself
               // this allows components like ct-list to manage the cell internally.
               $value={items}
               editable

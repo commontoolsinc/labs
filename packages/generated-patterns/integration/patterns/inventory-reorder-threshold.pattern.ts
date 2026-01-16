@@ -150,33 +150,46 @@ const updateThreshold = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftInventoryView = lift(sanitizeInventoryList);
+
+const liftLowStockEntries = lift((entries: InventoryEntry[]) =>
+  entries.filter((entry) => entry.stock <= entry.reorderLevel)
+);
+
+const liftLowStockSkus = lift((entries: InventoryEntry[]) =>
+  entries.map((entry) => entry.sku)
+);
+
+const liftLowStockReport = lift((entries: InventoryEntry[]) =>
+  entries.map((entry) => ({
+    sku: entry.sku,
+    stock: entry.stock,
+    reorderLevel: entry.reorderLevel,
+    recommendedOrder: entry.reorderLevel - entry.stock + 1,
+  }))
+);
+
+const liftAlertCount = lift((entries: InventoryEntry[]) => entries.length);
+
+const liftNeedsAttention = lift((count: number) => count > 0);
+
+const liftAlertMessage = lift((skus: string[]) => {
+  if (skus.length === 0) return "All items healthy";
+  return `Reorder needed for ${skus.join(", ")}`;
+});
+
 export const inventoryReorderThreshold = recipe<InventoryReorderArgs>(
   "Inventory Reorder Threshold",
   ({ inventory }) => {
-    const inventoryView = lift(sanitizeInventoryList)(inventory);
-    const lowStockEntries = lift((entries: InventoryEntry[]) =>
-      entries.filter((entry) => entry.stock <= entry.reorderLevel)
-    )(inventoryView);
-    const lowStockSkus = lift((entries: InventoryEntry[]) =>
-      entries.map((entry) => entry.sku)
-    )(lowStockEntries);
-    const lowStockReport = lift((entries: InventoryEntry[]) =>
-      entries.map((entry) => ({
-        sku: entry.sku,
-        stock: entry.stock,
-        reorderLevel: entry.reorderLevel,
-        recommendedOrder: entry.reorderLevel - entry.stock + 1,
-      }))
-    )(lowStockEntries);
-    const alertCount = lift((entries: InventoryEntry[]) => entries.length)(
-      lowStockEntries,
-    );
-    const needsAttention = lift((count: number) => count > 0)(alertCount);
+    const inventoryView = liftInventoryView(inventory);
+    const lowStockEntries = liftLowStockEntries(inventoryView);
+    const lowStockSkus = liftLowStockSkus(lowStockEntries);
+    const lowStockReport = liftLowStockReport(lowStockEntries);
+    const alertCount = liftAlertCount(lowStockEntries);
+    const needsAttention = liftNeedsAttention(alertCount);
     const alertLabel = str`${alertCount} items below reorder threshold`;
-    const alertMessage = lift((skus: string[]) => {
-      if (skus.length === 0) return "All items healthy";
-      return `Reorder needed for ${skus.join(", ")}`;
-    })(lowStockSkus);
+    const alertMessage = liftAlertMessage(lowStockSkus);
 
     return {
       inventory,
@@ -196,3 +209,5 @@ export const inventoryReorderThreshold = recipe<InventoryReorderArgs>(
 );
 
 export type { InventoryEntry, InventoryReorderArgs, LowStockReportEntry };
+
+export default inventoryReorderThreshold;

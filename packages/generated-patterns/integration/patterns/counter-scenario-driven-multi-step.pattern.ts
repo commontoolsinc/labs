@@ -125,6 +125,21 @@ const applyStep = handler(
   },
 );
 
+const liftCurrentValue = lift((input: unknown) => toNumber(input, 0));
+
+const liftCurrentPhase = lift((input: unknown) => toSafeString(input, "idle"));
+
+const liftCompletedPhases = lift((input: unknown) => {
+  if (!Array.isArray(input)) return [];
+  const result: string[] = [];
+  for (const value of input) {
+    result.push(toSafeString(value, "unknown phase"));
+  }
+  return result;
+});
+
+const liftSanitizeStepEntries = lift(sanitizeStepEntries);
+
 const completeSequence = handler(
   (
     event: CompleteEvent | undefined,
@@ -156,19 +171,10 @@ export const counterWithScenarioDrivenSteps = recipe<MultiStepArgs>(
     const stepLog = cell<StepEntry[]>([]);
     const phaseHistory = cell<string[]>([]);
 
-    const currentValue = lift((input: unknown) => toNumber(input, 0))(value);
-    const currentPhase = lift((input: unknown) => toSafeString(input, "idle"))(
-      phase,
-    );
-    const steps = lift(sanitizeStepEntries)(stepLog);
-    const completedPhases = lift((input: unknown) => {
-      if (!Array.isArray(input)) return [];
-      const result: string[] = [];
-      for (const value of input) {
-        result.push(toSafeString(value, "unknown phase"));
-      }
-      return result;
-    })(phaseHistory);
+    const currentValue = liftCurrentValue(value);
+    const currentPhase = liftCurrentPhase(phase);
+    const steps = liftSanitizeStepEntries(stepLog);
+    const completedPhases = liftCompletedPhases(phaseHistory);
 
     const stepCount = derive(steps, (entries) => entries.length);
     const lastRecordedTotal = derive(
@@ -207,3 +213,5 @@ export const counterWithScenarioDrivenSteps = recipe<MultiStepArgs>(
     };
   },
 );
+
+export default counterWithScenarioDrivenSteps;

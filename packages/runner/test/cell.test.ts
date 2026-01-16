@@ -71,6 +71,185 @@ describe("Cell", () => {
     expect(c.get()).toBe(20);
   });
 
+  it("should convert Error instances to @Error wrapper on set", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should convert Error instances to @Error wrapper on set",
+      undefined,
+      tx,
+    );
+    const error = new TypeError("something went wrong");
+    c.set(error);
+
+    // Error should be converted to @Error wrapper during set
+    const result = c.get() as { "@Error": Record<string, unknown> } | undefined;
+    expect(result).toHaveProperty("@Error");
+    expect(result!["@Error"].name).toBe("TypeError");
+    expect(result!["@Error"].message).toBe("something went wrong");
+    expect(typeof result!["@Error"].stack).toBe("string");
+  });
+
+  it("should preserve Error cause property on set", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should preserve Error cause property on set",
+      undefined,
+      tx,
+    );
+    const cause = new Error("root cause");
+    const error = new Error("wrapper error", { cause });
+    c.set(error);
+
+    // Error cause should be recursively converted to @Error wrapper
+    const result = c.get() as { "@Error": Record<string, unknown> } | undefined;
+    expect(result).toHaveProperty("@Error");
+    expect(result!["@Error"].message).toBe("wrapper error");
+    const causeWrapper = result!["@Error"].cause as {
+      "@Error": Record<string, unknown>;
+    };
+    expect(causeWrapper).toHaveProperty("@Error");
+    expect(causeWrapper["@Error"].message).toBe("root cause");
+  });
+
+  it("should call toJSON() on plain objects during set", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should call toJSON() on plain objects during set",
+      undefined,
+      tx,
+    );
+    const objWithToJSON = {
+      secret: "internal",
+      toJSON() {
+        return { exposed: true };
+      },
+    };
+    c.set({ data: objWithToJSON });
+
+    const result = c.get() as { data: unknown } | undefined;
+    // toJSON() should have been called, so we get { exposed: true } not { secret, toJSON }
+    expect(result?.data).toEqual({ exposed: true });
+  });
+
+  it("should densify sparse arrays during set", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should densify sparse arrays during set",
+      undefined,
+      tx,
+    );
+    const sparse: unknown[] = [];
+    sparse[0] = "a";
+    sparse[2] = "c"; // hole at index 1
+    c.set({ arr: sparse });
+
+    const result = c.get() as { arr: unknown[] } | undefined;
+    // Sparse array should be densified with null in the hole
+    expect(result?.arr).toEqual(["a", null, "c"]);
+  });
+
+  it("should densify shared sparse arrays and preserve sharing", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should densify shared sparse arrays and preserve sharing",
+      undefined,
+      tx,
+    );
+    const sparse: unknown[] = [];
+    sparse[0] = 1;
+    sparse[3] = 2; // holes at indices 1 and 2
+    // Same sparse array referenced twice
+    c.set([sparse, sparse]);
+
+    const result = c.get() as unknown[][] | undefined;
+    // Both should be densified
+    expect(result?.[0]).toEqual([1, null, null, 2]);
+    expect(result?.[1]).toEqual([1, null, null, 2]);
+    // Both should reference the same array (sharing preserved)
+    expect(result?.[0]).toBe(result?.[1]);
+  });
+
+  it("should call toJSON() on arrays with toJSON method during set", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should call toJSON() on arrays with toJSON method during set",
+      undefined,
+      tx,
+    );
+    const arrWithToJSON = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
+    arrWithToJSON.toJSON = () => "custom-array-value";
+    c.set({ arr: arrWithToJSON });
+
+    const result = c.get() as { arr: unknown } | undefined;
+    // toJSON() should have been called
+    expect(result?.arr).toBe("custom-array-value");
+  });
+
+  it("should convert -0 to 0 during set", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should convert -0 to 0 during set",
+      undefined,
+      tx,
+    );
+    c.set({ value: -0 });
+
+    const result = c.get() as { value: number } | undefined;
+    expect(result?.value).toBe(0);
+    // Verify it's actually 0, not -0
+    expect(Object.is(result?.value, 0)).toBe(true);
+    expect(Object.is(result?.value, -0)).toBe(false);
+  });
+
+  it("should throw when setting NaN", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should throw when setting NaN",
+      undefined,
+      tx,
+    );
+    expect(() => c.set({ value: NaN })).toThrow(
+      "Cannot store non-finite number",
+    );
+  });
+
+  it("should throw when setting Infinity", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should throw when setting Infinity",
+      undefined,
+      tx,
+    );
+    expect(() => c.set({ value: Infinity })).toThrow(
+      "Cannot store non-finite number",
+    );
+    expect(() => c.set({ value: -Infinity })).toThrow(
+      "Cannot store non-finite number",
+    );
+  });
+
+  it("should throw when setting Symbol", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should throw when setting Symbol",
+      undefined,
+      tx,
+    );
+    expect(() => c.set({ value: Symbol("test") })).toThrow(
+      "Cannot store symbol",
+    );
+  });
+
+  it("should throw when setting BigInt", () => {
+    const c = runtime.getCell<unknown>(
+      space,
+      "should throw when setting BigInt",
+      undefined,
+      tx,
+    );
+    expect(() => c.set({ value: BigInt(123) })).toThrow("Cannot store bigint");
+  });
+
   it("should create a proxy for the cell", () => {
     const c = runtime.getCell<{ x: number; y: number }>(
       space,
@@ -84,19 +263,6 @@ describe("Cell", () => {
     expect(proxy.y).toBe(2);
   });
 
-  it("should update cell value through proxy", () => {
-    const c = runtime.getCell<{ x: number; y: number }>(
-      space,
-      "should update cell value through proxy",
-      undefined,
-      tx,
-    );
-    c.set({ x: 1, y: 2 });
-    const proxy = c.getAsQueryResult();
-    proxy.x = 10;
-    expect(c.get()).toEqual({ x: 10, y: 2 });
-  });
-
   it("should get value at path", () => {
     const c = runtime.getCell<{ a: { b: { c: number } } }>(
       space,
@@ -106,18 +272,6 @@ describe("Cell", () => {
     );
     c.set({ a: { b: { c: 42 } } });
     expect(c.key("a").key("b").key("c").get()).toBe(42);
-  });
-
-  it("should set value at path", () => {
-    const c = runtime.getCell<{ a: { b: { c: number } } }>(
-      space,
-      "should set value at path",
-      undefined,
-      tx,
-    );
-    c.set({ a: { b: { c: 42 } } });
-    c.getAsQueryResult().a.b.c = 100;
-    expect(c.key("a").key("b").key("c").get()).toBe(100);
   });
 
   it("should get raw value using getRaw", () => {
@@ -446,19 +600,6 @@ describe("createProxy", () => {
     expect(proxy.a.b.c).toBe(42);
   });
 
-  it("should support regular assigments", () => {
-    const c = runtime.getCell<{ x: number }>(
-      space,
-      "should support regular assigments",
-      undefined,
-      tx,
-    );
-    c.set({ x: 1 });
-    const proxy = c.getAsQueryResult();
-    proxy.x = 2;
-    expect(c.get()).toStrictEqual({ x: 2 });
-  });
-
   it("should handle $alias in objects", () => {
     const c = runtime.getCell(
       space,
@@ -469,19 +610,6 @@ describe("createProxy", () => {
     c.setRaw({ x: { $alias: { path: ["y"] } }, y: 42 });
     const proxy = c.getAsQueryResult();
     expect(proxy.x).toBe(42);
-  });
-
-  it("should handle aliases when writing", () => {
-    const c = runtime.getCell<{ x: number; y: number }>(
-      space,
-      "should handle aliases when writing",
-      undefined,
-      tx,
-    );
-    c.setRaw({ x: { $alias: { path: ["y"] } }, y: 42 });
-    const proxy = c.getAsQueryResult();
-    proxy.x = 100;
-    expect(c.get().y).toBe(100);
   });
 
   it("should handle nested cells", () => {
@@ -500,34 +628,6 @@ describe("createProxy", () => {
     );
     outerCell.set({ x: innerCell });
     const proxy = outerCell.getAsQueryResult();
-    expect(proxy.x).toBe(42);
-  });
-
-  it("should handle cell references", () => {
-    const c = runtime.getCell<{ x: number; y?: any }>(
-      space,
-      "should handle cell references",
-      undefined,
-      tx,
-    );
-    c.set({ x: 42 });
-    const ref = c.key("x").getAsLink();
-    const proxy = c.getAsQueryResult();
-    proxy.y = ref;
-    expect(proxy.y).toBe(42);
-  });
-
-  it("should handle infinite loops in cell references", () => {
-    const c = runtime.getCell<{ x: number; y?: any }>(
-      space,
-      "should handle infinite loops in cell references",
-      undefined,
-      tx,
-    );
-    c.set({ x: 42 });
-    const ref = c.key("x").getAsLink();
-    const proxy = c.getAsQueryResult();
-    proxy.x = ref;
     expect(proxy.x).toBe(42);
   });
 
@@ -613,42 +713,6 @@ describe("createProxy", () => {
     expect(sliced.length).toBe(3);
     expect(sliced[0]).toBe(2);
     expect(sliced[2]).toBe(4);
-  });
-
-  it("should maintain reactivity with nested array operations", () => {
-    const c = runtime.getCell<{ nested: { arrays: number[][] } }>(
-      space,
-      "should maintain reactivity with nested array operations",
-      undefined,
-      tx,
-    );
-    c.set({ nested: { arrays: [[1, 2], [3, 4]] } });
-    const proxy = c.getAsQueryResult();
-
-    // Access a nested array through multiple levels
-    const firstInnerArray = proxy.nested.arrays[0];
-    expect(firstInnerArray).toEqual([1, 2]);
-    expect(isCellResult(firstInnerArray)).toBe(true);
-
-    // Modify the deeply nested array
-    firstInnerArray.push(3);
-    expect(firstInnerArray).toEqual([1, 2, 3]);
-
-    // Verify the change is reflected in the original data
-    expect(proxy.nested.arrays[0]).toEqual([1, 2, 3]);
-    expect(c.get().nested.arrays[0]).toEqual([1, 2, 3]);
-
-    // Create a flattened array using array methods
-    const flattened = proxy.nested.arrays.flat();
-    expect(flattened).toEqual([1, 2, 3, 3, 4]);
-    expect(isCellResult(flattened)).toBe(false);
-
-    // Modify the flattened result
-    flattened[0] = 10;
-    expect(flattened[0]).toBe(10);
-
-    // Original arrays should not be affected by modifying the flattened result
-    expect(proxy.nested.arrays[0][0]).toBe(1);
   });
 
   it("should support spreading array query results with for...of", () => {
@@ -970,7 +1034,9 @@ describe("Proxy", () => {
     streamCell.send({ $stream: true });
     await runtime.idle();
 
-    expect(c.get()).toStrictEqual({ stream: { $stream: true } });
+    // The stream property returns a Cell (stream kind) rather than raw { $stream: true }
+    // because createQueryResultProxy detects stream markers and returns stream cells
+    expect(c.get().stream).toHaveProperty("send");
     expect(eventCount).toBe(1);
     expect(lastEventSeen).toEqual({ $stream: true });
   });
@@ -1117,17 +1183,17 @@ describe("asCell", () => {
       values.push(value);
     });
     expect(values).toEqual([42]); // Initial call
-    c.withTx(tx).getAsQueryResult().d = 50;
+    c.withTx(tx).key("d").set(50);
     tx.commit();
     tx = runtime.edit();
-    c.withTx(tx).getAsQueryResult().a.c = 100;
+    c.withTx(tx).key("a").key("c").set(100);
     tx.commit();
     tx = runtime.edit();
-    c.withTx(tx).getAsQueryResult().a.b = 42;
+    c.withTx(tx).key("a").key("b").set(42);
     tx.commit();
     tx = runtime.edit();
     expect(values).toEqual([42]); // Didn't get called again
-    c.withTx(tx).getAsQueryResult().a.b = 300;
+    c.withTx(tx).key("a").key("b").set(300);
     tx.commit();
     await runtime.idle();
     expect(c.get()).toEqual({ a: { b: 300, c: 100 }, d: 50 });

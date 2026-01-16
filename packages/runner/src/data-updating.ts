@@ -1,4 +1,5 @@
 import { isRecord } from "@commontools/utils/types";
+import { toStorableValue } from "./value-codec.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import { createRef } from "./create-ref.ts";
@@ -429,6 +430,19 @@ export function normalizeAndDiff(
         seen,
       ),
     ];
+  }
+
+  // Convert the (top level of) the value to something JSON-encodable if not
+  // already JSON-encodable, or throw if it's neither already valid nor
+  // convertible.
+  const storableValue = toStorableValue(newValue);
+  if (storableValue !== newValue) {
+    diffLogger.debug(
+      "diff",
+      () =>
+        `[TO_STORABLE_VALUE] Converted ${typeof newValue} at path=${pathStr}`,
+    );
+    newValue = storableValue;
   }
 
   // Handle arrays

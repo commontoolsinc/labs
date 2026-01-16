@@ -7,16 +7,16 @@
  * Demonstrates the settingsUI pattern for module configuration.
  */
 import {
-  Cell,
+  computed,
   type Default,
   handler,
   ifElse,
   ImageData,
-  lift,
   NAME,
   recipe,
   str,
   UI,
+  Writable,
 } from "commontools";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
@@ -57,7 +57,7 @@ interface PhotoModuleOutput {
 // Handler to clear the photo
 const clearPhoto = handler<
   unknown,
-  { images: Cell<ImageData[]> }
+  { images: Writable<ImageData[]> }
 >((_event, { images }) => {
   images.set([]);
 });
@@ -68,54 +68,43 @@ export const PhotoModule = recipe<PhotoModuleInput, PhotoModuleOutput>(
   ({ image: inputImage, label }) => {
     // We use an array internally for ct-image-input compatibility
     // but the module only supports a single image
-    // NOTE: Cell.of must use empty array to avoid TypeScript OOM (CT-1148)
-    // Using input params in Cell.of() causes deep type inference explosion
-    const images = Cell.of<ImageData[]>([]);
+    // NOTE: Writable.of must use empty array to avoid TypeScript OOM (CT-1148)
+    // Using input params in Writable.of() causes deep type inference explosion
+    const images = Writable.of<ImageData[]>([]);
 
     // Sync image Cell with images array (first element)
     // Also handles initialization from inputImage for import/restore
-    const syncedImage = lift(
-      ({ input, arr }: { input: ImageData | null; arr: ImageData[] }) => {
-        // If we have stored images, use the first one
-        if (arr && arr.length > 0) return arr[0];
-        // Otherwise, use the input image (for initialization)
-        return input;
-      },
-    )({ input: inputImage, arr: images });
+    const syncedImage = computed(() => {
+      const arr = images.get();
+      // If we have stored images, use the first one
+      if (arr && arr.length > 0) return arr[0];
+      // Otherwise, use the input image (for initialization)
+      return inputImage;
+    });
 
-    // Check if we have a photo - use lift for reactive boolean
+    // Check if we have a photo - use computed for reactive boolean
     // Checks both stored images and input image
-    const hasPhoto = lift(
-      ({ input, arr }: { input: ImageData | null; arr: ImageData[] }) => {
-        return (arr && arr.length > 0) || !!input;
-      },
-    )({ input: inputImage, arr: images });
+    const hasPhoto = computed(() => {
+      const arr = images.get();
+      return (arr && arr.length > 0) || !!inputImage;
+    });
 
     // Display text for NAME
-    const displayText = lift(
-      ({
-        input,
-        arr,
-        photoLabel,
-      }: {
-        input: ImageData | null;
-        arr: ImageData[];
-        photoLabel: string;
-      }) => {
-        const hasImage = (arr && arr.length > 0) || !!input;
-        if (photoLabel && hasImage) return photoLabel;
-        if (hasImage) return "Photo uploaded";
-        return "No photo";
-      },
-    )({ input: inputImage, arr: images, photoLabel: label });
+    const displayText = computed(() => {
+      const arr = images.get();
+      const hasImage = (arr && arr.length > 0) || !!inputImage;
+      if (label && hasImage) return label;
+      if (hasImage) return "Photo uploaded";
+      return "No photo";
+    });
 
     // Get the image URL reactively
-    const imageUrl = lift(({ img }: { img: ImageData | null }) => {
-      return img?.url || "";
-    })({ img: syncedImage });
+    const imageUrl = computed(() => {
+      return syncedImage?.url || "";
+    });
 
     // Check if label is set
-    const hasLabel = lift(({ l }: { l: string }) => !!l)({ l: label });
+    const hasLabel = computed(() => !!label);
 
     return {
       [NAME]: str`${MODULE_METADATA.icon} ${displayText}`,

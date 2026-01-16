@@ -21,6 +21,7 @@
     "./packages/memory",
     "./packages/patterns",
     "./packages/runner",
+    "./packages/runtime-client",
     "./packages/seeder",
     "./packages/shell",
     "./packages/static",
@@ -65,7 +66,14 @@
     "exclude": [
       ".beads/",
       "./packages/static/assets",
-      "./packages/vendor-astral"
+      "./packages/ui/src/v2/components/ct-outliner",
+      "./packages/vendor-astral",
+      "./packages/patterns-saves-backup/",
+      "./tmp/",
+      "./packages/patterns/default-array-push-test.tsx",
+      "./packages/patterns/notes-menu.tsx",
+      "./packages/patterns/record/",
+      "./packages/patterns/weight-tracker.tsx"
     ],
     "rules": {
       "tags": [
@@ -76,6 +84,7 @@
         "no-external-import"
       ],
       "exclude": [
+        "jsx-key",
         "jsx-no-useless-fragment",
         "no-explicit-any",
         "require-yield"

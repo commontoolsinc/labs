@@ -1,5 +1,6 @@
 import { css, html } from "lit";
-import { type Cell } from "@commontools/runner";
+import { type CellHandle } from "@commontools/runtime-client";
+import { stringSchema } from "@commontools/runner/schemas";
 import { BaseElement } from "../../core/base-element.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
 import type { CTTab } from "../ct-tab/ct-tab.ts";
@@ -11,7 +12,7 @@ import type { CTTabPanel } from "../ct-tab-panel/ct-tab-panel.ts";
  * @element ct-tabs
  *
  * @attr {string} value - Currently selected tab value (plain string)
- * @prop {Cell<string>|string} value - Selected tab value (supports Cell for two-way binding)
+ * @prop {CellHandle<string>|string} value - Selected tab value (supports Cell for two-way binding)
  * @attr {string} orientation - Tab orientation: "horizontal" | "vertical" (default: "horizontal")
  *
  * @slot - Default slot for ct-tab-list and ct-tab-panel elements
@@ -84,17 +85,15 @@ export class CTTabs extends BaseElement {
     orientation: { type: String },
   };
 
-  declare value: Cell<string> | string;
+  declare value: CellHandle<string> | string;
   declare orientation: "horizontal" | "vertical";
 
-  private _changeGroup = crypto.randomUUID();
   // Track last known value to detect external cell changes
   private _lastKnownValue: string = "";
 
   /* ---------- Cell controller for value binding ---------- */
   private _cellController = createStringCellController(this, {
     timing: { strategy: "immediate" }, // Tab changes should be immediate
-    changeGroup: this._changeGroup,
     onChange: (newValue: string, oldValue: string) => {
       // Track this internal change so render() doesn't double-update
       this._lastKnownValue = newValue;
@@ -132,11 +131,17 @@ export class CTTabs extends BaseElement {
 
   override firstUpdated() {
     // Initialize cell controller binding
-    this._cellController.bind(this.value);
+    this._cellController.bind(this.value, stringSchema);
     // Track initial value
     this._lastKnownValue = this._cellController.getValue();
     // Initialize tab selection
     this.updateTabSelection();
+
+    // Listen for slotchange to handle tabs being added after initial render
+    const slot = this.shadowRoot?.querySelector("slot");
+    if (slot) {
+      slot.addEventListener("slotchange", this.handleSlotChange);
+    }
   }
 
   override willUpdate(
@@ -146,7 +151,7 @@ export class CTTabs extends BaseElement {
 
     // If the value property itself changed (e.g., switched to a different cell)
     if (changedProperties.has("value")) {
-      this._cellController.bind(this.value);
+      this._cellController.bind(this.value, stringSchema);
     }
   }
 
@@ -183,11 +188,15 @@ export class CTTabs extends BaseElement {
     const panels = this.getTabPanels();
     const currentValue = this._cellController.getValue();
 
+    // Track if any tab matches the current value
+    let hasMatch = false;
+
     // Update tabs - use property access instead of getAttribute
     // because JSX sets properties, not attributes
     tabs.forEach((tab) => {
       const tabValue = (tab as CTTab).value;
       if (tabValue === currentValue) {
+        hasMatch = true;
         tab.setAttribute("aria-selected", "true");
         tab.setAttribute("data-selected", "true");
         (tab as CTTab).selected = true;
@@ -212,7 +221,18 @@ export class CTTabs extends BaseElement {
         (panel as CTTabPanel).hidden = true;
       }
     });
+
+    // If no tab matched the current value, default to first enabled tab
+    if (!hasMatch && tabs.length > 0) {
+      this.selectFirst();
+    }
   }
+
+  private handleSlotChange = () => {
+    // When slot content changes, re-run tab selection
+    // This handles the case where tabs are added after initial render
+    this.updateTabSelection();
+  };
 
   private handleTabClick = (event: CustomEvent<{ tab: Element }>) => {
     const tab = event.detail.tab as CTTab;

@@ -2,10 +2,10 @@
 import {
   Cell,
   cell,
+  computed,
   Default,
   derive,
   handler,
-  lift,
   recipe,
   str,
 } from "commontools";
@@ -50,29 +50,16 @@ export const counterWithComputedDefaultStrings = recipe<
       (count) => (typeof count === "number" ? count : 0),
     );
 
-    const fallbackLabel = lift(
-      (
-        inputs: { prefix: string | undefined; count: number },
-      ) => {
-        const base = typeof inputs.prefix === "string" &&
-            inputs.prefix.length > 0
-          ? inputs.prefix
-          : "Count";
-        return `${base} ${inputs.count}`;
-      },
-    )({
-      prefix,
-      count: normalizedValue,
+    const fallbackLabel = computed(() => {
+      const prefixValue = typeof prefix === "string" && prefix.length > 0
+        ? prefix
+        : "Count";
+      return `${prefixValue} ${normalizedValue}`;
     });
 
-    const label = lift(
-      (
-        inputs: { override?: string; fallback: string },
-      ) =>
-        typeof inputs.override === "string" ? inputs.override : inputs.fallback,
-    )({
-      override,
-      fallback: fallbackLabel,
+    const label = computed(() => {
+      const overrideValue = override.get();
+      return typeof overrideValue === "string" ? overrideValue : fallbackLabel;
     });
 
     const summary = str`${label} (current: ${normalizedValue})`;
@@ -92,3 +79,5 @@ export const counterWithComputedDefaultStrings = recipe<
     };
   },
 );
+
+export default counterWithComputedDefaultStrings;

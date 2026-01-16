@@ -193,33 +193,42 @@ const buildTimeline = (segments: readonly EpisodeSegment[]): OutlineEntry[] => {
   return entries;
 };
 
+// Module-scope lift definitions
+const liftSanitizeSegments = lift(
+  (value: EpisodeSegmentInput[] | undefined): EpisodeSegment[] =>
+    sanitizeSegments(value),
+);
+
+const liftBuildTimeline = lift(
+  (entries: EpisodeSegment[] | undefined): OutlineEntry[] =>
+    buildTimeline(Array.isArray(entries) ? entries : []),
+);
+
+const liftOutlineLabel = lift(
+  (entries: OutlineEntry[] | undefined): string => {
+    if (!entries || entries.length === 0) return "(empty outline)";
+    return entries.map((entry) => entry.label).join(" -> ");
+  },
+);
+
+const liftTotalMinutes = lift(
+  (entries: OutlineEntry[] | undefined): number => {
+    if (!entries || entries.length === 0) return 0;
+    return entries[entries.length - 1].endMinute;
+  },
+);
+
 /** Pattern orchestrating podcast episode segments into a timed outline. */
 export const podcastEpisodePlanner = recipe<PodcastEpisodePlannerArgs>(
   "Podcast Episode Planner",
   ({ segments }) => {
-    const segmentsView = lift(
-      (value: EpisodeSegmentInput[] | undefined): EpisodeSegment[] =>
-        sanitizeSegments(value),
-    )(segments);
+    const segmentsView = liftSanitizeSegments(segments);
 
-    const timeline = lift(
-      (entries: EpisodeSegment[] | undefined): OutlineEntry[] =>
-        buildTimeline(Array.isArray(entries) ? entries : []),
-    )(segmentsView);
+    const timeline = liftBuildTimeline(segmentsView);
 
-    const outline = lift(
-      (entries: OutlineEntry[] | undefined): string => {
-        if (!entries || entries.length === 0) return "(empty outline)";
-        return entries.map((entry) => entry.label).join(" -> ");
-      },
-    )(timeline);
+    const outline = liftOutlineLabel(timeline);
 
-    const totalMinutes = lift(
-      (entries: OutlineEntry[] | undefined): number => {
-        if (!entries || entries.length === 0) return 0;
-        return entries[entries.length - 1].endMinute;
-      },
-    )(timeline);
+    const totalMinutes = liftTotalMinutes(timeline);
 
     return {
       segments,
@@ -233,3 +242,5 @@ export const podcastEpisodePlanner = recipe<PodcastEpisodePlannerArgs>(
     };
   },
 );
+
+export default podcastEpisodePlanner;

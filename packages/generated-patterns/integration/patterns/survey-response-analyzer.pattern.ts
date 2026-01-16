@@ -339,129 +339,163 @@ const appendSurveyResponse = handler(
   },
 );
 
+// Module-scope lift definitions
+const liftSanitizeResponses = lift(sanitizeResponses);
+const liftSanitizeQuestionList = lift(sanitizeQuestionList);
+
+const liftNormalizedResponses = lift((input: {
+  store: SurveyResponse[];
+  base: SurveyResponse[];
+}) => {
+  const storeEntries = Array.isArray(input.store) ? input.store : [];
+  if (storeEntries.length > 0) {
+    return storeEntries.map(cloneResponse);
+  }
+  const baseEntries = Array.isArray(input.base) ? input.base : [];
+  return baseEntries.map(cloneResponse);
+});
+
+const liftQuestionCatalog = lift((input: {
+  provided: readonly string[];
+  responses: readonly SurveyResponse[];
+}) => buildQuestionCatalog(input));
+
+const liftQuestionSummaries = lift((input: {
+  questions: readonly string[];
+  responses: readonly SurveyResponse[];
+}) => computeQuestionSummaries(input));
+
+const liftQuestionSummariesView = lift((summaries: QuestionSummary[]) =>
+  summaries.map(cloneQuestionSummary)
+);
+
+const liftBuildQuestionAverageMap = lift(buildQuestionAverageMap);
+const liftQuestionAverageMapView = lift((record: Record<string, number>) => ({
+  ...record,
+}));
+
+const liftBuildDemographicCatalog = lift(buildDemographicCatalog);
+
+const liftDemographicSummaries = lift((input: {
+  demographics: readonly string[];
+  questions: readonly string[];
+  responses: readonly SurveyResponse[];
+}) => computeDemographicSummaries(input));
+
+const liftDemographicSummariesView = lift((summaries: DemographicSummary[]) =>
+  summaries.map(cloneDemographicSummary)
+);
+
+const liftBuildDemographicAverageMap = lift(buildDemographicAverageMap);
+const liftDemographicAverageMapView = lift((
+  record: Record<
+    string,
+    Record<
+      string,
+      number
+    >
+  >,
+) => {
+  const copy: Record<string, Record<string, number>> = {};
+  for (const key of Object.keys(record)) {
+    copy[key] = { ...record[key] };
+  }
+  return copy;
+});
+
+const liftOverallAverage = lift((summaries: QuestionSummary[]) => {
+  let total = 0;
+  let answered = 0;
+  for (const summary of summaries) {
+    total += summary.total;
+    answered += summary.answered;
+  }
+  return answered > 0 ? roundAverage(total / answered) : 0;
+});
+
+const liftOverallAverageLabel = lift((value: number | undefined) => {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "0.00";
+  }
+  return value.toFixed(2);
+});
+
+const liftResponseCount = lift((entries: readonly SurveyResponse[]) =>
+  entries.length
+);
+const liftQuestionCount = lift((entries: readonly string[]) => entries.length);
+const liftDemographicCount = lift((entries: readonly string[]) =>
+  entries.length
+);
+
+const liftResponsesView = lift((entries: SurveyResponse[]) =>
+  entries.map(cloneResponse)
+);
+
 export const surveyResponseAnalyzer = recipe<SurveyResponseArgs>(
   "Survey Response Analyzer",
   ({ responses, questions }) => {
-    const sanitizedArgumentResponses = lift(sanitizeResponses)(responses);
-    const sanitizedQuestionList = lift(sanitizeQuestionList)(questions);
+    const sanitizedArgumentResponses = liftSanitizeResponses(responses);
+    const sanitizedQuestionList = liftSanitizeQuestionList(questions);
 
     const responseStore = cell<SurveyResponse[]>([]);
     const responseSequence = cell(0);
 
-    const normalizedResponses = lift((input: {
-      store: SurveyResponse[];
-      base: SurveyResponse[];
-    }) => {
-      const storeEntries = Array.isArray(input.store) ? input.store : [];
-      if (storeEntries.length > 0) {
-        return storeEntries.map(cloneResponse);
-      }
-      const baseEntries = Array.isArray(input.base) ? input.base : [];
-      return baseEntries.map(cloneResponse);
-    })({
+    const normalizedResponses = liftNormalizedResponses({
       store: responseStore,
       base: sanitizedArgumentResponses,
     });
 
-    const questionCatalog = lift((input: {
-      provided: readonly string[];
-      responses: readonly SurveyResponse[];
-    }) => buildQuestionCatalog(input))({
+    const questionCatalog = liftQuestionCatalog({
       provided: sanitizedQuestionList,
       responses: normalizedResponses,
     });
 
-    const questionSummaries = lift((input: {
-      questions: readonly string[];
-      responses: readonly SurveyResponse[];
-    }) => computeQuestionSummaries(input))({
+    const questionSummaries = liftQuestionSummaries({
       questions: questionCatalog,
       responses: normalizedResponses,
     });
 
-    const questionSummariesView = lift((summaries: QuestionSummary[]) =>
-      summaries.map(cloneQuestionSummary)
-    )(questionSummaries);
+    const questionSummariesView = liftQuestionSummariesView(questionSummaries);
 
-    const questionAverageMap = lift(buildQuestionAverageMap)(
-      questionSummaries,
-    );
-    const questionAverageMapView = lift((record: Record<string, number>) => ({
-      ...record,
-    }))(questionAverageMap);
-
-    const demographicCatalog = lift(buildDemographicCatalog)(
-      normalizedResponses,
+    const questionAverageMap = liftBuildQuestionAverageMap(questionSummaries);
+    const questionAverageMapView = liftQuestionAverageMapView(
+      questionAverageMap,
     );
 
-    const demographicSummaries = lift((input: {
-      demographics: readonly string[];
-      questions: readonly string[];
-      responses: readonly SurveyResponse[];
-    }) => computeDemographicSummaries(input))({
+    const demographicCatalog = liftBuildDemographicCatalog(normalizedResponses);
+
+    const demographicSummaries = liftDemographicSummaries({
       demographics: demographicCatalog,
       questions: questionCatalog,
       responses: normalizedResponses,
     });
 
-    const demographicSummariesView = lift((summaries: DemographicSummary[]) =>
-      summaries.map(cloneDemographicSummary)
-    )(demographicSummaries);
-
-    const demographicAverageMap = lift(buildDemographicAverageMap)(
+    const demographicSummariesView = liftDemographicSummariesView(
       demographicSummaries,
     );
-    const demographicAverageMapView = lift((
-      record: Record<
-        string,
-        Record<
-          string,
-          number
-        >
-      >,
-    ) => {
-      const copy: Record<string, Record<string, number>> = {};
-      for (const key of Object.keys(record)) {
-        copy[key] = { ...record[key] };
-      }
-      return copy;
-    })(demographicAverageMap);
 
-    const overallAverage = lift((summaries: QuestionSummary[]) => {
-      let total = 0;
-      let answered = 0;
-      for (const summary of summaries) {
-        total += summary.total;
-        answered += summary.answered;
-      }
-      return answered > 0 ? roundAverage(total / answered) : 0;
-    })(questionSummaries);
-
-    const overallAverageLabel = lift((value: number | undefined) => {
-      if (typeof value !== "number" || Number.isNaN(value)) {
-        return "0.00";
-      }
-      return value.toFixed(2);
-    })(overallAverage);
-
-    const responseCount = lift((entries: readonly SurveyResponse[]) =>
-      entries.length
-    )(normalizedResponses);
-    const questionCount = lift((entries: readonly string[]) => entries.length)(
-      questionCatalog,
+    const demographicAverageMap = liftBuildDemographicAverageMap(
+      demographicSummaries,
     );
-    const demographicCount = lift((entries: readonly string[]) =>
-      entries.length
-    )(demographicCatalog);
+    const demographicAverageMapView = liftDemographicAverageMapView(
+      demographicAverageMap,
+    );
+
+    const overallAverage = liftOverallAverage(questionSummaries);
+
+    const overallAverageLabel = liftOverallAverageLabel(overallAverage);
+
+    const responseCount = liftResponseCount(normalizedResponses);
+    const questionCount = liftQuestionCount(questionCatalog);
+    const demographicCount = liftDemographicCount(demographicCatalog);
 
     const summaryHead =
       str`${responseCount} responses · ${questionCount} questions`;
     const summary =
       str`${summaryHead} · ${demographicCount} demographics · avg ${overallAverageLabel}`;
 
-    const responsesView = lift((entries: SurveyResponse[]) =>
-      entries.map(cloneResponse)
-    )(normalizedResponses);
+    const responsesView = liftResponsesView(normalizedResponses);
 
     return {
       responses: responsesView,
@@ -485,3 +519,5 @@ export const surveyResponseAnalyzer = recipe<SurveyResponseArgs>(
     };
   },
 );
+
+export default surveyResponseAnalyzer;

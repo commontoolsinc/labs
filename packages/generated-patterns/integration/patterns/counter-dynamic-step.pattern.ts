@@ -41,3 +41,5 @@ export const counterWithDynamicStep = recipe<DynamicStepArgs>(
     };
   },
 );
+
+export default counterWithDynamicStep;

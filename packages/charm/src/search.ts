@@ -1,8 +1,7 @@
 import { charmId, CharmManager, DEFAULT_MODEL } from "@commontools/charm";
 import { nameSchema } from "@commontools/runner/schemas";
-import { NAME } from "@commontools/runner";
+import { Cell, NAME } from "@commontools/runner";
 import { extractTextFromLLMResponse, LLMClient } from "@commontools/llm";
-import { Cell } from "@commontools/runner";
 import { isObject } from "@commontools/utils/types";
 
 export type CharmSearchResult = {
@@ -19,10 +18,10 @@ export async function searchCharms(
   thinking: string;
 }> {
   try {
-    const charms = charmManager.getCharms();
-    await charmManager.sync(charms);
+    const charmsCell = await charmManager.getCharms();
+    await charmManager.sync(charmsCell);
     const results = await Promise.all(
-      charms.get().map(async (charm) => {
+      charmsCell.get().map(async (charm: Cell<unknown>) => {
         try {
           const data = charm.asSchema(nameSchema).get();
           const title = data?.[NAME] ?? "Untitled";

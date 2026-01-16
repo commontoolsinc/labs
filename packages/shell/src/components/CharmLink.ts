@@ -1,7 +1,7 @@
 import { css, html, LitElement } from "lit";
 import { property } from "lit/decorators.js";
-import { navigate } from "../lib/navigate.ts";
 import { type DID } from "@commontools/identity";
+import { navigate } from "../../shared/mod.ts";
 
 export class CharmLinkElement extends LitElement {
   static override styles = css`

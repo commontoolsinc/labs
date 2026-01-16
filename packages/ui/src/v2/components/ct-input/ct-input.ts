@@ -9,7 +9,8 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
-import { type Cell } from "@commontools/runner";
+import { type CellHandle } from "@commontools/runtime-client";
+import { stringSchema } from "@commontools/runner/schemas";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
 
@@ -20,7 +21,7 @@ import { createStringCellController } from "../../core/cell-controller.ts";
  *
  * @attr {string} type - Input type: "text" | "email" | "password" | "number" | "search" | "tel" | "url" | "date" | "time" | "datetime-local" | "month" | "week" | "color" | "file" | "range" | "hidden"
  * @attr {string} placeholder - Placeholder text
- * @attr {string|Cell<string>} value - Input value (supports both plain string and Cell<string>)
+ * @attr {string|CellHandle<string>} value - Input value (supports both plain string and CellHandle<string>)
  * @attr {boolean} disabled - Whether the input is disabled
  * @attr {boolean} readonly - Whether the input is read-only
  * @attr {boolean} required - Whether the input is required
@@ -325,7 +326,7 @@ export class CTInput extends BaseElement {
 
       declare type: InputType;
       declare placeholder: string;
-      declare value: Cell<string> | string;
+      declare value: CellHandle<string> | string;
       declare disabled: boolean;
       declare readonly: boolean;
       declare error: boolean;
@@ -350,14 +351,12 @@ export class CTInput extends BaseElement {
       declare timingStrategy: InputTimingOptions["strategy"];
       declare timingDelay: number;
 
-      private _changeGroup = crypto.randomUUID();
       private _input: HTMLInputElement | null = null;
       private _cellController = createStringCellController(this, {
         timing: {
           strategy: "debounce",
           delay: 300,
         },
-        changeGroup: this._changeGroup,
         onChange: (newValue: string, oldValue: string) => {
           this.emit("ct-change", {
             value: newValue,
@@ -494,7 +493,7 @@ export class CTInput extends BaseElement {
         if (changedProperties.has("value")) {
           // Bind the new value (Cell or plain) to the controller
           // This updates the internal reference so getValue() returns the correct value
-          this._cellController.bind(this.value);
+          this._cellController.bind(this.value, stringSchema);
         }
       }
 
@@ -530,7 +529,7 @@ export class CTInput extends BaseElement {
         this._input = this.shadowRoot?.querySelector("input") || null;
 
         // Bind the initial value to the cell controller
-        this._cellController.bind(this.value);
+        this._cellController.bind(this.value, stringSchema);
 
         // Update timing options to match current properties
         this._cellController.updateTimingOptions({

@@ -1,0 +1,12 @@
+{
+  "properties": {
+    "v": {
+      "asCell": true,
+      "type": "string"
+    }
+  },
+  "required": [
+    "v"
+  ],
+  "type": "object"
+}

@@ -23,17 +23,21 @@ const bumpWithFallback = handler(
   },
 );
 
+const liftSafeDefault = lift((fallback: number | undefined) =>
+  typeof fallback === "number" ? fallback : 10
+);
+
+const liftSafeValue = lift((inputs: { value?: number; fallback?: number }) => {
+  if (typeof inputs.value === "number") return inputs.value;
+  if (typeof inputs.fallback === "number") return inputs.fallback;
+  return 10;
+});
+
 export const counterWithOptionalFallback = recipe<OptionalFallbackArgs>(
   "Counter With Optional Fallback",
   ({ value, defaultValue }) => {
-    const safeDefault = lift((fallback: number | undefined) =>
-      typeof fallback === "number" ? fallback : 10
-    )(defaultValue);
-    const safeValue = lift((inputs: { value?: number; fallback?: number }) => {
-      if (typeof inputs.value === "number") return inputs.value;
-      if (typeof inputs.fallback === "number") return inputs.fallback;
-      return 10;
-    })({ value, fallback: defaultValue });
+    const safeDefault = liftSafeDefault(defaultValue);
+    const safeValue = liftSafeValue({ value, fallback: defaultValue });
 
     return {
       value,
@@ -45,3 +49,5 @@ export const counterWithOptionalFallback = recipe<OptionalFallbackArgs>(
     };
   },
 );
+
+export default counterWithOptionalFallback;

@@ -66,6 +66,7 @@ const OPAQUE_REF_OWNER_NAMES = new Set([
 
 const CELL_LIKE_CLASSES = new Set([
   "Cell",
+  "Writable", // Alias for Cell that better expresses write-access semantics
   "OpaqueCell",
   "Stream",
   "ComparableCell",

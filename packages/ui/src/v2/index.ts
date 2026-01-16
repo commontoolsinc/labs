@@ -78,6 +78,8 @@ export * from "./components/ct-tabs/index.ts";
 export * from "./components/ct-list/index.ts";
 export * from "./components/ct-list-item/index.ts";
 export * from "./components/ct-loader/index.ts";
+export * from "./components/ct-location/index.ts";
+export * from "./components/ct-map/index.ts";
 export * from "./components/ct-markdown/index.ts";
 export * from "./components/ct-tags/index.ts";
 export * from "./components/ct-table/index.ts";
@@ -94,7 +96,8 @@ export * from "./components/ct-vstack/index.ts";
 export * from "./components/ct-select/index.ts";
 export * from "./components/ct-message-input/ct-message-input.ts";
 export * from "./components/ct-prompt-input/index.ts";
-export * from "./components/ct-outliner/index.ts";
+// TODO(runtime-worker-refactor)
+// export * from "./components/ct-outliner/index.ts";
 export * from "./components/ct-keybind/index.ts";
 export * from "./components/ct-tools-chip/index.ts";
 export * from "./components/keyboard-context.ts";

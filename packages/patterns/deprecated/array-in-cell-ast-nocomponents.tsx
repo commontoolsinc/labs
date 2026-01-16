@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, handler, NAME, recipe, UI } from "commontools";
+import { Default, handler, NAME, recipe, UI, Writable } from "commontools";
 
 interface Item {
   text: Default<string, "">;
@@ -17,7 +17,7 @@ type InputEventType = {
 };
 
 interface ListState {
-  items: Cell<Item[]>;
+  items: Writable<Item[]>;
 }
 
 const addItem = handler<InputEventType, ListState>(
@@ -34,10 +34,7 @@ export default recipe<InputSchema>(({ title, items }) => {
         <h3>{title}</h3>
         <p>Super Simple Array</p>
         <ul>
-          {
-            // deno-lint-ignore jsx-key
-            items.map((item) => <li>{item.text}</li>)
-          }
+          {items.map((item) => <li>{item.text}</li>)}
         </ul>
         <ct-message-input
           name="Send"

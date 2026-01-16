@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { StaticCacheFS } from "@commontools/static";
 
-import { transformSource } from "../utils.ts";
+import { transformSource, validateSource } from "../utils.ts";
 
 const staticCache = new StaticCacheFS();
 const commontools = await staticCache.getText("types/commontools.d.ts");
@@ -17,11 +17,16 @@ import { OpaqueRef, h } from "commontools";
 const count: OpaqueRef<number> = {} as any;
 const el = <div>{count + 1}</div>;
 `;
-      await expect(
-        transformSource(source, { mode: "error", types }),
-      ).rejects.toThrow(
-        /JSX expression with OpaqueRef computation should use derive/,
-      );
+      const { diagnostics } = await validateSource(source, {
+        mode: "error",
+        types,
+      });
+      expect(diagnostics.length).toBeGreaterThan(0);
+      expect(
+        diagnostics.some((d) =>
+          d.message.includes("OpaqueRef computation should use derive")
+        ),
+      ).toBe(true);
     });
 
     it("reports multiple errors", async () => {
@@ -37,9 +42,12 @@ const el = (
   </div>
 );
 `;
-      await expect(
-        transformSource(source, { mode: "error", types }),
-      ).rejects.toThrow(/OpaqueRef transformation errors/);
+      const { diagnostics } = await validateSource(source, {
+        mode: "error",
+        types,
+      });
+      // Should have at least 3 diagnostics (one for each JSX expression)
+      expect(diagnostics.length).toBeGreaterThanOrEqual(3);
     });
   });
 

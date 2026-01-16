@@ -99,6 +99,57 @@ const recordTransition = (
   sequence.set(baseId + 1);
 };
 
+// Module-scope lift definitions
+const liftNormalizedStage = lift((value: WorkflowStage | undefined) =>
+  sanitizeStage(value)
+);
+
+const liftHistoryView = lift((entries: TransitionRecord[] | undefined) =>
+  Array.isArray(entries) ? entries.slice() : []
+);
+
+const liftAttemptCount = lift((entries: TransitionRecord[]) => entries.length);
+
+const liftAcceptedCount = lift((entries: TransitionRecord[]) =>
+  entries.reduce(
+    (count, entry) => count + (entry.result === "accepted" ? 1 : 0),
+    0,
+  )
+);
+
+const liftRejectedCount = lift((entries: TransitionRecord[]) =>
+  entries.reduce(
+    (count, entry) => count + (entry.result === "rejected" ? 1 : 0),
+    0,
+  )
+);
+
+const liftStageIndex = lift((current: WorkflowStage) =>
+  WORKFLOW_STAGES.indexOf(current)
+);
+
+const liftAvailableTransitions = lift((current: WorkflowStage) => {
+  const allowed = ALLOWED_TRANSITIONS[current] ?? [];
+  return [...allowed];
+});
+
+const liftStageMetadata = lift((current: WorkflowStage) =>
+  WORKFLOW_STAGES.map((stageName) => ({
+    stage: stageName,
+    isCurrent: stageName === current,
+    isReachable: (ALLOWED_TRANSITIONS[current] ?? [])
+      .includes(stageName),
+  }))
+);
+
+const liftLastTransitionStatus = lift((entries: TransitionRecord[]) => {
+  const entry = entries.at(-1);
+  if (!entry) {
+    return "none";
+  }
+  return `${entry.result}:${entry.from}->${entry.to}`;
+});
+
 const attemptStageTransition = handler(
   (
     event: TransitionEvent | undefined,
@@ -175,62 +226,28 @@ export const workflowStateMachine = recipe<WorkflowArgs>(
     const transitions = cell<TransitionRecord[]>([]);
     const sequence = cell(0);
 
-    const normalizedStage = lift((value: WorkflowStage | undefined) =>
-      sanitizeStage(value)
-    )(stage);
+    const normalizedStage = liftNormalizedStage(stage);
 
-    const historyView = lift((entries: TransitionRecord[] | undefined) =>
-      Array.isArray(entries) ? entries.slice() : []
-    )(transitions);
+    const historyView = liftHistoryView(transitions);
 
-    const attemptCount = lift((entries: TransitionRecord[]) => entries.length)(
-      historyView,
-    );
+    const attemptCount = liftAttemptCount(historyView);
 
-    const acceptedCount = lift((entries: TransitionRecord[]) =>
-      entries.reduce(
-        (count, entry) => count + (entry.result === "accepted" ? 1 : 0),
-        0,
-      )
-    )(historyView);
+    const acceptedCount = liftAcceptedCount(historyView);
 
-    const rejectedCount = lift((entries: TransitionRecord[]) =>
-      entries.reduce(
-        (count, entry) => count + (entry.result === "rejected" ? 1 : 0),
-        0,
-      )
-    )(historyView);
+    const rejectedCount = liftRejectedCount(historyView);
 
-    const stageIndex = lift((current: WorkflowStage) =>
-      WORKFLOW_STAGES.indexOf(current)
-    )(normalizedStage);
+    const stageIndex = liftStageIndex(normalizedStage);
 
-    const availableTransitions = lift((current: WorkflowStage) => {
-      const allowed = ALLOWED_TRANSITIONS[current] ?? [];
-      return [...allowed];
-    })(normalizedStage);
+    const availableTransitions = liftAvailableTransitions(normalizedStage);
 
     const availableLabel = derive(
       availableTransitions,
       (options) => (options.length === 0 ? "none" : options.join(",")),
     );
 
-    const stageMetadata = lift((current: WorkflowStage) =>
-      WORKFLOW_STAGES.map((stageName) => ({
-        stage: stageName,
-        isCurrent: stageName === current,
-        isReachable: (ALLOWED_TRANSITIONS[current] ?? [])
-          .includes(stageName),
-      }))
-    )(normalizedStage);
+    const stageMetadata = liftStageMetadata(normalizedStage);
 
-    const lastTransitionStatus = lift((entries: TransitionRecord[]) => {
-      const entry = entries.at(-1);
-      if (!entry) {
-        return "none";
-      }
-      return `${entry.result}:${entry.from}->${entry.to}`;
-    })(historyView);
+    const lastTransitionStatus = liftLastTransitionStatus(historyView);
 
     const summary = derive(
       {
@@ -266,3 +283,5 @@ export const workflowStateMachine = recipe<WorkflowArgs>(
 );
 
 export const pattern = workflowStateMachine;
+
+export default workflowStateMachine;

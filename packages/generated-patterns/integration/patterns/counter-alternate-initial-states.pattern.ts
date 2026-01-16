@@ -177,33 +177,40 @@ const selectInitialState = handler(
   },
 );
 
+const liftSanitizeStateSeeds = lift(sanitizeStateSeeds);
+
+const liftActiveState = lift(
+  (
+    input:
+      | {
+        states?: AlternateInitialState[];
+        active?: Cell<string>;
+      }
+      | undefined,
+  ): AlternateInitialState => {
+    const candidate = Array.isArray(input?.states)
+      ? input?.states?.slice() ?? []
+      : [];
+    const list = candidate.length > 0 ? candidate : [fallbackState()];
+    const desiredId = toStateId(input?.active?.get(), list[0].id);
+    return list.find((entry) => entry.id === desiredId) ?? list[0];
+  },
+);
+
 export const counterWithAlternateInitialStates = recipe<
   AlternateInitialStatesArgs
 >("Counter With Alternate Initial States", ({ states }) => {
-  const sanitizedStates = lift(sanitizeStateSeeds)(states);
+  const sanitizedStates = liftSanitizeStateSeeds(states);
 
   const activeStateId = cell(fallbackState().id);
   const valueCell = cell(0);
   const stepCell = cell(1);
   const selectionLog = cell<SelectionLogEntry[]>([]);
 
-  const activeState = lift(
-    (
-      input:
-        | {
-          states?: AlternateInitialState[];
-          active?: Cell<string>;
-        }
-        | undefined,
-    ): AlternateInitialState => {
-      const candidate = Array.isArray(input?.states)
-        ? input?.states?.slice() ?? []
-        : [];
-      const list = candidate.length > 0 ? candidate : [fallbackState()];
-      const desiredId = toStateId(input?.active?.get(), list[0].id);
-      return list.find((entry) => entry.id === desiredId) ?? list[0];
-    },
-  )({ states: sanitizedStates, active: activeStateId });
+  const activeState = liftActiveState({
+    states: sanitizedStates,
+    active: activeStateId,
+  });
 
   const selectionCount = derive(
     selectionLog,
@@ -233,3 +240,5 @@ export const counterWithAlternateInitialStates = recipe<
     }),
   };
 });
+
+export default counterWithAlternateInitialStates;

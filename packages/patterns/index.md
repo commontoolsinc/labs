@@ -44,7 +44,7 @@ interface TodoItem {
 }
 
 interface Output {
-  items: Cell<TodoItem[]>;
+  items: Writable<TodoItem[]>;
 }
 ```
 
@@ -142,7 +142,7 @@ mentionables. Deploy this to have a conversational AI interface.
 
 ```ts
 type ChatInput = {
-  messages?: Cell<Default<Array<BuiltInLLMMessage>, []>>;
+  messages?: Writable<Default<Array<BuiltInLLMMessage>, []>>;
   tools?: any;
   theme?: any;
   system?: string;
@@ -175,7 +175,7 @@ microphone button to record, release to transcribe.
 
 ```ts
 type Input = {
-  title?: Cell<Default<string, "Voice Note">>;
+  title?: Writable<Default<string, "Voice Note">>;
 };
 ```
 
@@ -217,45 +217,10 @@ type ImageChatInput = {
 
 ```ts
 type ImageChatOutput = {
-  images: Cell<ImageData[]>;
-  prompt: Cell<string>;
+  images: Writable<ImageData[]>;
+  prompt: Writable<string>;
   response: string | undefined;
   pending: boolean | undefined;
-};
-```
-
-## `chatbot-outliner.tsx`
-
-Structured outliner with integrated AI chat that can manipulate the outline via
-tools. The AI assistant can add nodes to your outline.
-
-**Keywords:** outliner, chat, tools, ct-outliner
-
-### Input Schema
-
-```ts
-type OutlinerNode = {
-  body: Default<string, "">;
-  children: Default<OutlinerNode[], []>;
-  attachments: Default<OpaqueRef<any>[], []>;
-};
-
-type LLMTestInput = {
-  title?: Cell<Default<string, "LLM Test">>;
-  messages?: Cell<Default<Array<BuiltInLLMMessage>, []>>;
-  expandChat?: Cell<Default<boolean, false>>;
-  outline?: Default<
-    { root: OutlinerNode },
-    { root: { body: "Untitled Page"; children: []; attachments: [] } }
-  >;
-};
-```
-
-### Output Schema
-
-```ts
-type LLMTestResult = {
-  messages: Default<Array<BuiltInLLMMessage>, []>;
 };
 ```
 
@@ -271,13 +236,13 @@ scoring. Two players can join and play simultaneously.
 ```ts
 interface LobbyInput {
   gameName: Default<string, "Scrabble Match">;
-  boardJson: Cell<Default<string, "">>;
-  bagJson: Cell<Default<string, "">>;
-  bagIndex: Cell<Default<number, 0>>;
-  playersJson: Cell<Default<string, "[]">>;
-  gameEventsJson: Cell<Default<string, "[]">>;
-  allRacksJson: Cell<Default<string, "{}">>;
-  allPlacedJson: Cell<Default<string, "{}">>;
+  boardJson: Writable<Default<string, "">>;
+  bagJson: Writable<Default<string, "">>;
+  bagIndex: Writable<Default<number, 0>>;
+  playersJson: Writable<Default<string, "[]">>;
+  gameEventsJson: Writable<Default<string, "[]">>;
+  allRacksJson: Writable<Default<string, "{}">>;
+  allPlacedJson: Writable<Default<string, "{}">>;
 }
 ```
 
@@ -343,8 +308,8 @@ interface Relationship {
 }
 
 interface Input {
-  contacts: Cell<Default<Contact[], []>>;
-  relationships: Cell<Default<Relationship[], []>>;
+  contacts: Writable<Default<Contact[], []>>;
+  relationships: Writable<Default<Relationship[], []>>;
 }
 ```
 
@@ -380,8 +345,8 @@ interface HabitLog {
 }
 
 interface Input {
-  habits: Cell<Default<Habit[], []>>;
-  logs: Cell<Default<HabitLog[], []>>;
+  habits: Writable<Default<Habit[], []>>;
+  logs: Writable<Default<HabitLog[], []>>;
 }
 ```
 
@@ -413,7 +378,7 @@ interface Event {
 }
 
 interface Input {
-  events: Cell<Default<Event[], []>>;
+  events: Writable<Default<Event[], []>>;
 }
 ```
 
@@ -428,10 +393,10 @@ interface Output {
 
 ## `reading-list.tsx`
 
-Track books, articles, papers, and videos you want to read or have read. Filter
-by status (want/reading/finished/abandoned) and rate items.
+**Canonical list-detail example.** Track books, articles, papers, and videos.
+Demonstrates: footer forms, `navigateTo()` for details, `lift()` for filtering.
 
-**Keywords:** reading, books, articles, status-tracking, lift
+**Keywords:** reading, books, articles, status-tracking, lift, navigateTo
 
 ### Input Schema
 
@@ -452,7 +417,7 @@ interface ReadingItem {
 }
 
 interface Input {
-  items: Cell<Default<ReadingItem[], []>>;
+  items: Writable<Default<ReadingItem[], []>>;
 }
 ```
 
@@ -596,7 +561,7 @@ type ResearchResult = {
 
 type Output = {
   question: string;
-  result: Cell<ResearchResult | undefined>;
+  result: Writable<ResearchResult | undefined>;
   pending: boolean;
   error: string | undefined;
 };
@@ -967,8 +932,8 @@ containers.
 
 ```ts
 interface ContainerCoordinationContext<TEntry = unknown> {
-  entries: Cell<TEntry[]>;
-  trashedEntries: Cell<(TEntry & { trashedAt: string })[]>;
+  entries: Writable<TEntry[]>;
+  trashedEntries: Writable<(TEntry & { trashedAt: string })[]>;
   createModule: (type: string) => unknown;
 }
 

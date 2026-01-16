@@ -1,17 +1,26 @@
 /// <cts-enable />
-import { Cell, lift, NAME, OpaqueRef, pattern, UI } from "commontools";
+import { lift, NAME, pattern, UI, Writable } from "commontools";
 
+/**
+ * Type for charms used in the mentionable/backlinks system.
+ *
+ * Note: While `mentioned` and `backlinks` are typed as required for structural
+ * compatibility, at runtime most charms don't actually have these fields.
+ * Only patterns like notes and calendar events define them. The computeIndex
+ * function safely handles charms that lack these fields.
+ */
 export type MentionableCharm = {
   [NAME]?: string;
   isHidden?: boolean;
   isMentionable?: boolean;
   mentioned: MentionableCharm[];
   backlinks: MentionableCharm[];
+  mentionable?: MentionableCharm[] | { get?: () => MentionableCharm[] };
 };
 
 export type WriteableBacklinks = {
   mentioned: WriteableBacklinks[];
-  backlinks: Cell<WriteableBacklinks[]>;
+  backlinks: Writable<WriteableBacklinks[]>;
 };
 
 type Input = {
@@ -29,14 +38,22 @@ const computeIndex = lift<
   ({ allCharms }) => {
     const cs = allCharms ?? [];
 
+    // Reset backlinks for charms that support it.
+    // Many charms don't have backlinks (e.g., auth charms, google patterns),
+    // so we safely skip them with optional chaining.
+    // Also skip undefined/null entries that may exist in the array.
     for (const c of cs) {
-      c.backlinks?.set([]);
+      if (!c) continue;
+      c.backlinks?.set?.([]);
     }
 
+    // Populate backlinks from mentioned references.
+    // Again, use optional chaining since not all charms support backlinks.
     for (const c of cs) {
+      if (!c) continue;
       const mentions = c.mentioned ?? [];
       for (const m of mentions) {
-        m?.backlinks?.push(c);
+        m?.backlinks?.push?.(c);
       }
     }
   },
@@ -65,14 +82,14 @@ const computeMentionable = lift<
   const cs = charmList ?? [];
   const out: MentionableCharm[] = [];
   for (const c of cs) {
+    // Skip undefined/null entries that may exist in the array
+    if (!c) continue;
     // Skip charms explicitly marked as not mentionable (like note-md viewer charms)
     // Note: We check isMentionable === false, not isHidden, because notes in
     // notebooks are hidden but should still be mentionable
     if (c.isMentionable === false) continue;
     out.push(c);
-    const exported = (c as unknown as {
-      mentionable?: MentionableCharm[] | { get?: () => MentionableCharm[] };
-    }).mentionable;
+    const exported = c.mentionable;
     if (Array.isArray(exported)) {
       for (const m of exported) if (m && m.isMentionable !== false) out.push(m);
     } else if (exported && typeof (exported as any).get === "function") {
@@ -86,7 +103,7 @@ const computeMentionable = lift<
 
 const BacklinksIndex = pattern<Input, Output>(({ allCharms }) => {
   computeIndex({
-    allCharms: allCharms as unknown as OpaqueRef<WriteableBacklinks[]>,
+    allCharms,
   });
 
   // Compute mentionable list from allCharms reactively

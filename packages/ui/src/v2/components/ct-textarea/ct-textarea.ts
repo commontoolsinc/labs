@@ -9,7 +9,8 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
-import { type Cell } from "@commontools/runner";
+import { type CellHandle } from "@commontools/runtime-client";
+import { stringSchema } from "@commontools/runner/schemas";
 import { createStringCellController } from "../../core/cell-controller.ts";
 
 export type TimingStrategy = "immediate" | "debounce" | "throttle" | "blur";
@@ -20,7 +21,7 @@ export type TimingStrategy = "immediate" | "debounce" | "throttle" | "blur";
  * @element ct-textarea
  *
  * @attr {string} placeholder - Placeholder text
- * @attr {string|Cell<string>} value - Textarea value (supports both plain string and Cell<string>)
+ * @attr {string|CellHandle<string>} value - Textarea value (supports both plain string and CellHandle<string>)
  * @attr {boolean} disabled - Whether the textarea is disabled
  * @attr {boolean} readonly - Whether the textarea is read-only
  * @attr {boolean} required - Whether the textarea is required
@@ -74,7 +75,7 @@ export class CTTextarea extends BaseElement {
     timingDelay: { type: Number, attribute: "timing-delay" },
   };
   declare placeholder: string;
-  declare value: Cell<string> | string;
+  declare value: CellHandle<string> | string;
   declare disabled: boolean;
   declare readonly: boolean;
   declare error: boolean;
@@ -279,14 +280,12 @@ export class CTTextarea extends BaseElement {
       declare theme?: CTTheme;
 
       // Cache + initial setup
-      private _changeGroup = crypto.randomUUID();
       private _textarea: HTMLTextAreaElement | null = null;
       private _cellController = createStringCellController(this, {
         timing: {
           strategy: "debounce",
           delay: 300,
         },
-        changeGroup: this._changeGroup,
       });
 
       constructor() {
@@ -338,7 +337,7 @@ export class CTTextarea extends BaseElement {
           | null;
 
         // Bind the initial value to the cell controller
-        this._cellController.bind(this.value);
+        this._cellController.bind(this.value, stringSchema);
 
         // Update timing options to match current properties
         this._cellController.updateTimingOptions({
@@ -367,7 +366,7 @@ export class CTTextarea extends BaseElement {
 
         if (changedProperties.has("value")) {
           // Bind the new value (Cell or plain) to the controller
-          this._cellController.bind(this.value);
+          this._cellController.bind(this.value, stringSchema);
         }
 
         // Update timing options if they changed

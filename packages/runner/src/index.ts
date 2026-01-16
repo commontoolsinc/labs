@@ -3,7 +3,6 @@ export type {
   ConsoleHandler,
   ErrorHandler,
   ErrorWithContext as RuntimeErrorWithContext,
-  HomeSpaceCellContents,
   RuntimeOptions,
   SpaceCellContents,
 } from "./runtime.ts";
@@ -31,8 +30,8 @@ export {
 export { convertCellsToLinks, isCell, isStream } from "./cell.ts";
 export {
   getCellOrThrow,
-  isCellResult as isQueryResult,
-  isCellResultForDereferencing as isQueryResultForDereferencing,
+  isCellResult,
+  isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 export { effect } from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
@@ -133,4 +132,5 @@ export {
 
 // Utility functions (split from utils.ts)
 export { createJsonSchema } from "./builder/json-utils.ts";
-export { deepEqual, getValueAtPath, setValueAtPath } from "./path-utils.ts";
+export { deepEqual } from "@commontools/utils/deep-equal";
+export { getValueAtPath, setValueAtPath } from "./path-utils.ts";

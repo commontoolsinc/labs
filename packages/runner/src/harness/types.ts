@@ -22,6 +22,8 @@ export interface TypeScriptHarnessProcessOptions {
   filename?: string;
   // Get the program post-AST-transformation for debugging.
   getTransformedProgram?: (program: Program) => void;
+  // Show verbose TypeScript error messages instead of simplified hints.
+  verboseErrors?: boolean;
 }
 
 // A `Harness` wraps a flow of compiling, bundling, and executing typescript.
