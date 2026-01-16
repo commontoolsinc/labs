@@ -9,6 +9,7 @@ import {
   pattern,
   patternTool,
   type PatternToolResult,
+  SELF,
   Stream,
   UI,
   type VNode,
@@ -60,6 +61,7 @@ type Output = {
   [UI]: VNode;
   mentioned: Default<Array<MentionableCharm>, []>;
   backlinks: MentionableCharm[];
+  parentNotebook: any; // Reference to parent notebook (set on navigation for back link)
 
   content: Default<string, "">;
   isHidden: Default<boolean, false>;
@@ -227,8 +229,11 @@ const menuGoToNotebook = handler<
 });
 
 // Navigate to parent notebook
-const goToParent = handler<void, { parent: Writable<NotebookCharm> }>(
-  (_, { parent }) => navigateTo(parent),
+const goToParent = handler<Record<string, never>, { self: any }>(
+  (_, { self }) => {
+    const p = (self as any).parentNotebook;
+    if (p) navigateTo(p);
+  },
 );
 
 // Handler that creates NoteMd dynamically when clicked (not during pattern construction)
@@ -309,6 +314,7 @@ const Note = pattern<Input, Output>(
       noteId,
       linkPattern,
       parentNotebook: parentNotebookProp,
+      [SELF]: self,
     },
   ) => {
     const { allCharms } = wish<{ allCharms: MinimalCharm[] }>("/");
@@ -370,7 +376,11 @@ const Note = pattern<Input, Output>(
 
     // Find parent notebook: use explicit prop if provided, else fall back to wish-based lookup
     const parentNotebook = computed(() => {
-      // If parent was passed explicitly via SELF, use it
+      // Read from self.parentNotebook for reactive updates when navigating
+      const selfParent = (self as any)?.parentNotebook;
+      if (selfParent) return selfParent;
+
+      // If parent was passed explicitly as prop, use it
       if (parentNotebookProp) return parentNotebookProp;
 
       // Fallback: search for containing notebook (backward compatibility)
@@ -430,27 +440,40 @@ const Note = pattern<Input, Output>(
               borderBottom: "1px solid var(--ct-color-border, #e5e5e7)",
             }}
           >
+            {/* Parent notebook chip - shows where we navigated from */}
+            <ct-hstack
+              gap="2"
+              align="center"
+              style={{
+                display: computed(() => {
+                  const p = (self as any).parentNotebook;
+                  return p ? "flex" : "none";
+                }),
+                marginBottom: "4px",
+              }}
+            >
+              <span
+                style={{
+                  fontSize: "13px",
+                  color: "var(--ct-color-text-secondary)",
+                }}
+              >
+                In:
+              </span>
+              <ct-chip
+                label={computed(() => {
+                  const p = (self as any).parentNotebook;
+                  return p?.[NAME] ?? p?.title ?? "Notebook";
+                })}
+                interactive
+                onct-click={goToParent({ self })}
+              />
+            </ct-hstack>
+
             <ct-hstack
               gap="3"
               style={{ alignItems: "center" }}
             >
-              {/* Parent notebook button */}
-              <ct-button
-                variant="ghost"
-                onClick={goToParent({ parent: parentNotebook })}
-                style={{
-                  display: computed(() => (parentNotebook ? "flex" : "none")),
-                  alignItems: "center",
-                  padding: "6px 8px",
-                  fontSize: "16px",
-                }}
-                title={computed(() =>
-                  `Go to ${parentNotebook?.[NAME] ?? "notebook"}`
-                )}
-              >
-                ⬆️
-              </ct-button>
-
               {/* Editable Title - click to edit */}
               <div
                 style={{
@@ -619,6 +642,7 @@ const Note = pattern<Input, Output>(
       content,
       mentioned,
       backlinks,
+      parentNotebook,
       isHidden,
       noteId,
       grep: patternTool(grepFn, { content }),

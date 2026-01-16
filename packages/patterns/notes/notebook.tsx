@@ -70,7 +70,7 @@ interface Input {
   notes?: Writable<Default<NoteCharm[], []>>;
   isNotebook?: Default<boolean, true>; // Marker for identification through proxy
   isHidden?: Default<boolean, false>; // Hide from default-app charm list when nested
-  parentNotebook?: any; // Reference to parent notebook (set when created as nested)
+  parentNotebook?: any; // Reference to parent notebook (set on navigation for back link)
 }
 
 interface Output {
@@ -81,6 +81,7 @@ interface Output {
   noteCount: number;
   isNotebook: boolean;
   isHidden: boolean;
+  parentNotebook: any; // Reference to parent notebook (reactive)
   backlinks: MentionableCharm[];
   // LLM-callable streams for omnibot integration
   createNote: Stream<{ title: string; content: string }>;
@@ -117,7 +118,6 @@ const createNoteAndOpen = handler<
     notes: Writable<NoteCharm[]>;
     allCharms: Writable<NoteCharm[]>;
     usedCreateAnotherNote: Writable<boolean>;
-    self: Output;
   }
 >((
   _,
@@ -127,7 +127,6 @@ const createNoteAndOpen = handler<
     notes,
     allCharms,
     usedCreateAnotherNote,
-    self,
   },
 ) => {
   const title = newNoteTitle.get() || "New Note";
@@ -136,7 +135,6 @@ const createNoteAndOpen = handler<
     content: "",
     isHidden: true,
     noteId: generateId(),
-    parentNotebook: self,
   });
   allCharms.push(newNote as any); // Required for persistence
   notes.push(newNote);
@@ -162,16 +160,14 @@ const createNoteAndContinue = handler<
     notes: Writable<NoteCharm[]>;
     allCharms: Writable<NoteCharm[]>;
     usedCreateAnotherNote: Writable<boolean>;
-    self: Output;
   }
->((_, { newNoteTitle, notes, allCharms, usedCreateAnotherNote, self }) => {
+>((_, { newNoteTitle, notes, allCharms, usedCreateAnotherNote }) => {
   const title = newNoteTitle.get() || "New Note";
   const newNote = Note({
     title,
     content: "",
     isHidden: true,
     noteId: generateId(),
-    parentNotebook: self,
   });
   allCharms.push(newNote as any); // Required for persistence
   notes.push(newNote);
@@ -239,9 +235,8 @@ const handleDropOntoCurrentNotebook = handler<
     notes: Writable<NoteCharm[]>;
     notebooks: Writable<NotebookCharm[]>;
     selectedNoteIndices: Writable<number[]>;
-    self: any; // Current notebook reference for parentNotebook
   }
->((event, { notes, notebooks, selectedNoteIndices, self }) => {
+>((event, { notes, notebooks, selectedNoteIndices }) => {
   const sourceCell = event.detail.sourceCell;
   const notesList = notes.get();
   const selected = selectedNoteIndices.get();
@@ -298,8 +293,6 @@ const handleDropOntoCurrentNotebook = handler<
       if (!alreadyExists) {
         notes.push(item as any);
         (item as any).key?.("isHidden")?.set?.(true);
-        // Update parentNotebook to point to this notebook
-        (item as any).key?.("parentNotebook")?.set?.(self);
       }
     }
 
@@ -333,8 +326,6 @@ const handleDropOntoCurrentNotebook = handler<
 
     // Hide from default-app charm list
     sourceCell.key("isHidden").set(true);
-    // Update parentNotebook to point to this notebook
-    sourceCell.key("parentNotebook").set(self);
 
     // Add to this notebook
     notes.push(sourceCell as any);
@@ -401,8 +392,6 @@ const handleDropOntoNotebook = handler<
       if (!alreadyInTarget) {
         targetNotesCell.push(item);
         (item as any).key?.("isHidden")?.set?.(true);
-        // Update parentNotebook to point to the target notebook
-        (item as any).key?.("parentNotebook")?.set?.(targetNotebook);
       }
     }
 
@@ -450,8 +439,6 @@ const handleDropOntoNotebook = handler<
 
     // Hide from default-app charm list
     sourceCell.key("isHidden").set(true);
-    // Update parentNotebook to point to the target notebook
-    sourceCell.key("parentNotebook").set(targetNotebook);
 
     // Add to target notebook
     targetNotesCell.push(sourceCell);
@@ -467,7 +454,6 @@ const createNestedNotebookAndOpen = handler<
     notes: Writable<NoteCharm[]>;
     allCharms: Writable<NoteCharm[]>;
     usedCreateAnotherNotebook: Writable<boolean>;
-    self: any; // Parent notebook reference
   }
 >((
   _,
@@ -477,7 +463,6 @@ const createNestedNotebookAndOpen = handler<
     notes,
     allCharms,
     usedCreateAnotherNotebook,
-    self,
   },
 ) => {
   const title = newNestedNotebookTitle.get() || "New Notebook";
@@ -486,7 +471,6 @@ const createNestedNotebookAndOpen = handler<
     title,
     notes: [],
     isHidden: true,
-    parentNotebook: self,
   });
   allCharms.push(nb);
   notes.push(nb);
@@ -512,11 +496,10 @@ const createNestedNotebookAndContinue = handler<
     notes: Writable<NoteCharm[]>;
     allCharms: Writable<NoteCharm[]>;
     usedCreateAnotherNotebook: Writable<boolean>;
-    self: any; // Parent notebook reference
   }
 >((
   _,
-  { newNestedNotebookTitle, notes, allCharms, usedCreateAnotherNotebook, self },
+  { newNestedNotebookTitle, notes, allCharms, usedCreateAnotherNotebook },
 ) => {
   const title = newNestedNotebookTitle.get() || "New Notebook";
   // Pass isHidden: true and parentNotebook for navigation back
@@ -524,7 +507,6 @@ const createNestedNotebookAndContinue = handler<
     title,
     notes: [],
     isHidden: true,
-    parentNotebook: self,
   });
   allCharms.push(nb);
   notes.push(nb);
@@ -579,9 +561,24 @@ const handleBacklinkClick = handler<
 // Handler to navigate to parent notebook
 const goToParent = handler<
   Record<string, never>,
-  { parent: Writable<NotebookCharm> }
+  { self: any }
 >(
-  (_, { parent }) => navigateTo(parent),
+  (_, { self }) => {
+    const p = (self as any).parentNotebook;
+    if (p) navigateTo(p);
+  },
+);
+
+// Handler to navigate to a child (note or notebook) - sets parent for back navigation
+const navigateToChild = handler<
+  Record<string, never>,
+  { child: Writable<any>; self: any }
+>(
+  (_, { child, self }) => {
+    // Set the child's parentNotebook to current notebook for back navigation
+    child.key("parentNotebook").set(self);
+    navigateTo(child);
+  },
 );
 
 // Handler to select all notes in this notebook
@@ -608,9 +605,8 @@ const _duplicateSelectedNotes = handler<
     notes: Writable<NoteCharm[]>;
     allCharms: Writable<NoteCharm[]>;
     selectedNoteIndices: Writable<number[]>;
-    self: Output;
   }
->((_, { notes, allCharms, selectedNoteIndices, self }) => {
+>((_, { notes, allCharms, selectedNoteIndices }) => {
   const selected = selectedNoteIndices.get();
   const notesList = notes.get();
 
@@ -624,7 +620,6 @@ const _duplicateSelectedNotes = handler<
         content: original.content ?? "",
         isHidden: true,
         noteId: generateId(),
-        parentNotebook: self,
       }));
     }
   }
@@ -1055,15 +1050,13 @@ const handleCreateNote = handler<
   {
     notes: Writable<NoteCharm[]>;
     allCharms: Writable<NoteCharm[]>;
-    self: Output;
   }
->(({ title: noteTitle, content }, { notes, allCharms, self }) => {
+>(({ title: noteTitle, content }, { notes, allCharms }) => {
   const newNote = Note({
     title: noteTitle,
     content,
     isHidden: true,
     noteId: generateId(),
-    parentNotebook: self,
   });
   allCharms.push(newNote as any); // Required for persistence
   notes.push(newNote);
@@ -1076,9 +1069,8 @@ const handleCreateNotes = handler<
   {
     notes: Writable<NoteCharm[]>;
     allCharms: Writable<NoteCharm[]>;
-    self: Output;
   }
->(({ notesData }, { notes, allCharms, self }) => {
+>(({ notesData }, { notes, allCharms }) => {
   // Collect notes first, then batch push (reduces N reactive cycles to 1)
   const created: NoteCharm[] = [];
   for (const data of notesData) {
@@ -1087,7 +1079,6 @@ const handleCreateNotes = handler<
       content: data.content,
       isHidden: true,
       noteId: generateId(),
-      parentNotebook: self,
     }));
   }
   allCharms.push(...created); // Required for persistence
@@ -1190,7 +1181,6 @@ const Notebook = pattern<Input, Output>(
             content: (original as any).content ?? "",
             isHidden: true,
             noteId: generateId(),
-            parentNotebook: self,
           });
           allCharms.push(newNote as any);
           notes.push(newNote);
@@ -1331,7 +1321,11 @@ const Notebook = pattern<Input, Output>(
                   gap="2"
                   align="center"
                   style={{
-                    display: computed(() => parentNotebook ? "flex" : "none"),
+                    display: computed(() => {
+                      // Read from output's parentNotebook cell for reactive updates after drag
+                      const p = (self as any).parentNotebook;
+                      return p ? "flex" : "none";
+                    }),
                   }}
                 >
                   <span
@@ -1343,20 +1337,21 @@ const Notebook = pattern<Input, Output>(
                     In:
                   </span>
                   <ct-chip
-                    label={computed(() =>
-                      parentNotebook?.[NAME] ?? parentNotebook?.title ??
-                        "Parent"
-                    )}
-                    interactive
-                    onct-click={goToParent({
-                      parent: parentNotebook,
+                    label={computed(() => {
+                      const p = (self as any).parentNotebook;
+                      return p?.[NAME] ?? p?.title ?? "Parent";
                     })}
+                    interactive
+                    onct-click={goToParent({ self })}
                   />
                 </ct-hstack>
                 {/* Spacer when no parent */}
                 <div
                   style={{
-                    display: computed(() => parentNotebook ? "none" : "block"),
+                    display: computed(() => {
+                      const p = (self as any).parentNotebook;
+                      return p ? "none" : "block";
+                    }),
                   }}
                 />
 
@@ -1383,7 +1378,6 @@ const Notebook = pattern<Input, Output>(
                       notes,
                       notebooks,
                       selectedNoteIndices,
-                      self,
                     })}
                     style={{ width: "100%" }}
                   >
@@ -1540,9 +1534,23 @@ const Notebook = pattern<Input, Output>(
                                 })}
                               >
                                 <ct-drag-source $cell={note} type="note">
-                                  <ct-cell-context $cell={note}>
-                                    <ct-cell-link $cell={note} />
-                                  </ct-cell-context>
+                                  <div
+                                    style={{ cursor: "pointer" }}
+                                    onClick={navigateToChild({
+                                      child: note,
+                                      self,
+                                    })}
+                                  >
+                                    <ct-cell-context $cell={note}>
+                                      <ct-chip
+                                        label={computed(() =>
+                                          note?.[NAME] ?? note?.title ??
+                                            "Untitled"
+                                        )}
+                                        interactive
+                                      />
+                                    </ct-cell-context>
+                                  </div>
                                 </ct-drag-source>
                               </ct-drop-zone>
                             </td>
@@ -1699,9 +1707,20 @@ const Notebook = pattern<Input, Output>(
                       })}
                     >
                       <ct-drag-source $cell={notebook} type="sibling">
-                        <ct-cell-context $cell={notebook}>
-                          <ct-cell-link $cell={notebook} />
-                        </ct-cell-context>
+                        <div
+                          style={{ cursor: "pointer" }}
+                          onClick={navigateToChild({ child: notebook, self })}
+                        >
+                          <ct-cell-context $cell={notebook}>
+                            <ct-chip
+                              label={computed(() =>
+                                notebook?.[NAME] ?? notebook?.title ??
+                                  "Untitled"
+                              )}
+                              interactive
+                            />
+                          </ct-cell-context>
+                        </div>
                       </ct-drag-source>
                     </ct-drop-zone>
                   ))}
@@ -1802,7 +1821,6 @@ const Notebook = pattern<Input, Output>(
                       notes,
                       allCharms,
                       usedCreateAnotherNote,
-                      self,
                     })}
                   >
                     Create Another
@@ -1815,7 +1833,6 @@ const Notebook = pattern<Input, Output>(
                       notes,
                       allCharms,
                       usedCreateAnotherNote,
-                      self,
                     })}
                   >
                     Create
@@ -1864,7 +1881,6 @@ const Notebook = pattern<Input, Output>(
                       notes,
                       allCharms,
                       usedCreateAnotherNotebook,
-                      self,
                     })}
                   >
                     Create Another
@@ -1877,7 +1893,6 @@ const Notebook = pattern<Input, Output>(
                       notes,
                       allCharms,
                       usedCreateAnotherNotebook,
-                      self,
                     })}
                   >
                     Create
@@ -1926,12 +1941,13 @@ const Notebook = pattern<Input, Output>(
       title,
       notes,
       noteCount,
+      parentNotebook,
       backlinks,
       // Make notes discoverable via [[ autocomplete system-wide
       mentionable: notes,
       // LLM-callable streams for omnibot integration
-      createNote: handleCreateNote({ notes, allCharms, self }),
-      createNotes: handleCreateNotes({ notes, allCharms, self }),
+      createNote: handleCreateNote({ notes, allCharms }),
+      createNotes: handleCreateNotes({ notes, allCharms }),
       setTitle: handleSetTitle({ title }),
       createNotebook: handleCreateNotebook({ allCharms }),
     };
