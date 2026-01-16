@@ -67,14 +67,7 @@
       ".beads/",
       "./packages/static/assets",
       "./packages/ui/src/v2/components/ct-outliner",
-      "./packages/vendor-astral",
-      "./packages/patterns-saves-backup/",
-      "./tmp/",
-      "./packages/patterns/notes-menu.tsx",
-      "./packages/patterns/record/",
-      "./packages/patterns/weight-tracker.tsx",
-      "./packages/patterns/notes-v2/",
-      "./packages/patterns/default-array-push-test.tsx"
+      "./packages/vendor-astral"
     ],
     "rules": {
       "tags": [
