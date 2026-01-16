@@ -423,20 +423,8 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
                     </div>
                     {isGameStarted
                       ? (
-                        <button
-                          type="button"
-                          style={{
-                            marginTop: "1rem",
-                            width: "100%",
-                            padding: "0.75rem 1.5rem",
-                            fontSize: "0.875rem",
-                            backgroundColor: "#1e40af",
-                            color: "white",
-                            fontWeight: "600",
-                            border: "none",
-                            borderRadius: "8px",
-                            cursor: "pointer",
-                          }}
+                        <ct-button
+                          style="margin-top: 1rem; width: 100%;"
                           onClick={rejoinGame({
                             gameName,
                             playerSlot: 1,
@@ -447,7 +435,7 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
                           })}
                         >
                           Rejoin Game
-                        </button>
+                        </ct-button>
                       )
                       : <></>}
                   </div>
@@ -459,19 +447,8 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
                       placeholder="Your name"
                       style="width: 100%; margin-bottom: 1rem;"
                     />
-                    <button
-                      type="button"
-                      style={{
-                        width: "100%",
-                        padding: "0.75rem 1.5rem",
-                        fontSize: "1rem",
-                        backgroundColor: "#3b82f6",
-                        color: "white",
-                        fontWeight: "600",
-                        border: "none",
-                        borderRadius: "8px",
-                        cursor: "pointer",
-                      }}
+                    <ct-button
+                      style="width: 100%;"
                       onClick={joinAsPlayer({
                         gameName,
                         nameInput: player1NameInput,
@@ -483,7 +460,7 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
                       })}
                     >
                       Join as Player 1
-                    </button>
+                    </ct-button>
                   </>
                 )}
             </div>
@@ -546,20 +523,8 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
                     </div>
                     {isGameStarted
                       ? (
-                        <button
-                          type="button"
-                          style={{
-                            marginTop: "1rem",
-                            width: "100%",
-                            padding: "0.75rem 1.5rem",
-                            fontSize: "0.875rem",
-                            backgroundColor: "#991b1b",
-                            color: "white",
-                            fontWeight: "600",
-                            border: "none",
-                            borderRadius: "8px",
-                            cursor: "pointer",
-                          }}
+                        <ct-button
+                          style="margin-top: 1rem; width: 100%;"
                           onClick={rejoinGame({
                             gameName,
                             playerSlot: 2,
@@ -570,7 +535,7 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
                           })}
                         >
                           Rejoin Game
-                        </button>
+                        </ct-button>
                       )
                       : <></>}
                   </div>
@@ -582,19 +547,8 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
                       placeholder="Your name"
                       style="width: 100%; margin-bottom: 1rem;"
                     />
-                    <button
-                      type="button"
-                      style={{
-                        width: "100%",
-                        padding: "0.75rem 1.5rem",
-                        fontSize: "1rem",
-                        backgroundColor: "#ef4444",
-                        color: "white",
-                        fontWeight: "600",
-                        border: "none",
-                        borderRadius: "8px",
-                        cursor: "pointer",
-                      }}
+                    <ct-button
+                      style="width: 100%;"
                       onClick={joinAsPlayer({
                         gameName,
                         nameInput: player2NameInput,
@@ -606,7 +560,7 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
                       })}
                     >
                       Join as Player 2
-                    </button>
+                    </ct-button>
                   </>
                 )}
             </div>
@@ -633,19 +587,9 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
           </div>
 
           {/* Reset Button */}
-          <button
-            type="button"
-            style={{
-              marginTop: "2rem",
-              padding: "0.5rem 1rem",
-              fontSize: "0.875rem",
-              background: "none",
-              color: "rgba(255,255,255,0.4)",
-              fontWeight: "400",
-              border: "1px solid rgba(255,255,255,0.2)",
-              borderRadius: "4px",
-              cursor: "pointer",
-            }}
+          <ct-button
+            variant="secondary"
+            style="margin-top: 2rem;"
             onClick={resetLobby({
               player1,
               player2,
@@ -654,7 +598,7 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
             })}
           >
             Reset Game
-          </button>
+          </ct-button>
         </div>
       ),
       gameName,
