@@ -1,6 +1,14 @@
 /// <cts-enable />
 import { lift, NAME, pattern, UI, Writable } from "commontools";
 
+/**
+ * Type for charms used in the mentionable/backlinks system.
+ *
+ * Note: While `mentioned` and `backlinks` are typed as required for structural
+ * compatibility, at runtime most charms don't actually have these fields.
+ * Only patterns like notes and calendar events define them. The computeIndex
+ * function safely handles charms that lack these fields.
+ */
 export type MentionableCharm = {
   [NAME]?: string;
   isHidden?: boolean;
@@ -30,14 +38,19 @@ const computeIndex = lift<
   ({ allCharms }) => {
     const cs = allCharms ?? [];
 
+    // Reset backlinks for charms that support it.
+    // Many charms don't have backlinks (e.g., auth charms, google patterns),
+    // so we safely skip them with optional chaining.
     for (const c of cs) {
-      c.backlinks?.set([]);
+      c.backlinks?.set?.([]);
     }
 
+    // Populate backlinks from mentioned references.
+    // Again, use optional chaining since not all charms support backlinks.
     for (const c of cs) {
       const mentions = c.mentioned ?? [];
       for (const m of mentions) {
-        m?.backlinks?.push(c);
+        m?.backlinks?.push?.(c);
       }
     }
   },
