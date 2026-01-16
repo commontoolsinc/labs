@@ -320,10 +320,10 @@ export default pattern<PatternInput, PatternOutput>(
       (emails: Email[]) => emails?.length || 0,
     );
 
-    // Check if gmail importer has any emails (indicates auth is connected)
+    // Check if auth is connected by checking if linkedAuth has a token
     const isConnected = derive(
-      gmailImporter,
-      (gi) => (gi?.emailCount ?? 0) >= 0,
+      { linkedAuth },
+      ({ linkedAuth: la }) => !!(la?.token),
     );
 
     // ==========================================================================
