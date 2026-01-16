@@ -68,7 +68,7 @@ import {
 import {
   MODULE_METADATA as SimpleListMeta,
   SimpleListModule,
-} from "../simple-list.tsx";
+} from "../simple-list/simple-list.tsx";
 import { MODULE_METADATA as PhotoMeta, PhotoModule } from "../photo.tsx";
 import {
   CustomFieldModule,
