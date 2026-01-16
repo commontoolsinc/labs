@@ -1,5 +1,6 @@
 import { getLogger } from "@commontools/utils/logger";
 import type {
+  Activity,
   ChangeGroup,
   CommitError,
   IAttestation,
@@ -10,21 +11,17 @@ import type {
   IStorageTransaction,
   IStorageTransactionAborted,
   IStorageTransactionComplete,
-  IStorageTransactionWriteIsolationError,
-  ITransactionReader,
-  ITransactionWriter,
+  IStorageTransactionInconsistent,
   JSONValue,
   MemorySpace,
-  ReaderError,
   Result,
   StorageTransactionFailed,
   StorageTransactionStatus,
   Unit,
   WriteError,
-  WriterError,
 } from "./interface.ts";
 
-import * as Journal from "./transaction/journal.ts";
+import * as Chronicle from "./transaction/chronicle.ts";
 
 const logger = getLogger("storage-transaction", {
   enabled: false,
@@ -35,26 +32,28 @@ export const create = (manager: IStorageManager) =>
   new StorageTransaction({
     status: "ready",
     storage: manager,
-    journal: Journal.open(manager),
-    writer: null,
+    branches: new Map(),
+    activity: [],
   });
 
 export type EditableState = {
   status: "ready";
   storage: IStorageManager;
-  journal: Journal.Journal;
-  writer: ITransactionWriter | null;
+  branches: Map<MemorySpace, Chronicle.Chronicle>;
+  activity: Activity[];
 };
 
 export type SumbittedState = {
   status: "pending";
-  journal: Journal.Journal;
+  branches: Map<MemorySpace, Chronicle.Chronicle>;
+  activity: Activity[];
   promise: Promise<Result<Unit, StorageTransactionFailed>>;
 };
 
 export type CompleteState = {
   status: "done";
-  journal: Journal.Journal;
+  branches: Map<MemorySpace, Chronicle.Chronicle>;
+  activity: Activity[];
   result: Result<Unit, StorageTransactionFailed>;
 };
 
@@ -82,20 +81,16 @@ class StorageTransaction implements IStorageTransaction {
     this.#state = state;
   }
 
-  get journal() {
-    return this.#state.journal;
+  get branches() {
+    return this.#state.branches;
+  }
+
+  get activity() {
+    return this.#state.activity;
   }
 
   status(): StorageTransactionStatus {
     return status(this);
-  }
-
-  reader(space: MemorySpace): Result<ITransactionReader, ReaderError> {
-    return reader(this, space);
-  }
-
-  writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
-    return writer(this, space);
   }
 
   read(address: IMemorySpaceAddress, options?: IReadOptions) {
@@ -128,14 +123,23 @@ export const status = (
     if (state.result.error) {
       return {
         status: "error",
-        journal: state.journal,
+        branches: state.branches,
+        activity: state.activity,
         error: state.result.error,
       };
     } else {
-      return { status: "done", journal: state.journal };
+      return {
+        status: "done",
+        branches: state.branches,
+        activity: state.activity,
+      };
     }
   } else {
-    return { status: state.status, journal: state.journal };
+    return {
+      status: state.status,
+      branches: state.branches,
+      activity: state.activity,
+    };
   }
 };
 
@@ -154,66 +158,24 @@ const edit = (
 };
 
 /**
- * Opens a transaction reader for the given space or fails if transaction is
- * no longer editable.
+ * Gets or creates a Chronicle for the given memory space.
  */
-export const reader = (
+const checkout = (
   transaction: StorageTransaction,
   space: MemorySpace,
-): Result<ITransactionReader, ReaderError> => {
+): Result<Chronicle.Chronicle, InactiveTransactionError> => {
   const { error, ok: ready } = edit(transaction);
   if (error) {
     return { error };
   } else {
-    return ready.journal.reader(space);
-  }
-};
-
-/**
- * Opens a transaction writer for the given space or fails if transaction is
- * no longer editable or if writer for a different space is open.
- */
-export const writer = (
-  transaction: StorageTransaction,
-  space: MemorySpace,
-): Result<ITransactionWriter, WriterError> => {
-  const { error, ok: ready } = edit(transaction);
-  if (error) {
-    return { error };
-  } else {
-    const writer = ready.writer;
-    if (writer) {
-      if (writer.did() === space) {
-        return { ok: writer };
-      } else {
-        return {
-          error: WriteIsolationError({
-            open: writer.did(),
-            requested: space,
-          }),
-        };
-      }
+    const branch = ready.branches.get(space);
+    if (branch) {
+      return { ok: branch };
     } else {
-      const { error, ok: writer } = ready.journal.writer(space);
-      if (error) {
-        switch (error.name) {
-          case "StorageTransactionCompleteError":
-          case "StorageTransactionAborted": {
-            return { error };
-          }
-          default: {
-            mutate(transaction, {
-              status: "done",
-              journal: ready.journal,
-              result: { error },
-            });
-            return { error };
-          }
-        }
-      } else {
-        ready.writer = writer;
-        return { ok: writer };
-      }
+      const { replica } = ready.storage.open(space);
+      const branch = Chronicle.open(replica);
+      ready.branches.set(space, branch);
+      return { ok: branch };
     }
   }
 };
@@ -223,12 +185,21 @@ export const read = (
   address: IMemorySpaceAddress,
   options?: IReadOptions,
 ) => {
-  const { ok: space, error } = reader(transaction, address.space);
+  const { ok: branch, error } = checkout(transaction, address.space);
   if (error) {
     return { error };
   } else {
+    // Track read activity with metadata
+    const state = use(transaction);
+    state.activity.push({
+      read: {
+        ...address,
+        meta: options?.meta ?? {},
+      },
+    });
+
     const { space: _, ...memoryAddress } = address;
-    const result = space.read(memoryAddress, options);
+    const result = branch.read(memoryAddress, options);
 
     // Special handling for source path, API is to always return object
     // We should return objects, but we get JSON strings from transaction, so we convert
@@ -264,7 +235,12 @@ export const read = (
         }
       }
     }
-    return result;
+
+    if (result.error) {
+      return { error: result.error.from(address.space) };
+    } else {
+      return result;
+    }
   }
 };
 
@@ -272,13 +248,22 @@ export const write = (
   transaction: StorageTransaction,
   address: IMemorySpaceAddress,
   value?: JSONValue,
-): Result<IAttestation, WriterError | WriteError> => {
-  const { ok: space, error } = writer(transaction, address.space);
+): Result<IAttestation, WriteError> => {
+  const { ok: branch, error } = checkout(transaction, address.space);
   if (error) {
     return { error };
   } else {
     const { space: _, ...memoryAddress } = address;
-    return space.write(memoryAddress, value);
+    const result = branch.write(memoryAddress, value);
+
+    if (result.error) {
+      return { error: result.error.from(address.space) };
+    } else {
+      // Track write activity
+      const state = use(transaction);
+      state.activity.push({ write: address });
+      return result;
+    }
   }
 };
 
@@ -290,18 +275,14 @@ export const abort = (
   if (error) {
     return { error };
   } else {
-    const { error } = ready.journal.abort(reason);
-    if (error) {
-      return { error };
-    } else {
-      mutate(transaction, {
-        status: "done",
-        journal: ready.journal,
-        result: {
-          error: TransactionAborted(reason),
-        },
-      });
-    }
+    mutate(transaction, {
+      status: "done",
+      branches: ready.branches,
+      activity: ready.activity,
+      result: {
+        error: TransactionAborted(reason),
+      },
+    });
     return { ok: {} };
   }
 };
@@ -313,43 +294,76 @@ export const commit = async (
   if (error) {
     return { error };
   } else {
-    const { error, ok: archive } = ready.journal.close();
-    if (error) {
-      mutate(transaction, {
-        status: "done",
-        journal: ready.journal,
-        result: { error: error as StorageTransactionFailed },
-      });
-      return { error };
-    } else {
-      const { writer, storage } = ready;
-      const replica = writer ? storage.open(writer.did()).replica : null;
-      const changes = replica ? archive.get(replica.did()) : null;
-      const hasWrites = changes && changes.facts.length > 0;
-      if (hasWrites) {
-        logger.debug("storage-commit-writes", () => [
-          `Committing ${changes.facts.length} writes to replica`,
-        ]);
+    // Validate and collect transactions from all Chronicles
+    const archive: Map<MemorySpace, any> = new Map();
+    for (const [space, chronicle] of ready.branches) {
+      const { error, ok } = chronicle.commit();
+      if (error) {
+        mutate(transaction, {
+          status: "done",
+          branches: ready.branches,
+          activity: ready.activity,
+          result: { error: error as StorageTransactionFailed },
+        });
+        return { error };
+      } else {
+        archive.set(space, ok);
       }
-      const promise = hasWrites
-        ? replica!.commit(changes, transaction)
-        : Promise.resolve({ ok: {} });
-
-      mutate(transaction, {
-        status: "pending",
-        journal: ready.journal,
-        promise,
-      });
-
-      const result = await promise;
-      mutate(transaction, {
-        status: "done",
-        journal: ready.journal,
-        result,
-      });
-
-      return result;
     }
+
+    // Commit to replicas for each space that has writes
+    const { storage, branches, activity } = ready;
+    let hasWrites = false;
+    let writeCount = 0;
+
+    for (const [space, changes] of archive) {
+      if (changes.facts.length > 0) {
+        hasWrites = true;
+        writeCount += changes.facts.length;
+      }
+    }
+
+    if (hasWrites) {
+      logger.debug("storage-commit-writes", () => [
+        `Committing ${writeCount} writes across ${archive.size} space(s)`,
+      ]);
+    }
+
+    const commitPromises: Promise<Result<Unit, any>>[] = [];
+    for (const [space, changes] of archive) {
+      if (changes.facts.length > 0) {
+        const replica = storage.open(space).replica;
+        commitPromises.push(replica.commit(changes, transaction));
+      }
+    }
+
+    const promise = commitPromises.length > 0
+      ? Promise.all(commitPromises).then((results) => {
+        for (const result of results) {
+          if (result.error) {
+            return result;
+          }
+        }
+        return { ok: {} };
+      })
+      : Promise.resolve({ ok: {} });
+
+    mutate(transaction, {
+      status: "pending",
+      branches,
+      activity,
+      promise,
+    });
+
+    const result = await promise;
+    mutate(transaction, {
+      status: "done",
+      branches,
+      activity,
+      result,
+    });
+
+    return result;
   }
 };
 
@@ -364,14 +378,4 @@ export const TransactionAborted = (
   name: "StorageTransactionAborted",
   message: "Transaction was aborted",
   reason,
-});
-
-export const WriteIsolationError = (
-  { open, requested }: { open: MemorySpace; requested: MemorySpace },
-): IStorageTransactionWriteIsolationError => ({
-  name: "StorageTransactionWriteIsolationError",
-  message:
-    `Can not open transaction writer for ${requested} because transaction has writer open for ${open}`,
-  open,
-  requested,
 });

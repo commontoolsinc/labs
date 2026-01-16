@@ -8,18 +8,13 @@ import type {
   InactiveTransactionError,
   IReadOptions,
   IStorageTransaction,
-  ITransactionJournal,
-  ITransactionReader,
-  ITransactionWriter,
   JSONValue,
   MemorySpace,
-  ReaderError,
   ReadError,
   Result,
   StorageTransactionStatus,
   Unit,
   WriteError,
-  WriterError,
 } from "./interface.ts";
 import { toThrowable } from "./interface.ts";
 
@@ -49,16 +44,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   constructor(public tx: IStorageTransaction) {}
 
-  get journal(): ITransactionJournal {
-    return this.tx.journal;
-  }
-
   status(): StorageTransactionStatus {
     return this.tx.status();
-  }
-
-  reader(space: MemorySpace): Result<ITransactionReader, ReaderError> {
-    return this.tx.reader(space);
   }
 
   read(
@@ -100,14 +87,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     );
   }
 
-  writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
-    return this.tx.writer(space);
-  }
-
   write(
     address: IMemorySpaceAddress,
     value: any,
-  ): Result<IAttestation, WriteError | WriterError> {
+  ): Result<IAttestation, WriteError> {
     const result = this.tx.write(address, value);
     logResult("write", result, address, value);
     return result;
@@ -261,16 +244,8 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.wrapped.tx;
   }
 
-  get journal(): ITransactionJournal {
-    return this.wrapped.journal;
-  }
-
   status(): StorageTransactionStatus {
     return this.wrapped.status();
-  }
-
-  reader(space: MemorySpace): Result<ITransactionReader, ReaderError> {
-    return this.wrapped.reader(space);
   }
 
   private transformReadOptions(options?: IReadOptions): IReadOptions {
@@ -310,14 +285,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     );
   }
 
-  writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
-    return this.wrapped.writer(space);
-  }
-
   write(
     address: IMemorySpaceAddress,
     value: JSONValue | undefined,
-  ): Result<IAttestation, WriteError | WriterError> {
+  ): Result<IAttestation, WriteError> {
     return this.wrapped.write(address, value);
   }
 

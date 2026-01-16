@@ -405,12 +405,25 @@ export interface IMemoryChange {
 }
 
 export type StorageTransactionStatus =
-  | { status: "ready"; journal: ITransactionJournal }
-  | { status: "pending"; journal: ITransactionJournal }
-  | { status: "done"; journal: ITransactionJournal }
+  | {
+    status: "ready";
+    branches: Map<MemorySpace, any>;
+    activity: Activity[];
+  }
+  | {
+    status: "pending";
+    branches: Map<MemorySpace, any>;
+    activity: Activity[];
+  }
+  | {
+    status: "done";
+    branches: Map<MemorySpace, any>;
+    activity: Activity[];
+  }
   | {
     status: "error";
-    journal: ITransactionJournal;
+    branches: Map<MemorySpace, any>;
+    activity: Activity[];
     error: StorageTransactionFailed;
   };
 
@@ -431,11 +444,6 @@ export interface IStorageTransaction {
    * Optional change group used to associate commits with scheduler actions.
    */
   changeGroup?: ChangeGroup;
-  /**
-   * The transaction journal containing all read and write activities.
-   * Provides access to transaction operations and dependency tracking.
-   */
-  readonly journal: ITransactionJournal;
 
   /**
    * Describes current status of the transaction. Returns a union type with
@@ -444,15 +452,12 @@ export interface IStorageTransaction {
    * - `"pending"`: Commit was called but promise has not resolved yet
    * - `"done"`: Commit successfully completed
    * - `"error"`: Transaction has failed or was cancelled, includes error details
-
-   * Each status variant includes a `journal` field with transaction operations.
+   *
+   * Each status variant includes `branches` and `activity` fields with transaction state.
    */
   status(): StorageTransactionStatus;
 
   /**
-   * Helper that is the same as `reader().read()` but more convenient, as it
-   * combines error capturing in one call.
-   *
    * Reads a value from a (local) memory address and captures corresponding
    * `Read` in the transaction invariants. If value was written in read memory
    * address in this transaction read will return value that was written as
@@ -468,17 +473,6 @@ export interface IStorageTransaction {
   ): Result<IAttestation, ReadError>;
 
   /**
-   * Creates a memory space writer for this transaction. Fails if transaction is
-   * no longer in progress or if writer for the different space was already open
-   * on this transaction. Requesting a writer for the same memory space will
-   * return same writer instance.
-   */
-  writer(space: MemorySpace): Result<ITransactionWriter, WriterError>;
-
-  /**
-   * Helper that is the same as `writer().write()` but more convenient, as it
-   * combines error capturing in one call.
-   *
    * Writes a value into a storage at a given address & captures it in the
    * transaction invariants.
    *
@@ -489,16 +483,7 @@ export interface IStorageTransaction {
   write(
     address: IMemorySpaceAddress,
     value?: JSONValue,
-  ): Result<IAttestation, WriterError | WriteError>;
-
-  /**
-   * Creates a memory space reader for inside this transaction. Fails if
-   * transaction is no longer in progress. Requesting a reader for the same
-   * memory space will return same reader instance.
-   */
-  reader(
-    space: MemorySpace,
-  ): Result<ITransactionReader, ReaderError>;
+  ): Result<IAttestation, WriteError>;
 
   /**
    * Transaction can be cancelled which causes storage provider to stop keeping
