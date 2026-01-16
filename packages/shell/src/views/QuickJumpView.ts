@@ -4,12 +4,8 @@ import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { Task } from "@lit/task";
 import { navigate } from "../../shared/mod.ts";
-import {
-  CellHandle,
-  isCellHandle,
-  PageHandle,
-} from "@commontools/runtime-client";
-import { NameSchema } from "@commontools/runner/schemas";
+import { CellHandle, isCellHandle } from "@commontools/runtime-client";
+import { NAME } from "@commontools/runner/shared";
 
 type CharmItem = { id: string; name: string };
 
@@ -117,29 +113,26 @@ export class XQuickJumpView extends BaseView {
       const charmsList = charmsListCell.get();
       if (!charmsList || !Array.isArray(charmsList)) return [];
 
-      // Extract valid charm IDs
-      const charmIds = charmsList
-        .map((charmData) => (isCellHandle(charmData) ? charmData.id() : null))
-        .filter((id): id is string => id !== null);
-
-      // Load all charms in parallel for performance
-      const results = await Promise.allSettled(
-        charmIds.map((id) => rt.getPattern(id)),
+      // Extract CellHandles from the charms list
+      const charmCells = charmsList.filter(
+        (item): item is CellHandle => isCellHandle(item),
       );
 
-      const handles: PageHandle<NameSchema>[] = [];
-      results.forEach((result, index) => {
-        if (result.status === "fulfilled" && result.value) {
-          handles.push(result.value);
-        } else if (result.status === "rejected") {
-          console.error(
-            `[QuickJumpView] Failed to load charm ${charmIds[index]}:`,
-            result.reason,
-          );
-        }
-      });
+      // Sync all cells in parallel to fetch their data (without running them)
+      await Promise.all(charmCells.map((cell) => cell.sync()));
 
-      return handles;
+      // Extract id and name from each cell
+      const items: CharmItem[] = [];
+      for (const cell of charmCells) {
+        const id = cell.id();
+        const data = cell.get() as Record<string, unknown> | undefined;
+        const name = data && typeof data[NAME] === "string"
+          ? data[NAME]
+          : "Untitled Charm";
+        items.push({ id, name });
+      }
+
+      return items;
     },
     args: () => [this.rt],
   });
@@ -170,11 +163,8 @@ export class XQuickJumpView extends BaseView {
   }
 
   private getItems(): CharmItem[] {
-    const list = this._charms.value || [];
-    return list.map((c: PageHandle<NameSchema>) => ({
-      id: c.id(),
-      name: c.name() ?? "Untitled Charm",
-    }));
+    const items = this._charms.value;
+    return items ? [...items] : [];
   }
 
   private containsInsensitive(a: string, b: string): boolean {
