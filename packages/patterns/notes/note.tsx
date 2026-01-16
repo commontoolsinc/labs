@@ -245,6 +245,7 @@ const goToViewer = handler<
     content: Writable<string>;
     backlinks: Writable<MentionableCharm[]>;
     noteId: Writable<string>;
+    self: any;
   }
 >((_, state) => {
   return navigateTo(
@@ -255,6 +256,10 @@ const goToViewer = handler<
         backlinks: state.backlinks,
         noteId: state.noteId,
       },
+      // Pass direct reference to source note for Edit button
+      sourceNoteRef: state.self,
+      // Pass content Writable for checkbox updates
+      content: state.content,
     }),
   );
 });
@@ -514,7 +519,13 @@ const Note = pattern<Input, Output>(
               {/* View Mode button */}
               <ct-button
                 variant="ghost"
-                onClick={goToViewer({ title, content, backlinks, noteId })}
+                onClick={goToViewer({
+                  title,
+                  content,
+                  backlinks,
+                  noteId,
+                  self,
+                })}
                 style={{
                   alignItems: "center",
                   padding: "6px 12px",
