@@ -510,6 +510,14 @@ export const load = (
   return result;
 };
 
+/**
+ * Creates a NotFoundError for write operations.
+ *
+ * @param source - The attestation that was being written to
+ * @param address - The full address that was attempted
+ * @param path - The last existing parent path (excludes the missing key).
+ *   For writes, this is one level shallower than for reads. See INotFoundError docs.
+ */
 export const NotFound = (
   source: IAttestation,
   address: IMemoryAddress,
