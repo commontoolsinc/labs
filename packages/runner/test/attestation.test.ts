@@ -677,6 +677,34 @@ describe("Attestation Module", () => {
       expect(result.error).toBeDefined();
       expect(result.error?.name).toBe("NotFoundError");
     });
+
+    it("should set NotFoundError.path to path of non-existent key for reads", () => {
+      // Source has { user: { name: "Alice" } } - no "settings" key
+      const source = {
+        address: {
+          id: "test:notfound-read-path",
+          type: "application/json",
+          path: [],
+        },
+        value: { user: { name: "Alice" } },
+      } as const;
+
+      // Try to read ["user", "settings", "theme"] - "settings" doesn't exist
+      const result = Attestation.read(source, {
+        id: "test:notfound-read-path",
+        type: "application/json",
+        path: ["user", "settings", "theme"],
+      });
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.name).toBe("NotFoundError");
+      // For reads, the path includes the non-existent key: ["user", "settings"]
+      // (differs from writes, which return ["user"] - the last existing parent)
+      expect((result.error as INotFoundError).path).toEqual([
+        "user",
+        "settings",
+      ]);
+    });
   });
 
   describe("attest function", () => {
