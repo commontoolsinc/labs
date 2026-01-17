@@ -3648,6 +3648,7 @@ interface CTCodeEditorAttributes<T> extends CTHTMLAttributes<T> {
   "onct-blur"?: any;
   "onbacklink-click"?: any;
   "onbacklink-create"?: any;
+  "$self"?: any;
 }
 
 interface CTAutoLayoutAttributes<T> extends CTHTMLAttributes<T> {
