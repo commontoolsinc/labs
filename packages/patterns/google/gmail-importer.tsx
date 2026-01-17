@@ -1029,51 +1029,27 @@ export default pattern<{
   linkedAuth?: Auth;
 }, Output>(
   ({ settings, linkedAuth }) => {
-    const emails = Writable.of<Confidential<Email[]>>([]);
-    const fetching = Writable.of(false);
+    const emails = Writable.of<Confidential<Email[]>>([]).for("emails");
+    const fetching = Writable.of(false).for("fetching");
 
     // Local writable cell for account type selection
-    const selectedAccountType = Writable.of<AccountType>("default");
+    const selectedAccountType = Writable.of<AccountType>("default").for(
+      "account type",
+    );
 
     // Use createGoogleAuth utility with reactive accountType
     const {
       auth: wishedAuth,
-      fullUI,
-      isReady: wishedIsReady,
-      currentEmail: wishedCurrentEmail,
+      fullUI: authUI,
     } = createGoogleAuth({
       requiredScopes: ["gmail"] as ScopeKey[],
       accountType: selectedAccountType,
     });
 
-    // Check if linkedAuth is provided (for manual linking when wish() is unavailable)
-    const hasLinkedAuth = derive(
-      { linkedAuth },
-      ({ linkedAuth: la }) => !!(la?.token),
-    );
-    const linkedAuthEmail = derive(
-      { linkedAuth },
-      ({ linkedAuth: la }) => la?.user?.email || "",
-    );
-
-    // Use linkedAuth if provided, otherwise use wished auth
-    // This allows manual linking via CLI when wish() is unavailable (e.g., favorites disabled)
-    // Note: We wrap linkedAuth in Writable.of outside of reactive context
-    const linkedAuthCell = Writable.of<Auth | null>(null);
-    computed(() => {
-      if (linkedAuth?.token) {
-        linkedAuthCell.set(linkedAuth as any);
-      }
-    });
-
     // Choose auth source based on linkedAuth availability
-    const auth = ifElse(hasLinkedAuth, linkedAuthCell, wishedAuth) as any;
-    const isReady = ifElse(hasLinkedAuth, hasLinkedAuth, wishedIsReady);
-    const currentEmail = ifElse(
-      hasLinkedAuth,
-      linkedAuthEmail,
-      wishedCurrentEmail,
-    );
+    const auth = ifElse(linkedAuth.token, linkedAuth, wishedAuth);
+    const isReady = auth.token;
+    const currentEmail = auth.user?.email;
 
     computed(() => {
       if (settings.debugMode) {
@@ -1083,7 +1059,7 @@ export default pattern<{
 
     // Auto-fetch when auth becomes valid (opt-in feature)
     // Track whether we've already triggered auto-fetch to prevent loops
-    const hasAutoFetched = Writable.of(false);
+    const hasAutoFetched = Writable.of(false).for("auto fetched");
 
     computed(() => {
       const ready = isReady;
@@ -1150,24 +1126,19 @@ export default pattern<{
               >
                 <option
                   value="default"
-                  selected={derive(
-                    selectedAccountType,
-                    (t: string) => t === "default",
-                  )}
+                  selected={selectedAccountType.get() === "default"}
                 >
                   Any Account
                 </option>
                 <option
                   value="personal"
-                  selected={derive(selectedAccountType, (t: string) =>
-                    t === "personal")}
+                  selected={selectedAccountType.get() === "personal"}
                 >
                   Personal
                 </option>
                 <option
                   value="work"
-                  selected={derive(selectedAccountType, (t: string) =>
-                    t === "work")}
+                  selected={selectedAccountType.get() === "work"}
                 >
                   Work
                 </option>
@@ -1178,12 +1149,10 @@ export default pattern<{
           <ct-vscroll flex showScrollbar>
             <ct-vstack padding="6" gap="4">
               {/* Auth management UI */}
-              {fullUI}
+              {authUI}
 
               <h3 style={{ fontSize: "18px", fontWeight: "bold" }}>
-                Imported email count: {computed(() =>
-                  emails.get().length
-                )}
+                Imported email count: {computed(() => emails.get().length)}
               </h3>
 
               <div style={{ fontSize: "14px", color: "#666" }}>
