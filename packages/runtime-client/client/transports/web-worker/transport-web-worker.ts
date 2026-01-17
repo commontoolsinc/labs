@@ -84,7 +84,7 @@ export class WebWorkerRuntimeTransport
     this.emit("message", {
       type: NotificationType.ErrorReport,
       message: `${event.error}`,
-      stackTrace: event.error.stack,
+      stackTrace: event.error?.stack,
     } as ErrorNotification);
   };
 }
