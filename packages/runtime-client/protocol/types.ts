@@ -329,6 +329,7 @@ export interface ErrorNotification {
   space?: string;
   recipeId?: string;
   spellId?: string;
+  stackTrace?: string;
 }
 
 export interface TelemetryNotification {
