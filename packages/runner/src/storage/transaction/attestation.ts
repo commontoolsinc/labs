@@ -366,13 +366,10 @@ export const resolve = (
       error: NotFound(
         source,
         address,
-        // Last valid path component is assumed to be the one that points to
-        // `undefined`. If the path was empty this means the document doesn't
-        // exist at all. If it isn't empty, we're assuming the parent is
-        // correct, but that depends on the validity of the source attestation.
-        source.address.path.length > 0
-          ? source.address.path.slice(0, -1)
-          : undefined,
+        // Return the source path (empty array for root). This is consistent with
+        // how writes handle document-not-found. If source.address.path has content,
+        // we slice off the last element since that's what points to undefined.
+        source.address.path.length > 0 ? source.address.path.slice(0, -1) : [],
       ),
     };
   }

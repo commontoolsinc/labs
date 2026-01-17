@@ -366,8 +366,7 @@ describe("Attestation Module", () => {
 
       expect(result.error).toBeDefined();
       expect(result.error?.name).toBe("NotFoundError");
-      // When document doesn't exist, path is [] (the root source path)
-      // Note: This differs from reads which return undefined
+      // When document doesn't exist, path is [] (consistent with reads)
       expect((result.error as INotFoundError).path).toEqual([]);
     });
   });
@@ -706,7 +705,7 @@ describe("Attestation Module", () => {
       expect(result.error?.name).toBe("NotFoundError");
     });
 
-    it("should set NotFoundError.path to undefined when document does not exist (read)", () => {
+    it("should set NotFoundError.path to empty array when document does not exist (read)", () => {
       // Document doesn't exist at all (value is undefined at root)
       const source = {
         address: {
@@ -726,8 +725,8 @@ describe("Attestation Module", () => {
 
       expect(result.error).toBeDefined();
       expect(result.error?.name).toBe("NotFoundError");
-      // When document doesn't exist, path is undefined (no valid path exists)
-      expect((result.error as INotFoundError).path).toBeUndefined();
+      // When document doesn't exist, path is [] (consistent with writes)
+      expect((result.error as INotFoundError).path).toEqual([]);
     });
 
     it("should set NotFoundError.path to path of non-existent key for reads", () => {
