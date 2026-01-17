@@ -556,11 +556,13 @@ export default pattern(({ items, showInactive }) => {
                     type: "object",
                     properties: {
                         tags: {
-                            type: "array",
-                            items: {
-                                not: true,
-                                asOpaque: true
-                            }
+                            type: "object",
+                            properties: {
+                                length: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["length"]
                         }
                     },
                     required: ["tags"]

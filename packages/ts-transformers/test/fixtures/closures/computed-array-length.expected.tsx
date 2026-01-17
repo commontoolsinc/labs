@@ -48,11 +48,13 @@ export default pattern(() => {
             type: "object",
             properties: {
                 allCharms: {
-                    type: "array",
-                    items: {
-                        not: true,
-                        asOpaque: true
-                    }
+                    type: "object",
+                    properties: {
+                        length: {
+                            type: "number"
+                        }
+                    },
+                    required: ["length"]
                 }
             },
             required: ["allCharms"]
@@ -66,11 +68,13 @@ export default pattern(() => {
             type: "object",
             properties: {
                 allCharms: {
-                    type: "array",
-                    items: {
-                        not: true,
-                        asOpaque: true
-                    }
+                    type: "object",
+                    properties: {
+                        length: {
+                            type: "number"
+                        }
+                    },
+                    required: ["length"]
                 }
             },
             required: ["allCharms"]
