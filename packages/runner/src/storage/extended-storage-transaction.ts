@@ -123,19 +123,20 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       writeResult.error &&
       (writeResult.error.name === "NotFoundError")
     ) {
-      // Create parent entries if needed
-      const lastValidPath = writeResult.error.name === "NotFoundError"
-        ? writeResult.error.path
-        : undefined;
-      // When document doesn't exist (lastValidPath is undefined), we don't need to read.
-      // When nested path exists, read current value to preserve other properties.
+      // Create parent entries if needed.
+      // errorPath includes the missing key (consistent with read errors).
+      // lastExistingPath is one level up - the actual last existing parent.
+      const errorPath = writeResult.error.path;
+      const lastExistingPath = errorPath?.slice(0, -1);
+      // When document doesn't exist (lastExistingPath is undefined or empty),
+      // we don't need to read - just start with {}.
       let valueObj: Record<string, JSONValue>;
-      if (lastValidPath === undefined) {
+      if (!lastExistingPath || lastExistingPath.length === 0) {
         valueObj = {};
       } else {
         const currentValue = this.readOrThrow({
           ...address,
-          path: lastValidPath,
+          path: lastExistingPath,
         }, { meta: ignoreReadForScheduling });
         if (!isRecord(currentValue)) {
           // This should have already been caught as type mismatch error
@@ -145,10 +146,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         }
         valueObj = currentValue as Record<string, JSONValue>;
       }
-      const remainingPath = address.path.slice(lastValidPath?.length ?? 0);
+      const remainingPath = address.path.slice(lastExistingPath?.length ?? 0);
       if (remainingPath.length === 0) {
         throw new Error(
-          `Invalid error path: ${lastValidPath?.join("/")}`,
+          `Invalid error path: ${errorPath?.join("/")}`,
         );
       }
       const lastKey = remainingPath.pop()!;
@@ -162,7 +163,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             >;
       }
       nextValue[lastKey] = value as JSONValue;
-      const parentAddress = { ...address, path: lastValidPath ?? [] };
+      const parentAddress = { ...address, path: lastExistingPath ?? [] };
       const writeResultRetry = this.tx.write(parentAddress, valueObj);
       logResult(
         "writeOrThrow, retry",

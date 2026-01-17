@@ -95,7 +95,10 @@ const setAtPath = (
   if (root === null || root === undefined || typeof root !== "object") {
     // Distinguish between undefined (path not found) vs primitive (type mismatch)
     if (root === undefined) {
-      return { error: { at: 0, type: "undefined", notFound: true } };
+      // Return at: -1 to indicate the error is at the parent level (the key that
+      // led here doesn't exist). After +1 adjustments during unwinding, this
+      // produces a path that includes the missing key, matching read semantics.
+      return { error: { at: -1, type: "undefined", notFound: true } };
     }
     const actualType = root === null ? "null" : typeof root;
     return { error: { at: 0, type: actualType } };
@@ -225,16 +228,17 @@ export const write = (
 
   if ("error" in result) {
     // Map error position to full address path
-    // result.error.at is the depth where we found an error; errorPath includes that level
+    // result.error.at is the depth where the error occurred; +1 to include the failed key
     const errorPath = address.path.slice(
       0,
-      source.address.path.length + result.error.at,
+      source.address.path.length + result.error.at + 1,
     );
 
     // Distinguish between NotFound (path doesn't exist) and TypeMismatch (wrong type)
     if (result.error.notFound) {
+      // errorPath includes the missing key, matching read error semantics
       return {
-        error: NotFound(source, address, errorPath.slice(0, -1)),
+        error: NotFound(source, address, errorPath),
       };
     }
     return {
@@ -511,12 +515,12 @@ export const load = (
 };
 
 /**
- * Creates a NotFoundError for write operations.
+ * Creates a NotFoundError.
  *
- * @param source - The attestation that was being written to
+ * @param source - The attestation that was being read from or written to
  * @param address - The full address that was attempted
- * @param path - The last existing parent path (excludes the missing key).
- *   For writes, this is one level shallower than for reads. See INotFoundError docs.
+ * @param path - Path to the non-existent key (includes the missing key).
+ *   Consistent for both reads and writes. See INotFoundError docs.
  */
 export const NotFound = (
   source: IAttestation,

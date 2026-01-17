@@ -719,21 +719,17 @@ export type CommitError =
 /**
  * Error returned when a read or write operation fails because the path does not exist.
  *
- * **Important:** The `path` property has different semantics for reads vs writes:
+ * The `path` property is the path to the non-existent key (includes the missing key).
+ * Example: Document has `{ user: { name: "Alice" } }`, read/write `["user", "settings", "theme"]`
+ * → `path` is `["user", "settings"]` (the path that points to undefined)
  *
- * - **Reads**: `path` is the path to the non-existent key (includes the missing key).
- *   Example: Document has `{ user: { name: "Alice" } }`, read `["user", "settings", "theme"]`
- *   → `path` is `["user", "settings"]` (the path that points to undefined)
- *
- * - **Writes**: `path` is the last existing parent (excludes the missing key).
- *   Example: Document has `{ user: { name: "Alice" } }`, write to `["user", "settings", "theme"]`
- *   → `path` is `["user"]` (the deepest path that exists)
+ * To get the last existing parent, slice off the final element: `path.slice(0, -1)`.
  */
 export interface INotFoundError extends IStorageError {
   readonly name: "NotFoundError";
   readonly source: IAttestation;
   readonly address: IMemoryAddress;
-  /** See interface comment for read vs write semantics. */
+  /** Path to the non-existent key (includes the missing key). */
   readonly path?: readonly MemoryAddressPathComponent[];
   from(space: MemorySpace): INotFoundError;
 }

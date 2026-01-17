@@ -338,9 +338,12 @@ describe("Attestation Module", () => {
 
       expect(result.error).toBeDefined();
       expect(result.error?.name).toBe("NotFoundError");
-      // The path should point to the last EXISTING location: ["user"]
-      // (the parent that exists, not the path we tried to access)
-      expect((result.error as INotFoundError).path).toEqual(["user"]);
+      // The path includes the non-existent key: ["user", "settings"]
+      // (consistent with read error semantics)
+      expect((result.error as INotFoundError).path).toEqual([
+        "user",
+        "settings",
+      ]);
     });
   });
 
