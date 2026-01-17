@@ -416,6 +416,10 @@ const Note = pattern<Input, Output>(
       return custom || JSON.stringify(Note);
     });
 
+    // Get current charm's NAME for filtering from mentions dropdown
+    // Use title.get() since it's a Writable<string>
+    const selfName = computed(() => `📝 ${title.get()}`);
+
     // Editor component - used in both full UI and embeddedUI
     const editorUI = (
       <ct-code-editor
@@ -423,6 +427,7 @@ const Note = pattern<Input, Output>(
         $mentionable={mentionable}
         $mentioned={mentioned}
         $pattern={patternJson}
+        selfId={selfName}
         onbacklink-click={handleCharmLinkClick({})}
         onbacklink-create={handleNewBacklink({ mentionable, allCharms })}
         language="text/markdown"
