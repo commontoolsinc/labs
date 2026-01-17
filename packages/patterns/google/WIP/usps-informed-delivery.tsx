@@ -6,16 +6,16 @@
  * incoming mail using LLM vision analysis.
  *
  * Features:
- * - Connects to gmail-importer via wish() for email fetching
+ * - Embeds gmail-importer directly (no separate charm needed)
+ * - Pre-configured with USPS filter query and settings
  * - Auto-analyzes mail piece images with LLM vision
  * - Learns household members from recipient names over time
  * - Classifies mail type and spam likelihood
  *
  * Usage:
- * 1. Create a gmail-importer instance with:
- *    - gmailFilterQuery: "from:USPSInformeddelivery@email.informeddelivery.usps.com"
- *    - autoFetchOnAuth: true
- * 2. Deploy this pattern and it will connect via wish()
+ * 1. Deploy a google-auth charm and complete OAuth
+ * 2. Deploy this pattern
+ * 3. Link: ct charm link google-auth/auth usps/linkedAuth
  */
 import {
   Default,
@@ -26,14 +26,14 @@ import {
   NAME,
   pattern,
   UI,
-  wish,
   Writable,
 } from "commontools";
+import GmailImporter, { type Auth } from "../gmail-importer.tsx";
 
 // Debug flag for development - disable in production
 const DEBUG_USPS = false;
 
-// Email type - inlined to avoid import chain issues when deploying from WIP/
+// Email type - matches GmailImporter's Email type
 interface Email {
   id: string;
   from: string;
@@ -42,9 +42,9 @@ interface Email {
   date: string;
   snippet: string;
   threadId: string;
-  labels: string[];
+  labelIds: string[];
   htmlContent: string;
-  textContent: string;
+  plainText: string;
   markdownContent: string;
 }
 
@@ -90,12 +90,6 @@ interface HouseholdMember {
 /** Pattern settings */
 interface Settings {
   lastProcessedEmailId: Default<string, "">;
-}
-
-/** Gmail importer output type (what we expect from wish) */
-interface GmailImporterOutput {
-  emails: Email[];
-  emailCount: number;
 }
 
 // =============================================================================
@@ -277,9 +271,9 @@ interface PatternInput {
   >;
   mailPieces: Default<MailPiece[], []>;
   householdMembers: Default<HouseholdMember[], []>;
-  // Optional: Link emails directly from a Gmail Importer charm when wish() is unavailable
-  // Use: ct charm link gmailImporterCharm/emails uspsCharm/linkedEmails
-  linkedEmails?: Email[];
+  // Optional: Link auth directly from a Google Auth charm
+  // Use: ct charm link googleAuthCharm/auth uspsCharm/linkedAuth
+  linkedAuth?: Auth;
 }
 
 /** USPS Informed Delivery mail analyzer. #uspsInformedDelivery */
@@ -291,33 +285,27 @@ interface PatternOutput {
 }
 
 export default pattern<PatternInput, PatternOutput>(
-  ({ settings: _settings, mailPieces, householdMembers, linkedEmails }) => {
+  ({ settings: _settings, mailPieces, householdMembers, linkedAuth }) => {
     // Local state - prefixed with _ as not currently used directly
     const _processing = Writable.of(false);
 
-    // Check if linkedEmails is provided (manual linking via CT CLI)
-    const hasLinkedEmails = derive(
-      { linkedEmails },
-      ({ linkedEmails: le }) => !!(le && Array.isArray(le) && le.length > 0),
-    );
-
-    // Wish for a gmail-importer instance (fallback when linkedEmails not provided)
-    const gmailImporter = wish<GmailImporterOutput>({
-      query: "#gmailEmails",
+    // Directly instantiate GmailImporter with USPS-specific settings
+    // This eliminates the need for separate gmail-importer charm + wish()
+    const gmailImporter = GmailImporter({
+      settings: {
+        gmailFilterQuery:
+          "from:USPSInformeddelivery@email.informeddelivery.usps.com",
+        autoFetchOnAuth: true,
+        resolveInlineImages: true,
+        limit: 20,
+        historyId: "",
+        debugMode: false,
+      },
+      linkedAuth, // Pass through from USPS input (user can link google-auth here)
     });
 
-    // Get emails from either linkedEmails or wish result
-    const allEmails = derive(
-      { linkedEmails, gmailImporter },
-      ({ linkedEmails: le, gmailImporter: gi }) => {
-        // Prefer linkedEmails if available
-        if (le && Array.isArray(le) && le.length > 0) {
-          return le;
-        }
-        // Fallback to wish result
-        return gi?.result?.emails || [];
-      },
-    );
+    // Get emails directly from the embedded gmail-importer
+    const allEmails = gmailImporter.emails;
 
     // Filter for USPS emails
     const uspsEmails = derive(allEmails, (emails: Email[]) => {
@@ -332,11 +320,17 @@ export default pattern<PatternInput, PatternOutput>(
       (emails: Email[]) => emails?.length || 0,
     );
 
-    // Check if we have emails (either from linkedEmails or wish)
+    // Check if connected - either linkedAuth is provided or gmailImporter found auth via wish
+    // We check emailCount > 0 OR if the importer is actively fetching
     const isConnected = derive(
-      { hasLinkedEmails, gmailImporter },
-      ({ hasLinkedEmails: hle, gmailImporter: gi }) =>
-        hle || !!gi?.result?.emails,
+      { linkedAuth, gmailImporter },
+      ({ linkedAuth: la, gmailImporter: gi }) => {
+        // If linkedAuth has a token, we're connected
+        if (la?.token) return true;
+        // Otherwise check if gmailImporter has found auth (emailCount will be defined, even if 0)
+        // The importer uses wish() internally to find favorited google-auth
+        return gi?.emailCount !== undefined;
+      },
     );
 
     // ==========================================================================
@@ -537,12 +531,12 @@ If you cannot read the image clearly, make your best guess based on what you can
                   }}
                 >
                   <h4 style={{ margin: "0 0 8px 0", color: "#b45309" }}>
-                    Gmail Importer Not Connected
+                    Google Auth Not Connected
                   </h4>
                   <p
                     style={{ margin: "0", fontSize: "14px", color: "#92400e" }}
                   >
-                    To use this pattern, please:
+                    To use this pattern, link a Google Auth charm:
                   </p>
                   <ol
                     style={{
@@ -552,9 +546,9 @@ If you cannot read the image clearly, make your best guess based on what you can
                       color: "#92400e",
                     }}
                   >
-                    <li>Create a Gmail Importer charm</li>
+                    <li>Deploy a google-auth charm and complete OAuth</li>
                     <li>
-                      Set the filter query to:
+                      Link it to this charm:
                       <code
                         style={{
                           display: "block",
@@ -565,11 +559,10 @@ If you cannot read the image clearly, make your best guess based on what you can
                           fontSize: "12px",
                         }}
                       >
-                        from:USPSInformeddelivery@email.informeddelivery.usps.com
+                        ct charm link google-auth/auth usps/linkedAuth
                       </code>
                     </li>
-                    <li>Enable "Auto-fetch on auth"</li>
-                    <li>Connect Google Auth and favorite it</li>
+                    <li>USPS emails will be fetched automatically</li>
                   </ol>
                 </div>,
               )}
