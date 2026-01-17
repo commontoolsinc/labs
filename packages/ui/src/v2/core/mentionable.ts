@@ -22,3 +22,8 @@ export const MentionableArraySchema = {
   type: "array",
   items: MentionableSchema,
 } as const satisfies JSONSchema;
+
+export const MentionableAsCellsArraySchema = {
+  type: "array",
+  items: { ...MentionableSchema, asCell: true },
+} as const satisfies JSONSchema;
