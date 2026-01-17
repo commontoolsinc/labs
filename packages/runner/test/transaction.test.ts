@@ -29,78 +29,12 @@ describe("StorageTransaction", () => {
       expect(result.status).toBe("ready");
     });
 
-    it("should create reader for a space", () => {
-      const result = transaction.reader(space);
-      expect(result.ok).toBeDefined();
-      expect(result.ok?.did()).toBe(space);
-    });
-
-    it("should create writer for a space", () => {
-      const result = transaction.writer(space);
-      expect(result.ok).toBeDefined();
-      expect(result.ok?.did()).toBe(space);
-    });
-
-    it("should return same reader instance for same space", () => {
-      const reader1 = transaction.reader(space);
-      const reader2 = transaction.reader(space);
-      expect(reader1.ok).toBe(reader2.ok);
-    });
-
-    it("should return same writer instance for same space", () => {
-      const writer1 = transaction.writer(space);
-      const writer2 = transaction.writer(space);
-      expect(writer1.ok).toBe(writer2.ok);
-    });
-
-    it("should create different readers for different spaces", () => {
-      const reader1 = transaction.reader(space);
-      const reader2 = transaction.reader(space2);
-
-      expect(reader1.ok).toBeDefined();
-      expect(reader2.ok).toBeDefined();
-      expect(reader1.ok).not.toBe(reader2.ok);
-      expect(reader1.ok?.did()).toBe(space);
-      expect(reader2.ok?.did()).toBe(space2);
-    });
-  });
-
-  describe("Write Isolation", () => {
-    it("should enforce single writer constraint", () => {
-      // First writer succeeds
-      const writer1 = transaction.writer(space);
-      expect(writer1.ok).toBeDefined();
-
-      // Second writer for different space fails
-      const writer2 = transaction.writer(space2);
-      expect(writer2.error).toBeDefined();
-      expect(writer2.error?.name).toBe("StorageTransactionWriteIsolationError");
-      if (writer2.error?.name === "StorageTransactionWriteIsolationError") {
-        expect(writer2.error.open).toBe(space);
-        expect(writer2.error.requested).toBe(space2);
-      }
-    });
-
-    it("should allow multiple readers with single writer", () => {
-      const writer = transaction.writer(space);
-      expect(writer.ok).toBeDefined();
-
-      const reader1 = transaction.reader(space);
-      const reader2 = transaction.reader(space2);
-
-      expect(reader1.ok).toBeDefined();
-      expect(reader2.ok).toBeDefined();
-    });
-
-    it("should allow writer after readers", () => {
-      const reader1 = transaction.reader(space);
-      const reader2 = transaction.reader(space2);
-
-      expect(reader1.ok).toBeDefined();
-      expect(reader2.ok).toBeDefined();
-
-      const writer = transaction.writer(space);
-      expect(writer.ok).toBeDefined();
+    it("should have branches and activity in status", () => {
+      const status = transaction.status();
+      expect(status.branches).toBeDefined();
+      expect(status.activity).toBeDefined();
+      expect(status.branches instanceof Map).toBe(true);
+      expect(Array.isArray(status.activity)).toBe(true);
     });
   });
 
@@ -121,10 +55,10 @@ describe("StorageTransaction", () => {
 
       // Read value
       const readResult = transaction.read(address);
-      expect(readResult.ok).toBeDefined();
-      if (readResult.ok) {
-        expect(readResult.ok.value).toEqual(value);
-      }
+      expect(readResult.error).toBeUndefined();
+      expect((readResult as { ok: { value: unknown } }).ok.value).toEqual(
+        value,
+      );
     });
 
     it("should read with metadata options", () => {
@@ -142,10 +76,10 @@ describe("StorageTransaction", () => {
 
       // Read with metadata
       const readResult = transaction.read(address, { meta: metadata });
-      expect(readResult.ok).toBeDefined();
-      if (readResult.ok) {
-        expect(readResult.ok.value).toEqual(value);
-      }
+      expect(readResult.error).toBeUndefined();
+      expect((readResult as { ok: { value: unknown } }).ok.value).toEqual(
+        value,
+      );
     });
 
     it("should read without metadata (default behavior)", () => {
@@ -162,10 +96,10 @@ describe("StorageTransaction", () => {
 
       // Read without metadata options (should work as before)
       const readResult = transaction.read(address);
-      expect(readResult.ok).toBeDefined();
-      if (readResult.ok) {
-        expect(readResult.ok.value).toEqual(value);
-      }
+      expect(readResult.error).toBeUndefined();
+      expect((readResult as { ok: { value: unknown } }).ok.value).toEqual(
+        value,
+      );
     });
 
     it("should handle various metadata types", () => {
@@ -183,17 +117,17 @@ describe("StorageTransaction", () => {
       // Test string metadata
       const stringMeta = { type: "string", data: "test string" };
       const stringResult = transaction.read(address, { meta: stringMeta });
-      expect(stringResult.ok).toBeDefined();
+      expect(stringResult.error).toBeUndefined();
 
       // Test number metadata
       const numberMeta = { count: 42, weight: 3.14 };
       const numberResult = transaction.read(address, { meta: numberMeta });
-      expect(numberResult.ok).toBeDefined();
+      expect(numberResult.error).toBeUndefined();
 
       // Test boolean metadata
       const booleanMeta = { enabled: true, debug: false };
       const booleanResult = transaction.read(address, { meta: booleanMeta });
-      expect(booleanResult.ok).toBeDefined();
+      expect(booleanResult.error).toBeUndefined();
 
       // Test nested object metadata
       const nestedMeta = {
@@ -201,12 +135,12 @@ describe("StorageTransaction", () => {
         array: [1, 2, 3],
       };
       const nestedResult = transaction.read(address, { meta: nestedMeta });
-      expect(nestedResult.ok).toBeDefined();
+      expect(nestedResult.error).toBeUndefined();
 
       // Test empty metadata object
       const emptyMeta = {};
       const emptyResult = transaction.read(address, { meta: emptyMeta });
-      expect(emptyResult.ok).toBeDefined();
+      expect(emptyResult.error).toBeUndefined();
     });
 
     it("should handle cross-space operations", () => {
@@ -225,19 +159,24 @@ describe("StorageTransaction", () => {
 
       // Write to first space
       const write1 = transaction.write(address1, { space: 1 });
-      expect(write1.ok).toBeDefined();
+      expect(write1.error).toBeUndefined();
 
-      // Try to write to second space (should fail due to write isolation)
+      // Write to second space (no longer has write isolation)
       const write2 = transaction.write(address2, { space: 2 });
-      expect(write2.error).toBeDefined();
-      expect(write2.error?.name).toBe("StorageTransactionWriteIsolationError");
+      expect(write2.error).toBeUndefined();
 
-      // But reading from second space should work
+      // Both spaces should have their data
+      const read1 = transaction.read(address1);
+      expect(read1.error).toBeUndefined();
+      expect((read1 as { ok: { value: unknown } }).ok.value).toEqual({
+        space: 1,
+      });
+
       const read2 = transaction.read(address2);
-      expect(read2.ok).toBeDefined();
-      if (read2.ok) {
-        expect(read2.ok.value).toBeUndefined(); // No data written
-      }
+      expect(read2.error).toBeUndefined();
+      expect((read2 as { ok: { value: unknown } }).ok.value).toEqual({
+        space: 2,
+      });
     });
 
     it("should handle cross-space operations with metadata", () => {
@@ -261,21 +200,20 @@ describe("StorageTransaction", () => {
 
       // Read from first space with metadata
       const read1 = transaction.read(address1, { meta: metadata1 });
-      expect(read1.ok).toBeDefined();
-      if (read1.ok) {
-        expect(read1.ok.value).toEqual({ data: "space1" });
-      }
+      expect(read1.error).toBeUndefined();
+      expect((read1 as { ok: { value: unknown } }).ok.value).toEqual({
+        data: "space1",
+      });
 
       // Read from second space with metadata (should work, but no data)
       const read2 = transaction.read(address2, { meta: metadata2 });
-      expect(read2.ok).toBeDefined();
-      if (read2.ok) {
-        expect(read2.ok.value).toBeUndefined(); // No data written
-      }
+      expect(read2.error).toBeUndefined();
+      expect((read2 as { ok: { value: unknown } }).ok.value).toBeUndefined(); // No data written
     });
 
-    it("should support metadata in reader and writer interfaces", () => {
+    it("should support metadata in read operations", () => {
       const address = {
+        space,
         id: "test:interface-meta",
         type: "application/json",
         path: [],
@@ -283,38 +221,22 @@ describe("StorageTransaction", () => {
       const value = { name: "Interface Test" };
       const metadata = { interface: "reader", test: true };
 
-      // Get reader and writer
-      const readerResult = transaction.reader(space);
-      const writerResult = transaction.writer(space);
-      expect(readerResult.ok).toBeDefined();
-      expect(writerResult.ok).toBeDefined();
+      // Write using transaction
+      transaction.write(address, value);
 
-      const reader = readerResult.ok!;
-      const writer = writerResult.ok!;
-
-      // Write using writer
-      writer.write(address, value);
-
-      // Read using reader with metadata
-      const readResult = reader.read(address, { meta: metadata });
-      expect(readResult.ok).toBeDefined();
-      if (readResult.ok) {
-        expect(readResult.ok.value).toEqual(value);
-      }
-
-      // Read using writer with metadata (writer extends reader)
-      const writerReadResult = writer.read(address, { meta: metadata });
-      expect(writerReadResult.ok).toBeDefined();
-      if (writerReadResult.ok) {
-        expect(writerReadResult.ok.value).toEqual(value);
-      }
+      // Read with metadata
+      const readResult = transaction.read(address, { meta: metadata });
+      expect(readResult.error).toBeUndefined();
+      expect((readResult as { ok: { value: unknown } }).ok.value).toEqual(
+        value,
+      );
     });
   });
 
   describe("Transaction Abort", () => {
     it("should abort successfully", () => {
-      const writer = transaction.writer(space);
-      writer.ok!.write({
+      transaction.write({
+        space,
         id: "test:abort",
         type: "application/json",
         path: [],
@@ -336,14 +258,6 @@ describe("StorageTransaction", () => {
 
     it("should fail operations after abort", () => {
       transaction.abort("test");
-
-      const readerResult = transaction.reader(space);
-      expect(readerResult.error).toBeDefined();
-      expect(readerResult.error?.name).toBe("StorageTransactionCompleteError");
-
-      const writerResult = transaction.writer(space);
-      expect(writerResult.error).toBeDefined();
-      expect(writerResult.error?.name).toBe("StorageTransactionCompleteError");
 
       const readResult = transaction.read({
         space,
@@ -382,14 +296,14 @@ describe("StorageTransaction", () => {
     });
 
     it("should commit transaction with changes", async () => {
-      const writer = transaction.writer(space);
       const address = {
+        space,
         id: "test:commit",
         type: "application/json",
         path: [],
       } as const;
 
-      writer.ok!.write(address, { committed: true });
+      transaction.write(address, { committed: true });
 
       const result = await transaction.commit();
       expect(result.ok).toBeDefined();
@@ -402,16 +316,15 @@ describe("StorageTransaction", () => {
         type: "application/json",
         path: [],
       });
-      if (verifyResult.ok) {
-        expect(verifyResult.ok.value).toEqual({ committed: true });
-      } else {
-        expect(verifyResult.ok).toBeDefined();
-      }
+      expect(verifyResult.error).toBeUndefined();
+      expect((verifyResult as { ok: { value: unknown } }).ok.value).toEqual({
+        committed: true,
+      });
     });
 
     it("should transition through pending state", async () => {
-      const writer = transaction.writer(space);
-      writer.ok!.write({
+      transaction.write({
+        space,
         id: "test:pending",
         type: "application/json",
         path: [],
@@ -433,13 +346,23 @@ describe("StorageTransaction", () => {
     it("should fail operations after commit", async () => {
       await transaction.commit();
 
-      const readerResult = transaction.reader(space);
-      expect(readerResult.error).toBeDefined();
-      expect(readerResult.error?.name).toBe("StorageTransactionCompleteError");
+      const readResult = transaction.read({
+        space,
+        id: "test:1",
+        type: "application/json",
+        path: [],
+      });
+      expect(readResult.error).toBeDefined();
+      expect(readResult.error?.name).toBe("StorageTransactionCompleteError");
 
-      const writerResult = transaction.writer(space);
-      expect(writerResult.error).toBeDefined();
-      expect(writerResult.error?.name).toBe("StorageTransactionCompleteError");
+      const writeResult = transaction.write({
+        space,
+        id: "test:1",
+        type: "application/json",
+        path: [],
+      }, {});
+      expect(writeResult.error).toBeDefined();
+      expect(writeResult.error?.name).toBe("StorageTransactionCompleteError");
     });
 
     it("should not commit twice", async () => {
@@ -485,11 +408,11 @@ describe("StorageTransaction", () => {
 
       // Read to establish invariant (this locks in the expected value)
       const readResult = freshTransaction.read(address);
-      if (readResult.ok) {
-        expect(readResult.ok.value).toEqual({ name: "Initial", version: 1 });
-      } else {
-        expect(readResult.ok).toBeDefined();
-      }
+      expect(readResult.error).toBeUndefined();
+      expect((readResult as { ok: { value: unknown } }).ok.value).toEqual({
+        name: "Initial",
+        version: 1,
+      });
 
       // Modify the replica outside the transaction with proper causal reference
       const v2 = assert({
@@ -551,10 +474,11 @@ describe("StorageTransaction", () => {
       } as const;
 
       const result = freshTransaction.read(address);
-      expect(result.ok).toBeDefined();
-      if (result.ok) {
-        expect(result.ok.value).toEqual({ name: "Bob", status: "active" });
-      }
+      expect(result.error).toBeUndefined();
+      expect((result as { ok: { value: unknown } }).ok.value).toEqual({
+        name: "Bob",
+        status: "active",
+      });
     });
 
     it("should handle nested path reads from replica", async () => {
@@ -586,17 +510,13 @@ describe("StorageTransaction", () => {
       } as const;
 
       const result = freshTransaction.read(nestedAddress);
-      if (result.ok) {
-        expect(result.ok.value).toBe("admin");
-      } else {
-        expect(result.ok).toBeDefined();
-      }
+      expect(result.error).toBeUndefined();
+      expect((result as { ok: { value: unknown } }).ok.value).toBe("admin");
     });
   });
 
   describe("Error Handling", () => {
     it("should handle reading invalid nested paths", () => {
-      const writer = transaction.writer(space);
       const rootAddress = {
         space,
         id: "test:error",
@@ -605,7 +525,7 @@ describe("StorageTransaction", () => {
       } as const;
 
       // Write a non-object value
-      writer.ok!.write(rootAddress, "not an object");
+      transaction.write(rootAddress, "not an object");
 
       // Try to read nested path
       const nestedAddress = {
@@ -642,13 +562,26 @@ describe("StorageTransaction", () => {
   });
 
   describe("Edge Cases", () => {
-    it("should handle operations on transaction with no writer", async () => {
-      // Only create readers, no writers
-      const reader1 = transaction.reader(space);
-      const reader2 = transaction.reader(space2);
+    it("should handle read-only transactions", async () => {
+      // Only perform reads, no writes
+      const read1 = transaction.read({
+        space,
+        id: "test:readonly",
+        type: "application/json",
+        path: [],
+      });
+      const read2 = transaction.read({
+        space: space2,
+        id: "test:readonly",
+        type: "application/json",
+        path: [],
+      });
 
-      expect(reader1.ok).toBeDefined();
-      expect(reader2.ok).toBeDefined();
+      // Reads return NotFoundError for non-existent data (which is fine)
+      expect(read1.error?.name === "NotFoundError" || !read1.error)
+        .toBeTruthy();
+      expect(read2.error?.name === "NotFoundError" || !read2.error)
+        .toBeTruthy();
 
       // Commit should still work
       const result = await transaction.commit();
@@ -675,11 +608,10 @@ describe("StorageTransaction", () => {
 
       // Read should not have the deleted property
       const result = transaction.read(rootAddress);
-      if (result.ok) {
-        expect(result.ok.value).toEqual({ name: "Eve" });
-      } else {
-        expect(result.ok).toBeDefined();
-      }
+      expect(result.error).toBeUndefined();
+      expect((result as { ok: { value: unknown } }).ok.value).toEqual({
+        name: "Eve",
+      });
     });
 
     it("should handle array operations", () => {
@@ -700,11 +632,10 @@ describe("StorageTransaction", () => {
       transaction.write(itemAddress, "B");
 
       const result = transaction.read(address);
-      if (result.ok) {
-        expect(result.ok.value).toEqual({ items: ["a", "B", "c"] });
-      } else {
-        expect(result.ok).toBeDefined();
-      }
+      expect(result.error).toBeUndefined();
+      expect((result as { ok: { value: unknown } }).ok.value).toEqual({
+        items: ["a", "B", "c"],
+      });
     });
   });
 });

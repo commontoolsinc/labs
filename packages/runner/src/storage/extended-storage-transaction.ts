@@ -9,7 +9,6 @@ import type {
   IReadOptions,
   IStorageTransaction,
   JSONValue,
-  MemorySpace,
   ReadError,
   Result,
   StorageTransactionStatus,

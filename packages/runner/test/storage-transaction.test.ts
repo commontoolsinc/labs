@@ -149,20 +149,8 @@ describe("StorageTransaction", () => {
     expect(commitResult.error?.name).toBe("StorageTransactionCompleteError");
   });
 
-  it("should enforce write isolation per space", () => {
-    const transaction = runtime.edit();
-
-    // Open writer for first space
-    const writer1Result = transaction.writer(space);
-    expect(writer1Result.ok).toBeDefined();
-
-    // Try to open writer for different space - should fail
-    const writer2Result = transaction.writer("did:test:space2");
-    expect(writer2Result.error).toBeDefined();
-    expect(writer2Result.error?.name).toBe(
-      "StorageTransactionWriteIsolationError",
-    );
-  });
+  // Note: Write isolation per space was removed in transaction simplification refactoring.
+  // Transactions now support multi-space writes, with conflicts detected at commit time.
 
   describe("write validation", () => {
     it("should allow writing to root path when document is empty", () => {

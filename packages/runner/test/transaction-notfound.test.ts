@@ -138,8 +138,8 @@ describe("Transaction NotFound Behavior", () => {
     });
 
     // Reading a non-existent property returns undefined, not NotFound
-    expect(result.ok).toBeDefined();
-    expect(result.ok?.value).toBeUndefined();
+    expect(result.error).toBeUndefined();
+    expect((result as { ok: { value: unknown } }).ok.value).toBeUndefined();
   });
 
   it("should return TypeMismatchError when traversing through non-object", () => {
@@ -172,7 +172,7 @@ describe("Transaction NotFound Behavior", () => {
       path: [],
     }, { name: "Bob", age: 25 });
 
-    expect(writeResult.ok).toBeDefined();
+    expect(writeResult.error).toBeUndefined();
 
     // Now read it back
     const readResult = tx.read({
@@ -182,18 +182,16 @@ describe("Transaction NotFound Behavior", () => {
       path: ["name"],
     });
 
-    expect(readResult.ok).toBeDefined();
-    expect(readResult.ok?.value).toBe("Bob");
+    expect(readResult.error).toBeUndefined();
+    expect((readResult as { ok: { value: unknown } }).ok.value).toBe("Bob");
   });
 
-  it("should propagate NotFound through transaction reader", () => {
+  it("should propagate NotFound through transaction read", () => {
     const storage = new MockStorageManager();
     const tx = storage.edit();
-    const reader = tx.reader(testSpace);
 
-    expect(reader.ok).toBeDefined();
-
-    const result = reader.ok!.read({
+    const result = tx.read({
+      space: testSpace,
       id: "doc:missing",
       type: "application/json",
       path: ["value"],
@@ -203,14 +201,12 @@ describe("Transaction NotFound Behavior", () => {
     expect(result.error?.name).toBe("NotFoundError");
   });
 
-  it("should propagate NotFound through transaction writer", () => {
+  it("should propagate NotFound through transaction write", () => {
     const storage = new MockStorageManager();
     const tx = storage.edit();
-    const writer = tx.writer(testSpace);
 
-    expect(writer.ok).toBeDefined();
-
-    const result = writer.ok!.write({
+    const result = tx.write({
+      space: testSpace,
       id: "doc:missing",
       type: "application/json",
       path: ["nested", "value"],

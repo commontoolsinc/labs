@@ -5,33 +5,36 @@ import {
   summarizeTransaction,
 } from "../src/storage/transaction-summary.ts";
 import type {
+  Activity,
   IAttestation,
   IExtendedStorageTransaction,
-  ITransactionJournal,
+  JSONValue,
+  StorageTransactionStatus,
 } from "../src/storage/interface.ts";
+import type { MemorySpace } from "../src/runtime.ts";
 
-// Simple test transaction journal
-class TestJournal implements ITransactionJournal {
+// Mock Chronicle class that provides novelty/history iterators
+class MockChronicle {
   constructor(
     private noveltyData: IAttestation[] = [],
     private historyData: IAttestation[] = [],
   ) {}
 
-  activity(): Iterable<any> {
-    return [];
+  *novelty(): Iterable<IAttestation> {
+    yield* this.noveltyData;
   }
 
-  novelty(_space: any): Iterable<IAttestation> {
-    return this.noveltyData;
-  }
-
-  history(_space: any): Iterable<IAttestation> {
-    return this.historyData;
+  *history(): Iterable<IAttestation> {
+    yield* this.historyData;
   }
 }
 
 // Helper to create test attestations
-function attestation(id: string, path: string[], value?: any): IAttestation {
+function attestation(
+  id: string,
+  path: string[],
+  value?: JSONValue,
+): IAttestation {
   return {
     address: {
       id: id as any, // Cast to URI type
@@ -46,11 +49,21 @@ function attestation(id: string, path: string[], value?: any): IAttestation {
 function createTestTransaction(
   novelty: IAttestation[],
   history: IAttestation[] = [],
+  activity: Activity[] = [],
 ): IExtendedStorageTransaction {
-  const journal = new TestJournal(novelty, history);
+  const chronicle = new MockChronicle(novelty, history);
+  const branches = new Map<MemorySpace, MockChronicle>();
+  // Add chronicle for the test space
+  branches.set("did:key:test" as MemorySpace, chronicle);
+
+  const status: StorageTransactionStatus = {
+    status: "done" as const,
+    branches: branches as any,
+    activity,
+  };
+
   return {
-    journal,
-    status: () => ({ status: "done" as const, journal }),
+    status: () => status,
   } as any;
 }
 
@@ -69,7 +82,7 @@ describe("transaction-summary", () => {
     assertEquals(summary.writes[0].isDeleted, false);
   });
 
-  it("should extract a write with previous value (before → after)", () => {
+  it("should extract a write with previous value (before -> after)", () => {
     const tx = createTestTransaction(
       [attestation("of:abc123", ["value", "count"], 42)],
       [attestation("of:abc123", ["value", "count"], 10)],

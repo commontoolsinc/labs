@@ -7,7 +7,6 @@
 
 import type {
   Activity,
-  IAttestation,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   StorageTransactionStatus,

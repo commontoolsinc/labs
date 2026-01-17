@@ -11,7 +11,6 @@ import type {
   IStorageTransaction,
   IStorageTransactionAborted,
   IStorageTransactionComplete,
-  IStorageTransactionInconsistent,
   JSONValue,
   MemorySpace,
   Result,
@@ -316,7 +315,7 @@ export const commit = async (
     let hasWrites = false;
     let writeCount = 0;
 
-    for (const [space, changes] of archive) {
+    for (const [_space, changes] of archive) {
       if (changes.facts.length > 0) {
         hasWrites = true;
         writeCount += changes.facts.length;
