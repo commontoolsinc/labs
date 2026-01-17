@@ -22,5 +22,12 @@ export const MentionableArraySchema = {
   type: "array",
   // Include MentionableSchema to sync NAME property
   // AND asCell: true to get CellHandles with proper IDs
-  items: { ...MentionableSchema, asCell: true },
+  items: {
+    type: "object",
+    properties: {
+      [NAME]: { type: "string" },
+    },
+    required: [NAME],
+    asCell: true,
+  },
 } as const satisfies JSONSchema;
