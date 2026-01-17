@@ -345,6 +345,31 @@ describe("Attestation Module", () => {
         "settings",
       ]);
     });
+
+    it("should set NotFoundError.path to empty array when document does not exist (write)", () => {
+      // Document doesn't exist at all (value is undefined at root)
+      const source = {
+        address: {
+          id: "test:doc-not-found-write",
+          type: "application/json",
+          path: [],
+        },
+        value: undefined,
+      } as const;
+
+      // Try to write a nested path on non-existent document
+      const result = Attestation.write(source, {
+        id: "test:doc-not-found-write",
+        type: "application/json",
+        path: ["foo", "bar"],
+      }, "value");
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.name).toBe("NotFoundError");
+      // When document doesn't exist, path is [] (the root source path)
+      // Note: This differs from reads which return undefined
+      expect((result.error as INotFoundError).path).toEqual([]);
+    });
   });
 
   describe("setAtPath edge cases", () => {
@@ -681,6 +706,30 @@ describe("Attestation Module", () => {
       expect(result.error?.name).toBe("NotFoundError");
     });
 
+    it("should set NotFoundError.path to undefined when document does not exist (read)", () => {
+      // Document doesn't exist at all (value is undefined at root)
+      const source = {
+        address: {
+          id: "test:doc-not-found-read",
+          type: "application/json",
+          path: [],
+        },
+        value: undefined,
+      } as const;
+
+      // Try to read a nested path on non-existent document
+      const result = Attestation.read(source, {
+        id: "test:doc-not-found-read",
+        type: "application/json",
+        path: ["foo", "bar"],
+      });
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.name).toBe("NotFoundError");
+      // When document doesn't exist, path is undefined (no valid path exists)
+      expect((result.error as INotFoundError).path).toBeUndefined();
+    });
+
     it("should set NotFoundError.path to path of non-existent key for reads", () => {
       // Source has { user: { name: "Alice" } } - no "settings" key
       const source = {
@@ -701,8 +750,7 @@ describe("Attestation Module", () => {
 
       expect(result.error).toBeDefined();
       expect(result.error?.name).toBe("NotFoundError");
-      // For reads, the path includes the non-existent key: ["user", "settings"]
-      // (differs from writes, which return ["user"] - the last existing parent)
+      // The path includes the non-existent key: ["user", "settings"]
       expect((result.error as INotFoundError).path).toEqual([
         "user",
         "settings",
