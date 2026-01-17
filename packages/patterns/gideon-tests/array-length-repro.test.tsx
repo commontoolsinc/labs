@@ -49,12 +49,22 @@ export default pattern(() => {
     () => subject.items.some(() => true),
   );
 
+  // === Approach 4: Via string templates ===
+  const assert_initial_empty_template = computed(
+    () => `length: ${subject.items.length}` === "length: 0",
+  );
+
+  const assert_one_item_template = computed(
+    () => `length: ${subject.items.length}` === "length: 1",
+  );
+
   return {
     tests: [
       // Initial state - all approaches
       { assertion: assert_initial_length_direct },
       { assertion: assert_initial_length_filter },
       { assertion: assert_initial_empty_some },
+      { assertion: assert_initial_empty_template },
 
       // Add item
       { action: action_add_item },
@@ -63,6 +73,7 @@ export default pattern(() => {
       { assertion: assert_one_item_length_direct },
       { assertion: assert_one_item_length_filter },
       { assertion: assert_one_item_some },
+      { assertion: assert_one_item_template },
     ],
     subject,
   };
