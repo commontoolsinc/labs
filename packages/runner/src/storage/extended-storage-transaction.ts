@@ -126,12 +126,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // Create parent entries if needed.
       // errorPath includes the missing key (consistent with read errors).
       // lastExistingPath is one level up - the actual last existing parent.
-      const errorPath = writeResult.error.path;
-      const lastExistingPath = errorPath?.slice(0, -1);
+      const errorPath = writeResult.error.path!;
+      const lastExistingPath = errorPath.slice(0, -1);
       // When document doesn't exist (errorPath is [], so lastExistingPath is []),
       // we don't need to read - just start with {}.
       let valueObj: Record<string, JSONValue>;
-      if (!lastExistingPath || lastExistingPath.length === 0) {
+      if (lastExistingPath.length === 0) {
         valueObj = {};
       } else {
         const currentValue = this.readOrThrow({
