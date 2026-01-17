@@ -306,6 +306,8 @@ export class CTCodeEditor extends BaseElement {
     mentionable: { type: Object },
     mentioned: { type: Array },
     pattern: { type: Object },
+    // NOTE: selfName is read from dataset.selfName (data-self-name attribute)
+    // to avoid JSX type changes that trigger TS2589 in CI
     // New editor configuration props
     wordWrap: { type: Boolean },
     lineNumbers: { type: Boolean },
@@ -328,6 +330,13 @@ export class CTCodeEditor extends BaseElement {
   declare mentionable?: CellHandle<MentionableArray> | null;
   declare mentioned?: CellHandle<MentionableArray>;
   declare pattern: CellHandle<string>;
+  /**
+   * Name of the current charm to exclude from mentionable dropdown.
+   * Read from data-self-name attribute via this.dataset.selfName.
+   */
+  private get selfName(): string | undefined {
+    return this.dataset.selfName;
+  }
   declare wordWrap: boolean;
   declare lineNumbers: boolean;
   declare maxLineWidth?: number;
@@ -481,12 +490,14 @@ export class CTCodeEditor extends BaseElement {
 
     for (let i = 0; i < mentionableData.length; i++) {
       const mention = mentionableData[i];
-      if (
-        mention &&
-        mention[NAME]
-          ?.toLowerCase()
-          ?.includes(queryLower)
-      ) {
+      const name = mention?.[NAME] ?? "";
+
+      // Skip the current charm by comparing NAME
+      if (this.selfName && name === this.selfName) {
+        continue;
+      }
+
+      if (name?.toLowerCase()?.includes(queryLower)) {
         matches.push(this.mentionable.key(i) as CellHandle<Mentionable>);
       }
     }
