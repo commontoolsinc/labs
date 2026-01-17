@@ -231,8 +231,16 @@ export function createQueryResultProxy<T>(
             // Wraps values in a proxy that remembers the original index and
             // creates cell value proxies on demand.
             let copy: any;
-            if (isReadWrite === ArrayMethodType.WriteOnly) copy = [...value];
-            else {
+            if (isReadWrite === ArrayMethodType.WriteOnly) {
+              // CT-1173: Read fresh value from transaction, not stale proxy target.
+              // The proxy target (value) is captured at proxy creation time and
+              // becomes stale after writes. We must read current state from tx.
+              const readTx = (tx?.status().status === "ready")
+                ? tx
+                : runtime.edit();
+              const currentValue = readTx.readValueOrThrow(link) as any[];
+              copy = [...currentValue];
+            } else {
               copy = value.map((_, index) =>
                 createProxyForArrayValue(
                   runtime,
@@ -265,6 +273,7 @@ export function createQueryResultProxy<T>(
             // This ensures objects get stored as separate entity documents
             // rather than inline data, which is critical for persistence.
             const frame = getTopFrame();
+
             const processedCopy = recursivelyAddIDIfNeeded(copy, frame);
 
             // And if there was a change at all, update the cell.
@@ -275,17 +284,16 @@ export function createQueryResultProxy<T>(
               context: frame?.cause ?? "unknown",
             });
 
-            // Update target from store
-            const newValue = tx.readValueOrThrow(link) as typeof value;
-
-            if (!Array.isArray(newValue)) {
-              throw new Error(
-                `Array operation failed - value is no longer an array after .${prop}() (now ${typeof newValue})\n` +
-                  `help: ensure cell schema specifies array type, check for concurrent modifications`,
-              );
-            }
-
-            value.splice(0, value.length, ...newValue);
+            // CT-1173 FIX: Don't mutate proxy target (value) after writes.
+            // The old code did `value.splice(0, value.length, ...newValue)` which
+            // mutated the heap's stored array because `value` shares a reference
+            // with heap state. This caused StorageTransactionInconsistent errors
+            // because read invariants would see the written values before commit.
+            //
+            // The proxy still works correctly without this sync because:
+            // 1. Reads go through the transaction which returns fresh values
+            // 2. The diffAndUpdate above has already written the changes
+            // 3. Subsequent reads via the proxy will see the updated values
 
             if (Array.isArray(result)) {
               const cause = {
