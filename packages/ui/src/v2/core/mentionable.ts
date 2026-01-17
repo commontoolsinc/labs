@@ -18,16 +18,19 @@ export const MentionableSchema = {
   // additionalProperties: true,
 } as const satisfies JSONSchema;
 
-export const MentionableArraySchema = {
+// Define items schema separately to avoid deep type instantiation (TS2589)
+const MentionableItemSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    [NAME]: { type: "string" },
+  },
+  required: [NAME],
+  asCell: true,
+};
+
+export const MentionableArraySchema: JSONSchema = {
   type: "array",
   // Include MentionableSchema to sync NAME property
   // AND asCell: true to get CellHandles with proper IDs
-  items: {
-    type: "object",
-    properties: {
-      [NAME]: { type: "string" },
-    },
-    required: [NAME],
-    asCell: true,
-  },
-} as const satisfies JSONSchema;
+  items: MentionableItemSchema,
+};
