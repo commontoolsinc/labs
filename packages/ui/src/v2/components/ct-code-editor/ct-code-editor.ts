@@ -307,7 +307,7 @@ export class CTCodeEditor extends BaseElement {
     mentionable: { type: Object },
     mentioned: { type: Array },
     pattern: { type: Object },
-    selfId: { attribute: false },
+    self: { attribute: false },
     // New editor configuration props
     wordWrap: { type: Boolean },
     lineNumbers: { type: Boolean },
@@ -331,10 +331,9 @@ export class CTCodeEditor extends BaseElement {
   declare mentioned?: CellHandle<MentionableArray>;
   declare pattern: CellHandle<string>;
   /**
-   * ID of the current charm to exclude from mentionable dropdown.
-   * Can be a string ID or a CellHandle (from which ID will be extracted).
+   * The current charm's cell handle, used to exclude self from mentionable dropdown.
    */
-  declare selfId?: string | CellHandle<unknown>;
+  declare self?: CellHandle;
   declare wordWrap: boolean;
   declare lineNumbers: boolean;
   declare maxLineWidth?: number;
@@ -355,6 +354,7 @@ export class CTCodeEditor extends BaseElement {
   private _cleanupFns: Array<() => void> = [];
   private _mentionableUnsub: (() => void) | null = null;
   private _mentionedUnsub: (() => void) | null = null;
+  private _rawMentionableUnsub: (() => void) | null = null;
   // Track previous backlink names to detect changes for syncing to charm NAME
   private _previousBacklinkNames = new Map<string, string>();
   // Track subscriptions to charm NAME cells for bidirectional sync
@@ -466,7 +466,7 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Get filtered mentionable items based on query.
    * Returns pairs of { cell: CellHandle (for ID), name: string (for display) }
-   * Excludes the current charm (selfId) from results.
+   * Excludes the current charm (self) from results.
    */
   private getFilteredMentionable(
     query: string,
@@ -476,13 +476,10 @@ export class CTCodeEditor extends BaseElement {
     }
 
     const rawMentionable = this.mentionable.get();
-    // With asCell: true, each item in the array is a CellHandle<Mentionable>
     const cellHandles =
-      (Array.isArray(rawMentionable)
-        ? rawMentionable
-        : isCellHandle(rawMentionable)
-        ? (rawMentionable.get() ?? [])
-        : []) as Array<CellHandle<Mentionable>>;
+      (Array.isArray(rawMentionable) ? rawMentionable : []) as Array<
+        CellHandle<Mentionable>
+      >;
 
     if (cellHandles.length === 0) {
       return [];
@@ -491,37 +488,20 @@ export class CTCodeEditor extends BaseElement {
     const queryLower = query.toLowerCase();
     const matches: Array<{ cell: CellHandle<Mentionable>; name: string }> = [];
 
-    // Extract selfId value once before loop
-    let selfIdStr = "";
-    if (this.selfId) {
-      if (isCellHandle(this.selfId)) {
-        selfIdStr = this.selfId.id();
-      } else if (
-        typeof this.selfId === "object" &&
-        "get" in this.selfId &&
-        typeof (this.selfId as { get: () => unknown }).get === "function"
-      ) {
-        const val = (this.selfId as { get: () => unknown }).get();
-        selfIdStr = typeof val === "string" ? val : String(val);
-      } else if (typeof this.selfId === "string") {
-        selfIdStr = this.selfId;
-      } else {
-        selfIdStr = String(this.selfId);
-      }
-    }
-
+    // TODO(@seefeldb): We need a way to sync all cell handles at once and then we should trigger and await that.
+    // Currently we rely on array index alignment between cellHandles and _rawMentionableData.
     for (let i = 0; i < cellHandles.length; i++) {
       const cell = cellHandles[i];
       if (!cell) continue;
 
-      // Get name from cached raw data
-      const rawItem = this._rawMentionableData[i];
-      const name = rawItem?.[NAME] ?? "";
-
-      // Skip the current charm (compare by NAME)
-      if (selfIdStr && name && name === selfIdStr) {
+      // Skip the current charm using CellHandle.equals()
+      if (this.self && cell.equals(this.self)) {
         continue;
       }
+
+      // Get name from cached raw data (CellHandle.get() may involve IPC)
+      const rawItem = this._rawMentionableData[i];
+      const name = rawItem?.[NAME] ?? "";
 
       if (name.toLowerCase().includes(queryLower)) {
         matches.push({ cell, name });
@@ -541,13 +521,10 @@ export class CTCodeEditor extends BaseElement {
     if (!this.mentionable) return null;
 
     const rawMentionable = this.mentionable.get();
-    // With asCell: true, each item in the array is a CellHandle<Mentionable>
     const cellHandles =
-      (Array.isArray(rawMentionable)
-        ? rawMentionable
-        : isCellHandle(rawMentionable)
-        ? (rawMentionable.get() ?? [])
-        : []) as Array<CellHandle<Mentionable>>;
+      (Array.isArray(rawMentionable) ? rawMentionable : []) as Array<
+        CellHandle<Mentionable>
+      >;
 
     const queryLower = query.toLowerCase();
 
@@ -555,7 +532,7 @@ export class CTCodeEditor extends BaseElement {
       const cell = cellHandles[i];
       if (!cell) continue;
 
-      // Get name from cached raw data (CellHandle data may not be synced)
+      // Get name from cached raw data (CellHandle.get() may involve IPC)
       const rawItem = this._rawMentionableData[i];
       const name = rawItem?.[NAME] ?? "";
 
@@ -796,12 +773,15 @@ export class CTCodeEditor extends BaseElement {
 
   /**
    * Create a backlink from pattern
+   * TODO(@seefeldb): This method digs too deep into internals (runtime.createPage).
+   * Should handle via callback so caller can decide what a new page looks like.
    */
   private async createBacklinkFromPattern(
     backlinkText: string,
     shouldNavigate: boolean,
   ): Promise<void> {
     try {
+      // TODO(@seefeldb): We should remove IDs from notes - they add complexity.
       // Simple random ID generator for noteId (matches pattern used in note.tsx)
       const generateId = () =>
         `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
@@ -1188,6 +1168,10 @@ export class CTCodeEditor extends BaseElement {
       this._mentionedUnsub();
       this._mentionedUnsub = null;
     }
+    if (this._rawMentionableUnsub) {
+      this._rawMentionableUnsub();
+      this._rawMentionableUnsub = null;
+    }
     this._cleanupFns.forEach((fn) => fn());
     this._cleanupFns = [];
     if (this._editorView) {
@@ -1202,11 +1186,16 @@ export class CTCodeEditor extends BaseElement {
 
   override willUpdate(changedProperties: Map<string, any>) {
     if (changedProperties.has("mentionable")) {
+      // Clean up previous raw mentionable subscription
+      if (this._rawMentionableUnsub) {
+        this._rawMentionableUnsub();
+        this._rawMentionableUnsub = null;
+      }
       if (this.mentionable) {
         // Subscribe to raw data BEFORE applying schema
         // This captures name data that may not be available in CellHandles
         const rawCell = this.mentionable;
-        rawCell.subscribe((data) => {
+        this._rawMentionableUnsub = rawCell.subscribe((data) => {
           if (Array.isArray(data)) {
             this._rawMentionableData = data as Mentionable[];
           }

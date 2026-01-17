@@ -3648,7 +3648,7 @@ interface CTCodeEditorAttributes<T> extends CTHTMLAttributes<T> {
   "onct-blur"?: any;
   "onbacklink-click"?: any;
   "onbacklink-create"?: any;
-  "selfId"?: string | CellLike<any>;
+  "$self"?: CellLike<any>;
 }
 
 interface CTAutoLayoutAttributes<T> extends CTHTMLAttributes<T> {
