@@ -163,6 +163,7 @@ export class RuntimeProcessor {
             space: error.space,
             recipeId: error.recipeId,
             spellId: error.spellId,
+            stackTrace: error.stack,
           });
         },
       ],

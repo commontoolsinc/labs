@@ -187,7 +187,7 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
     allCharms.get().filter((charm) => {
       if (!charm) return false;
       if (charm.isHidden) return false;
-      const name = charm[NAME];
+      const name = charm?.[NAME];
       return typeof name === "string" && name.length > 0;
     })
   );
