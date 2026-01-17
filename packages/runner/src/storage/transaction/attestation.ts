@@ -522,7 +522,7 @@ export const load = (
 export const NotFound = (
   source: IAttestation,
   address: IMemoryAddress,
-  path?: readonly MemoryAddressPathComponent[],
+  path: readonly MemoryAddressPathComponent[],
 ): INotFoundError => {
   let message: string;
 

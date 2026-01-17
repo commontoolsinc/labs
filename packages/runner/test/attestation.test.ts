@@ -994,12 +994,13 @@ describe("Attestation Module", () => {
           path: ["data", "property"],
         } as const;
 
-        const error = Attestation.NotFound(source, address);
+        const error = Attestation.NotFound(source, address, ["data"]);
 
         expect(error.name).toBe("NotFoundError");
         expect(error.message).toBe(
           "Cannot access path [data, property] - path does not exist",
         );
+        expect(error.path).toEqual(["data"]);
         expect(error.source).toBe(source);
         expect(error.address).toBe(address);
       });
@@ -1015,7 +1016,7 @@ describe("Attestation Module", () => {
           path: ["property"],
         } as const;
 
-        const error = Attestation.NotFound(source, address);
+        const error = Attestation.NotFound(source, address, []);
         const withSpace = error.from(space);
 
         // NotFound error now returns the same instance from .from()
@@ -1023,6 +1024,7 @@ describe("Attestation Module", () => {
         expect(withSpace.message).toBe(
           "Cannot access path [property] - path does not exist",
         );
+        expect(error.path).toEqual([]);
       });
     });
 
