@@ -737,7 +737,7 @@ export interface INotFoundError extends IStorageError {
   readonly source: IAttestation;
   readonly address: IMemoryAddress;
   /** Path to the non-existent key, or `[]` if the document doesn't exist. */
-  readonly path?: readonly MemoryAddressPathComponent[];
+  readonly path: readonly MemoryAddressPathComponent[];
   from(space: MemorySpace): INotFoundError;
 }
 

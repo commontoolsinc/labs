@@ -6,7 +6,10 @@ import {
   type NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
-import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  INotFoundError,
+} from "./storage/interface.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { Runtime } from "./runtime.ts";
 
@@ -110,7 +113,7 @@ export function resolveLink(
       const whole = tx.readValueOrThrow({ ...link, path: link.path });
       nextLink = parseLink(whole as CellLink, link);
     } else if (sigilProbe.error?.name === "NotFoundError") {
-      const lastValid = sigilProbe.error.path!.slice(); // [] => doc missing
+      const lastValid = (sigilProbe.error as INotFoundError).path.slice(); // [] => doc missing
 
       if (lastValid.length > 0) {
         // remove `value` prefix

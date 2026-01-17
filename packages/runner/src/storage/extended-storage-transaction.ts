@@ -6,6 +6,7 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   InactiveTransactionError,
+  INotFoundError,
   IReadOptions,
   IStorageTransaction,
   ITransactionJournal,
@@ -126,7 +127,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // Create parent entries if needed.
       // errorPath includes the missing key (consistent with read errors).
       // lastExistingPath is one level up - the actual last existing parent.
-      const errorPath = writeResult.error.path!;
+      const errorPath = (writeResult.error as INotFoundError).path;
       const lastExistingPath = errorPath.slice(0, -1);
       // When document doesn't exist (errorPath is [], so lastExistingPath is []),
       // we don't need to read - just start with {}.
