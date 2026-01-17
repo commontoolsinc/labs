@@ -18,16 +18,7 @@ export const MentionableSchema = {
   // additionalProperties: true,
 } as const satisfies JSONSchema;
 
-// Use explicit type annotation to avoid TS2589 "Type instantiation is excessively deep"
-// The asCell: true ensures array items are CellHandles with proper IDs for .equals() comparison
-export const MentionableArraySchema: JSONSchema = {
+export const MentionableArraySchema = {
   type: "array",
-  items: {
-    type: "object",
-    properties: {
-      [NAME]: { type: "string" },
-    },
-    required: [NAME],
-    asCell: true,
-  },
-};
+  items: MentionableSchema,
+} as const satisfies JSONSchema;

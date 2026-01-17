@@ -488,20 +488,30 @@ export class CTCodeEditor extends BaseElement {
     const queryLower = query.toLowerCase();
     const matches: Array<{ cell: CellHandle<Mentionable>; name: string }> = [];
 
+    // Get self's NAME for comparison (if self is a CellHandle)
+    // TODO(@seefeldb): Once asCell works without TS2589, use CellHandle.equals() instead
+    let selfName = "";
+    if (this.self) {
+      const selfData = this.self.get();
+      if (selfData && typeof selfData === "object" && NAME in selfData) {
+        selfName = (selfData as Mentionable)[NAME];
+      }
+    }
+
     // TODO(@seefeldb): We need a way to sync all cell handles at once and then we should trigger and await that.
     // Currently we rely on array index alignment between cellHandles and _rawMentionableData.
     for (let i = 0; i < cellHandles.length; i++) {
       const cell = cellHandles[i];
       if (!cell) continue;
 
-      // Skip the current charm using CellHandle.equals()
-      if (this.self && cell.equals(this.self)) {
-        continue;
-      }
-
       // Get name from cached raw data (CellHandle.get() may involve IPC)
       const rawItem = this._rawMentionableData[i];
       const name = rawItem?.[NAME] ?? "";
+
+      // Skip the current charm by comparing NAME
+      if (selfName && name === selfName) {
+        continue;
+      }
 
       if (name.toLowerCase().includes(queryLower)) {
         matches.push({ cell, name });
