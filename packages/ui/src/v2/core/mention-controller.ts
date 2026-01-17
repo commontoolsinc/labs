@@ -8,6 +8,7 @@ import {
   type Mentionable,
   type MentionableArray,
   MentionableAsCellsArraySchema,
+  type MentionableCellsArray,
 } from "./mentionable.ts";
 
 /**
@@ -88,8 +89,8 @@ export class MentionController implements ReactiveController {
     selectedIndex: 0,
   };
 
-  // Mentionable items
-  private _mentionable: CellHandle<MentionableArray> | null = null;
+  // Mentionable items - typed for schema-converted cell where .get() returns CellHandle[]
+  private _mentionable: CellHandle<MentionableCellsArray> | null = null;
   private _mentionableUnsubscribe: (() => void) | null = null;
 
   constructor(
@@ -120,8 +121,9 @@ export class MentionController implements ReactiveController {
    */
   setMentionable(mentionable: CellHandle<MentionableArray> | null): void {
     this._cleanupMentionableSubscription();
-    this._mentionable = mentionable?.asSchema(MentionableAsCellsArraySchema) ??
-      null;
+    this._mentionable = mentionable?.asSchema<MentionableCellsArray>(
+      MentionableAsCellsArraySchema,
+    ) ?? null;
 
     // Set up new subscription
     this._setupMentionableSubscription();
@@ -145,17 +147,10 @@ export class MentionController implements ReactiveController {
 
   /**
    * Get filtered mentions based on current query.
-   * With MentionableAsCellsArraySchema, .get() returns CellHandle[] directly.
+   * Uses _mentionable which has proper typing from asSchema<MentionableCellsArray>.
    */
   getFilteredMentions(): CellHandle<Mentionable>[] {
-    if (!this._mentionable) {
-      return [];
-    }
-
-    // With MentionableAsCellsArraySchema, .get() returns an array of CellHandles
-    const mentionableCells = this._mentionable.get() as unknown as
-      | CellHandle<Mentionable>[]
-      | null;
+    const mentionableCells = this._mentionable?.get();
     if (!mentionableCells || mentionableCells.length === 0) {
       return [];
     }
@@ -337,17 +332,10 @@ export class MentionController implements ReactiveController {
 
   /**
    * Read all mentionable items as CellHandles.
-   * With MentionableAsCellsArraySchema, .get() returns CellHandle[] directly.
+   * Uses _mentionable which has proper typing from asSchema<MentionableCellsArray>.
    */
   private readMentionables(): CellHandle<Mentionable>[] {
-    if (!this._mentionable) {
-      return [];
-    }
-
-    // With MentionableAsCellsArraySchema, .get() returns an array of CellHandles
-    const mentionableCells = this._mentionable.get() as unknown as
-      | CellHandle<Mentionable>[]
-      | null;
+    const mentionableCells = this._mentionable?.get();
     if (!mentionableCells || mentionableCells.length === 0) {
       return [];
     }

@@ -47,6 +47,7 @@ import {
   Mentionable,
   MentionableArray,
   MentionableAsCellsArraySchema,
+  MentionableCellsArray,
 } from "../../core/mentionable.ts";
 
 /**
@@ -348,6 +349,9 @@ export class CTCodeEditor extends BaseElement {
   private _cleanupFns: Array<() => void> = [];
   private _mentionableUnsub: (() => void) | null = null;
   private _mentionedUnsub: (() => void) | null = null;
+  // Schema-converted cells where .get() returns CellHandle<Mentionable>[]
+  private _mentionableCells: CellHandle<MentionableCellsArray> | null = null;
+  private _mentionedCells: CellHandle<MentionableCellsArray> | null = null;
   // Track previous backlink names to detect changes for syncing to charm NAME
   private _previousBacklinkNames = new Map<string, string>();
   // Track subscriptions to charm NAME cells for bidirectional sync
@@ -459,17 +463,10 @@ export class CTCodeEditor extends BaseElement {
 
   /**
    * Get filtered mentionable items based on query.
-   * With MentionableAsCellsArraySchema, .get() returns CellHandle[] directly.
+   * Uses _mentionableCells which has proper typing from asSchema<MentionableCellsArray>.
    */
   private getFilteredMentionable(query: string): CellHandle<Mentionable>[] {
-    if (!this.mentionable) {
-      return [];
-    }
-
-    // With MentionableAsCellsArraySchema, .get() returns an array of CellHandles
-    const mentionableCells = this.mentionable.get() as unknown as
-      | CellHandle<Mentionable>[]
-      | null;
+    const mentionableCells = this._mentionableCells?.get();
     if (!mentionableCells || mentionableCells.length === 0) {
       return [];
     }
@@ -490,15 +487,10 @@ export class CTCodeEditor extends BaseElement {
 
   /**
    * Find exact case-insensitive match in mentionable items.
-   * With MentionableAsCellsArraySchema, .get() returns CellHandle[] directly.
+   * Uses _mentionableCells which has proper typing from asSchema<MentionableCellsArray>.
    */
   private _findExactMentionable(query: string): CellHandle<Mentionable> | null {
-    if (!this.mentionable) return null;
-
-    // With MentionableAsCellsArraySchema, .get() returns an array of CellHandles
-    const mentionableCells = this.mentionable.get() as unknown as
-      | CellHandle<Mentionable>[]
-      | null;
+    const mentionableCells = this._mentionableCells?.get();
     if (!mentionableCells) return null;
 
     const queryLower = query.toLowerCase();
@@ -785,15 +777,10 @@ export class CTCodeEditor extends BaseElement {
 
   /**
    * Find a charm by ID in the mentionable list.
-   * With MentionableAsCellsArraySchema, .get() returns CellHandle[] directly.
+   * Uses _mentionableCells which has proper typing from asSchema<MentionableCellsArray>.
    */
   private findCharmById(id: string): CellHandle<Mentionable> | null {
-    if (!this.mentionable) return null;
-
-    // With MentionableAsCellsArraySchema, .get() returns an array of CellHandles
-    const mentionableCells = this.mentionable.get() as unknown as
-      | CellHandle<Mentionable>[]
-      | null;
+    const mentionableCells = this._mentionableCells?.get();
     if (!mentionableCells || mentionableCells.length === 0) return null;
 
     for (const charmCell of mentionableCells) {
@@ -1055,18 +1042,17 @@ export class CTCodeEditor extends BaseElement {
 
   override willUpdate(changedProperties: Map<string, any>) {
     if (changedProperties.has("mentionable")) {
-      if (this.mentionable) {
-        this.mentionable = this.mentionable.asSchema(
+      this._mentionableCells =
+        this.mentionable?.asSchema<MentionableCellsArray>(
           MentionableAsCellsArraySchema,
-        );
-      }
+        ) ?? null;
       this._setupMentionableSyncHandler();
       this._updateMentionedFromContent();
     }
     if (changedProperties.has("mentioned")) {
-      if (this.mentioned) {
-        this.mentioned = this.mentioned.asSchema(MentionableAsCellsArraySchema);
-      }
+      this._mentionedCells = this.mentioned?.asSchema<MentionableCellsArray>(
+        MentionableAsCellsArraySchema,
+      ) ?? null;
       this._setupMentionedSyncHandler();
       this._updateMentionedFromContent();
     }
@@ -1470,16 +1456,11 @@ export class CTCodeEditor extends BaseElement {
 
   /**
    * Get IDs of currently mentioned charms.
-   * With MentionableAsCellsArraySchema, .get() returns CellHandle[] directly.
+   * Uses _mentionedCells which has proper typing from asSchema<MentionableCellsArray>.
    */
   private _getCurrentMentionedIds(): Set<string> {
     const curIds = new Set<string>();
-    if (!this.mentioned) return curIds;
-
-    // With MentionableAsCellsArraySchema, .get() returns an array of CellHandles
-    const mentionedCells = this.mentioned.get() as unknown as
-      | CellHandle<Mentionable>[]
-      | null;
+    const mentionedCells = this._mentionedCells?.get();
     if (!mentionedCells) return curIds;
 
     // Each cell in mentioned already has the correct id()
