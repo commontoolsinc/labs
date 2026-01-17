@@ -154,7 +154,7 @@ export class Chronicle {
         error: NotFound(
           workingCopy,
           address,
-          path.length > 0 ? path.slice(0, -1) : undefined,
+          path.length > 0 ? path.slice(0, -1) : [],
         ),
       };
     }
