@@ -33,9 +33,17 @@ const addFavorite = handler<
   if (!current.some((f) => equals(f.cell, charm))) {
     // HACK(seefeld): Access internal API to get schema.
     // Once we sandbox, we need proper reflection
-    let schema = (charm as any)?.asSchemaFromLinks?.()?.schema;
+    //
+    // This first resolves all links, then clears the schema, so it's forced to
+    // read the schema defined in the pattern, then reconstructs that schema.
+    let schema = (charm as any)?.resolveAsCell()?.asSchema(undefined)
+      .asSchemaFromLinks?.()?.schema;
     if (typeof schema !== "object") schema = ""; // schema can be true or false
-    favorites.push({ cell: charm, tag: tag || schema || "", userTags: [] });
+    favorites.push({
+      cell: charm,
+      tag: tag || JSON.stringify(schema) || "",
+      userTags: [],
+    });
   }
 });
 
