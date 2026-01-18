@@ -26,7 +26,6 @@ import {
 } from "./builder/recipe.ts";
 import { type Cell, isCell } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
-import { diffAndUpdate } from "./data-updating.ts";
 import {
   findAllWriteRedirectCells,
   unsafe_noteParentOnRecipes,
