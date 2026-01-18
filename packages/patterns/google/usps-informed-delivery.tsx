@@ -28,10 +28,10 @@ import {
   UI,
   Writable,
 } from "commontools";
-import GmailImporter, { type Auth } from "../gmail-importer.tsx";
+import GmailImporter, { type Auth } from "./gmail-importer.tsx";
 
 // Debug flag for development - disable in production
-const DEBUG_USPS = false;
+const DEBUG_USPS = true;
 
 // Email type - matches GmailImporter's Email type
 interface Email {
@@ -490,6 +490,9 @@ If you cannot read the image clearly, make your best guess based on what you can
 
           <ct-vscroll flex showScrollbar>
             <ct-vstack padding="6" gap="4">
+              {/* Auth UI from embedded Gmail Importer */}
+              {gmailImporter.authUI}
+
               {/* Connection Status */}
               {ifElse(
                 isConnected,
@@ -516,55 +519,13 @@ If you cannot read the image clearly, make your best guess based on what you can
                         backgroundColor: "#10b981",
                       }}
                     />
-                    <span>Connected to Gmail Importer</span>
+                    <span>Connected to Gmail</span>
                     <span style={{ marginLeft: "auto", color: "#059669" }}>
                       {uspsEmailCount} USPS emails found
                     </span>
                   </div>
                 </div>,
-                <div
-                  style={{
-                    padding: "16px",
-                    backgroundColor: "#fef3c7",
-                    borderRadius: "8px",
-                    border: "1px solid #f59e0b",
-                  }}
-                >
-                  <h4 style={{ margin: "0 0 8px 0", color: "#b45309" }}>
-                    Google Auth Not Connected
-                  </h4>
-                  <p
-                    style={{ margin: "0", fontSize: "14px", color: "#92400e" }}
-                  >
-                    To use this pattern, link a Google Auth charm:
-                  </p>
-                  <ol
-                    style={{
-                      margin: "8px 0 0 0",
-                      paddingLeft: "20px",
-                      fontSize: "14px",
-                      color: "#92400e",
-                    }}
-                  >
-                    <li>Deploy a google-auth charm and complete OAuth</li>
-                    <li>
-                      Link it to this charm:
-                      <code
-                        style={{
-                          display: "block",
-                          margin: "4px 0",
-                          padding: "4px 8px",
-                          backgroundColor: "#fef9c3",
-                          borderRadius: "4px",
-                          fontSize: "12px",
-                        }}
-                      >
-                        ct charm link google-auth/auth usps/linkedAuth
-                      </code>
-                    </li>
-                    <li>USPS emails will be fetched automatically</li>
-                  </ol>
-                </div>,
+                null,
               )}
 
               {/* Analysis Status - reactive, no button needed */}

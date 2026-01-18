@@ -113,6 +113,9 @@ interface Output {
   emails: Email[];
   /** Number of emails imported */
   emailCount: number;
+  /** Auth UI component for managing Google OAuth connection */
+  // deno-lint-ignore no-explicit-any
+  authUI: any;
 }
 
 // Debug logging helpers - pass debugMode explicitly to avoid module-level state issues
@@ -1336,6 +1339,7 @@ export default pattern<{
           </ct-vscroll>
         </ct-screen>
       ),
+      authUI,
       emails,
       emailCount: derive(emails, (list: Email[]) => list?.length || 0),
       bgUpdater: googleUpdater({ emails, auth, settings }),
