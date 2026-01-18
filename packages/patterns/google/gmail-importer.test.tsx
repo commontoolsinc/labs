@@ -21,7 +21,6 @@ export default pattern(() => {
     settings: {
       gmailFilterQuery: "in:INBOX",
       limit: 10,
-      historyId: "",
       debugMode: false,
       autoFetchOnAuth: false,
       resolveInlineImages: false,
@@ -33,7 +32,6 @@ export default pattern(() => {
     settings: {
       gmailFilterQuery: "label:important",
       limit: 50,
-      historyId: "",
       debugMode: true,
       autoFetchOnAuth: false,
       resolveInlineImages: true,
