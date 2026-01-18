@@ -57,7 +57,6 @@ import {
   computed,
   Default,
   handler,
-  ifElse,
   navigateTo,
   pattern,
   UI,
@@ -984,19 +983,14 @@ export const GoogleAuthManager = pattern<
       );
     });
 
-    // Compose fullUI using ifElse chains
-    const fullUI = ifElse(
-      isLoadingOrNotFound,
-      loadingUI,
-      ifElse(
-        isSelecting,
-        selectingUI,
-        ifElse(
-          needsAction,
-          needsActionUI,
-          ifElse(isAuthReady, readyUI, null),
-        ),
-      ),
+    // Compose fullUI using JSX conditionals
+    const fullUI = (
+      <>
+        {isLoadingOrNotFound && loadingUI}
+        {isSelecting && selectingUI}
+        {needsAction && needsActionUI}
+        {isAuthReady && readyUI}
+      </>
     );
 
     // ==========================================================================
