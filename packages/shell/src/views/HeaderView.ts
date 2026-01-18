@@ -1,9 +1,10 @@
 import { css, html } from "lit";
-import { property } from "lit/decorators.js";
+import { property, state } from "lit/decorators.js";
 import { KeyStore } from "@commontools/identity";
 import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import "../components/Flex.ts";
+import "../components/Spinner.ts";
 
 type ConnectionStatus =
   | "connecting"
@@ -67,12 +68,46 @@ export class XHeaderView extends BaseView {
       opacity: 0.5;
       transition: opacity 0.2s;
       user-select: none;
-      font-size: 0.9rem;
-      margin-left: 0.25rem;
+      font-size: 1.1rem;
+      margin-left: 0.35rem;
     }
 
     .reload-icon:hover {
       opacity: 1;
+    }
+
+    .reload-icon.reloading {
+      opacity: 0.7;
+      animation: spin 1s linear infinite;
+      pointer-events: none;
+    }
+
+    @keyframes spin {
+      from {
+        transform: rotate(0deg);
+      }
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(255, 255, 255, 0.7);
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .loading-overlay x-spinner {
+      width: auto;
+      height: auto;
+      background: transparent;
     }
 
     #page-title {
@@ -121,6 +156,9 @@ export class XHeaderView extends BaseView {
   @property({ attribute: false })
   isViewingDefaultPattern = false;
 
+  @state()
+  private isReloading = false;
+
   private handleAuthClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
@@ -155,7 +193,8 @@ export class XHeaderView extends BaseView {
   private async handleReloadPatternClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
-    if (!this.rt) return;
+    if (!this.rt || this.isReloading) return;
+    this.isReloading = true;
     try {
       await this.rt.recreateSpaceRootPattern();
       // Dispatch event to notify AppView to refresh the pattern
@@ -164,6 +203,8 @@ export class XHeaderView extends BaseView {
       );
     } catch (err) {
       console.error("[HeaderView] Failed to recreate pattern:", err);
+    } finally {
+      this.isReloading = false;
     }
   }
 
@@ -191,10 +232,16 @@ export class XHeaderView extends BaseView {
     const reloadIcon = this.isViewingDefaultPattern && this.isLoggedIn
       ? html`
         <span
-          class="reload-icon"
+          class="reload-icon ${this.isReloading ? "reloading" : ""}"
           @click="${this.handleReloadPatternClick}"
           title="Reload default pattern"
         >↻</span>
+      `
+      : null;
+
+    const loadingOverlay = this.isReloading
+      ? html`
+        <div class="loading-overlay"><x-spinner></x-spinner></div>
       `
       : null;
 
@@ -253,6 +300,7 @@ export class XHeaderView extends BaseView {
           `
           : null}
       </div>
+      ${loadingOverlay}
     `;
   }
 }
