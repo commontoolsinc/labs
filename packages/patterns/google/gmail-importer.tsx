@@ -11,6 +11,7 @@ import {
   patternTool,
   str,
   UI,
+  VNode,
   Writable,
 } from "commontools";
 import {
@@ -110,12 +111,20 @@ type Settings = {
 
 /** Gmail email importer for fetching and viewing emails. #gmailEmails */
 interface Output {
+  /** Array of imported emails */
   emails: Email[];
   /** Number of emails imported */
   emailCount: number;
   /** Auth UI component for managing Google OAuth connection */
-  // deno-lint-ignore no-explicit-any
-  authUI: any;
+  authUI: VNode;
+  /** Handler to trigger email fetch from external patterns */
+  bgUpdater: unknown;
+  /** Search emails by query string (searches subject, from, snippet) */
+  searchEmails: unknown;
+  /** Get count of imported emails */
+  getEmailCount: unknown;
+  /** Get recent emails as formatted string */
+  getRecentEmails: unknown;
 }
 
 // Debug logging helpers - pass debugMode explicitly to avoid module-level state issues
