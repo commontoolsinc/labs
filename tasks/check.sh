@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -e
+shopt -s extglob
 
 DENO_VERSIONS_ALLOWED=("2.5.2" "2.6.4")
 # This is more portable than parsing `deno --version`
@@ -48,7 +49,6 @@ PATHS=(
   "packages/patterns/battleship"
   "packages/patterns/budget-tracker"
   "packages/patterns/contacts"
-  "packages/patterns/deprecated"
   "packages/patterns/examples"
   "packages/patterns/gideon-tests"
   "packages/patterns/integration"
@@ -58,7 +58,11 @@ PATHS=(
   "packages/patterns/system"
   "packages/patterns/test"
   "packages/patterns/weekly-calendar"
-  "packages/patterns/google"
+  "packages/patterns/google/google-*.tsx"
+  "packages/patterns/google/gmail-*.tsx"
+  "packages/patterns/google/!(google-*|gmail-*).tsx"
+  "packages/patterns/google/util"
+  "packages/patterns/google/integration"
 )
 
 # Check each path separately
