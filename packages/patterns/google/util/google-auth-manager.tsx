@@ -143,8 +143,8 @@ export interface AuthInfo {
   // Status display
   statusDotColor: string;
   statusText: string;
-  // For navigation/actions
-  charm: GoogleAuthCharm | null;
+  // For navigation/actions (internal use - typed as unknown to avoid exposing private type)
+  charm: unknown;
   // UI components from wished charm (to avoid accessing wishResult in fullUI)
   userChip: unknown;
   charmUI: unknown;
@@ -271,14 +271,13 @@ const createAuthHandler = handler<unknown, { scopes: ScopeKey[] }>(
 
 /**
  * Handler to navigate to existing auth charm.
+ * Note: charm is typed as unknown in the public interface to avoid exposing private types,
+ * but internally we know it's a GoogleAuthCharm.
  */
-const goToAuthHandler = handler<
-  unknown,
-  { charm: Writable<GoogleAuthCharm | null> }
->(
+const goToAuthHandler = handler<unknown, { charm: unknown }>(
   (_event, { charm }) => {
-    const c = charm.get();
-    if (c) return navigateTo(c);
+    // charm is the reactive value from authInfo.charm
+    if (charm) return navigateTo(charm as GoogleAuthCharm);
   },
 );
 
