@@ -14,6 +14,7 @@ to print the evaluated pattern export.
 
 COMMON USAGE:
   ct dev ./pattern.tsx              # Compile, transform, and execute (quiet)
+  ct dev ./a.tsx ./b.tsx            # Process multiple patterns
   ct dev ./pattern.tsx --pattern-json   # Print JSON result on success
   ct dev ./pattern.tsx --no-run     # Type-check only (fast validation)
   ct dev ./pattern.tsx --show-transformed   # See transformed output
@@ -31,6 +32,10 @@ export const dev = new Command()
   .example(
     "ct dev ./pattern.tsx",
     "Compile and evaluate a pattern (quiet on success).",
+  )
+  .example(
+    "ct dev ./a.tsx ./b.tsx ./c.tsx",
+    "Compile and evaluate multiple patterns.",
   )
   .example(
     "ct dev ./pattern.tsx --pattern-json",
@@ -70,38 +75,59 @@ export const dev = new Command()
     "--pattern-json",
     "Print the evaluated pattern export as JSON.",
   )
-  .arguments("<main:string>")
-  .action(async (options, main) => {
-    const mainPath = isAbsolute(main) ? main : join(Deno.cwd(), main);
+  .arguments("<files...:string>")
+  .action(async (options, ...files) => {
+    let hasError = false;
 
-    const { main: exports } = await process({
-      main: mainPath,
-      rootPath: Deno.cwd(),
-      check: options.check,
-      run: options.run,
-      output: options.output,
-      filename: options.filename,
-      showTransformed: options.showTransformed,
-      mainExport: options.mainExport,
-      verboseErrors: options.verboseErrors,
-    });
-    // Only print JSON output when --pattern-json is used
-    // (and not when --show-transformed is used, as that already prints to stdout)
-    if (options.patternJson && !options.showTransformed && exports) {
-      // Select the export to render. If no --main-export specified, use "default".
-      // This mirrors the logic in Engine.run() which uses program.mainExport ?? "default"
-      const exportName = options.mainExport ?? "default";
-      const mainExport = exportName in exports ? exports[exportName] : exports;
+    for (const file of files) {
+      const mainPath = isAbsolute(file) ? file : join(Deno.cwd(), file);
+
       try {
-        // Stringify before rendering, as the exported
-        // recipe is a function with extra properties via Object.assign
-        render(JSON.stringify(mainExport, null, 2));
-      } catch (_) {
-        if (isRecord(mainExport) && typeof mainExport.toString === "function") {
-          render(mainExport.toString());
-        } else {
-          throw new Error("Main export not serializable.");
+        const { main: exports } = await process({
+          main: mainPath,
+          rootPath: Deno.cwd(),
+          check: options.check,
+          run: options.run,
+          output: files.length === 1 ? options.output : undefined,
+          filename: options.filename,
+          showTransformed: options.showTransformed,
+          mainExport: options.mainExport,
+          verboseErrors: options.verboseErrors,
+        });
+        // Only print JSON output when --pattern-json is used
+        // (and not when --show-transformed is used, as that already prints to stdout)
+        if (options.patternJson && !options.showTransformed && exports) {
+          // Select the export to render. If no --main-export specified, use "default".
+          // This mirrors the logic in Engine.run() which uses program.mainExport ?? "default"
+          const exportName = options.mainExport ?? "default";
+          const mainExport = exportName in exports
+            ? exports[exportName]
+            : exports;
+          try {
+            // Stringify before rendering, as the exported
+            // recipe is a function with extra properties via Object.assign
+            render(JSON.stringify(mainExport, null, 2));
+          } catch (_) {
+            if (
+              isRecord(mainExport) && typeof mainExport.toString === "function"
+            ) {
+              render(mainExport.toString());
+            } else {
+              throw new Error("Main export not serializable.");
+            }
+          }
         }
+      } catch (error) {
+        hasError = true;
+        // Re-throw for single file, continue for multiple files
+        if (files.length === 1) {
+          throw error;
+        }
+        console.error(error);
       }
+    }
+
+    if (hasError) {
+      Deno.exit(1);
     }
   });
