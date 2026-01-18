@@ -9,8 +9,12 @@ const devDescription = `Compile and execute patterns for debugging.
 The pattern is processed through ts-transformers, which converts reactive
 constructs (computed, handler, JSX) into runtime-compatible code.
 
+By default, produces no output on success (like deno check). Use --pattern-json
+to print the evaluated pattern export.
+
 COMMON USAGE:
-  ct dev ./pattern.tsx              # Compile, transform, and execute
+  ct dev ./pattern.tsx              # Compile, transform, and execute (quiet)
+  ct dev ./pattern.tsx --pattern-json   # Print JSON result on success
   ct dev ./pattern.tsx --no-run     # Type-check only (fast validation)
   ct dev ./pattern.tsx --show-transformed   # See transformed output
 
@@ -25,16 +29,20 @@ export const dev = new Command()
   .name("dev")
   .description(devDescription)
   .example(
-    "ct dev ./recipe.tsx",
-    "Locally compile and evaluate a recipe, printing export default to stdout.",
+    "ct dev ./pattern.tsx",
+    "Compile and evaluate a pattern (quiet on success).",
   )
   .example(
-    "ct dev ./recipe.tsx --no-run --output out.js",
-    "Locally compile a recipe, storing the translated and bundled JavaScript to out.js without evaluating the recipe.",
+    "ct dev ./pattern.tsx --pattern-json",
+    "Compile and evaluate a pattern, printing export default as JSON.",
   )
   .example(
-    "ct dev ./recipe.tsx --no-check",
-    "Locally compile and evaluate recipe without typechecking.",
+    "ct dev ./pattern.tsx --no-run --output out.js",
+    "Compile a pattern, storing the translated and bundled JavaScript to out.js without evaluating.",
+  )
+  .example(
+    "ct dev ./pattern.tsx --no-check",
+    "Compile and evaluate pattern without typechecking.",
   )
   .option("--no-run", "Do not execute input, only type check.")
   .option("--no-check", "Do not type check input.")
@@ -58,6 +66,10 @@ export const dev = new Command()
     "--verbose-errors",
     "Show original TypeScript error messages in addition to simplified hints.",
   )
+  .option(
+    "--pattern-json",
+    "Print the evaluated pattern export as JSON.",
+  )
   .arguments("<main:string>")
   .action(async (options, main) => {
     const mainPath = isAbsolute(main) ? main : join(Deno.cwd(), main);
@@ -73,9 +85,9 @@ export const dev = new Command()
       mainExport: options.mainExport,
       verboseErrors: options.verboseErrors,
     });
-    // If --show-transformed is used, the transformed source is already printed to stdout
-    // and we don't want to print the JSON output
-    if (!options.showTransformed && exports) {
+    // Only print JSON output when --pattern-json is used
+    // (and not when --show-transformed is used, as that already prints to stdout)
+    if (options.patternJson && !options.showTransformed && exports) {
       // Select the export to render. If no --main-export specified, use "default".
       // This mirrors the logic in Engine.run() which uses program.mainExport ?? "default"
       const exportName = options.mainExport ?? "default";
