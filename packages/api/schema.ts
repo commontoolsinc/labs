@@ -23,6 +23,7 @@ import type {
   OpaqueRef,
   RecipeFactory,
   SELF,
+  StripCell,
   Stream,
 } from "commontools";
 
@@ -346,7 +347,7 @@ declare module "commontools" {
           [SELF]: OpaqueRef<any>;
         },
       ) => any,
-    ): RecipeFactory<SchemaWithoutCell<S>, ReturnType<typeof fn>>;
+    ): RecipeFactory<SchemaWithoutCell<S>, StripCell<ReturnType<typeof fn>>>;
 
     <S extends JSONSchema, R>(
       argumentSchema: S,
@@ -355,7 +356,7 @@ declare module "commontools" {
           [SELF]: OpaqueRef<R>;
         },
       ) => Opaque<R>,
-    ): RecipeFactory<SchemaWithoutCell<S>, R>;
+    ): RecipeFactory<SchemaWithoutCell<S>, StripCell<R>>;
 
     <S extends JSONSchema, RS extends JSONSchema>(
       argumentSchema: S,

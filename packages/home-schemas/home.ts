@@ -1,6 +1,7 @@
 import { favoriteEntrySchema, favoriteListSchema } from "./favorites.ts";
 import { journalEntrySchema, journalSchema } from "./journal.ts";
-import type { JSONSchema, Schema } from "@commontools/api";
+import type { JSONSchema } from "@commontools/api";
+import type { Schema } from "@commontools/api/schema";
 
 export const homeSchema = {
   type: "object",
