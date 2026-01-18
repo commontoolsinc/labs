@@ -23,8 +23,8 @@ import type {
   OpaqueRef,
   RecipeFactory,
   SELF,
-  StripCell,
   Stream,
+  StripCell,
 } from "commontools";
 
 // ===== Helper Types =====
