@@ -58,9 +58,9 @@ PATHS=(
   "packages/patterns/system"
   "packages/patterns/test"
   "packages/patterns/weekly-calendar"
-  "packages/patterns/google/google-*.tsx"
-  "packages/patterns/google/gmail-*.tsx"
-  "packages/patterns/google/!(google-*|gmail-*).tsx"
+  "packages/patterns/google/google-*.ts*"
+  "packages/patterns/google/gmail-*.ts*"
+  "packages/patterns/google/!(google-*|gmail-*).ts*"
   "packages/patterns/google/util"
   "packages/patterns/google/integration"
 )
