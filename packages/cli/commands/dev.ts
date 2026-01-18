@@ -28,6 +28,7 @@ TIPS:
 
 export const dev = new Command()
   .name("dev")
+  .alias("check")
   .description(devDescription)
   .example(
     "ct dev ./pattern.tsx",
