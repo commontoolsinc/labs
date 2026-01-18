@@ -1,4 +1,4 @@
-import { DID, Identity } from "@commontools/identity";
+import { DID, Identity, type Session } from "@commontools/identity";
 import { CharmManager } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
 import { getLoggerCountsBreakdown, Logger } from "@commontools/utils/logger";
@@ -65,6 +65,7 @@ export class RuntimeProcessor {
   private charmManager: CharmManager;
   private cc: CharmsController;
   private space: DID;
+  private identity: Identity;
   private _isDisposed = false;
   private disposingPromise: Promise<void> | undefined;
   private subscriptions = new Map<string, Cancel>();
@@ -75,12 +76,14 @@ export class RuntimeProcessor {
     charmManager: CharmManager,
     cc: CharmsController,
     space: DID,
+    identity: Identity,
     telemetry: RuntimeTelemetry,
   ) {
     this.runtime = runtime;
     this.charmManager = charmManager;
     this.cc = cc;
     this.space = space;
+    this.identity = identity;
     this.telemetry = telemetry;
     this.telemetry.addEventListener("telemetry", this.#onTelemetry);
   }
@@ -177,7 +180,14 @@ export class RuntimeProcessor {
     await charmManager.synced();
     const cc = new CharmsController(charmManager);
 
-    return new RuntimeProcessor(runtime, charmManager, cc, space, telemetry);
+    return new RuntimeProcessor(
+      runtime,
+      charmManager,
+      cc,
+      space,
+      identity,
+      telemetry,
+    );
   }
 
   dispose(): Promise<void> {
@@ -296,6 +306,7 @@ export class RuntimeProcessor {
   /**
    * Ensure the home space's default pattern is running and return a CellRef to it.
    * This is needed for favorites operations which require the pattern to be active.
+   * Creates the home pattern if it doesn't exist yet.
    */
   async handleEnsureHomePatternRunning(
     _request: EnsureHomePatternRunningRequest,
@@ -303,27 +314,33 @@ export class RuntimeProcessor {
     const homeSpaceCell = this.runtime.getHomeSpaceCell();
     await homeSpaceCell.sync();
 
-    const defaultPatternCell = homeSpaceCell.key("defaultPattern");
+    const defaultPatternCell = homeSpaceCell.key("defaultPattern").get()
+      .resolveAsCell();
     await defaultPatternCell.sync();
 
-    // Check that defaultPattern exists
-    const patternLink = defaultPatternCell.get();
-    if (!patternLink) {
-      throw new Error(
-        "Home space defaultPattern not initialized. Visit home space first.",
-      );
-    }
-
-    // Resolve and start the pattern to ensure it's running
-    const charmCell = defaultPatternCell.resolveAsCell();
-    if (charmCell) {
-      await this.runtime.start(charmCell);
+    // Fast path: pattern already exists
+    // (Value is a Cell itself, and source cell means it's instantiated)
+    if (defaultPatternCell.getSourceCell()) {
+      await this.runtime.start(defaultPatternCell);
       await this.runtime.idle();
+      return {
+        cell: createCellRef(defaultPatternCell),
+      };
     }
 
-    // Return the resolved pattern cell
+    // Pattern doesn't exist - create it via home space CharmController
+    const homeSession: Session = {
+      as: this.identity,
+      space: this.runtime.userIdentityDID,
+    };
+    const homeManager = new CharmManager(homeSession, this.runtime);
+    await homeManager.synced();
+    const homeCC = new CharmsController(homeManager);
+
+    const homePattern = await homeCC.ensureDefaultPattern();
+
     return {
-      cell: createCellRef(charmCell || defaultPatternCell),
+      cell: createCellRef(homePattern.getCell()),
     };
   }
 

@@ -31,10 +31,19 @@ const addFavorite = handler<
 >(({ charm, tag }, { favorites }) => {
   const current = favorites.get();
   if (!current.some((f) => equals(f.cell, charm))) {
-    favorites.set([
-      ...current,
-      { cell: charm, tag: tag || "", userTags: [] },
-    ]);
+    // HACK(seefeld): Access internal API to get schema.
+    // Once we sandbox, we need proper reflection
+    //
+    // This first resolves all links, then clears the schema, so it's forced to
+    // read the schema defined in the pattern, then reconstructs that schema.
+    let schema = (charm as any)?.resolveAsCell()?.asSchema(undefined)
+      .asSchemaFromLinks?.()?.schema;
+    if (typeof schema !== "object") schema = ""; // schema can be true or false
+    favorites.push({
+      cell: charm,
+      tag: tag || JSON.stringify(schema) || "",
+      userTags: [],
+    });
   }
 });
 
@@ -43,9 +52,8 @@ const removeFavorite = handler<
   { charm: Writable<unknown> },
   { favorites: Writable<Favorite[]> }
 >(({ charm }, { favorites }) => {
-  favorites.set([
-    ...favorites.get().filter((f: Favorite) => !equals(f.cell, charm)),
-  ]);
+  const favorite = favorites.get().find((f) => equals(f.cell, charm));
+  if (favorite) favorites.remove(favorite);
 });
 
 // Handler to add a journal entry
@@ -53,18 +61,18 @@ const addJournalEntry = handler<
   { entry: JournalEntry },
   { journal: Writable<JournalEntry[]> }
 >(({ entry }, { journal }) => {
-  journal.set([...journal.get(), entry]);
+  journal.push(entry);
 });
 
 export default pattern((_) => {
-  // OWN the data cells
-  const favorites = Writable.of<Favorite[]>([]);
-  const journal = Writable.of<JournalEntry[]>([]);
+  // OWN the data cells (.for for id stability)
+  const favorites = Writable.of<Favorite[]>([]).for("favorites");
+  const journal = Writable.of<JournalEntry[]>([]).for("journal");
 
   // Child components use wish() to access favorites/journal through defaultPattern
   const favoritesComponent = FavoritesManager({});
   const journalComponent = Journal({});
-  const activeTab = Writable.of("journal");
+  const activeTab = Writable.of("journal").for("activeTab");
 
   return {
     [NAME]: `Home`,
