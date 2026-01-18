@@ -258,13 +258,11 @@ export class Runner {
       if (previousRecipeId === recipeId) {
         // If the recipe is the same, but argument is different, just update the
         // argument without stopping
-        diffAndUpdate(
-          this.runtime,
-          tx,
-          processCell.key("argument").getAsNormalizedFullLink(),
-          argument,
-          processCell.getAsNormalizedFullLink(),
-        );
+        if (!isCellLink(argument) && isObject(argument)) {
+          processCell.key<any>("argument").update(argument as any);
+        } else {
+          processCell.key("argument").set(argument);
+        }
         return { resultCell, needsStart: false };
       }
 
@@ -315,13 +313,11 @@ export class Runner {
       ...(recipeId !== undefined) ? { spell: getSpellLink(recipeId) } : {},
     });
     if (argument) {
-      diffAndUpdate(
-        this.runtime,
-        tx,
-        processCell.key("argument").getAsNormalizedFullLink(),
-        argument,
-        processCell.getAsNormalizedFullLink(),
-      );
+      if (!isCellLink(argument) && isObject(argument)) {
+        processCell.key<any>("argument").update(argument as any);
+      } else {
+        processCell.key("argument").set(argument);
+      }
     }
 
     // Send "query" to results to the result doc only on initial run or if
