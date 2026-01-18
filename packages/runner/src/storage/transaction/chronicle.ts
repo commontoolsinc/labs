@@ -154,7 +154,7 @@ export class Chronicle {
         error: NotFound(
           workingCopy,
           address,
-          path.length > 0 ? path.slice(0, -1) : undefined,
+          path.length > 0 ? path.slice(0, -1) : [],
         ),
       };
     }
@@ -195,7 +195,7 @@ export class Chronicle {
 
     // Check if document exists when trying to read from nested path
     if (state.is === undefined && address.path.length > 0) {
-      return { error: NotFound(attest(state), address) };
+      return { error: NotFound(attest(state), address, []) };
     }
 
     const loaded = attest(state);

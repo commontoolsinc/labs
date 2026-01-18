@@ -4,7 +4,10 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import * as Chronicle from "../src/storage/transaction/chronicle.ts";
 import { assert } from "@commontools/memory/fact";
-import type { IReadOnlyAddressError } from "../src/storage/interface.ts";
+import type {
+  INotFoundError,
+  IReadOnlyAddressError,
+} from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("chronicle test");
 const space = signer.did();
@@ -969,6 +972,21 @@ describe("Chronicle", () => {
 
       expect(writeResult.error).toBeDefined();
       expect(writeResult.error?.name).toBe("NotFoundError");
+    });
+
+    it("should set NotFoundError.path to empty array when document does not exist", () => {
+      const chronicle = Chronicle.open(replica);
+
+      const writeResult = chronicle.write({
+        id: "test:nonexistent-path-check",
+        type: "application/json",
+        path: ["nested", "value"],
+      }, "some value");
+
+      expect(writeResult.error).toBeDefined();
+      expect(writeResult.error?.name).toBe("NotFoundError");
+      // When document doesn't exist, path is [] (consistent with attestation layer)
+      expect((writeResult.error as INotFoundError).path).toEqual([]);
     });
 
     it("should fail commit when read invariants change after initial read", async () => {

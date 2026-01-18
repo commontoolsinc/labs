@@ -716,11 +716,28 @@ export type CommitError =
   | InactiveTransactionError
   | StorageTransactionRejected;
 
+/**
+ * Error returned when a read or write operation fails because the path does not exist.
+ *
+ * The `path` property behavior is consistent for both reads and writes:
+ *
+ * **Nested path not found** (document exists but path doesn't):
+ * - `path` includes the missing key
+ * - Example: Document `{ user: { name: "Alice" } }`, access `["user", "settings", "theme"]`
+ * - → `path` is `["user", "settings"]` (path to the non-existent key)
+ * - To get last existing parent: `path.slice(0, -1)` → `["user"]`
+ *
+ * **Document not found** (document itself doesn't exist):
+ * - `path` is `[]` (empty array)
+ * - Example: Document doesn't exist, access `["foo", "bar"]`
+ * - → `path` is `[]`
+ */
 export interface INotFoundError extends IStorageError {
   readonly name: "NotFoundError";
   readonly source: IAttestation;
   readonly address: IMemoryAddress;
-  readonly path?: readonly MemoryAddressPathComponent[];
+  /** Path to the non-existent key, or `[]` if the document doesn't exist. */
+  readonly path: readonly MemoryAddressPathComponent[];
   from(space: MemorySpace): INotFoundError;
 }
 

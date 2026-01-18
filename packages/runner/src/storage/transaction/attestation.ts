@@ -95,7 +95,10 @@ const setAtPath = (
   if (root === null || root === undefined || typeof root !== "object") {
     // Distinguish between undefined (path not found) vs primitive (type mismatch)
     if (root === undefined) {
-      return { error: { at: 0, type: "undefined", notFound: true } };
+      // Return at: -1 to indicate the error is at the parent level (the key that
+      // led here doesn't exist). After +1 adjustments during unwinding, this
+      // produces a path that includes the missing key, matching read semantics.
+      return { error: { at: -1, type: "undefined", notFound: true } };
     }
     const actualType = root === null ? "null" : typeof root;
     return { error: { at: 0, type: actualType } };
@@ -225,6 +228,7 @@ export const write = (
 
   if ("error" in result) {
     // Map error position to full address path
+    // result.error.at is the depth where the error occurred; +1 to include the failed key
     const errorPath = address.path.slice(
       0,
       source.address.path.length + result.error.at + 1,
@@ -232,8 +236,9 @@ export const write = (
 
     // Distinguish between NotFound (path doesn't exist) and TypeMismatch (wrong type)
     if (result.error.notFound) {
+      // errorPath includes the missing key, matching read error semantics
       return {
-        error: NotFound(source, address, errorPath.slice(0, -1)),
+        error: NotFound(source, address, errorPath),
       };
     }
     return {
@@ -361,13 +366,10 @@ export const resolve = (
       error: NotFound(
         source,
         address,
-        // Last valid path component is assumed to be the one that points to
-        // `undefined`. If the path was empty this means the document doesn't
-        // exist at all. If it isn't empty, we're assuming the parent is
-        // correct, but that depends on the validity of the source attestation.
-        source.address.path.length > 0
-          ? source.address.path.slice(0, -1)
-          : undefined,
+        // Return the source path (empty array for root). This is consistent with
+        // how writes handle document-not-found. If source.address.path has content,
+        // we slice off the last element since that's what points to undefined.
+        source.address.path.length > 0 ? source.address.path.slice(0, -1) : [],
       ),
     };
   }
@@ -509,10 +511,18 @@ export const load = (
   return result;
 };
 
+/**
+ * Creates a NotFoundError.
+ *
+ * @param source - The attestation that was being read from or written to
+ * @param address - The full address that was attempted
+ * @param path - Path to the non-existent key (includes the missing key).
+ *   Consistent for both reads and writes. See INotFoundError docs.
+ */
 export const NotFound = (
   source: IAttestation,
   address: IMemoryAddress,
-  path?: readonly MemoryAddressPathComponent[],
+  path: readonly MemoryAddressPathComponent[],
 ): INotFoundError => {
   let message: string;
 
