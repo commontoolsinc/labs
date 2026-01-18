@@ -1044,6 +1044,7 @@ export default pattern<{
     } = createGoogleAuth({
       requiredScopes: ["gmail"] as ScopeKey[],
       accountType: selectedAccountType,
+      debugMode: settings.debugMode,
     });
 
     // Choose auth source based on linkedAuth availability

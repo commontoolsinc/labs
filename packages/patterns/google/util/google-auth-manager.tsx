@@ -157,6 +157,7 @@ export type AccountType = "default" | "personal" | "work";
 export interface GoogleAuthManagerInput {
   requiredScopes?: Default<ScopeKey[], []>;
   accountType?: Default<AccountType, "default">;
+  debugMode?: Default<boolean, false>;
 }
 
 /** Output interface for GoogleAuthManager pattern */
@@ -317,11 +318,16 @@ function formatTimeRemaining(ms: number | null): string {
  * 3. Single computed() for all derived state to prevent thrashing
  * 4. Token refresh is currently broken - we detect but don't auto-refresh
  */
+// Debug logging helper
+function debugLog(debug: boolean, ...args: unknown[]) {
+  if (debug) console.log("[GoogleAuthManager]", ...args);
+}
+
 export const GoogleAuthManager = pattern<
   GoogleAuthManagerInput,
   GoogleAuthManagerOutput
 >(
-  ({ requiredScopes, accountType }) => {
+  ({ requiredScopes, accountType, debugMode }) => {
     // Compute the wish tag
     // IMPORTANT: wish() requires a string value, NOT a Cell. Passing a Cell
     // causes wish() to never resolve, leaving the pattern stuck in "loading" state.
@@ -340,12 +346,24 @@ export const GoogleAuthManager = pattern<
     // CRITICAL: wish() at pattern body level, NOT inside derive
     const wishResult = wish<GoogleAuthCharm>({ query: tag });
 
-    // Use derive() instead of computed() - derive() properly unwraps OpaqueRef
-    // computed() closes over all accessed cells (wishResult, requiredScopes)
+    // computed() closes over all accessed cells (wishResult, requiredScopes, debugMode)
     const authInfo = computed((): AuthInfo => {
+      const debug = debugMode as boolean;
       const wr = wishResult as UnwrappedWishResult | null | undefined;
       const authCell = wr?.result?.auth;
       const authData = authCell?.get?.() ?? null;
+
+      debugLog(debug, "authInfo recomputing", {
+        hasWishResult: !!wr,
+        hasResult: !!wr?.result,
+        hasError: !!wr?.error,
+        error: wr?.error,
+        hasUI: !!wr?.[UI],
+        authCell: !!authCell,
+        authData: authData
+          ? { email: authData.user?.email, hasToken: !!authData.token }
+          : null,
+      });
 
       // Determine state from wish result
       let state: AuthState = "loading";
@@ -358,19 +376,24 @@ export const GoogleAuthManager = pattern<
 
       if (!wr) {
         state = "loading";
+        debugLog(debug, "state: loading (no wish result yet)");
       } else if (wr.error) {
         // Wish returned error - no matches found
         state = "not-found";
+        debugLog(debug, "state: not-found (wish error)", wr.error);
       } else if (hasPickerUI) {
         // Multiple matches - show picker for user to choose
         state = "selecting";
+        debugLog(debug, "state: selecting (multiple matches, picker UI shown)");
       } else if (wr.result) {
         // Single match - evaluate auth state
         const email = authData?.user?.email;
         if (email && email !== "") {
           state = "ready"; // Will be refined below
+          debugLog(debug, "state: ready (single match)", { email });
         } else {
           state = "needs-login";
+          debugLog(debug, "state: needs-login (no email in auth data)");
         }
       }
 
@@ -383,9 +406,17 @@ export const GoogleAuthManager = pattern<
       });
       const hasRequiredScopes = missingScopes.length === 0;
 
+      debugLog(debug, "scope check", {
+        required: scopesArray,
+        granted: grantedScopes,
+        missing: missingScopes,
+        hasAll: hasRequiredScopes,
+      });
+
       // Refine state based on scopes
       if (state === "ready" && !hasRequiredScopes) {
         state = "missing-scopes";
+        debugLog(debug, "state refined: missing-scopes");
       }
 
       // Check token expiry
@@ -410,7 +441,18 @@ export const GoogleAuthManager = pattern<
       // Refine state based on token expiry
       if (state === "ready" && isTokenExpired) {
         state = "token-expired";
+        debugLog(debug, "state refined: token-expired");
       }
+
+      debugLog(debug, "token check", {
+        tokenExpiresAt,
+        tokenTimeRemaining,
+        isTokenExpired,
+        tokenExpiryWarning,
+        tokenExpiryDisplay,
+      });
+
+      debugLog(debug, "final state:", state);
 
       // Generate status display
       const email = authData?.user?.email ?? "";
