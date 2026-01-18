@@ -9,7 +9,9 @@ import {
   NAME,
   pattern,
   patternTool,
+  PatternToolResult as _PatternToolResult,
   str,
+  Stream,
   UI,
   VNode,
   Writable,
@@ -111,6 +113,8 @@ type Settings = {
 
 /** Gmail email importer for fetching and viewing emails. #gmailEmails */
 interface Output {
+  [NAME]: string;
+  [UI]: VNode;
   /** Array of imported emails */
   emails: Email[];
   /** Number of emails imported */
@@ -118,13 +122,13 @@ interface Output {
   /** Auth UI component for managing Google OAuth connection */
   authUI: VNode;
   /** Handler to trigger email fetch from external patterns */
-  bgUpdater: unknown;
-  /** Search emails by query string (searches subject, from, snippet) */
-  searchEmails: unknown;
-  /** Get count of imported emails */
-  getEmailCount: unknown;
-  /** Get recent emails as formatted string */
-  getRecentEmails: unknown;
+  bgUpdater: Stream<unknown>;
+  // /** Search emails by query string (searches subject, from, snippet) */
+  // searchEmails: PatternToolResult<{ query: string }>;
+  // /** Get count of imported emails */
+  // getEmailCount: PatternToolResult<void>;
+  // /** Get recent emails as formatted string */
+  // getRecentEmails: PatternToolResult<{ count: number }>;
 }
 
 // Debug logging helpers - pass debugMode explicitly to avoid module-level state issues
