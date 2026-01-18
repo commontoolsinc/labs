@@ -168,6 +168,15 @@ export async function batchTypeCheckFixtures(
             isExternalLibraryImport: false,
           };
         }
+        if (
+          name === "commontools/schema" && types["commontools-schema.d.ts"]
+        ) {
+          return {
+            resolvedFileName: "commontools-schema.d.ts",
+            extension: ts.Extension.Dts,
+            isExternalLibraryImport: false,
+          };
+        }
         if (name === "@commontools/common" && types["commontools.d.ts"]) {
           return {
             resolvedFileName: "commontools.d.ts",
@@ -378,6 +387,15 @@ export async function transformFiles(
         if (name === "commontools" && types["commontools.d.ts"]) {
           return {
             resolvedFileName: "commontools.d.ts",
+            extension: ts.Extension.Dts,
+            isExternalLibraryImport: false,
+          };
+        }
+        if (
+          name === "commontools/schema" && types["commontools-schema.d.ts"]
+        ) {
+          return {
+            resolvedFileName: "commontools-schema.d.ts",
             extension: ts.Extension.Dts,
             isExternalLibraryImport: false,
           };

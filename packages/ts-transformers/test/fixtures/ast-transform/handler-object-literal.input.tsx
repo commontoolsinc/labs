@@ -1,5 +1,6 @@
 /// <cts-enable />
 import { Cell, handler, recipe } from "commontools";
+import "commontools/schema";
 
 interface State {
   value: Cell<number>;

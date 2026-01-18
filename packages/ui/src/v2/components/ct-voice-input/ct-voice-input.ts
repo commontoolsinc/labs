@@ -3,7 +3,7 @@ import { property } from "lit/decorators.js";
 import { createRef, type Ref, ref } from "lit/directives/ref.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
-import type { Schema } from "@commontools/api";
+import type { Schema } from "@commontools/api/schema";
 import { createCellController } from "../../core/cell-controller.ts";
 import { consume } from "@lit/context";
 import {

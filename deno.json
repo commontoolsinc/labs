@@ -111,6 +111,7 @@
   },
   "imports": {
     "commontools": "./packages/api/index.ts",
+    "commontools/schema": "./packages/api/schema.ts",
     "core-js/proposals/explicit-resource-management": "https://esm.sh/core-js/proposals/explicit-resource-management",
     "core-js/proposals/async-explicit-resource-management": "https://esm.sh/core-js/proposals/async-explicit-resource-management",
     "@astral/astral": "./packages/vendor-astral/mod.ts",

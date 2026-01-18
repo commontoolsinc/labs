@@ -10,7 +10,7 @@ import {
   themeContext,
 } from "../theme-context.ts";
 import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
-import type { Schema } from "@commontools/api";
+import type { Schema } from "@commontools/api/schema";
 import { stringArraySchema, stringSchema } from "@commontools/runner/schemas";
 import { createCellController } from "../../core/cell-controller.ts";
 
