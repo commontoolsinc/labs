@@ -1068,6 +1068,13 @@ export default pattern<{
     const isReady = auth.token;
     const currentEmail = computed(() => auth.user?.email ?? "");
 
+    const googleUpdaterStream = googleUpdater({
+      emails,
+      auth,
+      settings,
+      fetching,
+    });
+
     computed(() => {
       if (settings.debugMode) {
         console.log("emails", emails.get().length);
@@ -1101,12 +1108,7 @@ export default pattern<{
         }
         hasAutoFetched.set(true);
         // Trigger the fetch handler
-        googleUpdater({
-          emails,
-          auth,
-          settings,
-          fetching,
-        }).send({});
+        googleUpdaterStream.send({});
       }
     });
 
@@ -1269,12 +1271,7 @@ export default pattern<{
                   isReady,
                   <ct-button
                     type="button"
-                    onClick={googleUpdater({
-                      emails,
-                      auth,
-                      settings,
-                      fetching,
-                    })}
+                    onClick={googleUpdaterStream}
                     disabled={fetching}
                   >
                     {ifElse(
@@ -1355,7 +1352,7 @@ export default pattern<{
       authUI,
       emails,
       emailCount: derive(emails, (list: Email[]) => list?.length || 0),
-      bgUpdater: googleUpdater({ emails, auth, settings }),
+      bgUpdater: googleUpdaterStream,
       // Pattern tools for omnibot - using module-scope callbacks
       searchEmails: patternTool(searchEmailsCallback, { emails }),
       getEmailCount: patternTool(getEmailCountCallback, { emails }),
