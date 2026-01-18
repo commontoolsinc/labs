@@ -316,6 +316,20 @@ class VdomChildNode {
     let cancel;
     if (isCellHandle(childValue)) {
       throw new Error("child node cell resolved to another cell.");
+    } else if (Array.isArray(childValue)) {
+      // Wrap array in synthetic VNode with display:contents so it's layout-invisible
+      const [childElement, childCancel] = renderNode(
+        {
+          type: "vnode",
+          name: "span",
+          props: { style: "display:contents" },
+          children: childValue,
+        },
+        this.options,
+        new Set(this.visited),
+      );
+      element = childElement;
+      cancel = childCancel;
     } else if (isVNodeish(childValue)) {
       // Create a fresh copy of visited for each effect invocation to avoid
       // false cycle detection when the same VNode structure is re-rendered.
