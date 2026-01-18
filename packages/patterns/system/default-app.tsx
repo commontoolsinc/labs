@@ -200,7 +200,7 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
 
   return {
     backlinksIndex: index,
-    [NAME]: computed(() => `DefaultCharmList (${visibleCharms.length})`),
+    [NAME]: computed(() => `Space Home (${visibleCharms.length})`),
     [UI]: (
       <ct-screen>
         <ct-keybind

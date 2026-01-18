@@ -62,6 +62,19 @@ export class XHeaderView extends BaseView {
       font-size: 1rem;
     }
 
+    .reload-icon {
+      cursor: pointer;
+      opacity: 0.5;
+      transition: opacity 0.2s;
+      user-select: none;
+      font-size: 0.9rem;
+      margin-left: 0.25rem;
+    }
+
+    .reload-icon:hover {
+      opacity: 1;
+    }
+
     #page-title {
       font-size: 1rem;
       font-weight: 600;
@@ -105,6 +118,9 @@ export class XHeaderView extends BaseView {
   @property()
   showSidebar = false;
 
+  @property({ attribute: false })
+  isViewingDefaultPattern = false;
+
   private handleAuthClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
@@ -136,6 +152,21 @@ export class XHeaderView extends BaseView {
     });
   }
 
+  private async handleReloadPatternClick(e: Event) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!this.rt) return;
+    try {
+      await this.rt.recreateSpaceRootPattern();
+      // Dispatch event to notify AppView to refresh the pattern
+      this.dispatchEvent(
+        new CustomEvent("pattern-recreated", { bubbles: true, composed: true }),
+      );
+    } catch (err) {
+      console.error("[HeaderView] Failed to recreate pattern:", err);
+    }
+  }
+
   private getConnectionStatus(): ConnectionStatus {
     return this.rt ? "connected" : "disconnected";
   }
@@ -157,9 +188,19 @@ export class XHeaderView extends BaseView {
         >${this.charmTitle || this.charmId}</x-charm-link>
       `
       : null;
+    const reloadIcon = this.isViewingDefaultPattern && this.isLoggedIn
+      ? html`
+        <span
+          class="reload-icon"
+          @click="${this.handleReloadPatternClick}"
+          title="Reload default pattern"
+        >↻</span>
+      `
+      : null;
+
     const title = html`
       <h1 id="page-title">
-        ${spaceLink} ${charmLink ? "/" : ""} ${charmLink}
+        ${spaceLink}${charmLink ? " / " : ""}${charmLink}${reloadIcon}
       </h1>
     `;
 

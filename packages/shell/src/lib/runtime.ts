@@ -114,6 +114,15 @@ export class RuntimeInternals extends EventTarget {
     return this.#spaceRootPattern;
   }
 
+  async recreateSpaceRootPattern(): Promise<PageHandle<NameSchema>> {
+    this.#check();
+    // Clear cached pattern since we're recreating it
+    this.#spaceRootPattern = undefined;
+    const pattern = await this.#client.recreateSpaceRootPattern();
+    this.#spaceRootPattern = Promise.resolve(pattern);
+    return pattern;
+  }
+
   getPattern(id: string): Promise<PageHandle<NameSchema>> {
     this.#check();
     const cached = this.#patternCache.get(id);

@@ -42,6 +42,7 @@ export enum RequestType {
 
   // Page operations (main -> worker)
   GetSpaceRootPattern = "pattern:getSpaceRoot",
+  RecreateSpaceRootPattern = "pattern:recreateSpaceRoot",
   PageCreate = "page:create",
   PageGet = "page:get",
   PageRemove = "page:remove",
@@ -220,6 +221,10 @@ export interface PageGetSpaceDefault extends BaseRequest {
   type: RequestType.GetSpaceRootPattern;
 }
 
+export interface RecreateSpaceRootPatternRequest extends BaseRequest {
+  type: RequestType.RecreateSpaceRootPattern;
+}
+
 export interface PageGetRequest extends BaseRequest {
   type: RequestType.PageGet;
   pageId: string;
@@ -268,6 +273,7 @@ export type IPCClientRequest =
   | IdleRequest
   | PageCreateRequest
   | PageGetSpaceDefault
+  | RecreateSpaceRootPatternRequest
   | PageGetRequest
   | PageRemoveRequest
   | PageStartRequest
@@ -451,6 +457,10 @@ export type Commands = {
   };
   [RequestType.GetSpaceRootPattern]: {
     request: PageGetSpaceDefault;
+    response: PageResponse;
+  };
+  [RequestType.RecreateSpaceRootPattern]: {
+    request: RecreateSpaceRootPatternRequest;
     response: PageResponse;
   };
 };
