@@ -99,8 +99,6 @@ type Settings = {
   gmailFilterQuery: Default<string, "in:INBOX">;
   // Maximum number of emails to fetch
   limit: Default<number, 10>;
-  // Gmail history ID for incremental sync
-  historyId: Default<string, "">;
   // Enable verbose console logging for debugging
   debugMode: Default<boolean, false>;
   // Automatically fetch emails when auth becomes valid (opt-in)
@@ -154,16 +152,16 @@ const _updateLimit = handler<
 // consistent token refresh behavior across all Gmail patterns.
 
 const googleUpdater = handler<unknown, {
-  emails: Writable<Email[]>;
+  emails: Writable<Array<Writable<Email>>>;
   auth: Writable<Auth>;
   settings: Writable<{
     gmailFilterQuery: string;
     limit: number;
-    historyId: string;
     debugMode: boolean;
     autoFetchOnAuth: boolean;
     resolveInlineImages: boolean;
   }>;
+  historyId: Writable<string>;
   fetching?: Writable<boolean>;
 }>(
   async (_event, state) => {
@@ -192,7 +190,11 @@ const googleUpdater = handler<unknown, {
         state.auth,
         settings.limit,
         gmailFilterQuery,
-        { emails: state.emails, settings: state.settings },
+        {
+          emails: state.emails,
+          historyId: state.historyId,
+          resolveInlineImages: settings.resolveInlineImages,
+        },
         debugMode,
       );
     } finally {
@@ -211,7 +213,7 @@ const googleUpdater = handler<unknown, {
       const deleteSet = new Set(result.deletedEmailIds);
       const currentEmails = state.emails.get();
       const remainingEmails = currentEmails.filter((email) =>
-        !deleteSet.has(email.id)
+        !deleteSet.has(email.key("id").get())
       );
       state.emails.set(remainingEmails);
     }
@@ -224,18 +226,15 @@ const googleUpdater = handler<unknown, {
 
     // Update historyId
     if (result.newHistoryId) {
-      const currentSettings = state.settings.get();
+      const previousHistoryId = state.historyId.get();
       debugLog(debugMode, "=== UPDATING HISTORY ID ===");
       debugLog(
         debugMode,
         "Previous historyId:",
-        currentSettings.historyId || "none",
+        previousHistoryId || "none",
       );
       debugLog(debugMode, "New historyId:", result.newHistoryId);
-      state.settings.set({
-        ...currentSettings,
-        historyId: result.newHistoryId,
-      });
+      state.historyId.set(result.newHistoryId);
       debugLog(debugMode, "HistoryId updated successfully");
       debugLog(debugMode, "==========================");
     }
@@ -653,15 +652,9 @@ export async function process(
   maxResults: number = 100,
   gmailFilterQuery: string = "in:INBOX",
   state: {
-    emails: Writable<Email[]>;
-    settings: Writable<
-      {
-        gmailFilterQuery: string;
-        limit: number;
-        historyId: string;
-        resolveInlineImages?: boolean;
-      }
-    >;
+    emails: Writable<Array<Writable<Email>>>;
+    historyId: Writable<string>;
+    resolveInlineImages?: boolean;
   },
   debugMode: boolean = false,
 ): Promise<
@@ -674,7 +667,7 @@ export async function process(
   }
 
   const client = new GmailClient(auth, { debugMode });
-  const currentHistoryId = state.settings.get().historyId;
+  const currentHistoryId = state.historyId.get();
 
   let newHistoryId: string | null = null;
   let messagesToFetch: string[] = [];
@@ -683,8 +676,10 @@ export async function process(
 
   // Get existing email IDs and create a map for efficient updates
   const existingEmails = state.emails.get();
-  const existingEmailIds = new Set(existingEmails.map((email) => email.id));
-  const emailMap = new Map(existingEmails.map((email) => [email.id, email]));
+  const emailMap = new Map(
+    existingEmails.map((email) => [email.key("id").get(), email]),
+  );
+  const existingEmailIds = new Set(emailMap.keys());
 
   // Try incremental sync if we have a historyId
   if (currentHistoryId) {
@@ -793,9 +788,10 @@ export async function process(
                   item.labelIds,
                 );
                 // Add new labels
-                const newLabels = new Set(email.labelIds);
+                const labelCell = email.key("labelIds");
+                const newLabels = new Set(labelCell.get());
                 item.labelIds.forEach((label) => newLabels.add(label));
-                email.labelIds = Array.from(newLabels);
+                labelCell.set(Array.from(newLabels));
               }
             }
           }
@@ -814,9 +810,10 @@ export async function process(
                   item.labelIds,
                 );
                 // Remove labels
-                const labelSet = new Set(email.labelIds);
+                const labelCell = email.key("labelIds");
+                const labelSet = new Set(labelCell.get());
                 item.labelIds.forEach((label) => labelSet.delete(label));
-                email.labelIds = Array.from(labelSet);
+                labelCell.set(Array.from(labelSet));
               }
             }
           }
@@ -905,17 +902,10 @@ export async function process(
       try {
         await sleep(1000);
         const fetched = await client.fetchMessagesByIds(batchIds);
-        const currentSettings = state.settings.get();
-        const resolveInlineImages = currentSettings.resolveInlineImages ||
-          false;
+        const resolveInlineImages = state.resolveInlineImages || false;
         debugLog(
           debugMode,
           `[process] resolveInlineImages setting: ${resolveInlineImages}`,
-        );
-        debugLog(
-          debugMode,
-          `[process] Full settings:`,
-          JSON.stringify(currentSettings),
         );
         const emails = await messageToEmail(
           fetched,
@@ -1035,7 +1025,6 @@ export default pattern<{
   settings: Default<Settings, {
     gmailFilterQuery: "in:INBOX";
     limit: 10;
-    historyId: "";
     debugMode: false;
     autoFetchOnAuth: false;
     resolveInlineImages: false;
@@ -1046,6 +1035,7 @@ export default pattern<{
 }, Output>(
   ({ settings, linkedAuth }) => {
     const emails = Writable.of<Confidential<Email[]>>([]).for("emails");
+    const historyId = Writable.of("").for("historyId");
     const fetching = Writable.of(false).for("fetching");
 
     // Local writable cell for account type selection
@@ -1072,6 +1062,7 @@ export default pattern<{
       emails,
       auth,
       settings,
+      historyId,
       fetching,
     });
 
@@ -1091,7 +1082,7 @@ export default pattern<{
       const alreadyFetched = hasAutoFetched.get();
       const currentlyFetching = fetching.get();
       const hasEmails = emails.get().length > 0;
-      const hasHistoryId = !!settings.historyId;
+      const hasHistoryId = !!historyId.get();
 
       // Only auto-fetch once when:
       // - Auth is ready
@@ -1175,7 +1166,7 @@ export default pattern<{
               </h3>
 
               <div style={{ fontSize: "14px", color: "#666" }}>
-                historyId: {settings.historyId || "none"}
+                historyId: {historyId || "none"}
               </div>
 
               <ct-vstack gap="4">
