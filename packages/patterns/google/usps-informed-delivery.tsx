@@ -975,103 +975,105 @@ If you cannot read the image clearly, make your best guess based on what you can
                 </details>
               )}
 
-              {/* Possibly Urgent Section */}
-              {urgentCount > 0 && (
+              {/* Possibly Urgent Section - only show container if there are urgent items */}
+              <div
+                style={{
+                  marginTop: "8px",
+                  padding: "16px",
+                  backgroundColor: "#fef3c7",
+                  borderRadius: "12px",
+                  border: "2px solid #f59e0b",
+                  display: urgentCount > 0 ? "block" : "none",
+                }}
+              >
                 <div
                   style={{
-                    marginTop: "8px",
-                    padding: "16px",
-                    backgroundColor: "#fef3c7",
-                    borderRadius: "12px",
-                    border: "2px solid #f59e0b",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    marginBottom: "12px",
                   }}
                 >
-                  <div
+                  <span style={{ fontSize: "20px" }}>⚠️</span>
+                  <span
                     style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                      marginBottom: "12px",
+                      fontWeight: "700",
+                      fontSize: "18px",
+                      color: "#b45309",
                     }}
                   >
-                    <span style={{ fontSize: "20px" }}>⚠️</span>
-                    <span
+                    Possibly Urgent ({urgentCount})
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: "16px",
+                  }}
+                >
+                  {mailPieceAnalyses.map((analysisItem) => (
+                    <div
                       style={{
-                        fontWeight: "700",
-                        fontSize: "18px",
-                        color: "#b45309",
+                        display: analysisItem?.result?.isUrgent &&
+                            !analysisItem?.pending
+                          ? "block"
+                          : "none",
+                        backgroundColor: "white",
+                        borderRadius: "8px",
+                        padding: "12px",
+                        border: "1px solid #fcd34d",
+                        width: "200px",
                       }}
                     >
-                      Possibly Urgent ({urgentCount})
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      flexWrap: "wrap",
-                      gap: "16px",
-                    }}
-                  >
-                    {urgentMailAnalyses.map((analysisItem) => (
+                      {/* Enlarged thumbnail */}
                       <div
                         style={{
-                          backgroundColor: "white",
-                          borderRadius: "8px",
-                          padding: "12px",
-                          border: "1px solid #fcd34d",
-                          width: "200px",
+                          width: "176px",
+                          height: "132px",
+                          backgroundColor: "#e5e7eb",
+                          borderRadius: "6px",
+                          overflow: "hidden",
+                          marginBottom: "8px",
                         }}
                       >
-                        {/* Enlarged thumbnail */}
-                        <div
+                        <img
+                          src={analysisItem.imageUrl || ""}
+                          alt="Urgent mail piece"
                           style={{
-                            width: "176px",
-                            height: "132px",
-                            backgroundColor: "#e5e7eb",
-                            borderRadius: "6px",
-                            overflow: "hidden",
-                            marginBottom: "8px",
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
                           }}
-                        >
-                          <img
-                            src={analysisItem.imageUrl || ""}
-                            alt="Urgent mail piece"
-                            style={{
-                              width: "100%",
-                              height: "100%",
-                              objectFit: "cover",
-                            }}
-                          />
-                        </div>
-                        {/* Info */}
-                        <div style={{ fontWeight: "600", fontSize: "14px" }}>
-                          {analysisItem.result?.sender || "Unknown Sender"}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "12px",
-                            color: "#6b7280",
-                            marginTop: "2px",
-                          }}
-                        >
-                          To: {analysisItem.result?.recipient || "Unknown"}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "12px",
-                            color: "#b45309",
-                            marginTop: "6px",
-                            fontStyle: "italic",
-                          }}
-                        >
-                          {analysisItem.result?.urgentReason ||
-                            "Time-sensitive"}
-                        </div>
+                        />
                       </div>
-                    ))}
-                  </div>
+                      {/* Info */}
+                      <div style={{ fontWeight: "600", fontSize: "14px" }}>
+                        {analysisItem.result?.sender || "Unknown Sender"}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          color: "#6b7280",
+                          marginTop: "2px",
+                        }}
+                      >
+                        To: {analysisItem.result?.recipient || "Unknown"}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          color: "#b45309",
+                          marginTop: "6px",
+                          fontStyle: "italic",
+                        }}
+                      >
+                        {analysisItem.result?.urgentReason || "Time-sensitive"}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              )}
+              </div>
 
               {/* Reactive Mail Piece Analysis Results */}
               <details open style={{ marginTop: "8px" }}>
