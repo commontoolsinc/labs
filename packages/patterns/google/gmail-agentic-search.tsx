@@ -43,6 +43,7 @@ import {
   createGoogleAuth as createGoogleAuthUtil,
   type ScopeKey,
 } from "./util/google-auth-manager.tsx";
+import GoogleAuth from "./google-auth.tsx";
 import {
   GmailClient,
   validateAndRefreshTokenCrossCharm,
@@ -986,6 +987,32 @@ const _updateSanitizedQueryHandler = handler<
   }
 });
 
+// Handler to create a new GoogleAuth charm (module scope)
+const createGoogleAuthHandler = handler(() => {
+  const authCharm = GoogleAuth({
+    selectedScopes: {
+      gmail: true,
+      gmailSend: false,
+      gmailModify: false,
+      calendar: false,
+      calendarWrite: false,
+      drive: false,
+      docs: false,
+      contacts: false,
+    },
+    auth: {
+      token: "",
+      tokenType: "",
+      scope: [],
+      expiresIn: 0,
+      expiresAt: 0,
+      refreshToken: "",
+      user: { email: "", name: "", picture: "" },
+    },
+  });
+  return navigateTo(authCharm);
+});
+
 // ============================================================================
 // PATTERN
 // ============================================================================
@@ -1123,18 +1150,20 @@ const GmailAgenticSearch = pattern<
     // Passes reactive selectedAccountType for dynamic account switching
     const {
       auth: wishedAuth,
+      authInfo,
       fullUI: authFullUI,
       isReady: wishedAuthReady,
       currentEmail: _wishedEmail, // Prefixed with _ as not currently used directly
-      wishResult,
-      createAuth: createGoogleAuthAction,
     } = createGoogleAuthUtil({
       requiredScopes: ["gmail"] as ScopeKey[],
       accountType: selectedAccountType,
     });
 
-    // For compatibility with existing code
-    const wishedAuthCharm = derive(wishResult, (wr: any) => wr?.result || null);
+    // For compatibility with existing code - derive charm from authInfo
+    const wishedAuthCharm = derive(
+      authInfo,
+      (info: any) => info?.charm || null,
+    );
     const hasWishedAuth = wishedAuthReady;
 
     // Access auth via property path to maintain writability
@@ -1203,8 +1232,8 @@ const GmailAgenticSearch = pattern<
 
     // Note: Scope warnings are handled by authFullUI via createGoogleAuth utility
 
-    // Handler to create a new GoogleAuth charm (uses utility's createAuth action)
-    const createGoogleAuth = createGoogleAuthAction;
+    // Use module-scope handler for creating GoogleAuth
+    const createGoogleAuth = createGoogleAuthHandler;
 
     // Use module-scope handlers
     const createSearchRegistry = createSearchRegistryHandler;

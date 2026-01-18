@@ -841,7 +841,7 @@ export default pattern<Input, Output>(
                 >
                   <strong>Granted Scopes:</strong>
                   <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
-                    {(auth?.scope || []).map((scope: string, i: number) => (
+                    {auth.scope.map((scope: string, i: number) => (
                       <li key={i}>{getScopeFriendlyName(scope)}</li>
                     ))}
                   </ul>

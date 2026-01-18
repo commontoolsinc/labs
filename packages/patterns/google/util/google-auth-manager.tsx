@@ -55,10 +55,10 @@
 
 import {
   computed,
-  derive,
+  Default,
   handler,
-  ifElse,
   navigateTo,
+  pattern,
   UI,
   wish,
   type WishState,
@@ -127,8 +127,8 @@ export type TokenExpiryWarning = "ok" | "warning" | "expired";
 export interface AuthInfo {
   state: AuthState;
   auth: Auth | null;
-  /** The writable auth cell for token refresh - use this, not auth data */
-  authCell: Writable<Auth> | null;
+  /** The writable auth cell for token refresh - internal use */
+  authCell: unknown;
   email: string;
   hasRequiredScopes: boolean;
   grantedScopes: string[];
@@ -142,8 +142,8 @@ export interface AuthInfo {
   // Status display
   statusDotColor: string;
   statusText: string;
-  // For navigation/actions
-  charm: GoogleAuthCharm | null;
+  // For navigation/actions (internal use - typed as unknown to avoid exposing private type)
+  charm: unknown;
   // UI components from wished charm (to avoid accessing wishResult in fullUI)
   userChip: unknown;
   charmUI: unknown;
@@ -152,53 +152,30 @@ export interface AuthInfo {
 /** Account type for multi-account support */
 export type AccountType = "default" | "personal" | "work";
 
-/** Options for createGoogleAuth */
-export interface CreateGoogleAuthOptions {
-  /** Required scopes by friendly name (e.g., ["gmail", "drive"]) */
-  requiredScopes?: ScopeKey[];
-  /**
-   * Account type preference for wish tag.
-   * Can be a static string or a reactive Writable for dynamic account switching.
-   */
-  accountType?: AccountType | Writable<AccountType>;
+/** Input options for GoogleAuthManager pattern */
+export interface GoogleAuthManagerInput {
+  requiredScopes?: Default<ScopeKey[], []>;
+  accountType?: Default<AccountType, "default">;
+  debugMode?: Default<boolean, false>;
 }
 
-/**
- * Return type for createGoogleAuth - explicitly typed to avoid TS inference issues
- * with internal Cell types (CELL_BRAND, CELL_INNER_TYPE) that cannot be named in exports.
- *
- * Note: Most fields use 'any' to avoid exposing internal cell wrapper types.
- * Consumers should use the specific property types documented in JSDoc comments.
- */
-export interface GoogleAuthResult {
-  /** Core auth cell - WRITABLE for token refresh. Type: Writable<Auth> | null */
-  auth: any;
-  /** Single computed with all state - use authInfo.state for state checks */
-  authInfo: any;
-  /** Boolean for state === "ready" */
-  isReady: any;
-  /** String of signed-in email */
-  currentEmail: any;
-  /** Current AuthState value */
-  currentState: any;
-  /** Handler to create a new Google Auth charm */
-  createAuth: any;
-  /** Handler to navigate to existing auth charm */
-  goToAuth: any;
-  /** Picker UI when multiple auth matches */
+/** Output interface for GoogleAuthManager pattern */
+export interface GoogleAuthManagerOutput {
+  auth: Auth | null;
+  authInfo: AuthInfo;
+  isReady: boolean;
+  currentEmail: string;
+  currentState: AuthState;
+  // deno-lint-ignore no-explicit-any
   pickerUI: any;
-  /** Minimal status indicator */
+  // deno-lint-ignore no-explicit-any
   statusUI: any;
-  /** Full state-aware management UI */
+  // deno-lint-ignore no-explicit-any
   fullUI: any;
-  /** Protected content wrapper - use ifElse(isReady, children, null) if serialization issues */
-  protectedContent: (children: JSX.Element) => any;
-  /** Raw wish result for advanced use cases */
-  wishResult: any;
 }
 
-/** Type for the Google Auth charm returned by wish */
-export interface GoogleAuthCharm {
+/** Type for the Google Auth charm returned by wish (internal) */
+interface GoogleAuthCharm {
   auth: Writable<Auth>;
   scopes?: string[];
   selectedScopes?: Record<ScopeKey, boolean>;
@@ -293,14 +270,13 @@ const createAuthHandler = handler<unknown, { scopes: ScopeKey[] }>(
 
 /**
  * Handler to navigate to existing auth charm.
+ * Note: charm is typed as unknown in the public interface to avoid exposing private types,
+ * but internally we know it's a GoogleAuthCharm.
  */
-const goToAuthHandler = handler<
-  unknown,
-  { charm: Writable<GoogleAuthCharm | null> }
->(
+const goToAuthHandler = handler<unknown, { charm: unknown }>(
   (_event, { charm }) => {
-    const c = charm.get();
-    if (c) return navigateTo(c);
+    // charm is the reactive value from authInfo.charm
+    if (charm) return navigateTo(charm as GoogleAuthCharm);
   },
 );
 
@@ -325,11 +301,11 @@ function formatTimeRemaining(ms: number | null): string {
 }
 
 // =============================================================================
-// MAIN UTILITY FUNCTION
+// MAIN PATTERN
 // =============================================================================
 
 /**
- * Google Auth management utility.
+ * Google Auth management pattern.
  *
  * Encapsulates all auth discovery, validation, and UI in one place.
  *
@@ -340,43 +316,52 @@ function formatTimeRemaining(ms: number | null): string {
  * 3. Single computed() for all derived state to prevent thrashing
  * 4. Token refresh is currently broken - we detect but don't auto-refresh
  */
-export function createGoogleAuth(
-  options: CreateGoogleAuthOptions = {},
-): GoogleAuthResult {
-  const requiredScopes = options.requiredScopes || [];
-  const accountType = options.accountType || "default";
+// Debug logging helper
+function debugLog(debug: boolean, ...args: unknown[]) {
+  if (debug) console.log("[GoogleAuthManager]", ...args);
+}
 
-  // Compute the wish tag
-  // IMPORTANT: wish() requires a string value, NOT a Cell. Passing a Cell
-  // causes wish() to never resolve, leaving the pattern stuck in "loading" state.
-  // For static accountType (the common case), compute the string directly.
-  // TODO(@jkomoros): For reactive account switching (Writable<AccountType>), we need a different
-  // approach since wish() doesn't support Cell query values.
-  const tag = accountType === "personal"
-    ? "#googleAuthPersonal"
-    : accountType === "work"
-    ? "#googleAuthWork"
-    : "#googleAuth";
+export const GoogleAuthManager = pattern<
+  GoogleAuthManagerInput,
+  GoogleAuthManagerOutput
+>(
+  ({ requiredScopes, accountType, debugMode }) => {
+    // Compute the wish tag
+    // IMPORTANT: wish() requires a string value, NOT a Cell. Passing a Cell
+    // causes wish() to never resolve, leaving the pattern stuck in "loading" state.
+    // For static accountType (the common case), compute the string directly.
+    // TODO(@jkomoros): For reactive account switching (Writable<AccountType>), we need a different
+    // approach since wish() doesn't support Cell query values.
+    const tag = computed(() => {
+      const type = accountType;
+      return type === "personal"
+        ? "#googleAuthPersonal"
+        : type === "work"
+        ? "#googleAuthWork"
+        : "#googleAuth";
+    });
 
-  // CRITICAL: wish() at pattern body level, NOT inside derive
-  const wishResult = wish<GoogleAuthCharm>({ query: tag });
+    // CRITICAL: wish() at pattern body level, NOT inside derive
+    const wishResult = wish<GoogleAuthCharm>({ query: tag });
 
-  // Convert required scope keys to URLs for comparison
-  // Note: This is for potential future use in scope URL matching
-  const _requiredScopeUrls = requiredScopes
-    .map((key) => SCOPE_MAP[key])
-    .filter(Boolean);
-
-  // Use derive() instead of computed() - derive() properly unwraps OpaqueRef
-  // Inside derive callback, we can do normal JS operations (truthiness, comparisons)
-  // Note: We derive from wishResult, and access auth via wr.result?.auth
-  // Type annotation needed because derive() infers UIRenderable without it
-  const authInfo = derive(
-    wishResult,
-    (wr: UnwrappedWishResult | null | undefined): AuthInfo => {
-      // Inside derive(), wr is unwrapped - can do normal JS operations
+    // computed() closes over all accessed cells (wishResult, requiredScopes, debugMode)
+    const authInfo = computed((): AuthInfo => {
+      const debug = debugMode as boolean;
+      const wr = wishResult as UnwrappedWishResult | null | undefined;
       const authCell = wr?.result?.auth;
       const authData = authCell?.get?.() ?? null;
+
+      debugLog(debug, "authInfo recomputing", {
+        hasWishResult: !!wr,
+        hasResult: !!wr?.result,
+        hasError: !!wr?.error,
+        error: wr?.error,
+        hasUI: !!wr?.[UI],
+        authCell: !!authCell,
+        authData: authData
+          ? { email: authData.user?.email, hasToken: !!authData.token }
+          : null,
+      });
 
       // Determine state from wish result
       let state: AuthState = "loading";
@@ -389,33 +374,47 @@ export function createGoogleAuth(
 
       if (!wr) {
         state = "loading";
+        debugLog(debug, "state: loading (no wish result yet)");
       } else if (wr.error) {
         // Wish returned error - no matches found
         state = "not-found";
+        debugLog(debug, "state: not-found (wish error)", wr.error);
       } else if (hasPickerUI) {
         // Multiple matches - show picker for user to choose
         state = "selecting";
+        debugLog(debug, "state: selecting (multiple matches, picker UI shown)");
       } else if (wr.result) {
         // Single match - evaluate auth state
         const email = authData?.user?.email;
         if (email && email !== "") {
           state = "ready"; // Will be refined below
+          debugLog(debug, "state: ready (single match)", { email });
         } else {
           state = "needs-login";
+          debugLog(debug, "state: needs-login (no email in auth data)");
         }
       }
 
       // Check granted scopes
       const grantedScopes: string[] = authData?.scope ?? [];
-      const missingScopes = requiredScopes.filter((key) => {
+      const scopesArray = requiredScopes as ScopeKey[];
+      const missingScopes: ScopeKey[] = scopesArray.filter((key) => {
         const scopeUrl = SCOPE_MAP[key];
         return scopeUrl && !grantedScopes.includes(scopeUrl);
       });
       const hasRequiredScopes = missingScopes.length === 0;
 
+      debugLog(debug, "scope check", {
+        required: scopesArray,
+        granted: grantedScopes,
+        missing: missingScopes,
+        hasAll: hasRequiredScopes,
+      });
+
       // Refine state based on scopes
       if (state === "ready" && !hasRequiredScopes) {
         state = "missing-scopes";
+        debugLog(debug, "state refined: missing-scopes");
       }
 
       // Check token expiry
@@ -440,7 +439,18 @@ export function createGoogleAuth(
       // Refine state based on token expiry
       if (state === "ready" && isTokenExpired) {
         state = "token-expired";
+        debugLog(debug, "state refined: token-expired");
       }
+
+      debugLog(debug, "token check", {
+        tokenExpiresAt,
+        tokenTimeRemaining,
+        isTokenExpired,
+        tokenExpiryWarning,
+        tokenExpiryDisplay,
+      });
+
+      debugLog(debug, "final state:", state);
 
       // Generate status display
       const email = authData?.user?.email ?? "";
@@ -450,7 +460,9 @@ export function createGoogleAuth(
       if (state === "ready") {
         statusText = `Signed in as ${email}`;
       } else if (state === "missing-scopes") {
-        const missingNames = missingScopes.map((k) => SCOPE_DESCRIPTIONS[k])
+        const missingNames = missingScopes.map((k) =>
+          SCOPE_DESCRIPTIONS[k as ScopeKey]
+        )
           .join(
             ", ",
           );
@@ -480,554 +492,550 @@ export function createGoogleAuth(
           (wr?.result as (GoogleAuthCharm & { [UI]?: unknown }) | undefined)
             ?.[UI] ?? null,
       };
-    },
-  );
+    });
 
-  // ==========================================================================
-  // PRE-BOUND HANDLERS
-  // Handlers are defined at module scope. Here we bind them with the required
-  // state so they can be used in JSX. These bound handlers work in direct JSX
-  // but NOT inside derive() callbacks.
-  // ==========================================================================
+    // ==========================================================================
+    // PRE-BOUND HANDLERS
+    // Handlers are defined at module scope. Here we bind them with the required
+    // state so they can be used in JSX. These bound handlers work in direct JSX
+    // but NOT inside derive() callbacks.
+    // ==========================================================================
 
-  // Pre-create charm cell for goToAuth binding
-  const charmCell = derive(authInfo, (info) => info.charm);
+    // Pre-create charm cell for goToAuth binding
+    const charmCell = authInfo.charm;
 
-  // Bind handlers with their required state
-  const boundCreateAuth = createAuthHandler({ scopes: requiredScopes });
-  const boundGoToAuth = goToAuthHandler({ charm: charmCell });
+    // Bind handlers with their required state
+    const boundCreateAuth = createAuthHandler({ scopes: requiredScopes });
+    const boundGoToAuth = goToAuthHandler({ charm: charmCell });
 
-  // ==========================================================================
-  // UI COMPONENTS
-  // ==========================================================================
+    // ==========================================================================
+    // UI COMPONENTS
+    // ==========================================================================
 
-  // Minimal status indicator (avatar + dot + text + token expiry)
-  const statusUI = derive(authInfo, (info) => {
-    // Determine background color based on state and token warning
-    const bgColor = info.state !== "ready"
-      ? "#fef3c7"
-      : info.tokenExpiryWarning === "warning"
-      ? "#fef3c7"
-      : "#d1fae5";
+    // Minimal status indicator (avatar + dot + text + token expiry)
+    const statusUI = computed(() => {
+      const info = authInfo;
+      // Determine background color based on state and token warning
+      const bgColor = info.state !== "ready"
+        ? "#fef3c7"
+        : info.tokenExpiryWarning === "warning"
+        ? "#fef3c7"
+        : "#d1fae5";
 
-    const avatarUrl = info.auth?.user?.picture;
+      const avatarUrl = info.auth?.user?.picture;
 
-    return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          padding: "8px 12px",
-          borderRadius: "6px",
-          backgroundColor: bgColor,
-          fontSize: "14px",
-        }}
-      >
-        {/* Avatar when ready and available */}
-        {info.state === "ready" && avatarUrl && (
-          <img
-            src={avatarUrl}
-            alt=""
-            style={{
-              width: "20px",
-              height: "20px",
-              borderRadius: "50%",
-            }}
-          />
-        )}
-        {/* Status dot when no avatar or not ready */}
-        {(!avatarUrl || info.state !== "ready") && (
-          <span
-            style={{
-              width: "10px",
-              height: "10px",
-              borderRadius: "50%",
-              backgroundColor: info.statusDotColor,
-            }}
-          />
-        )}
-        <span>{info.statusText}</span>
-        {/* Show token expiry countdown when ready and has expiry time */}
-        {info.state === "ready" && info.tokenExpiryDisplay && (
-          <span
-            style={{
-              marginLeft: "4px",
-              fontSize: "12px",
-              color: info.tokenExpiryWarning === "warning" ? "#b45309" : "#666",
-              fontWeight: info.tokenExpiryWarning === "warning"
-                ? "500"
-                : "normal",
-            }}
-          >
-            • {info.tokenExpiryDisplay}
-          </span>
-        )}
-      </div>
-    );
-  });
-
-  // Picker UI - renders wishResult[UI] when multiple matches
-  const pickerUI = derive(
-    wishResult,
-    (wr: UnwrappedWishResult | null | undefined) => {
-      if (!wr) return null;
-      if (wr[UI]) return wr[UI];
-      return null;
-    },
-  );
-
-  // Helper to format scope list for display
-  const formatScopesList = (scopes: ScopeKey[]) =>
-    scopes.map((k) => SCOPE_DESCRIPTIONS[k]).join(", ");
-
-  // ==========================================================================
-  // UI PIECES (with handlers)
-  // These use pre-bound handlers and are defined OUTSIDE derive() callbacks.
-  // Handlers don't work inside derive() - they fail with "X is not a function".
-  // ==========================================================================
-
-  // Scope list for display (static content, safe in derive)
-  const scopeListItems = requiredScopes.map((scope, i) => (
-    <li key={i} style={{ marginBottom: "4px" }}>
-      {SCOPE_DESCRIPTIONS[scope]}
-    </li>
-  ));
-
-  // "Connect" button - uses pre-bound handler, defined outside derive
-  const connectButton = (
-    <button
-      type="button"
-      onClick={boundCreateAuth}
-      style={{
-        padding: "10px 20px",
-        backgroundColor: "#3b82f6",
-        color: "white",
-        border: "none",
-        borderRadius: "6px",
-        cursor: "pointer",
-        fontWeight: "500",
-        fontSize: "14px",
-      }}
-    >
-      Connect Google Account
-    </button>
-  );
-
-  // "Add new account" button (outline style)
-  const addAccountButton = (
-    <button
-      type="button"
-      onClick={boundCreateAuth}
-      style={{
-        marginTop: "12px",
-        padding: "8px 16px",
-        backgroundColor: "transparent",
-        color: "#1e40af",
-        border: "1px solid #3b82f6",
-        borderRadius: "6px",
-        cursor: "pointer",
-        fontSize: "13px",
-      }}
-    >
-      + Add new account
-    </button>
-  );
-
-  // "Manage this account" button
-  const manageAccountButton = (
-    <button
-      type="button"
-      onClick={boundGoToAuth}
-      style={{
-        padding: "6px 12px",
-        backgroundColor: "transparent",
-        color: "#4b5563",
-        border: "1px solid #d1d5db",
-        borderRadius: "4px",
-        cursor: "pointer",
-        fontSize: "13px",
-      }}
-    >
-      Manage this account
-    </button>
-  );
-
-  // "Use different account" button
-  const useDifferentAccountButton = (
-    <button
-      type="button"
-      onClick={boundCreateAuth}
-      style={{
-        padding: "6px 12px",
-        backgroundColor: "transparent",
-        color: "#3b82f6",
-        border: "1px solid #3b82f6",
-        borderRadius: "4px",
-        cursor: "pointer",
-        fontSize: "13px",
-      }}
-    >
-      + Use different account
-    </button>
-  );
-
-  // "Switch" button for ready state
-  const switchButton = (
-    <button
-      type="button"
-      onClick={boundGoToAuth}
-      style={{
-        background: "none",
-        border: "none",
-        color: "#047857",
-        cursor: "pointer",
-        fontSize: "12px",
-        padding: "2px 6px",
-        borderRadius: "4px",
-      }}
-    >
-      Switch
-    </button>
-  );
-
-  // "+ Add" button for ready state
-  const addButton = (
-    <button
-      type="button"
-      onClick={boundCreateAuth}
-      style={{
-        background: "none",
-        border: "none",
-        color: "#047857",
-        cursor: "pointer",
-        fontSize: "12px",
-        padding: "2px 6px",
-        borderRadius: "4px",
-      }}
-    >
-      + Add
-    </button>
-  );
-
-  // Action buttons row for error states
-  const actionButtonsRow = (
-    <div
-      style={{
-        padding: "12px 16px",
-        backgroundColor: "#f9fafb",
-        display: "flex",
-        gap: "12px",
-        alignItems: "center",
-      }}
-    >
-      <span style={{ fontSize: "13px", color: "#6b7280" }}>Or:</span>
-      {manageAccountButton}
-      {useDifferentAccountButton}
-    </div>
-  );
-
-  // ==========================================================================
-  // FULL UI (using ifElse for state-based rendering)
-  // The buttons with handlers are defined above, outside any derive context.
-  // ==========================================================================
-
-  // State checks for conditional rendering
-  const isLoadingOrNotFound = derive(
-    authInfo,
-    (info) => info.state === "loading" || info.state === "not-found",
-  );
-  const isSelecting = derive(authInfo, (info) => info.state === "selecting");
-  const needsAction = derive(
-    authInfo,
-    (info) =>
-      info.state === "needs-login" || info.state === "missing-scopes" ||
-      info.state === "token-expired",
-  );
-  const isAuthReady = derive(authInfo, (info) => info.state === "ready");
-
-  // Loading/Not-found UI
-  const loadingUI = (
-    <div
-      style={{
-        padding: "16px",
-        backgroundColor: "#f3f4f6",
-        borderRadius: "8px",
-        border: "1px solid #d1d5db",
-      }}
-    >
-      <h4 style={{ margin: "0 0 8px 0", color: "#374151" }}>
-        Connect Your Google Account
-      </h4>
-      <p style={{ margin: "0 0 12px 0", fontSize: "14px", color: "#4b5563" }}>
-        To use this feature, connect a Google account with these permissions:
-      </p>
-      {requiredScopes.length > 0 && (
-        <ul
-          style={{
-            margin: "0 0 16px 0",
-            paddingLeft: "20px",
-            fontSize: "13px",
-            color: "#6b7280",
-          }}
-        >
-          {scopeListItems}
-        </ul>
-      )}
-      {connectButton}
-    </div>
-  );
-
-  // Selecting UI (multiple matches)
-  const selectingUI = (
-    <div
-      style={{
-        padding: "16px",
-        backgroundColor: "#dbeafe",
-        borderRadius: "8px",
-      }}
-    >
-      <h4 style={{ margin: "0 0 8px 0", color: "#1e40af" }}>
-        Select a Google Account
-      </h4>
-      {requiredScopes.length > 0 && (
-        <p style={{ margin: "0 0 12px 0", fontSize: "13px", color: "#4b5563" }}>
-          This feature needs access to: {formatScopesList(requiredScopes)}
-        </p>
-      )}
-      {pickerUI}
-      {addAccountButton}
-    </div>
-  );
-
-  // Needs-action UI (needs-login, missing-scopes, token-expired)
-  // This one needs dynamic content from authInfo, so we use derive for the content
-  // but the buttons are still the pre-bound ones from above
-  const needsActionUI = derive(authInfo, (info) => {
-    if (
-      info.state !== "needs-login" && info.state !== "missing-scopes" &&
-      info.state !== "token-expired"
-    ) {
-      return null;
-    }
-
-    // Build missing scopes message
-    const missingScopesMessage = info.state === "missing-scopes"
-      ? (
-        <div>
-          <p
-            style={{ margin: "0 0 8px 0", fontSize: "13px", color: "#4b5563" }}
-          >
-            Connected as{" "}
-            <strong>{info.email}</strong>, but this feature needs additional
-            permissions:
-          </p>
-          <ul style={{ margin: "0", paddingLeft: "20px", fontSize: "13px" }}>
-            {Array.from(info.missingScopes).map((scope, i) => (
-              <li key={i} style={{ color: "#c2410c", marginBottom: "2px" }}>
-                {SCOPE_DESCRIPTIONS[scope as ScopeKey]}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )
-      : null;
-
-    const stateConfig = {
-      "needs-login": {
-        title: "Sign In Required",
-        message: (
-          <span>Please sign in with your Google account to continue.</span>
-        ),
-        bgColor: "#fee2e2",
-        borderColor: "#ef4444",
-        titleColor: "#dc2626",
-      },
-      "missing-scopes": {
-        title: "Additional Permissions Needed",
-        message: missingScopesMessage,
-        bgColor: "#ffedd5",
-        borderColor: "#f97316",
-        titleColor: "#c2410c",
-      },
-      "token-expired": {
-        title: "Session Expired",
-        message: (
-          <span>
-            Your Google session has expired. Please sign in again to continue.
-          </span>
-        ),
-        bgColor: "#fee2e2",
-        borderColor: "#ef4444",
-        titleColor: "#dc2626",
-      },
-    };
-
-    const config = stateConfig[
-      info.state as "needs-login" | "missing-scopes" | "token-expired"
-    ];
-
-    return (
-      <div
-        style={{
-          borderRadius: "8px",
-          border: `1px solid ${config.borderColor}`,
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            padding: "12px 16px",
-            backgroundColor: config.bgColor,
-            borderBottom: `1px solid ${config.borderColor}`,
-          }}
-        >
-          <h4
-            style={{
-              margin: "0 0 4px 0",
-              color: config.titleColor,
-              fontSize: "14px",
-            }}
-          >
-            {config.title}
-          </h4>
-          <div style={{ margin: "0", fontSize: "13px", color: "#4b5563" }}>
-            {config.message || ""}
-          </div>
-        </div>
-        <div style={{ backgroundColor: "white" }}>
-          {info.charmUI as any}
-        </div>
-        {actionButtonsRow}
-      </div>
-    );
-  });
-
-  // Ready state UI
-  // Uses derive for dynamic content but buttons are pre-bound
-  const readyUI = derive(authInfo, (info) => {
-    if (info.state !== "ready") return null;
-
-    return (
-      <div>
+      return (
         <div
           style={{
             display: "flex",
             alignItems: "center",
             gap: "8px",
-            padding: "12px 16px",
-            backgroundColor: "#d1fae5",
-            borderRadius: info.tokenExpiryWarning === "warning"
-              ? "8px 8px 0 0"
-              : "8px",
-            border: "1px solid #10b981",
-            borderBottom: info.tokenExpiryWarning === "warning"
-              ? "none"
-              : "1px solid #10b981",
+            padding: "8px 12px",
+            borderRadius: "6px",
+            backgroundColor: bgColor,
+            fontSize: "14px",
           }}
         >
-          {info.userChip as any}
-          <div
-            style={{
-              marginLeft: "auto",
-              display: "flex",
-              alignItems: "center",
-              gap: "12px",
-            }}
-          >
-            {info.tokenExpiryDisplay && (
-              <span style={{ fontSize: "12px", color: "#059669" }}>
-                {info.tokenExpiryDisplay}
-              </span>
-            )}
-            {switchButton}
-            {addButton}
-          </div>
+          {/* Avatar when ready and available */}
+          {info.state === "ready" && avatarUrl && (
+            <img
+              src={avatarUrl}
+              alt=""
+              style={{
+                width: "20px",
+                height: "20px",
+                borderRadius: "50%",
+              }}
+            />
+          )}
+          {/* Status dot when no avatar or not ready */}
+          {(!avatarUrl || info.state !== "ready") && (
+            <span
+              style={{
+                width: "10px",
+                height: "10px",
+                borderRadius: "50%",
+                backgroundColor: info.statusDotColor,
+              }}
+            />
+          )}
+          <span>{info.statusText}</span>
+          {/* Show token expiry countdown when ready and has expiry time */}
+          {info.state === "ready" && info.tokenExpiryDisplay && (
+            <span
+              style={{
+                marginLeft: "4px",
+                fontSize: "12px",
+                color: info.tokenExpiryWarning === "warning"
+                  ? "#b45309"
+                  : "#666",
+                fontWeight: info.tokenExpiryWarning === "warning"
+                  ? "500"
+                  : "normal",
+              }}
+            >
+              • {info.tokenExpiryDisplay}
+            </span>
+          )}
         </div>
-        {info.tokenExpiryWarning === "warning" && (
-          <div
-            style={{
-              padding: "8px 16px",
-              backgroundColor: "#fef3c7",
-              borderRadius: "0 0 8px 8px",
-              border: "1px solid #f59e0b",
-              borderTop: "none",
-              fontSize: "13px",
-              color: "#b45309",
-            }}
-          >
-            ⚠️ Token expires soon. You may need to re-authenticate shortly.
-          </div>
-        )}
+      );
+    });
+
+    // Picker UI - renders wishResult[UI] when multiple matches
+    const pickerUI = computed(() => {
+      const wr = wishResult as UnwrappedWishResult | null | undefined;
+      if (!wr) return null;
+      if (wr[UI]) return wr[UI];
+      return null;
+    });
+
+    // Helper to format scope list for display
+    const formatScopesList = computed(() =>
+      requiredScopes.map((k) => SCOPE_DESCRIPTIONS[k as ScopeKey]).join(", ")
+    );
+
+    // ==========================================================================
+    // UI PIECES (with handlers)
+    // These use pre-bound handlers and are defined OUTSIDE derive() callbacks.
+    // Handlers don't work inside derive() - they fail with "X is not a function".
+    // ==========================================================================
+
+    // Scope list for display
+    const scopeListItems = requiredScopes.map((scope) => (
+      <li style={{ marginBottom: "4px" }}>
+        {SCOPE_DESCRIPTIONS[scope as ScopeKey]}
+      </li>
+    ));
+
+    // "Connect" button - uses pre-bound handler, defined outside derive
+    const connectButton = (
+      <button
+        type="button"
+        onClick={boundCreateAuth}
+        style={{
+          padding: "10px 20px",
+          backgroundColor: "#3b82f6",
+          color: "white",
+          border: "none",
+          borderRadius: "6px",
+          cursor: "pointer",
+          fontWeight: "500",
+          fontSize: "14px",
+        }}
+      >
+        Connect Google Account
+      </button>
+    );
+
+    // "Add new account" button (outline style)
+    const addAccountButton = (
+      <button
+        type="button"
+        onClick={boundCreateAuth}
+        style={{
+          marginTop: "12px",
+          padding: "8px 16px",
+          backgroundColor: "transparent",
+          color: "#1e40af",
+          border: "1px solid #3b82f6",
+          borderRadius: "6px",
+          cursor: "pointer",
+          fontSize: "13px",
+        }}
+      >
+        + Add new account
+      </button>
+    );
+
+    // "Manage this account" button
+    const manageAccountButton = (
+      <button
+        type="button"
+        onClick={boundGoToAuth}
+        style={{
+          padding: "6px 12px",
+          backgroundColor: "transparent",
+          color: "#4b5563",
+          border: "1px solid #d1d5db",
+          borderRadius: "4px",
+          cursor: "pointer",
+          fontSize: "13px",
+        }}
+      >
+        Manage this account
+      </button>
+    );
+
+    // "Use different account" button
+    const useDifferentAccountButton = (
+      <button
+        type="button"
+        onClick={boundCreateAuth}
+        style={{
+          padding: "6px 12px",
+          backgroundColor: "transparent",
+          color: "#3b82f6",
+          border: "1px solid #3b82f6",
+          borderRadius: "4px",
+          cursor: "pointer",
+          fontSize: "13px",
+        }}
+      >
+        + Use different account
+      </button>
+    );
+
+    // "Switch" button for ready state
+    const switchButton = (
+      <button
+        type="button"
+        onClick={boundGoToAuth}
+        style={{
+          background: "none",
+          border: "none",
+          color: "#047857",
+          cursor: "pointer",
+          fontSize: "12px",
+          padding: "2px 6px",
+          borderRadius: "4px",
+        }}
+      >
+        Switch
+      </button>
+    );
+
+    // "+ Add" button for ready state
+    const addButton = (
+      <button
+        type="button"
+        onClick={boundCreateAuth}
+        style={{
+          background: "none",
+          border: "none",
+          color: "#047857",
+          cursor: "pointer",
+          fontSize: "12px",
+          padding: "2px 6px",
+          borderRadius: "4px",
+        }}
+      >
+        + Add
+      </button>
+    );
+
+    // Action buttons row for error states
+    const actionButtonsRow = (
+      <div
+        style={{
+          padding: "12px 16px",
+          backgroundColor: "#f9fafb",
+          display: "flex",
+          gap: "12px",
+          alignItems: "center",
+        }}
+      >
+        <span style={{ fontSize: "13px", color: "#6b7280" }}>Or:</span>
+        {manageAccountButton}
+        {useDifferentAccountButton}
       </div>
     );
-  });
 
-  // Compose fullUI using ifElse chains
-  const fullUI = ifElse(
-    isLoadingOrNotFound,
-    loadingUI,
-    ifElse(
-      isSelecting,
-      selectingUI,
-      ifElse(
-        needsAction,
-        needsActionUI,
-        ifElse(isAuthReady, readyUI, null),
-      ),
-    ),
-  );
+    // ==========================================================================
+    // FULL UI (using ifElse for state-based rendering)
+    // The buttons with handlers are defined above, outside any derive context.
+    // ==========================================================================
 
-  // ==========================================================================
-  // RETURN
-  // ==========================================================================
+    // State checks for conditional rendering
+    const isLoadingOrNotFound = computed(() =>
+      authInfo.state === "loading" || authInfo.state === "not-found"
+    );
+    const isSelecting = computed(() => authInfo.state === "selecting");
+    const needsAction = computed(() =>
+      authInfo.state === "needs-login" || authInfo.state === "missing-scopes" ||
+      authInfo.state === "token-expired"
+    );
+    const isAuthReady = computed(() => authInfo.state === "ready");
 
-  // Helper getters - pre-unwrapped for convenience (avoids OpaqueRef footgun)
-  const isReady = derive(authInfo, (info) => info.state === "ready");
-  const currentEmail = derive(authInfo, (info) => info.email);
-  const currentState = derive(authInfo, (info) => info.state);
+    // Check if we have required scopes to display
+    const hasRequiredScopes = computed(() => requiredScopes.length > 0);
 
-  // Extract the writable auth cell directly from wishResult (not through derive)
-  // IMPORTANT: Using computed() preserves the original cell reference for token refresh writes
-  // derive() would create a read-only projection, breaking auth.update() calls in clients
-  const auth = computed(
-    (): Writable<Auth> | null =>
-      (wishResult as UnwrappedWishResult | null)?.result?.auth ?? null,
-  );
+    // Loading/Not-found UI
+    const loadingUI = (
+      <div
+        style={{
+          padding: "16px",
+          backgroundColor: "#f3f4f6",
+          borderRadius: "8px",
+          border: "1px solid #d1d5db",
+        }}
+      >
+        <h4 style={{ margin: "0 0 8px 0", color: "#374151" }}>
+          Connect Your Google Account
+        </h4>
+        <p style={{ margin: "0 0 12px 0", fontSize: "14px", color: "#4b5563" }}>
+          To use this feature, connect a Google account with these permissions:
+        </p>
+        {hasRequiredScopes && (
+          <ul
+            style={{
+              margin: "0 0 16px 0",
+              paddingLeft: "20px",
+              fontSize: "13px",
+              color: "#6b7280",
+            }}
+          >
+            {scopeListItems}
+          </ul>
+        )}
+        {connectButton}
+      </div>
+    );
 
-  return {
-    // Core auth cell - WRITABLE for token refresh
-    // Note: This is extracted from authInfo.authCell which preserves the original cell reference
-    auth,
+    // Selecting UI (multiple matches)
+    const selectingUI = (
+      <div
+        style={{
+          padding: "16px",
+          backgroundColor: "#dbeafe",
+          borderRadius: "8px",
+        }}
+      >
+        <h4 style={{ margin: "0 0 8px 0", color: "#1e40af" }}>
+          Select a Google Account
+        </h4>
+        {hasRequiredScopes && (
+          <p
+            style={{ margin: "0 0 12px 0", fontSize: "13px", color: "#4b5563" }}
+          >
+            This feature needs access to: {formatScopesList}
+          </p>
+        )}
+        {pickerUI}
+        {addAccountButton}
+      </div>
+    );
 
-    // Single computed with all state - use authInfo.state for state checks
-    authInfo,
+    // Needs-action UI (needs-login, missing-scopes, token-expired)
+    // This one needs dynamic content from authInfo
+    // but the buttons are still the pre-bound ones from above
+    const needsActionUI = computed(() => {
+      const info = authInfo;
+      if (
+        info.state !== "needs-login" && info.state !== "missing-scopes" &&
+        info.state !== "token-expired"
+      ) {
+        return null;
+      }
 
-    // Helper getters (pre-unwrapped to avoid OpaqueRef issues)
-    isReady,
-    currentEmail,
-    currentState,
+      // Build missing scopes message
+      const missingScopesMessage = info.state === "missing-scopes"
+        ? (
+          <div>
+            <p
+              style={{
+                margin: "0 0 8px 0",
+                fontSize: "13px",
+                color: "#4b5563",
+              }}
+            >
+              Connected as{" "}
+              <strong>{info.email}</strong>, but this feature needs additional
+              permissions:
+            </p>
+            <ul style={{ margin: "0", paddingLeft: "20px", fontSize: "13px" }}>
+              {info.missingScopes.map((scope, i) => (
+                <li key={i} style={{ color: "#c2410c", marginBottom: "2px" }}>
+                  {SCOPE_DESCRIPTIONS[scope as ScopeKey]}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
+        : null;
 
-    // Actions (pre-bound handlers)
-    createAuth: boundCreateAuth,
-    goToAuth: boundGoToAuth,
+      const stateConfig = {
+        "needs-login": {
+          title: "Sign In Required",
+          message: (
+            <span>Please sign in with your Google account to continue.</span>
+          ),
+          bgColor: "#fee2e2",
+          borderColor: "#ef4444",
+          titleColor: "#dc2626",
+        },
+        "missing-scopes": {
+          title: "Additional Permissions Needed",
+          message: missingScopesMessage,
+          bgColor: "#ffedd5",
+          borderColor: "#f97316",
+          titleColor: "#c2410c",
+        },
+        "token-expired": {
+          title: "Session Expired",
+          message: (
+            <span>
+              Your Google session has expired. Please sign in again to continue.
+            </span>
+          ),
+          bgColor: "#fee2e2",
+          borderColor: "#ef4444",
+          titleColor: "#dc2626",
+        },
+      };
 
-    // UI Components
-    pickerUI,
-    statusUI,
-    fullUI,
+      const config = stateConfig[
+        info.state as "needs-login" | "missing-scopes" | "token-expired"
+      ];
 
-    // Protected content wrapper - renders children only when auth is ready
-    // Usage: {protectedContent(<button>Action</button>)}
-    //
-    // ⚠️ WARNING: This helper function does NOT survive serialization through the
-    // action system. If you get "TypeError: protectedContent is not a function",
-    // use ifElse(isReady, children, null) directly instead.
-    // See: community-docs/superstitions/2025-11-29-cells-must-be-json-serializable.md
-    protectedContent: (children: JSX.Element) =>
-      ifElse(isReady, children, null),
+      return (
+        <div
+          style={{
+            borderRadius: "8px",
+            border: `1px solid ${config.borderColor}`,
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              padding: "12px 16px",
+              backgroundColor: config.bgColor,
+              borderBottom: `1px solid ${config.borderColor}`,
+            }}
+          >
+            <h4
+              style={{
+                margin: "0 0 4px 0",
+                color: config.titleColor,
+                fontSize: "14px",
+              }}
+            >
+              {config.title}
+            </h4>
+            <div style={{ margin: "0", fontSize: "13px", color: "#4b5563" }}>
+              {config.message || ""}
+            </div>
+          </div>
+          <div style={{ backgroundColor: "white" }}>
+            {info.charmUI as any}
+          </div>
+          {actionButtonsRow}
+        </div>
+      );
+    });
 
-    // Raw wish result for advanced use cases
-    wishResult,
-  };
-}
+    // Ready state UI
+    const readyUI = computed(() => {
+      const info = authInfo;
+      if (info.state !== "ready") return null;
+
+      return (
+        <div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "12px 16px",
+              backgroundColor: "#d1fae5",
+              borderRadius: info.tokenExpiryWarning === "warning"
+                ? "8px 8px 0 0"
+                : "8px",
+              border: "1px solid #10b981",
+              borderBottom: info.tokenExpiryWarning === "warning"
+                ? "none"
+                : "1px solid #10b981",
+            }}
+          >
+            {info.userChip as any}
+            <div
+              style={{
+                marginLeft: "auto",
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+              }}
+            >
+              {info.tokenExpiryDisplay && (
+                <span style={{ fontSize: "12px", color: "#059669" }}>
+                  {info.tokenExpiryDisplay}
+                </span>
+              )}
+              {switchButton}
+              {addButton}
+            </div>
+          </div>
+          {info.tokenExpiryWarning === "warning" && (
+            <div
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "#fef3c7",
+                borderRadius: "0 0 8px 8px",
+                border: "1px solid #f59e0b",
+                borderTop: "none",
+                fontSize: "13px",
+                color: "#b45309",
+              }}
+            >
+              ⚠️ Token expires soon. You may need to re-authenticate shortly.
+            </div>
+          )}
+        </div>
+      );
+    });
+
+    // Compose fullUI using JSX conditionals
+    const fullUI = (
+      <>
+        {isLoadingOrNotFound && loadingUI}
+        {isSelecting && selectingUI}
+        {needsAction && needsActionUI}
+        {isAuthReady && readyUI}
+      </>
+    );
+
+    // ==========================================================================
+    // RETURN
+    // ==========================================================================
+
+    // Helper getters - pre-unwrapped for convenience (avoids OpaqueRef footgun)
+    const isReady = computed(() => authInfo.state === "ready");
+    const currentEmail = authInfo.email;
+    const currentState = authInfo.state;
+
+    // Extract the writable auth cell directly from wishResult (not through derive)
+    // IMPORTANT: Using computed() preserves the original cell reference for token refresh writes
+    // derive() would create a read-only projection, breaking auth.update() calls in clients
+    const auth = computed(() =>
+      (wishResult as UnwrappedWishResult | null)?.result?.auth ?? null
+    );
+
+    return {
+      // Core auth cell - WRITABLE for token refresh
+      // Note: This is extracted from authInfo.authCell which preserves the original cell reference
+      auth,
+
+      // Single computed with all state - use authInfo.state for state checks
+      authInfo,
+
+      // Helper getters (pre-unwrapped to avoid OpaqueRef issues)
+      isReady,
+      currentEmail,
+      currentState,
+
+      // UI Components
+      pickerUI,
+      statusUI,
+      fullUI,
+
+      // Pattern's main UI
+      [UI]: fullUI,
+    };
+  },
+);
+
+// Export as default for ct dev
+export default GoogleAuthManager;
+
+// Backward-compatible export for existing code that uses createGoogleAuth()
+// This allows patterns to call GoogleAuthManager as a function
+export const createGoogleAuth = GoogleAuthManager;

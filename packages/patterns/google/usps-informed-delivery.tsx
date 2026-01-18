@@ -18,17 +18,16 @@
  * 3. Link: ct charm link google-auth/auth usps/linkedAuth
  */
 import {
+  computed,
   Default,
-  derive,
   generateObject,
   handler,
-  ifElse,
   NAME,
   pattern,
   UI,
   Writable,
 } from "commontools";
-import GmailImporter, { type Auth } from "../gmail-importer.tsx";
+import GmailImporter, { type Auth } from "./gmail-importer.tsx";
 
 // Debug flag for development - disable in production
 const DEBUG_USPS = false;
@@ -286,9 +285,6 @@ interface PatternOutput {
 
 export default pattern<PatternInput, PatternOutput>(
   ({ settings: _settings, mailPieces, householdMembers, linkedAuth }) => {
-    // Local state - prefixed with _ as not currently used directly
-    const _processing = Writable.of(false);
-
     // Directly instantiate GmailImporter with USPS-specific settings
     // This eliminates the need for separate gmail-importer charm + wish()
     const gmailImporter = GmailImporter({
@@ -299,7 +295,7 @@ export default pattern<PatternInput, PatternOutput>(
         resolveInlineImages: true,
         limit: 20,
         historyId: "",
-        debugMode: false,
+        debugMode: DEBUG_USPS,
       },
       linkedAuth, // Pass through from USPS input (user can link google-auth here)
     });
@@ -308,30 +304,24 @@ export default pattern<PatternInput, PatternOutput>(
     const allEmails = gmailImporter.emails;
 
     // Filter for USPS emails
-    const uspsEmails = derive(allEmails, (emails: Email[]) => {
-      return (emails || []).filter((e: Email) =>
+    const uspsEmails = computed(() => {
+      return (allEmails || []).filter((e: Email) =>
         e.from?.toLowerCase().includes(USPS_SENDER)
       );
     });
 
     // Count of USPS emails found
-    const uspsEmailCount = derive(
-      uspsEmails,
-      (emails: Email[]) => emails?.length || 0,
-    );
+    const uspsEmailCount = computed(() => uspsEmails?.length || 0);
 
     // Check if connected - either linkedAuth is provided or gmailImporter found auth via wish
     // We check emailCount > 0 OR if the importer is actively fetching
-    const isConnected = derive(
-      { linkedAuth, gmailImporter },
-      ({ linkedAuth: la, gmailImporter: gi }) => {
-        // If linkedAuth has a token, we're connected
-        if (la?.token) return true;
-        // Otherwise check if gmailImporter has found auth (emailCount will be defined, even if 0)
-        // The importer uses wish() internally to find favorited google-auth
-        return gi?.emailCount !== undefined;
-      },
-    );
+    const isConnected = computed(() => {
+      // If linkedAuth has a token, we're connected
+      if (linkedAuth?.token) return true;
+      // Otherwise check if gmailImporter has found auth (emailCount will be defined, even if 0)
+      // The importer uses wish() internally to find favorited google-auth
+      return gmailImporter?.emailCount !== undefined;
+    });
 
     // ==========================================================================
     // REACTIVE LLM ANALYSIS
@@ -341,14 +331,14 @@ export default pattern<PatternInput, PatternOutput>(
 
     // First, extract all mail piece images from all emails
     // Returns array of { emailId, emailDate, imageUrl } objects
-    const mailPieceImages = derive(uspsEmails, (emails: Email[]) => {
+    const mailPieceImages = computed(() => {
       const images: {
         emailId: string;
         emailDate: string;
         imageUrl: string;
         imageIndex: number;
       }[] = [];
-      for (const email of emails || []) {
+      for (const email of uspsEmails || []) {
         const urls = extractMailPieceImages(email.htmlContent);
         urls.forEach((url, idx) => {
           images.push({
@@ -364,18 +354,18 @@ export default pattern<PatternInput, PatternOutput>(
     });
 
     // Count of images to analyze
-    const imageCount = derive(mailPieceImages, (imgs) => imgs?.length || 0);
+    const imageCount = computed(() => mailPieceImages?.length || 0);
 
     // Analyze each image with generateObject - this is called at pattern level (reactive)
     // Uses .map() over the derived array to create per-item LLM calls with automatic caching
-    // NOTE: Per store-mapper pattern, generateObject prompt should use derive() with the cell
     const mailPieceAnalyses = mailPieceImages.map((imageInfo) => {
-      // Get the image URL from the cell - need to derive to get actual value
-      const imageUrl = derive(imageInfo, (info) => info?.imageUrl || "");
+      // Get the image URL from the cell
+      const imageUrl = computed(() => imageInfo?.imageUrl || "");
 
       const analysis = generateObject({
-        // Prompt must be derived to access cell values properly
-        prompt: derive(imageUrl, (url) => {
+        // Prompt computed from imageUrl
+        prompt: computed(() => {
+          const url = imageUrl as string;
           // Debug logging (gated by DEBUG_USPS flag)
           if (DEBUG_USPS) {
             console.log(
@@ -433,33 +423,26 @@ If you cannot read the image clearly, make your best guess based on what you can
     });
 
     // Count pending analyses
-    const pendingCount = derive(
-      mailPieceAnalyses,
-      (analyses) => analyses?.filter((a: any) => a.pending)?.length || 0,
+    const pendingCount = computed(
+      () => mailPieceAnalyses?.filter((a) => a.pending)?.length || 0,
     );
 
     // Count completed analyses
-    const completedCount = derive(
-      mailPieceAnalyses,
-      (analyses) =>
-        analyses?.filter((a: any) => !a.pending && a.result)?.length || 0,
+    const completedCount = computed(
+      () =>
+        mailPieceAnalyses?.filter((a) => !a.pending && a.result)?.length || 0,
     );
 
     // Derived counts from stored mailPieces (persisted results)
-    const mailCount = derive(
-      mailPieces,
-      (pieces: MailPiece[]) => pieces?.length || 0,
-    );
-    const spamCount = derive(
-      mailPieces,
-      (pieces: MailPiece[]) =>
-        pieces?.filter((p) => p.isLikelySpam)?.length || 0,
+    const mailCount = computed(() => mailPieces?.length || 0);
+    const spamCount = computed(
+      () => mailPieces?.filter((p) => p.isLikelySpam)?.length || 0,
     );
 
     // Group mail by date - prefixed with _ as not currently used in UI
-    const _mailByDate = derive(mailPieces, (pieces: MailPiece[]) => {
+    const _mailByDate = computed(() => {
       const groups: Record<string, MailPiece[]> = {};
-      for (const piece of pieces || []) {
+      for (const piece of mailPieces || []) {
         const date = new Date(piece.emailDate).toLocaleDateString();
         if (!groups[date]) groups[date] = [];
         groups[date].push(piece);
@@ -468,10 +451,8 @@ If you cannot read the image clearly, make your best guess based on what you can
     });
 
     // Unconfirmed members count
-    const unconfirmedCount = derive(
-      householdMembers,
-      (members: HouseholdMember[]) =>
-        members?.filter((m) => !m.isConfirmed)?.length || 0,
+    const unconfirmedCount = computed(
+      () => householdMembers?.filter((m) => !m.isConfirmed)?.length || 0,
     );
 
     return {
@@ -490,124 +471,104 @@ If you cannot read the image clearly, make your best guess based on what you can
 
           <ct-vscroll flex showScrollbar>
             <ct-vstack padding="6" gap="4">
-              {/* Connection Status */}
-              {ifElse(
-                isConnected,
-                <div
-                  style={{
-                    padding: "12px 16px",
-                    backgroundColor: "#d1fae5",
-                    borderRadius: "8px",
-                    border: "1px solid #10b981",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        width: "10px",
-                        height: "10px",
-                        borderRadius: "50%",
-                        backgroundColor: "#10b981",
-                      }}
-                    />
-                    <span>Connected to Gmail Importer</span>
-                    <span style={{ marginLeft: "auto", color: "#059669" }}>
-                      {uspsEmailCount} USPS emails found
-                    </span>
-                  </div>
-                </div>,
-                <div
-                  style={{
-                    padding: "16px",
-                    backgroundColor: "#fef3c7",
-                    borderRadius: "8px",
-                    border: "1px solid #f59e0b",
-                  }}
-                >
-                  <h4 style={{ margin: "0 0 8px 0", color: "#b45309" }}>
-                    Google Auth Not Connected
-                  </h4>
-                  <p
-                    style={{ margin: "0", fontSize: "14px", color: "#92400e" }}
-                  >
-                    To use this pattern, link a Google Auth charm:
-                  </p>
-                  <ol
-                    style={{
-                      margin: "8px 0 0 0",
-                      paddingLeft: "20px",
-                      fontSize: "14px",
-                      color: "#92400e",
-                    }}
-                  >
-                    <li>Deploy a google-auth charm and complete OAuth</li>
-                    <li>
-                      Link it to this charm:
-                      <code
-                        style={{
-                          display: "block",
-                          margin: "4px 0",
-                          padding: "4px 8px",
-                          backgroundColor: "#fef9c3",
-                          borderRadius: "4px",
-                          fontSize: "12px",
-                        }}
-                      >
-                        ct charm link google-auth/auth usps/linkedAuth
-                      </code>
-                    </li>
-                    <li>USPS emails will be fetched automatically</li>
-                  </ol>
-                </div>,
-              )}
+              {/* Auth UI from embedded Gmail Importer */}
+              {gmailImporter.authUI}
 
-              {/* Analysis Status - reactive, no button needed */}
-              {ifElse(
-                isConnected,
-                <div
-                  style={{
-                    padding: "12px 16px",
-                    backgroundColor: "#eff6ff",
-                    borderRadius: "8px",
-                    border: "1px solid #3b82f6",
-                  }}
-                >
+              {/* Connection Status */}
+              {isConnected
+                ? (
                   <div
                     style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "12px",
+                      padding: "12px 16px",
+                      backgroundColor: "#d1fae5",
+                      borderRadius: "8px",
+                      border: "1px solid #10b981",
                     }}
                   >
-                    <span style={{ fontWeight: "600" }}>Analysis:</span>
-                    <span>{imageCount} images found</span>
-                    {ifElse(
-                      derive(pendingCount, (c: number) => c > 0),
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                      }}
+                    >
                       <span
                         style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "4px",
-                          color: "#2563eb",
+                          width: "10px",
+                          height: "10px",
+                          borderRadius: "50%",
+                          backgroundColor: "#10b981",
+                        }}
+                      />
+                      <span>Connected to Gmail</span>
+                      <span style={{ marginLeft: "auto", color: "#059669" }}>
+                        {uspsEmailCount} USPS emails found
+                      </span>
+                      <button
+                        type="button"
+                        onClick={gmailImporter.bgUpdater}
+                        style={{
+                          marginLeft: "8px",
+                          padding: "6px 12px",
+                          backgroundColor: "#10b981",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "6px",
+                          cursor: "pointer",
+                          fontSize: "13px",
+                          fontWeight: "500",
                         }}
                       >
-                        <ct-loader size="sm" />
-                        {pendingCount} analyzing...
-                      </span>,
-                      <span style={{ color: "#059669" }}>
-                        {completedCount} completed
-                      </span>,
-                    )}
+                        Fetch Emails
+                      </button>
+                    </div>
                   </div>
-                </div>,
-                null,
-              )}
+                )
+                : null}
+
+              {/* Analysis Status - reactive, no button needed */}
+              {isConnected
+                ? (
+                  <div
+                    style={{
+                      padding: "12px 16px",
+                      backgroundColor: "#eff6ff",
+                      borderRadius: "8px",
+                      border: "1px solid #3b82f6",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "12px",
+                      }}
+                    >
+                      <span style={{ fontWeight: "600" }}>Analysis:</span>
+                      <span>{imageCount} images found</span>
+                      {pendingCount > 0
+                        ? (
+                          <span
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              color: "#2563eb",
+                            }}
+                          >
+                            <ct-loader size="sm" />
+                            {pendingCount} analyzing...
+                          </span>
+                        )
+                        : (
+                          <span style={{ color: "#059669" }}>
+                            {completedCount} completed
+                          </span>
+                        )}
+                    </div>
+                  </div>
+                )
+                : null}
 
               {/* Stats */}
               <div
@@ -643,10 +604,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                 </div>
                 <div>
                   <div style={{ fontSize: "24px", fontWeight: "bold" }}>
-                    {derive(
-                      householdMembers,
-                      (m: HouseholdMember[]) => m?.length || 0,
-                    )}
+                    {householdMembers?.length || 0}
                   </div>
                   <div style={{ fontSize: "12px", color: "#666" }}>
                     Household Members
@@ -665,36 +623,33 @@ If you cannot read the image clearly, make your best guess based on what you can
                   }}
                 >
                   Household Members
-                  {ifElse(
-                    derive(unconfirmedCount, (c: number) => c > 0),
-                    <span
-                      style={{
-                        marginLeft: "8px",
-                        padding: "2px 8px",
-                        backgroundColor: "#fef3c7",
-                        borderRadius: "12px",
-                        fontSize: "12px",
-                        color: "#b45309",
-                      }}
-                    >
-                      {unconfirmedCount} unconfirmed
-                    </span>,
-                    null,
-                  )}
+                  {unconfirmedCount > 0
+                    ? (
+                      <span
+                        style={{
+                          marginLeft: "8px",
+                          padding: "2px 8px",
+                          backgroundColor: "#fef3c7",
+                          borderRadius: "12px",
+                          fontSize: "12px",
+                          color: "#b45309",
+                        }}
+                      >
+                        {unconfirmedCount} unconfirmed
+                      </span>
+                    )
+                    : null}
                 </summary>
 
                 <ct-vstack gap="2">
-                  {ifElse(
-                    derive(
-                      householdMembers,
-                      (m: HouseholdMember[]) => !m || m.length === 0,
-                    ),
-                    <div style={{ color: "#666", fontSize: "14px" }}>
-                      No household members learned yet. Analyze some mail to get
-                      started.
-                    </div>,
-                    null,
-                  )}
+                  {!householdMembers?.length
+                    ? (
+                      <div style={{ color: "#666", fontSize: "14px" }}>
+                        No household members learned yet. Analyze some mail to
+                        get started.
+                      </div>
+                    )
+                    : null}
                   {/* Use .map() directly on cell array to get cell references */}
                   {householdMembers.map((member) => (
                     <div
@@ -703,56 +658,43 @@ If you cannot read the image clearly, make your best guess based on what you can
                         alignItems: "center",
                         gap: "8px",
                         padding: "8px 12px",
-                        backgroundColor: derive(
-                          member,
-                          (m: HouseholdMember) =>
-                            m.isConfirmed ? "#f0fdf4" : "#fefce8",
-                        ),
+                        backgroundColor: member.isConfirmed
+                          ? "#f0fdf4"
+                          : "#fefce8",
                         borderRadius: "6px",
-                        border: derive(
-                          member,
-                          (m: HouseholdMember) =>
-                            `1px solid ${
-                              m.isConfirmed ? "#86efac" : "#fde047"
-                            }`,
-                        ),
+                        border: `1px solid ${
+                          member.isConfirmed ? "#86efac" : "#fde047"
+                        }`,
                       }}
                     >
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: "500" }}>
-                          {derive(member, (m: HouseholdMember) => m.name)}
-                        </div>
+                        <div style={{ fontWeight: "500" }}>{member.name}</div>
                         <div style={{ fontSize: "12px", color: "#666" }}>
-                          {derive(member, (m: HouseholdMember) => m.mailCount)}
-                          {" "}
-                          pieces
-                          {derive(
-                            member,
-                            (m: HouseholdMember) => m.aliases?.length > 0
-                              ? ` • Also: ${m.aliases.join(", ")}`
-                              : "",
-                          )}
+                          {member.mailCount} pieces
+                          {member.aliases?.length > 0
+                            ? ` • Also: ${member.aliases.join(", ")}`
+                            : ""}
                         </div>
                       </div>
-                      {ifElse(
-                        derive(member, (m: HouseholdMember) => !m.isConfirmed),
-                        <button
-                          type="button"
-                          onClick={confirmMember({ member })}
-                          style={{
-                            padding: "4px 8px",
-                            fontSize: "12px",
-                            backgroundColor: "#22c55e",
-                            color: "white",
-                            border: "none",
-                            borderRadius: "4px",
-                            cursor: "pointer",
-                          }}
-                        >
-                          Confirm
-                        </button>,
-                        null,
-                      )}
+                      {!member.isConfirmed
+                        ? (
+                          <button
+                            type="button"
+                            onClick={confirmMember({ member })}
+                            style={{
+                              padding: "4px 8px",
+                              fontSize: "12px",
+                              backgroundColor: "#22c55e",
+                              color: "white",
+                              border: "none",
+                              borderRadius: "4px",
+                              cursor: "pointer",
+                            }}
+                          >
+                            Confirm
+                          </button>
+                        )
+                        : null}
                       <button
                         type="button"
                         onClick={deleteMember({ householdMembers, member })}
@@ -787,14 +729,14 @@ If you cannot read the image clearly, make your best guess based on what you can
                 </summary>
 
                 <ct-vstack gap="2">
-                  {ifElse(
-                    derive(imageCount, (c: number) => c === 0),
-                    <div style={{ color: "#666", fontSize: "14px" }}>
-                      No mail piece images found in emails. USPS emails may not
-                      contain scanned images.
-                    </div>,
-                    null,
-                  )}
+                  {imageCount === 0
+                    ? (
+                      <div style={{ color: "#666", fontSize: "14px" }}>
+                        No mail piece images found in emails. USPS emails may
+                        not contain scanned images.
+                      </div>
+                    )
+                    : null}
                   {/* Map over reactive analyses */}
                   {mailPieceAnalyses.map((analysisItem) => (
                     <div
@@ -819,10 +761,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                         }}
                       >
                         <img
-                          src={derive(
-                            analysisItem,
-                            (a: any) => a.imageUrl || "",
-                          )}
+                          src={analysisItem.imageUrl || ""}
                           alt="Mail piece"
                           style={{
                             width: "100%",
@@ -834,25 +773,28 @@ If you cannot read the image clearly, make your best guess based on what you can
 
                       {/* Details */}
                       <div style={{ flex: 1 }}>
-                        {ifElse(
-                          derive(analysisItem, (a: any) => a.pending),
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "8px",
-                            }}
-                          >
-                            <ct-loader size="sm" />
-                            <span style={{ color: "#6b7280" }}>
-                              Analyzing...
-                            </span>
-                          </div>,
-                          ifElse(
-                            derive(analysisItem, (a: any) => !!a.error),
+                        {analysisItem.pending
+                          ? (
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                              }}
+                            >
+                              <ct-loader size="sm" />
+                              <span style={{ color: "#6b7280" }}>
+                                Analyzing...
+                              </span>
+                            </div>
+                          )
+                          : analysisItem.error
+                          ? (
                             <div style={{ color: "#dc2626", fontSize: "12px" }}>
                               LLM Error (image may be inaccessible)
-                            </div>,
+                            </div>
+                          )
+                          : (
                             <div>
                               <div
                                 style={{
@@ -862,39 +804,29 @@ If you cannot read the image clearly, make your best guess based on what you can
                                 }}
                               >
                                 <span style={{ fontWeight: "600" }}>
-                                  {derive(
-                                    analysisItem,
-                                    (a: any) =>
-                                      a.result?.recipient || "Unknown",
-                                  )}
+                                  {analysisItem.result?.recipient || "Unknown"}
                                 </span>
-                                {ifElse(
-                                  derive(
-                                    analysisItem,
-                                    (a: any) => a.result?.isLikelySpam,
-                                  ),
-                                  <span
-                                    style={{
-                                      padding: "2px 6px",
-                                      backgroundColor: "#dc2626",
-                                      color: "white",
-                                      borderRadius: "4px",
-                                      fontSize: "10px",
-                                      fontWeight: "600",
-                                    }}
-                                  >
-                                    SPAM
-                                  </span>,
-                                  null,
-                                )}
+                                {analysisItem.result?.isLikelySpam
+                                  ? (
+                                    <span
+                                      style={{
+                                        padding: "2px 6px",
+                                        backgroundColor: "#dc2626",
+                                        color: "white",
+                                        borderRadius: "4px",
+                                        fontSize: "10px",
+                                        fontWeight: "600",
+                                      }}
+                                    >
+                                      SPAM
+                                    </span>
+                                  )
+                                  : null}
                               </div>
                               <div
                                 style={{ fontSize: "13px", color: "#4b5563" }}
                               >
-                                From: {derive(
-                                  analysisItem,
-                                  (a: any) => a.result?.sender || "Unknown",
-                                )}
+                                From: {analysisItem.result?.sender || "Unknown"}
                               </div>
                               <div
                                 style={{
@@ -903,10 +835,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                                   marginTop: "4px",
                                 }}
                               >
-                                {derive(
-                                  analysisItem,
-                                  (a: any) => a.result?.summary || "",
-                                )}
+                                {analysisItem.result?.summary || ""}
                               </div>
                               <div
                                 style={{
@@ -915,17 +844,14 @@ If you cannot read the image clearly, make your best guess based on what you can
                                   marginTop: "4px",
                                 }}
                               >
-                                Type: {derive(
-                                  analysisItem,
-                                  (a: any) => a.result?.mailType || "unknown",
-                                )} • Spam: {derive(
-                                  analysisItem,
-                                  (a: any) => a.result?.spamConfidence || 0,
-                                )}%
+                                Type:{" "}
+                                {analysisItem.result?.mailType || "unknown"}
+                                {" "}
+                                • Spam:{" "}
+                                {analysisItem.result?.spamConfidence || 0}%
                               </div>
-                            </div>,
-                          ),
-                        )}
+                            </div>
+                          )}
                       </div>
                     </div>
                   ))}

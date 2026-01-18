@@ -326,12 +326,13 @@ export class CTTags extends BaseElement {
   override render() {
     return html`
       <div class="tags-container">
-        ${this.tags.length === 0 && !this.showingNewInput
+        ${(!Array.isArray(this.tags) || this.tags.length === 0) &&
+            !this.showingNewInput
           ? html`
             <span class="placeholder">No tags</span>
           `
           : ""} ${repeat(
-            this.tags,
+            this.tags ?? [],
             (_, index) => index,
             (tag, index) => this.renderTag(tag, index),
           )} ${!this.readonly ? this.renderAddTag() : ""}
