@@ -299,7 +299,7 @@ export default pattern<PatternInput, PatternOutput>(
         resolveInlineImages: true,
         limit: 20,
         historyId: "",
-        debugMode: false,
+        debugMode: DEBUG_USPS,
       },
       linkedAuth, // Pass through from USPS input (user can link google-auth here)
     });
@@ -523,6 +523,23 @@ If you cannot read the image clearly, make your best guess based on what you can
                     <span style={{ marginLeft: "auto", color: "#059669" }}>
                       {uspsEmailCount} USPS emails found
                     </span>
+                    <button
+                      type="button"
+                      onClick={gmailImporter.bgUpdater}
+                      style={{
+                        marginLeft: "8px",
+                        padding: "6px 12px",
+                        backgroundColor: "#10b981",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "6px",
+                        cursor: "pointer",
+                        fontSize: "13px",
+                        fontWeight: "500",
+                      }}
+                    >
+                      Fetch Emails
+                    </button>
                   </div>
                 </div>,
                 null,
