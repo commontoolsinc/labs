@@ -101,7 +101,7 @@ type RefreshStreamType = Stream<Record<string, never>>;
 // Tool definition for additional tools
 export interface ToolDefinition {
   description: string;
-  handler: ReturnType<typeof handler>;
+  handler: Stream<any>;
 }
 
 // ============================================================================

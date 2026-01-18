@@ -149,7 +149,7 @@ export function listTool<Fields extends string>(
     LIST_TOOL_STATE_SCHEMA,
     (input: Record<string, any>, state: {
       items: Writable<any[]>;
-      dedupeFields: string[];
+      dedupeFields: readonly string[];
       idPrefix: string;
       timestampField: string;
     }) => {
