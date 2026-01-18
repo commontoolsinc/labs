@@ -66,6 +66,7 @@ export default pattern<Record<string, never>>((_) => {
             </ct-vstack>
           </ct-cell-context>
         ))}
+        {favorites.length === 0 && <ct-text>No favorites yet.</ct-text>}
       </ct-vstack>
     ),
   };
