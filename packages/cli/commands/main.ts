@@ -1,7 +1,7 @@
 import { Command } from "@cliffy/command";
 import { HelpCommand } from "@cliffy/command/help";
 import { acl } from "./acl.ts";
-import { dev } from "./dev.ts";
+import { check, dev } from "./dev.ts";
 import { init } from "./init.ts";
 import { charm } from "./charm.ts";
 import { identity } from "./identity.ts";
@@ -44,6 +44,7 @@ export const main = new Command()
   .command("acl", acl)
   // @ts-ignore for the above type issue
   .command("charm", charm)
+  .command("check", check)
   .command("dev", dev)
   .command("id", identity)
   .command("init", init)
