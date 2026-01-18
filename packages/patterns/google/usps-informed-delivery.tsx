@@ -22,11 +22,13 @@ import {
   Default,
   generateObject,
   handler,
+  JSONSchema,
   NAME,
   pattern,
   UI,
   Writable,
 } from "commontools";
+import type { Schema } from "commontools/schema";
 import GmailImporter, { type Auth } from "./gmail-importer.tsx";
 
 // Debug flag for development - disable in production
@@ -61,22 +63,6 @@ type MailType =
   | "charity"
   | "other";
 
-/** A single mail piece extracted from an Informed Delivery email */
-interface MailPiece {
-  id: string;
-  emailId: string;
-  emailDate: string;
-  imageUrl: string;
-  // LLM-extracted fields
-  recipient: string;
-  sender: string;
-  mailType: MailType;
-  isLikelySpam: boolean;
-  spamConfidence: number;
-  summary: string;
-  processedAt: number;
-}
-
 /** A learned household member */
 interface HouseholdMember {
   name: string;
@@ -84,11 +70,6 @@ interface HouseholdMember {
   mailCount: number;
   firstSeen: number;
   isConfirmed: boolean;
-}
-
-/** Pattern settings */
-interface Settings {
-  lastProcessedEmailId: Default<string, "">;
 }
 
 // =============================================================================
@@ -146,7 +127,9 @@ const MAIL_ANALYSIS_SCHEMA = {
     "spamConfidence",
     "summary",
   ],
-} as const;
+} as const satisfies JSONSchema;
+
+type MailAnalysis = Schema<typeof MAIL_ANALYSIS_SCHEMA>;
 
 // =============================================================================
 // HELPERS
@@ -262,13 +245,6 @@ const deleteMember = handler<
 // =============================================================================
 
 interface PatternInput {
-  settings: Default<
-    Settings,
-    {
-      lastProcessedEmailId: "";
-    }
-  >;
-  mailPieces: Default<MailPiece[], []>;
   householdMembers: Default<HouseholdMember[], []>;
   // Optional: Link auth directly from a Google Auth charm
   // Use: ct charm link googleAuthCharm/auth uspsCharm/linkedAuth
@@ -277,14 +253,14 @@ interface PatternInput {
 
 /** USPS Informed Delivery mail analyzer. #uspsInformedDelivery */
 interface PatternOutput {
-  mailPieces: MailPiece[];
+  mailPieces: MailAnalysis[];
   householdMembers: HouseholdMember[];
   mailCount: number;
   spamCount: number;
 }
 
 export default pattern<PatternInput, PatternOutput>(
-  ({ settings: _settings, mailPieces, householdMembers, linkedAuth }) => {
+  ({ householdMembers, linkedAuth }) => {
     // Directly instantiate GmailImporter with USPS-specific settings
     // This eliminates the need for separate gmail-importer charm + wish()
     const gmailImporter = GmailImporter({
@@ -294,7 +270,6 @@ export default pattern<PatternInput, PatternOutput>(
         autoFetchOnAuth: true,
         resolveInlineImages: true,
         limit: 20,
-        historyId: "",
         debugMode: DEBUG_USPS,
       },
       linkedAuth, // Pass through from USPS input (user can link google-auth here)
@@ -360,25 +335,24 @@ export default pattern<PatternInput, PatternOutput>(
     // Uses .map() over the derived array to create per-item LLM calls with automatic caching
     const mailPieceAnalyses = mailPieceImages.map((imageInfo) => {
       // Get the image URL from the cell
-      const imageUrl = computed(() => imageInfo?.imageUrl || "");
-
-      const analysis = generateObject({
+      const analysis = generateObject<MailAnalysis>({
         // Prompt computed from imageUrl
         prompt: computed(() => {
-          const url = imageUrl as string;
+          if (!imageInfo?.imageUrl) {
+            if (DEBUG_USPS) {
+              console.log(`[USPS LLM] Empty URL, returning text-only prompt`);
+            }
+
+            return undefined; // No-op while there is no URL
+          }
+          const url = imageInfo.imageUrl;
+
           // Debug logging (gated by DEBUG_USPS flag)
           if (DEBUG_USPS) {
             console.log(
               `[USPS LLM] Processing image URL (first 100 chars):`,
               url?.slice(0, 100),
             );
-          }
-
-          if (!url) {
-            if (DEBUG_USPS) {
-              console.log(`[USPS LLM] Empty URL, returning text-only prompt`);
-            }
-            return "No image URL available - please return default values";
           }
 
           // Check if it's a base64 data URL vs external URL
@@ -414,7 +388,7 @@ If you cannot read the image clearly, make your best guess based on what you can
 
       return {
         imageInfo,
-        imageUrl,
+        imageUrl: imageInfo.imageUrl,
         analysis,
         pending: analysis.pending,
         error: analysis.error,
@@ -424,31 +398,24 @@ If you cannot read the image clearly, make your best guess based on what you can
 
     // Count pending analyses
     const pendingCount = computed(
-      () => mailPieceAnalyses?.filter((a) => a.pending)?.length || 0,
+      () => mailPieceAnalyses?.filter((a) => a?.pending)?.length || 0,
     );
 
     // Count completed analyses
     const completedCount = computed(
       () =>
-        mailPieceAnalyses?.filter((a) => !a.pending && a.result)?.length || 0,
+        mailPieceAnalyses?.filter((a) =>
+          a?.analysis?.pending === false && a?.analysis?.result !== undefined
+        ).length || 0,
     );
 
-    // Derived counts from stored mailPieces (persisted results)
+    const mailPieces = mailPieceAnalyses.map((a) => a.result);
+
+    // Derived counts from stored mailPieces
     const mailCount = computed(() => mailPieces?.length || 0);
     const spamCount = computed(
-      () => mailPieces?.filter((p) => p.isLikelySpam)?.length || 0,
+      () => mailPieces?.filter((p) => p?.isLikelySpam)?.length || 0,
     );
-
-    // Group mail by date - prefixed with _ as not currently used in UI
-    const _mailByDate = computed(() => {
-      const groups: Record<string, MailPiece[]> = {};
-      for (const piece of mailPieces || []) {
-        const date = new Date(piece.emailDate).toLocaleDateString();
-        if (!groups[date]) groups[date] = [];
-        groups[date].push(piece);
-      }
-      return groups;
-    });
 
     // Unconfirmed members count
     const unconfirmedCount = computed(
@@ -546,25 +513,22 @@ If you cannot read the image clearly, make your best guess based on what you can
                     >
                       <span style={{ fontWeight: "600" }}>Analysis:</span>
                       <span>{imageCount} images found</span>
-                      {pendingCount > 0
-                        ? (
-                          <span
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "4px",
-                              color: "#2563eb",
-                            }}
-                          >
-                            <ct-loader size="sm" />
-                            {pendingCount} analyzing...
-                          </span>
-                        )
-                        : (
-                          <span style={{ color: "#059669" }}>
-                            {completedCount} completed
-                          </span>
-                        )}
+                      {pendingCount > 0 && (
+                        <span
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            color: "#2563eb",
+                          }}
+                        >
+                          <ct-loader size="sm" />
+                          {pendingCount} analyzing...
+                        </span>
+                      )}
+                      <span style={{ color: "#059669" }}>
+                        {completedCount} completed
+                      </span>
                     </div>
                   </div>
                 )
@@ -602,118 +566,122 @@ If you cannot read the image clearly, make your best guess based on what you can
                     Spam/Junk
                   </div>
                 </div>
-                <div>
-                  <div style={{ fontSize: "24px", fontWeight: "bold" }}>
-                    {householdMembers?.length || 0}
+                {false && (
+                  <div>
+                    <div style={{ fontSize: "24px", fontWeight: "bold" }}>
+                      {householdMembers?.length || 0}
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#666" }}>
+                      Household Members
+                    </div>
                   </div>
-                  <div style={{ fontSize: "12px", color: "#666" }}>
-                    Household Members
-                  </div>
-                </div>
+                )}
               </div>
 
               {/* Household Members */}
-              <details open style={{ marginTop: "8px" }}>
-                <summary
-                  style={{
-                    cursor: "pointer",
-                    fontWeight: "600",
-                    fontSize: "16px",
-                    marginBottom: "8px",
-                  }}
-                >
-                  Household Members
-                  {unconfirmedCount > 0
-                    ? (
-                      <span
-                        style={{
-                          marginLeft: "8px",
-                          padding: "2px 8px",
-                          backgroundColor: "#fef3c7",
-                          borderRadius: "12px",
-                          fontSize: "12px",
-                          color: "#b45309",
-                        }}
-                      >
-                        {unconfirmedCount} unconfirmed
-                      </span>
-                    )
-                    : null}
-                </summary>
+              {false && (
+                <details open style={{ marginTop: "8px" }}>
+                  <summary
+                    style={{
+                      cursor: "pointer",
+                      fontWeight: "600",
+                      fontSize: "16px",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    Household Members
+                    {unconfirmedCount > 0
+                      ? (
+                        <span
+                          style={{
+                            marginLeft: "8px",
+                            padding: "2px 8px",
+                            backgroundColor: "#fef3c7",
+                            borderRadius: "12px",
+                            fontSize: "12px",
+                            color: "#b45309",
+                          }}
+                        >
+                          {unconfirmedCount} unconfirmed
+                        </span>
+                      )
+                      : null}
+                  </summary>
 
-                <ct-vstack gap="2">
-                  {!householdMembers?.length
-                    ? (
-                      <div style={{ color: "#666", fontSize: "14px" }}>
-                        No household members learned yet. Analyze some mail to
-                        get started.
-                      </div>
-                    )
-                    : null}
-                  {/* Use .map() directly on cell array to get cell references */}
-                  {householdMembers.map((member) => (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        padding: "8px 12px",
-                        backgroundColor: member.isConfirmed
-                          ? "#f0fdf4"
-                          : "#fefce8",
-                        borderRadius: "6px",
-                        border: `1px solid ${
-                          member.isConfirmed ? "#86efac" : "#fde047"
-                        }`,
-                      }}
-                    >
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: "500" }}>{member.name}</div>
-                        <div style={{ fontSize: "12px", color: "#666" }}>
-                          {member.mailCount} pieces
-                          {member.aliases?.length > 0
-                            ? ` • Also: ${member.aliases.join(", ")}`
-                            : ""}
+                  <ct-vstack gap="2">
+                    {!householdMembers?.length
+                      ? (
+                        <div style={{ color: "#666", fontSize: "14px" }}>
+                          No household members learned yet. Analyze some mail to
+                          get started.
                         </div>
-                      </div>
-                      {!member.isConfirmed
-                        ? (
-                          <button
-                            type="button"
-                            onClick={confirmMember({ member })}
-                            style={{
-                              padding: "4px 8px",
-                              fontSize: "12px",
-                              backgroundColor: "#22c55e",
-                              color: "white",
-                              border: "none",
-                              borderRadius: "4px",
-                              cursor: "pointer",
-                            }}
-                          >
-                            Confirm
-                          </button>
-                        )
-                        : null}
-                      <button
-                        type="button"
-                        onClick={deleteMember({ householdMembers, member })}
+                      )
+                      : null}
+                    {/* Use .map() directly on cell array to get cell references */}
+                    {householdMembers.map((member) => (
+                      <div
                         style={{
-                          padding: "4px 8px",
-                          fontSize: "12px",
-                          backgroundColor: "#ef4444",
-                          color: "white",
-                          border: "none",
-                          borderRadius: "4px",
-                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          padding: "8px 12px",
+                          backgroundColor: member.isConfirmed
+                            ? "#f0fdf4"
+                            : "#fefce8",
+                          borderRadius: "6px",
+                          border: `1px solid ${
+                            member.isConfirmed ? "#86efac" : "#fde047"
+                          }`,
                         }}
                       >
-                        Delete
-                      </button>
-                    </div>
-                  ))}
-                </ct-vstack>
-              </details>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: "500" }}>{member.name}</div>
+                          <div style={{ fontSize: "12px", color: "#666" }}>
+                            {member.mailCount} pieces
+                            {member.aliases?.length > 0
+                              ? ` • Also: ${member.aliases.join(", ")}`
+                              : ""}
+                          </div>
+                        </div>
+                        {!member.isConfirmed
+                          ? (
+                            <button
+                              type="button"
+                              onClick={confirmMember({ member })}
+                              style={{
+                                padding: "4px 8px",
+                                fontSize: "12px",
+                                backgroundColor: "#22c55e",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                              }}
+                            >
+                              Confirm
+                            </button>
+                          )
+                          : null}
+                        <button
+                          type="button"
+                          onClick={deleteMember({ householdMembers, member })}
+                          style={{
+                            padding: "4px 8px",
+                            fontSize: "12px",
+                            backgroundColor: "#ef4444",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "4px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    ))}
+                  </ct-vstack>
+                </details>
+              )}
 
               {/* Reactive Mail Piece Analysis Results */}
               <details open style={{ marginTop: "8px" }}>
