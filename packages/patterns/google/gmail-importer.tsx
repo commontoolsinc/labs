@@ -1049,7 +1049,7 @@ export default pattern<{
     // Choose auth source based on linkedAuth availability
     const auth = ifElse(linkedAuth.token, linkedAuth, wishedAuth);
     const isReady = auth.token;
-    const currentEmail = auth.user?.email;
+    const currentEmail = computed(() => auth.user?.email ?? "");
 
     computed(() => {
       if (settings.debugMode) {
