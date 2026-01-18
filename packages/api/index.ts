@@ -930,10 +930,10 @@ export type Opaque<T> =
   | ComparableCell<T>
   | ReadonlyCell<T>
   | WriteonlyCell<T>
-  // Special case: When T includes VNode or UIRenderable (even with null/undefined),
+  // Special case: When T is VNode or UIRenderable (even with null/undefined),
   // also accept JSXElement. Use NonNullable to handle VNode | undefined.
-  | ([NonNullable<T>] extends [VNode] ? JSXElement : never)
-  | ([NonNullable<T>] extends [UIRenderable] ? JSXElement : never)
+  // Combined into single check to reduce type instantiation overhead.
+  | ([NonNullable<T>] extends [VNode | UIRenderable] ? JSXElement : never)
   | (T extends Array<infer U> ? Array<Opaque<U>>
     : T extends object ? { [K in keyof T]: Opaque<T[K]> }
     : T);
