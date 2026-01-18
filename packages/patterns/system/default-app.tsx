@@ -313,7 +313,7 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
                 {visibleCharms.map((charm) => {
                   // Check if charm is a notebook by NAME prefix (isNotebook prop not reliable through proxy)
                   const isNotebook = computed(() => {
-                    const name = charm[NAME];
+                    const name = charm?.[NAME];
                     const result = typeof name === "string" &&
                       name.startsWith("📓");
                     return result;
