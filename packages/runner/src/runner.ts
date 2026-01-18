@@ -34,7 +34,6 @@ import {
 } from "./recipe-binding.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
-  areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
   isCellLink,
   isSigilLink,
@@ -1182,56 +1181,37 @@ export class Runner {
       fn = moduleWrappers[module.wrapper](fn);
     }
 
-    // Check if any of the read cells is a stream alias
+    // Check if $event is a stream alias
     let streamLink: NormalizedFullLink | undefined = undefined;
-    if (isRecord(inputs)) {
-      for (const key in inputs) {
-        let value = inputs[key];
-        while (isWriteRedirectLink(value)) {
-          const maybeStreamLink = resolveLink(
-            this.runtime,
-            tx,
-            parseLink(value, processCell),
-            "writeRedirect",
-          );
-          value = tx.readValueOrThrow(maybeStreamLink);
-        }
-        if (isStreamValue(value)) {
-          streamLink = parseLink(inputs[key], processCell);
-          break;
-        }
+    if (isRecord(inputs) && "$event" in inputs) {
+      let value = inputs.$event;
+      while (isWriteRedirectLink(value)) {
+        const maybeStreamLink = resolveLink(
+          this.runtime,
+          tx,
+          parseLink(value, processCell),
+          "writeRedirect",
+        );
+        value = tx.readValueOrThrow(maybeStreamLink);
+      }
+      if (isStreamValue(value)) {
+        streamLink = parseLink(inputs.$event, processCell);
       }
     }
 
     if (streamLink) {
-      // Helper to merge event into inputs
-      const mergeEventIntoInputs = (event: any) => {
-        const eventInputs = { ...(inputs as Record<string, any>) };
-        for (const key in eventInputs) {
-          if (isWriteRedirectLink(eventInputs[key])) {
-            const eventLink = parseLink(eventInputs[key], processCell);
-            if (areNormalizedLinksSame(eventLink, streamLink)) {
-              eventInputs[key] = event;
-            }
-          }
-        }
-        return eventInputs;
-      };
-
       // Register as event handler for the stream
       const handler = (tx: IExtendedStorageTransaction, event: any) => {
         // TODO(seefeld): Scheduler has to create the transaction instead
         if (event?.preventDefault) event.preventDefault();
-        const eventInputs = mergeEventIntoInputs(event);
-        const cause = { ...(inputs as Record<string, any>) };
-        for (const key in cause) {
-          if (isWriteRedirectLink(cause[key])) {
-            const eventLink = parseLink(cause[key], processCell);
-            if (areNormalizedLinksSame(eventLink, streamLink)) {
-              cause[key] = crypto.randomUUID();
-            }
-          }
-        }
+        const eventInputs = {
+          ...(inputs as Record<string, any>),
+          $event: event,
+        };
+        const cause = {
+          ...(inputs as Record<string, any>),
+          $event: crypto.randomUUID(),
+        };
 
         const frame = pushFrameFromCause(
           cause,
@@ -1356,8 +1336,10 @@ export class Runner {
       // This reads all cells the handler will access (from the argument schema and event).
       const populateDependencies = module.argumentSchema
         ? (depTx: IExtendedStorageTransaction, event: any) => {
-          // Merge event into inputs the same way the handler does
-          const eventInputs = mergeEventIntoInputs(event);
+          const eventInputs = {
+            ...(inputs as Record<string, any>),
+            $event: event,
+          };
           const inputsCell = this.runtime.getImmutableCell(
             processCell.space,
             eventInputs,
