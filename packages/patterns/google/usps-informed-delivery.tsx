@@ -114,6 +114,16 @@ const MAIL_ANALYSIS_SCHEMA = {
       maximum: 100,
       description: "Confidence score for spam classification (0-100)",
     },
+    isUrgent: {
+      type: "boolean",
+      description:
+        "Whether this mail appears urgent or time-sensitive (bills with due dates, government notices, legal documents, medical correspondence, tax forms, etc.)",
+    },
+    urgentReason: {
+      type: "string",
+      description:
+        "Brief explanation of why this mail is considered urgent, or empty string if not urgent",
+    },
     summary: {
       type: "string",
       description: "Brief one-sentence description of this mail piece",
@@ -125,6 +135,8 @@ const MAIL_ANALYSIS_SCHEMA = {
     "mailType",
     "isLikelySpam",
     "spamConfidence",
+    "isUrgent",
+    "urgentReason",
     "summary",
   ],
 } as const satisfies JSONSchema;
@@ -376,6 +388,13 @@ export default pattern<PatternInput, PatternOutput>(
 2. The sender or company name (from return address if visible)
 3. The type of mail (bill, advertisement, personal, package notification, government, subscription, charity, or other)
 4. Whether it appears to be spam/junk mail
+5. Whether it appears URGENT or time-sensitive. Consider urgent:
+   - Government correspondence (IRS, DMV, court notices, etc.)
+   - Legal documents or certified mail indicators
+   - Medical correspondence (hospitals, insurance EOBs, etc.)
+   - Late bills mentioning due dates
+   - Bank account alerts
+   - Time-sensitive offers with deadlines
 
 If you cannot read the image clearly, make your best guess based on what you can see.`,
             },
@@ -416,6 +435,14 @@ If you cannot read the image clearly, make your best guess based on what you can
     const spamCount = computed(
       () => mailPieces?.filter((p) => p?.isLikelySpam)?.length || 0,
     );
+
+    // Filter for urgent mail pieces (with their analysis data for display)
+    const urgentMailAnalyses = computed(() =>
+      (mailPieceAnalyses || []).filter((a) =>
+        a?.result?.isUrgent && !a?.pending
+      )
+    );
+    const urgentCount = computed(() => urgentMailAnalyses?.length || 0);
 
     // Unconfirmed members count
     const unconfirmedCount = computed(
@@ -557,6 +584,18 @@ If you cannot read the image clearly, make your best guess based on what you can
                     style={{
                       fontSize: "24px",
                       fontWeight: "bold",
+                      color: "#f59e0b",
+                    }}
+                  >
+                    {urgentCount}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#666" }}>Urgent</div>
+                </div>
+                <div>
+                  <div
+                    style={{
+                      fontSize: "24px",
+                      fontWeight: "bold",
                       color: "#dc2626",
                     }}
                   >
@@ -683,6 +722,104 @@ If you cannot read the image clearly, make your best guess based on what you can
                 </details>
               )}
 
+              {/* Possibly Urgent Section */}
+              {urgentCount > 0 && (
+                <div
+                  style={{
+                    marginTop: "8px",
+                    padding: "16px",
+                    backgroundColor: "#fef3c7",
+                    borderRadius: "12px",
+                    border: "2px solid #f59e0b",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    <span style={{ fontSize: "20px" }}>⚠️</span>
+                    <span
+                      style={{
+                        fontWeight: "700",
+                        fontSize: "18px",
+                        color: "#b45309",
+                      }}
+                    >
+                      Possibly Urgent ({urgentCount})
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: "16px",
+                    }}
+                  >
+                    {urgentMailAnalyses.map((analysisItem) => (
+                      <div
+                        style={{
+                          backgroundColor: "white",
+                          borderRadius: "8px",
+                          padding: "12px",
+                          border: "1px solid #fcd34d",
+                          width: "200px",
+                        }}
+                      >
+                        {/* Enlarged thumbnail */}
+                        <div
+                          style={{
+                            width: "176px",
+                            height: "132px",
+                            backgroundColor: "#e5e7eb",
+                            borderRadius: "6px",
+                            overflow: "hidden",
+                            marginBottom: "8px",
+                          }}
+                        >
+                          <img
+                            src={analysisItem.imageUrl || ""}
+                            alt="Urgent mail piece"
+                            style={{
+                              width: "100%",
+                              height: "100%",
+                              objectFit: "cover",
+                            }}
+                          />
+                        </div>
+                        {/* Info */}
+                        <div style={{ fontWeight: "600", fontSize: "14px" }}>
+                          {analysisItem.result?.sender || "Unknown Sender"}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "12px",
+                            color: "#6b7280",
+                            marginTop: "2px",
+                          }}
+                        >
+                          To: {analysisItem.result?.recipient || "Unknown"}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "12px",
+                            color: "#b45309",
+                            marginTop: "6px",
+                            fontStyle: "italic",
+                          }}
+                        >
+                          {analysisItem.result?.urgentReason ||
+                            "Time-sensitive"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Reactive Mail Piece Analysis Results */}
               <details open style={{ marginTop: "8px" }}>
                 <summary
@@ -774,6 +911,22 @@ If you cannot read the image clearly, make your best guess based on what you can
                                 <span style={{ fontWeight: "600" }}>
                                   {analysisItem.result?.recipient || "Unknown"}
                                 </span>
+                                {analysisItem.result?.isUrgent
+                                  ? (
+                                    <span
+                                      style={{
+                                        padding: "2px 6px",
+                                        backgroundColor: "#f59e0b",
+                                        color: "white",
+                                        borderRadius: "4px",
+                                        fontSize: "10px",
+                                        fontWeight: "600",
+                                      }}
+                                    >
+                                      URGENT
+                                    </span>
+                                  )
+                                  : null}
                                 {analysisItem.result?.isLikelySpam
                                   ? (
                                     <span
