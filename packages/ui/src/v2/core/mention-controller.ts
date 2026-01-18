@@ -4,7 +4,12 @@ import {
   isCellHandle,
   NAME,
 } from "@commontools/runtime-client";
-import { type Mentionable, type MentionableArray } from "./mentionable.ts";
+import {
+  type Mentionable,
+  type MentionableArray,
+  MentionableAsCellsArraySchema,
+  type MentionableCellsArray,
+} from "./mentionable.ts";
 
 /**
  * Configuration for the MentionController
@@ -84,8 +89,8 @@ export class MentionController implements ReactiveController {
     selectedIndex: 0,
   };
 
-  // Mentionable items
-  private _mentionable: CellHandle<MentionableArray> | null = null;
+  // Mentionable items - typed for schema-converted cell where .get() returns CellHandle[]
+  private _mentionable: CellHandle<MentionableCellsArray> | null = null;
   private _mentionableUnsubscribe: (() => void) | null = null;
 
   constructor(
@@ -111,11 +116,14 @@ export class MentionController implements ReactiveController {
   }
 
   /**
-   * Set the mentionable items
+   * Set the mentionable items.
+   * Applies MentionableAsCellsArraySchema so .get() returns CellHandle[].
    */
   setMentionable(mentionable: CellHandle<MentionableArray> | null): void {
     this._cleanupMentionableSubscription();
-    this._mentionable = mentionable;
+    this._mentionable = mentionable?.asSchema<MentionableCellsArray>(
+      MentionableAsCellsArraySchema,
+    ) ?? null;
 
     // Set up new subscription
     this._setupMentionableSubscription();
@@ -138,27 +146,21 @@ export class MentionController implements ReactiveController {
   }
 
   /**
-   * Get filtered mentions based on current query
+   * Get filtered mentions based on current query.
+   * Uses _mentionable which has proper typing from asSchema<MentionableCellsArray>.
    */
   getFilteredMentions(): CellHandle<Mentionable>[] {
-    if (!this._mentionable) {
-      return [];
-    }
-
-    const mentionableArray = this._mentionable.get();
-    if (!Array.isArray(mentionableArray) || mentionableArray.length === 0) {
+    const mentionableCells = this._mentionable?.get();
+    if (!mentionableCells || mentionableCells.length === 0) {
       return [];
     }
 
     const query = this._state.query.toLowerCase();
 
     const filtered: CellHandle<Mentionable>[] = [];
-    for (let i = 0; i < mentionableArray.length; i++) {
-      // Use .key(i) to get Cell reference, preserving cell-ness
-      const mentionCell = this._mentionable.key(i);
-
-      // Only call .get() to read the name for filtering
-      const name = mentionCell.get()?.[NAME];
+    for (const mentionCell of mentionableCells) {
+      if (!mentionCell) continue;
+      const name = mentionCell.key(NAME).get() as string | undefined;
 
       if (!query || name?.toLowerCase().includes(query)) {
         filtered.push(mentionCell);
@@ -328,26 +330,17 @@ export class MentionController implements ReactiveController {
     return mentions;
   }
 
+  /**
+   * Read all mentionable items as CellHandles.
+   * Uses _mentionable which has proper typing from asSchema<MentionableCellsArray>.
+   */
   private readMentionables(): CellHandle<Mentionable>[] {
-    if (!this._mentionable) {
+    const mentionableCells = this._mentionable?.get();
+    if (!mentionableCells || mentionableCells.length === 0) {
       return [];
     }
 
-    const mentionableArray = this._mentionable.get();
-    if (!Array.isArray(mentionableArray) || mentionableArray.length === 0) {
-      return [];
-    }
-
-    // Use .key(i) to preserve cell-ness of items
-    const mentions: CellHandle<Mentionable>[] = [];
-    for (let i = 0; i < mentionableArray.length; i++) {
-      const mentionCell = this._mentionable.key(i);
-      if (mentionCell) {
-        mentions.push(mentionCell);
-      }
-    }
-
-    return mentions;
+    return mentionableCells.filter((cell) => cell != null);
   }
 
   /**

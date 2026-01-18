@@ -1,3 +1,4 @@
+import { type CellHandle } from "@commontools/runtime-client";
 import { type JSONSchema, NAME } from "@commontools/runner/shared";
 
 export interface Mentionable {
@@ -6,6 +7,12 @@ export interface Mentionable {
 }
 
 export type MentionableArray = Mentionable[];
+
+/**
+ * Type for a CellHandle after applying MentionableAsCellsArraySchema.
+ * When .get() is called, returns CellHandle<Mentionable>[] instead of Mentionable[].
+ */
+export type MentionableCellsArray = CellHandle<Mentionable>[];
 
 export const MentionableSchema = {
   type: "object",
@@ -21,4 +28,9 @@ export const MentionableSchema = {
 export const MentionableArraySchema = {
   type: "array",
   items: MentionableSchema,
+} as const satisfies JSONSchema;
+
+export const MentionableAsCellsArraySchema = {
+  type: "array",
+  items: { ...MentionableSchema, asCell: true },
 } as const satisfies JSONSchema;
