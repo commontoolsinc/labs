@@ -9,56 +9,59 @@ if [[ ! " ${DENO_VERSIONS_ALLOWED[@]} " =~ " ${DENO_VERSION} " ]]; then
   exit 1
 fi
 
-deno check tasks/*.ts
-deno check recipes/[!_]*.ts*
+# Function to check a path (handles globs via eval)
+check_path() {
+  echo "Checking: $1"
+  eval "deno check $1"
+}
 
-# TODO(runtime-worker-refactor):
-# Ignore ct-outliner until re-added
-deno check packages/ui/src/v2/components/*[!outliner]/*.ts*
+# All paths to check
+PATHS=(
+  "tasks/*.ts"
+  "recipes/[!_]*.ts*"
+  "packages/ui/src/v2/components/*[!outliner]/*.ts*"
+  "packages/api"
+  "packages/background-charm-service"
+  "packages/charm"
+  "packages/cli/*.ts"
+  "packages/cli/test"
+  "packages/cli/commands"
+  "packages/deno-web-test"
+  "packages/html"
+  "packages/identity"
+  "packages/iframe-sandbox"
+  "packages/integration"
+  "packages/js-compiler"
+  "packages/llm"
+  "packages/memory"
+  "packages/runner"
+  "packages/runtime-client"
+  "packages/seeder"
+  "packages/shell"
+  "packages/static/*.ts"
+  "packages/static/scripts"
+  "packages/static/test"
+  "packages/toolshed"
+  "packages/utils"
+  "packages/patterns/*.ts"
+  "packages/patterns/*.tsx"
+  "packages/patterns/battleship"
+  "packages/patterns/budget-tracker"
+  "packages/patterns/contacts"
+  "packages/patterns/deprecated"
+  "packages/patterns/examples"
+  "packages/patterns/gideon-tests"
+  "packages/patterns/integration"
+  "packages/patterns/notes"
+  "packages/patterns/record"
+  "packages/patterns/scrabble"
+  "packages/patterns/system"
+  "packages/patterns/test"
+  "packages/patterns/weekly-calendar"
+  "packages/patterns/google"
+)
 
-# Check core packages
-deno check \
-  packages/api \
-  packages/background-charm-service \
-  packages/charm \
-  packages/cli/*.ts \
-  packages/cli/test \
-  packages/cli/commands \
-  packages/deno-web-test \
-  packages/html \
-  packages/identity \
-  packages/iframe-sandbox \
-  packages/integration \
-  packages/js-compiler \
-  packages/llm \
-  packages/memory \
-  packages/runner \
-  packages/runtime-client \
-  packages/seeder \
-  packages/shell \
-  packages/static/*.ts \
-  packages/static/scripts \
-  packages/static/test \
-  packages/toolshed \
-  packages/utils
-
-# Check patterns separately to avoid OOM in CI
-deno check \
-  packages/patterns/*.ts \
-  packages/patterns/*.tsx \
-  packages/patterns/battleship \
-  packages/patterns/budget-tracker \
-  packages/patterns/contacts \
-  packages/patterns/deprecated \
-  packages/patterns/examples \
-  packages/patterns/gideon-tests \
-  packages/patterns/integration \
-  packages/patterns/notes \
-  packages/patterns/record \
-  packages/patterns/scrabble \
-  packages/patterns/system \
-  packages/patterns/test \
-  packages/patterns/weekly-calendar
-
-# Check google patterns separately (large package)
-deno check packages/patterns/google
+# Check each path separately
+for path in "${PATHS[@]}"; do
+  check_path "$path"
+done
