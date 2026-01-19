@@ -462,7 +462,9 @@ const setDueDateForGroup = handler<
   {
     groupItems: TrackedItem[];
     selectedItems: Writable<Default<string[], []>>;
-    dueDateOverrides: Writable<Default<Record<string, string>, {}>>;
+    dueDateOverrides: Writable<
+      Default<Record<string, string>, Record<string, never>>
+    >;
   }
 >((event, { groupItems, selectedItems, dueDateOverrides }) => {
   const input = (event as { target: { value: string } }).target;
@@ -512,7 +514,9 @@ interface PatternInput {
   // Track selected items for bulk operations (per-group checkboxes)
   selectedItems: Writable<Default<string[], []>>;
   // Track manual due date overrides (persisted)
-  dueDateOverrides: Writable<Default<Record<string, string>, {}>>;
+  dueDateOverrides: Writable<
+    Default<Record<string, string>, Record<string, never>>
+  >;
 }
 
 /** Berkeley Public Library book tracker. #berkeleyLibrary */
