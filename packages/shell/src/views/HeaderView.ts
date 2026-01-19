@@ -247,7 +247,7 @@ export class XHeaderView extends BaseView {
 
     const title = html`
       <h1 id="page-title">
-        ${spaceLink}${charmLink ? " / " : ""}${charmLink}${reloadIcon}
+        ${spaceLink}${charmLink ? " / " : ""}${charmLink}
       </h1>
     `;
 
@@ -258,7 +258,7 @@ export class XHeaderView extends BaseView {
       <div id="header">
         <div class="left-section">
           <ct-logo .backgroundColor="${connectionColor}"></ct-logo>
-          ${title}
+          ${title} ${reloadIcon}
         </div>
         ${this.isLoggedIn
           ? html`
