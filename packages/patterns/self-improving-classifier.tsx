@@ -12,8 +12,6 @@
  * - Regex rules with precision-weighted voting (Phase 2)
  * - LLM-generated rule suggestions (Phase 3)
  * - Per-rule confidence tiers (Phase 4)
- *
- * @tags #classifier #learning
  */
 import {
   computed,
@@ -160,6 +158,7 @@ interface ClassifierInput {
   currentItem: Writable<Default<ClassifiableInput | null, null>>;
 }
 
+/** Self-improving binary classifier with LLM + regex rules. #classifier #learning */
 interface ClassifierOutput {
   config: ClassifierConfig;
   examples: LabeledExample[];
