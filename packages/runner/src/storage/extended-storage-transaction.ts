@@ -149,10 +149,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         }
         valueObj = currentValue as Record<string, JSONValue>;
       }
-      const remainingPath = address.path.slice(lastExistingPath?.length ?? 0);
+      const remainingPath = address.path.slice(lastExistingPath.length);
       if (remainingPath.length === 0) {
         throw new Error(
-          `Invalid error path: ${errorPath?.join("/")}`,
+          `Invalid error path: ${errorPath.join("/")}`,
         );
       }
       const lastKey = remainingPath.pop()!;
@@ -166,7 +166,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             >;
       }
       nextValue[lastKey] = value as JSONValue;
-      const parentAddress = { ...address, path: lastExistingPath ?? [] };
+      const parentAddress = { ...address, path: lastExistingPath };
       const writeResultRetry = this.tx.write(parentAddress, valueObj);
       logResult(
         "writeOrThrow, retry",
