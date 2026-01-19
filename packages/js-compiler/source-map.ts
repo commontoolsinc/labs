@@ -17,12 +17,16 @@ const MAX_SOURCE_MAP_CACHE_SIZE = 50;
 /// ```
 // at doubleOrThrow (recipe-abc.js, <anonymous>:14:15)
 // at Object.eval [as factory] (recipe-abc.js, <anonymous>:4:52)
+// at Object.errorOnLine6 [as default] (known-line.js, <anonymous>:5:15)
 // at AMDLoader.resolveModule (recipe-abc.js, <anonymous>:1:1764)
 // at AMDLoader.require (recipe-abc.js, <anonymous>:1:923)
 // at eval (recipe-abc.js, <anonymous>:17:10)
 /// ```
+// Pattern breakdown:
+// - Function name: [\w\.$<>]* allows alphanumeric, underscore, dot, $, and <> (for <anonymous>)
+// - [as identifier]: \[as \w+\] matches any identifier, not just "factory"
 const stackTracePattern =
-  /at ([a-zA-Z\.]*) (?:\[as factory\] )?\((.+?)(?:, <anonymous>)?(?:\):|\:)(\d+):(\d+)\)/;
+  /at ([\w\.$<>]*) (?:\[as \w+\] )?\((.+?)(?:, <anonymous>)?(?:\):|\:)(\d+):(\d+)\)/;
 const CT_INTERNAL = `    at <CT_INTERNAL>`;
 const UNMAPPED = `    at <UNMAPPED>`;
 
