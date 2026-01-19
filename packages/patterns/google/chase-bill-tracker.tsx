@@ -248,10 +248,11 @@ function formatDate(dateStr: string | undefined): string {
  * Get a consistent color for a card based on its last 4 digits.
  * Same card always gets the same color.
  */
-function getCardColor(last4: string): string {
+function getCardColor(last4: string | undefined): string {
+  if (!last4 || typeof last4 !== "string") return CARD_COLORS[0];
   let hash = 0;
-  for (const char of last4) {
-    hash = (hash + char.charCodeAt(0)) % 16;
+  for (let i = 0; i < last4.length; i++) {
+    hash = (hash + last4.charCodeAt(i)) % 16;
   }
   return CARD_COLORS[hash];
 }
@@ -429,9 +430,9 @@ Extract:
     // ==========================================================================
 
     // Extract payment confirmations (to auto-mark bills as paid)
-    // Using Record<string, string> instead of Map since Map is not JSON-serializable
+    // Track ALL payment dates per card to match against bill due dates
     const paymentConfirmations = computed(() => {
-      const confirmations: Record<string, string> = {}; // cardLast4 -> paymentDate
+      const confirmations: Record<string, string[]> = {}; // cardLast4 -> array of paymentDates
 
       for (const analysisItem of emailAnalyses || []) {
         const result = analysisItem.result;
@@ -442,10 +443,11 @@ Extract:
           result.cardLast4 &&
           result.paymentDate
         ) {
-          // Find the bill this payment applies to
-          // We'll match by card last 4 and look for nearby due dates
           const key = result.cardLast4;
-          confirmations[key] = result.paymentDate;
+          if (!confirmations[key]) {
+            confirmations[key] = [];
+          }
+          confirmations[key].push(result.paymentDate);
         }
       }
 
@@ -457,8 +459,8 @@ Extract:
       const billMap: Record<string, TrackedBill> = {};
       // manuallyPaid is Writable - use .get() to access value
       const paidKeys = manuallyPaid.get() || [];
-      // Access the computed value - paymentConfirmations returns a Record
-      const payments = (paymentConfirmations || {}) as Record<string, string>;
+      // Access the computed value - paymentConfirmations returns a Record of arrays
+      const payments = (paymentConfirmations || {}) as Record<string, string[]>;
 
       // Sort emails by date (newest first) so we keep most recent data
       const sortedAnalyses = [...(emailAnalyses || [])]
@@ -503,9 +505,19 @@ Extract:
 
         // Check if this bill has been paid (auto or manual)
         const isManuallyPaid = paidKeys.includes(key);
-        // TODO(@anthropic): Auto-pay detection is broad - any payment for a card marks
-        // all bills for that card as paid. Could match payment amounts/dates for precision.
-        const autoPaid = result.cardLast4 in payments;
+        // Check if any payment was made on or after the due date for this card
+        // This means the bill was paid (payments typically happen around due date)
+        const cardPayments = payments[result.cardLast4] || [];
+        const billDueDate = result.dueDate; // Already verified non-null above
+        const matchingPayment = cardPayments.find((paymentDate) => {
+          // A payment made within 30 days before or any time after the due date
+          // likely corresponds to this bill
+          const dueDateMs = new Date(billDueDate).getTime();
+          const paymentMs = new Date(paymentDate).getTime();
+          const daysDiff = (paymentMs - dueDateMs) / (1000 * 60 * 60 * 24);
+          return daysDiff >= -30; // Payment made within 30 days before due date or after
+        });
+        const autoPaid = !!matchingPayment;
         const isPaid = isManuallyPaid || autoPaid;
 
         const trackedBill: TrackedBill = {
@@ -515,7 +527,7 @@ Extract:
           dueDate: result.dueDate,
           status: isPaid ? "paid" : daysUntilDue < 0 ? "overdue" : "unpaid",
           isPaid,
-          paidDate: autoPaid ? payments[result.cardLast4] : undefined,
+          paidDate: matchingPayment || undefined,
           emailDate: analysisItem.emailDate,
           emailId: analysisItem.emailId,
           isManuallyPaid,
@@ -531,25 +543,23 @@ Extract:
     });
 
     // Unpaid bills
-    const unpaidBills = computed(() =>
-      (bills || []).filter((bill) => !bill.isPaid)
-    );
+    const unpaidBills = computed(() => bills.filter((bill) => !bill.isPaid));
 
     // Paid bills - sorted by due date descending (newest first)
     const paidBills = computed(() =>
-      (bills || [])
+      bills
         .filter((bill) => bill.isPaid)
         .sort((a, b) => b.dueDate.localeCompare(a.dueDate))
     );
 
     // Total unpaid amount
     const totalUnpaid = computed(() =>
-      (unpaidBills || []).reduce((sum, bill) => sum + bill.amount, 0)
+      unpaidBills.reduce((sum, bill) => sum + bill.amount, 0)
     );
 
     // Overdue count
     const overdueCount = computed(
-      () => (unpaidBills || []).filter((bill) => bill.daysUntilDue < 0).length,
+      () => unpaidBills.filter((bill) => bill.daysUntilDue < 0).length,
     );
 
     // Preview UI for compact display
@@ -762,19 +772,22 @@ Extract:
                   style={{
                     borderLeft: "1px solid #d1d5db",
                     paddingLeft: "16px",
+                    display: computed(() =>
+                      overdueCount > 0 ? "block" : "none"
+                    ),
                   }}
                 >
                   <div
                     style={{
                       fontSize: "28px",
                       fontWeight: "bold",
-                      color: "#059669",
+                      color: "#dc2626",
                     }}
                   >
-                    {computed(() => paidBills?.length || 0)}
+                    {computed(() => overdueCount)}
                   </div>
                   <div style={{ fontSize: "12px", color: "#666" }}>
-                    Paid Bills
+                    Overdue
                   </div>
                 </div>
               </div>
@@ -820,7 +833,7 @@ Extract:
               <div
                 style={{
                   display: computed(() =>
-                    (unpaidBills || []).length > 0 ? "block" : "none"
+                    unpaidBills.length > 0 ? "block" : "none"
                   ),
                 }}
               >
@@ -916,7 +929,7 @@ Extract:
               <div
                 style={{
                   display: computed(() =>
-                    (paidBills || []).length > 0 ? "block" : "none"
+                    paidBills.length > 0 ? "block" : "none"
                   ),
                 }}
               >
@@ -1164,7 +1177,8 @@ Extract:
                               marginTop: "4px",
                             }}
                           >
-                            Error: {computed(() =>
+                            Error:{" "}
+                            {computed(() =>
                               analysis.error ? String(analysis.error) : ""
                             )}
                           </div>
@@ -1188,7 +1202,8 @@ Extract:
                               }}
                             >
                               <div style={{ color: "#374151" }}>
-                                <strong>Type:</strong> {computed(() =>
+                                <strong>Type:</strong>{" "}
+                                {computed(() =>
                                   analysis.result?.emailType || "N/A"
                                 )}
                               </div>
@@ -1214,14 +1229,16 @@ Extract:
                               <div
                                 style={{ color: "#374151", marginTop: "4px" }}
                               >
-                                <strong>Due:</strong> {computed(() =>
+                                <strong>Due:</strong>{" "}
+                                {computed(() =>
                                   formatDate(analysis.result?.dueDate)
                                 )}
                               </div>
                               <div
                                 style={{ color: "#374151", marginTop: "4px" }}
                               >
-                                <strong>Summary:</strong> {computed(() =>
+                                <strong>Summary:</strong>{" "}
+                                {computed(() =>
                                   analysis.result?.summary || "N/A"
                                 )}
                               </div>
@@ -1267,7 +1284,7 @@ Extract:
                   }}
                   title="Uses fake numbers for privacy"
                 >
-                  Demo Mode
+                  ⚠️ Demo Mode
                 </div>
               )}
             </ct-vstack>
