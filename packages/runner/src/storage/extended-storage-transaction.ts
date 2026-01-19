@@ -129,10 +129,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // lastExistingPath is one level up - the actual last existing parent.
       const errorPath = (writeResult.error as INotFoundError).path;
       const lastExistingPath = errorPath.slice(0, -1);
-      // When document doesn't exist (errorPath is [], so lastExistingPath is []),
-      // we don't need to read - just start with {}.
+      // When document doesn't exist (errorPath is []), we don't need to read -
+      // just start with {}. But if errorPath has content (e.g., ["foo"]), the
+      // document exists and we need to read from lastExistingPath to preserve
+      // existing fields.
       let valueObj: Record<string, JSONValue>;
-      if (lastExistingPath.length === 0) {
+      if (errorPath.length === 0) {
         valueObj = {};
       } else {
         const currentValue = this.readOrThrow({
