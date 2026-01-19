@@ -107,12 +107,37 @@ export interface Employment {
 }
 
 // ============================================================================
+// DEFAULT VALUES (for Default<> type parameters)
+// ============================================================================
+
+const EMPTY_PERSON: Person = {
+  name: "",
+  nickname: "",
+  birthday: { month: "", day: "", year: "" },
+  relationship: "",
+  phones: [],
+  emails: [],
+  addresses: [],
+  school: { name: "", gradeLevel: "", teacher: "" },
+  notes: "",
+};
+
+const EMPTY_EMPLOYMENT: Employment = {
+  employer: "",
+  title: "",
+  street: "",
+  city: "",
+  state: "",
+  notes: "",
+};
+
+// ============================================================================
 // PROFILE INPUT/OUTPUT SCHEMAS
 // ============================================================================
 
 interface ProfileInput {
-  self?: Writable<Person>;
-  partner?: Writable<Person>;
+  self?: Writable<Default<Person, typeof EMPTY_PERSON>>;
+  partner?: Writable<Default<Person, typeof EMPTY_PERSON>>;
   children?: Writable<Default<Person[], []>>;
   parents?: Writable<Default<Person[], []>>;
   inlaws?: Writable<Default<Person[], []>>;
@@ -120,7 +145,7 @@ interface ProfileInput {
   vehicles?: Writable<Default<Vehicle[], []>>;
   memberships?: Writable<Default<Membership[], []>>;
   banks?: Writable<Default<Bank[], []>>;
-  employment?: Writable<Employment>;
+  employment?: Writable<Default<Employment, typeof EMPTY_EMPLOYMENT>>;
   notes?: Writable<Default<string, "">>;
 }
 
