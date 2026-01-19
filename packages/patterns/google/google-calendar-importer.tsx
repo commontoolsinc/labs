@@ -365,7 +365,9 @@ async function fetchCalendarEvents(state: FetchState): Promise<void> {
       calendars.some(
         (cal, i) =>
           existingCalendars[i]?.id !== cal.id ||
-          existingCalendars[i]?.summary !== cal.summary,
+          existingCalendars[i]?.summary !== cal.summary ||
+          existingCalendars[i]?.backgroundColor !== cal.backgroundColor ||
+          existingCalendars[i]?.foregroundColor !== cal.foregroundColor,
       );
     if (calendarsChanged) {
       debugLog(debugMode, "Calendar list changed, updating...");
