@@ -21,7 +21,7 @@ ls -la *.key 2>/dev/null || ls -la ~/.claude/*.key 2>/dev/null || find . -name "
 
 **Check syntax without deploying:**
 ```bash
-deno task ct dev pattern.tsx --no-run
+deno task ct check pattern.tsx --no-run
 ```
 
 **Deploy new pattern:**

@@ -26,7 +26,7 @@ hooks:
 
 ```bash
 # Check compilation only (no server, no deploy)
-deno task ct dev main.tsx --no-run
+deno task ct check main.tsx --no-run
 
 # Deploy to toolshed (this is how you "run" it)
 API_URL=<url> deno task ct charm new main.tsx --identity <key_path>
@@ -42,7 +42,7 @@ API_URL=<url> deno task ct charm call <handler> --charm <charm_id> --identity <k
 ## Deploy Flow
 
 1. **Ask for config** (key, API URL, space)
-2. **Check compilation** (`ct dev --no-run`)
+2. **Check compilation** (`ct check --no-run`)
 3. **Deploy** (`ct charm new`) — this gives you a charm ID and URL
 4. **Give user the link** to test in browser
 5. **Debug** with `inspect` and `call` as needed

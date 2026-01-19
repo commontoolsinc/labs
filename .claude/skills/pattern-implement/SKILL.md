@@ -52,6 +52,6 @@ const deleteItem = handler<void, { items: Writable<Item[]>; index: number }>(
 ```
 
 ## Done When
-- Pattern compiles: `deno task ct dev pattern.tsx --no-run`
+- Pattern compiles: `deno task ct check pattern.tsx --no-run`
 - Minimal UI renders inputs/buttons
 - Ready for testing
