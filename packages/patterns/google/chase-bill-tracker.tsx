@@ -449,6 +449,8 @@ Extract:
 
         // Check if this bill has been paid (auto or manual)
         const isManuallyPaid = paidKeys.includes(key);
+        // TODO(@anthropic): Auto-pay detection is broad - any payment for a card marks
+        // all bills for that card as paid. Could match payment amounts/dates for precision.
         const autoPaid = result.cardLast4 in payments;
         const isPaid = isManuallyPaid || autoPaid;
 
