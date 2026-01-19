@@ -11,7 +11,8 @@
 ./scripts/stop-local-dev.sh           # Stop both servers
 ./scripts/restart-local-dev.sh        # Restart both
 ./scripts/restart-local-dev.sh --force       # Force kill first
-./scripts/restart-local-dev.sh --clear-cache # Clear cache on restart
+./scripts/restart-local-dev.sh --clear-cache # Clear disposable caches (preserves spaces)
+./scripts/restart-local-dev.sh --dangerously-clear-all-spaces # Clear databases/spaces
 ```
 
 **URLs:**
@@ -84,7 +85,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:5173          # Shell
 | Commands hang/timeout | Servers not running | Run `./scripts/restart-local-dev.sh` |
 | Space shows errors | Only one server running | Ensure BOTH are running |
 | Port already in use | Previous server didn't stop | Use `--force` flag |
-| Stale data | Cache issues | Use `--clear-cache` flag |
+| Stale data | Cache issues | Use `--clear-cache` flag (or `--dangerously-clear-all-spaces` for database issues) |
 | `*.ts.net` URLs hang | Not on Tailscale | Connect to CT network via Tailscale |
 | OAuth error: `Unexpected token '<'` | Fetching from wrong port | Use port 8000 for API calls ([see below](#oauth-returns-html-instead-of-json)) |
 | UI component changes not appearing | Shell doesn't watch packages/ui | Restart local dev server |
