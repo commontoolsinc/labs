@@ -7,11 +7,11 @@
  * Entities stored here can later be "popped out" to dedicated patterns
  * (person.tsx, vehicle.tsx, etc.) without changing the data structure.
  *
- * Discovery tag: #profile
- *
  * Usage from other patterns:
  *   const profile = wish<ProfileOutput>({ query: "#profile" });
  *   profile?.memberships.push({ program: "Hilton Honors", memberNumber: "12345" });
+ *
+ * @tags #profile
  */
 import {
   action,
