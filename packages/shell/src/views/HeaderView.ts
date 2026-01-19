@@ -208,6 +208,12 @@ export class XHeaderView extends BaseView {
     }
   }
 
+  private handleLogoClick(e: Event) {
+    e.preventDefault();
+    e.stopPropagation();
+    globalThis.location.href = "/";
+  }
+
   private getConnectionStatus(): ConnectionStatus {
     return this.rt ? "connected" : "disconnected";
   }
@@ -257,7 +263,11 @@ export class XHeaderView extends BaseView {
     return html`
       <div id="header">
         <div class="left-section">
-          <ct-logo .backgroundColor="${connectionColor}"></ct-logo>
+          <ct-logo
+            .backgroundColor="${connectionColor}"
+            @click="${this.handleLogoClick}"
+            title="Go to home"
+          ></ct-logo>
           ${title} ${reloadIcon}
         </div>
         ${this.isLoggedIn
