@@ -1743,16 +1743,16 @@ export default pattern<Input, Output>(
             <ct-tab-panel value="departments">
               <ct-vscroll flex showScrollbar fadeEdges>
                 <ct-vstack gap="2" style="padding: 1rem; max-width: 800px;">
-                  {/* Department list - sorted with unassigned first */}
-                  {derive(departments, (depts: Department[]) => {
+                  {/* Department list - unassigned shown first, assigned at bottom */}
+                  {computed(() => {
+                    const depts = departments.get();
                     // Sort: unassigned first, then assigned departments
-                    const sorted = [...depts].sort((a, b) => {
+                    return [...depts].sort((a, b) => {
                       const aAssigned = a.location !== "unassigned";
                       const bAssigned = b.location !== "unassigned";
                       if (aAssigned === bAssigned) return 0;
                       return aAssigned ? 1 : -1;
                     });
-                    return sorted;
                   }).map((dept) => (
                     <ct-card>
                       <ct-vstack gap="2">
