@@ -44,6 +44,7 @@ import {
   PageResponse,
   type PageStartRequest,
   type PageStopRequest,
+  type RecreateSpaceRootPatternRequest,
   RequestType,
   type SetLoggerEnabledRequest,
   type SetLoggerLevelRequest,
@@ -380,6 +381,15 @@ export class RuntimeProcessor {
     };
   }
 
+  async handleRecreateSpaceRootPattern(
+    _: RecreateSpaceRootPatternRequest,
+  ): Promise<PageResponse> {
+    const charm = await this.cc.recreateDefaultPattern();
+    return {
+      page: createPageRef(charm.getCell()),
+    };
+  }
+
   // TODO(runtime-worker-refactor): Can this fail? What if the cell
   // is not a page cell?
   handlePageGet(
@@ -552,6 +562,10 @@ export class RuntimeProcessor {
         );
       case RequestType.GetSpaceRootPattern:
         return await this.handleGetSpaceRootPattern(
+          request,
+        );
+      case RequestType.RecreateSpaceRootPattern:
+        return await this.handleRecreateSpaceRootPattern(
           request,
         );
       case RequestType.PageGet:

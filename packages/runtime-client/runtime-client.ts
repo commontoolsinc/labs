@@ -171,6 +171,15 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return new PageHandle<NameSchema>(this, response.page);
   }
 
+  async recreateSpaceRootPattern(): Promise<PageHandle<NameSchema>> {
+    const response = await this.#conn.request<
+      RequestType.RecreateSpaceRootPattern
+    >({
+      type: RequestType.RecreateSpaceRootPattern,
+    });
+    return new PageHandle<NameSchema>(this, response.page);
+  }
+
   async getPage<T = unknown>(
     pageId: string,
     runIt?: boolean,

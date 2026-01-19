@@ -208,6 +208,11 @@ export class XAppView extends BaseView {
     }
   }
 
+  #handlePatternRecreated = () => {
+    // Re-run the space root pattern task to pick up the newly recreated pattern
+    this._spaceRootPattern.run();
+  };
+
   // Always defer to the loaded active pattern for the ID,
   // but until that loads, use an ID in the view if available.
   private getActivePatternId(): string | undefined {
@@ -241,6 +246,9 @@ export class XAppView extends BaseView {
     const spaceName = this.app && "spaceName" in this.app.view
       ? this.app.view.spaceName
       : undefined;
+    // We're viewing the default pattern if there's no charmId in the current view
+    const isViewingDefaultPattern = !("charmId" in this.app.view &&
+      this.app.view.charmId);
     const content = this.app?.identity ? authenticated : unauthenticated;
     return html`
       <div class="shell-container">
@@ -251,9 +259,11 @@ export class XAppView extends BaseView {
           .keyStore="${this.keyStore}"
           .charmTitle="${this.charmTitle}"
           .charmId="${charmId}"
+          .isViewingDefaultPattern="${isViewingDefaultPattern}"
           .showShellCharmListView="${config.showShellCharmListView ?? false}"
           .showDebuggerView="${config.showDebuggerView ?? false}"
           .showSidebar="${config.showSidebar ?? false}"
+          @pattern-recreated="${this.#handlePatternRecreated}"
         ></x-header-view>
         <div class="content-area">
           ${content}
