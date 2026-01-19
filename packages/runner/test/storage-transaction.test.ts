@@ -765,6 +765,258 @@ describe("root value rewriting", () => {
   });
 });
 
+describe("numeric path key edge cases", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      storageManager,
+      apiUrl: new URL("http://localhost:8000"),
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  // Documents current behavior: numeric string as FINAL key creates an object,
+  // not an array. If you want { data: ["Alice"] }, writing to ["data", "0"]
+  // gives you { data: { "0": "Alice" } } instead.
+  it("numeric final key creates object property, not array index", () => {
+    const transaction = runtime.edit();
+
+    transaction.writeOrThrow({
+      space,
+      id: "of:numeric-final",
+      type: "application/json",
+      path: ["data", "0"],
+    }, "Alice");
+
+    // Read back the structure at "data"
+    const data = transaction.readOrThrow({
+      space,
+      id: "of:numeric-final",
+      type: "application/json",
+      path: ["data"],
+    });
+
+    // Current behavior: it's an object with key "0", not an array
+    expect(data).toEqual({ "0": "Alice" });
+    expect(Array.isArray(data)).toBe(false);
+  });
+
+  // Documents that mixed numeric-string and regular keys at the same level
+  // work correctly as object keys.
+  it("mixed numeric and non-numeric keys at same level work as object keys", () => {
+    const transaction = runtime.edit();
+
+    // Write numeric-looking key first
+    transaction.writeOrThrow({
+      space,
+      id: "of:mixed-keys",
+      type: "application/json",
+      path: ["data", "0"],
+    }, "Alice");
+
+    // Write non-numeric key second
+    transaction.writeOrThrow({
+      space,
+      id: "of:mixed-keys",
+      type: "application/json",
+      path: ["data", "name"],
+    }, "Bob");
+
+    const data = transaction.readOrThrow({
+      space,
+      id: "of:mixed-keys",
+      type: "application/json",
+      path: ["data"],
+    });
+
+    // Both are object keys
+    expect(data).toEqual({ "0": "Alice", "name": "Bob" });
+  });
+
+  // Documents current behavior: numeric string as INTERMEDIATE key creates an
+  // array, which then gets a named property set on it (invalid for JSON).
+  // Note: committing this transaction would throw "Cannot store array with
+  // enumerable named properties" - we verify the structure without committing.
+  it("numeric intermediate key creates array with named property", () => {
+    const transaction = runtime.edit();
+
+    // Write to path where "0" is intermediate (not final)
+    // This creates { data: { "0": [] } } where the array gets .name = "Alice"
+    transaction.writeOrThrow({
+      space,
+      id: "of:numeric-intermediate",
+      type: "application/json",
+      path: ["data", "0", "name"],
+    }, "Alice");
+
+    // Verify the structure: "0" becomes an array (due to numeric key heuristic)
+    // and "name" is set as a named property on that array
+    const inner = transaction.readOrThrow({
+      space,
+      id: "of:numeric-intermediate",
+      type: "application/json",
+      path: ["data", "0"],
+    });
+
+    // The value at "0" is an array with a named property
+    expect(Array.isArray(inner)).toBe(true);
+    expect((inner as unknown as { name: string }).name).toBe("Alice");
+
+    // Don't commit - it would throw due to array with named property
+  });
+
+  // Documents: if you actually want an array, you must write the whole array
+  // at once - you cannot build it incrementally via path-based writes.
+  it("creating actual array requires writing whole array, not path-based", () => {
+    const transaction = runtime.edit();
+
+    // Write the complete array structure
+    transaction.writeOrThrow({
+      space,
+      id: "of:actual-array",
+      type: "application/json",
+      path: ["data"],
+    }, ["Alice", "Bob"]);
+
+    const data = transaction.readOrThrow({
+      space,
+      id: "of:actual-array",
+      type: "application/json",
+      path: ["data"],
+    });
+
+    expect(Array.isArray(data)).toBe(true);
+    expect(data).toEqual(["Alice", "Bob"]);
+  });
+
+  // Documents: writing to array index on existing array works
+  it("writing to numeric path on existing array sets array index", () => {
+    const transaction = runtime.edit();
+
+    // First create the array
+    transaction.writeOrThrow({
+      space,
+      id: "of:existing-array",
+      type: "application/json",
+      path: ["data"],
+    }, ["original"]);
+
+    // Now write to index 0
+    transaction.writeOrThrow({
+      space,
+      id: "of:existing-array",
+      type: "application/json",
+      path: ["data", "0"],
+    }, "updated");
+
+    const data = transaction.readOrThrow({
+      space,
+      id: "of:existing-array",
+      type: "application/json",
+      path: ["data"],
+    });
+
+    expect(Array.isArray(data)).toBe(true);
+    expect(data).toEqual(["updated"]);
+  });
+
+  // Documents: writing non-numeric key to existing array is rejected immediately
+  // with TypeMismatchError (can't write object property to array).
+  it("writing non-numeric key to existing array throws TypeMismatchError", () => {
+    const transaction = runtime.edit();
+
+    // First create the array
+    transaction.writeOrThrow({
+      space,
+      id: "of:array-named-key",
+      type: "application/json",
+      path: ["data"],
+    }, ["Alice"]);
+
+    // Write a non-numeric key - throws immediately because storage layer
+    // correctly rejects writing object-style property to an array.
+    expect(() => {
+      transaction.writeOrThrow({
+        space,
+        id: "of:array-named-key",
+        type: "application/json",
+        path: ["data", "name"],
+      }, "Bob");
+    }).toThrow("expected object but found array");
+  });
+
+  // Documents: multiple numeric intermediate keys create nested arrays
+  // Note: committing would throw - we verify the structure without committing.
+  it("multiple numeric intermediate keys create nested arrays", () => {
+    const transaction = runtime.edit();
+
+    // Path: ["data", "0", "1", "name"]
+    // "data" is intermediate → creates object {}
+    // "0" is intermediate → creates array [] (because it's numeric)
+    // "1" is intermediate → sets index 1 to array [] (sparse!)
+    // "name" is final → sets named property on that inner array
+    transaction.writeOrThrow({
+      space,
+      id: "of:nested-numeric",
+      type: "application/json",
+      path: ["data", "0", "1", "name"],
+    }, "Alice");
+
+    // Verify the nested structure
+    const level0 = transaction.readOrThrow({
+      space,
+      id: "of:nested-numeric",
+      type: "application/json",
+      path: ["data", "0"],
+    });
+    // "0" is an array (because key "0" looks numeric) with index 1 set
+    expect(Array.isArray(level0)).toBe(true);
+    expect((level0 as unknown[]).length).toBe(2); // sparse: [undefined, [...]]
+
+    const level1 = transaction.readOrThrow({
+      space,
+      id: "of:nested-numeric",
+      type: "application/json",
+      path: ["data", "0", "1"],
+    });
+    // Index "1" is also an array with named property "name"
+    expect(Array.isArray(level1)).toBe(true);
+    expect((level1 as unknown as { name: string }).name).toBe("Alice");
+
+    // Don't commit - it would throw due to array with named property
+  });
+
+  // Documents: sparse array creation via high index
+  it("writing to high numeric index on empty doc creates object, not sparse array", () => {
+    const transaction = runtime.edit();
+
+    transaction.writeOrThrow({
+      space,
+      id: "of:high-index",
+      type: "application/json",
+      path: ["data", "99"],
+    }, "value");
+
+    const data = transaction.readOrThrow({
+      space,
+      id: "of:high-index",
+      type: "application/json",
+      path: ["data"],
+    });
+
+    // Current behavior: object with key "99", not sparse array
+    expect(data).toEqual({ "99": "value" });
+    expect(Array.isArray(data)).toBe(false);
+  });
+});
+
 describe("data: URI behaviors", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
