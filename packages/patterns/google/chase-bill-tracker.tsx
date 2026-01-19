@@ -267,7 +267,7 @@ const unmarkAsPaid = handler<
 
 interface PatternInput {
   linkedAuth?: Auth;
-  manuallyPaid: Default<string[], []>;
+  manuallyPaid: Writable<Default<string[], []>>;
 }
 
 /** Chase credit card bill tracker. #chaseBills */
@@ -417,8 +417,8 @@ Extract:
     // Process all analyses and build bill list
     const bills = computed(() => {
       const billMap: Record<string, TrackedBill> = {};
-      // Inside computed(), reactive values are auto-unwrapped
-      const paidKeys = (manuallyPaid || []) as string[];
+      // manuallyPaid is Writable - use .get() to access value
+      const paidKeys = manuallyPaid.get() || [];
       // Access the computed value - paymentConfirmations returns a Record
       const payments = (paymentConfirmations || {}) as Record<string, string>;
 
