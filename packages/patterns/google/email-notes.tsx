@@ -220,21 +220,6 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
     linkedAuth: effectiveAuth,
   });
 
-  // Auto-fetch labels when auth becomes ready
-  const hasFetchedLabels = Writable.of(false).for("hasFetchedLabels");
-  computed(() => {
-    const ready = isReady;
-    const alreadyFetched = hasFetchedLabels.get();
-    const hasLabelId = !!taskCurrentLabelId.get();
-
-    if (ready && !alreadyFetched && !hasLabelId) {
-      hasFetchedLabels.set(true);
-      // Trigger label fetch
-      fetchLabels({ auth: effectiveAuth, taskCurrentLabelId, loadingLabels })
-        .send({});
-    }
-  });
-
   // Get emails from importer
   const allEmails = gmailImporter.emails;
 
@@ -329,7 +314,7 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
               null,
             )}
 
-            {/* Label status */}
+            {/* Label status with Load Labels button */}
             {ifElse(
               isReady,
               <div
@@ -339,6 +324,9 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
                   borderRadius: "6px",
                   fontSize: "13px",
                   color: taskCurrentLabelId ? "#166534" : "#b45309",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
                 }}
               >
                 {ifElse(
@@ -348,10 +336,32 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
                     taskCurrentLabelId,
                     <span>task-current label ready</span>,
                     <span>
-                      task-current label not found - Mark as Done will not work
+                      task-current label not found - click Load Labels
                     </span>,
                   ),
                 )}
+                <button
+                  type="button"
+                  onClick={fetchLabels({
+                    auth: effectiveAuth,
+                    taskCurrentLabelId,
+                    loadingLabels,
+                  })}
+                  disabled={loadingLabels}
+                  style={{
+                    marginLeft: "8px",
+                    padding: "4px 10px",
+                    backgroundColor: loadingLabels ? "#9ca3af" : "#6366f1",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "4px",
+                    fontSize: "12px",
+                    cursor: loadingLabels ? "not-allowed" : "pointer",
+                    fontWeight: "500",
+                  }}
+                >
+                  {ifElse(loadingLabels, "Loading...", "Load Labels")}
+                </button>
               </div>,
               null,
             )}
