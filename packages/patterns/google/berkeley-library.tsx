@@ -217,10 +217,21 @@ function createItemKey(item: LibraryItem): string {
 /**
  * Calculate days until due date.
  * Returns negative number for overdue items.
+ * Parses YYYY-MM-DD format explicitly to avoid timezone issues.
  */
 function calculateDaysUntilDue(dueDate: string | undefined): number {
   if (!dueDate) return 999; // No due date = far in future
-  const due = new Date(dueDate);
+
+  // Parse YYYY-MM-DD explicitly as local date to avoid UTC timezone shifts
+  const match = dueDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return 999; // Invalid format = treat as no due date
+
+  const [, year, month, day] = match;
+  const due = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+
+  // Validate the parsed date is valid
+  if (isNaN(due.getTime())) return 999;
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   due.setHours(0, 0, 0, 0);
