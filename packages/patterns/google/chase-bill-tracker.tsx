@@ -462,6 +462,7 @@ Extract:
 
     // Extract payment confirmations (to auto-mark bills as paid)
     // Track ALL payment dates per card to match against bill due dates
+    // IMPORTANT: Sort payments chronologically to ensure deterministic matching
     const paymentConfirmations = computed(() => {
       const confirmations: Record<string, string[]> = {}; // cardLast4 -> array of paymentDates
 
@@ -482,6 +483,12 @@ Extract:
         }
       }
 
+      // Sort each card's payments chronologically (oldest first)
+      // This ensures deterministic matching regardless of email fetch order
+      for (const cardKey of Object.keys(confirmations)) {
+        confirmations[cardKey].sort((a, b) => a.localeCompare(b));
+      }
+
       return confirmations;
     });
 
@@ -494,12 +501,15 @@ Extract:
       const payments = (paymentConfirmations || {}) as Record<string, string[]>;
 
       // Sort emails by date (newest first) so we keep most recent data
+      // Use emailId as tie-breaker for stable sorting when dates are equal
       const sortedAnalyses = [...(emailAnalyses || [])]
         .filter((a) => a?.result)
         .sort((a, b) => {
           const dateA = new Date(a.emailDate || 0).getTime();
           const dateB = new Date(b.emailDate || 0).getTime();
-          return dateB - dateA;
+          if (dateB !== dateA) return dateB - dateA;
+          // Stable tie-breaker: use email ID (deterministic string comparison)
+          return (a.emailId || "").localeCompare(b.emailId || "");
         });
 
       for (const analysisItem of sortedAnalyses) {
@@ -536,18 +546,33 @@ Extract:
 
         // Check if this bill has been paid (auto or manual)
         const isManuallyPaid = paidKeys.includes(key);
-        // Check if any payment was made on or after the due date for this card
-        // This means the bill was paid (payments typically happen around due date)
+        // Check if any payment was made within a reasonable window of the due date
+        // Payments are sorted chronologically, so we find the BEST match (closest to due date)
         const cardPayments = payments[result.cardLast4] || [];
         const billDueDate = result.dueDate; // Already verified non-null above
-        const matchingPayment = cardPayments.find((paymentDate) => {
-          // A payment made within 30 days before or any time after the due date
-          // likely corresponds to this bill
-          const dueDateMs = new Date(billDueDate).getTime();
+        const dueDateMs = new Date(billDueDate).getTime();
+
+        // Find the payment closest to the due date within the valid window
+        // Window: 30 days before due date to 60 days after (to account for late payments)
+        let matchingPayment: string | undefined;
+        let bestDaysDiff = Infinity;
+
+        for (const paymentDate of cardPayments) {
           const paymentMs = new Date(paymentDate).getTime();
           const daysDiff = (paymentMs - dueDateMs) / (1000 * 60 * 60 * 24);
-          return daysDiff >= -30; // Payment made within 30 days before due date or after
-        });
+
+          // Payment must be within -30 to +60 days of due date
+          if (daysDiff >= -30 && daysDiff <= 60) {
+            // Prefer the payment closest to (but not before) the due date
+            // This prioritizes on-time or slightly late payments
+            const absDiff = Math.abs(daysDiff);
+            if (absDiff < bestDaysDiff) {
+              bestDaysDiff = absDiff;
+              matchingPayment = paymentDate;
+            }
+          }
+        }
+
         const autoPaid = !!matchingPayment;
         // Bills past the threshold are "likely paid" - payment wasn't detected but
         // it's very unlikely a bill this old is genuinely unpaid
