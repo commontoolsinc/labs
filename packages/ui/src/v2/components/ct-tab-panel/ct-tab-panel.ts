@@ -22,9 +22,12 @@ export class CTTabPanel extends BaseElement {
     BaseElement.baseStyles,
     css`
       :host {
-        display: block;
+        display: flex;
+        flex-direction: column;
         margin-top: var(--ct-spacing-6);
         animation: fadeIn var(--ct-transition-duration-fast) ease-in;
+        flex: 1;
+        min-height: 0;
       }
 
       :host([hidden]) {
@@ -42,6 +45,10 @@ export class CTTabPanel extends BaseElement {
 
       .tab-panel {
         outline: none;
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
       }
 
       .tab-panel:focus-visible {
