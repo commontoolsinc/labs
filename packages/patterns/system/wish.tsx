@@ -22,52 +22,35 @@ export default pattern<
   WishParams & { candidates: Default<Writable<unknown>[], []> },
   WishState<unknown>
 >(
-  ({ query: _query, context: _context, candidates }) => {
+  ({ candidates }) => {
     const selectedIndex = Writable.of(0);
-    // Persisted confirmation state - once set, the selection is permanent
     const confirmedIndex = Writable.of<number | null>(null);
 
-    // Result computed - once confirmed, always returns that specific cell
-    // Use array indexing since pattern inputs are unwrapped to plain arrays
+    // Result: the confirmed cell, or current selection while browsing
     const result = computed(() => {
       if (candidates.length === 0) return undefined;
-      const confirmed = confirmedIndex.get();
-      if (confirmed !== null) {
-        // Permanent selection - always return this cell
-        return candidates[Math.min(confirmed, candidates.length - 1)];
-      }
-      // Browsing mode - follows selectedIndex
-      return candidates[Math.min(selectedIndex.get(), candidates.length - 1)];
+      const idx = confirmedIndex.get() ?? selectedIndex.get();
+      return candidates[Math.min(idx, candidates.length - 1)];
     });
 
     return {
       result,
-      [UI]: (
-        <div>
-          {computed(() => {
-            const confirmed = confirmedIndex.get();
-            if (confirmed !== null) {
-              // Confirmed - render the selected candidate's UI directly
-              const selectedCell =
-                candidates[Math.min(confirmed, candidates.length - 1)];
-              return selectedCell;
-            }
-            // Picking - show picker with confirm button
-            return (
-              <ct-card>
-                <h2>Choose Result ({candidates.length})</h2>
-                <ct-picker $items={candidates} $selectedIndex={selectedIndex} />
-                <ct-button
-                  variant="primary"
-                  onClick={() => confirmedIndex.set(selectedIndex.get())}
-                >
-                  Confirm Selection
-                </ct-button>
-              </ct-card>
-            );
-          })}
-        </div>
-      ),
+      [UI]: computed(() => {
+        if (candidates.length === 0) return <div>No candidates</div>;
+        if (confirmedIndex.get() !== null) return result;
+        return (
+          <ct-card>
+            <h2>Choose Result ({candidates.length})</h2>
+            <ct-picker $items={candidates} $selectedIndex={selectedIndex} />
+            <ct-button
+              variant="primary"
+              onClick={() => confirmedIndex.set(selectedIndex.get())}
+            >
+              Confirm Selection
+            </ct-button>
+          </ct-card>
+        );
+      }),
     };
   },
 );
