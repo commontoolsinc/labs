@@ -243,7 +243,7 @@ function getStatusColor(daysUntilDue: number, isPaid: boolean): {
 
 // Handler to mark a bill as paid
 const markAsPaid = handler<
-  unknown,
+  void,
   { paidKeys: Writable<string[]>; billKey: string }
 >((_event, { paidKeys, billKey }) => {
   const current = paidKeys.get() || [];
@@ -254,7 +254,7 @@ const markAsPaid = handler<
 
 // Handler to unmark a bill as paid
 const unmarkAsPaid = handler<
-  unknown,
+  void,
   { paidKeys: Writable<string[]>; billKey: string }
 >((_event, { paidKeys, billKey }) => {
   const current = paidKeys.get() || [];
@@ -869,10 +869,11 @@ Extract:
                         </div>
                         <button
                           type="button"
-                          onClick={markAsPaid({
-                            paidKeys: manuallyPaid,
-                            billKey: bill.key,
-                          })}
+                          onClick={() =>
+                            markAsPaid({
+                              paidKeys: manuallyPaid,
+                              billKey: bill.key,
+                            }).send()}
                           style={{
                             padding: "8px 16px",
                             backgroundColor: "#10b981",
@@ -985,10 +986,11 @@ Extract:
                         </div>
                         <button
                           type="button"
-                          onClick={unmarkAsPaid({
-                            paidKeys: manuallyPaid,
-                            billKey: bill.key,
-                          })}
+                          onClick={() =>
+                            unmarkAsPaid({
+                              paidKeys: manuallyPaid,
+                              billKey: bill.key,
+                            }).send()}
                           style={{
                             padding: "6px 12px",
                             backgroundColor: "#6b7280",

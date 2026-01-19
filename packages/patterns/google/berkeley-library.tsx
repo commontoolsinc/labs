@@ -317,7 +317,7 @@ function formatDate(dateStr: string | undefined): string {
 
 // Handler to mark an item as returned
 const markAsReturned = handler<
-  unknown,
+  void,
   { returnedKeys: Writable<string[]>; itemKey: string }
 >((_event, { returnedKeys, itemKey }) => {
   const current = returnedKeys.get();
@@ -328,7 +328,7 @@ const markAsReturned = handler<
 
 // Handler to unmark an item as returned
 const unmarkAsReturned = handler<
-  unknown,
+  void,
   { returnedKeys: Writable<string[]>; itemKey: string }
 >((_event, { returnedKeys, itemKey }) => {
   const current = returnedKeys.get();
@@ -916,10 +916,11 @@ Note: If this is a forwarded email, look for the original library content within
                       </div>
                       <button
                         type="button"
-                        onClick={markAsReturned({
-                          returnedKeys: manuallyReturned,
-                          itemKey: item.key,
-                        })}
+                        onClick={() =>
+                          markAsReturned({
+                            returnedKeys: manuallyReturned,
+                            itemKey: item.key,
+                          }).send()}
                         style={{
                           padding: "6px 12px",
                           backgroundColor: "#10b981",
@@ -1011,10 +1012,11 @@ Note: If this is a forwarded email, look for the original library content within
                       </div>
                       <button
                         type="button"
-                        onClick={markAsReturned({
-                          returnedKeys: manuallyReturned,
-                          itemKey: item.key,
-                        })}
+                        onClick={() =>
+                          markAsReturned({
+                            returnedKeys: manuallyReturned,
+                            itemKey: item.key,
+                          }).send()}
                         style={{
                           padding: "6px 12px",
                           backgroundColor: "#10b981",
@@ -1245,10 +1247,11 @@ Note: If this is a forwarded email, look for the original library content within
                         </div>
                         <button
                           type="button"
-                          onClick={unmarkAsReturned({
-                            returnedKeys: manuallyReturned,
-                            itemKey: item.key,
-                          })}
+                          onClick={() =>
+                            unmarkAsReturned({
+                              returnedKeys: manuallyReturned,
+                              itemKey: item.key,
+                            }).send()}
                           style={{
                             padding: "6px 12px",
                             backgroundColor: "#6b7280",
