@@ -1132,7 +1132,9 @@ const handleCreateNotebook = handler<
 
 const Notebook = pattern<Input, Output>(
   ({ title, notes, isNotebook, isHidden, parentNotebook, [SELF]: self }) => {
-    const { allCharms } = wish<{ allCharms: Writable<NoteCharm[]> }>("#default");
+    const { allCharms } = wish<{ allCharms: Writable<NoteCharm[]> }>(
+      "#default",
+    );
 
     // Use computed() for proper reactive tracking of notes.length
     const noteCount = computed(() => notes.get().length);
