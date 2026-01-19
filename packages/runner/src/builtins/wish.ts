@@ -406,7 +406,7 @@ export function wish(
   let wishPatternResultCell: Cell<WishState<any>> | undefined;
 
   async function launchWishPattern(
-    input?: WishParams & { candidates?: Cell<unknown>[] },
+    input?: WishParams & { candidates?: Cell<Cell<unknown>[]> },
     providedTx?: IExtendedStorageTransaction,
   ): Promise<Cell<WishState<any>>> {
     if (input) wishPatternInput = input;
@@ -607,10 +607,26 @@ export function wish(
           } else {
             // If it's multiple results, launch the wish pattern for the user
             // to pick from. Navigation goes to the picker charm.
+            // Wrap candidates array in a cell so ct-picker's .key(index) works
+            const candidatesArrayCell = runtime.getImmutableCell(
+              parentCell.space,
+              resultCells,
+              undefined,
+              tx,
+            );
+
+            // Sync the candidates cell and all result cells to ensure data is loaded
+            await candidatesArrayCell.sync();
+            await Promise.all(resultCells.map((cell) => cell.sync()));
+
             const wishResultCell = await launchWishPattern({
               ...targetValue as WishParams,
-              candidates: resultCells,
+              candidates: candidatesArrayCell,
             }, tx);
+
+            // Return the wish pattern cell directly as result
+            // Its [UI] shows the picker, and after confirmation shows the chosen cell
+            // Access the actual chosen value via wishResult.result.result
             sendResult(tx, {
               result: wishResultCell,
               [UI]: wishResultCell.get()[UI],
