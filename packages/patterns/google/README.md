@@ -1,21 +1,112 @@
 # Google Services Patterns
 
-> **Status: Work In Progress**
->
-> These patterns are experimental and may have bugs or incomplete features. They
-> are being actively developed and tested.
-
 This folder contains patterns for integrating with Google services (Gmail,
 Calendar, Docs) via OAuth authentication.
 
-## Important: Fork Status
+## Quick Start
 
-The `google-auth.tsx` pattern in this folder is a **fork** of the original from
-the community-patterns repository. This version includes additional features and
-enhancements, but may also have introduced regressions or bugs.
+### For Staging/Production (Recommended)
 
-**Long-term goal:** Rationalize these two implementations to maintain a single,
-well-tested version.
+OAuth is pre-configured. Just:
+
+1. Visit your homespace (e.g., `https://toolshed.common.tools/`)
+2. Deploy `google-auth.tsx`
+3. Click "Sign in with Google" and complete OAuth
+4. Click the star to favorite it (tags it as `#googleAuth`)
+5. Deploy any Google pattern - it auto-discovers your auth via `wish()`
+
+### For Local Development
+
+You need your own Google OAuth credentials:
+
+1. Create project at [Google Cloud Console](https://console.cloud.google.com)
+2. Create OAuth 2.0 Client ID (Web application)
+3. Add redirect URI:
+   `http://localhost:8000/api/integrations/google-oauth/callback`
+4. Enable APIs: Gmail, Calendar, Drive (as needed)
+5. Add to `packages/toolshed/.env`:
+   ```
+   GOOGLE_CLIENT_ID=your-client-id
+   GOOGLE_CLIENT_SECRET=your-client-secret
+   ```
+6. Follow the staging/production steps above
+
+### Token Refresh
+
+Tokens expire after ~1 hour. When expired:
+
+1. Find your google-auth charm (in favorites or homespace)
+2. Click "Refresh Token" button
+3. Other patterns automatically get the refreshed token
+
+## Pattern Architectures
+
+This folder contains two main architectural approaches for building Gmail-based
+patterns:
+
+### Smart Importers
+
+Patterns that fetch specific emails and process them with LLM vision or text
+analysis.
+
+**Example:** `usps-informed-delivery.tsx`
+
+**How it works:**
+
+1. Embeds `gmail-importer` with a hardcoded search query
+2. Filters and extracts data (e.g., mail piece images)
+3. Uses `generateObject()` with vision to analyze each item
+4. Exposes enriched results + aggregate counts to other patterns
+
+**Architecture:**
+
+```
+Your Pattern
+  └─ Instantiates GmailImporter({ gmailFilterQuery: "from:..." })
+       └─ Gets raw emails
+  └─ computed() chain for filtering/extraction
+  └─ .map() with generateObject() for LLM analysis
+  └─ Exports: enriched data, counts, previewUI
+```
+
+**Key code (usps-informed-delivery.tsx):**
+
+- Line 294-295: Hardcoded query
+  `from:USPSInformeddelivery@email.informeddelivery.usps.com`
+- Lines 362-442: Per-item LLM analysis with vision using `.map()` and
+  `generateObject()`
+- Lines 460-495: Aggregate category counts computed from analysis results
+
+### Agentic Search Patterns
+
+Patterns where an LLM strategizes and loops to find information dynamically.
+
+**Example:** `hotel-membership-gmail-agent.tsx`
+
+**How it works:**
+
+1. Instantiates `GmailAgenticSearch` with goal, schema, prompts
+2. LLM decides which searches to run
+3. LLM extracts results matching the schema
+4. Loops until goal is satisfied or limits reached
+
+**Architecture:**
+
+```
+Your Pattern
+  └─ Defines: goal, resultSchema, systemPrompt, additionalTools
+  └─ Instantiates GmailAgenticSearch({...})
+       └─ generateObject() with tools: searchGmail + your tools
+       └─ LLM loop: search → analyze → extract → repeat
+  └─ Composes UI: searcher.ui.{auth, controls, progress}
+  └─ Exports: extracted results
+```
+
+**Key code (hotel-membership-gmail-agent.tsx):**
+
+- Lines 54-88: Schema definition with `defineItemSchema()`
+- Lines 287-391: Dynamic goal generation based on scan mode
+- Lines 408-429: System prompt with workflow instructions
 
 ## Pattern Categories
 
@@ -30,13 +121,14 @@ well-tested version.
 
 ### Gmail
 
-| Pattern                     | Description                                    |
-| --------------------------- | ---------------------------------------------- |
-| `gmail-importer.tsx`        | Import emails from Gmail with search queries   |
-| `gmail-sender.tsx`          | Send emails via Gmail API                      |
-| `gmail-label-manager.tsx`   | Add/remove labels from emails                  |
-| `gmail-agentic-search.tsx`  | Base pattern for Gmail-based agentic searchers |
-| `gmail-search-registry.tsx` | Community query database for Gmail searches    |
+| Pattern                      | Description                                    |
+| ---------------------------- | ---------------------------------------------- |
+| `gmail-importer.tsx`         | Import emails from Gmail with search queries   |
+| `gmail-sender.tsx`           | Send emails via Gmail API                      |
+| `gmail-label-manager.tsx`    | Add/remove labels from emails                  |
+| `gmail-agentic-search.tsx`   | Base pattern for Gmail-based agentic searchers |
+| `gmail-search-registry.tsx`  | Community query database for Gmail searches    |
+| `usps-informed-delivery.tsx` | USPS mail analyzer with LLM vision             |
 
 ### Gmail Agentic Patterns
 
@@ -62,40 +154,25 @@ well-tested version.
 
 ### WIP (Work In Progress)
 
-| Pattern                          | Description                        |
-| -------------------------------- | ---------------------------------- |
-| `WIP/usps-informed-delivery.tsx` | USPS mail analyzer with LLM vision |
-| `WIP/google-docs-importer.tsx`   | Import Google Docs content         |
+| Pattern                        | Description                |
+| ------------------------------ | -------------------------- |
+| `WIP/google-docs-importer.tsx` | Import Google Docs content |
 
 > **Note:** `google-docs-importer.tsx` imports from `../../notes/note.tsx` and
 > requires deploying with `--root packages/patterns` to resolve cross-folder
 > imports.
 
-## Prerequisites
+## OAuth Scopes
 
-1. **Google Cloud Console Setup**
-   - Create a project at
-     [Google Cloud Console](https://console.cloud.google.com)
-   - Enable the APIs you need (Gmail API, Calendar API, Docs API, etc.)
-   - Create OAuth 2.0 credentials (Web application type)
-   - Add authorized redirect URIs for your deployment
+The patterns request various scopes depending on their needs:
 
-2. **OAuth Scopes** The patterns request various scopes depending on their
-   needs:
-   - `email`, `profile` - Basic user info (OpenID Connect)
-   - `https://www.googleapis.com/auth/gmail.readonly` - Read emails
-   - `https://www.googleapis.com/auth/gmail.send` - Send emails
-   - `https://www.googleapis.com/auth/gmail.modify` - Modify labels
-   - `https://www.googleapis.com/auth/calendar.readonly` - Read calendar
-   - `https://www.googleapis.com/auth/calendar.events` - Manage calendar events
-   - `https://www.googleapis.com/auth/documents.readonly` - Read Google Docs
-
-## Quick Start
-
-1. Deploy `google-auth.tsx` first
-2. Complete the OAuth flow in the browser
-3. Deploy other patterns (gmail-importer, google-calendar-importer, etc.)
-4. Link the auth charm to other patterns via `wish()` or manual linking
+- `email`, `profile` - Basic user info (OpenID Connect)
+- `https://www.googleapis.com/auth/gmail.readonly` - Read emails
+- `https://www.googleapis.com/auth/gmail.send` - Send emails
+- `https://www.googleapis.com/auth/gmail.modify` - Modify labels
+- `https://www.googleapis.com/auth/calendar.readonly` - Read calendar
+- `https://www.googleapis.com/auth/calendar.events` - Manage calendar events
+- `https://www.googleapis.com/auth/documents.readonly` - Read Google Docs
 
 ## Manual Charm Linking
 
@@ -189,6 +266,15 @@ const myHandler = handler<unknown, {
 
 Missing fields in the handler's type definition can cause them to be unavailable
 when calling `.get()`.
+
+## Fork Status
+
+The `google-auth.tsx` pattern in this folder is a **fork** of the original from
+the community-patterns repository. This version includes additional features and
+enhancements, but may also have introduced regressions or bugs.
+
+**Long-term goal:** Rationalize these two implementations to maintain a single,
+well-tested version.
 
 ## Origin
 

@@ -54,11 +54,13 @@ interface Email {
 // =============================================================================
 
 type MailType =
-  | "bill"
-  | "advertisement"
   | "personal"
+  | "bill"
+  | "financial"
+  | "advertisement"
   | "package"
   | "government"
+  | "medical"
   | "subscription"
   | "charity"
   | "other";
@@ -93,11 +95,13 @@ const MAIL_ANALYSIS_SCHEMA = {
     mailType: {
       type: "string",
       enum: [
-        "bill",
-        "advertisement",
         "personal",
+        "bill",
+        "financial",
+        "advertisement",
         "package",
         "government",
+        "medical",
         "subscription",
         "charity",
         "other",
@@ -269,6 +273,16 @@ interface PatternOutput {
   householdMembers: HouseholdMember[];
   mailCount: number;
   spamCount: number;
+  personalCount: number;
+  billCount: number;
+  financialCount: number;
+  advertisementCount: number;
+  packageCount: number;
+  governmentCount: number;
+  medicalCount: number;
+  subscriptionCount: number;
+  charityCount: number;
+  previewUI: unknown;
 }
 
 export default pattern<PatternInput, PatternOutput>(
@@ -386,7 +400,17 @@ export default pattern<PatternInput, PatternOutput>(
                 `Analyze this scanned mail piece image from USPS Informed Delivery. Extract:
 1. The recipient name (who the mail is addressed to)
 2. The sender or company name (from return address if visible)
-3. The type of mail (bill, advertisement, personal, package notification, government, subscription, charity, or other)
+3. The type of mail - use these categories:
+   - "personal": Greeting cards, holiday cards, wedding invitations, thank you notes, handwritten letters - mail personally sent to you, NOT business mail
+   - "bill": Utility bills, credit card statements, invoices, payment requests
+   - "financial": Bank statements, tax documents (1099s, W-2s), investment reports, brokerage statements - financial documents that are NOT bills
+   - "advertisement": Flyers, coupons, promotional mailers, catalogs, marketing materials
+   - "package": Package arrival notices, delivery confirmations
+   - "government": IRS notices, DMV renewals, court documents, voter registration, official government correspondence
+   - "medical": Insurance EOBs, appointment reminders, prescription notices, hospital correspondence
+   - "subscription": Magazines, newsletters, membership renewals
+   - "charity": Donation requests, nonprofit mailings
+   - "other": Anything that doesn't fit the above categories
 4. Whether it appears to be spam/junk mail
 5. Whether it appears URGENT or time-sensitive. Consider urgent:
    - Government correspondence (IRS, DMV, court notices, etc.)
@@ -395,6 +419,8 @@ export default pattern<PatternInput, PatternOutput>(
    - Late bills mentioning due dates
    - Bank account alerts
    - Time-sensitive offers with deadlines
+
+IMPORTANT: Use "personal" ONLY for greeting cards, holiday cards, and handwritten correspondence - NOT for business mail.
 
 If you cannot read the image clearly, make your best guess based on what you can see.`,
             },
@@ -436,6 +462,38 @@ If you cannot read the image clearly, make your best guess based on what you can
       () => mailPieces?.filter((p) => p?.isLikelySpam)?.length || 0,
     );
 
+    // Category counts
+    const personalCount = computed(
+      () => mailPieces?.filter((p) => p?.mailType === "personal")?.length || 0,
+    );
+    const billCount = computed(
+      () => mailPieces?.filter((p) => p?.mailType === "bill")?.length || 0,
+    );
+    const financialCount = computed(
+      () => mailPieces?.filter((p) => p?.mailType === "financial")?.length || 0,
+    );
+    const advertisementCount = computed(
+      () =>
+        mailPieces?.filter((p) => p?.mailType === "advertisement")?.length || 0,
+    );
+    const packageCount = computed(
+      () => mailPieces?.filter((p) => p?.mailType === "package")?.length || 0,
+    );
+    const governmentCount = computed(
+      () =>
+        mailPieces?.filter((p) => p?.mailType === "government")?.length || 0,
+    );
+    const medicalCount = computed(
+      () => mailPieces?.filter((p) => p?.mailType === "medical")?.length || 0,
+    );
+    const subscriptionCount = computed(
+      () =>
+        mailPieces?.filter((p) => p?.mailType === "subscription")?.length || 0,
+    );
+    const charityCount = computed(
+      () => mailPieces?.filter((p) => p?.mailType === "charity")?.length || 0,
+    );
+
     // Filter for urgent mail pieces (with their analysis data for display)
     const urgentMailAnalyses = computed(() =>
       (mailPieceAnalyses || []).filter((a) =>
@@ -449,6 +507,70 @@ If you cannot read the image clearly, make your best guess based on what you can
       () => householdMembers?.filter((m) => !m.isConfirmed)?.length || 0,
     );
 
+    // Get top 3 categories for preview summary
+    const topCategories = computed(() => {
+      const categories = [
+        { name: "personal", count: personalCount },
+        { name: "bills", count: billCount },
+        { name: "financial", count: financialCount },
+        { name: "ads", count: advertisementCount },
+        { name: "packages", count: packageCount },
+        { name: "government", count: governmentCount },
+        { name: "medical", count: medicalCount },
+        { name: "subscriptions", count: subscriptionCount },
+        { name: "charity", count: charityCount },
+      ];
+      return categories
+        .filter((c) => (c.count || 0) > 0)
+        .sort((a, b) => (b.count || 0) - (a.count || 0))
+        .slice(0, 3);
+    });
+
+    // Preview UI for compact display in lists/pickers
+    const previewUI = (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "12px",
+          padding: "8px 12px",
+        }}
+      >
+        {/* Blue badge with mail count */}
+        <div
+          style={{
+            width: "36px",
+            height: "36px",
+            borderRadius: "8px",
+            backgroundColor: "#3b82f6",
+            color: "white",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontWeight: "bold",
+            fontSize: "16px",
+          }}
+        >
+          {mailCount}
+        </div>
+        {/* Label and summary */}
+        <div>
+          <div style={{ fontWeight: "600", fontSize: "14px" }}>USPS Mail</div>
+          <div style={{ fontSize: "12px", color: "#6b7280" }}>
+            {topCategories.map((cat, idx) => (
+              <span>
+                {idx > 0 ? " · " : ""}
+                {cat.count} {cat.name}
+              </span>
+            ))}
+            {spamCount > 0 && (
+              <span style={{ color: "#dc2626" }}>· {spamCount} spam</span>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+
     return {
       [NAME]: "USPS Informed Delivery",
 
@@ -456,6 +578,16 @@ If you cannot read the image clearly, make your best guess based on what you can
       householdMembers,
       mailCount,
       spamCount,
+      personalCount,
+      billCount,
+      financialCount,
+      advertisementCount,
+      packageCount,
+      governmentCount,
+      medicalCount,
+      subscriptionCount,
+      charityCount,
+      previewUI,
 
       [UI]: (
         <ct-screen>
@@ -564,57 +696,178 @@ If you cannot read the image clearly, make your best guess based on what you can
               {/* Stats */}
               <div
                 style={{
-                  display: "flex",
-                  gap: "16px",
                   padding: "12px",
                   backgroundColor: "#f3f4f6",
                   borderRadius: "8px",
                 }}
               >
-                <div>
-                  <div style={{ fontSize: "24px", fontWeight: "bold" }}>
-                    {mailCount}
-                  </div>
-                  <div style={{ fontSize: "12px", color: "#666" }}>
-                    Mail Pieces
-                  </div>
-                </div>
-                <div>
-                  <div
-                    style={{
-                      fontSize: "24px",
-                      fontWeight: "bold",
-                      color: "#f59e0b",
-                    }}
-                  >
-                    {urgentCount}
-                  </div>
-                  <div style={{ fontSize: "12px", color: "#666" }}>Urgent</div>
-                </div>
-                <div>
-                  <div
-                    style={{
-                      fontSize: "24px",
-                      fontWeight: "bold",
-                      color: "#dc2626",
-                    }}
-                  >
-                    {spamCount}
-                  </div>
-                  <div style={{ fontSize: "12px", color: "#666" }}>
-                    Spam/Junk
-                  </div>
-                </div>
-                {false && (
+                {/* Top row: Mail Pieces and Spam/Junk */}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "16px",
+                    marginBottom: "12px",
+                  }}
+                >
                   <div>
                     <div style={{ fontSize: "24px", fontWeight: "bold" }}>
-                      {householdMembers?.length || 0}
+                      {mailCount}
                     </div>
                     <div style={{ fontSize: "12px", color: "#666" }}>
-                      Household Members
+                      Mail Pieces
                     </div>
                   </div>
-                )}
+                  <div>
+                    <div
+                      style={{
+                        fontSize: "24px",
+                        fontWeight: "bold",
+                        color: "#dc2626",
+                      }}
+                    >
+                      {spamCount}
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#666" }}>
+                      Spam/Junk
+                    </div>
+                  </div>
+                </div>
+
+                {/* Category badges */}
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: "8px",
+                  }}
+                >
+                  {personalCount > 0 && (
+                    <span
+                      style={{
+                        padding: "4px 10px",
+                        backgroundColor: "#fce7f3",
+                        color: "#be185d",
+                        borderRadius: "12px",
+                        fontSize: "13px",
+                        fontWeight: "500",
+                      }}
+                    >
+                      {personalCount} Personal
+                    </span>
+                  )}
+                  {billCount > 0 && (
+                    <span
+                      style={{
+                        padding: "4px 10px",
+                        backgroundColor: "#fef3c7",
+                        color: "#b45309",
+                        borderRadius: "12px",
+                        fontSize: "13px",
+                        fontWeight: "500",
+                      }}
+                    >
+                      {billCount} Bills
+                    </span>
+                  )}
+                  {financialCount > 0 && (
+                    <span
+                      style={{
+                        padding: "4px 10px",
+                        backgroundColor: "#d1fae5",
+                        color: "#047857",
+                        borderRadius: "12px",
+                        fontSize: "13px",
+                        fontWeight: "500",
+                      }}
+                    >
+                      {financialCount} Financial
+                    </span>
+                  )}
+                  {advertisementCount > 0 && (
+                    <span
+                      style={{
+                        padding: "4px 10px",
+                        backgroundColor: "#e5e7eb",
+                        color: "#4b5563",
+                        borderRadius: "12px",
+                        fontSize: "13px",
+                        fontWeight: "500",
+                      }}
+                    >
+                      {advertisementCount} Ads
+                    </span>
+                  )}
+                  {packageCount > 0 && (
+                    <span
+                      style={{
+                        padding: "4px 10px",
+                        backgroundColor: "#dbeafe",
+                        color: "#1d4ed8",
+                        borderRadius: "12px",
+                        fontSize: "13px",
+                        fontWeight: "500",
+                      }}
+                    >
+                      {packageCount} Packages
+                    </span>
+                  )}
+                  {governmentCount > 0 && (
+                    <span
+                      style={{
+                        padding: "4px 10px",
+                        backgroundColor: "#ede9fe",
+                        color: "#6d28d9",
+                        borderRadius: "12px",
+                        fontSize: "13px",
+                        fontWeight: "500",
+                      }}
+                    >
+                      {governmentCount} Government
+                    </span>
+                  )}
+                  {medicalCount > 0 && (
+                    <span
+                      style={{
+                        padding: "4px 10px",
+                        backgroundColor: "#fee2e2",
+                        color: "#b91c1c",
+                        borderRadius: "12px",
+                        fontSize: "13px",
+                        fontWeight: "500",
+                      }}
+                    >
+                      {medicalCount} Medical
+                    </span>
+                  )}
+                  {subscriptionCount > 0 && (
+                    <span
+                      style={{
+                        padding: "4px 10px",
+                        backgroundColor: "#cffafe",
+                        color: "#0e7490",
+                        borderRadius: "12px",
+                        fontSize: "13px",
+                        fontWeight: "500",
+                      }}
+                    >
+                      {subscriptionCount} Subscriptions
+                    </span>
+                  )}
+                  {charityCount > 0 && (
+                    <span
+                      style={{
+                        padding: "4px 10px",
+                        backgroundColor: "#fef9c3",
+                        color: "#a16207",
+                        borderRadius: "12px",
+                        fontSize: "13px",
+                        fontWeight: "500",
+                      }}
+                    >
+                      {charityCount} Charity
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Household Members */}
@@ -722,103 +975,113 @@ If you cannot read the image clearly, make your best guess based on what you can
                 </details>
               )}
 
-              {/* Possibly Urgent Section */}
-              {urgentCount > 0 && (
+              {
+                /* Possibly Urgent Section
+                  WORKAROUND: Using CSS display:none instead of conditional rendering (ifElse or &&)
+                  because .map() inside conditionals doesn't get transformed to mapWithPattern,
+                  causing raw vnode JSON to render instead of actual UI elements.
+                  See: packages/ts-transformers/ISSUES_TO_FOLLOW_UP.md Issue #5
+                  Related: https://github.com/user/repo/commit/1b10bac4d (link subscription bug)
+              */
+              }
+              <div
+                style={{
+                  marginTop: "8px",
+                  padding: "16px",
+                  backgroundColor: "#fef3c7",
+                  borderRadius: "12px",
+                  border: "2px solid #f59e0b",
+                  display: urgentCount > 0 ? "block" : "none",
+                }}
+              >
                 <div
                   style={{
-                    marginTop: "8px",
-                    padding: "16px",
-                    backgroundColor: "#fef3c7",
-                    borderRadius: "12px",
-                    border: "2px solid #f59e0b",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    marginBottom: "12px",
                   }}
                 >
-                  <div
+                  <span style={{ fontSize: "20px" }}>⚠️</span>
+                  <span
                     style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                      marginBottom: "12px",
+                      fontWeight: "700",
+                      fontSize: "18px",
+                      color: "#b45309",
                     }}
                   >
-                    <span style={{ fontSize: "20px" }}>⚠️</span>
-                    <span
+                    Possibly Urgent ({urgentCount})
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: "16px",
+                  }}
+                >
+                  {mailPieceAnalyses.map((analysisItem) => (
+                    <div
                       style={{
-                        fontWeight: "700",
-                        fontSize: "18px",
-                        color: "#b45309",
+                        display: analysisItem?.result?.isUrgent &&
+                            !analysisItem?.pending
+                          ? "block"
+                          : "none",
+                        backgroundColor: "white",
+                        borderRadius: "8px",
+                        padding: "12px",
+                        border: "1px solid #fcd34d",
+                        width: "200px",
                       }}
                     >
-                      Possibly Urgent ({urgentCount})
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      flexWrap: "wrap",
-                      gap: "16px",
-                    }}
-                  >
-                    {urgentMailAnalyses.map((analysisItem) => (
+                      {/* Enlarged thumbnail */}
                       <div
                         style={{
-                          backgroundColor: "white",
-                          borderRadius: "8px",
-                          padding: "12px",
-                          border: "1px solid #fcd34d",
-                          width: "200px",
+                          width: "176px",
+                          height: "132px",
+                          backgroundColor: "#e5e7eb",
+                          borderRadius: "6px",
+                          overflow: "hidden",
+                          marginBottom: "8px",
                         }}
                       >
-                        {/* Enlarged thumbnail */}
-                        <div
+                        <img
+                          src={analysisItem.imageUrl || ""}
+                          alt="Urgent mail piece"
                           style={{
-                            width: "176px",
-                            height: "132px",
-                            backgroundColor: "#e5e7eb",
-                            borderRadius: "6px",
-                            overflow: "hidden",
-                            marginBottom: "8px",
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
                           }}
-                        >
-                          <img
-                            src={analysisItem.imageUrl || ""}
-                            alt="Urgent mail piece"
-                            style={{
-                              width: "100%",
-                              height: "100%",
-                              objectFit: "cover",
-                            }}
-                          />
-                        </div>
-                        {/* Info */}
-                        <div style={{ fontWeight: "600", fontSize: "14px" }}>
-                          {analysisItem.result?.sender || "Unknown Sender"}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "12px",
-                            color: "#6b7280",
-                            marginTop: "2px",
-                          }}
-                        >
-                          To: {analysisItem.result?.recipient || "Unknown"}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "12px",
-                            color: "#b45309",
-                            marginTop: "6px",
-                            fontStyle: "italic",
-                          }}
-                        >
-                          {analysisItem.result?.urgentReason ||
-                            "Time-sensitive"}
-                        </div>
+                        />
                       </div>
-                    ))}
-                  </div>
+                      {/* Info */}
+                      <div style={{ fontWeight: "600", fontSize: "14px" }}>
+                        {analysisItem.result?.sender || "Unknown Sender"}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          color: "#6b7280",
+                          marginTop: "2px",
+                        }}
+                      >
+                        To: {analysisItem.result?.recipient || "Unknown"}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          color: "#b45309",
+                          marginTop: "6px",
+                          fontStyle: "italic",
+                        }}
+                      >
+                        {analysisItem.result?.urgentReason || "Time-sensitive"}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              )}
+              </div>
 
               {/* Reactive Mail Piece Analysis Results */}
               <details open style={{ marginTop: "8px" }}>
