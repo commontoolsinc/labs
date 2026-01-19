@@ -351,7 +351,8 @@ export default pattern<PatternInput, PatternOutput>(
     // Directly instantiate GmailImporter with library-specific settings
     const gmailImporter = GmailImporter({
       settings: {
-        gmailFilterQuery: `from:${LIBRARY_SENDER}`,
+        // Search for library address anywhere (from OR body) to catch forwarded emails
+        gmailFilterQuery: `from:${LIBRARY_SENDER} OR ${LIBRARY_SENDER}`,
         autoFetchOnAuth: true,
         resolveInlineImages: false,
         limit: 50,
@@ -363,11 +364,20 @@ export default pattern<PatternInput, PatternOutput>(
     // Get emails directly from the embedded gmail-importer
     const allEmails = gmailImporter.emails;
 
-    // Filter for library emails
+    // Filter for library emails (from library OR forwarded with library content)
     const libraryEmails = computed(() => {
-      return (allEmails || []).filter((e: Email) =>
-        e.from?.toLowerCase().includes("library.berkeleypubliclibrary.org")
-      );
+      return (allEmails || []).filter((e: Email) => {
+        const fromLibrary = e.from?.toLowerCase().includes(
+          "library.berkeleypubliclibrary.org",
+        );
+        const contentHasLibrary = e.markdownContent?.toLowerCase().includes(
+          "library.berkeleypubliclibrary.org",
+        ) ||
+          e.markdownContent?.toLowerCase().includes(
+            "notices@library.berkeleypubliclibrary.org",
+          );
+        return fromLibrary || contentHasLibrary;
+      });
     });
 
     // Count of library emails found
