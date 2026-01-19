@@ -520,6 +520,48 @@ describe("StorageTransaction", () => {
     });
     expect(result).toBe("deepvalue");
   });
+
+  it("should preserve existing fields when writing nested path through new top-level key", () => {
+    const transaction = runtime.edit();
+
+    // Create a document with existing data at root (no "value" wrapper)
+    transaction.write({
+      space,
+      id: "of:test-preserve-existing",
+      type: "application/json",
+      path: [],
+    }, { existingKey: "existingValue" });
+
+    // Write to a nested path through a NEW top-level key using writeOrThrow
+    // (not writeValueOrThrow, which adds a "value" prefix)
+    // This should NOT overwrite existingKey
+    expect(() => {
+      transaction.writeOrThrow({
+        space,
+        id: "of:test-preserve-existing",
+        type: "application/json",
+        path: ["newKey", "nested"],
+      }, "newValue");
+    }).not.toThrow();
+
+    // Verify the new path was created
+    const newResult = transaction.readOrThrow({
+      space,
+      id: "of:test-preserve-existing",
+      type: "application/json",
+      path: ["newKey", "nested"],
+    });
+    expect(newResult).toBe("newValue");
+
+    // Verify existing data was preserved (this is the key assertion)
+    const existingResult = transaction.readOrThrow({
+      space,
+      id: "of:test-preserve-existing",
+      type: "application/json",
+      path: ["existingKey"],
+    });
+    expect(existingResult).toBe("existingValue");
+  });
 });
 
 describe("DocImpl shim notifications", () => {
