@@ -98,3 +98,87 @@ describe("CharmsController.ensureDefaultPattern", () => {
     });
   });
 });
+
+describe("CharmsController.recreateDefaultPattern", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let manager: CharmManager;
+  let controller: CharmsController;
+
+  beforeEach(async () => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      // Use a fake URL since we won't actually fetch patterns in unit tests
+      apiUrl: new URL("http://localhost:9999"),
+      storageManager,
+    });
+
+    const session = await createSession({
+      identity: signer,
+      spaceName: "test-space-" + crypto.randomUUID(),
+    });
+    manager = new CharmManager(session, runtime);
+    await manager.synced();
+    controller = new CharmsController(manager);
+  });
+
+  afterEach(async () => {
+    try {
+      await controller?.dispose();
+    } catch {
+      // Already disposed
+    }
+    await storageManager?.close();
+  });
+
+  it("should throw if pattern server is unavailable", async () => {
+    // The fake URL should cause pattern loading to fail
+    await expect(controller.recreateDefaultPattern()).rejects.toThrow();
+  });
+
+  it("should handle disposed controller gracefully", async () => {
+    await controller.dispose();
+
+    await expect(controller.recreateDefaultPattern()).rejects.toThrow(
+      /disposed/,
+    );
+  });
+
+  it("should unlink existing defaultPattern before creating new one", async () => {
+    // Create a mock charm cell and link it as the default pattern
+    const mockCharmCell = runtime.getImmutableCell(
+      manager.getSpace(),
+      { name: "MockDefaultPattern" },
+    );
+    await manager.linkDefaultPattern(mockCharmCell);
+
+    // Verify it's linked by checking the space cell directly
+    const spaceCell = runtime.getCell(
+      manager.getSpace(),
+      manager.getSpace(),
+    );
+    const defaultPatternCell = spaceCell.key("defaultPattern");
+    expect(defaultPatternCell.get()).toBeDefined();
+
+    // recreateDefaultPattern will fail (no server) but should unlink first
+    await expect(controller.recreateDefaultPattern()).rejects.toThrow();
+
+    // Pattern should be unlinked now (unlink happens before the network call)
+    // After unlinking, the cell value is set to undefined
+    const afterValue = defaultPatternCell.get();
+    expect(afterValue).toBeUndefined();
+  });
+
+  it("should work even when no defaultPattern exists initially", async () => {
+    // Verify no pattern exists by checking the space cell directly
+    const spaceCell = runtime.getCell(
+      manager.getSpace(),
+      manager.getSpace(),
+    );
+    const defaultPatternCell = spaceCell.key("defaultPattern");
+    expect(defaultPatternCell.get()?.get()).toBeUndefined();
+
+    // Should still attempt to create (and fail due to fake server)
+    await expect(controller.recreateDefaultPattern()).rejects.toThrow();
+  });
+});

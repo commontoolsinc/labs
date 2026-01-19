@@ -149,17 +149,7 @@ export class CharmsController<T = unknown> {
   async recreateDefaultPattern(): Promise<CharmController<NameSchema>> {
     this.disposeCheck();
 
-    // Get the existing default pattern (if any) and stop it
-    const existingPattern = await this.#manager.getDefaultPattern();
-    if (existingPattern) {
-      try {
-        await this.#manager.stopCharm(existingPattern);
-      } catch {
-        // Ignore errors when stopping (pattern might not be running)
-      }
-    }
-
-    // Unlink the existing default pattern
+    // Unlink the existing default pattern first (before any operations that might fail)
     await this.#manager.unlinkDefaultPattern();
 
     // Determine which pattern to use based on space type
