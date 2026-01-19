@@ -449,6 +449,7 @@ const handleDropOntoNotebook = handler<
 });
 
 // Create nested notebook and navigate to it (unless "Create Another" was used)
+// Note: Notebooks are created empty; a default note is created lazily when opened
 const createNestedNotebookAndOpen = handler<
   void,
   {
@@ -471,7 +472,7 @@ const createNestedNotebookAndOpen = handler<
   },
 ) => {
   const title = newNestedNotebookTitle.get() || "New Notebook";
-  // Pass isHidden: true and parentNotebook: self at creation time for back navigation
+
   const nb = Notebook({
     title,
     notes: [],
@@ -495,6 +496,7 @@ const createNestedNotebookAndOpen = handler<
 });
 
 // Create nested notebook and keep modal open for another
+// Note: Notebooks are created empty; a default note is created lazily when opened
 const createNestedNotebookAndContinue = handler<
   void,
   {
@@ -508,7 +510,7 @@ const createNestedNotebookAndContinue = handler<
   { newNestedNotebookTitle, notes, allCharms, usedCreateAnotherNotebook },
 ) => {
   const title = newNestedNotebookTitle.get() || "New Notebook";
-  // Pass isHidden: true and parentNotebook for navigation back
+
   const nb = Notebook({
     title,
     notes: [],
@@ -1102,6 +1104,7 @@ const handleSetTitle = handler<
 });
 
 // LLM-callable handler: Create a new notebook (optionally with notes)
+// Note: If no notesData provided, notebook is created empty; a default note is created lazily when opened
 const handleCreateNotebook = handler<
   { title: string; notesData?: Array<{ title: string; content: string }> },
   { allCharms: Writable<NoteCharm[]> }
@@ -1119,13 +1122,12 @@ const handleCreateNotebook = handler<
     }
   }
 
-  // Create the notebook with the notes
+  // Create the notebook with the notes (empty if no notesData)
   const newNotebook = Notebook({
     title: nbTitle,
     notes: notesToAdd,
   });
 
-  // Push only the notebook to allCharms (notes are auto-added but hidden)
   allCharms.push(newNotebook);
   return newNotebook;
 });
@@ -1197,6 +1199,21 @@ const Notebook = pattern<Input, Output>(
       selectedNoteIndices.set([]);
     });
 
+    // Lazy note creation: Creates a default note when opening an empty notebook
+    // This is triggered by clicking the empty state UI, making notebook creation faster
+    const createFirstNote = action(() => {
+      if (notes.get().length === 0) {
+        const defaultNote = Note({
+          title: "New Note",
+          content: "",
+          isHidden: true,
+          noteId: generateId(),
+        });
+        allCharms.push(defaultNote as any);
+        notes.push(defaultNote);
+      }
+    });
+
     // Filter to find all notebooks by checking if [NAME] contains "Notebook" or starts with notebook emoji
     // Charms from wish("#default") only expose [NAME] at top level, not other properties
     const notebooks = computed(() =>
@@ -1212,11 +1229,12 @@ const Notebook = pattern<Input, Output>(
 
     // COMBINED computed for ALL notebook relationships to avoid nested computed access issues
     // Returns parents, children, siblings, and their boolean flags all in one place
-    const notebookRelationships = computed(() => {
+    // NOTE: Prefixed with _ because siblings feature is disabled; kept for re-enabling
+    const _notebookRelationships = computed(() => {
       // Current notebook's name for comparison - use title since it's our local prop
       const currentTitle = title;
       // Build a pattern to match our NAME format: "📓 {title} ({count})"
-      const currentNamePattern = `📓 ${currentTitle}`;
+      const _currentNamePattern = `📓 ${currentTitle}`;
       const nbCount = notebooks.length;
 
       // Find parent notebooks (notebooks that contain this notebook in their notes)
@@ -1242,25 +1260,36 @@ const Notebook = pattern<Input, Output>(
         }
       }
 
-      // Get names of items in our notes list to exclude from siblings
-      const notesListNames = (Array.isArray(notesList) ? notesList : [])
-        .map((n: any) => getCharmName(n))
-        .filter((t: any) => t.length > 0);
+      // ========================================================================
+      // SIBLINGS FEATURE DISABLED FOR PERFORMANCE
+      // ========================================================================
+      // The "Other notebooks" sibling feature was causing significant performance
+      // issues with 50+ notebooks due to O(n*m) complexity in the computation.
+      //
+      // To re-enable:
+      // 1. Uncomment the siblings computation below
+      // 2. Uncomment the UI section in JSX (search for "DISABLED FOR PERFORMANCE")
+      // 3. Set hasSiblings to: siblings.length > 0
+      //
+      // Performance consideration: Consider implementing lazy evaluation or
+      // a collapsible UI that only computes siblings when expanded.
+      // ========================================================================
 
-      // Find sibling notebooks (excluding self and anything in our notes list)
-      const siblings: any[] = [];
-      for (let i = 0; i < nbCount; i++) {
-        const nb = notebooks[i];
-        const nbName = getCharmName(nb);
-        if (nbName.length === 0) continue;
-        // Skip self (name starts with our pattern)
-        if (nbName.startsWith(currentNamePattern)) continue;
-        // Skip notebooks already in our notes list
-        if (
-          notesListNames.some((n) => nbName.includes(n) || n.includes(nbName))
-        ) continue;
-        siblings.push(nb);
-      }
+      // const notesListNames = (Array.isArray(notesList) ? notesList : [])
+      //   .map((n: any) => getCharmName(n))
+      //   .filter((t: any) => t.length > 0);
+      //
+      // const siblings: any[] = [];
+      // for (let i = 0; i < nbCount; i++) {
+      //   const nb = notebooks[i];
+      //   const nbName = getCharmName(nb);
+      //   if (nbName.length === 0) continue;
+      //   if (nbName.startsWith(currentNamePattern)) continue;
+      //   if (notesListNames.some((n) => nbName.includes(n) || n.includes(nbName))) continue;
+      //   siblings.push(nb);
+      // }
+
+      const siblings: any[] = []; // Empty - siblings feature disabled
 
       return {
         parents,
@@ -1268,7 +1297,7 @@ const Notebook = pattern<Input, Output>(
         children,
         hasChildren: children.length > 0,
         siblings,
-        hasSiblings: siblings.length > 0,
+        hasSiblings: false, // Set to: siblings.length > 0 when re-enabling
       };
     });
 
@@ -1486,6 +1515,44 @@ const Notebook = pattern<Input, Output>(
                     </div>
                   </ct-drop-zone>
 
+                  {/* Empty state - shown when notebook has no notes, click to create first note */}
+                  <div
+                    style={{
+                      display: computed(() => hasNotes ? "none" : "flex"),
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: "48px 24px",
+                      cursor: "pointer",
+                      borderRadius: "8px",
+                      border: "2px dashed var(--ct-color-border, #e5e5e7)",
+                      background: "var(--ct-color-bg-secondary, #f9f9f9)",
+                    }}
+                    onClick={createFirstNote}
+                  >
+                    <span style={{ fontSize: "32px", marginBottom: "12px" }}>
+                      📝
+                    </span>
+                    <span
+                      style={{
+                        fontSize: "15px",
+                        fontWeight: "500",
+                        color: "var(--ct-color-text-primary)",
+                      }}
+                    >
+                      Click to create your first note
+                    </span>
+                    <span
+                      style={{
+                        fontSize: "13px",
+                        color: "var(--ct-color-text-secondary, #6e6e73)",
+                        marginTop: "4px",
+                      }}
+                    >
+                      or use the New button above
+                    </span>
+                  </div>
+
                   <ct-vstack
                     gap="0"
                     style={{
@@ -1551,10 +1618,8 @@ const Notebook = pattern<Input, Output>(
                                   >
                                     <ct-cell-context $cell={note}>
                                       <ct-chip
-                                        label={computed(() =>
-                                          note?.[NAME] ?? note?.title ??
-                                            "Untitled"
-                                        )}
+                                        label={note?.[NAME] ?? note?.title ??
+                                          "Untitled"}
                                         interactive
                                       />
                                     </ct-cell-context>
@@ -1682,12 +1747,16 @@ const Notebook = pattern<Input, Output>(
                 </ct-vstack>
               </ct-card>
 
-              {/* Sibling Notebooks (Other notebooks from space) - vertical list */}
+              {
+                /* ================================================================
+                  SIBLINGS FEATURE DISABLED FOR PERFORMANCE
+                  See notebookRelationships computed for re-enabling instructions
+                  ================================================================
               <ct-vstack
                 gap="2"
                 style={{
                   display: computed(() =>
-                    notebookRelationships.hasSiblings ? "flex" : "none"
+                    _notebookRelationships.hasSiblings ? "flex" : "none"
                   ),
                   marginTop: "16px",
                   paddingTop: "16px",
@@ -1704,7 +1773,7 @@ const Notebook = pattern<Input, Output>(
                   Other notebooks:
                 </span>
                 <ct-vstack gap="1">
-                  {notebookRelationships.siblings.map((notebook) => (
+                  {_notebookRelationships.siblings.map((notebook) => (
                     <ct-drop-zone
                       accept="note,notebook"
                       onct-drop={handleDropOntoNotebook({
@@ -1721,10 +1790,7 @@ const Notebook = pattern<Input, Output>(
                         >
                           <ct-cell-context $cell={notebook}>
                             <ct-chip
-                              label={computed(() =>
-                                notebook?.[NAME] ?? notebook?.title ??
-                                  "Untitled"
-                              )}
+                              label={notebook?.[NAME] ?? notebook?.title ?? "Untitled"}
                               interactive
                             />
                           </ct-cell-context>
@@ -1734,6 +1800,8 @@ const Notebook = pattern<Input, Output>(
                   ))}
                 </ct-vstack>
               </ct-vstack>
+              */
+              }
             </ct-vstack>
           </div>
 
