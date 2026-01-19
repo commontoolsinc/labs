@@ -942,6 +942,9 @@ export class CTCodeEditor extends BaseElement {
     if (!this._editorView) return;
 
     const newValue = this.getValue();
+    // Guard against undefined - can happen when cell isn't bound yet
+    if (newValue === undefined || newValue === null) return;
+
     const currentValue = this._editorView.state.doc.toString();
 
     // Skip if content already matches - handles Cell echoes.
@@ -1390,7 +1393,7 @@ export class CTCodeEditor extends BaseElement {
 
     // Create editor state
     const state = EditorState.create({
-      doc: this.getValue(),
+      doc: this.getValue() ?? "",
       extensions,
     });
 
