@@ -454,6 +454,49 @@ const dismissHoldHandler = handler<
   }
 });
 
+/**
+ * Handler to set a new due date for selected items in a group.
+ */
+const setDueDateForGroup = handler<
+  unknown,
+  {
+    groupItems: TrackedItem[];
+    selectedItems: Writable<Default<string[], []>>;
+    dueDateOverrides: Writable<Default<Record<string, string>, {}>>;
+  }
+>((event, { groupItems, selectedItems, dueDateOverrides }) => {
+  const input = (event as { target: { value: string } }).target;
+  const newDueDate = input.value;
+  if (!newDueDate) return;
+
+  // Get selected items in this group
+  const currentSelected = selectedItems.get() || [];
+  const selectedInThisGroup = groupItems.filter((item: TrackedItem) =>
+    currentSelected.includes(item.key)
+  );
+
+  if (selectedInThisGroup.length === 0) return;
+
+  // Update due date overrides for selected items
+  const current = dueDateOverrides.get() || {};
+  const updated = { ...current };
+  for (const item of selectedInThisGroup) {
+    updated[item.key] = newDueDate;
+  }
+  dueDateOverrides.set(updated);
+
+  // Clear selections after updating
+  selectedItems.set(
+    currentSelected.filter(
+      (k: string) =>
+        !selectedInThisGroup.some((item: TrackedItem) => item.key === k),
+    ),
+  );
+
+  // Reset the input
+  input.value = "";
+});
+
 // =============================================================================
 // PATTERN
 // =============================================================================
@@ -468,6 +511,8 @@ interface PatternInput {
   dismissedHolds: Writable<Default<string[], []>>;
   // Track selected items for bulk operations (per-group checkboxes)
   selectedItems: Writable<Default<string[], []>>;
+  // Track manual due date overrides (persisted)
+  dueDateOverrides: Writable<Default<Record<string, string>, {}>>;
 }
 
 /** Berkeley Public Library book tracker. #berkeleyLibrary */
@@ -484,7 +529,13 @@ interface PatternOutput {
 }
 
 export default pattern<PatternInput, PatternOutput>(
-  ({ linkedAuth, manuallyReturned, dismissedHolds, selectedItems }) => {
+  ({
+    linkedAuth,
+    manuallyReturned,
+    dismissedHolds,
+    selectedItems,
+    dueDateOverrides,
+  }) => {
     // Directly instantiate GmailImporter with library-specific settings
     const gmailImporter = GmailImporter({
       settings: {
@@ -599,6 +650,8 @@ Note: If this is a forwarded email, look for the original library content within
       const itemMap = new Map<string, TrackedItem>();
       // manuallyReturned is a Writable Cell, get the actual array value
       const returnedKeys = manuallyReturned.get() || [];
+      // Get due date overrides
+      const overrides = dueDateOverrides.get() || {};
 
       // Sort emails by date (newest first) so we keep most recent data
       const sortedAnalyses = [...(emailAnalyses || [])]
@@ -622,14 +675,17 @@ Note: If this is a forwarded email, look for the original library content within
           // Skip items that are holds (not checked out)
           if (item.status === "hold_ready") continue;
 
-          const daysUntilDue = calculateDaysUntilDue(item.dueDate);
+          // Use overridden due date if available, otherwise use original
+          const effectiveDueDate = overrides[key] || item.dueDate;
+
+          const daysUntilDue = calculateDaysUntilDue(effectiveDueDate);
           const urgency = calculateUrgency(daysUntilDue, item.status);
 
           const trackedItem: TrackedItem = {
             key,
             title: item.title,
             author: item.author,
-            dueDate: item.dueDate,
+            dueDate: effectiveDueDate,
             status: item.status,
             itemType: item.itemType,
             renewalsRemaining: item.renewalsRemaining,
@@ -1160,54 +1216,98 @@ Note: If this is a forwarded email, look for the original library content within
                               })}
                             </div>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              // Get selected items in this group
-                              const currentSelected = selectedItems.get() || [];
-                              const selectedInThisGroup = group.items.filter(
-                                (item: TrackedItem) =>
-                                  currentSelected.includes(item.key),
-                              );
-                              if (selectedInThisGroup.length === 0) return;
-
-                              // Mark them as returned
-                              const current = manuallyReturned.get();
-                              const selectedKeys = selectedInThisGroup.map(
-                                (item: TrackedItem) => item.key,
-                              );
-                              manuallyReturned.set([
-                                ...current,
-                                ...selectedKeys,
-                              ]);
-
-                              // Clear selections for returned items
-                              selectedItems.set(
-                                currentSelected.filter(
-                                  (k: string) => !selectedKeys.includes(k),
-                                ),
-                              );
-                            }}
+                          <div
                             style={{
-                              padding: "8px 16px",
-                              backgroundColor: computed(() =>
-                                selectedCount > 0 ? "#10b981" : "#d1d5db"
-                              ),
-                              color: "white",
-                              border: "none",
-                              borderRadius: "6px",
-                              cursor: computed(() =>
-                                selectedCount > 0 ? "pointer" : "not-allowed"
-                              ),
-                              fontSize: "13px",
-                              fontWeight: "600",
-                              display: computed(() =>
-                                selectedCount > 0 ? "block" : "none"
-                              ),
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
                             }}
                           >
-                            Mark {selectedCount} Returned
-                          </button>
+                            {/* Date picker for setting new due date */}
+                            <div
+                              style={{
+                                display: computed(() =>
+                                  selectedCount > 0 ? "flex" : "none"
+                                ),
+                                alignItems: "center",
+                                gap: "8px",
+                              }}
+                            >
+                              <label
+                                style={{
+                                  fontSize: "13px",
+                                  fontWeight: "500",
+                                  color: "#374151",
+                                }}
+                              >
+                                New due date:
+                              </label>
+                              <input
+                                type="date"
+                                onChange={setDueDateForGroup({
+                                  groupItems: group.items,
+                                  selectedItems,
+                                  dueDateOverrides,
+                                })}
+                                style={{
+                                  padding: "6px 12px",
+                                  border: "1px solid #d1d5db",
+                                  borderRadius: "6px",
+                                  fontSize: "13px",
+                                  cursor: "pointer",
+                                }}
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                // Get selected items in this group
+                                const currentSelected = selectedItems.get() ||
+                                  [];
+                                const selectedInThisGroup = group.items.filter(
+                                  (item: TrackedItem) =>
+                                    currentSelected.includes(item.key),
+                                );
+                                if (selectedInThisGroup.length === 0) return;
+
+                                // Mark them as returned
+                                const current = manuallyReturned.get();
+                                const selectedKeys = selectedInThisGroup.map(
+                                  (item: TrackedItem) => item.key,
+                                );
+                                manuallyReturned.set([
+                                  ...current,
+                                  ...selectedKeys,
+                                ]);
+
+                                // Clear selections for returned items
+                                selectedItems.set(
+                                  currentSelected.filter(
+                                    (k: string) => !selectedKeys.includes(k),
+                                  ),
+                                );
+                              }}
+                              style={{
+                                padding: "8px 16px",
+                                backgroundColor: computed(() =>
+                                  selectedCount > 0 ? "#10b981" : "#d1d5db"
+                                ),
+                                color: "white",
+                                border: "none",
+                                borderRadius: "6px",
+                                cursor: computed(() =>
+                                  selectedCount > 0 ? "pointer" : "not-allowed"
+                                ),
+                                fontSize: "13px",
+                                fontWeight: "600",
+                                display: computed(() =>
+                                  selectedCount > 0 ? "block" : "none"
+                                ),
+                              }}
+                            >
+                              Mark {selectedCount} Returned
+                            </button>
+                          </div>
                         </div>
 
                         {/* Items in this group */}
