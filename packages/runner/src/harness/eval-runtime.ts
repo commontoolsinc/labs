@@ -84,6 +84,13 @@ class IsolateInternals {
   }
 
   /**
+   * Parse an error stack trace, mapping all positions back to original sources.
+   */
+  parseStack(stack: string): string {
+    return this.sourceMaps.parse(stack);
+  }
+
+  /**
    * Clear accumulated source maps to release memory.
    */
   clear(): void {
@@ -123,6 +130,13 @@ export class UnsafeEvalIsolate implements JsIsolate {
   }
 
   /**
+   * Parse an error stack trace, mapping all positions back to original sources.
+   */
+  parseStack(stack: string): string {
+    return this.internals.parseStack(stack);
+  }
+
+  /**
    * Clear accumulated source maps and other state.
    * Call this when disposing the runtime to prevent memory leaks.
    */
@@ -147,6 +161,13 @@ export class UnsafeEvalRuntime extends EventTarget implements JsRuntime {
     column: number,
   ): MappedPosition | null {
     return this.isolateSingleton.mapPosition(filename, line, column);
+  }
+
+  /**
+   * Parse an error stack trace, mapping all positions back to original sources.
+   */
+  parseStack(stack: string): string {
+    return this.isolateSingleton.parseStack(stack);
   }
 
   /**

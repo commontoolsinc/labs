@@ -1883,6 +1883,11 @@ export class Scheduler {
       (error as Error & { frame?: Frame }).frame,
     );
 
+    // Transform stack trace to show original source locations
+    if (error.stack) {
+      error.stack = this.runtime.harness.parseStack(error.stack);
+    }
+
     const errorWithContext = error as ErrorWithContext;
     errorWithContext.action = action;
     if (charmId) errorWithContext.charmId = charmId;
