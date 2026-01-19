@@ -6,6 +6,7 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   InactiveTransactionError,
+  INotFoundError,
   IReadOptions,
   IStorageTransaction,
   ITransactionJournal,
@@ -123,36 +124,49 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       writeResult.error &&
       (writeResult.error.name === "NotFoundError")
     ) {
-      // Create parent entries if needed
-      const lastValidPath = writeResult.error.name === "NotFoundError"
-        ? writeResult.error.path
-        : undefined;
-      const currentValue = this.readValueOrThrow({
-        ...address,
-        path: lastValidPath ?? [],
-      }, { meta: ignoreReadForScheduling });
-      const valueObj = lastValidPath === undefined ? {} : currentValue;
-      if (!isRecord(valueObj)) {
-        // This should have already been caught as type mismatch error
-        throw new Error(
-          `Value at path ${address.path.join("/")} is not an object`,
-        );
+      // Create parent entries if needed.
+      // errorPath includes the missing key (consistent with read errors).
+      // lastExistingPath is one level up - the actual last existing parent.
+      const errorPath = (writeResult.error as INotFoundError).path;
+      const lastExistingPath = errorPath.slice(0, -1);
+      // When document doesn't exist (errorPath is []), we don't need to read -
+      // just start with {}. But if errorPath has content (e.g., ["foo"]), the
+      // document exists and we need to read from lastExistingPath to preserve
+      // existing fields.
+      let valueObj: Record<string, JSONValue>;
+      if (errorPath.length === 0) {
+        valueObj = {};
+      } else {
+        const currentValue = this.readOrThrow({
+          ...address,
+          path: lastExistingPath,
+        }, { meta: ignoreReadForScheduling });
+        if (!isRecord(currentValue)) {
+          // This should have already been caught as type mismatch error
+          throw new Error(
+            `Value at path ${address.path.join("/")} is not an object`,
+          );
+        }
+        valueObj = currentValue as Record<string, JSONValue>;
       }
-      const remainingPath = address.path.slice(lastValidPath?.length ?? 0);
+      const remainingPath = address.path.slice(lastExistingPath.length);
       if (remainingPath.length === 0) {
         throw new Error(
-          `Invalid error path: ${lastValidPath?.join("/")}`,
+          `Invalid error path: ${errorPath.join("/")}`,
         );
       }
       const lastKey = remainingPath.pop()!;
-      let nextValue = valueObj;
+      let nextValue: Record<string, JSONValue> = valueObj;
       for (const key of remainingPath) {
         nextValue =
           nextValue[key] =
-            (Number.isInteger(Number(key)) ? [] : {}) as typeof nextValue;
+            (Number.isInteger(Number(key)) ? [] : {}) as Record<
+              string,
+              JSONValue
+            >;
       }
-      nextValue[lastKey] = value;
-      const parentAddress = { ...address, path: lastValidPath ?? [] };
+      nextValue[lastKey] = value as JSONValue;
+      const parentAddress = { ...address, path: lastExistingPath };
       const writeResultRetry = this.tx.write(parentAddress, valueObj);
       logResult(
         "writeOrThrow, retry",
