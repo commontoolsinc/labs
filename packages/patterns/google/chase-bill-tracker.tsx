@@ -18,10 +18,10 @@
  * 3. Link: ct charm link google-auth/auth chase-bill-tracker/linkedAuth
  */
 import {
+  action,
   computed,
   Default,
   generateObject,
-  handler,
   JSONSchema,
   NAME,
   pattern,
@@ -240,26 +240,8 @@ function getStatusColor(daysUntilDue: number, isPaid: boolean): {
 // =============================================================================
 // HANDLERS
 // =============================================================================
-
-// Handler to mark a bill as paid
-const markAsPaid = handler<
-  unknown,
-  { paidKeys: Writable<string[]>; billKey: string }
->((_event, { paidKeys, billKey }) => {
-  const current = paidKeys.get();
-  if (!current.includes(billKey)) {
-    paidKeys.set([...current, billKey]);
-  }
-});
-
-// Handler to unmark a bill as paid
-const unmarkAsPaid = handler<
-  unknown,
-  { paidKeys: Writable<string[]>; billKey: string }
->((_event, { paidKeys, billKey }) => {
-  const current = paidKeys.get();
-  paidKeys.set(current.filter((k) => k !== billKey));
-});
+// Note: These are kept as module-level handlers for potential reusability,
+// but we'll use action() inside the pattern for better reactive value handling
 
 // =============================================================================
 // PATTERN
@@ -267,7 +249,7 @@ const unmarkAsPaid = handler<
 
 interface PatternInput {
   linkedAuth?: Auth;
-  manuallyPaid: Default<string[], []>;
+  manuallyPaid: Writable<Default<string[], []>>;
 }
 
 /** Chase credit card bill tracker. #chaseBills */
@@ -417,7 +399,8 @@ Extract:
     // Process all analyses and build bill list
     const bills = computed(() => {
       const billMap: Record<string, TrackedBill> = {};
-      const paidKeys = (manuallyPaid || []) as string[];
+      // Get the current manually paid keys
+      const paidKeys = manuallyPaid.get() || [];
       // Access the computed value - paymentConfirmations returns a Record
       const payments = (paymentConfirmations || {}) as Record<string, string>;
 
@@ -438,8 +421,7 @@ Extract:
         // - bill_due: Explicit "payment due" notifications
         // - payment_reminder: Upcoming due date reminders
         // - statement_ready: Statement notifications (these often contain the bill amount/due date)
-        const isBillEmail =
-          result.emailType === "bill_due" ||
+        const isBillEmail = result.emailType === "bill_due" ||
           result.emailType === "payment_reminder";
         const isStatementWithBillInfo =
           result.emailType === "statement_ready" &&
@@ -793,101 +775,117 @@ Extract:
                   Unpaid Bills
                 </h3>
                 <ct-vstack gap="3">
-                  {unpaidBills.map((bill) => (
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: "12px",
-                        padding: "16px",
-                        backgroundColor: computed(() =>
-                          getStatusColor(bill.daysUntilDue, false).bg
-                        ),
-                        borderRadius: "12px",
-                        border: computed(() =>
-                          `2px solid ${
-                            getStatusColor(bill.daysUntilDue, false).border
-                          }`
-                        ),
-                      }}
-                    >
-                      <div style={{ flex: 1 }}>
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            marginBottom: "4px",
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontWeight: "700",
-                              fontSize: "18px",
-                              color: "#111827",
-                            }}
-                          >
-                            {computed(() => formatCurrency(bill.amount))}
-                          </span>
-                          <span
-                            style={{
-                              padding: "2px 8px",
-                              backgroundColor: "#e5e7eb",
-                              borderRadius: "4px",
-                              fontSize: "12px",
-                              color: "#374151",
-                            }}
-                          >
-                            ...{bill.cardLast4}
-                          </span>
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "14px",
-                            color: computed(() =>
-                              getStatusColor(bill.daysUntilDue, false).text
-                            ),
-                          }}
-                        >
-                          {computed(() => {
-                            if (bill.daysUntilDue < 0) {
-                              return `${
-                                Math.abs(bill.daysUntilDue)
-                              } days overdue`;
-                            }
-                            if (bill.daysUntilDue === 0) {
-                              return "Due today!";
-                            }
-                            if (bill.daysUntilDue === 1) {
-                              return "Due tomorrow";
-                            }
-                            return `Due in ${bill.daysUntilDue} days`;
-                          })}
-                          {" - "}
-                          {computed(() => formatDate(bill.dueDate))}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={markAsPaid({
-                          paidKeys: manuallyPaid,
-                          billKey: bill.key,
-                        })}
+                  {unpaidBills.map((bill) => {
+                    // Create action for this specific bill
+                    const markThisPaid = action(() => {
+                      console.log("[markThisPaid] Action called");
+                      const current = manuallyPaid.get() || [];
+                      console.log("[markThisPaid] Current keys:", current);
+                      const key = bill.key; // Access reactive value inside action
+                      console.log("[markThisPaid] Bill key:", key);
+                      if (key && !current.includes(key)) {
+                        const newKeys = [...current, key];
+                        console.log(
+                          "[markThisPaid] Setting new keys:",
+                          newKeys,
+                        );
+                        manuallyPaid.set(newKeys);
+                      }
+                    });
+
+                    return (
+                      <div
                         style={{
-                          padding: "8px 16px",
-                          backgroundColor: "#10b981",
-                          color: "white",
-                          border: "none",
-                          borderRadius: "8px",
-                          cursor: "pointer",
-                          fontSize: "14px",
-                          fontWeight: "600",
-                          alignSelf: "center",
+                          display: "flex",
+                          gap: "12px",
+                          padding: "16px",
+                          backgroundColor: computed(() =>
+                            getStatusColor(bill.daysUntilDue, false).bg
+                          ),
+                          borderRadius: "12px",
+                          border: computed(() =>
+                            `2px solid ${
+                              getStatusColor(bill.daysUntilDue, false).border
+                            }`
+                          ),
                         }}
                       >
-                        Mark Paid
-                      </button>
-                    </div>
-                  ))}
+                        <div style={{ flex: 1 }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              marginBottom: "4px",
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontWeight: "700",
+                                fontSize: "18px",
+                                color: "#111827",
+                              }}
+                            >
+                              {computed(() => formatCurrency(bill.amount))}
+                            </span>
+                            <span
+                              style={{
+                                padding: "2px 8px",
+                                backgroundColor: "#e5e7eb",
+                                borderRadius: "4px",
+                                fontSize: "12px",
+                                color: "#374151",
+                              }}
+                            >
+                              ...{bill.cardLast4}
+                            </span>
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "14px",
+                              color: computed(() =>
+                                getStatusColor(bill.daysUntilDue, false).text
+                              ),
+                            }}
+                          >
+                            {computed(() => {
+                              if (bill.daysUntilDue < 0) {
+                                return `${
+                                  Math.abs(bill.daysUntilDue)
+                                } days overdue`;
+                              }
+                              if (bill.daysUntilDue === 0) {
+                                return "Due today!";
+                              }
+                              if (bill.daysUntilDue === 1) {
+                                return "Due tomorrow";
+                              }
+                              return `Due in ${bill.daysUntilDue} days`;
+                            })}
+                            {" - "}
+                            {computed(() => formatDate(bill.dueDate))}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={markThisPaid}
+                          style={{
+                            padding: "8px 16px",
+                            backgroundColor: "#10b981",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "8px",
+                            cursor: "pointer",
+                            fontSize: "14px",
+                            fontWeight: "600",
+                            alignSelf: "center",
+                          }}
+                        >
+                          Mark Paid
+                        </button>
+                      </div>
+                    );
+                  })}
                 </ct-vstack>
               </div>
 
@@ -912,98 +910,104 @@ Extract:
                     Paid Bills ({computed(() => paidBills?.length || 0)})
                   </summary>
                   <ct-vstack gap="2">
-                    {paidBills.map((bill) => (
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "12px",
-                          padding: "12px",
-                          backgroundColor: "#d1fae5",
-                          borderRadius: "8px",
-                          border: "1px solid #10b981",
-                          opacity: 0.8,
-                        }}
-                      >
-                        <div style={{ flex: 1 }}>
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "8px",
-                            }}
-                          >
-                            <span
-                              style={{
-                                fontWeight: "600",
-                                fontSize: "16px",
-                                color: "#047857",
-                              }}
-                            >
-                              {computed(() => formatCurrency(bill.amount))}
-                            </span>
-                            <span
-                              style={{
-                                padding: "2px 6px",
-                                backgroundColor: "#a7f3d0",
-                                borderRadius: "4px",
-                                fontSize: "11px",
-                                color: "#065f46",
-                              }}
-                            >
-                              ...{bill.cardLast4}
-                            </span>
-                            <span
-                              style={{
-                                fontSize: "12px",
-                                color: "#059669",
-                              }}
-                            >
-                              {bill.isManuallyPaid
-                                ? "(manually marked)"
-                                : "(auto-detected)"}
-                            </span>
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "12px",
-                              color: "#047857",
-                              marginTop: "4px",
-                            }}
-                          >
-                            {computed(() => {
-                              const dueText = `Was due: ${
-                                formatDate(bill.dueDate)
-                              }`;
-                              const paidText = bill.paidDate
-                                ? ` • Paid: ${formatDate(bill.paidDate)}`
-                                : "";
-                              return dueText + paidText;
-                            })}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={unmarkAsPaid({
-                            paidKeys: manuallyPaid,
-                            billKey: bill.key,
-                          })}
+                    {paidBills.map((bill) => {
+                      // Create action for this specific bill
+                      const unmarkThisPaid = action(() => {
+                        const current = manuallyPaid.get();
+                        const key = bill.key; // Access reactive value inside action
+                        manuallyPaid.set(current.filter((k) => k !== key));
+                      });
+
+                      return (
+                        <div
                           style={{
-                            padding: "6px 12px",
-                            backgroundColor: "#6b7280",
-                            color: "white",
-                            border: "none",
-                            borderRadius: "6px",
-                            cursor: "pointer",
-                            fontSize: "12px",
-                            fontWeight: "500",
-                            alignSelf: "center",
-                            display: bill.isManuallyPaid ? "block" : "none",
+                            display: "flex",
+                            gap: "12px",
+                            padding: "12px",
+                            backgroundColor: "#d1fae5",
+                            borderRadius: "8px",
+                            border: "1px solid #10b981",
+                            opacity: 0.8,
                           }}
                         >
-                          Undo
-                        </button>
-                      </div>
-                    ))}
+                          <div style={{ flex: 1 }}>
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                              }}
+                            >
+                              <span
+                                style={{
+                                  fontWeight: "600",
+                                  fontSize: "16px",
+                                  color: "#047857",
+                                }}
+                              >
+                                {computed(() => formatCurrency(bill.amount))}
+                              </span>
+                              <span
+                                style={{
+                                  padding: "2px 6px",
+                                  backgroundColor: "#a7f3d0",
+                                  borderRadius: "4px",
+                                  fontSize: "11px",
+                                  color: "#065f46",
+                                }}
+                              >
+                                ...{bill.cardLast4}
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: "12px",
+                                  color: "#059669",
+                                }}
+                              >
+                                {bill.isManuallyPaid
+                                  ? "(manually marked)"
+                                  : "(auto-detected)"}
+                              </span>
+                            </div>
+                            <div
+                              style={{
+                                fontSize: "12px",
+                                color: "#047857",
+                                marginTop: "4px",
+                              }}
+                            >
+                              {computed(() => {
+                                const dueText = `Was due: ${
+                                  formatDate(bill.dueDate)
+                                }`;
+                                const paidText = bill.paidDate
+                                  ? ` • Paid: ${formatDate(bill.paidDate)}`
+                                  : "";
+                                return dueText + paidText;
+                              })}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={unmarkThisPaid}
+                            style={{
+                              padding: "6px 12px",
+                              backgroundColor: "#6b7280",
+                              color: "white",
+                              border: "none",
+                              borderRadius: "6px",
+                              cursor: "pointer",
+                              fontSize: "12px",
+                              fontWeight: "500",
+                              alignSelf: "center",
+                              display: bill.isManuallyPaid ? "block" : "none",
+                            }}
+                          >
+                            Undo
+                          </button>
+                        </div>
+                      );
+                    })}
                   </ct-vstack>
                 </details>
               </div>
