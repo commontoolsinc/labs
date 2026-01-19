@@ -145,7 +145,7 @@ const menuAllNotebooks = handler<
   if (existing) {
     return navigateTo(existing);
   }
-  return navigateTo(NotesImportExport({ importMarkdown: "" }));
+  return navigateTo(NotesImportExport({ importMarkdown: "", allCharms }));
 });
 
 // Handler: Add charm to allCharms if not already present
@@ -319,27 +319,16 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
                     return result;
                   });
 
-                  const dragHandle = (
-                    <ct-drag-source $cell={charm} type="note">
-                      <span
-                        style={{ cursor: "grab", padding: "4px", opacity: 0.5 }}
-                      >
-                        ⠿
-                      </span>
-                    </ct-drag-source>
-                  );
-
                   const link = (
-                    <ct-cell-context $cell={charm}>
-                      <ct-cell-link $cell={charm} />
-                    </ct-cell-context>
+                    <ct-drag-source $cell={charm} type="note">
+                      <ct-cell-context $cell={charm}>
+                        <ct-cell-link $cell={charm} />
+                      </ct-cell-context>
+                    </ct-drag-source>
                   );
 
                   return (
                     <tr>
-                      <td style={{ width: "24px", padding: "0 4px" }}>
-                        {dragHandle}
-                      </td>
                       <td>
                         {ifElse(
                           isNotebook,
