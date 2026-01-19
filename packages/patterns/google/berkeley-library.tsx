@@ -21,6 +21,7 @@ import {
   computed,
   Default,
   generateObject,
+  handler,
   JSONSchema,
   NAME,
   pattern,
@@ -312,6 +313,30 @@ function formatDate(dateStr: string | undefined): string {
 }
 
 // =============================================================================
+// HANDLERS
+// =============================================================================
+
+// Handler to toggle checkbox selection for an item
+// Pass the entire item Cell, then access .key inside the handler
+// This ensures the reactive reference is resolved in the proper context
+const toggleItemSelection = handler<
+  unknown,
+  {
+    item: TrackedItem;
+    selectedItems: Writable<Default<string[], []>>;
+  }
+>((_, { item, selectedItems }) => {
+  const key = item.key; // Access key inside handler context
+  const current = selectedItems.get() || [];
+  const idx = current.indexOf(key);
+  if (idx >= 0) {
+    selectedItems.set(current.filter((k: string) => k !== key));
+  } else {
+    selectedItems.set([...current, key]);
+  }
+});
+
+// =============================================================================
 // PATTERN
 // =============================================================================
 
@@ -323,6 +348,8 @@ interface PatternInput {
   manuallyReturned: Writable<Default<string[], []>>;
   // Track holds manually dismissed (persisted)
   dismissedHolds: Writable<Default<string[], []>>;
+  // Track selected items for bulk operations (per-group checkboxes)
+  selectedItems: Writable<Default<string[], []>>;
 }
 
 /** Berkeley Public Library book tracker. #berkeleyLibrary */
@@ -336,7 +363,7 @@ interface PatternOutput {
 }
 
 export default pattern<PatternInput, PatternOutput>(
-  ({ linkedAuth, manuallyReturned, dismissedHolds }) => {
+  ({ linkedAuth, manuallyReturned, dismissedHolds, selectedItems }) => {
     // Directly instantiate GmailImporter with library-specific settings
     const gmailImporter = GmailImporter({
       settings: {
@@ -625,6 +652,29 @@ Note: If this is a forwarded email, look for the original library content within
       return "ok";
     });
 
+    // Group active items by due date for checkbox-based bulk returns
+    const itemsByDueDate = computed(() => {
+      const groups = new Map<string, TrackedItem[]>();
+      const items = activeItems || [];
+
+      for (const item of items) {
+        const dueDate = item.dueDate || "No due date";
+        if (!groups.has(dueDate)) {
+          groups.set(dueDate, []);
+        }
+        groups.get(dueDate)!.push(item);
+      }
+
+      // Sort groups by due date (earliest first)
+      return Array.from(groups.entries())
+        .sort(([dateA], [dateB]) => {
+          if (dateA === "No due date") return 1;
+          if (dateB === "No due date") return -1;
+          return dateA.localeCompare(dateB);
+        })
+        .map(([dueDate, items]) => ({ dueDate, items }));
+    });
+
     // Preview UI for compact display in lists/pickers
     const previewUI = (
       <div
@@ -878,13 +928,11 @@ Note: If this is a forwarded email, look for the original library content within
                 </div>
               </div>
 
-              {/* Overdue Items Section */}
+              {/* Checked Out Items - Grouped by Due Date */}
               <div
                 style={{
                   display: computed(() =>
-                    (activeItems || []).some((i) => i.urgency === "overdue")
-                      ? "block"
-                      : "none"
+                    (activeItems || []).length > 0 ? "block" : "none"
                   ),
                 }}
               >
@@ -892,269 +940,243 @@ Note: If this is a forwarded email, look for the original library content within
                   style={{
                     fontSize: "16px",
                     fontWeight: "600",
-                    marginBottom: "8px",
-                    color: "#b91c1c",
+                    marginBottom: "12px",
+                    color: "#374151",
                   }}
                 >
-                  🔴 Overdue
+                  Checked Out Items
                 </h3>
-                <ct-vstack gap="2">
-                  {activeItems.map((item) => (
-                    <div
-                      style={{
-                        display: item.urgency === "overdue" ? "flex" : "none",
-                        gap: "12px",
-                        padding: "12px",
-                        backgroundColor: "#fee2e2",
-                        borderRadius: "8px",
-                        border: "1px solid #ef4444",
-                      }}
-                    >
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: "600", fontSize: "14px" }}>
-                          {item.title}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "12px",
-                            color: "#6b7280",
-                            display: item.author ? "block" : "none",
-                          }}
-                        >
-                          by {item.author}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "12px",
-                            color: "#b91c1c",
-                            marginTop: "4px",
-                          }}
-                        >
-                          {computed(() =>
-                            getUrgencyLabel(item.urgency, item.daysUntilDue)
-                          )} • Due: {computed(() => formatDate(item.dueDate))}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const current = manuallyReturned.get();
-                          if (!current.includes(item.key)) {
-                            manuallyReturned.set([...current, item.key]);
-                          }
-                        }}
-                        style={{
-                          padding: "6px 12px",
-                          backgroundColor: "#10b981",
-                          color: "white",
-                          border: "none",
-                          borderRadius: "6px",
-                          cursor: "pointer",
-                          fontSize: "12px",
-                          fontWeight: "500",
-                          alignSelf: "center",
-                        }}
-                      >
-                        Mark Returned
-                      </button>
-                    </div>
-                  ))}
-                </ct-vstack>
-              </div>
+                <ct-vstack gap="4">
+                  {itemsByDueDate.map((group) => {
+                    const groupUrgency = computed(() => {
+                      const items = group.items || [];
+                      if (items.some((i) => i.urgency === "overdue")) {
+                        return "overdue";
+                      }
+                      if (
+                        items.some((i) => i.urgency === "urgent_1day")
+                      ) return "urgent_1day";
+                      if (
+                        items.some((i) => i.urgency === "warning_3days")
+                      ) return "warning_3days";
+                      if (
+                        items.some((i) => i.urgency === "notice_7days")
+                      ) return "notice_7days";
+                      return "ok";
+                    });
 
-              {/* Due Soon Items Section (1-3 days) */}
-              <div
-                style={{
-                  display: computed(() =>
-                    (activeItems || []).some(
-                        (i) =>
-                          i.urgency === "urgent_1day" ||
-                          i.urgency === "warning_3days",
-                      )
-                      ? "block"
-                      : "none"
-                  ),
-                }}
-              >
-                <h3
-                  style={{
-                    fontSize: "16px",
-                    fontWeight: "600",
-                    marginBottom: "8px",
-                    color: "#c2410c",
-                  }}
-                >
-                  🟠 Due Soon
-                </h3>
-                <ct-vstack gap="2">
-                  {activeItems.map((item) => (
-                    <div
-                      style={{
-                        display: item.urgency === "urgent_1day" ||
-                            item.urgency === "warning_3days"
-                          ? "flex"
-                          : "none",
-                        gap: "12px",
-                        padding: "12px",
-                        backgroundColor: computed(() =>
-                          getUrgencyColor(item.urgency).bg
-                        ),
-                        borderRadius: "8px",
-                        border: computed(() =>
-                          `1px solid ${getUrgencyColor(item.urgency).border}`
-                        ),
-                      }}
-                    >
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: "600", fontSize: "14px" }}>
-                          {item.title}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "12px",
-                            color: "#6b7280",
-                            display: item.author ? "block" : "none",
-                          }}
-                        >
-                          by {item.author}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "12px",
-                            color: computed(() =>
-                              getUrgencyColor(item.urgency).text
-                            ),
-                            marginTop: "4px",
-                          }}
-                        >
-                          {computed(() =>
-                            getUrgencyLabel(item.urgency, item.daysUntilDue)
-                          )} • Due: {computed(() => formatDate(item.dueDate))}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const current = manuallyReturned.get();
-                          if (!current.includes(item.key)) {
-                            manuallyReturned.set([...current, item.key]);
-                          }
-                        }}
-                        style={{
-                          padding: "6px 12px",
-                          backgroundColor: "#10b981",
-                          color: "white",
-                          border: "none",
-                          borderRadius: "6px",
-                          cursor: "pointer",
-                          fontSize: "12px",
-                          fontWeight: "500",
-                          alignSelf: "center",
-                        }}
-                      >
-                        Mark Returned
-                      </button>
-                    </div>
-                  ))}
-                </ct-vstack>
-              </div>
+                    // Get count of selected items in this group
+                    const selectedCount = computed(() => {
+                      const selected = selectedItems.get() || [];
+                      return group.items.filter((item: TrackedItem) =>
+                        selected.includes(item.key)
+                      ).length;
+                    });
 
-              {/* OK Items Section */}
-              <div
-                style={{
-                  display: computed(() =>
-                    (activeItems || []).some(
-                        (i) =>
-                          i.urgency === "notice_7days" || i.urgency === "ok",
-                      )
-                      ? "block"
-                      : "none"
-                  ),
-                }}
-              >
-                <details>
-                  <summary
-                    style={{
-                      cursor: "pointer",
-                      fontWeight: "600",
-                      fontSize: "16px",
-                      marginBottom: "8px",
-                      color: "#047857",
-                    }}
-                  >
-                    🟢 Due Later (
-                    {computed(() =>
-                      (activeItems || []).filter(
-                        (i) =>
-                          i.urgency === "notice_7days" || i.urgency === "ok",
-                      ).length
-                    )}
-                    )
-                  </summary>
-                  <ct-vstack gap="2">
-                    {activeItems.map((item) => (
+                    return (
                       <div
                         style={{
-                          display: item.urgency === "notice_7days" ||
-                              item.urgency === "ok"
-                            ? "flex"
-                            : "none",
-                          gap: "12px",
-                          padding: "12px",
-                          backgroundColor: "#d1fae5",
+                          padding: "16px",
+                          backgroundColor: "#f9fafb",
                           borderRadius: "8px",
-                          border: "1px solid #10b981",
+                          border: "1px solid #e5e7eb",
                         }}
                       >
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: "600", fontSize: "14px" }}>
-                            {item.title}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "12px",
-                              color: "#6b7280",
-                              display: item.author ? "block" : "none",
-                            }}
-                          >
-                            by {item.author}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "12px",
-                              color: "#047857",
-                              marginTop: "4px",
-                            }}
-                          >
-                            Due: {computed(() => formatDate(item.dueDate))}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const current = manuallyReturned.get();
-                            if (!current.includes(item.key)) {
-                              manuallyReturned.set([...current, item.key]);
-                            }
-                          }}
+                        {/* Group Header with Due Date */}
+                        <div
                           style={{
-                            padding: "6px 12px",
-                            backgroundColor: "#10b981",
-                            color: "white",
-                            border: "none",
-                            borderRadius: "6px",
-                            cursor: "pointer",
-                            fontSize: "12px",
-                            fontWeight: "500",
-                            alignSelf: "center",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            marginBottom: "12px",
                           }}
                         >
-                          Mark Returned
-                        </button>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontWeight: "600",
+                                fontSize: "15px",
+                                color: "#111827",
+                              }}
+                            >
+                              Due: {computed(() => formatDate(group.dueDate))}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: "13px",
+                                padding: "4px 8px",
+                                borderRadius: "4px",
+                                backgroundColor: computed(() =>
+                                  getUrgencyColor(groupUrgency).bg
+                                ),
+                                color: computed(() =>
+                                  getUrgencyColor(groupUrgency).text
+                                ),
+                                fontWeight: "500",
+                              }}
+                            >
+                              {computed(() => {
+                                const items = group.items || [];
+                                if (items.length === 0) return "";
+                                const firstItem = items[0];
+                                return getUrgencyLabel(
+                                  firstItem.urgency,
+                                  firstItem.daysUntilDue,
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              // Get selected items in this group
+                              const currentSelected = selectedItems.get() || [];
+                              const selectedInThisGroup = group.items.filter(
+                                (item: TrackedItem) =>
+                                  currentSelected.includes(item.key),
+                              );
+                              if (selectedInThisGroup.length === 0) return;
+
+                              // Mark them as returned
+                              const current = manuallyReturned.get();
+                              const selectedKeys = selectedInThisGroup.map(
+                                (item: TrackedItem) => item.key,
+                              );
+                              manuallyReturned.set([
+                                ...current,
+                                ...selectedKeys,
+                              ]);
+
+                              // Clear selections for returned items
+                              selectedItems.set(
+                                currentSelected.filter(
+                                  (k: string) => !selectedKeys.includes(k),
+                                ),
+                              );
+                            }}
+                            style={{
+                              padding: "8px 16px",
+                              backgroundColor: computed(() =>
+                                selectedCount > 0 ? "#10b981" : "#d1d5db"
+                              ),
+                              color: "white",
+                              border: "none",
+                              borderRadius: "6px",
+                              cursor: computed(() =>
+                                selectedCount > 0 ? "pointer" : "not-allowed"
+                              ),
+                              fontSize: "13px",
+                              fontWeight: "600",
+                              display: computed(() =>
+                                selectedCount > 0 ? "block" : "none"
+                              ),
+                            }}
+                          >
+                            Mark {selectedCount} Returned
+                          </button>
+                        </div>
+
+                        {/* Items in this group */}
+                        <ct-vstack gap="2">
+                          {group.items.map((item) => (
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: "12px",
+                                padding: "12px",
+                                backgroundColor: "white",
+                                borderRadius: "6px",
+                                border: "1px solid #e5e7eb",
+                                alignItems: "center",
+                              }}
+                            >
+                              {/* Checkbox - pass item to handler for proper reactive resolution */}
+                              <div
+                                style={{
+                                  cursor: "pointer",
+                                  userSelect: "none",
+                                  flexShrink: "0",
+                                }}
+                                onClick={toggleItemSelection({
+                                  item,
+                                  selectedItems,
+                                })}
+                              >
+                                <ct-checkbox
+                                  checked={computed(() => {
+                                    const selected = selectedItems.get() || [];
+                                    return selected.includes(item.key);
+                                  })}
+                                />
+                              </div>
+
+                              {/* Book Info */}
+                              <div style={{ flex: 1 }}>
+                                <div
+                                  style={{
+                                    fontWeight: "600",
+                                    fontSize: "14px",
+                                  }}
+                                >
+                                  {item.title}
+                                </div>
+                                <div
+                                  style={{
+                                    fontSize: "12px",
+                                    color: "#6b7280",
+                                    display: item.author ? "block" : "none",
+                                  }}
+                                >
+                                  by {item.author}
+                                </div>
+                              </div>
+
+                              {/* Individual Mark Returned Button */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const current = manuallyReturned.get();
+                                  if (!current.includes(item.key)) {
+                                    manuallyReturned.set([
+                                      ...current,
+                                      item.key,
+                                    ]);
+                                  }
+                                  // Remove from selected if present
+                                  const currentSelected = selectedItems.get();
+                                  selectedItems.set(
+                                    currentSelected.filter(
+                                      (k: string) => k !== item.key,
+                                    ),
+                                  );
+                                }}
+                                style={{
+                                  padding: "6px 12px",
+                                  backgroundColor: "#10b981",
+                                  color: "white",
+                                  border: "none",
+                                  borderRadius: "6px",
+                                  cursor: "pointer",
+                                  fontSize: "12px",
+                                  fontWeight: "500",
+                                  flexShrink: "0",
+                                }}
+                              >
+                                Mark Returned
+                              </button>
+                            </div>
+                          ))}
+                        </ct-vstack>
                       </div>
-                    ))}
-                  </ct-vstack>
-                </details>
+                    );
+                  })}
+                </ct-vstack>
               </div>
 
               {/* Holds Ready Section */}
@@ -1527,7 +1549,8 @@ Note: If this is a forwarded email, look for the original library content within
                               marginTop: "4px",
                             }}
                           >
-                            Error: {computed(() =>
+                            Error:{" "}
+                            {computed(() =>
                               analysis.error ? String(analysis.error) : ""
                             )}
                           </div>
@@ -1551,14 +1574,16 @@ Note: If this is a forwarded email, look for the original library content within
                               }}
                             >
                               <div style={{ color: "#374151" }}>
-                                <strong>Email Type:</strong> {computed(() =>
+                                <strong>Email Type:</strong>{" "}
+                                {computed(() =>
                                   analysis.result?.emailType || "N/A"
                                 )}
                               </div>
                               <div
                                 style={{ color: "#374151", marginTop: "4px" }}
                               >
-                                <strong>Summary:</strong> {computed(() =>
+                                <strong>Summary:</strong>{" "}
+                                {computed(() =>
                                   analysis.result?.summary || "N/A"
                                 )}
                               </div>
@@ -1573,7 +1598,8 @@ Note: If this is a forwarded email, look for the original library content within
                                   ),
                                 }}
                               >
-                                <strong>Account Holder:</strong> {computed(() =>
+                                <strong>Account Holder:</strong>{" "}
+                                {computed(() =>
                                   analysis.result?.accountHolder || ""
                                 )}
                               </div>
