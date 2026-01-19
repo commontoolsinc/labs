@@ -322,7 +322,7 @@ const Note = pattern<Input, Output>(
       [SELF]: self,
     },
   ) => {
-    const { allCharms } = wish<{ allCharms: MinimalCharm[] }>("/");
+    const { allCharms } = wish<{ allCharms: MinimalCharm[] }>("#default");
     const mentionable = wish<Default<MentionableCharm[], []>>(
       "#mentionable",
     );

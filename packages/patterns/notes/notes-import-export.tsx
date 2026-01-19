@@ -89,7 +89,7 @@ function resolveBooleanValue(value: unknown, parentObj?: unknown): boolean {
   return String(value) === "true";
 }
 
-// Helper to get charm name (handles both local and wish("/") charms)
+// Helper to get charm name (handles both local and wish("#default") charms)
 function _getCharmName(charm: unknown): string {
   const symbolName = (charm as any)?.[NAME];
   if (typeof symbolName === "string") return symbolName;
@@ -1738,7 +1738,7 @@ const getExportFilename = (prefix: string) => {
 const NotesImportExport = pattern<Input, Output>(
   ({ title, importMarkdown, allCharms }) => {
     // allCharms is passed directly from default-app for proper cell sharing
-    // This is the only reliable way to share the cell - wish("/") doesn't work in this context
+    // This is the only reliable way to share the cell - wish("#default") doesn't work in this context
 
     // Filter to only notes using 📝 marker in NAME (same pattern as notebooks)
     // Note: Using NAME prefix is more reliable than checking title/content through proxy
