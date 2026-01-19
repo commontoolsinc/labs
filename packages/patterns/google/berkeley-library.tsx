@@ -11,11 +11,16 @@
  * - Tracks due dates and calculates urgency levels
  * - Deduplicates books across multiple reminder emails
  * - Supports "Mark as Returned" for local tracking
+ * - Omnibot actions: mark books as returned and dismiss holds
  *
  * Usage:
  * 1. Deploy a google-auth charm and complete OAuth
  * 2. Deploy this pattern
  * 3. Link: ct charm link google-auth/auth berkeley-library/linkedAuth
+ *
+ * Omnibot Actions:
+ * - markAsReturned: Mark a book as returned by title
+ * - dismissHold: Dismiss a hold (mark as picked up) by title
  */
 import {
   computed,
@@ -25,6 +30,7 @@ import {
   JSONSchema,
   NAME,
   pattern,
+  Stream,
   UI,
   Writable,
 } from "commontools";
@@ -336,6 +342,118 @@ const toggleItemSelection = handler<
   }
 });
 
+/**
+ * Handler for omnibot to mark a book as returned by title.
+ * Usage: Call with { title: "Book Title" }
+ *
+ * This searches for the book by title and marks all matching items as returned.
+ * If you know the author, you can pass "Title by Author" for exact matching.
+ */
+const markAsReturnedHandler = handler<
+  { title: string },
+  {
+    manuallyReturned: Writable<Default<string[], []>>;
+    emailAnalyses: Array<{
+      result?: LibraryEmailAnalysis;
+    }>;
+  }
+>(({ title }, { manuallyReturned, emailAnalyses }) => {
+  const normalizedInput = title.toLowerCase().trim();
+
+  // Check if input is "Title by Author" format
+  const byMatch = normalizedInput.match(/^(.+?)\s+by\s+(.+)$/);
+  const searchTitle = byMatch ? byMatch[1].trim() : normalizedInput;
+  const searchAuthor = byMatch ? byMatch[2].trim() : "";
+
+  const current = manuallyReturned.get() || [];
+  const keysToAdd: string[] = [];
+
+  // Search through all analyzed emails for matching items
+  for (const analysis of emailAnalyses) {
+    if (!analysis.result?.items) continue;
+
+    for (const item of analysis.result.items) {
+      if (item.status === "hold_ready") continue; // Skip holds
+
+      const itemTitle = (item.title || "").toLowerCase().trim();
+      const itemAuthor = (item.author || "").toLowerCase().trim();
+
+      // Match by title, optionally also by author if provided
+      const titleMatches = itemTitle === searchTitle ||
+        itemTitle.includes(searchTitle);
+      const authorMatches = !searchAuthor || itemAuthor === searchAuthor ||
+        itemAuthor.includes(searchAuthor);
+
+      if (titleMatches && authorMatches) {
+        const key = createItemKey(item);
+        if (!current.includes(key) && !keysToAdd.includes(key)) {
+          keysToAdd.push(key);
+        }
+      }
+    }
+  }
+
+  if (keysToAdd.length > 0) {
+    manuallyReturned.set([...current, ...keysToAdd]);
+  }
+});
+
+/**
+ * Handler for omnibot to dismiss a hold by title (mark as picked up).
+ * Usage: Call with { title: "Book Title" }
+ *
+ * This searches for the hold by title and dismisses all matching holds.
+ * If you know the author, you can pass "Title by Author" for exact matching.
+ */
+const dismissHoldHandler = handler<
+  { title: string },
+  {
+    dismissedHolds: Writable<Default<string[], []>>;
+    emailAnalyses: Array<{
+      result?: LibraryEmailAnalysis;
+    }>;
+  }
+>(({ title }, { dismissedHolds, emailAnalyses }) => {
+  const normalizedInput = title.toLowerCase().trim();
+
+  // Check if input is "Title by Author" format
+  const byMatch = normalizedInput.match(/^(.+?)\s+by\s+(.+)$/);
+  const searchTitle = byMatch ? byMatch[1].trim() : normalizedInput;
+  const searchAuthor = byMatch ? byMatch[2].trim() : "";
+
+  const current = dismissedHolds.get() || [];
+  const keysToAdd: string[] = [];
+
+  // Search through all analyzed emails for matching holds
+  for (const analysis of emailAnalyses) {
+    if (!analysis.result?.items) continue;
+
+    for (const item of analysis.result.items) {
+      if (item.status !== "hold_ready") continue; // Only holds
+
+      const itemTitle = (item.title || "").toLowerCase().trim();
+      const itemAuthor = (item.author || "").toLowerCase().trim();
+
+      // Match by title, optionally also by author if provided
+      const titleMatches = itemTitle === searchTitle ||
+        itemTitle.includes(searchTitle);
+      const authorMatches = !searchAuthor || itemAuthor === searchAuthor ||
+        itemAuthor.includes(searchAuthor);
+
+      if (titleMatches && authorMatches) {
+        const key = createItemKey(item);
+        if (!current.includes(key) && !keysToAdd.includes(key)) {
+          keysToAdd.push(key);
+        }
+      }
+    }
+  }
+
+  if (keysToAdd.length > 0) {
+    dismissedHolds.set([...current, ...keysToAdd]);
+  }
+});
+
 // =============================================================================
 // PATTERN
 // =============================================================================
@@ -360,6 +478,9 @@ interface PatternOutput {
   checkedOutCount: number;
   holdsReadyCount: number;
   previewUI: unknown;
+  // Omnibot actions
+  markAsReturned: Stream<{ title: string }>;
+  dismissHold: Stream<{ title: string }>;
 }
 
 export default pattern<PatternInput, PatternOutput>(
@@ -747,6 +868,13 @@ Note: If this is a forwarded email, look for the original library content within
       checkedOutCount,
       holdsReadyCount,
       previewUI,
+
+      // Omnibot actions - bind handlers with current state
+      markAsReturned: markAsReturnedHandler({
+        manuallyReturned,
+        emailAnalyses,
+      }),
+      dismissHold: dismissHoldHandler({ dismissedHolds, emailAnalyses }),
 
       [UI]: (
         <ct-screen>
