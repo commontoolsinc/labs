@@ -1199,21 +1199,6 @@ const Notebook = pattern<Input, Output>(
       selectedNoteIndices.set([]);
     });
 
-    // Lazy note creation: Creates a default note when opening an empty notebook
-    // This is triggered by clicking the empty state UI, making notebook creation faster
-    const createFirstNote = action(() => {
-      if (notes.get().length === 0) {
-        const defaultNote = Note({
-          title: "New Note",
-          content: "",
-          isHidden: true,
-          noteId: generateId(),
-        });
-        allCharms.push(defaultNote as any);
-        notes.push(defaultNote);
-      }
-    });
-
     // Filter to find all notebooks by checking if [NAME] contains "Notebook" or starts with notebook emoji
     // Charms from wish("#default") only expose [NAME] at top level, not other properties
     const notebooks = computed(() =>
@@ -1515,7 +1500,7 @@ const Notebook = pattern<Input, Output>(
                     </div>
                   </ct-drop-zone>
 
-                  {/* Empty state - shown when notebook has no notes, click to create first note */}
+                  {/* Empty state - shown when notebook has no notes, opens new note modal */}
                   <div
                     style={{
                       display: computed(() => hasNotes ? "none" : "flex"),
@@ -1528,7 +1513,7 @@ const Notebook = pattern<Input, Output>(
                       border: "2px dashed var(--ct-color-border, #e5e5e7)",
                       background: "var(--ct-color-bg-secondary, #f9f9f9)",
                     }}
-                    onClick={createFirstNote}
+                    onClick={showNewNoteModal({ showNewNotePrompt })}
                   >
                     <span style={{ fontSize: "32px", marginBottom: "12px" }}>
                       📝
@@ -1541,15 +1526,6 @@ const Notebook = pattern<Input, Output>(
                       }}
                     >
                       Click to create your first note
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "var(--ct-color-text-secondary, #6e6e73)",
-                        marginTop: "4px",
-                      }}
-                    >
-                      or use the New button above
                     </span>
                   </div>
 
