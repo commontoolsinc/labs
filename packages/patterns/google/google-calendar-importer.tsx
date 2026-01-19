@@ -315,7 +315,8 @@ function parseCalendarEvent(
   };
 }
 
-const calendarUpdater = handler<unknown, {
+// Core fetch logic extracted for reuse
+type FetchState = {
   events: Writable<CalendarEvent[]>;
   calendars: Writable<Calendar[]>;
   auth: Writable<Auth>;
@@ -326,93 +327,144 @@ const calendarUpdater = handler<unknown, {
     debugMode: boolean;
   }>;
   fetching?: Writable<boolean>;
-}>(
-  async (_event, state) => {
-    // Set fetching state if available
-    if (state.fetching) {
-      state.fetching.set(true);
-    }
-    const debugMode = state.settings.get().debugMode || false;
+  selectedCalendarIds?: Writable<string[]>;
+};
 
-    debugLog(debugMode, "calendarUpdater!");
+async function fetchCalendarEvents(state: FetchState): Promise<void> {
+  // Set fetching state if available
+  if (state.fetching) {
+    state.fetching.set(true);
+  }
+  const debugMode = state.settings.get().debugMode || false;
 
-    if (!state.auth.get().token) {
-      debugWarn(debugMode, "no token found in auth cell");
-      if (state.fetching) state.fetching.set(false);
-      return;
-    }
+  debugLog(debugMode, "fetchCalendarEvents!");
 
-    const settings = state.settings.get();
-    const client = new CalendarClient(state.auth, { debugMode });
+  if (!state.auth.get().token) {
+    debugWarn(debugMode, "no token found in auth cell");
+    if (state.fetching) state.fetching.set(false);
+    return;
+  }
 
-    try {
-      // Get calendar list
-      debugLog(debugMode, "Fetching calendar list...");
-      const calendars = await client.getCalendarList();
-      debugLog(debugMode, `Found ${calendars.length} calendars`);
-      state.calendars.set(calendars);
+  const settings = state.settings.get();
+  const client = new CalendarClient(state.auth, { debugMode });
 
-      // Calculate time range
-      const now = new Date();
-      const timeMin = new Date(now);
-      timeMin.setDate(timeMin.getDate() - settings.daysBack);
-      const timeMax = new Date(now);
-      timeMax.setDate(timeMax.getDate() + settings.daysForward);
+  try {
+    // Get calendar list
+    debugLog(debugMode, "Fetching calendar list...");
 
-      debugLog(
-        debugMode,
-        `Time range: ${timeMin.toISOString()} to ${timeMax.toISOString()}`,
+    // Check if this is first fetch BEFORE fetching new calendars
+    const previousCalendarCount = state.calendars.get().length;
+    const currentSelected = state.selectedCalendarIds?.get() || [];
+
+    const calendars = await client.getCalendarList();
+    debugLog(debugMode, `Found ${calendars.length} calendars`);
+
+    // Only update calendars if the list actually changed (prevents reactive loop)
+    const existingCalendars = state.calendars.get();
+    const calendarsChanged = existingCalendars.length !== calendars.length ||
+      calendars.some(
+        (cal, i) =>
+          existingCalendars[i]?.id !== cal.id ||
+          existingCalendars[i]?.summary !== cal.summary ||
+          existingCalendars[i]?.backgroundColor !== cal.backgroundColor ||
+          existingCalendars[i]?.foregroundColor !== cal.foregroundColor,
       );
-
-      // Fetch events from all calendars
-      const allEvents: CalendarEvent[] = [];
-
-      for (const calendar of calendars) {
-        try {
-          debugLog(
-            debugMode,
-            `Fetching events from calendar: ${calendar.summary} (${calendar.id})`,
-          );
-          const rawEvents = await client.getEvents(
-            calendar.id,
-            timeMin,
-            timeMax,
-            settings.maxResults,
-          );
-
-          const events = rawEvents.map((e) =>
-            parseCalendarEvent(e, calendar.id, calendar.summary)
-          );
-          debugLog(
-            debugMode,
-            `Found ${events.length} events in ${calendar.summary}`,
-          );
-          allEvents.push(...events);
-
-          // Small delay between calendar requests to avoid rate limiting
-          await sleep(200);
-        } catch (error) {
-          debugWarn(
-            debugMode,
-            `Error fetching events from ${calendar.summary}:`,
-            error,
-          );
-        }
-      }
-
-      // Sort events by start time
-      allEvents.sort((a, b) => {
-        const aStart = new Date(a.startDateTime || a.start).getTime();
-        const bStart = new Date(b.startDateTime || b.start).getTime();
-        return aStart - bStart;
-      });
-
-      debugLog(debugMode, `Total events fetched: ${allEvents.length}`);
-      state.events.set(allEvents);
-    } finally {
-      // Clear fetching state
-      if (state.fetching) state.fetching.set(false);
+    if (calendarsChanged) {
+      debugLog(debugMode, "Calendar list changed, updating...");
+      state.calendars.set(calendars);
     }
+
+    // Initialize selectedCalendarIds with all calendars on first fetch
+    // Only auto-select all on first fetch (when we had no calendars before AND no selection)
+    if (state.selectedCalendarIds) {
+      if (currentSelected.length === 0 && previousCalendarCount === 0) {
+        state.selectedCalendarIds.set(calendars.map((c) => c.id));
+        debugLog(
+          debugMode,
+          "First fetch - selected all calendars by default",
+        );
+      }
+    }
+
+    // Calculate time range
+    const now = new Date();
+    const timeMin = new Date(now);
+    timeMin.setDate(timeMin.getDate() - settings.daysBack);
+    const timeMax = new Date(now);
+    timeMax.setDate(timeMax.getDate() + settings.daysForward);
+
+    debugLog(
+      debugMode,
+      `Time range: ${timeMin.toISOString()} to ${timeMax.toISOString()}`,
+    );
+
+    // Filter calendars based on selection
+    // Only fetch from selected calendars (empty selection = fetch nothing, not everything)
+    const selectedIds = state.selectedCalendarIds?.get() || [];
+    const calendarsToFetch = calendars.filter((c) =>
+      selectedIds.includes(c.id)
+    );
+
+    debugLog(
+      debugMode,
+      `Fetching events from ${calendarsToFetch.length} selected calendars`,
+    );
+
+    // Fetch events from selected calendars
+    const allEvents: CalendarEvent[] = [];
+
+    for (const calendar of calendarsToFetch) {
+      try {
+        debugLog(
+          debugMode,
+          `Fetching events from calendar: ${calendar.summary} (${calendar.id})`,
+        );
+        const rawEvents = await client.getEvents(
+          calendar.id,
+          timeMin,
+          timeMax,
+          settings.maxResults,
+        );
+
+        const events = rawEvents.map((e) =>
+          parseCalendarEvent(e, calendar.id, calendar.summary)
+        );
+        debugLog(
+          debugMode,
+          `Found ${events.length} events in ${calendar.summary}`,
+        );
+        allEvents.push(...events);
+
+        // Small delay between calendar requests to avoid rate limiting
+        await sleep(200);
+      } catch (error) {
+        debugWarn(
+          debugMode,
+          `Error fetching events from ${calendar.summary}:`,
+          error,
+        );
+      }
+    }
+
+    // Sort events by start time
+    allEvents.sort((a, b) => {
+      const aStart = new Date(a.startDateTime || a.start).getTime();
+      const bStart = new Date(b.startDateTime || b.start).getTime();
+      return aStart - bStart;
+    });
+
+    debugLog(debugMode, `Total events fetched: ${allEvents.length}`);
+    state.events.set(allEvents);
+  } finally {
+    // Clear fetching state
+    if (state.fetching) state.fetching.set(false);
+  }
+}
+
+// Handler wrapper that calls the core fetch logic
+const calendarUpdater = handler<unknown, FetchState>(
+  async (_event, state) => {
+    await fetchCalendarEvents(state);
   },
 );
 
@@ -425,6 +477,63 @@ const toggleDebugMode = handler<
     settings.set({ ...current, debugMode: target.checked });
   },
 );
+
+const toggleCalendarSelection = handler<
+  unknown,
+  {
+    calendarId: string;
+    selectedCalendarIds: Writable<string[]>;
+    events: Writable<CalendarEvent[]>;
+    calendars: Writable<Calendar[]>;
+    auth: Writable<Auth>;
+    settings: Writable<Settings>;
+    fetching?: Writable<boolean>;
+  }
+>(async (_event, state) => {
+  const { calendarId, selectedCalendarIds } = state;
+  const current = selectedCalendarIds.get();
+  if (current.includes(calendarId)) {
+    selectedCalendarIds.set(current.filter((c) => c !== calendarId));
+  } else {
+    selectedCalendarIds.set([...current, calendarId]);
+  }
+  // Re-fetch events with new selection - call directly
+  await fetchCalendarEvents(state);
+});
+
+const selectAllCalendars = handler<
+  unknown,
+  {
+    calendars: Writable<Calendar[]>;
+    selectedCalendarIds: Writable<string[]>;
+    events: Writable<CalendarEvent[]>;
+    auth: Writable<Auth>;
+    settings: Writable<Settings>;
+    fetching?: Writable<boolean>;
+  }
+>(async (_event, state) => {
+  const { calendars, selectedCalendarIds } = state;
+  const allIds = calendars.get().map((c) => c.id);
+  selectedCalendarIds.set(allIds);
+  // Re-fetch events with new selection - call directly
+  await fetchCalendarEvents(state);
+});
+
+const deselectAllCalendars = handler<
+  unknown,
+  {
+    selectedCalendarIds: Writable<string[]>;
+    events: Writable<CalendarEvent[]>;
+    calendars: Writable<Calendar[]>;
+    auth: Writable<Auth>;
+    settings: Writable<Settings>;
+    fetching?: Writable<boolean>;
+  }
+>(async (_event, state) => {
+  state.selectedCalendarIds.set([]);
+  // Re-fetch events with new selection (will fetch nothing) - call directly
+  await fetchCalendarEvents(state);
+});
 
 const _nextPage = handler<unknown, { currentPage: Writable<number> }>(
   (_, { currentPage }) => {
@@ -540,12 +649,20 @@ interface Output {
   eventCount: number;
 }
 
+const toggleShowEvents = handler<unknown, { showEvents: Writable<boolean> }>(
+  (_, { showEvents }) => {
+    showEvents.set(!showEvents.get());
+  },
+);
+
 const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
   ({ settings, linkedAuth }) => {
     const events = Writable.of<Confidential<CalendarEvent[]>>([]);
     const calendars = Writable.of<Calendar[]>([]);
     const fetching = Writable.of(false);
     const currentPage = Writable.of(0);
+    const showEvents = Writable.of(false); // Collapsed by default
+    const selectedCalendarIds = Writable.of<string[]>([]); // Empty = all selected on first fetch
     const PAGE_SIZE = 10;
 
     // Use createGoogleAuth utility for auth management
@@ -727,6 +844,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                       auth,
                       settings,
                       fetching,
+                      selectedCalendarIds,
                     })}
                     disabled={fetching}
                   >
@@ -749,17 +867,75 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                 )}
               </ct-vstack>
 
-              {/* Calendar list */}
-              {ifElse(
-                computed(() => calendars.get().length > 0),
-                <div style={{ marginTop: "16px" }}>
-                  <h4 style={{ fontSize: "16px", marginBottom: "8px" }}>
-                    Your Calendars
+              {/* Calendar list with selection */}
+              <div style={{ marginTop: "16px" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: "8px",
+                  }}
+                >
+                  <h4 style={{ fontSize: "16px", margin: 0 }}>
+                    Your Calendars ({computed(() => calendars.get().length)})
                   </h4>
-                  <div
-                    style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}
-                  >
-                    {calendars.map((cal) => (
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button
+                      type="button"
+                      style={{
+                        padding: "4px 8px",
+                        fontSize: "11px",
+                        border: "1px solid #d1d5db",
+                        borderRadius: "4px",
+                        backgroundColor: "#fff",
+                        cursor: "pointer",
+                      }}
+                      onClick={selectAllCalendars({
+                        calendars,
+                        selectedCalendarIds,
+                        events,
+                        auth,
+                        settings,
+                        fetching,
+                      })}
+                    >
+                      Select All
+                    </button>
+                    <button
+                      type="button"
+                      style={{
+                        padding: "4px 8px",
+                        fontSize: "11px",
+                        border: "1px solid #d1d5db",
+                        borderRadius: "4px",
+                        backgroundColor: "#fff",
+                        cursor: "pointer",
+                      }}
+                      onClick={deselectAllCalendars({
+                        selectedCalendarIds,
+                        events,
+                        calendars,
+                        auth,
+                        settings,
+                        fetching,
+                      })}
+                    >
+                      Deselect All
+                    </button>
+                  </div>
+                </div>
+                <div
+                  style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}
+                >
+                  {calendars.map((cal) => {
+                    // Per-item reactive computation for selection state
+                    // Using computed() inside .map() is fine per framework author
+                    // Just don't call .get() on it
+                    const isSelected = computed(() =>
+                      selectedCalendarIds.get().includes(cal.id)
+                    );
+                    return (
                       <div
                         style={{
                           display: "flex",
@@ -770,51 +946,161 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                           backgroundColor: cal.backgroundColor,
                           color: cal.foregroundColor,
                           fontSize: "12px",
+                          cursor: "pointer",
+                          opacity: ifElse(isSelected, 1, 0.4),
+                          textDecoration: ifElse(
+                            isSelected,
+                            "none",
+                            "line-through",
+                          ),
+                          transition: "opacity 0.15s, text-decoration 0.15s",
                         }}
+                        onClick={toggleCalendarSelection({
+                          calendarId: cal.id,
+                          selectedCalendarIds,
+                          events,
+                          calendars,
+                          auth,
+                          settings,
+                          fetching,
+                        })}
                       >
-                        {ifElse(
-                          cal.primary,
-                          <span>★</span>,
-                          <span />,
-                        )}
+                        {ifElse(isSelected, <span>✓</span>, <span />)}
+                        {cal.primary ? <span>★</span> : null}
                         {cal.summary}
                       </div>
-                    ))}
-                  </div>
-                </div>,
-                <div />,
-              )}
-
-              {
-                /*
-                 * Events summary - showing only count instead of full event list.
-                 *
-                 * NOTE: This minimal UI is intentional due to performance limitations.
-                 * Rendering 200+ events with reactive cells causes Chrome CPU to spike
-                 * to 100% for extended periods. Ideally we'd show all events in a full
-                 * table/list view, but until the framework supports virtualization or
-                 * more efficient rendering, we display just the summary.
-                 *
-                 * See: https://linear.app/common-tools/issue/CT-1111/performance-derive-inside-map-causes-8x-more-calls-than-expected-never
-                 *
-                 * The full event data is still available via the `events` output for
-                 * other patterns to access via linking/wishing.
-                 */
-              }
-              <div style={{ marginTop: "16px" }}>
-                <h4 style={{ fontSize: "16px", margin: 0 }}>
-                  {derive(
-                    events,
-                    (evts: CalendarEvent[]) => `${evts.length} events imported`,
-                  )}
-                </h4>
+                    );
+                  })}
+                </div>
                 <p
-                  style={{ fontSize: "12px", color: "#666", marginTop: "8px" }}
+                  style={{
+                    fontSize: "11px",
+                    color: "#666",
+                    marginTop: "8px",
+                  }}
                 >
-                  Full event data available for other patterns via linking.
-                  (Event list hidden for performance - rendering 200+ items
-                  causes CPU issues)
+                  Click calendars to toggle selection. Only selected calendars
+                  will be fetched.
                 </p>
+              </div>
+
+              {/* Collapsible events list */}
+              <div style={{ marginTop: "16px" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    cursor: "pointer",
+                  }}
+                  onClick={toggleShowEvents({ showEvents })}
+                >
+                  <span style={{ fontSize: "14px" }}>
+                    {ifElse(showEvents, "▼", "▶")}
+                  </span>
+                  <h4 style={{ fontSize: "16px", margin: 0 }}>
+                    {derive(
+                      events,
+                      (evts: CalendarEvent[]) =>
+                        `${evts.length} events imported`,
+                    )}
+                  </h4>
+                </div>
+                {ifElse(
+                  showEvents,
+                  <div
+                    style={{
+                      marginTop: "12px",
+                      maxHeight: "400px",
+                      overflowY: "auto",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: "8px",
+                    }}
+                  >
+                    {events.map((event) => {
+                      // Look up calendar colors for this event
+                      const bgColor = derive(
+                        { calendars, calendarId: event.calendarId },
+                        ({
+                          calendars: cals,
+                          calendarId,
+                        }: { calendars: Calendar[]; calendarId: string }) => {
+                          const cal = cals.find((c: Calendar) =>
+                            c.id === calendarId
+                          );
+                          return cal?.backgroundColor || "#4285f4";
+                        },
+                      );
+                      const fgColor = derive(
+                        { calendars, calendarId: event.calendarId },
+                        ({
+                          calendars: cals,
+                          calendarId,
+                        }: { calendars: Calendar[]; calendarId: string }) => {
+                          const cal = cals.find((c: Calendar) =>
+                            c.id === calendarId
+                          );
+                          return cal?.foregroundColor || "#ffffff";
+                        },
+                      );
+                      return (
+                        <div
+                          style={{
+                            padding: "8px 12px",
+                            borderBottom: "1px solid #f3f4f6",
+                            fontSize: "13px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                            }}
+                          >
+                            <span
+                              style={{
+                                padding: "2px 8px",
+                                borderRadius: "12px",
+                                backgroundColor: bgColor,
+                                color: fgColor,
+                                fontSize: "11px",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {event.calendarName}
+                            </span>
+                            <span style={{ fontWeight: "500" }}>
+                              {event.summary}
+                            </span>
+                          </div>
+                          <div
+                            style={{
+                              color: "#6b7280",
+                              fontSize: "12px",
+                              marginTop: "4px",
+                            }}
+                          >
+                            {formatEventDate(
+                              event.startDateTime,
+                              event.endDateTime,
+                              event.isAllDay,
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>,
+                  <p
+                    style={{
+                      fontSize: "12px",
+                      color: "#666",
+                      marginTop: "8px",
+                    }}
+                  >
+                    Click to expand event list.
+                  </p>,
+                )}
               </div>
             </ct-vstack>
           </ct-vscroll>
@@ -826,7 +1112,13 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
         logDeriveCall(`eventCount (length=${list?.length})`);
         return list?.length || 0;
       }),
-      bgUpdater: calendarUpdater({ events, calendars, auth, settings }),
+      bgUpdater: calendarUpdater({
+        events,
+        calendars,
+        auth,
+        settings,
+        selectedCalendarIds,
+      }),
       // Pattern tools for omnibot (implementations at module scope)
       searchEvents: patternTool(searchEventsImpl, { events }),
       getEventCount: patternTool(getEventCountImpl, { events }),
