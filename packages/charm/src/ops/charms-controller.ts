@@ -149,7 +149,15 @@ export class CharmsController<T = unknown> {
   async recreateDefaultPattern(): Promise<CharmController<NameSchema>> {
     this.disposeCheck();
 
-    // Unlink the existing default pattern first (before any operations that might fail)
+    // Stop and unlink the existing default pattern first (before any operations that might fail)
+    // We need to stop it to prevent resource leaks or duplicate behavior from the old pattern
+    // Access the space cell directly to get the pattern reference without running it
+    const spaceCellContents = this.#manager.getSpaceCellContents();
+    const defaultPatternRef = spaceCellContents.key("defaultPattern").get();
+    if (defaultPatternRef?.get()) {
+      // Stop the existing pattern (no-op if not running)
+      this.#manager.runtime.runner.stop(defaultPatternRef);
+    }
     await this.#manager.unlinkDefaultPattern();
 
     // Determine which pattern to use based on space type
