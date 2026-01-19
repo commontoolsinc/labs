@@ -1,6 +1,31 @@
 import { isInstance, isRecord } from "@commontools/utils/types";
 
 /**
+ * Indicates whether the given string to be used as a property name (for an
+ * object or array) is syntactically valid as an array index per se.
+ *
+ * @param name - The property name to check
+ * @returns `true` if `name` when used on an array would access an indexed
+ *   element of that array.
+ */
+export function isArrayIndexPropertyName(name: string): boolean {
+  if (name === "0") {
+    // Easy and common special case, making the regex below simpler.
+    return true;
+  } else if (!/^[1-9][0-9]{0,9}$/.test(name)) {
+    // It's not a string of digits starting with not-`0`.
+    return false;
+  } else if (name.length < 10) {
+    // It's short enough that it can't possibly be out of range.
+    return true;
+  } else {
+    // Need to actually check the value. We do this for pedantic correctness, on
+    // the assumption that it will rarely if ever be encountered in practice.
+    return Number(name) < (2 ** 31);
+  }
+}
+
+/**
  * Converts specially-recognized class instances to their designated storable
  * form. Returns `null` if the value is not one of the recognized types.
  *

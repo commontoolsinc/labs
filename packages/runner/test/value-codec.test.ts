@@ -1,12 +1,100 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  isArrayIndexPropertyName,
   isStorableValue,
   toDeepStorableValue,
   toStorableValue,
 } from "../src/value-codec.ts";
 
 describe("value-codec", () => {
+  describe("isArrayIndexPropertyName", () => {
+    describe("returns true for valid array indices", () => {
+      it("accepts '0'", () => {
+        expect(isArrayIndexPropertyName("0")).toBe(true);
+      });
+
+      it("accepts single-digit indices 1-9", () => {
+        for (let i = 1; i <= 9; i++) {
+          expect(isArrayIndexPropertyName(String(i))).toBe(true);
+        }
+      });
+
+      it("accepts multi-digit indices", () => {
+        expect(isArrayIndexPropertyName("10")).toBe(true);
+        expect(isArrayIndexPropertyName("99")).toBe(true);
+        expect(isArrayIndexPropertyName("123")).toBe(true);
+        expect(isArrayIndexPropertyName("999999999")).toBe(true);
+      });
+
+      it("accepts max valid index (2**31 - 1)", () => {
+        expect(isArrayIndexPropertyName("2147483647")).toBe(true);
+      });
+
+      it("accepts 10-digit numbers below 2**31", () => {
+        expect(isArrayIndexPropertyName("1000000000")).toBe(true);
+        expect(isArrayIndexPropertyName("2147483646")).toBe(true); // 2**31 - 2
+      });
+    });
+
+    describe("returns false for invalid indices", () => {
+      it("rejects empty string", () => {
+        expect(isArrayIndexPropertyName("")).toBe(false);
+      });
+
+      it("rejects leading zeros", () => {
+        expect(isArrayIndexPropertyName("00")).toBe(false);
+        expect(isArrayIndexPropertyName("01")).toBe(false);
+        expect(isArrayIndexPropertyName("007")).toBe(false);
+      });
+
+      it("rejects negative numbers", () => {
+        expect(isArrayIndexPropertyName("-1")).toBe(false);
+        expect(isArrayIndexPropertyName("-0")).toBe(false);
+        expect(isArrayIndexPropertyName("-100")).toBe(false);
+      });
+
+      it("rejects decimals", () => {
+        expect(isArrayIndexPropertyName("1.5")).toBe(false);
+        expect(isArrayIndexPropertyName("0.0")).toBe(false);
+        expect(isArrayIndexPropertyName("1.0")).toBe(false);
+      });
+
+      it("rejects scientific notation", () => {
+        expect(isArrayIndexPropertyName("1e5")).toBe(false);
+        expect(isArrayIndexPropertyName("1E5")).toBe(false);
+        expect(isArrayIndexPropertyName("1e+5")).toBe(false);
+      });
+
+      it("rejects whitespace", () => {
+        expect(isArrayIndexPropertyName(" 1")).toBe(false);
+        expect(isArrayIndexPropertyName("1 ")).toBe(false);
+        expect(isArrayIndexPropertyName(" 1 ")).toBe(false);
+      });
+
+      it("rejects non-numeric strings", () => {
+        expect(isArrayIndexPropertyName("NaN")).toBe(false);
+        expect(isArrayIndexPropertyName("Infinity")).toBe(false);
+        expect(isArrayIndexPropertyName("abc")).toBe(false);
+        expect(isArrayIndexPropertyName("1a")).toBe(false);
+        expect(isArrayIndexPropertyName("a1")).toBe(false);
+      });
+
+      it("rejects leading plus sign", () => {
+        expect(isArrayIndexPropertyName("+1")).toBe(false);
+        expect(isArrayIndexPropertyName("+0")).toBe(false);
+      });
+
+      it("rejects values >= 2**31", () => {
+        expect(isArrayIndexPropertyName("2147483648")).toBe(false); // 2**31
+        expect(isArrayIndexPropertyName("2147483649")).toBe(false); // 2**31 + 1
+        expect(isArrayIndexPropertyName("4294967295")).toBe(false); // 2**32 - 1
+        expect(isArrayIndexPropertyName("9999999999")).toBe(false); // way > 2**31
+        expect(isArrayIndexPropertyName("10000000000")).toBe(false); // 11 digits
+      });
+    });
+  });
+
   describe("isStorableValue", () => {
     describe("returns true for JSON-encodable values", () => {
       it("accepts booleans", () => {
