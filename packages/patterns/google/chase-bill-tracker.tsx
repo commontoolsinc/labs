@@ -59,7 +59,7 @@ type EmailType =
   | "autopay_scheduled"
   | "other";
 
-type BillStatus = "unpaid" | "paid" | "overdue";
+type BillStatus = "unpaid" | "paid" | "overdue" | "likely_paid";
 
 interface ChaseEmailAnalysis {
   emailType: EmailType;
@@ -85,6 +85,7 @@ interface TrackedBill {
   emailDate: string;
   emailId: string;
   isManuallyPaid: boolean;
+  isLikelyPaid: boolean; // True for bills assumed paid due to age
   daysUntilDue: number;
 }
 
@@ -98,24 +99,54 @@ interface TrackedBill {
  */
 const DEMO_MODE = true;
 
-// 16 distinct colors for card badges
+/**
+ * Bills older than this threshold (in days overdue) are assumed "likely paid"
+ * when no payment confirmation was detected. This avoids false positives from
+ * missing payment emails (e.g., card number changed, payment made differently).
+ */
+const LIKELY_PAID_THRESHOLD_DAYS = -45;
+
+// 32 distinct colors for card badges (to reduce collisions)
 const CARD_COLORS = [
+  // Reds & oranges
   "#ef4444",
+  "#dc2626",
   "#f97316",
+  "#ea580c",
+  // Yellows & limes
   "#eab308",
+  "#ca8a04",
   "#84cc16",
+  "#65a30d",
+  // Greens
   "#22c55e",
+  "#16a34a",
   "#14b8a6",
+  "#0d9488",
+  // Cyans & blues
   "#06b6d4",
+  "#0891b2",
   "#0ea5e9",
+  "#0284c7",
+  // Indigos & purples
   "#3b82f6",
+  "#2563eb",
   "#6366f1",
+  "#4f46e5",
   "#8b5cf6",
+  "#7c3aed",
   "#a855f7",
+  "#9333ea",
+  // Pinks & roses
   "#d946ef",
+  "#c026d3",
   "#ec4899",
+  "#db2777",
   "#f43f5e",
+  "#e11d48",
+  // Neutrals
   "#78716c",
+  "#57534e",
 ];
 
 // Chase sends from various addresses - capture the main patterns
@@ -252,7 +283,7 @@ function getCardColor(last4: string | undefined): string {
   if (!last4 || typeof last4 !== "string") return CARD_COLORS[0];
   let hash = 0;
   for (let i = 0; i < last4.length; i++) {
-    hash = (hash + last4.charCodeAt(i)) % 16;
+    hash = (hash * 31 + last4.charCodeAt(i)) % 32;
   }
   return CARD_COLORS[hash];
 }
@@ -518,19 +549,37 @@ Extract:
           return daysDiff >= -30; // Payment made within 30 days before due date or after
         });
         const autoPaid = !!matchingPayment;
-        const isPaid = isManuallyPaid || autoPaid;
+        // Bills past the threshold are "likely paid" - payment wasn't detected but
+        // it's very unlikely a bill this old is genuinely unpaid
+        const isLikelyPaid = !isManuallyPaid &&
+          !autoPaid &&
+          daysUntilDue < LIKELY_PAID_THRESHOLD_DAYS;
+        const isPaid = isManuallyPaid || autoPaid || isLikelyPaid;
+
+        // Determine status
+        let status: BillStatus;
+        if (isLikelyPaid) {
+          status = "likely_paid";
+        } else if (isPaid) {
+          status = "paid";
+        } else if (daysUntilDue < 0) {
+          status = "overdue";
+        } else {
+          status = "unpaid";
+        }
 
         const trackedBill: TrackedBill = {
           key,
           cardLast4: result.cardLast4,
           amount: demoPrice(billAmount),
           dueDate: result.dueDate,
-          status: isPaid ? "paid" : daysUntilDue < 0 ? "overdue" : "unpaid",
+          status,
           isPaid,
           paidDate: matchingPayment || undefined,
           emailDate: analysisItem.emailDate,
           emailId: analysisItem.emailId,
           isManuallyPaid,
+          isLikelyPaid,
           daysUntilDue,
         };
 
@@ -542,22 +591,31 @@ Extract:
       return items.sort((a, b) => a.daysUntilDue - b.daysUntilDue);
     });
 
-    // Unpaid bills
-    const unpaidBills = computed(() => bills.filter((bill) => !bill.isPaid));
+    // Unpaid bills (excludes likely paid)
+    const unpaidBills = computed(() =>
+      bills.filter((bill) => !bill.isPaid && !bill.isLikelyPaid)
+    );
 
-    // Paid bills - sorted by due date descending (newest first)
-    const paidBills = computed(() =>
+    // Likely paid bills - old bills assumed paid but not confirmed
+    const likelyPaidBills = computed(() =>
       bills
-        .filter((bill) => bill.isPaid)
+        .filter((bill) => bill.isLikelyPaid)
         .sort((a, b) => b.dueDate.localeCompare(a.dueDate))
     );
 
-    // Total unpaid amount
+    // Confirmed paid bills - sorted by due date descending (newest first)
+    const paidBills = computed(() =>
+      bills
+        .filter((bill) => bill.isPaid && !bill.isLikelyPaid)
+        .sort((a, b) => b.dueDate.localeCompare(a.dueDate))
+    );
+
+    // Total unpaid amount (excludes likely paid)
     const totalUnpaid = computed(() =>
       unpaidBills.reduce((sum, bill) => sum + bill.amount, 0)
     );
 
-    // Overdue count
+    // Overdue count (excludes likely paid)
     const overdueCount = computed(
       () => unpaidBills.filter((bill) => bill.daysUntilDue < 0).length,
     );
@@ -808,15 +866,15 @@ Extract:
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: "8px",
+                    gap: "12px",
                     marginBottom: "8px",
                   }}
                 >
-                  <span style={{ fontSize: "20px" }}>!</span>
+                  <span style={{ fontSize: "32px" }}>🚨</span>
                   <span
                     style={{
                       fontWeight: "700",
-                      fontSize: "18px",
+                      fontSize: "20px",
                       color: "#b91c1c",
                     }}
                   >
@@ -923,6 +981,139 @@ Extract:
                     </div>
                   ))}
                 </ct-vstack>
+              </div>
+
+              {/* Likely Paid Bills Section */}
+              <div
+                style={{
+                  display: computed(() =>
+                    likelyPaidBills.length > 0 ? "block" : "none"
+                  ),
+                }}
+              >
+                <details>
+                  <summary
+                    style={{
+                      cursor: "pointer",
+                      fontWeight: "600",
+                      fontSize: "16px",
+                      marginBottom: "12px",
+                      color: "#92400e",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
+                    <span>
+                      Likely Paid ({computed(() =>
+                        likelyPaidBills?.length || 0
+                      )})
+                    </span>
+                    <span
+                      title="Bills over 45 days old with no detected payment are likely already paid (payment email missing or card changed)"
+                      style={{
+                        fontSize: "14px",
+                        color: "#78716c",
+                        cursor: "help",
+                      }}
+                    >
+                      ⓘ
+                    </span>
+                  </summary>
+                  <div
+                    style={{
+                      fontSize: "13px",
+                      color: "#78716c",
+                      marginBottom: "12px",
+                      padding: "8px 12px",
+                      backgroundColor: "#fef9c3",
+                      borderRadius: "6px",
+                      border: "1px solid #eab308",
+                    }}
+                  >
+                    These bills are over 45 days old without detected payment.
+                    They're likely already paid. Click "Confirm Paid" to move
+                    them to your paid list.
+                  </div>
+                  <ct-vstack gap="2">
+                    {likelyPaidBills.map((bill) => (
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "12px",
+                          padding: "12px",
+                          backgroundColor: "#fef3c7",
+                          borderRadius: "8px",
+                          border: "1px solid #d97706",
+                          opacity: 0.85,
+                        }}
+                      >
+                        <div style={{ flex: 1 }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              marginBottom: "4px",
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontWeight: "600",
+                                fontSize: "16px",
+                                color: "#92400e",
+                              }}
+                            >
+                              {formatCurrency(bill.amount)}
+                            </span>
+                            <span
+                              style={{
+                                padding: "2px 6px",
+                                backgroundColor: getCardColor(bill.cardLast4),
+                                borderRadius: "4px",
+                                fontSize: "11px",
+                                color: "white",
+                                fontWeight: "500",
+                              }}
+                            >
+                              ...{bill.cardLast4}
+                            </span>
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "12px",
+                              color: "#78716c",
+                            }}
+                          >
+                            Was due: {formatDate(bill.dueDate)} (
+                            {computed(() => Math.abs(bill.daysUntilDue))}{" "}
+                            days ago)
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={markAsPaid({
+                            paidKeys: manuallyPaid,
+                            bill,
+                          })}
+                          style={{
+                            padding: "8px 14px",
+                            backgroundColor: "#10b981",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "6px",
+                            cursor: "pointer",
+                            fontSize: "13px",
+                            fontWeight: "600",
+                            alignSelf: "center",
+                          }}
+                        >
+                          Confirm Paid
+                        </button>
+                      </div>
+                    ))}
+                  </ct-vstack>
+                </details>
               </div>
 
               {/* Paid Bills Section */}
