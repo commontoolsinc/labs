@@ -869,11 +869,10 @@ Extract:
                         </div>
                         <button
                           type="button"
-                          onClick={() =>
-                            markAsPaid({
-                              paidKeys: manuallyPaid,
-                              billKey: bill.key,
-                            }).send()}
+                          onClick={markAsPaid({
+                            paidKeys: manuallyPaid,
+                            billKey: bill.key,
+                          })}
                           style={{
                             padding: "8px 16px",
                             backgroundColor: "#10b981",
@@ -986,11 +985,10 @@ Extract:
                         </div>
                         <button
                           type="button"
-                          onClick={() =>
-                            unmarkAsPaid({
-                              paidKeys: manuallyPaid,
-                              billKey: bill.key,
-                            }).send()}
+                          onClick={unmarkAsPaid({
+                            paidKeys: manuallyPaid,
+                            billKey: bill.key,
+                          })}
                           style={{
                             padding: "6px 12px",
                             backgroundColor: "#6b7280",
