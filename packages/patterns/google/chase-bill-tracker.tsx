@@ -204,10 +204,13 @@ function formatCurrency(amount: number | undefined): string {
 
 /**
  * Format date for display.
+ * Parses YYYY-MM-DD as local date to avoid UTC timezone shift.
  */
 function formatDate(dateStr: string | undefined): string {
   if (!dateStr) return "N/A";
-  const date = new Date(dateStr);
+  // Parse YYYY-MM-DD as local date components to avoid UTC interpretation
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const date = new Date(year, month - 1, day); // month is 0-indexed
   return date.toLocaleDateString("en-US", {
     weekday: "short",
     month: "short",
