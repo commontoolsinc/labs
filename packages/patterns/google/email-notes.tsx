@@ -51,30 +51,39 @@ interface Note {
 }
 
 // =============================================================================
-// HANDLERS
+// HELPERS
 // =============================================================================
 
 /**
- * Copy note content to clipboard
+ * Format date for display (relative dates for recent, otherwise short format)
  */
-const copyToClipboard = handler<
-  unknown,
-  { content: Writable<string>; copiedId: Writable<string>; noteId: string }
->(async (_event, { content, copiedId, noteId }) => {
-  const text = content.get();
+function formatDate(dateStr: string): string {
   try {
-    await navigator.clipboard.writeText(text);
-    copiedId.set(noteId);
-    // Clear the "copied" indicator after 2 seconds
-    setTimeout(() => {
-      if (copiedId.get() === noteId) {
-        copiedId.set("");
-      }
-    }, 2000);
-  } catch (err) {
-    console.error("[EmailNotes] Failed to copy:", err);
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) {
+      return date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } else if (diffDays === 1) {
+      return "Yesterday";
+    } else if (diffDays < 7) {
+      return date.toLocaleDateString([], { weekday: "short" });
+    } else {
+      return date.toLocaleDateString([], { month: "short", day: "numeric" });
+    }
+  } catch {
+    return dateStr;
   }
-});
+}
+
+// =============================================================================
+// HANDLERS
+// =============================================================================
 
 /**
  * Mark a note as done by removing the task-current label
@@ -183,7 +192,6 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
   const loadingLabels = Writable.of(false).for("loadingLabels");
   const hiddenNotes = Writable.of<string[]>([]).for("hiddenNotes");
   const processingNotes = Writable.of<string[]>([]).for("processingNotes");
-  const copiedId = Writable.of("").for("copiedId");
 
   // Use createGoogleAuth for scopes that include gmailModify
   const {
@@ -193,6 +201,10 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
   } = createGoogleAuth({
     requiredScopes: ["gmail", "gmailModify"] as ScopeKey[],
   });
+
+  // Compute the effective auth - use linkedAuth if provided, otherwise auth from createGoogleAuth
+  const hasLinkedAuth = computed(() => !!linkedAuth && !!linkedAuth.token);
+  const effectiveAuth = ifElse(hasLinkedAuth, linkedAuth, auth);
 
   // Directly instantiate GmailImporter with task-current filter
   // Note: subject:"" in Gmail search means empty subject
@@ -205,7 +217,7 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
       limit: 50,
       debugMode: DEBUG_NOTES,
     },
-    linkedAuth: linkedAuth || auth,
+    linkedAuth: effectiveAuth,
   });
 
   // Auto-fetch labels when auth becomes ready
@@ -218,7 +230,8 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
     if (ready && !alreadyFetched && !hasLabelId) {
       hasFetchedLabels.set(true);
       // Trigger label fetch
-      fetchLabels({ auth, taskCurrentLabelId, loadingLabels }).send({});
+      fetchLabels({ auth: effectiveAuth, taskCurrentLabelId, loadingLabels })
+        .send({});
     }
   });
 
@@ -247,31 +260,6 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
   });
 
   const noteCount = computed(() => notes?.length || 0);
-
-  // Format date for display
-  const formatDate = (dateStr: string) => {
-    try {
-      const date = new Date(dateStr);
-      const now = new Date();
-      const diffMs = now.getTime() - date.getTime();
-      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-      if (diffDays === 0) {
-        return date.toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-      } else if (diffDays === 1) {
-        return "Yesterday";
-      } else if (diffDays < 7) {
-        return date.toLocaleDateString([], { weekday: "short" });
-      } else {
-        return date.toLocaleDateString([], { month: "short", day: "numeric" });
-      }
-    } catch {
-      return dateStr;
-    }
-  };
 
   return {
     [NAME]: "Email Notes",
@@ -390,12 +378,11 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
               </div>,
               <ct-vstack gap="3">
                 {notes.map((note) => {
-                  // Check if this note is being processed or was just copied
+                  // Check if this note is being processed
                   // Note: Inside .map(), 'note' is a reactive cell reference
                   const isProcessing = computed(() =>
                     processingNotes.get().includes(note.id)
                   );
-                  const isCopied = computed(() => copiedId.get() === note.id);
 
                   return (
                     <div
@@ -425,36 +412,20 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
                           {derive(note, (n) => formatDate(n.date))}
                         </span>
                         <div style={{ display: "flex", gap: "8px" }}>
-                          {/* Copy button */}
-                          <button
-                            type="button"
-                            onClick={copyToClipboard({
-                              content: note.content as unknown as Writable<
-                                string
-                              >,
-                              copiedId,
-                              noteId: note.id,
-                            })}
-                            style={{
-                              padding: "4px 10px",
-                              backgroundColor: isCopied ? "#d1fae5" : "#f3f4f6",
-                              color: isCopied ? "#059669" : "#374151",
-                              border: "1px solid",
-                              borderColor: isCopied ? "#10b981" : "#d1d5db",
-                              borderRadius: "4px",
-                              fontSize: "12px",
-                              cursor: "pointer",
-                              fontWeight: "500",
-                            }}
+                          {/* Copy button - uses ct-copy-button component */}
+                          <ct-copy-button
+                            text={note.content}
+                            variant="outline"
+                            size="sm"
                           >
-                            {ifElse(isCopied, "Copied!", "Copy")}
-                          </button>
+                            Copy
+                          </ct-copy-button>
 
                           {/* Mark as Done button */}
                           <button
                             type="button"
                             onClick={markAsDone({
-                              auth,
+                              auth: effectiveAuth,
                               noteId: note.id,
                               taskCurrentLabelId,
                               hiddenNotes,
