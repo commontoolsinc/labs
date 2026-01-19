@@ -1,5 +1,6 @@
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { isRecord } from "@commontools/utils/types";
+import { isArrayIndexPropertyName } from "../../value-codec.ts";
 import type {
   IAttestation,
   IInvalidDataURIError,
@@ -60,17 +61,6 @@ export const UnsupportedMediaTypeError = (
 });
 
 /**
- * Checks if a string is a valid non-negative integer array index.
- * Valid: "0", "1", "123"
- * Invalid: "-1", "1.5", "abc", "", "01" (leading zeros except "0"), "length"
- */
-const isValidArrayIndex = (key: string): boolean => {
-  if (key === "" || key === "length") return false;
-  const num = Number(key);
-  return Number.isInteger(num) && num >= 0 && String(num) === key;
-};
-
-/**
  * Sets a value at path using structural sharing. Only clones along the path.
  * Returns original reference if nothing changed (noop propagation).
  *
@@ -123,7 +113,7 @@ const setAtPath = (
     }
 
     // Validate array key
-    if (!isValidArrayIndex(key)) {
+    if (!isArrayIndexPropertyName(key)) {
       return { error: { at: 0, type: "array" } };
     }
 
