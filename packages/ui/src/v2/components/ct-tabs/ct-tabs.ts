@@ -132,16 +132,16 @@ export class CTTabs extends BaseElement {
   override firstUpdated() {
     // Initialize cell controller binding
     this._cellController.bind(this.value, stringSchema);
-    // Track initial value
-    this._lastKnownValue = this._cellController.getValue();
-    // Initialize tab selection
-    this.updateTabSelection();
 
-    // Listen for slotchange to handle tabs being added after initial render
+    // Set up slotchange listener FIRST to catch any pending events
     const slot = this.shadowRoot?.querySelector("slot");
     if (slot) {
       slot.addEventListener("slotchange", this.handleSlotChange);
     }
+
+    // Track initial value and initialize tab selection
+    this._lastKnownValue = this._cellController.getValue();
+    this.updateTabSelection();
   }
 
   override willUpdate(
