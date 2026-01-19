@@ -2010,7 +2010,9 @@ const NotesImportExport = pattern<Input, Output>(
                                   ? (noteMemberships[noteId] ?? [])
                                   : [];
                                 // Use Array.from to avoid CTS transformer's mapWithPattern issue
-                                return Array.from(memberships).map(({ name, notebook }) => (
+                                return Array.from(memberships).map((
+                                  { name, notebook },
+                                ) => (
                                   <ct-chip
                                     label={name}
                                     interactive
