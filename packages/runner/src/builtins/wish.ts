@@ -406,7 +406,7 @@ export function wish(
   let wishPatternResultCell: Cell<WishState<any>> | undefined;
 
   async function launchWishPattern(
-    input?: WishParams & { candidates?: Cell<unknown>[] },
+    input?: WishParams & { candidates?: Cell<Cell<unknown>[]> },
     providedTx?: IExtendedStorageTransaction,
   ): Promise<Cell<WishState<any>>> {
     if (input) wishPatternInput = input;
@@ -594,26 +594,34 @@ export function wish(
             const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
             return schema ? resolvedCell.asSchema(schema) : resolvedCell;
           });
-          if (resultCells.length === 1) {
-            // If it's one result, just return it directly
-            const resolvedCell = resultCells[0];
+          // Sync all result cells to ensure data is loaded
+          await Promise.all(resultCells.map((cell) => cell.sync()));
 
-            // Sync the resolved cell to ensure data is loaded
-            await resolvedCell.sync();
+          if (resultCells.length === 1) {
+            // Single result - return directly
             sendResult(tx, {
-              result: resolvedCell,
-              [UI]: cellLinkUI(resolvedCell),
+              result: resultCells[0],
+              [UI]: cellLinkUI(resultCells[0]),
             });
           } else {
-            // If it's multiple results, launch the wish pattern for the user
-            // to pick from. Navigation goes to the picker charm.
-            const wishResultCell = await launchWishPattern({
+            // Multiple results - show picker for user to choose
+            const candidatesCell = runtime.getImmutableCell(
+              parentCell.space,
+              resultCells,
+              undefined,
+              tx,
+            );
+
+            const pickerCell = await launchWishPattern({
               ...targetValue as WishParams,
-              candidates: resultCells,
+              candidates: candidatesCell,
             }, tx);
+
+            // Return the picker pattern - its [UI] shows picker, then chosen cell
+            // After confirmation: wishResult.result.result gives the chosen cell
             sendResult(tx, {
-              result: wishResultCell,
-              [UI]: wishResultCell.get()[UI],
+              result: pickerCell,
+              [UI]: pickerCell.get()[UI],
             });
           }
         } catch (e) {

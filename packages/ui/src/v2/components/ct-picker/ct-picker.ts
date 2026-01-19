@@ -1,6 +1,9 @@
 import { css, html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
-import { createCellController } from "../../core/cell-controller.ts";
+import {
+  createArrayCellController,
+  createCellController,
+} from "../../core/cell-controller.ts";
 import { type CellHandle } from "@commontools/runtime-client";
 import { numberSchema } from "@commontools/runner/schemas";
 import "../ct-render/ct-render.ts";
@@ -17,10 +20,11 @@ import "../ct-render/ct-render.ts";
  * @attr {boolean} disabled - Whether the picker is disabled
  * @attr {string} min-height - Minimum height for the picker area (default: 200px)
  *
- * @prop {CellHandle<any[]>} items - Array of Cells with [UI] to render in stack
+ * @prop {CellHandle<any[]> | any[]} items - Array of Cells with [UI] to render in stack (CellHandle or plain array)
  * @prop {CellHandle<number>} selectedIndex - Two-way bound cell for current selection index
  *
  * @fires ct-change - Fired when selection changes: { index, value, items }
+ * @fires ct-confirm - Fired when Enter/Space pressed to confirm selection: { index, value }
  * @fires ct-focus - Fired when picker gains focus
  * @fires ct-blur - Fired when picker loses focus
  *
@@ -251,7 +255,7 @@ export class CTPicker extends BaseElement {
             disabled: { type: Boolean, reflect: true },
           };
 
-          declare items: CellHandle<any[]>;
+          declare items: CellHandle<any[]> | any[];
           declare selectedIndex: CellHandle<number>;
           declare minHeight: string;
           declare disabled: boolean;
@@ -259,19 +263,46 @@ export class CTPicker extends BaseElement {
           private _touchStartX = 0;
           private _isTouching = false;
 
-          private _cellController = createCellController<number>(this, {
+          /**
+           * Get items array - uses cell controller for proper subscription
+           */
+          private _getItems(): readonly any[] {
+            // Use the cell controller which handles subscription and value loading
+            return this._itemsCellController.getValue() ?? [];
+          }
+
+          /**
+           * Get item at index - uses cell controller for proper access
+           */
+          private _getItemAt(index: number): any {
+            // If items is a CellHandle, use .key() for reactive access
+            const cell = this._itemsCellController.getCell();
+            if (cell) {
+              return cell.key(index);
+            }
+            // Plain array - return element directly
+            const items = this._getItems();
+            return items[index];
+          }
+
+          private _indexCellController = createCellController<number>(this, {
             timing: { strategy: "immediate" },
             onChange: (newIndex) => {
               this.emit("ct-change", {
                 index: newIndex,
-                value: this.items?.key(newIndex ?? 0),
+                value: this._getItemAt(newIndex ?? 0),
                 items: this.items,
               });
             },
           });
 
+          // Cell controller for items - handles subscription to load cell values
+          private _itemsCellController = createArrayCellController<any>(this, {
+            timing: { strategy: "immediate" },
+          });
+
           private get _currentIndex(): number {
-            return this._cellController.getValue() ?? 0;
+            return this._indexCellController.getValue() ?? 0;
           }
 
           constructor() {
@@ -297,7 +328,8 @@ export class CTPicker extends BaseElement {
           }
 
           override firstUpdated() {
-            this._cellController.bind(this.selectedIndex, numberSchema);
+            this._indexCellController.bind(this.selectedIndex, numberSchema);
+            this._itemsCellController.bind(this.items as any);
             this._updateAriaAttributes();
             this._updateMinHeight();
           }
@@ -305,7 +337,10 @@ export class CTPicker extends BaseElement {
           override willUpdate(changedProperties: PropertyValues) {
             super.willUpdate(changedProperties);
             if (changedProperties.has("selectedIndex")) {
-              this._cellController.bind(this.selectedIndex, numberSchema);
+              this._indexCellController.bind(this.selectedIndex, numberSchema);
+            }
+            if (changedProperties.has("items")) {
+              this._itemsCellController.bind(this.items as any);
             }
           }
 
@@ -344,7 +379,7 @@ export class CTPicker extends BaseElement {
           }
 
           override render() {
-            const items = this.items?.get() ?? [];
+            const items = this._getItems();
             const hasMultipleItems = items.length > 1;
             const currentIndex = this._currentIndex;
 
@@ -389,7 +424,7 @@ export class CTPicker extends BaseElement {
                           id="picker-item-${index}"
                         >
                           <ct-render
-                            .cell="${this.items.key(index)}"
+                            .cell="${this._getItemAt(index)}"
                             variant="preview"
                           ></ct-render>
                         </div>
@@ -424,7 +459,7 @@ export class CTPicker extends BaseElement {
           // --- Selection methods ---
 
           private _selectPrevious = (): void => {
-            const items = this.items.get() ?? [];
+            const items = this._getItems();
             if (this.disabled || !items.length) return;
             const len = items.length;
             this._selectIndex(
@@ -433,7 +468,7 @@ export class CTPicker extends BaseElement {
           };
 
           private _selectNext = (): void => {
-            const items = this.items.get() ?? [];
+            const items = this._getItems();
             if (this.disabled || !items.length) return;
             const len = items.length;
             this._selectIndex(
@@ -442,11 +477,11 @@ export class CTPicker extends BaseElement {
           };
 
           private _selectIndex(index: number): void {
-            const len = (this.items.get() ?? []).length;
+            const len = this._getItems().length;
             if (index < 0 || index >= len || index === this._currentIndex) {
               return;
             }
-            this._cellController.setValue(index);
+            this._indexCellController.setValue(index);
             this._updateAriaAttributes();
             this.requestUpdate();
           }
@@ -454,7 +489,7 @@ export class CTPicker extends BaseElement {
           // --- Keyboard navigation ---
 
           private _handleKeyDown = (event: KeyboardEvent): void => {
-            const items = this.items.get() ?? [];
+            const items = this._getItems();
             if (this.disabled || !items.length) return;
             switch (event.key) {
               case "ArrowLeft":
@@ -474,6 +509,14 @@ export class CTPicker extends BaseElement {
               case "End":
                 event.preventDefault();
                 this._selectIndex(items.length - 1);
+                break;
+              case "Enter":
+              case " ":
+                event.preventDefault();
+                this.emit("ct-confirm", {
+                  index: this._currentIndex,
+                  value: this._getItemAt(this._currentIndex),
+                });
                 break;
             }
           };
@@ -532,8 +575,7 @@ export class CTPicker extends BaseElement {
           }
 
           getSelectedItem(): any | undefined {
-            const items = this.items?.get() ?? [];
-            return items[this._currentIndex];
+            return this._getItemAt(this._currentIndex);
           }
 
           selectByIndex(index: number): void {
