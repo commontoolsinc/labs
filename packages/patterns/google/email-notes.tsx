@@ -206,6 +206,38 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
   const hasLinkedAuth = computed(() => !!linkedAuth && !!linkedAuth.token);
   const effectiveAuth = ifElse(hasLinkedAuth, linkedAuth, auth);
 
+  // Create a Stream from the fetchLabels handler for auto-triggering
+  const labelFetcherStream = fetchLabels({
+    auth: effectiveAuth,
+    taskCurrentLabelId,
+    loadingLabels,
+  });
+
+  // Auto-fetch labels when auth becomes ready
+  // Track whether we've already triggered auto-fetch to prevent loops
+  const hasAutoFetchedLabels = Writable.of(false).for("hasAutoFetchedLabels");
+
+  computed(() => {
+    const ready = isReady;
+    const alreadyFetched = hasAutoFetchedLabels.get();
+    const hasLabelId = !!taskCurrentLabelId.get();
+    const currentlyLoading = loadingLabels.get();
+
+    // Only auto-fetch once when:
+    // - Auth is ready
+    // - We haven't already auto-fetched this session
+    // - No label ID loaded yet
+    // - Not currently loading labels
+    if (ready && !alreadyFetched && !hasLabelId && !currentlyLoading) {
+      if (DEBUG_NOTES) {
+        console.log("[EmailNotes] Auto-fetching labels on auth ready");
+      }
+      hasAutoFetchedLabels.set(true);
+      // Trigger the label fetch via stream
+      labelFetcherStream.send({});
+    }
+  });
+
   // Directly instantiate GmailImporter with task-current filter
   // Note: subject:"" in Gmail search means empty subject
   // GmailImporter will use linkedAuth if provided, otherwise its own wish
@@ -342,11 +374,7 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
                 )}
                 <button
                   type="button"
-                  onClick={fetchLabels({
-                    auth: effectiveAuth,
-                    taskCurrentLabelId,
-                    loadingLabels,
-                  })}
+                  onClick={labelFetcherStream}
                   disabled={loadingLabels}
                   style={{
                     marginLeft: "8px",
