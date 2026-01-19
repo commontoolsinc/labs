@@ -17,6 +17,8 @@ dist/
 .claude/settings.local.json
 claude-research.key
 *.key
+.passphrase
+*passphrase*
 .page-agent-config.json
 .common.json
 .knowledge
