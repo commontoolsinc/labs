@@ -92,6 +92,32 @@ interface TrackedBill {
 // CONSTANTS
 // =============================================================================
 
+/**
+ * DEMO_MODE: When true, all dollar amounts are hashed to fake values
+ * for privacy during demos. This ensures no real financial data is shown.
+ */
+const DEMO_MODE = true;
+
+// 16 distinct colors for card badges
+const CARD_COLORS = [
+  "#ef4444",
+  "#f97316",
+  "#eab308",
+  "#84cc16",
+  "#22c55e",
+  "#14b8a6",
+  "#06b6d4",
+  "#0ea5e9",
+  "#3b82f6",
+  "#6366f1",
+  "#8b5cf6",
+  "#a855f7",
+  "#d946ef",
+  "#ec4899",
+  "#f43f5e",
+  "#78716c",
+];
+
 // Chase sends from various addresses - capture the main patterns
 const _CHASE_SENDERS = [
   "no-reply@alertsp.chase.com",
@@ -216,6 +242,34 @@ function formatDate(dateStr: string | undefined): string {
     month: "short",
     day: "numeric",
   });
+}
+
+/**
+ * Get a consistent color for a card based on its last 4 digits.
+ * Same card always gets the same color.
+ */
+function getCardColor(last4: string): string {
+  let hash = 0;
+  for (const char of last4) {
+    hash = (hash + char.charCodeAt(0)) % 16;
+  }
+  return CARD_COLORS[hash];
+}
+
+/**
+ * In demo mode, hash any price to a deterministic value $0-$5000.
+ * Uses a simple string hash on the input to ensure same input = same output.
+ */
+function demoPrice(amount: number): number {
+  if (!DEMO_MODE) return amount;
+  // Hash the amount to get deterministic pseudo-random value
+  const str = amount.toFixed(2);
+  let hash = 0;
+  for (const char of str) {
+    hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+  }
+  // Map to 0-5000 range
+  return Math.abs(hash % 500000) / 100; // 0.00 to 4999.99
 }
 
 // =============================================================================
@@ -457,7 +511,7 @@ Extract:
         const trackedBill: TrackedBill = {
           key,
           cardLast4: result.cardLast4,
-          amount: billAmount,
+          amount: demoPrice(billAmount),
           dueDate: result.dueDate,
           status: isPaid ? "paid" : daysUntilDue < 0 ? "overdue" : "unpaid",
           isPaid,
@@ -481,9 +535,11 @@ Extract:
       (bills || []).filter((bill) => !bill.isPaid)
     );
 
-    // Paid bills
+    // Paid bills - sorted by due date descending (newest first)
     const paidBills = computed(() =>
-      (bills || []).filter((bill) => bill.isPaid)
+      (bills || [])
+        .filter((bill) => bill.isPaid)
+        .sort((a, b) => b.dueDate.localeCompare(a.dueDate))
     );
 
     // Total unpaid amount
@@ -811,10 +867,11 @@ Extract:
                           <span
                             style={{
                               padding: "2px 8px",
-                              backgroundColor: "#e5e7eb",
+                              backgroundColor: getCardColor(bill.cardLast4),
                               borderRadius: "4px",
                               fontSize: "12px",
-                              color: "#374151",
+                              color: "white",
+                              fontWeight: "500",
                             }}
                           >
                             ...{bill.cardLast4}
@@ -908,10 +965,11 @@ Extract:
                             <span
                               style={{
                                 padding: "2px 6px",
-                                backgroundColor: "#a7f3d0",
+                                backgroundColor: getCardColor(bill.cardLast4),
                                 borderRadius: "4px",
                                 fontSize: "11px",
-                                color: "#065f46",
+                                color: "white",
+                                fontWeight: "500",
                               }}
                             >
                               ...{bill.cardLast4}
@@ -1146,7 +1204,11 @@ Extract:
                                 style={{ color: "#374151", marginTop: "4px" }}
                               >
                                 <strong>Amount:</strong> {computed(() =>
-                                  formatCurrency(analysis.result?.amount)
+                                  formatCurrency(
+                                    analysis.result?.amount !== undefined
+                                      ? demoPrice(analysis.result.amount)
+                                      : undefined,
+                                  )
                                 )}
                               </div>
                               <div
@@ -1192,6 +1254,22 @@ Extract:
                   Open Chase Website
                 </a>
               </div>
+
+              {/* Demo Mode Indicator */}
+              {DEMO_MODE && (
+                <div
+                  style={{
+                    fontSize: "11px",
+                    color: "#9ca3af",
+                    cursor: "help",
+                    textAlign: "center",
+                    marginTop: "8px",
+                  }}
+                  title="Uses fake numbers for privacy"
+                >
+                  Demo Mode
+                </div>
+              )}
             </ct-vstack>
           </ct-vscroll>
         </ct-screen>
