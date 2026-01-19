@@ -959,9 +959,15 @@ Extract:
                               marginTop: "4px",
                             }}
                           >
-                            Was due: {computed(() => formatDate(bill.dueDate))}
-                            {bill.paidDate &&
-                              ` • Paid: ${formatDate(bill.paidDate)}`}
+                            {computed(() => {
+                              const dueText = `Was due: ${
+                                formatDate(bill.dueDate)
+                              }`;
+                              const paidText = bill.paidDate
+                                ? ` • Paid: ${formatDate(bill.paidDate)}`
+                                : "";
+                              return dueText + paidText;
+                            })}
                           </div>
                         </div>
                         <button
