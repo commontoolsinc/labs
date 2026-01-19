@@ -118,6 +118,7 @@ const createNoteAndOpen = handler<
     notes: Writable<NoteCharm[]>;
     allCharms: Writable<NoteCharm[]>;
     usedCreateAnotherNote: Writable<boolean>;
+    self: any;
   }
 >((
   _,
@@ -127,6 +128,7 @@ const createNoteAndOpen = handler<
     notes,
     allCharms,
     usedCreateAnotherNote,
+    self,
   },
 ) => {
   const title = newNoteTitle.get() || "New Note";
@@ -135,6 +137,7 @@ const createNoteAndOpen = handler<
     content: "",
     isHidden: true,
     noteId: generateId(),
+    parentNotebook: self, // Set parent at creation for back navigation
   });
   allCharms.push(newNote as any); // Required for persistence
   notes.push(newNote);
@@ -454,6 +457,7 @@ const createNestedNotebookAndOpen = handler<
     notes: Writable<NoteCharm[]>;
     allCharms: Writable<NoteCharm[]>;
     usedCreateAnotherNotebook: Writable<boolean>;
+    self: any;
   }
 >((
   _,
@@ -463,14 +467,16 @@ const createNestedNotebookAndOpen = handler<
     notes,
     allCharms,
     usedCreateAnotherNotebook,
+    self,
   },
 ) => {
   const title = newNestedNotebookTitle.get() || "New Notebook";
-  // Pass isHidden: true and parentNotebook for navigation back
+  // Pass isHidden: true and parentNotebook: self at creation time for back navigation
   const nb = Notebook({
     title,
     notes: [],
     isHidden: true,
+    parentNotebook: self,
   });
   allCharms.push(nb);
   notes.push(nb);
@@ -1821,6 +1827,7 @@ const Notebook = pattern<Input, Output>(
                   notes,
                   allCharms,
                   usedCreateAnotherNote,
+                  self,
                 })}
               >
                 Create
@@ -1874,6 +1881,7 @@ const Notebook = pattern<Input, Output>(
                   notes,
                   allCharms,
                   usedCreateAnotherNotebook,
+                  self,
                 })}
               >
                 Create
