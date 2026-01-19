@@ -540,12 +540,19 @@ interface Output {
   eventCount: number;
 }
 
+const toggleShowEvents = handler<unknown, { showEvents: Writable<boolean> }>(
+  (_, { showEvents }) => {
+    showEvents.set(!showEvents.get());
+  },
+);
+
 const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
   ({ settings, linkedAuth }) => {
     const events = Writable.of<Confidential<CalendarEvent[]>>([]);
     const calendars = Writable.of<Calendar[]>([]);
     const fetching = Writable.of(false);
     const currentPage = Writable.of(0);
+    const showEvents = Writable.of(false); // Collapsed by default
     const PAGE_SIZE = 10;
 
     // Use createGoogleAuth utility for auth management
@@ -785,36 +792,68 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                 <div />,
               )}
 
-              {
-                /*
-                 * Events summary - showing only count instead of full event list.
-                 *
-                 * NOTE: This minimal UI is intentional due to performance limitations.
-                 * Rendering 200+ events with reactive cells causes Chrome CPU to spike
-                 * to 100% for extended periods. Ideally we'd show all events in a full
-                 * table/list view, but until the framework supports virtualization or
-                 * more efficient rendering, we display just the summary.
-                 *
-                 * See: https://linear.app/common-tools/issue/CT-1111/performance-derive-inside-map-causes-8x-more-calls-than-expected-never
-                 *
-                 * The full event data is still available via the `events` output for
-                 * other patterns to access via linking/wishing.
-                 */
-              }
+              {/* Collapsible events list */}
               <div style={{ marginTop: "16px" }}>
-                <h4 style={{ fontSize: "16px", margin: 0 }}>
-                  {derive(
-                    events,
-                    (evts: CalendarEvent[]) => `${evts.length} events imported`,
-                  )}
-                </h4>
-                <p
-                  style={{ fontSize: "12px", color: "#666", marginTop: "8px" }}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    cursor: "pointer",
+                  }}
+                  onClick={toggleShowEvents({ showEvents })}
                 >
-                  Full event data available for other patterns via linking.
-                  (Event list hidden for performance - rendering 200+ items
-                  causes CPU issues)
-                </p>
+                  <span style={{ fontSize: "14px" }}>
+                    {ifElse(showEvents, "▼", "▶")}
+                  </span>
+                  <h4 style={{ fontSize: "16px", margin: 0 }}>
+                    {derive(
+                      events,
+                      (evts: CalendarEvent[]) =>
+                        `${evts.length} events imported`,
+                    )}
+                  </h4>
+                </div>
+                {ifElse(
+                  showEvents,
+                  <div
+                    style={{
+                      marginTop: "12px",
+                      maxHeight: "400px",
+                      overflowY: "auto",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: "8px",
+                    }}
+                  >
+                    {events.map((event) => (
+                      <div
+                        style={{
+                          padding: "8px 12px",
+                          borderBottom: "1px solid #f3f4f6",
+                          fontSize: "13px",
+                        }}
+                      >
+                        <div style={{ fontWeight: "500" }}>{event.summary}</div>
+                        <div style={{ color: "#6b7280", fontSize: "12px" }}>
+                          {formatEventDate(
+                            event.startDateTime,
+                            event.endDateTime,
+                            event.isAllDay,
+                          )} • {event.calendarName}
+                        </div>
+                      </div>
+                    ))}
+                  </div>,
+                  <p
+                    style={{
+                      fontSize: "12px",
+                      color: "#666",
+                      marginTop: "8px",
+                    }}
+                  >
+                    Click to expand event list.
+                  </p>,
+                )}
               </div>
             </ct-vstack>
           </ct-vscroll>
