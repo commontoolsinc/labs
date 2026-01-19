@@ -205,13 +205,14 @@ type EmailAnalysisResult = Schema<typeof EMAIL_ANALYSIS_SCHEMA>;
 
 /**
  * Create a deduplication key for a library item.
- * Uses lowercase title + author + dueDate.
+ * Uses lowercase title + author only (not dueDate).
+ * This allows the same book with different due dates (from renewals/different emails)
+ * to be deduplicated, keeping the most recent information.
  */
 function createItemKey(item: LibraryItem): string {
   const title = (item.title || "").toLowerCase().trim();
   const author = (item.author || "").toLowerCase().trim();
-  const dueDate = item.dueDate || "";
-  return `${title}|${author}|${dueDate}`;
+  return `${title}|${author}`;
 }
 
 /**
