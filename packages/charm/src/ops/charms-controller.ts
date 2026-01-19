@@ -154,7 +154,7 @@ export class CharmsController<T = unknown> {
     // Access the space cell directly to get the pattern reference without running it
     const spaceCellContents = this.#manager.getSpaceCellContents();
     const defaultPatternRef = spaceCellContents.key("defaultPattern").get();
-    if (defaultPatternRef?.get()) {
+    if (defaultPatternRef) {
       // Stop the existing pattern (no-op if not running)
       this.#manager.runtime.runner.stop(defaultPatternRef);
     }
