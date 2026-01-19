@@ -157,13 +157,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }
       const lastKey = remainingPath.pop()!;
       let nextValue: Record<string, JSONValue> = valueObj;
-      for (const key of remainingPath) {
+      // Create intermediate containers. The container type depends on whether
+      // the NEXT key (the one that will access this container) is numeric.
+      for (let i = 0; i < remainingPath.length; i++) {
+        const key = remainingPath[i];
+        const nextKey = remainingPath[i + 1] ?? lastKey;
+        const isNextKeyNumeric = Number.isInteger(Number(nextKey));
         nextValue =
           nextValue[key] =
-            (Number.isInteger(Number(key)) ? [] : {}) as Record<
-              string,
-              JSONValue
-            >;
+            (isNextKeyNumeric ? [] : {}) as Record<string, JSONValue>;
       }
       nextValue[lastKey] = value as JSONValue;
       const parentAddress = { ...address, path: lastExistingPath };
