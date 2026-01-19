@@ -19,6 +19,7 @@ import type {
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { isPrimitiveCellLink, parseLink } from "./link-utils.ts";
 import { fromURI } from "./uri-utils.ts";
+import { isArrayIndexPropertyName } from "./value-codec.ts";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
@@ -725,19 +726,12 @@ function narrowSchema(
   }
 }
 
-function indexFromPath(
-  array: unknown[],
-  path: string,
-): number | undefined {
-  const number = new Number(path).valueOf();
-  return (Number.isInteger(number) && number >= 0 && number < array.length)
-    ? number
-    : undefined;
-}
-
 function elementAt<T>(array: T[], path: string): T | undefined {
-  const index = indexFromPath(array, path);
-  return (index === undefined) ? undefined : array[index];
+  // Only access as array index if path is a valid index string.
+  // Out-of-bounds access returns undefined (standard JS behavior).
+  return isArrayIndexPropertyName(path)
+    ? (array as unknown as Record<string, T>)[path]
+    : undefined;
 }
 
 type Primitive = string | number | boolean | null | undefined | symbol | bigint;
