@@ -10,8 +10,6 @@
  * Usage from other patterns:
  *   const profile = wish<ProfileOutput>({ query: "#profile" });
  *   profile?.memberships.push({ program: "Hilton Honors", memberNumber: "12345" });
- *
- * @tags #profile
  */
 import {
   action,
@@ -149,6 +147,7 @@ interface ProfileInput {
   notes?: Writable<Default<string, "">>;
 }
 
+/** Profile blackboard for personal data coordination. #profile */
 export interface ProfileOutput {
   [NAME]: string;
   [UI]: VNode;
