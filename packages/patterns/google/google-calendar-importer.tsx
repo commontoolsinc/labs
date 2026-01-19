@@ -825,24 +825,79 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                       borderRadius: "8px",
                     }}
                   >
-                    {events.map((event) => (
-                      <div
-                        style={{
-                          padding: "8px 12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          fontSize: "13px",
-                        }}
-                      >
-                        <div style={{ fontWeight: "500" }}>{event.summary}</div>
-                        <div style={{ color: "#6b7280", fontSize: "12px" }}>
-                          {formatEventDate(
-                            event.startDateTime,
-                            event.endDateTime,
-                            event.isAllDay,
-                          )} • {event.calendarName}
+                    {events.map((event) => {
+                      // Look up calendar colors for this event
+                      const bgColor = derive(
+                        { calendars, calendarId: event.calendarId },
+                        ({
+                          calendars: cals,
+                          calendarId,
+                        }: { calendars: Calendar[]; calendarId: string }) => {
+                          const cal = cals.find((c: Calendar) =>
+                            c.id === calendarId
+                          );
+                          return cal?.backgroundColor || "#4285f4";
+                        },
+                      );
+                      const fgColor = derive(
+                        { calendars, calendarId: event.calendarId },
+                        ({
+                          calendars: cals,
+                          calendarId,
+                        }: { calendars: Calendar[]; calendarId: string }) => {
+                          const cal = cals.find((c: Calendar) =>
+                            c.id === calendarId
+                          );
+                          return cal?.foregroundColor || "#ffffff";
+                        },
+                      );
+                      return (
+                        <div
+                          style={{
+                            padding: "8px 12px",
+                            borderBottom: "1px solid #f3f4f6",
+                            fontSize: "13px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                            }}
+                          >
+                            <span
+                              style={{
+                                padding: "2px 8px",
+                                borderRadius: "12px",
+                                backgroundColor: bgColor,
+                                color: fgColor,
+                                fontSize: "11px",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {event.calendarName}
+                            </span>
+                            <span style={{ fontWeight: "500" }}>
+                              {event.summary}
+                            </span>
+                          </div>
+                          <div
+                            style={{
+                              color: "#6b7280",
+                              fontSize: "12px",
+                              marginTop: "4px",
+                            }}
+                          >
+                            {formatEventDate(
+                              event.startDateTime,
+                              event.endDateTime,
+                              event.isAllDay,
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>,
                   <p
                     style={{
