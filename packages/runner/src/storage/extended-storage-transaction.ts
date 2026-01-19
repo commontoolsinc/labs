@@ -25,6 +25,7 @@ import type {
 import { toThrowable } from "./interface.ts";
 
 import { ignoreReadForScheduling } from "../scheduler.ts";
+import { isArrayIndexPropertyName } from "../value-codec.ts";
 
 const logger = getLogger("extended-storage-transaction", {
   enabled: false,
@@ -158,14 +159,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       const lastKey = remainingPath.pop()!;
       let nextValue: Record<string, JSONValue> = valueObj;
       // Create intermediate containers. The container type depends on whether
-      // the NEXT key (the one that will access this container) is numeric.
+      // the NEXT key (the one that will access this container) is a valid array
+      // index.
       for (let i = 0; i < remainingPath.length; i++) {
         const key = remainingPath[i];
         const nextKey = remainingPath[i + 1] ?? lastKey;
-        const isNextKeyNumeric = Number.isInteger(Number(nextKey));
+        const isNextKeyArrayIndex = isArrayIndexPropertyName(nextKey);
         nextValue =
           nextValue[key] =
-            (isNextKeyNumeric ? [] : {}) as Record<string, JSONValue>;
+            (isNextKeyArrayIndex ? [] : {}) as Record<string, JSONValue>;
       }
       nextValue[lastKey] = value as JSONValue;
       const parentAddress = { ...address, path: lastExistingPath };

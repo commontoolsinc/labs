@@ -1048,6 +1048,32 @@ describe("numeric path key edge cases", () => {
     expect((data as unknown[]).length).toBe(100);
     expect((data as unknown[])[99]).toBe("value");
   });
+
+  // Keys like "01" look numeric but aren't valid array indices (leading zero).
+  // The container should be an object, not an array.
+  it("leading-zero numeric key should create object not array", () => {
+    const transaction = runtime.edit();
+
+    transaction.writeOrThrow({
+      space,
+      id: "of:leading-zero",
+      type: "application/json",
+      path: ["data", "01"],
+    }, "value");
+
+    const data = transaction.readOrThrow({
+      space,
+      id: "of:leading-zero",
+      type: "application/json",
+      path: ["data"],
+    });
+
+    // The key "01" is not a valid array index, so data should be an object.
+    // This test documents that this is the EXPECTED behavior - if it fails,
+    // the bug where "01" creates an array is present.
+    expect(Array.isArray(data)).toBe(false);
+    expect(data).toEqual({ "01": "value" });
+  });
 });
 
 describe("data: URI behaviors", () => {
