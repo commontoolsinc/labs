@@ -126,7 +126,7 @@ export default pattern<Input, Output>(({ note, sourceNoteRef, content }) => {
   });
 
   // Get allCharms for noteId lookup fallback
-  const { allCharms } = wish<{ allCharms: any[] }>("/");
+  const { allCharms } = wish<{ allCharms: any[] }>("#default");
 
   // Use sourceNoteRef directly if provided, otherwise fall back to noteId lookup
   const sourceNote = computed(() => {

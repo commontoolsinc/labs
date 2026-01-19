@@ -54,9 +54,9 @@ function _getNotebookNotesArray(notebook: unknown): unknown[] {
   return Array.isArray(notes) ? notes : [];
 }
 
-// Helper to get a comparable name from a charm (handles both local and wish("/") charms)
+// Helper to get a comparable name from a charm (handles both local and wish("#default") charms)
 function getCharmName(charm: unknown): string {
-  // First try [NAME] (works for wish("/") charms)
+  // First try [NAME] (works for wish("#default") charms)
   const symbolName = (charm as any)?.[NAME];
   if (typeof symbolName === "string") return symbolName;
   // Fallback to title (works for local charms)
@@ -1132,7 +1132,9 @@ const handleCreateNotebook = handler<
 
 const Notebook = pattern<Input, Output>(
   ({ title, notes, isNotebook, isHidden, parentNotebook, [SELF]: self }) => {
-    const { allCharms } = wish<{ allCharms: Writable<NoteCharm[]> }>("/");
+    const { allCharms } = wish<{ allCharms: Writable<NoteCharm[]> }>(
+      "#default",
+    );
 
     // Use computed() for proper reactive tracking of notes.length
     const noteCount = computed(() => notes.get().length);
@@ -1196,7 +1198,7 @@ const Notebook = pattern<Input, Output>(
     });
 
     // Filter to find all notebooks by checking if [NAME] contains "Notebook" or starts with notebook emoji
-    // Charms from wish("/") only expose [NAME] at top level, not other properties
+    // Charms from wish("#default") only expose [NAME] at top level, not other properties
     const notebooks = computed(() =>
       allCharms.get().filter((charm: any) => {
         const name = charm?.[NAME];
