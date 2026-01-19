@@ -30,7 +30,7 @@ import {
 } from "commontools";
 import GmailImporter, { type Email } from "./gmail-importer.tsx";
 import type { Auth } from "./util/google-auth-manager.tsx";
-import { type GmailLabel, GmailSendClient } from "./util/gmail-send-client.ts";
+import type { GmailLabel } from "./util/gmail-send-client.ts";
 import {
   createGoogleAuth,
   type ScopeKey,
@@ -87,6 +87,7 @@ function formatDate(dateStr: string): string {
 
 /**
  * Mark a note as done by removing the task-current label
+ * Uses direct API call instead of GmailSendClient to avoid .get() compatibility issues
  */
 const markAsDone = handler<
   unknown,
@@ -113,10 +114,32 @@ const markAsDone = handler<
   processingNotes.set([...currentProcessing, noteId]);
 
   try {
-    const client = new GmailSendClient(auth, { debugMode: DEBUG_NOTES });
-    await client.modifyLabels(noteId, {
-      removeLabelIds: [labelId],
-    });
+    // Get token directly from auth (works with both Writable and computed cells)
+    const token = auth?.token || auth?.get?.()?.token;
+    if (!token) {
+      throw new Error("No auth token available");
+    }
+
+    // Direct API call to modify labels
+    const res = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${
+        encodeURIComponent(noteId)
+      }/modify`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          removeLabelIds: [labelId],
+        }),
+      },
+    );
+
+    if (!res.ok) {
+      throw new Error(`Failed to modify labels: ${res.status}`);
+    }
 
     if (DEBUG_NOTES) {
       console.log("[EmailNotes] Marked as done:", noteId);
@@ -136,6 +159,7 @@ const markAsDone = handler<
 
 /**
  * Fetch labels to find task-current label ID
+ * Uses direct API call instead of GmailSendClient to avoid .get() compatibility issues
  */
 const fetchLabels = handler<
   unknown,
@@ -148,8 +172,29 @@ const fetchLabels = handler<
 >(async (_event, { auth, taskCurrentLabelId, loadingLabels }) => {
   loadingLabels.set(true);
   try {
-    const client = new GmailSendClient(auth, { debugMode: DEBUG_NOTES });
-    const labels = await client.listLabels();
+    // Get token directly from auth (works with both Writable and computed cells)
+    const token = auth?.token || auth?.get?.()?.token;
+    if (!token) {
+      console.warn("[EmailNotes] No auth token available");
+      return;
+    }
+
+    // Direct API call to list labels
+    const res = await fetch(
+      "https://gmail.googleapis.com/gmail/v1/users/me/labels",
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
+
+    if (!res.ok) {
+      throw new Error(`Failed to fetch labels: ${res.status}`);
+    }
+
+    const data = await res.json();
+    const labels: GmailLabel[] = data.labels || [];
 
     // Find task-current label (case-insensitive)
     const taskLabel = labels.find(
@@ -207,8 +252,10 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
   const effectiveAuth = ifElse(hasLinkedAuth, linkedAuth, auth);
 
   // Create a Stream from the fetchLabels handler for auto-triggering
+  // Note: We pass `auth` (Writable<Auth>) not `effectiveAuth` (derived value)
+  // because GmailSendClient needs a cell with .get() method
   const labelFetcherStream = fetchLabels({
-    auth: effectiveAuth,
+    auth,
     taskCurrentLabelId,
     loadingLabels,
   });
@@ -463,7 +510,7 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
                           <button
                             type="button"
                             onClick={markAsDone({
-                              auth: effectiveAuth,
+                              auth,
                               noteId: note.id,
                               taskCurrentLabelId,
                               hiddenNotes,
