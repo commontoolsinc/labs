@@ -21,7 +21,6 @@ import {
   computed,
   Default,
   generateObject,
-  handler,
   JSONSchema,
   NAME,
   pattern,
@@ -313,30 +312,6 @@ function formatDate(dateStr: string | undefined): string {
 }
 
 // =============================================================================
-// HANDLERS
-// =============================================================================
-
-// Handler to mark an item as returned
-const markAsReturned = handler<
-  unknown,
-  { returnedKeys: Writable<string[]>; itemKey: string }
->((_event, { returnedKeys, itemKey }) => {
-  const current = returnedKeys.get();
-  if (!current.includes(itemKey)) {
-    returnedKeys.set([...current, itemKey]);
-  }
-});
-
-// Handler to unmark an item as returned
-const unmarkAsReturned = handler<
-  unknown,
-  { returnedKeys: Writable<string[]>; itemKey: string }
->((_event, { returnedKeys, itemKey }) => {
-  const current = returnedKeys.get();
-  returnedKeys.set(current.filter((k) => k !== itemKey));
-});
-
-// =============================================================================
 // PATTERN
 // =============================================================================
 
@@ -345,7 +320,9 @@ interface PatternInput {
   // Use: ct charm link googleAuthCharm/auth berkeleyLibraryCharm/linkedAuth
   linkedAuth?: Auth;
   // Track items manually marked as returned (persisted)
-  manuallyReturned: Default<string[], []>;
+  manuallyReturned: Writable<Default<string[], []>>;
+  // Track holds manually dismissed (persisted)
+  dismissedHolds: Writable<Default<string[], []>>;
 }
 
 /** Berkeley Public Library book tracker. #berkeleyLibrary */
@@ -359,7 +336,7 @@ interface PatternOutput {
 }
 
 export default pattern<PatternInput, PatternOutput>(
-  ({ linkedAuth, manuallyReturned }) => {
+  ({ linkedAuth, manuallyReturned, dismissedHolds }) => {
     // Directly instantiate GmailImporter with library-specific settings
     const gmailImporter = GmailImporter({
       settings: {
@@ -472,8 +449,8 @@ Note: If this is a forwarded email, look for the original library content within
     // Process all analyses and build deduplicated item list
     const trackedItems = computed(() => {
       const itemMap = new Map<string, TrackedItem>();
-      // manuallyReturned is a reactive Cell, get the actual array value
-      const returnedKeys = (manuallyReturned || []) as string[];
+      // manuallyReturned is a Writable Cell, get the actual array value
+      const returnedKeys = manuallyReturned.get() || [];
 
       // Sort emails by date (newest first) so we keep most recent data
       const sortedAnalyses = [...(emailAnalyses || [])]
@@ -538,6 +515,8 @@ Note: If this is a forwarded email, look for the original library content within
     const holdsReady = computed(() => {
       const holdsSet = new Set<string>();
       const items: TrackedItem[] = [];
+      // dismissedHolds is a Writable Cell, get the actual array value
+      const dismissedKeys = dismissedHolds.get() || [];
 
       for (const analysisItem of emailAnalyses || []) {
         const result = analysisItem.result;
@@ -547,6 +526,8 @@ Note: If this is a forwarded email, look for the original library content within
           if (item.status !== "hold_ready") continue;
 
           const key = createItemKey(item);
+          // Skip dismissed holds
+          if (dismissedKeys.includes(key)) continue;
           if (holdsSet.has(key)) continue;
           holdsSet.add(key);
 
@@ -579,6 +560,45 @@ Note: If this is a forwarded email, look for the original library content within
     const historicalItems = computed(() =>
       (trackedItems || []).filter((item) => item.isManuallyReturned)
     );
+
+    // Dismissed holds (manually dismissed)
+    const dismissedHoldsItems = computed(() => {
+      const holdsSet = new Set<string>();
+      const items: TrackedItem[] = [];
+      const dismissedKeys = dismissedHolds.get() || [];
+
+      for (const analysisItem of emailAnalyses || []) {
+        const result = analysisItem.result;
+        if (!result?.items) continue;
+
+        for (const item of result.items) {
+          if (item.status !== "hold_ready") continue;
+
+          const key = createItemKey(item);
+          // Only include dismissed holds
+          if (!dismissedKeys.includes(key)) continue;
+          if (holdsSet.has(key)) continue;
+          holdsSet.add(key);
+
+          items.push({
+            key,
+            title: item.title,
+            author: item.author,
+            dueDate: undefined,
+            status: "hold_ready",
+            itemType: item.itemType,
+            renewalsRemaining: undefined,
+            fineAmount: undefined,
+            urgency: "ok",
+            daysUntilDue: 999,
+            emailDate: analysisItem.emailDate,
+            isManuallyReturned: false,
+          });
+        }
+      }
+
+      return items;
+    });
 
     // Count statistics
     const overdueCount = computed(
@@ -917,10 +937,12 @@ Note: If this is a forwarded email, look for the original library content within
                       </div>
                       <button
                         type="button"
-                        onClick={markAsReturned({
-                          returnedKeys: manuallyReturned,
-                          itemKey: item.key,
-                        })}
+                        onClick={() => {
+                          const current = manuallyReturned.get();
+                          if (!current.includes(item.key)) {
+                            manuallyReturned.set([...current, item.key]);
+                          }
+                        }}
                         style={{
                           padding: "6px 12px",
                           backgroundColor: "#10b981",
@@ -1012,10 +1034,12 @@ Note: If this is a forwarded email, look for the original library content within
                       </div>
                       <button
                         type="button"
-                        onClick={markAsReturned({
-                          returnedKeys: manuallyReturned,
-                          itemKey: item.key,
-                        })}
+                        onClick={() => {
+                          const current = manuallyReturned.get();
+                          if (!current.includes(item.key)) {
+                            manuallyReturned.set([...current, item.key]);
+                          }
+                        }}
                         style={{
                           padding: "6px 12px",
                           backgroundColor: "#10b981",
@@ -1107,10 +1131,12 @@ Note: If this is a forwarded email, look for the original library content within
                         </div>
                         <button
                           type="button"
-                          onClick={markAsReturned({
-                            returnedKeys: manuallyReturned,
-                            itemKey: item.key,
-                          })}
+                          onClick={() => {
+                            const current = manuallyReturned.get();
+                            if (!current.includes(item.key)) {
+                              manuallyReturned.set([...current, item.key]);
+                            }
+                          }}
                           style={{
                             padding: "6px 12px",
                             backgroundColor: "#10b981",
@@ -1182,9 +1208,116 @@ Note: If this is a forwarded email, look for the original library content within
                           Ready for pickup
                         </div>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const current = dismissedHolds.get();
+                          if (!current.includes(item.key)) {
+                            dismissedHolds.set([...current, item.key]);
+                          }
+                        }}
+                        style={{
+                          padding: "6px 12px",
+                          backgroundColor: "#10b981",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "6px",
+                          cursor: "pointer",
+                          fontSize: "12px",
+                          fontWeight: "500",
+                          alignSelf: "center",
+                        }}
+                      >
+                        Picked Up
+                      </button>
                     </div>
                   ))}
                 </ct-vstack>
+              </div>
+
+              {/* Dismissed Holds Section */}
+              <div
+                style={{
+                  display: computed(() =>
+                    (dismissedHoldsItems || []).length > 0 ? "block" : "none"
+                  ),
+                }}
+              >
+                <details>
+                  <summary
+                    style={{
+                      cursor: "pointer",
+                      fontWeight: "600",
+                      fontSize: "16px",
+                      marginBottom: "8px",
+                      color: "#6b7280",
+                    }}
+                  >
+                    ✓ Dismissed Holds (
+                    {computed(() => (dismissedHoldsItems || []).length)})
+                  </summary>
+                  <ct-vstack gap="2">
+                    {dismissedHoldsItems.map((item) => (
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "12px",
+                          padding: "12px",
+                          backgroundColor: "#f3f4f6",
+                          borderRadius: "8px",
+                          border: "1px solid #d1d5db",
+                          opacity: 0.7,
+                        }}
+                      >
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: "600", fontSize: "14px" }}>
+                            {item.title}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "12px",
+                              color: "#6b7280",
+                              display: item.author ? "block" : "none",
+                            }}
+                          >
+                            by {item.author}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "12px",
+                              color: "#9ca3af",
+                              marginTop: "4px",
+                            }}
+                          >
+                            Dismissed
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const current = dismissedHolds.get();
+                            dismissedHolds.set(
+                              current.filter((k: string) => k !== item.key),
+                            );
+                          }}
+                          style={{
+                            padding: "6px 12px",
+                            backgroundColor: "#6b7280",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "6px",
+                            cursor: "pointer",
+                            fontSize: "12px",
+                            fontWeight: "500",
+                            alignSelf: "center",
+                          }}
+                        >
+                          Undo
+                        </button>
+                      </div>
+                    ))}
+                  </ct-vstack>
+                </details>
               </div>
 
               {/* Historical Items Section */}
@@ -1246,10 +1379,12 @@ Note: If this is a forwarded email, look for the original library content within
                         </div>
                         <button
                           type="button"
-                          onClick={unmarkAsReturned({
-                            returnedKeys: manuallyReturned,
-                            itemKey: item.key,
-                          })}
+                          onClick={() => {
+                            const current = manuallyReturned.get();
+                            manuallyReturned.set(
+                              current.filter((k: string) => k !== item.key),
+                            );
+                          }}
                           style={{
                             padding: "6px 12px",
                             backgroundColor: "#6b7280",
