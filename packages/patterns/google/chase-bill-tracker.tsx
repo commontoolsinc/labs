@@ -434,16 +434,27 @@ Extract:
         const result = analysisItem.result;
         if (!result) continue;
 
-        // Only track bill_due and payment_reminder emails as actual bills
-        if (
-          result.emailType !== "bill_due" &&
-          result.emailType !== "payment_reminder"
-        ) {
+        // Track bills from multiple email types:
+        // - bill_due: Explicit "payment due" notifications
+        // - payment_reminder: Upcoming due date reminders
+        // - statement_ready: Statement notifications (these often contain the bill amount/due date)
+        const isBillEmail =
+          result.emailType === "bill_due" ||
+          result.emailType === "payment_reminder";
+        const isStatementWithBillInfo =
+          result.emailType === "statement_ready" &&
+          result.dueDate &&
+          (result.amount || result.statementBalance);
+
+        if (!isBillEmail && !isStatementWithBillInfo) {
           continue;
         }
 
         // Need card last 4 and due date to track a bill
         if (!result.cardLast4 || !result.dueDate) continue;
+
+        // For statement_ready, use statementBalance if amount isn't set
+        const billAmount = result.amount || result.statementBalance || 0;
 
         const key = createBillKey(result.cardLast4, result.dueDate);
 
@@ -460,7 +471,7 @@ Extract:
         const trackedBill: TrackedBill = {
           key,
           cardLast4: result.cardLast4,
-          amount: result.amount || 0,
+          amount: billAmount,
           dueDate: result.dueDate,
           status: isPaid ? "paid" : daysUntilDue < 0 ? "overdue" : "unpaid",
           isPaid,
