@@ -132,7 +132,7 @@ export default pattern<PatternInput>(({ linkedAuth }) => {
             {gmailAuth.authUI}
 
             <h3 style={{ fontSize: "18px", fontWeight: "600" }}>
-              All Email Patterns
+              Patterns launched based on your emails
             </h3>
 
             {/* USPS */}
