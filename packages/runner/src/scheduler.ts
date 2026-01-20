@@ -1885,7 +1885,17 @@ export class Scheduler {
 
     // Transform stack trace to show original source locations
     if (error.stack) {
+      const originalStack = error.stack;
+      console.log("[source-map-debug] Original stack:", originalStack);
       error.stack = this.runtime.harness.parseStack(error.stack);
+      console.log("[source-map-debug] Transformed stack:", error.stack);
+      // Debug: log if stack was not transformed
+      if (originalStack === error.stack) {
+        logger.warn(
+          "schedule-error",
+          "Stack trace was not transformed by source map",
+        );
+      }
     }
 
     const errorWithContext = error as ErrorWithContext;

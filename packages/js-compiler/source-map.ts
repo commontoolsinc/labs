@@ -21,12 +21,15 @@ const MAX_SOURCE_MAP_CACHE_SIZE = 50;
 // at AMDLoader.resolveModule (recipe-abc.js, <anonymous>:1:1764)
 // at AMDLoader.require (recipe-abc.js, <anonymous>:1:923)
 // at eval (recipe-abc.js, <anonymous>:17:10)
+// at async Scheduler.execute (http://localhost:8000/scripts/worker-runtime.js:241550:11)
+// at GmailClient.googleRequest (somefile.js:24414:23)
 /// ```
 // Pattern breakdown:
+// - Optional "async " prefix for async stack frames
 // - Function name: [\w\.$<>]* allows alphanumeric, underscore, dot, $, and <> (for <anonymous>)
 // - [as identifier]: \[as \w+\] matches any identifier, not just "factory"
 const stackTracePattern =
-  /at ([\w\.$<>]*) (?:\[as \w+\] )?\((.+?)(?:, <anonymous>)?(?:\):|\:)(\d+):(\d+)\)/;
+  /at (?:async )?([\w\.$<>]*) (?:\[as \w+\] )?\((.+?)(?:, <anonymous>)?(?:\):|\:)(\d+):(\d+)\)/;
 const CT_INTERNAL = `    at <CT_INTERNAL>`;
 const UNMAPPED = `    at <UNMAPPED>`;
 
@@ -104,11 +107,27 @@ export class SourceMapParser {
   // Fixes stack traces to use source map from eval. Strangely, both Deno and
   // Chrome at least only observe `sourceURL` but not the source map, so we can
   // use the former to find the right source map and then apply this.
-  parse(stack: string): string {
+  parse(stack: string, debug = false): string {
+    // Always log loaded source maps for debugging
+    console.log(
+      "[source-map-debug] Loaded source maps:",
+      [...this.sourceMaps.keys()],
+    );
+    if (debug) {
+      logger.info(
+        "source-map",
+        `Loaded source maps: ${[...this.sourceMaps.keys()].join(", ")}`,
+      );
+    }
     return stack.split("\n").map((line) => {
       const match = line.match(stackTracePattern);
 
       if (!match) {
+        if (debug) logger.info("source-map", `No regex match for: ${line}`);
+        // Log non-matching lines that look like stack frames
+        if (line.includes("at ")) {
+          console.log("[source-map-debug] No regex match for:", line);
+        }
         return line;
       }
       const fnName = match[1];
@@ -116,7 +135,23 @@ export class SourceMapParser {
       const lineNum = parseInt(match[3], 10);
       const columnNum = parseInt(match[4], 10);
 
-      if (!this.sourceMaps.has(filename)) return line;
+      console.log(
+        "[source-map-debug] Matched:",
+        { fnName, filename, lineNum, columnNum },
+      );
+
+      if (debug) {
+        logger.info(
+          "source-map",
+          `Matched: fn=${fnName}, file=${filename}, line=${lineNum}, col=${columnNum}`,
+        );
+      }
+
+      if (!this.sourceMaps.has(filename)) {
+        console.log("[source-map-debug] No source map for:", filename);
+        if (debug) logger.info("source-map", `No source map for: ${filename}`);
+        return line;
+      }
 
       // Touch to mark as recently used for LRU
       this.touch(filename);
@@ -132,12 +167,21 @@ export class SourceMapParser {
       });
 
       if (mapIsEmpty(originalPosition)) {
+        console.log("[source-map-debug] Empty mapping for:", {
+          filename,
+          lineNum,
+          columnNum,
+        });
         if (fnName === "eval") {
           return CT_INTERNAL;
         }
         return UNMAPPED;
       }
 
+      console.log("[source-map-debug] Successfully mapped:", {
+        from: { filename, lineNum, columnNum },
+        to: originalPosition,
+      });
       // Replace the original line with the mapped position information
       return `    at ${fnName} (${originalPosition.source}:${originalPosition.line}:${originalPosition.column})`;
     }).join("\n");
