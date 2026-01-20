@@ -351,6 +351,47 @@ function calculateDaysUntilFlight(
 }
 
 /**
+ * Calculate hours until a flight using both date and time.
+ * Returns actual hours (can be fractional) until departure.
+ */
+function calculateHoursUntilFlight(
+  departureDate: string | undefined,
+  departureTime: string | undefined,
+  referenceDate: Date,
+): number {
+  if (!departureDate) return 999 * 24;
+
+  const dateMatch = departureDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!dateMatch) return 999 * 24;
+
+  const [, year, month, day] = dateMatch;
+
+  // Default to noon if no time specified
+  let hours = 12;
+  let minutes = 0;
+
+  if (departureTime) {
+    const timeMatch = departureTime.match(/^(\d{1,2}):(\d{2})/);
+    if (timeMatch) {
+      hours = parseInt(timeMatch[1]);
+      minutes = parseInt(timeMatch[2]);
+    }
+  }
+
+  const departure = new Date(
+    parseInt(year),
+    parseInt(month) - 1,
+    parseInt(day),
+    hours,
+    minutes,
+  );
+
+  if (isNaN(departure.getTime())) return 999 * 24;
+
+  return (departure.getTime() - referenceDate.getTime()) / (1000 * 60 * 60);
+}
+
+/**
  * Format date for display.
  */
 function formatDate(dateStr: string | undefined): string {
@@ -576,9 +617,16 @@ Extract:
         if (emailType === "check_in_available" || result.checkInAvailable) {
           checkInAvailable = true;
           checkInDeadline = result.checkInDeadline;
-        } else if (isUpcoming && daysUntilFlight <= 1) {
-          // Auto-detect check-in window (within 24 hours)
-          checkInAvailable = true;
+        } else if (isUpcoming) {
+          // Auto-detect check-in window using true 24-hour calculation
+          const hoursUntilFlight = calculateHoursUntilFlight(
+            flight.departureDate,
+            flight.departureTime,
+            today,
+          );
+          if (hoursUntilFlight >= 0 && hoursUntilFlight <= 24) {
+            checkInAvailable = true;
+          }
         }
 
         // Parse status
