@@ -96,6 +96,7 @@ function buildGmailQuery(entries: RegistryEntry[]): string {
   const domains = new Set<string>();
 
   for (const entry of entries) {
+    if (!entry) continue;
     for (const emailPattern of entry.emailPatterns) {
       // Extract domain from pattern like "*@domain.com"
       const atIndex = emailPattern.indexOf("@");
@@ -187,7 +188,7 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
 
     if (!entries || entries.length === 0) return [];
 
-    const hack = Array.from(entries).map((entry) => {
+    const hack = Array.from(entries).filter(Boolean).map((entry) => {
       const matchedEmails = new Set<string>();
       for (const email of emails) {
         const fromAddress = email.from;
@@ -279,7 +280,7 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
       pending: false, /*computed(
         () => programFetch.pending || compiled.pending,
       ),*/
-      error: computed(() => compiled.result ? null : "can't find in list"),
+      error: null,
       /* error: computed(
         () => programFetch.error || compiled.error,
       ),*/
