@@ -233,8 +233,12 @@ function createBillKey(cardLast4: string, dueDate: string): string {
 /**
  * Calculate days until due date.
  * Returns negative number for overdue items.
+ * @param referenceDate - The "today" date to compare against (must be passed in for determinism)
  */
-function calculateDaysUntilDue(dueDate: string | undefined): number {
+function calculateDaysUntilDue(
+  dueDate: string | undefined,
+  referenceDate: Date,
+): number {
   if (!dueDate) return 999;
 
   const match = dueDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -245,10 +249,23 @@ function calculateDaysUntilDue(dueDate: string | undefined): number {
 
   if (isNaN(due.getTime())) return 999;
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
   due.setHours(0, 0, 0, 0);
-  return Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  return Math.ceil(
+    (due.getTime() - referenceDate.getTime()) / (1000 * 60 * 60 * 24),
+  );
+}
+
+/**
+ * Parse a date string to milliseconds for comparison.
+ * Returns NaN if invalid.
+ */
+function parseDateToMs(dateStr: string): number {
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return NaN;
+  const [, year, month, day] = match;
+  const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
 }
 
 /**
@@ -294,6 +311,8 @@ function getCardColor(last4: string | undefined): string {
  */
 function demoPrice(amount: number): number {
   if (!DEMO_MODE) return amount;
+  // Handle NaN/undefined/invalid amounts
+  if (!Number.isFinite(amount)) return 0;
   // Hash the amount to get deterministic pseudo-random value
   const str = amount.toFixed(2);
   let hash = 0;
@@ -502,6 +521,12 @@ Extract:
       // Access the computed value - paymentConfirmations returns a Record of arrays
       const payments = (paymentConfirmations || {}) as Record<string, string[]>;
 
+      // CRITICAL: Create a single reference date for ALL calculations in this computed
+      // This ensures deterministic results - calling new Date() multiple times would
+      // produce different timestamps and cause oscillation
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
       // Sort emails by date (newest first) so we keep most recent data
       // Use emailId as tie-breaker for stable sorting when dates are equal
       const sortedAnalyses = [...(emailAnalyses || [])]
@@ -544,7 +569,7 @@ Extract:
         // Skip if we already have this bill (we process newest first)
         if (billMap[key]) continue;
 
-        const daysUntilDue = calculateDaysUntilDue(result.dueDate);
+        const daysUntilDue = calculateDaysUntilDue(result.dueDate, today);
 
         // Check if this bill has been paid (auto or manual)
         const isManuallyPaid = paidKeys.includes(key);
@@ -555,9 +580,11 @@ Extract:
 
         // Find the first payment within the valid window (payments are sorted by date)
         // Window: 30 days before due date to 60 days after
+        // Use parseDateToMs for deterministic date parsing (no new Date() calls)
+        const dueDateMs = parseDateToMs(billDueDate);
         const matchingPayment = cardPayments.find((paymentDate) => {
-          const dueDateMs = new Date(billDueDate).getTime();
-          const paymentMs = new Date(paymentDate).getTime();
+          const paymentMs = parseDateToMs(paymentDate);
+          if (isNaN(dueDateMs) || isNaN(paymentMs)) return false;
           const daysDiff = (paymentMs - dueDateMs) / (1000 * 60 * 60 * 24);
           return daysDiff >= -30 && daysDiff <= 60;
         });
