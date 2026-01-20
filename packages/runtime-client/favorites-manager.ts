@@ -35,11 +35,16 @@ export class FavoritesManager {
    * Add a charm to favorites.
    * @param charmId - The entity ID of the charm to add
    * @param tag - Optional tag/category for the favorite
+   * @param spaceName - Optional human-readable name of the space
    */
-  async addFavorite(charmId: string, tag?: string): Promise<void> {
+  async addFavorite(
+    charmId: string,
+    tag?: string,
+    spaceName?: string,
+  ): Promise<void> {
     const handler = await this.#getHandler("addFavorite");
     const charmCellRef = this.#createCharmRef(charmId);
-    await handler.send({ charm: charmCellRef, tag: tag || "" });
+    await handler.send({ charm: charmCellRef, tag: tag || "", spaceName });
   }
 
   /**
