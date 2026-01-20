@@ -137,7 +137,7 @@ export const charm = new Command()
     `Create a charm that can import from parent directories within ./patterns.`,
   )
   .arguments("<main:string>")
-  .option("--start", "Start the charm after creation for one step")
+  .option("--no-start", "Only set up the charm without starting it")
   .option(
     "--main-export <export:string>",
     'Named export from entry for recipe definition. Defaults to "default".',
