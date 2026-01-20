@@ -2,7 +2,11 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
-import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
+import {
+  type CellHandle,
+  isCellHandle,
+  type JSONSchema,
+} from "@commontools/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 import "../ct-chat-message/ct-chat-message.ts";
 import "../ct-tool-call/ct-tool-call.ts";
@@ -196,6 +200,11 @@ export class CTChat extends BaseElement {
   @property({ type: Object, attribute: false })
   declare _computedTheme: CTTheme;
 
+  // Track subscriptions to nested CellHandles
+  // Using a Map with object identity (CellHandle instances)
+  // deno-lint-ignore no-explicit-any
+  private _nestedSubscriptions: Map<any, () => void> = new Map();
+
   constructor() {
     super();
     this.messages = [];
@@ -204,8 +213,110 @@ export class CTChat extends BaseElement {
     this._computedTheme = defaultTheme;
   }
 
+  /**
+   * Recursively find all CellHandles in a value structure
+   */
+  private _findAllCellHandles(value: unknown): CellHandle<unknown>[] {
+    const handles: CellHandle<unknown>[] = [];
+
+    if (isCellHandle(value)) {
+      handles.push(value);
+      // Also search inside the CellHandle's value for more nested handles
+      const innerValue = value.get();
+      if (innerValue !== undefined) {
+        handles.push(...this._findAllCellHandles(innerValue));
+      }
+    } else if (Array.isArray(value)) {
+      for (const item of value) {
+        handles.push(...this._findAllCellHandles(item));
+      }
+    } else if (value && typeof value === "object") {
+      for (const val of Object.values(value)) {
+        handles.push(...this._findAllCellHandles(val));
+      }
+    }
+
+    return handles;
+  }
+
+  private _updateNestedSubscriptions(
+    rawValue: readonly (BuiltInLLMMessage | CellHandle<BuiltInLLMMessage>)[],
+  ): void {
+    // Find ALL CellHandles recursively (including nested ones in message content)
+    // deno-lint-ignore no-explicit-any
+    const currentHandles = new Set<any>();
+    for (const handle of this._findAllCellHandles(rawValue)) {
+      currentHandles.add(handle);
+    }
+
+    // Unsubscribe from handles that are no longer present
+    for (const [handle, unsubscribe] of this._nestedSubscriptions) {
+      if (!currentHandles.has(handle)) {
+        unsubscribe();
+        this._nestedSubscriptions.delete(handle);
+      }
+    }
+
+    // Subscribe to new handles
+    for (const handle of currentHandles) {
+      if (!this._nestedSubscriptions.has(handle)) {
+        const unsubscribe = handle.subscribe(() => {
+          this.requestUpdate();
+        });
+        this._nestedSubscriptions.set(handle, unsubscribe);
+      }
+    }
+  }
+
+  /**
+   * Deep unwrap any CellHandles in an object/array structure
+   */
+  private _deepUnwrap(value: unknown): unknown {
+    if (isCellHandle(value)) {
+      const unwrapped = value.get();
+      return unwrapped !== undefined ? this._deepUnwrap(unwrapped) : undefined;
+    }
+
+    if (Array.isArray(value)) {
+      return value.map((item) => this._deepUnwrap(item));
+    }
+
+    if (value && typeof value === "object") {
+      const result: Record<string, unknown> = {};
+      for (const [key, val] of Object.entries(value)) {
+        result[key] = this._deepUnwrap(val);
+      }
+      return result;
+    }
+
+    return value;
+  }
+
   private get _messagesArray(): readonly BuiltInLLMMessage[] {
-    return this._cellController.getValue() || [];
+    const rawValue = this._cellController.getValue() || [];
+
+    // Update subscriptions to nested CellHandles
+    this._updateNestedSubscriptions(
+      rawValue as (BuiltInLLMMessage | CellHandle<BuiltInLLMMessage>)[],
+    );
+
+    // Unwrap CellHandles to get the actual message values, including nested properties
+    const result = rawValue
+      .map((item) => {
+        return this._deepUnwrap(item) as BuiltInLLMMessage | undefined;
+      })
+      .filter((item): item is BuiltInLLMMessage => item !== undefined);
+
+    return result;
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    // Clean up all nested subscriptions
+    for (const unsubscribe of this._nestedSubscriptions.values()) {
+      unsubscribe();
+    }
+    this._nestedSubscriptions.clear();
   }
 
   override firstUpdated(changedProperties: Map<string, any>) {
@@ -268,7 +379,7 @@ export class CTChat extends BaseElement {
     const resultMap = new Map<string, BuiltInLLMToolResultPart>();
 
     this._messagesArray.forEach((message) => {
-      if (message.role === "tool" && Array.isArray(message.content)) {
+      if (message?.role === "tool" && Array.isArray(message.content)) {
         message.content.forEach((part) => {
           if (part.type === "tool-result") {
             resultMap.set(part.toolCallId, part);
@@ -332,6 +443,9 @@ export class CTChat extends BaseElement {
     toolResultMap: Map<string, BuiltInLLMToolResultPart>,
     messageIndex: number,
   ) {
+    if (!message) {
+      return null;
+    }
     if (message.role === "tool") {
       // Don't render tool messages directly, they're handled as part of tool calls
       return null;
@@ -340,10 +454,11 @@ export class CTChat extends BaseElement {
     // For assistant messages with tool calls, we need to inject the results
     if (message.role === "assistant" && Array.isArray(message.content)) {
       const toolCalls = message.content.filter(
-        (part): part is BuiltInLLMToolCallPart => part.type === "tool-call",
+        (part): part is BuiltInLLMToolCallPart =>
+          part != null && part.type === "tool-call",
       );
       const textParts = message.content.filter(
-        (part) => part.type === "text",
+        (part) => part != null && part.type === "text",
       );
 
       if (toolCalls.length > 0) {
