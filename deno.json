@@ -55,7 +55,6 @@
   },
   "exclude": [
     "**/node_modules/",
-    "**/.vite/",
     "**/dist/",
     "**/build/",
     "**/.cache/",

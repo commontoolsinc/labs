@@ -10,7 +10,6 @@
   },
   "deno.disablePaths": [
     "**/node_modules",
-    "**/.vite",
     "**/dist",
     "**/build"
   ],
