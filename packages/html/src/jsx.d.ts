@@ -3214,7 +3214,7 @@ interface CTButtonAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 interface CTCopyButtonAttributes<T> extends CTHTMLAttributes<T> {
-  "text": string;
+  "text": string | Record<string, string>;
   "variant"?:
     | "primary"
     | "secondary"
