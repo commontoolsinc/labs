@@ -100,7 +100,8 @@ const SCHOOL_EVENT_SCHEMA = {
     },
     time: {
       type: "string",
-      description: "Event time if mentioned (e.g., '10:00 AM', '9:00-11:00 AM')",
+      description:
+        "Event time if mentioned (e.g., '10:00 AM', '9:00-11:00 AM')",
     },
     actionRequired: {
       type: "string",
@@ -490,7 +491,7 @@ Extract:
     });
 
     const teacherMessages = computed(() =>
-      allEvents.filter((e) => e.sourceType === "teacher"),
+      allEvents.filter((e) => e.sourceType === "teacher")
     );
 
     // Counts for UI
@@ -639,9 +640,7 @@ Extract:
                   backgroundColor: "#eff6ff",
                   borderRadius: "8px",
                   border: "1px solid #3b82f6",
-                  display: computed(() =>
-                    pendingCount > 0 ? "block" : "none"
-                  ),
+                  display: computed(() => pendingCount > 0 ? "block" : "none"),
                 }}
               >
                 <div
@@ -693,7 +692,9 @@ Extract:
                         border: "2px solid #fecaca",
                         borderLeft: computed(
                           () =>
-                            `4px solid ${CATEGORY_INFO[event.category]?.color || "#9ca3af"}`,
+                            `4px solid ${
+                              CATEGORY_INFO[event.category]?.color || "#9ca3af"
+                            }`,
                         ),
                       }}
                     >
@@ -816,7 +817,9 @@ Extract:
                             >
                               {computed(
                                 () =>
-                                  `${formatDate(event.date)}${event.time ? ` at ${event.time}` : ""}`,
+                                  `${formatDate(event.date)}${
+                                    event.time ? ` at ${event.time}` : ""
+                                  }`,
                               )}
                             </span>
                           </div>
@@ -936,7 +939,8 @@ Extract:
                           >
                             <span style={{ fontSize: "16px" }}>
                               {computed(
-                                () => CATEGORY_INFO[event.category]?.icon || "📌",
+                                () =>
+                                  CATEGORY_INFO[event.category]?.icon || "📌",
                               )}
                             </span>
                             <span
@@ -966,7 +970,9 @@ Extract:
                           >
                             {computed(
                               () =>
-                                `${formatDate(event.date)}${event.time ? ` at ${event.time}` : ""}`,
+                                `${formatDate(event.date)}${
+                                  event.time ? ` at ${event.time}` : ""
+                                }`,
                             )}
                           </div>
 
@@ -1112,7 +1118,9 @@ Extract:
                         <div style={{ fontSize: "12px", color: "#6b7280" }}>
                           {computed(
                             () =>
-                              `${formatDate(event.date)}${event.time ? ` • ${event.time}` : ""}`,
+                              `${formatDate(event.date)}${
+                                event.time ? ` • ${event.time}` : ""
+                              }`,
                           )}
                         </div>
                       </div>
@@ -1194,7 +1202,14 @@ Extract:
                           >
                             {computed(
                               () =>
-                                `${SOURCE_INFO[event.sourceType]?.label || "School"}${event.date ? ` • ${formatDate(event.date)}` : ""}`,
+                                `${
+                                  SOURCE_INFO[event.sourceType]?.label ||
+                                  "School"
+                                }${
+                                  event.date
+                                    ? ` • ${formatDate(event.date)}`
+                                    : ""
+                                }`,
                             )}
                           </div>
                           <div
@@ -1263,8 +1278,8 @@ Extract:
                           opacity: 0.7,
                           display: computed(() =>
                             (dismissedIds.get() || []).includes(
-                              email.id as string,
-                            )
+                                email.id as string,
+                              )
                               ? "flex"
                               : "none"
                           ),
