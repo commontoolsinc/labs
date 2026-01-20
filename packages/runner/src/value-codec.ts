@@ -6,11 +6,6 @@ import { isInstance, isRecord } from "@commontools/utils/types";
 const CHAR_CODE_0 = "0".charCodeAt(0);
 
 /**
- * Character code for digit `9`.
- */
-const CHAR_CODE_9 = "9".charCodeAt(0);
-
-/**
  * Indicates whether the given string to be used as a property name (for an
  * object or array) is syntactically valid as an array index per se.
  *
@@ -53,24 +48,21 @@ export function isArrayIndexPropertyName(name: string): boolean {
     return false;
   }
 
-  // Check that all characters are (normal) digits. No need to check the first
-  // one, because the `switch` above took care of that. (NB: Benchmarking shows
-  // this is significantly faster than using a regex test.)
-  for (let i = 1; i < length; i++) {
-    const c = name.charCodeAt(i);
-    if ((c < CHAR_CODE_0) || (c > CHAR_CODE_9)) {
+  // Check that all characters are (normal) digits, and parse it for a final
+  // range check. (NB: Benchmarking shows that doing it this way is
+  // significantly faster than using a regex test and a final `parseInt()` for
+  // the range check.
+  let num = 0;
+  for (let i = 0; i < length; i++) {
+    const digit = name.charCodeAt(i) - CHAR_CODE_0;
+    if ((digit < 0) || (digit > 9)) {
       return false;
     }
+    num = (num * 10) + digit;
   }
 
-  if (length < 10) {
-    // It's short enough that it can't possibly be out of range.
-    return true;
-  } else {
-    // Need to actually check the value. We do this for pedantic correctness, on
-    // the assumption that it will rarely if ever be encountered in practice.
-    return parseInt(name) < (2 ** 31);
-  }
+  // Only accept in-range values.
+  return (num < (2 ** 31));
 }
 
 /**
