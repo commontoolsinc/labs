@@ -278,7 +278,7 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
       pending: false, /*computed(
         () => programFetch.pending || compiled.pending,
       ),*/
-      error: null,
+      error: computed(() => compiled.result ? null : "can't find in list"),
       /* error: computed(
         () => programFetch.error || compiled.error,
       ),*/
