@@ -1,6 +1,5 @@
 import { css, html } from "lit";
 import { type CellHandle } from "@commontools/runtime-client";
-import { stringSchema } from "@commontools/runner/schemas";
 import { BaseElement } from "../../core/base-element.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
 import type { CTTab } from "../ct-tab/ct-tab.ts";
@@ -136,7 +135,7 @@ export class CTTabs extends BaseElement {
 
   override firstUpdated() {
     // Initialize cell controller binding
-    this._cellController.bind(this.value, stringSchema);
+    this._cellController.bind(this.value);
 
     // Set up slotchange listener to handle dynamically added content
     const slot = this.shadowRoot?.querySelector("slot");
@@ -155,8 +154,8 @@ export class CTTabs extends BaseElement {
     super.willUpdate(changedProperties);
 
     // If the value property itself changed (e.g., switched to a different cell)
-    if (changedProperties.has("value")) {
-      this._cellController.bind(this.value, stringSchema);
+    if (changedProperties.has("value") || !this._cellController.hasCell()) {
+      this._cellController.bind(this.value);
     }
   }
 

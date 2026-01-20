@@ -40,7 +40,6 @@ import {
   isCellHandle,
   NAME,
 } from "@commontools/runtime-client";
-import { stringSchema } from "@commontools/runner/schemas";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
 import {
@@ -1088,12 +1087,12 @@ export class CTCodeEditor extends BaseElement {
     super.updated(changedProperties);
 
     // If the value property itself changed (e.g., switched to a different cell)
-    if (changedProperties.has("value")) {
+    if (changedProperties.has("value") || !this._cellController.hasCell()) {
       // Cancel pending debounced updates from old Cell to prevent race condition
       this._cellController.cancel();
       // Clean up old Cell subscription and set up new one
       this._cleanupCellSyncHandler();
-      this._cellController.bind(this.value, stringSchema);
+      this._cellController.bind(this.value);
       this._setupCellSyncHandler();
       this._updateEditorFromCellValue();
     }
@@ -1196,7 +1195,7 @@ export class CTCodeEditor extends BaseElement {
     this._initializeEditor();
 
     // Bind the initial value to the cell controller
-    this._cellController.bind(this.value, stringSchema);
+    this._cellController.bind(this.value);
 
     // Update timing options to match current properties
     this._cellController.updateTimingOptions({
