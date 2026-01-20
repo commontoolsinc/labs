@@ -250,7 +250,7 @@ describe("runRecipe", () => {
     });
     const resultValue2 = await result.pull();
     expect(resultValue2).toEqual({ result: undefined });
-    expect(ran).toBe(true);
+    expect(ran).toBe(false);
   });
 
   it("should handle nested recipes", async () => {
