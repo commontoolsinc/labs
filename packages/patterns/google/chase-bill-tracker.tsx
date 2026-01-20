@@ -59,7 +59,7 @@ type EmailType =
   | "autopay_scheduled"
   | "other";
 
-type BillStatus = "unpaid" | "paid" | "overdue";
+type BillStatus = "unpaid" | "paid" | "overdue" | "likely_paid";
 
 interface ChaseEmailAnalysis {
   emailType: EmailType;
@@ -85,12 +85,69 @@ interface TrackedBill {
   emailDate: string;
   emailId: string;
   isManuallyPaid: boolean;
+  isLikelyPaid: boolean; // True for bills assumed paid due to age
   daysUntilDue: number;
 }
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
+
+/**
+ * DEMO_MODE: When true, all dollar amounts are hashed to fake values
+ * for privacy during demos. This ensures no real financial data is shown.
+ */
+const DEMO_MODE = true;
+
+/**
+ * Bills older than this threshold (in days overdue) are assumed "likely paid"
+ * when no payment confirmation was detected. This avoids false positives from
+ * missing payment emails (e.g., card number changed, payment made differently).
+ */
+const LIKELY_PAID_THRESHOLD_DAYS = -45;
+
+// 32 distinct colors for card badges (to reduce collisions)
+const CARD_COLORS = [
+  // Reds & oranges
+  "#ef4444",
+  "#dc2626",
+  "#f97316",
+  "#ea580c",
+  // Yellows & limes
+  "#eab308",
+  "#ca8a04",
+  "#84cc16",
+  "#65a30d",
+  // Greens
+  "#22c55e",
+  "#16a34a",
+  "#14b8a6",
+  "#0d9488",
+  // Cyans & blues
+  "#06b6d4",
+  "#0891b2",
+  "#0ea5e9",
+  "#0284c7",
+  // Indigos & purples
+  "#3b82f6",
+  "#2563eb",
+  "#6366f1",
+  "#4f46e5",
+  "#8b5cf6",
+  "#7c3aed",
+  "#a855f7",
+  "#9333ea",
+  // Pinks & roses
+  "#d946ef",
+  "#c026d3",
+  "#ec4899",
+  "#db2777",
+  "#f43f5e",
+  "#e11d48",
+  // Neutrals
+  "#78716c",
+  "#57534e",
+];
 
 // Chase sends from various addresses - capture the main patterns
 const _CHASE_SENDERS = [
@@ -176,8 +233,12 @@ function createBillKey(cardLast4: string, dueDate: string): string {
 /**
  * Calculate days until due date.
  * Returns negative number for overdue items.
+ * @param referenceDate - The "today" date to compare against (must be passed in for determinism)
  */
-function calculateDaysUntilDue(dueDate: string | undefined): number {
+function calculateDaysUntilDue(
+  dueDate: string | undefined,
+  referenceDate: Date,
+): number {
   if (!dueDate) return 999;
 
   const match = dueDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -188,10 +249,23 @@ function calculateDaysUntilDue(dueDate: string | undefined): number {
 
   if (isNaN(due.getTime())) return 999;
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
   due.setHours(0, 0, 0, 0);
-  return Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  return Math.ceil(
+    (due.getTime() - referenceDate.getTime()) / (1000 * 60 * 60 * 24),
+  );
+}
+
+/**
+ * Parse a date string to milliseconds for comparison.
+ * Returns NaN if invalid.
+ */
+function parseDateToMs(dateStr: string): number {
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return NaN;
+  const [, year, month, day] = match;
+  const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
 }
 
 /**
@@ -216,6 +290,37 @@ function formatDate(dateStr: string | undefined): string {
     month: "short",
     day: "numeric",
   });
+}
+
+/**
+ * Get a consistent color for a card based on its last 4 digits.
+ * Same card always gets the same color.
+ */
+function getCardColor(last4: string | undefined): string {
+  if (!last4 || typeof last4 !== "string") return CARD_COLORS[0];
+  let hash = 0;
+  for (let i = 0; i < last4.length; i++) {
+    hash = (hash * 31 + last4.charCodeAt(i)) % 32;
+  }
+  return CARD_COLORS[hash];
+}
+
+/**
+ * In demo mode, hash any price to a deterministic value $0-$5000.
+ * Uses a simple string hash on the input to ensure same input = same output.
+ */
+function demoPrice(amount: number): number {
+  if (!DEMO_MODE) return amount;
+  // Handle NaN/undefined/invalid amounts
+  if (!Number.isFinite(amount)) return 0;
+  // Hash the amount to get deterministic pseudo-random value
+  const str = amount.toFixed(2);
+  let hash = 0;
+  for (const char of str) {
+    hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+  }
+  // Map to 0-5000 range
+  return Math.abs(hash % 500000) / 100; // 0.00 to 4999.99
 }
 
 // =============================================================================
@@ -261,7 +366,7 @@ interface PatternOutput {
   paidBills: TrackedBill[];
   totalUnpaid: number;
   overdueCount: number;
-  // previewUI: unknown;
+  previewUI: unknown;
 }
 
 export default pattern<PatternInput, PatternOutput>(
@@ -375,9 +480,10 @@ Extract:
     // ==========================================================================
 
     // Extract payment confirmations (to auto-mark bills as paid)
-    // Using Record<string, string> instead of Map since Map is not JSON-serializable
+    // Track ALL payment dates per card to match against bill due dates
+    // IMPORTANT: Use Set for deduplication, then sort for deterministic matching
     const paymentConfirmations = computed(() => {
-      const confirmations: Record<string, string> = {}; // cardLast4 -> paymentDate
+      const confirmations: Record<string, Set<string>> = {}; // cardLast4 -> Set of paymentDates
 
       for (const analysisItem of emailAnalyses || []) {
         const result = analysisItem.result;
@@ -388,14 +494,23 @@ Extract:
           result.cardLast4 &&
           result.paymentDate
         ) {
-          // Find the bill this payment applies to
-          // We'll match by card last 4 and look for nearby due dates
           const key = result.cardLast4;
-          confirmations[key] = result.paymentDate;
+          if (!confirmations[key]) {
+            confirmations[key] = new Set();
+          }
+          confirmations[key].add(result.paymentDate);
         }
       }
 
-      return confirmations;
+      // Convert Sets to sorted arrays (oldest first) for deterministic matching
+      const result: Record<string, string[]> = {};
+      for (const cardKey of Object.keys(confirmations).sort()) {
+        result[cardKey] = [...confirmations[cardKey]].sort((a, b) =>
+          a.localeCompare(b)
+        );
+      }
+
+      return result;
     });
 
     // Process all analyses and build bill list
@@ -403,16 +518,25 @@ Extract:
       const billMap: Record<string, TrackedBill> = {};
       // manuallyPaid is Writable - use .get() to access value
       const paidKeys = manuallyPaid.get() || [];
-      // Access the computed value - paymentConfirmations returns a Record
-      const payments = (paymentConfirmations || {}) as Record<string, string>;
+      // Access the computed value - paymentConfirmations returns a Record of arrays
+      const payments = (paymentConfirmations || {}) as Record<string, string[]>;
+
+      // CRITICAL: Create a single reference date for ALL calculations in this computed
+      // This ensures deterministic results - calling new Date() multiple times would
+      // produce different timestamps and cause oscillation
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
 
       // Sort emails by date (newest first) so we keep most recent data
+      // Use emailId as tie-breaker for stable sorting when dates are equal
       const sortedAnalyses = [...(emailAnalyses || [])]
         .filter((a) => a?.result)
         .sort((a, b) => {
           const dateA = new Date(a.emailDate || 0).getTime();
           const dateB = new Date(b.emailDate || 0).getTime();
-          return dateB - dateA;
+          if (dateB !== dateA) return dateB - dateA;
+          // Stable tie-breaker: use email ID (deterministic string comparison)
+          return (a.emailId || "").localeCompare(b.emailId || "");
         });
 
       for (const analysisItem of sortedAnalyses) {
@@ -445,26 +569,58 @@ Extract:
         // Skip if we already have this bill (we process newest first)
         if (billMap[key]) continue;
 
-        const daysUntilDue = calculateDaysUntilDue(result.dueDate);
+        const daysUntilDue = calculateDaysUntilDue(result.dueDate, today);
 
         // Check if this bill has been paid (auto or manual)
         const isManuallyPaid = paidKeys.includes(key);
-        // TODO(@anthropic): Auto-pay detection is broad - any payment for a card marks
-        // all bills for that card as paid. Could match payment amounts/dates for precision.
-        const autoPaid = result.cardLast4 in payments;
-        const isPaid = isManuallyPaid || autoPaid;
+        // Check if any payment was made within a reasonable window of the due date
+        // Payments are sorted chronologically (oldest first), so .find() is deterministic
+        const cardPayments = payments[result.cardLast4] || [];
+        const billDueDate = result.dueDate; // Already verified non-null above
+
+        // Find the first payment within the valid window (payments are sorted by date)
+        // Window: 30 days before due date to 60 days after
+        // Use parseDateToMs for deterministic date parsing (no new Date() calls)
+        const dueDateMs = parseDateToMs(billDueDate);
+        const matchingPayment = cardPayments.find((paymentDate) => {
+          const paymentMs = parseDateToMs(paymentDate);
+          if (isNaN(dueDateMs) || isNaN(paymentMs)) return false;
+          const daysDiff = (paymentMs - dueDateMs) / (1000 * 60 * 60 * 24);
+          return daysDiff >= -30 && daysDiff <= 60;
+        });
+
+        const autoPaid = !!matchingPayment;
+        // Bills past the threshold are "likely paid" - payment wasn't detected but
+        // it's very unlikely a bill this old is genuinely unpaid
+        const isLikelyPaid = !isManuallyPaid &&
+          !autoPaid &&
+          daysUntilDue < LIKELY_PAID_THRESHOLD_DAYS;
+        const isPaid = isManuallyPaid || autoPaid || isLikelyPaid;
+
+        // Determine status
+        let status: BillStatus;
+        if (isLikelyPaid) {
+          status = "likely_paid";
+        } else if (isPaid) {
+          status = "paid";
+        } else if (daysUntilDue < 0) {
+          status = "overdue";
+        } else {
+          status = "unpaid";
+        }
 
         const trackedBill: TrackedBill = {
           key,
           cardLast4: result.cardLast4,
-          amount: billAmount,
+          amount: demoPrice(billAmount),
           dueDate: result.dueDate,
-          status: isPaid ? "paid" : daysUntilDue < 0 ? "overdue" : "unpaid",
+          status,
           isPaid,
-          paidDate: autoPaid ? payments[result.cardLast4] : undefined,
+          paidDate: matchingPayment || undefined,
           emailDate: analysisItem.emailDate,
           emailId: analysisItem.emailId,
           isManuallyPaid,
+          isLikelyPaid,
           daysUntilDue,
         };
 
@@ -476,24 +632,33 @@ Extract:
       return items.sort((a, b) => a.daysUntilDue - b.daysUntilDue);
     });
 
-    // Unpaid bills
+    // Unpaid bills (excludes likely paid)
     const unpaidBills = computed(() =>
-      (bills || []).filter((bill) => !bill.isPaid)
+      bills.filter((bill) => !bill.isPaid && !bill.isLikelyPaid)
     );
 
-    // Paid bills
+    // Likely paid bills - old bills assumed paid but not confirmed
+    const likelyPaidBills = computed(() =>
+      bills
+        .filter((bill) => bill.isLikelyPaid)
+        .sort((a, b) => b.dueDate.localeCompare(a.dueDate))
+    );
+
+    // Confirmed paid bills - sorted by due date descending (newest first)
     const paidBills = computed(() =>
-      (bills || []).filter((bill) => bill.isPaid)
+      bills
+        .filter((bill) => bill.isPaid && !bill.isLikelyPaid)
+        .sort((a, b) => b.dueDate.localeCompare(a.dueDate))
     );
 
-    // Total unpaid amount
+    // Total unpaid amount (excludes likely paid)
     const totalUnpaid = computed(() =>
-      (unpaidBills || []).reduce((sum, bill) => sum + bill.amount, 0)
+      unpaidBills.reduce((sum, bill) => sum + bill.amount, 0)
     );
 
-    // Overdue count
+    // Overdue count (excludes likely paid)
     const overdueCount = computed(
-      () => (unpaidBills || []).filter((bill) => bill.daysUntilDue < 0).length,
+      () => unpaidBills.filter((bill) => bill.daysUntilDue < 0).length,
     );
 
     // Preview UI for compact display
@@ -706,19 +871,22 @@ Extract:
                   style={{
                     borderLeft: "1px solid #d1d5db",
                     paddingLeft: "16px",
+                    display: computed(() =>
+                      overdueCount > 0 ? "block" : "none"
+                    ),
                   }}
                 >
                   <div
                     style={{
                       fontSize: "28px",
                       fontWeight: "bold",
-                      color: "#059669",
+                      color: "#dc2626",
                     }}
                   >
-                    {computed(() => paidBills?.length || 0)}
+                    {computed(() => overdueCount)}
                   </div>
                   <div style={{ fontSize: "12px", color: "#666" }}>
-                    Paid Bills
+                    Overdue
                   </div>
                 </div>
               </div>
@@ -739,15 +907,15 @@ Extract:
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: "8px",
+                    gap: "12px",
                     marginBottom: "8px",
                   }}
                 >
-                  <span style={{ fontSize: "20px" }}>!</span>
+                  <span style={{ fontSize: "32px" }}>🚨</span>
                   <span
                     style={{
                       fontWeight: "700",
-                      fontSize: "18px",
+                      fontSize: "20px",
                       color: "#b91c1c",
                     }}
                   >
@@ -764,7 +932,7 @@ Extract:
               <div
                 style={{
                   display: computed(() =>
-                    (unpaidBills || []).length > 0 ? "block" : "none"
+                    unpaidBills.length > 0 ? "block" : "none"
                   ),
                 }}
               >
@@ -811,10 +979,11 @@ Extract:
                           <span
                             style={{
                               padding: "2px 8px",
-                              backgroundColor: "#e5e7eb",
+                              backgroundColor: getCardColor(bill.cardLast4),
                               borderRadius: "4px",
                               fontSize: "12px",
-                              color: "#374151",
+                              color: "white",
+                              fontWeight: "500",
                             }}
                           >
                             ...{bill.cardLast4}
@@ -855,11 +1024,134 @@ Extract:
                 </ct-vstack>
               </div>
 
+              {/* Likely Paid Bills Section */}
+              <div
+                style={{
+                  display: computed(() =>
+                    likelyPaidBills.length > 0 ? "block" : "none"
+                  ),
+                }}
+              >
+                <details>
+                  <summary
+                    style={{
+                      cursor: "pointer",
+                      fontWeight: "600",
+                      fontSize: "16px",
+                      marginBottom: "12px",
+                      color: "#059669",
+                    }}
+                  >
+                    Likely Paid ({computed(() => likelyPaidBills?.length || 0)})
+                    <span
+                      title="Bills over 45 days old with no detected payment are likely already paid (payment email missing or card changed)"
+                      style={{
+                        fontSize: "14px",
+                        color: "#9ca3af",
+                        cursor: "help",
+                        marginLeft: "8px",
+                      }}
+                    >
+                      ⓘ
+                    </span>
+                  </summary>
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      color: "#6b7280",
+                      marginBottom: "12px",
+                      fontStyle: "italic",
+                    }}
+                  >
+                    Old bills without detected payment. Click "Confirm Paid" to
+                    move to paid list.
+                  </div>
+                  <ct-vstack gap="2">
+                    {likelyPaidBills.map((bill) => (
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "12px",
+                          padding: "12px",
+                          backgroundColor: "#d1fae5",
+                          borderRadius: "8px",
+                          border: "1px solid #10b981",
+                          opacity: 0.9,
+                        }}
+                      >
+                        <div style={{ flex: 1 }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              marginBottom: "4px",
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontWeight: "600",
+                                fontSize: "16px",
+                                color: "#047857",
+                              }}
+                            >
+                              {formatCurrency(bill.amount)}
+                            </span>
+                            <span
+                              style={{
+                                padding: "2px 6px",
+                                backgroundColor: getCardColor(bill.cardLast4),
+                                borderRadius: "4px",
+                                fontSize: "11px",
+                                color: "white",
+                                fontWeight: "500",
+                              }}
+                            >
+                              ...{bill.cardLast4}
+                            </span>
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "12px",
+                              color: "#047857",
+                            }}
+                          >
+                            Was due: {formatDate(bill.dueDate)} (
+                            {computed(() => Math.abs(bill.daysUntilDue))}{" "}
+                            days ago)
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={markAsPaid({
+                            paidKeys: manuallyPaid,
+                            bill,
+                          })}
+                          style={{
+                            padding: "8px 14px",
+                            backgroundColor: "#6b7280",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "6px",
+                            cursor: "pointer",
+                            fontSize: "13px",
+                            fontWeight: "600",
+                            alignSelf: "center",
+                          }}
+                        >
+                          Confirm Paid
+                        </button>
+                      </div>
+                    ))}
+                  </ct-vstack>
+                </details>
+              </div>
+
               {/* Paid Bills Section */}
               <div
                 style={{
                   display: computed(() =>
-                    (paidBills || []).length > 0 ? "block" : "none"
+                    paidBills.length > 0 ? "block" : "none"
                   ),
                 }}
               >
@@ -908,10 +1200,11 @@ Extract:
                             <span
                               style={{
                                 padding: "2px 6px",
-                                backgroundColor: "#a7f3d0",
+                                backgroundColor: getCardColor(bill.cardLast4),
                                 borderRadius: "4px",
                                 fontSize: "11px",
-                                color: "#065f46",
+                                color: "white",
+                                fontWeight: "500",
                               }}
                             >
                               ...{bill.cardLast4}
@@ -1020,8 +1313,7 @@ Extract:
                             {email.subject}
                           </div>
                           <div style={{ color: "#6b7280" }}>
-                            From: {email.from} • Date:{" "}
-                            {computed(() => formatDate(email.date))}
+                            From: {email.from} • Date: {email.date}
                           </div>
                           <details style={{ marginTop: "4px" }}>
                             <summary
@@ -1106,7 +1398,8 @@ Extract:
                               marginTop: "4px",
                             }}
                           >
-                            Error: {computed(() =>
+                            Error:{" "}
+                            {computed(() =>
                               analysis.error ? String(analysis.error) : ""
                             )}
                           </div>
@@ -1130,7 +1423,8 @@ Extract:
                               }}
                             >
                               <div style={{ color: "#374151" }}>
-                                <strong>Type:</strong> {computed(() =>
+                                <strong>Type:</strong>{" "}
+                                {computed(() =>
                                   analysis.result?.emailType || "N/A"
                                 )}
                               </div>
@@ -1146,20 +1440,26 @@ Extract:
                                 style={{ color: "#374151", marginTop: "4px" }}
                               >
                                 <strong>Amount:</strong> {computed(() =>
-                                  formatCurrency(analysis.result?.amount)
+                                  formatCurrency(
+                                    analysis.result?.amount !== undefined
+                                      ? demoPrice(analysis.result.amount)
+                                      : undefined,
+                                  )
                                 )}
                               </div>
                               <div
                                 style={{ color: "#374151", marginTop: "4px" }}
                               >
-                                <strong>Due:</strong> {computed(() =>
+                                <strong>Due:</strong>{" "}
+                                {computed(() =>
                                   formatDate(analysis.result?.dueDate)
                                 )}
                               </div>
                               <div
                                 style={{ color: "#374151", marginTop: "4px" }}
                               >
-                                <strong>Summary:</strong> {computed(() =>
+                                <strong>Summary:</strong>{" "}
+                                {computed(() =>
                                   analysis.result?.summary || "N/A"
                                 )}
                               </div>
@@ -1192,6 +1492,22 @@ Extract:
                   Open Chase Website
                 </a>
               </div>
+
+              {/* Demo Mode Indicator */}
+              {DEMO_MODE && (
+                <div
+                  style={{
+                    fontSize: "11px",
+                    color: "#9ca3af",
+                    cursor: "help",
+                    textAlign: "center",
+                    marginTop: "8px",
+                  }}
+                  title="Uses fake numbers for privacy"
+                >
+                  ⚠️ Demo Mode
+                </div>
+              )}
             </ct-vstack>
           </ct-vscroll>
         </ct-screen>
