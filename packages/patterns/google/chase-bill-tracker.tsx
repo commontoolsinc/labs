@@ -366,7 +366,7 @@ interface PatternOutput {
   paidBills: TrackedBill[];
   totalUnpaid: number;
   overdueCount: number;
-  // previewUI: unknown;
+  previewUI: unknown;
 }
 
 export default pattern<PatternInput, PatternOutput>(
@@ -1313,8 +1313,7 @@ Extract:
                             {email.subject}
                           </div>
                           <div style={{ color: "#6b7280" }}>
-                            From: {email.from} • Date:{" "}
-                            {computed(() => formatDate(email.date))}
+                            From: {email.from} • Date: {email.date}
                           </div>
                           <details style={{ marginTop: "4px" }}>
                             <summary
