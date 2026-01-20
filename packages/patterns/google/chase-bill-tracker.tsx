@@ -31,6 +31,7 @@ import {
 } from "commontools";
 import type { Schema } from "commontools/schema";
 import GmailImporter, { type Auth } from "./gmail-importer.tsx";
+import ProcessingStatus from "./processing-status.tsx";
 
 // Email type - matches GmailImporter's Email type
 interface Email {
@@ -691,7 +692,7 @@ Extract:
         >
           {computed(() => unpaidBills?.length || 0)}
         </div>
-        <div>
+        <div style={{ flex: 1 }}>
           <div style={{ fontWeight: "600", fontSize: "14px" }}>Chase Bills</div>
           <div style={{ fontSize: "12px", color: "#6b7280" }}>
             {computed(() => formatCurrency(totalUnpaid))} due
@@ -705,6 +706,12 @@ Extract:
               ({computed(() => overdueCount)} overdue)
             </span>
           </div>
+          {/* Loading/progress indicator */}
+          {ProcessingStatus({
+            totalCount: chaseEmailCount,
+            pendingCount,
+            completedCount,
+          }).ui as JSX.Element}
         </div>
       </div>
     );
