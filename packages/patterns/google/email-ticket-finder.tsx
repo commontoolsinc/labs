@@ -19,13 +19,11 @@
  */
 import {
   computed,
-  Default,
   generateObject,
   JSONSchema,
   NAME,
   pattern,
   UI,
-  Writable,
 } from "commontools";
 import type { Schema } from "commontools/schema";
 import GmailImporter, { type Auth } from "./gmail-importer.tsx";
