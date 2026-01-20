@@ -1,10 +1,18 @@
 [
   {
     "patternUri": "google/usps-informed-delivery.tsx",
-    "emailPatterns": ["*@informeddelivery.usps.com", "*@email.informeddelivery.usps.com", "*@usps.com"]
+    "emailPatterns": ["USPSInformeddelivery@email.informeddelivery.usps.com"]
   },
   {
     "patternUri": "google/berkeley-library.tsx",
-    "emailPatterns": ["*@library.berkeleypubliclibrary.org"]
+    "emailPatterns": ["notices@library.berkeleypubliclibrary.org"]
+  },
+  {
+    "patternUri": "google/chase-bill-tracker.tsx",
+    "emailPatterns": [
+      "no-reply@alertsp.chase.com",
+      "chase@email.chase.com",
+      "chase@chase.com"
+    ]
   }
 ]
