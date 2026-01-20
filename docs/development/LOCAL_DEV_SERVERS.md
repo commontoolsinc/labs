@@ -106,8 +106,8 @@ lsof -ti :8000 | xargs kill -9 2>/dev/null  # Toolshed
 lsof -ti :5173 | xargs kill -9 2>/dev/null  # Shell
 
 # Linux without lsof (use ss + awk):
-kill -9 $(ss -tlnp 'sport = :8000' | grep -oP 'pid=\K\d+') 2>/dev/null  # Toolshed
-kill -9 $(ss -tlnp 'sport = :5173' | grep -oP 'pid=\K\d+') 2>/dev/null  # Shell
+ss -tlnp 'sport = :8000' | awk -F'pid=' 'NF>1{split($2,a,","); print a[1]}' | xargs kill -9 2>/dev/null
+ss -tlnp 'sport = :5173' | awk -F'pid=' 'NF>1{split($2,a,","); print a[1]}' | xargs kill -9 2>/dev/null
 
 # 2. Wait for cleanup
 sleep 2
