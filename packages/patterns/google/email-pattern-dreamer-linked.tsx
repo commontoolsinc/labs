@@ -21,8 +21,7 @@
 import { NAME, pattern, UI } from "commontools";
 import GmailImporter, { type Auth } from "./gmail-importer.tsx";
 
-// Charm reference type - what you get when linking to a deployed charm
-// Using 'any' for the type since linked charms come as opaque cell references
+// Charm reference type - linked charms come as opaque cell references
 type CharmRef = any;
 
 interface PatternInput {
@@ -185,9 +184,9 @@ export default pattern<PatternInput>(({
               <div style={cardStyle}>
                 <div style={headerStyle}>
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
-                    {usps[NAME] || "USPS Informed Delivery"}
+                    USPS Informed Delivery
                   </div>
-                  <ct-cell-link $cell={usps}>Open</ct-cell-link>
+                  <ct-chip variant="secondary">Linked</ct-chip>
                 </div>
                 <div style={previewBoxStyle}>{usps.previewUI as any}</div>
               </div>
@@ -198,9 +197,9 @@ export default pattern<PatternInput>(({
               <div style={cardStyle}>
                 <div style={headerStyle}>
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
-                    {library[NAME] || "Berkeley Library"}
+                    Berkeley Library
                   </div>
-                  <ct-cell-link $cell={library}>Open</ct-cell-link>
+                  <ct-chip variant="secondary">Linked</ct-chip>
                 </div>
                 <div style={previewBoxStyle}>{library.previewUI as any}</div>
               </div>
@@ -211,9 +210,9 @@ export default pattern<PatternInput>(({
               <div style={cardStyle}>
                 <div style={headerStyle}>
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
-                    {chase[NAME] || "Chase Bill Tracker"}
+                    Chase Bill Tracker
                   </div>
-                  <ct-cell-link $cell={chase}>Open</ct-cell-link>
+                  <ct-chip variant="secondary">Linked</ct-chip>
                 </div>
                 <div style={previewBoxStyle}>{chase.previewUI as any}</div>
               </div>
@@ -224,9 +223,9 @@ export default pattern<PatternInput>(({
               <div style={cardStyle}>
                 <div style={headerStyle}>
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
-                    {bam[NAME] || "BAM School Dashboard"}
+                    BAM School Dashboard
                   </div>
-                  <ct-cell-link $cell={bam}>Open</ct-cell-link>
+                  <ct-chip variant="secondary">Linked</ct-chip>
                 </div>
                 <div style={previewBoxStyle}>{bam.previewUI as any}</div>
               </div>
@@ -237,9 +236,9 @@ export default pattern<PatternInput>(({
               <div style={cardStyle}>
                 <div style={headerStyle}>
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
-                    {bofa[NAME] || "Bank of America Bills"}
+                    Bank of America Bills
                   </div>
-                  <ct-cell-link $cell={bofa}>Open</ct-cell-link>
+                  <ct-chip variant="secondary">Linked</ct-chip>
                 </div>
                 <div style={previewBoxStyle}>{bofa.previewUI as any}</div>
               </div>
@@ -250,9 +249,9 @@ export default pattern<PatternInput>(({
               <div style={cardStyle}>
                 <div style={headerStyle}>
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
-                    {tickets[NAME] || "Email Ticket Finder"}
+                    Email Ticket Finder
                   </div>
-                  <ct-cell-link $cell={tickets}>Open</ct-cell-link>
+                  <ct-chip variant="secondary">Linked</ct-chip>
                 </div>
                 <div style={previewBoxStyle}>{tickets.previewUI as any}</div>
               </div>
@@ -263,7 +262,7 @@ export default pattern<PatternInput>(({
               <div style={cardStyle}>
                 <div style={headerStyle}>
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
-                    {calendar[NAME] || "Calendar Change Detector"}
+                    Calendar Change Detector
                   </div>
                   <ct-cell-link $cell={calendar}>Open</ct-cell-link>
                 </div>
@@ -276,7 +275,7 @@ export default pattern<PatternInput>(({
               <div style={cardStyle}>
                 <div style={headerStyle}>
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
-                    {notes[NAME] || "Email Notes"}
+                    Email Notes
                   </div>
                   <ct-cell-link $cell={notes}>Open</ct-cell-link>
                 </div>
@@ -289,7 +288,7 @@ export default pattern<PatternInput>(({
               <div style={cardStyle}>
                 <div style={headerStyle}>
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
-                    {united[NAME] || "United Flight Tracker"}
+                    United Flight Tracker
                   </div>
                   <ct-cell-link $cell={united}>Open</ct-cell-link>
                 </div>
