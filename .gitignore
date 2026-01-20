@@ -31,3 +31,7 @@ tools/ralph/smoketest/
 
 # Claude Code blackboard
 .claude/blackboard.db
+
+.agent
+PROMPT.md
+ralph.yml
