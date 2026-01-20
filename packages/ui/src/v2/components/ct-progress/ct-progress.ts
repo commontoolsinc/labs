@@ -75,7 +75,10 @@ export class CTProgress extends BaseElement {
   override willUpdate(changedProperties: PropertyValues) {
     // Clamp value within bounds
     if (changedProperties.has("value") || changedProperties.has("max")) {
-      const clampedValue = Math.max(0, Math.min(this.value, this.max));
+      const clampedValue = Math.max(
+        0,
+        Math.min(this.value ?? 0, this.max ?? 100),
+      );
       if (this.value !== clampedValue) {
         this.value = clampedValue;
       }
@@ -124,10 +127,10 @@ export class CTProgress extends BaseElement {
   }
 
   private updateAriaAttributes(): void {
-    this.setAttribute("aria-valuemax", this.max.toString());
+    this.setAttribute("aria-valuemax", this.max?.toString() ?? "100");
 
     if (!this.indeterminate) {
-      this.setAttribute("aria-valuenow", this.value.toString());
+      this.setAttribute("aria-valuenow", this.value?.toString() ?? "0");
       const percentage = this.getPercentage();
       this.setAttribute("aria-valuetext", `${Math.round(percentage)}%`);
     } else {
@@ -137,8 +140,8 @@ export class CTProgress extends BaseElement {
   }
 
   private getPercentage(): number {
-    if (this.max === 0) return 0;
-    return (this.value / this.max) * 100;
+    if (this.max === 0 || !Number.isFinite(this.max)) return 0;
+    return ((this.value ?? 0) / this.max) * 100;
   }
 
   private updateProgress(): void {
@@ -171,7 +174,7 @@ export class CTProgress extends BaseElement {
    * Check if progress is complete
    */
   isComplete(): boolean {
-    return !this.indeterminate && this.value >= this.max;
+    return !this.indeterminate && (this.value ?? 0) >= (this.max ?? 100);
   }
 
   /**
