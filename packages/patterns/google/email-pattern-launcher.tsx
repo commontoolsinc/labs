@@ -92,8 +92,8 @@ function matchesEmailPattern(email: string, pattern: string): boolean {
  * Build Gmail query from email patterns.
  */
 function buildGmailQuery(entries: RegistryEntry[]): string { // Build "from:@domain1 OR from:@domain2 ..." query
-  const parts = entries.flatMap((entry) =>
-    entry.emailPatterns.map((pattern) => `from:${pattern}`)
+  const parts = entries.filter(Boolean).flatMap((entry) =>
+    entry.emailPatterns.filter(Boolean).map((pattern) => `from:${pattern}`)
   );
   return parts.join(" OR ");
 }
