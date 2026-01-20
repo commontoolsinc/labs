@@ -26,13 +26,13 @@ typicalMix.push("0", "1", "9", "10", "99", "100", "999", "length", "toString");
 // Invalid indices that look numeric
 typicalMix.push("01", "007", "+1", "-1", "1.5", "1e5", "0x10");
 
-// Large numbers that hit the final else branch (10-digit numbers)
+// Large numbers, which should exercise the longest possible code paths.
 const largeNumbers: string[] = [];
-// Valid large indices (under 2^31 = 2147483648)
+// Valid large indices (under 2**31 = 2147483648)
 for (let i = 0; i < 50; i++) {
   largeNumbers.push(String(1000000000 + i * 20000000)); // 1B to ~2B range
 }
-// Invalid large indices (over 2^31)
+// Invalid large indices (over 2**31)
 for (let i = 0; i < 50; i++) {
   largeNumbers.push(String(2200000000 + i * 10000000)); // 2.2B+ range
 }
