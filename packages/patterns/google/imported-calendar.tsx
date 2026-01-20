@@ -12,6 +12,7 @@
  * - Day/Week view toggle
  */
 import {
+  action,
   Cell,
   computed,
   Default,
@@ -23,7 +24,6 @@ import {
   UI,
   wish,
   Writable,
-  action,
 } from "commontools";
 
 // Type matching CalendarEvent from google-calendar-importer.tsx
@@ -354,7 +354,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
   // WISH FOR CALENDAR EVENTS from Google Calendar Importer
   // ==========================================================================
   const { events: importedEvents } = wish<{ events: CalendarEvent[] }>(
-    "#calendarEvents"
+    "#calendarEvents",
   );
 
   // Navigation State (Writable so navigation buttons work)
@@ -385,7 +385,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
   // Computed Values
   const importedEventCount = derive(
     importedEvents,
-    (evts: CalendarEvent[]) => evts?.length || 0
+    (evts: CalendarEvent[]) => evts?.length || 0,
   );
   const localEventCount = computed(() => localEvents.get().length);
   const eventCount = computed(() => importedEventCount + localEventCount);
@@ -849,7 +849,8 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                 {COLUMN_INDICES.map((colIdx) => {
                   // Use computed() to properly extract values from the computed array
                   const columnDate = computed(() => weekDates[colIdx] || "");
-                  const isToday = derive(weekDates, (dates) => dates?.[colIdx] === todayDate);
+                  const isToday = derive(weekDates, (dates) =>
+                    dates?.[colIdx] === todayDate);
                   const dateHeader = derive(weekDates, (dates) => {
                     const d = dates?.[colIdx];
                     return d ? formatDateHeader(d) : "";
@@ -858,11 +859,9 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                     colIdx < visibleDays.get() ? "flex" : "none"
                   );
                   const headerBg = derive(weekDates, (dates) =>
-                    dates?.[colIdx] === todayDate ? "#eff6ff" : "transparent"
-                  );
+                    dates?.[colIdx] === todayDate ? "#eff6ff" : "transparent");
                   const headerColor = derive(weekDates, (dates) =>
-                    dates?.[colIdx] === todayDate ? "#2563eb" : "#374151"
-                  );
+                    dates?.[colIdx] === todayDate ? "#2563eb" : "#374151");
 
                   // Drop handler for moving/resizing local events
                   const handleDayDrop = action((e: {
@@ -876,38 +875,59 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                     const evt = e.detail.sourceCell.get();
                     const { pointerY, dropZoneRect, type: dragType } = e.detail;
 
-                    if (pointerY === undefined || !dropZoneRect) return;
+                    if (pointerY === undefined || !dropZoneRect) {
+                      return;
+                    }
 
                     const relativeY = pointerY - dropZoneRect.top;
-                    const slotIdx = Math.max(0, Math.floor(relativeY / SLOT_HEIGHT));
+                    const slotIdx = Math.max(
+                      0,
+                      Math.floor(relativeY / SLOT_HEIGHT),
+                    );
                     const newHour = DAY_START + Math.floor(slotIdx / 2);
                     const newMin = (slotIdx % 2) * 30;
                     const newTime = minutesToTime(
-                      Math.min(DAY_END - 1, Math.max(DAY_START, newHour)) * 60 + newMin
+                      Math.min(DAY_END - 1, Math.max(DAY_START, newHour)) * 60 +
+                        newMin,
                     );
 
                     const current = localEvents.get();
                     const evtId = evt?.eventId;
-                    const evtIdx = current.findIndex((a) => a?.eventId === evtId);
-                    if (evtIdx < 0) return;
+                    const evtIdx = current.findIndex((a) =>
+                      a?.eventId === evtId
+                    );
+                    if (evtIdx < 0) {
+                      return;
+                    }
 
                     const dateVal = weekDates[colIdx];
                     const eventCell = localEvents.key(evtIdx);
 
                     if (dragType === "local-event-resize") {
                       const adjustedY = relativeY + SLOT_HEIGHT / 2;
-                      const resizeSlotIdx = Math.max(0, Math.floor(adjustedY / SLOT_HEIGHT));
-                      const resizeHour = DAY_START + Math.floor(resizeSlotIdx / 2);
+                      const resizeSlotIdx = Math.max(
+                        0,
+                        Math.floor(adjustedY / SLOT_HEIGHT),
+                      );
+                      const resizeHour = DAY_START +
+                        Math.floor(resizeSlotIdx / 2);
                       const resizeMin = (resizeSlotIdx % 2) * 30;
                       const startMin = timeToMinutes(evt.startTime || "09:00");
-                      const newEndMin = Math.max(startMin + 30, resizeHour * 60 + resizeMin);
-                      eventCell.key("endTime").set(minutesToTime(Math.min(DAY_END * 60, newEndMin)));
+                      const newEndMin = Math.max(
+                        startMin + 30,
+                        resizeHour * 60 + resizeMin,
+                      );
+                      eventCell.key("endTime").set(
+                        minutesToTime(Math.min(DAY_END * 60, newEndMin)),
+                      );
                     } else {
                       const duration = timeToMinutes(evt.endTime || "10:00") -
                         timeToMinutes(evt.startTime || "09:00");
                       eventCell.key("date").set(dateVal);
                       eventCell.key("startTime").set(newTime);
-                      eventCell.key("endTime").set(addMinutesToTime(newTime, duration));
+                      eventCell.key("endTime").set(
+                        addMinutesToTime(newTime, duration),
+                      );
                     }
 
                     lastDropTime.set(Date.now());
@@ -916,11 +936,24 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                   // Click handlers for creating events at specific hours
                   const hourClickActions = HOURS.map((hour) =>
                     action(() => {
-                      if (Date.now() - lastDropTime.get() < 300) return;
+                      if (Date.now() - lastDropTime.get() < 300) {
+                        return;
+                      }
                       newEventTitle.set("");
                       newEventDate.set(columnDate);
-                      newEventStartTime.set(`${(hour.idx + DAY_START).toString().padStart(2, "0")}:00`);
-                      newEventEndTime.set(addHoursToTime(`${(hour.idx + DAY_START).toString().padStart(2, "0")}:00`, 1));
+                      newEventStartTime.set(
+                        `${
+                          (hour.idx + DAY_START).toString().padStart(2, "0")
+                        }:00`,
+                      );
+                      newEventEndTime.set(
+                        addHoursToTime(
+                          `${
+                            (hour.idx + DAY_START).toString().padStart(2, "0")
+                          }:00`,
+                          1,
+                        ),
+                      );
                       newEventColor.set(COLORS[0]);
                       showNewEventPrompt.set(true);
                     })
@@ -962,7 +995,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                           <div style={{ fontSize: "0.6rem", color: "#3b82f6" }}>
                             Today
                           </div>,
-                          null
+                          null,
                         )}
                       </div>
 
@@ -995,13 +1028,22 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                 {importedEvents.map((evt) => {
                   // Use derive() to extract display properties
                   // All derives guard against undefined events
-                  const evtTitle = derive(evt, (e) => e?.summary || "(No title)");
-                  const evtColor = derive(evt, (e) =>
-                    getColorForCalendar(e?.calendarId || "default")
+                  const evtTitle = derive(
+                    evt,
+                    (e) =>
+                      e?.summary || "(No title)",
                   );
-                  const evtLocation = derive(evt, (e) => e?.location || "");
+                  const evtColor = derive(
+                    evt,
+                    (e) =>
+                      getColorForCalendar(e?.calendarId || "default"),
+                  );
+                  const evtLocation = derive(evt, (e) =>
+                    e?.location || "");
                   const evtTimeRange = derive(evt, (e) => {
-                    if (!e) return "";
+                    if (!e) {
+                      return "";
+                    }
                     const startTime = e.isAllDay
                       ? "00:00"
                       : extractTime(e.startDateTime);
@@ -1010,13 +1052,21 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                       : extractTime(e.endDateTime);
                     return `${startTime} - ${endTime}`;
                   });
-                  const hasLocation = derive(evt, (e) => (e?.location || "").length > 0);
+                  const hasLocation = derive(
+                    evt,
+                    (e) =>
+                      (e?.location || "").length > 0,
+                  );
 
                   // Build direct event edit link: /r/eventedit/{base64(eventId + " " + calendarId)}
                   // This loads faster than the full calendar view
                   const googleLink = derive(evt, (e) => {
-                    if (!e) return "";
-                    if (!e.id || !e.calendarId) return e.htmlLink || "";
+                    if (!e) {
+                      return "";
+                    }
+                    if (!e.id || !e.calendarId) {
+                      return e.htmlLink || "";
+                    }
                     try {
                       const combined = `${e.id} ${e.calendarId}`;
                       const encoded = btoa(combined);
@@ -1030,52 +1080,59 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                   // Compute position/visibility in single derive
                   // Note: startDate and visibleDays are Cell.of(), so access with .get()
                   const styles = derive(evt, (e) => {
-                      const weekStart = startDate.get();
-                      const visibleCount = visibleDays.get();
-                      const eventDate = e ? extractDate(e.start || e.startDateTime) : null;
+                    const weekStart = startDate.get();
+                    const visibleCount = visibleDays.get();
+                    const eventDate = e
+                      ? extractDate(e.start || e.startDateTime)
+                      : null;
 
-                      const hidden = {
-                        top: "0",
-                        height: "0",
-                        left: "0",
-                        width: "0",
-                        display: "none" as const,
-                      };
+                    const hidden = {
+                      top: "0",
+                      height: "0",
+                      left: "0",
+                      width: "0",
+                      display: "none" as const,
+                    };
 
-                      if (!eventDate || !weekStart) return hidden;
+                    if (!eventDate || !weekStart) {
+                      return hidden;
+                    }
 
-                      const startMs = new Date(weekStart + "T00:00:00").getTime();
-                      const evtMs = new Date(eventDate + "T00:00:00").getTime();
-                      if (isNaN(startMs) || isNaN(evtMs)) return hidden;
+                    const startMs = new Date(weekStart + "T00:00:00").getTime();
+                    const evtMs = new Date(eventDate + "T00:00:00").getTime();
+                    if (isNaN(startMs) || isNaN(evtMs)) {
+                      return hidden;
+                    }
 
-                      const dayOffset = Math.floor(
-                        (evtMs - startMs) / (24 * 60 * 60 * 1000)
-                      );
-                      if (dayOffset < 0 || dayOffset >= visibleCount) {
-                        return hidden;
-                      }
+                    const dayOffset = Math.floor(
+                      (evtMs - startMs) / (24 * 60 * 60 * 1000),
+                    );
+                    if (dayOffset < 0 || dayOffset >= visibleCount) {
+                      return hidden;
+                    }
 
-                      const startTime = e.isAllDay
-                        ? "00:00"
-                        : extractTime(e.startDateTime);
-                      const endTime = e.isAllDay
-                        ? "23:59"
-                        : extractTime(e.endDateTime);
-                      const startMin = timeToMinutes(startTime) - DAY_START * 60;
-                      const endMin = timeToMinutes(endTime) - DAY_START * 60;
-                      const top = (startMin / 60) * HOUR_HEIGHT;
-                      const height = Math.max(
-                        30,
-                        ((endMin - startMin) / 60) * HOUR_HEIGHT
-                      );
+                    const startTime = e.isAllDay
+                      ? "00:00"
+                      : extractTime(e.startDateTime);
+                    const endTime = e.isAllDay
+                      ? "23:59"
+                      : extractTime(e.endDateTime);
+                    const startMin = timeToMinutes(startTime) - DAY_START * 60;
+                    const endMin = timeToMinutes(endTime) - DAY_START * 60;
+                    const top = (startMin / 60) * HOUR_HEIGHT;
+                    const height = Math.max(
+                      30,
+                      ((endMin - startMin) / 60) * HOUR_HEIGHT,
+                    );
 
-                      return {
-                        top: `${50 + top}px`,
-                        height: `${height}px`,
-                        left: `calc(50px + (100% - 50px) * ${dayOffset} / ${visibleCount} + 2px)`,
-                        width: `calc((100% - 50px) / ${visibleCount} - 4px)`,
-                        display: "block" as const,
-                      };
+                    return {
+                      top: `${50 + top}px`,
+                      height: `${height}px`,
+                      left:
+                        `calc(50px + (100% - 50px) * ${dayOffset} / ${visibleCount} + 2px)`,
+                      width: `calc((100% - 50px) / ${visibleCount} - 4px)`,
+                      display: "block" as const,
+                    };
                   });
 
                   return (
@@ -1137,7 +1194,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                           >
                             📍 {evtLocation}
                           </div>,
-                          null
+                          null,
                         )}
                       </div>
                     </a>
@@ -1160,14 +1217,18 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                       display: "none" as const,
                     };
 
-                    if (!evtDate || !weekStart) return hidden;
+                    if (!evtDate || !weekStart) {
+                      return hidden;
+                    }
 
                     const startMs = new Date(weekStart + "T00:00:00").getTime();
                     const evtMs = new Date(evtDate + "T00:00:00").getTime();
-                    if (isNaN(startMs) || isNaN(evtMs)) return hidden;
+                    if (isNaN(startMs) || isNaN(evtMs)) {
+                      return hidden;
+                    }
 
                     const dayOffset = Math.floor(
-                      (evtMs - startMs) / (24 * 60 * 60 * 1000)
+                      (evtMs - startMs) / (24 * 60 * 60 * 1000),
                     );
                     if (dayOffset < 0 || dayOffset >= visibleCount) {
                       return hidden;
@@ -1180,13 +1241,14 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                     const top = (startMin / 60) * HOUR_HEIGHT;
                     const height = Math.max(
                       30,
-                      ((endMin - startMin) / 60) * HOUR_HEIGHT
+                      ((endMin - startMin) / 60) * HOUR_HEIGHT,
                     );
 
                     return {
                       top: `${50 + top}px`,
                       height: `${height}px`,
-                      left: `calc(50px + (100% - 50px) * ${dayOffset} / ${visibleCount} + 2px)`,
+                      left:
+                        `calc(50px + (100% - 50px) * ${dayOffset} / ${visibleCount} + 2px)`,
                       width: `calc((100% - 50px) / ${visibleCount} - 4px)`,
                       display: "block" as const,
                     };
@@ -1194,7 +1256,9 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
 
                   // Click action to open edit modal
                   const openEvent = action(() => {
-                    if (Date.now() - lastDropTime.get() < 300) return;
+                    if (Date.now() - lastDropTime.get() < 300) {
+                      return;
+                    }
                     // Populate edit form with event data
                     editingEventIndex.set(evtIndex);
                     editEventTitle.set(evt.title || "");
@@ -1311,7 +1375,9 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
 
         {/* Empty State */}
         {ifElse(
-          computed(() => eventCount === 0),
+          computed(() =>
+            eventCount === 0
+          ),
           <div
             slot="footer"
             style={{
@@ -1323,7 +1389,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
           >
             No events yet. Click "+ Add" or click on a time slot to create one.
           </div>,
-          null
+          null,
         )}
       </ct-screen>
     ),
