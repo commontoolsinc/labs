@@ -892,6 +892,12 @@ Note: If this is a forwarded email, look for the original library content within
         });
     });
 
+    // Pre-compute due tomorrow count for preview UI
+    const dueTomorrowCount = computed(
+      () =>
+        activeItems?.filter((i) => i.urgency === "urgent_1day")?.length || 0,
+    );
+
     // Preview UI for compact display in lists/pickers
     const previewUI = (
       <div
@@ -930,26 +936,43 @@ Note: If this is a forwarded email, look for the original library content within
             Library Books
           </div>
           <div style={{ fontSize: "12px", color: "#6b7280" }}>
-            {overdueCount > 0 && (
-              <span style={{ color: "#dc2626" }}>{overdueCount} overdue</span>
-            )}
-            {overdueCount > 0 &&
-              (computed(() =>
-                activeItems?.filter((i) => i.urgency === "urgent_1day")
-                  ?.length || 0
-              ) > 0) && <span>·</span>}
-            {computed(() => {
-              const dueTomorrow = activeItems?.filter((i) =>
-                i.urgency === "urgent_1day"
-              )?.length || 0;
-              return dueTomorrow > 0 ? `${dueTomorrow} due tomorrow` : "";
-            })}
-            {holdsReadyCount > 0 && (
-              <span style={{ color: "#2563eb" }}>
-                {" "}
-                · {holdsReadyCount} holds ready
-              </span>
-            )}
+            <span
+              style={{
+                color: "#dc2626",
+                display: computed(() => (overdueCount > 0 ? "inline" : "none")),
+              }}
+            >
+              {overdueCount} overdue
+            </span>
+            <span
+              style={{
+                display: computed(() =>
+                  overdueCount > 0 && dueTomorrowCount > 0 ? "inline" : "none"
+                ),
+              }}
+            >
+              {" · "}
+            </span>
+            <span
+              style={{
+                display: computed(() =>
+                  dueTomorrowCount > 0 ? "inline" : "none"
+                ),
+              }}
+            >
+              {dueTomorrowCount} due tomorrow
+            </span>
+            <span
+              style={{
+                color: "#2563eb",
+                display: computed(() =>
+                  holdsReadyCount > 0 ? "inline" : "none"
+                ),
+              }}
+            >
+              {" · "}
+              {holdsReadyCount} holds ready
+            </span>
           </div>
         </div>
       </div>
