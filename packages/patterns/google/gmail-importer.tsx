@@ -1076,6 +1076,9 @@ export default pattern<{
     // Track whether we've already triggered auto-fetch to prevent loops
     const hasAutoFetched = Writable.of(false).for("auto fetched");
 
+    // Track previous auth ready state for transition detection
+    const wasAuthReady = Writable.of(false).for("was auth ready");
+
     // Track when auth was in an invalid state for recovery detection
     const wasAuthInvalid = Writable.of(false).for("was auth invalid");
 
@@ -1106,13 +1109,19 @@ export default pattern<{
       }
     });
 
-    // Track when auth becomes invalid (token expires or is cleared)
+    // Track when auth transitions from ready to invalid (token expires or is cleared)
     computed(() => {
-      const ready = isReady;
-      // When auth is not ready, mark it as invalid for recovery detection
-      if (!ready) {
+      const ready = !!isReady;
+      const previouslyReady = wasAuthReady.get();
+
+      // Only mark as invalid when we transition FROM ready TO not-ready
+      // This prevents false positives on initial load when auth isn't ready yet
+      if (previouslyReady && !ready) {
         wasAuthInvalid.set(true);
       }
+
+      // Track current ready state for next comparison
+      wasAuthReady.set(ready);
     });
 
     // Detect auth recovery and trigger incremental sync
