@@ -1,5 +1,6 @@
 import * as Reference from "merkle-reference";
 import { isDeno } from "@commontools/utils/env";
+import { LRUCache } from "@commontools/utils/cache";
 import { createSHA256, type IHasher } from "hash-wasm";
 export * from "merkle-reference";
 
@@ -69,8 +70,10 @@ if (isDeno()) {
  * These patterns repeat constantly in claims, so caching avoids redundant hashing.
  * Bounded with LRU eviction to prevent unbounded memory growth.
  */
-const UNCLAIMED_CACHE_MAX_SIZE = 50_000; // ~50KB overhead (small string keys + refs)
-const unclaimedCache = new Map<string, Reference.View<unknown>>();
+const unclaimedCache = new LRUCache<string, Reference.View<unknown>>({
+  // ~50KB overhead (small string keys + refs)
+  capacity: 50_000,
+});
 
 /**
  * Check if source is exactly {the, of} with string values and no other keys.
@@ -104,18 +107,10 @@ export const refer = <T>(source: T): Reference.View<T> => {
     const key = `${source.the}\0${source.of}`;
     const cached = unclaimedCache.get(key);
     if (cached) {
-      // Move to end for LRU behavior
-      unclaimedCache.delete(key);
-      unclaimedCache.set(key, cached);
       return cached as Reference.View<T>;
     }
     const result = referImpl(source);
-    // Evict oldest entry if at capacity
-    if (unclaimedCache.size >= UNCLAIMED_CACHE_MAX_SIZE) {
-      const oldest = unclaimedCache.keys().next().value;
-      if (oldest !== undefined) unclaimedCache.delete(oldest);
-    }
-    unclaimedCache.set(key, result);
+    unclaimedCache.put(key, result);
     return result;
   }
 
