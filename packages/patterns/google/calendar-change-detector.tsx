@@ -232,7 +232,7 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
       autoFetchOnAuth: true,
       resolveInlineImages: false,
       limit: 50,
-      debugMode: false,
+      debugMode: true,
     },
     linkedAuth,
   });

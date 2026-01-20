@@ -297,7 +297,7 @@ export default pattern<PatternInput, PatternOutput>(
         autoFetchOnAuth: true,
         resolveInlineImages: true,
         limit: 20,
-        debugMode: DEBUG_USPS,
+        debugMode: true,
       },
       linkedAuth, // Pass through from USPS input (user can link google-auth here)
     });
