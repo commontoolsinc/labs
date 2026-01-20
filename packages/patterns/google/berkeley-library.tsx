@@ -471,10 +471,10 @@ const setDueDateForGroup = handler<
   const newDueDate = input.value;
   if (!newDueDate) return;
 
-  // Get selected items in this group
-  const currentSelected = selectedItems.get() || [];
-  const selectedInThisGroup = groupItems.filter((item: TrackedItem) =>
-    currentSelected.includes(item.key)
+  // Get selected items in this group (not in deselected list = selected)
+  const deselectedKeys = selectedItems.get() || [];
+  const selectedInThisGroup = groupItems.filter(
+    (item: TrackedItem) => !deselectedKeys.includes(item.key),
   );
 
   if (selectedInThisGroup.length === 0) return;
@@ -487,12 +487,10 @@ const setDueDateForGroup = handler<
   }
   dueDateOverrides.set(updated);
 
-  // Clear selections after updating
+  // Clear deselected items for updated items
+  const updatedKeys = selectedInThisGroup.map((item: TrackedItem) => item.key);
   selectedItems.set(
-    currentSelected.filter(
-      (k: string) =>
-        !selectedInThisGroup.some((item: TrackedItem) => item.key === k),
-    ),
+    deselectedKeys.filter((k: string) => !updatedKeys.includes(k)),
   );
 
   // Reset the input
@@ -834,6 +832,7 @@ Note: If this is a forwarded email, look for the original library content within
     });
 
     // Group active items by due date for checkbox-based bulk returns
+    // Pre-compute ALL derived values here to avoid OpaqueRef issues in UI
     const itemsByDueDate = computed(() => {
       const groups = new Map<string, TrackedItem[]>();
       const items = activeItems || [];
@@ -846,14 +845,51 @@ Note: If this is a forwarded email, look for the original library content within
         groups.get(dueDate)!.push(item);
       }
 
-      // Sort groups by due date (earliest first)
+      // Sort groups by due date (earliest first) and compute group-level properties
+      // NOTE: Selection state is NOT computed here to avoid reactive loops
       return Array.from(groups.entries())
         .sort(([dateA], [dateB]) => {
           if (dateA === "No due date") return 1;
           if (dateB === "No due date") return -1;
           return dateA.localeCompare(dateB);
         })
-        .map(([dueDate, items]) => ({ dueDate, items }));
+        .map(([dueDate, groupItems]) => {
+          // Pre-compute group urgency
+          const rawItems = groupItems;
+          let groupUrgency: UrgencyLevel = "ok";
+          if (rawItems.some((i) => i.urgency === "overdue")) {
+            groupUrgency = "overdue";
+          } else if (rawItems.some((i) => i.urgency === "urgent_1day")) {
+            groupUrgency = "urgent_1day";
+          } else if (rawItems.some((i) => i.urgency === "warning_3days")) {
+            groupUrgency = "warning_3days";
+          } else if (rawItems.some((i) => i.urgency === "notice_7days")) {
+            groupUrgency = "notice_7days";
+          }
+
+          // Pre-compute urgency label from first item
+          const firstItem = rawItems[0];
+          const urgencyLabel = firstItem
+            ? getUrgencyLabel(firstItem.urgency, firstItem.daysUntilDue)
+            : "";
+
+          // Pre-compute urgency colors
+          const urgencyColors = getUrgencyColor(groupUrgency);
+
+          // Pre-compute formatted date
+          const formattedDate = formatDate(dueDate);
+
+          return {
+            dueDate,
+            formattedDate,
+            items: groupItems, // Plain TrackedItem array, no selection wrapping
+            groupUrgency,
+            urgencyLabel,
+            urgencyBgColor: urgencyColors.bg,
+            urgencyTextColor: urgencyColors.text,
+            totalCount: groupItems.length,
+          };
+        });
     });
 
     // Preview UI for compact display in lists/pickers
@@ -1136,28 +1172,11 @@ Note: If this is a forwarded email, look for the original library content within
                 </h3>
                 <ct-vstack gap="4">
                   {itemsByDueDate.map((group) => {
-                    const groupUrgency = computed(() => {
-                      const items = group.items || [];
-                      if (items.some((i) => i.urgency === "overdue")) {
-                        return "overdue";
-                      }
-                      if (
-                        items.some((i) => i.urgency === "urgent_1day")
-                      ) return "urgent_1day";
-                      if (
-                        items.some((i) => i.urgency === "warning_3days")
-                      ) return "warning_3days";
-                      if (
-                        items.some((i) => i.urgency === "notice_7days")
-                      ) return "notice_7days";
-                      return "ok";
-                    });
-
-                    // Get count of selected items in this group
+                    // Compute selected count outside JSX - items not in deselected list are selected
                     const selectedCount = computed(() => {
-                      const selected = selectedItems.get() || [];
-                      return group.items.filter((item: TrackedItem) =>
-                        selected.includes(item.key)
+                      const deselected = selectedItems.get() || [];
+                      return group.items.filter(
+                        (item: TrackedItem) => !deselected.includes(item.key),
                       ).length;
                     });
 
@@ -1193,31 +1212,19 @@ Note: If this is a forwarded email, look for the original library content within
                                 color: "#111827",
                               }}
                             >
-                              Due: {computed(() => formatDate(group.dueDate))}
+                              Due: {group.formattedDate}
                             </div>
                             <div
                               style={{
                                 fontSize: "13px",
                                 padding: "4px 8px",
                                 borderRadius: "4px",
-                                backgroundColor: computed(() =>
-                                  getUrgencyColor(groupUrgency).bg
-                                ),
-                                color: computed(() =>
-                                  getUrgencyColor(groupUrgency).text
-                                ),
+                                backgroundColor: group.urgencyBgColor,
+                                color: group.urgencyTextColor,
                                 fontWeight: "500",
                               }}
                             >
-                              {computed(() => {
-                                const items = group.items || [];
-                                if (items.length === 0) return "";
-                                const firstItem = items[0];
-                                return getUrgencyLabel(
-                                  firstItem.urgency,
-                                  firstItem.daysUntilDue,
-                                );
-                              })}
+                              {group.urgencyLabel}
                             </div>
                           </div>
                           <div
@@ -1230,9 +1237,7 @@ Note: If this is a forwarded email, look for the original library content within
                             {/* Date picker for setting new due date */}
                             <div
                               style={{
-                                display: computed(() =>
-                                  selectedCount > 0 ? "flex" : "none"
-                                ),
+                                display: selectedCount > 0 ? "flex" : "none",
                                 alignItems: "center",
                                 gap: "8px",
                               }}
@@ -1265,12 +1270,12 @@ Note: If this is a forwarded email, look for the original library content within
                             <button
                               type="button"
                               onClick={() => {
-                                // Get selected items in this group
-                                const currentSelected = selectedItems.get() ||
+                                // Get selected items in this group (not in deselected = selected)
+                                const deselectedKeys = selectedItems.get() ||
                                   [];
                                 const selectedInThisGroup = group.items.filter(
                                   (item: TrackedItem) =>
-                                    currentSelected.includes(item.key),
+                                    !deselectedKeys.includes(item.key),
                                 );
                                 if (selectedInThisGroup.length === 0) return;
 
@@ -1284,29 +1289,27 @@ Note: If this is a forwarded email, look for the original library content within
                                   ...selectedKeys,
                                 ]);
 
-                                // Clear selections for returned items
+                                // Clear deselected items for returned items
                                 selectedItems.set(
-                                  currentSelected.filter(
+                                  deselectedKeys.filter(
                                     (k: string) => !selectedKeys.includes(k),
                                   ),
                                 );
                               }}
                               style={{
                                 padding: "8px 16px",
-                                backgroundColor: computed(() =>
-                                  selectedCount > 0 ? "#10b981" : "#d1d5db"
-                                ),
+                                backgroundColor: selectedCount > 0
+                                  ? "#10b981"
+                                  : "#d1d5db",
                                 color: "white",
                                 border: "none",
                                 borderRadius: "6px",
-                                cursor: computed(() =>
-                                  selectedCount > 0 ? "pointer" : "not-allowed"
-                                ),
+                                cursor: selectedCount > 0
+                                  ? "pointer"
+                                  : "not-allowed",
                                 fontSize: "13px",
                                 fontWeight: "600",
-                                display: computed(() =>
-                                  selectedCount > 0 ? "block" : "none"
-                                ),
+                                display: selectedCount > 0 ? "block" : "none",
                               }}
                             >
                               Mark {selectedCount} Returned
@@ -1316,94 +1319,98 @@ Note: If this is a forwarded email, look for the original library content within
 
                         {/* Items in this group */}
                         <ct-vstack gap="2">
-                          {group.items.map((item) => (
-                            <div
-                              style={{
-                                display: "flex",
-                                gap: "12px",
-                                padding: "12px",
-                                backgroundColor: "white",
-                                borderRadius: "6px",
-                                border: "1px solid #e5e7eb",
-                                alignItems: "center",
-                              }}
-                            >
-                              {/* Checkbox - pass item to handler for proper reactive resolution */}
+                          {group.items.map((item) => {
+                            // Extract key before computed to avoid OpaqueRef issues
+                            const itemKey = item.key;
+                            const isChecked = computed(() => {
+                              const deselected = selectedItems.get() || [];
+                              return !deselected.includes(itemKey);
+                            });
+
+                            return (
                               <div
                                 style={{
-                                  cursor: "pointer",
-                                  userSelect: "none",
-                                  flexShrink: "0",
-                                }}
-                                onClick={toggleItemSelection({
-                                  item,
-                                  selectedItems,
-                                })}
-                              >
-                                <ct-checkbox
-                                  checked={computed(() => {
-                                    const selected = selectedItems.get() || [];
-                                    return selected.includes(item.key);
-                                  })}
-                                />
-                              </div>
-
-                              {/* Book Info */}
-                              <div style={{ flex: 1 }}>
-                                <div
-                                  style={{
-                                    fontWeight: "600",
-                                    fontSize: "14px",
-                                  }}
-                                >
-                                  {item.title}
-                                </div>
-                                <div
-                                  style={{
-                                    fontSize: "12px",
-                                    color: "#6b7280",
-                                    display: item.author ? "block" : "none",
-                                  }}
-                                >
-                                  by {item.author}
-                                </div>
-                              </div>
-
-                              {/* Individual Mark Returned Button */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const current = manuallyReturned.get();
-                                  if (!current.includes(item.key)) {
-                                    manuallyReturned.set([
-                                      ...current,
-                                      item.key,
-                                    ]);
-                                  }
-                                  // Remove from selected if present
-                                  const currentSelected = selectedItems.get();
-                                  selectedItems.set(
-                                    currentSelected.filter(
-                                      (k: string) => k !== item.key,
-                                    ),
-                                  );
-                                }}
-                                style={{
-                                  padding: "6px 12px",
-                                  backgroundColor: "#10b981",
-                                  color: "white",
-                                  border: "none",
+                                  display: "flex",
+                                  gap: "12px",
+                                  padding: "12px",
+                                  backgroundColor: "white",
                                   borderRadius: "6px",
-                                  cursor: "pointer",
-                                  fontSize: "12px",
-                                  fontWeight: "500",
-                                  flexShrink: "0",
+                                  border: "1px solid #e5e7eb",
+                                  alignItems: "center",
                                 }}
                               >
-                                Mark Returned
-                              </button>
-                            </div>
-                          ))}
+                                {/* Checkbox - pass item to handler for proper reactive resolution */}
+                                <div
+                                  style={{
+                                    cursor: "pointer",
+                                    userSelect: "none",
+                                    flexShrink: "0",
+                                  }}
+                                  onClick={toggleItemSelection({
+                                    item,
+                                    selectedItems,
+                                  })}
+                                >
+                                  <ct-checkbox $checked={isChecked} />
+                                </div>
+
+                                {/* Book Info */}
+                                <div style={{ flex: 1 }}>
+                                  <div
+                                    style={{
+                                      fontWeight: "600",
+                                      fontSize: "14px",
+                                    }}
+                                  >
+                                    {item.title}
+                                  </div>
+                                  <div
+                                    style={{
+                                      fontSize: "12px",
+                                      color: "#6b7280",
+                                      display: item.author ? "block" : "none",
+                                    }}
+                                  >
+                                    by {item.author}
+                                  </div>
+                                </div>
+
+                                {/* Individual Mark Returned Button */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const current = manuallyReturned.get();
+                                    if (!current.includes(item.key)) {
+                                      manuallyReturned.set([
+                                        ...current,
+                                        item.key,
+                                      ]);
+                                    }
+                                    // Remove from selected if present
+                                    const currentSelected = selectedItems.get();
+                                    selectedItems.set(
+                                      currentSelected.filter(
+                                        (k: string) => k !== item.key,
+                                      ),
+                                    );
+                                  }}
+                                  style={{
+                                    padding: "6px 12px",
+                                    backgroundColor: "#10b981",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "6px",
+                                    cursor: "pointer",
+                                    fontSize: "12px",
+                                    fontWeight: "500",
+                                    flexShrink: "0",
+                                  }}
+                                >
+                                  Mark Returned
+                                </button>
+                              </div>
+                            );
+                          })}
                         </ct-vstack>
                       </div>
                     );
