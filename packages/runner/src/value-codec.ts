@@ -1,6 +1,16 @@
 import { isInstance, isRecord } from "@commontools/utils/types";
 
 /**
+ * Character code for digit `0`.
+ */
+const CHAR_CODE_0 = "0".charCodeAt(0);
+
+/**
+ * Character code for digit `9`.
+ */
+const CHAR_CODE_9 = "9".charCodeAt(0);
+
+/**
  * Indicates whether the given string to be used as a property name (for an
  * object or array) is syntactically valid as an array index per se.
  *
@@ -9,19 +19,51 @@ import { isInstance, isRecord } from "@commontools/utils/types";
  *   element of that array.
  */
 export function isArrayIndexPropertyName(name: string): boolean {
+  switch (name[0]) {
+    case undefined: {
+      // Empty string.
+      return false;
+    }
+    case "0": {
+      // Only valid if the string is `0` per se.
+      return (name === "0");
+    }
+    case "1":
+    case "2":
+    case "3":
+    case "4":
+    case "5":
+    case "6":
+    case "7":
+    case "8":
+    case "9": {
+      // `break` for more detailed check below.
+      break;
+    }
+    default: {
+      return false;
+    }
+  }
+
   const length = name.length;
 
   if (length > 10) {
     // Don't bother with anything more if the name is too long to possibly be a
     // valid index.
     return false;
-  } else if (name === "0") {
-    // Easy and common special case, making the regex below simpler.
-    return true;
-  } else if (!/^[1-9][0-9]{0,9}$/.test(name)) {
-    // It's not a string of digits starting with not-`0`.
-    return false;
-  } else if (length < 10) {
+  }
+
+  // Check that all characters are (normal) digits. No need to check the first
+  // one, because the `switch` above took care of that. (NB: Benchmarking shows
+  // this is significantly faster than using a regex test.)
+  for (let i = 1; i < length; i++) {
+    const c = name.charCodeAt(i);
+    if ((c < CHAR_CODE_0) || (c > CHAR_CODE_9)) {
+      return false;
+    }
+  }
+
+  if (length < 10) {
     // It's short enough that it can't possibly be out of range.
     return true;
   } else {
