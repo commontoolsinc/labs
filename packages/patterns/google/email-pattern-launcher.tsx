@@ -84,33 +84,17 @@ function matchesEmailPattern(email: string, pattern: string): boolean {
     .replace(/[.+^${}()|[\]\\]/g, "\\$&") // Escape special regex chars except *
     .replace(/\*/g, ".*"); // Convert * to .*
 
-  const regex = new RegExp(`^${regexPattern}$`, "i");
+  const regex = new RegExp(`${regexPattern}$`, "i");
   return regex.test(emailLower);
 }
 
 /**
  * Build Gmail query from email patterns.
- * Converts ["*@usps.com", "*@library.org"] to "from:@usps.com OR from:@library.org"
  */
-function buildGmailQuery(entries: RegistryEntry[]): string {
-  const domains = new Set<string>();
-
-  for (const entry of entries) {
-    if (!entry) continue;
-    for (const emailPattern of entry.emailPatterns) {
-      // Extract domain from pattern like "*@domain.com"
-      const atIndex = emailPattern.indexOf("@");
-      if (atIndex !== -1) {
-        const domain = emailPattern.substring(atIndex); // includes @
-        domains.add(domain);
-      }
-    }
-  }
-
-  if (domains.size === 0) return "in:INBOX";
-
-  // Build "from:@domain1 OR from:@domain2 ..." query
-  const parts = Array.from(domains).map((domain) => `from:${domain}`);
+function buildGmailQuery(entries: RegistryEntry[]): string { // Build "from:@domain1 OR from:@domain2 ..." query
+  const parts = entries.flatMap((entry) =>
+    entry.emailPatterns.map((pattern) => `from:${pattern}`)
+  );
   return parts.join(" OR ");
 }
 
@@ -164,7 +148,7 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
       autoFetchOnAuth: false,
       resolveInlineImages: false,
       limit: 100,
-      debugMode: false,
+      debugMode: true,
     },
     linkedAuth,
   });
@@ -188,28 +172,12 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
 
     if (!entries || entries.length === 0) return [];
 
-    const hack = Array.from(entries).filter(Boolean).map((entry) => {
-      const matchedEmails = new Set<string>();
-      for (const email of emails) {
-        const fromAddress = email.from;
-        if (!fromAddress) continue;
-        matchedEmails.add(fromAddress);
-      }
-      return {
-        patternUri: entry.patternUri,
-        entry,
-        matchedEmails: Array.from(matchedEmails),
-      } as PatternMatchInfo;
-    });
-
-    console.log("hack", hack);
-    return hack;
-
     for (const email of emails) {
-      const fromAddress = email.from;
+      const fromAddress = email?.from;
       if (!fromAddress) continue;
 
       for (const entry of entries) {
+        if (!entry) continue;
         for (const emailPattern of entry.emailPatterns) {
           if (matchesEmailPattern(fromAddress, emailPattern)) {
             const key = entry.patternUri;
