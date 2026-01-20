@@ -1081,7 +1081,7 @@ export default pattern<{
 
     computed(() => {
       if (settings.debugMode) {
-        console.log("emails", emails.get().length);
+        console.log("retrieved emails", emails.get().length);
       }
     });
 
