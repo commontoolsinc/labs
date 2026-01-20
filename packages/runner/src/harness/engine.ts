@@ -254,7 +254,12 @@ export class Engine extends EventTarget implements Harness {
   // Parse an error stack trace, mapping all positions back to original sources.
   // Returns the original stack if internals haven't been initialized.
   parseStack(stack: string): string {
-    if (!this.internals) return stack;
+    if (!this.internals) {
+      console.warn(
+        "[source-map] Engine.parseStack: internals not initialized, returning original stack",
+      );
+      return stack;
+    }
     return this.internals.isolate.parseStack(stack);
   }
 
