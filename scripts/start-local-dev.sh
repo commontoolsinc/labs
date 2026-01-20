@@ -3,6 +3,9 @@
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR/.."
 
+# Source shared utilities
+source "$SCRIPT_DIR/common/port-utils.sh"
+
 # Parse command line arguments
 FORCE=false
 while [[ $# -gt 0 ]]; do
@@ -17,45 +20,26 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Cross-platform function to get PIDs listening on a port
-# Works on both macOS (lsof) and Linux (ss)
-get_pids_on_port() {
-    local port=$1
-    local pids=""
-
-    if command -v lsof &>/dev/null; then
-        # macOS and Linux with lsof installed
-        pids=$(lsof -Pi :$port -sTCP:LISTEN -t 2>/dev/null)
-    elif command -v ss &>/dev/null; then
-        # Linux with ss (part of iproute2, commonly available)
-        pids=$(ss -tlnp "sport = :$port" 2>/dev/null | grep -oP 'pid=\K\d+' | sort -u)
-    elif command -v fuser &>/dev/null; then
-        # Fallback to fuser
-        pids=$(fuser $port/tcp 2>/dev/null | tr -s ' ' '\n' | grep -v '^$')
-    fi
-
-    echo "$pids"
-}
-
-# check if port 8000 + 5173 are free
-# if not, throw error or kill processes if force flag is set
+# Check if port is free; kill processes if --force, otherwise error
 check_port() {
     local port=$1
-    local pids=$(get_pids_on_port $port)
+    local pids
+    pids=$(get_pids_on_port "$port")
+
     if [[ -n "$pids" ]]; then
         if [[ "$FORCE" == "true" ]]; then
             echo "Port $port is in use, killing processes: $pids"
             echo "$pids" | xargs kill 2>/dev/null
             sleep 1
-            # Check if processes are still running and force kill if needed
-            local remaining_pids=$(get_pids_on_port $port)
-            if [[ -n "$remaining_pids" ]]; then
-                echo "Force killing remaining processes on port $port: $remaining_pids"
-                echo "$remaining_pids" | xargs kill -9 2>/dev/null
+            # Force kill if still running
+            pids=$(get_pids_on_port "$port")
+            if [[ -n "$pids" ]]; then
+                echo "Force killing remaining processes: $pids"
+                echo "$pids" | xargs kill -9 2>/dev/null
                 sleep 1
             fi
         else
-            echo "Error: Port $port is already in use"
+            echo "Error: Port $port is already in use" >&2
             exit 1
         fi
     fi
