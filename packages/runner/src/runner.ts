@@ -1672,7 +1672,7 @@ export class Runner {
   }
 
   private instantiateRecipeNode(
-    _tx: IExtendedStorageTransaction,
+    tx: IExtendedStorageTransaction,
     module: Module,
     inputBindings: JSONValue,
     outputBindings: JSONValue,
@@ -1687,71 +1687,51 @@ export class Runner {
     );
     const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
 
-    // Determine if output bindings point to an existing cell
-    const useExistingCell = isSigilLink(outputBindings) &&
-      !isWriteRedirectLink(outputBindings);
-
-    // Track result cell for cleanup
-    let resultCell: Cell<any> | undefined;
-    let hasRun = false;
-
-    // Create an action that sets up and runs the nested recipe
-    const action: Action = (actionTx: IExtendedStorageTransaction) => {
-      // Guard: only run once since the recipe handles its own reactivity
-      if (hasRun) return;
-      hasRun = true;
-      // If output bindings is a link to a non-redirect cell,
-      // use that instead of creating a new cell.
-      let sendToBindings: boolean;
-      if (useExistingCell) {
-        resultCell = this.runtime.getCellFromLink(
-          parseLink(outputBindings, processCell),
-          recipeImpl.resultSchema,
-          actionTx,
-        );
-        sendToBindings = false;
-      } else {
-        resultCell = this.runtime.getCell(
-          processCell.space,
-          {
-            recipe: module.implementation,
-            parent: processCell.entityId,
-            inputBindings,
-            outputBindings,
-          },
-          recipeImpl.resultSchema,
-          actionTx,
-        );
-        sendToBindings = true;
-      }
-
-      // Run the nested recipe without the $TYPE watcher to prevent infinite loops.
-      // Nested recipes don't need to watch for recipe changes - their parent manages lifecycle.
-      this.run(actionTx, recipeImpl, inputs, resultCell, {
-        doNotUpdateOnPatternChange: true,
-      });
-
-      if (sendToBindings) {
-        sendValueToBinding(
-          actionTx,
-          processCell,
+    // If output bindings is a link to a non-redirect cell,
+    // use that instead of creating a new cell.
+    let resultCell;
+    let sendToBindings: boolean;
+    if (isSigilLink(outputBindings) && !isWriteRedirectLink(outputBindings)) {
+      resultCell = this.runtime.getCellFromLink(
+        parseLink(outputBindings, processCell),
+        recipeImpl.resultSchema,
+        tx,
+      );
+      sendToBindings = false;
+    } else {
+      resultCell = this.runtime.getCell(
+        processCell.space,
+        {
+          recipe: module.implementation,
+          parent: processCell.entityId,
+          inputBindings,
           outputBindings,
-          resultCell.getAsLink({ base: processCell }),
-        );
-      }
-    };
+        },
+        recipeImpl.resultSchema,
+        tx,
+      );
+      sendToBindings = true;
+    }
 
-    // Subscribe with no dependencies - runs once, recipe handles its own reactivity
-    addCancel(
-      this.runtime.scheduler.subscribe(action, { reads: [], writes: [] }),
-    );
+    // Run the nested recipe without the $TYPE watcher to prevent infinite loops.
+    // Nested recipes don't need to watch for recipe changes - their parent manages lifecycle.
+    this.run(tx, recipeImpl, inputs, resultCell, {
+      doNotUpdateOnPatternChange: true,
+    });
+
+    if (sendToBindings) {
+      sendValueToBinding(
+        tx,
+        processCell,
+        outputBindings,
+        resultCell.getAsLink({ base: processCell }),
+      );
+    }
 
     // TODO(seefeld): Make sure to not cancel after a recipe is elevated to a
     // charm, e.g. via navigateTo. Nothing is cancelling right now, so leaving
     // this as TODO.
-    addCancel(() => {
-      if (resultCell) this.stop(resultCell);
-    });
+    addCancel(() => this.stop(resultCell));
   }
 }
 
