@@ -376,16 +376,20 @@ export default pattern<PatternInput, PatternOutput>(() => {
               null,
             )}
 
-            {/* Label status with Load Labels button */}
+            {/* Label status - only show when there's a problem or loading */}
             {ifElse(
-              isReady,
+              derive(
+                { isReady, taskCurrentLabelId, loadingLabels },
+                ({ isReady, taskCurrentLabelId, loadingLabels }) =>
+                  isReady && (!taskCurrentLabelId || loadingLabels),
+              ),
               <div
                 style={{
                   padding: "8px 12px",
-                  backgroundColor: taskCurrentLabelId ? "#f0fdf4" : "#fef3c7",
+                  backgroundColor: "#fef3c7",
                   borderRadius: "6px",
                   fontSize: "13px",
-                  color: taskCurrentLabelId ? "#166534" : "#b45309",
+                  color: "#b45309",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
@@ -394,13 +398,9 @@ export default pattern<PatternInput, PatternOutput>(() => {
                 {ifElse(
                   loadingLabels,
                   <span>Loading labels...</span>,
-                  ifElse(
-                    taskCurrentLabelId,
-                    <span>task-current label ready</span>,
-                    <span>
-                      task-current label not found - click Load Labels
-                    </span>,
-                  ),
+                  <span>
+                    task-current label not found - click Load Labels
+                  </span>,
                 )}
                 <button
                   type="button"
