@@ -7,9 +7,20 @@ import type {
   State,
   URI,
 } from "@commontools/memory/interface";
-import { SchemaObjectTraverser } from "../src/traverse.ts";
+import {
+  CompoundCycleTracker,
+  getAtPath,
+  MapSet,
+  type PointerCycleTracker,
+  SchemaObjectTraverser,
+  type SchemaPathSelector,
+} from "../src/traverse.ts";
 import { StoreObjectManager } from "../src/storage/query.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
+import type { JSONSchema, JSONValue } from "../src/builder/types.ts";
+import type { Immutable } from "@commontools/utils/types";
+import { ContextualFlowControl } from "../src/cfc.ts";
+import type { SchemaContext } from "@commontools/memory/interface";
+import { deepEqual } from "@commontools/utils/deep-equal";
 
 describe("SchemaObjectTraverser.traverseDAG", () => {
   it("follows legacy cell links when traversing", () => {
@@ -190,5 +201,65 @@ describe("SchemaObjectTraverser array traversal", () => {
     });
 
     expect(result).toBeUndefined();
+  });
+});
+
+describe("getAtPath array index validation", () => {
+  it("rejects leading-zero array index like '01'", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-getAtPath" as URI;
+    const docEntity = docUri as Entity;
+
+    // Array with three elements
+    const docValue = ["zero", "one", "two"];
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const manager = new StoreObjectManager(store);
+    const tracker: PointerCycleTracker = new CompoundCycleTracker<
+      Immutable<JSONValue>,
+      SchemaContext | undefined
+    >();
+    const cfc = new ContextualFlowControl();
+    const schemaTracker = new MapSet<string, SchemaPathSelector>(deepEqual);
+
+    const doc = {
+      address: { id: docUri, type, path: ["value"] },
+      value: docValue,
+    };
+
+    // Navigate with invalid index "01"
+    const [result1] = getAtPath(
+      manager,
+      doc,
+      ["01"],
+      tracker,
+      cfc,
+      schemaTracker,
+    );
+
+    // Navigate with valid index "1"
+    const [result2] = getAtPath(
+      manager,
+      doc,
+      ["1"],
+      tracker,
+      cfc,
+      schemaTracker,
+    );
+
+    // "01" is not a valid array index (leading zero), should return undefined
+    // BUG: Current code returns "one" because new Number("01").valueOf() === 1
+    expect(result1.value).toBeUndefined();
+    // "1" is a valid array index, should return "one"
+    expect(result2.value).toBe("one");
   });
 });

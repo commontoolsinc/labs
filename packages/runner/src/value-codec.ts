@@ -1,6 +1,71 @@
 import { isInstance, isRecord } from "@commontools/utils/types";
 
 /**
+ * Character code for digit `0`.
+ */
+const CHAR_CODE_0 = "0".charCodeAt(0);
+
+/**
+ * Indicates whether the given string to be used as a property name (for an
+ * object or array) is syntactically valid as an array index per se.
+ *
+ * @param name - The property name to check
+ * @returns `true` if `name` when used on an array would access an indexed
+ *   element of that array.
+ */
+export function isArrayIndexPropertyName(name: string): boolean {
+  switch (name[0]) {
+    case undefined: {
+      // Empty string.
+      return false;
+    }
+    case "0": {
+      // Only valid if the string is `0` per se.
+      return (name === "0");
+    }
+    case "1":
+    case "2":
+    case "3":
+    case "4":
+    case "5":
+    case "6":
+    case "7":
+    case "8":
+    case "9": {
+      // `break` for more detailed check below.
+      break;
+    }
+    default: {
+      return false;
+    }
+  }
+
+  const length = name.length;
+
+  if (length > 10) {
+    // Don't bother with anything more if the name is too long to possibly be a
+    // valid index.
+    return false;
+  }
+
+  // Check that all characters are (normal) digits, and parse it for a final
+  // range check. (NB: Benchmarking shows that doing it this way is
+  // significantly faster than using a regex test and a final `parseInt()` for
+  // the range check.
+  let num = 0;
+  for (let i = 0; i < length; i++) {
+    const digit = name.charCodeAt(i) - CHAR_CODE_0;
+    if ((digit < 0) || (digit > 9)) {
+      return false;
+    }
+    num = (num * 10) + digit;
+  }
+
+  // Only accept in-range values.
+  return (num < (2 ** 31));
+}
+
+/**
  * Converts specially-recognized class instances to their designated storable
  * form. Returns `null` if the value is not one of the recognized types.
  *
