@@ -149,8 +149,17 @@ const ACCOUNT_COLORS = [
   "#57534e",
 ];
 
-// Bank of America Bill Pay sender
-const BOFA_GMAIL_QUERY = "from:billpay@billpay.bankofamerica.com";
+// Bank of America sends from various addresses - capture the main patterns
+const _BOFA_SENDERS = [
+  "billpay@billpay.bankofamerica.com",
+  "onlinebanking@ealerts.bankofamerica.com",
+  "ealerts@ealerts.bankofamerica.com",
+  "alerts@bankofamerica.com",
+] as const;
+
+// Gmail query to find Bank of America emails
+const BOFA_GMAIL_QUERY =
+  "from:billpay@billpay.bankofamerica.com OR from:onlinebanking@ealerts.bankofamerica.com OR from:ealerts@ealerts.bankofamerica.com OR from:alerts@bankofamerica.com";
 
 // Schema for LLM email analysis
 const EMAIL_ANALYSIS_SCHEMA = {
@@ -382,7 +391,7 @@ export default pattern<PatternInput, PatternOutput>(
     const bofaEmails = computed(() => {
       return (allEmails || []).filter((e: Email) => {
         const from = (e.from || "").toLowerCase();
-        return from.includes("billpay.bankofamerica.com");
+        return from.includes("bankofamerica.com");
       });
     });
 
