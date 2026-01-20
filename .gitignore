@@ -1,5 +1,3 @@
-target
-.wireit
 node_modules
 dist
 lib
@@ -10,7 +8,6 @@ __pycache__
 cache
 artifact
 _deno.lock
-packages/seeder/results
 .claude-prompt.tmp
 .pr-desc.tmp
 dist/
