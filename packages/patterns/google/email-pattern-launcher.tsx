@@ -580,9 +580,6 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
                           />
                         </div>
                       )}
-                      <div>
-                        Pattern <div>{patternInfo.result}</div>
-                      </div>
                     </div>
                   ))}
                 </ct-vstack>
