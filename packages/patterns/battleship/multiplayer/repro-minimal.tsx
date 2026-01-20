@@ -67,14 +67,14 @@ interface Coordinate {
 interface Item {
   id: number;
   name: string;
-  start: Coordinate; // Nested object
-  hits: boolean[]; // Nested array
+  start: Coordinate;  // Nested object
+  hits: boolean[];    // Nested array
 }
 
 /** Container holds an array of Items - the items array elements become undefined */
 interface Container {
   label: string;
-  items: Item[]; // <-- BUG: elements of this array are undefined when read cross-session
+  items: Item[];  // <-- BUG: elements of this array are undefined when read cross-session
 }
 
 // ============================================================================
@@ -89,71 +89,57 @@ interface ChildInput {
   whichPlayer: 1 | 2;
 }
 
-const Child = pattern<ChildInput, object>(
-  ({ myData, otherData, whichPlayer }) => {
-    /**
-     * CHECK OTHER DATA - This demonstrates the bug!
-     * When otherData was set by a different browser session,
-     * the array elements are undefined even though the array has length > 0.
-     */
-    const checkOther = action(() => {
-      console.log(`[Child P${whichPlayer}] Checking OTHER player's data...`);
-      const other = otherData.get();
-      console.log("[Child] otherData:", other);
-      console.log("[Child] otherData.items:", other?.items);
-      console.log("[Child] otherData.items.length:", other?.items?.length);
-      if (other?.items && other.items.length > 0) {
-        // BUG: These all log undefined even though items.length is 2
-        console.log("[Child] otherData.items[0]:", other.items[0]);
-        console.log("[Child] otherData.items[0]?.id:", other.items[0]?.id);
-        console.log(
-          "[Child] otherData.items[0]?.start:",
-          other.items[0]?.start,
-        );
-        console.log(
-          "[Child] otherData.items[0]?.start?.row:",
-          other.items[0]?.start?.row,
-        );
-      }
-    });
+const Child = pattern<ChildInput, object>(({ myData, otherData, whichPlayer }) => {
+  /**
+   * CHECK OTHER DATA - This demonstrates the bug!
+   * When otherData was set by a different browser session,
+   * the array elements are undefined even though the array has length > 0.
+   */
+  const checkOther = action(() => {
+    console.log(`[Child P${whichPlayer}] Checking OTHER player's data...`);
+    const other = otherData.get();
+    console.log("[Child] otherData:", other);
+    console.log("[Child] otherData.items:", other?.items);
+    console.log("[Child] otherData.items.length:", other?.items?.length);
+    if (other?.items && other.items.length > 0) {
+      // BUG: These all log undefined even though items.length is 2
+      console.log("[Child] otherData.items[0]:", other.items[0]);
+      console.log("[Child] otherData.items[0]?.id:", other.items[0]?.id);
+      console.log("[Child] otherData.items[0]?.start:", other.items[0]?.start);
+      console.log("[Child] otherData.items[0]?.start?.row:", other.items[0]?.start?.row);
+    }
+  });
 
-    /**
-     * CHECK MY DATA - This works correctly!
-     * When myData was set by THIS browser session, everything resolves properly.
-     */
-    const checkMine = action(() => {
-      console.log(`[Child P${whichPlayer}] Checking MY data...`);
-      const mine = myData.get();
-      console.log("[Child] myData:", mine);
-      console.log("[Child] myData.items:", mine?.items);
-      console.log("[Child] myData.items.length:", mine?.items?.length);
-      if (mine?.items && mine.items.length > 0) {
-        // WORKS: These all resolve correctly
-        console.log("[Child] myData.items[0]:", mine.items[0]);
-        console.log("[Child] myData.items[0]?.id:", mine.items[0]?.id);
-      }
-    });
+  /**
+   * CHECK MY DATA - This works correctly!
+   * When myData was set by THIS browser session, everything resolves properly.
+   */
+  const checkMine = action(() => {
+    console.log(`[Child P${whichPlayer}] Checking MY data...`);
+    const mine = myData.get();
+    console.log("[Child] myData:", mine);
+    console.log("[Child] myData.items:", mine?.items);
+    console.log("[Child] myData.items.length:", mine?.items?.length);
+    if (mine?.items && mine.items.length > 0) {
+      // WORKS: These all resolve correctly
+      console.log("[Child] myData.items[0]:", mine.items[0]);
+      console.log("[Child] myData.items[0]?.id:", mine.items[0]?.id);
+    }
+  });
 
-    return {
-      [NAME]: computed(() => `Child P${whichPlayer}`),
-      [UI]: (
-        <div
-          style={{ padding: "20px", backgroundColor: "#1e293b", color: "#fff" }}
-        >
-          <h2>Child Pattern - Player {whichPlayer}</h2>
-          <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
-            <ct-button onClick={() => checkMine.send()}>
-              Check MY Data
-            </ct-button>
-            <ct-button onClick={() => checkOther.send()}>
-              Check OTHER Data
-            </ct-button>
-          </div>
+  return {
+    [NAME]: computed(() => `Child P${whichPlayer}`),
+    [UI]: (
+      <div style={{ padding: "20px", backgroundColor: "#1e293b", color: "#fff" }}>
+        <h2>Child Pattern - Player {whichPlayer}</h2>
+        <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
+          <ct-button onClick={() => checkMine.send()}>Check MY Data</ct-button>
+          <ct-button onClick={() => checkOther.send()}>Check OTHER Data</ct-button>
         </div>
-      ),
-    };
-  },
-);
+      </div>
+    ),
+  };
+});
 
 // ============================================================================
 // Parent Pattern - owns cells WITH Default<> wrappers (type mismatch with child)
@@ -168,60 +154,38 @@ interface ParentInput {
   data2: Writable<Default<Container | null, null>>;
 }
 
-let nav:
-  | ((
-    myData: Writable<Container | null>,
-    otherData: Writable<Container | null>,
-    whichPlayer: 1 | 2,
-  ) => unknown)
-  | null = null;
+let nav: ((
+  myData: Writable<Container | null>,
+  otherData: Writable<Container | null>,
+  whichPlayer: 1 | 2,
+) => unknown) | null = null;
 
 const joinAsP1 = handler<
-  void,
+  unknown,
   { data1: Writable<Container | null>; data2: Writable<Container | null> }
 >((_e, { data1, data2 }) => {
   const items = [
-    {
-      id: 1,
-      name: "P1-Ship1",
-      start: { row: 0, col: 0 },
-      hits: [false, false, false],
-    },
-    {
-      id: 2,
-      name: "P1-Ship2",
-      start: { row: 2, col: 3 },
-      hits: [false, false],
-    },
+    { id: 1, name: "P1-Ship1", start: { row: 0, col: 0 }, hits: [false, false, false] },
+    { id: 2, name: "P1-Ship2", start: { row: 2, col: 3 }, hits: [false, false] },
   ];
   console.log("[Parent] P1 joining with items:", items);
   data1.set({ label: "Player 1", items });
   console.log("[Parent] P1 navigating to child...");
-  if (nav) return nav(data1, data2, 1); // My data = data1, Other = data2
+  if (nav) return nav(data1, data2, 1);  // My data = data1, Other = data2
 });
 
 const joinAsP2 = handler<
-  void,
+  unknown,
   { data1: Writable<Container | null>; data2: Writable<Container | null> }
 >((_e, { data1, data2 }) => {
   const items = [
-    {
-      id: 10,
-      name: "P2-Ship1",
-      start: { row: 5, col: 5 },
-      hits: [false, false, false, false],
-    },
-    {
-      id: 11,
-      name: "P2-Ship2",
-      start: { row: 7, col: 1 },
-      hits: [false, false, false],
-    },
+    { id: 10, name: "P2-Ship1", start: { row: 5, col: 5 }, hits: [false, false, false, false] },
+    { id: 11, name: "P2-Ship2", start: { row: 7, col: 1 }, hits: [false, false, false] },
   ];
   console.log("[Parent] P2 joining with items:", items);
   data2.set({ label: "Player 2", items });
   console.log("[Parent] P2 navigating to child...");
-  if (nav) return nav(data2, data1, 2); // My data = data2, Other = data1
+  if (nav) return nav(data2, data1, 2);  // My data = data2, Other = data1
 });
 
 const Parent = pattern<ParentInput, object>(({ data1, data2 }) => ({

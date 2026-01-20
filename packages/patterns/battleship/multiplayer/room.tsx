@@ -109,10 +109,26 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
         : player2.get();
       if (!opponentData) return;
 
+      // Debug: Log the raw ships data to understand reactive proxy behavior
+      console.log("[fireShot] opponentData:", opponentData);
+      console.log("[fireShot] opponentData.ships:", opponentData.ships);
+      console.log(
+        "[fireShot] ships array length:",
+        opponentData.ships?.length,
+      );
+      if (opponentData.ships && opponentData.ships.length > 0) {
+        console.log("[fireShot] first ship element:", opponentData.ships[0]);
+        console.log(
+          "[fireShot] first ship type:",
+          opponentData.ships[0]?.type,
+        );
+      }
+
       // Get ships array, filtering out any undefined elements (can happen with reactive proxies)
       const ships = (opponentData.ships || []).filter(
         (s): s is NonNullable<typeof s> => s != null && s.type != null,
       );
+      console.log("[fireShot] filtered ships length:", ships.length);
       if (ships.length === 0) {
         console.warn("[fireShot] No valid ships found in opponent data");
         return;
@@ -192,7 +208,10 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
         return [];
       }
 
-      const myShips = playerData.ships || [];
+      // Filter out undefined ship elements (reactive proxy issue across pattern boundaries)
+      const myShips = (playerData.ships || []).filter(
+        (s): s is NonNullable<typeof s> => s != null && s.type != null,
+      );
       const myShots = currentShots[playerNum] || [];
       const shipPositions = buildShipPositions(myShips);
 
