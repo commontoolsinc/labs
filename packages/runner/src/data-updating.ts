@@ -1,5 +1,5 @@
 import { isRecord } from "@commontools/utils/types";
-import { toStorableValue } from "./value-codec.ts";
+import { isArrayIndexPropertyName, toStorableValue } from "./value-codec.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import { createRef } from "./create-ref.ts";
@@ -624,15 +624,15 @@ function hasPath(value: unknown, path: readonly string[]): boolean {
   const [first, ...rest] = path;
 
   if (Array.isArray(value)) {
-    const index = parseInt(first, 10);
-    if (isNaN(index) || index < 0 || index >= value.length) {
-      // Special case: "length" is always present on arrays
-      if (first === "length" && rest.length === 0) return true;
-      return false;
-    }
-    // Check if index actually exists (handles sparse arrays with holes)
-    if (!(index in value)) return false;
-    return hasPath(value[index], rest);
+    // Special case: "length" is always present on arrays
+    if (first === "length" && rest.length === 0) return true;
+    // Only valid array index strings can access array elements
+    if (!isArrayIndexPropertyName(first)) return false;
+    // Access with string key works for arrays (array["1"] === array[1]).
+    // JSON arrays can't be sparse or contain `undefined`, so `undefined`
+    // means the index is out of range.
+    const element = (value as unknown as Record<string, unknown>)[first];
+    return element !== undefined && hasPath(element, rest);
   }
 
   const obj = value as Record<string, unknown>;
