@@ -1905,6 +1905,8 @@ export class Scheduler {
 
     if (this.errorHandlers.size === 0) {
       console.error("Uncaught error in action:", errorWithContext);
+    } else {
+      console.error("Error in action:", errorWithContext);
     }
   }
 
