@@ -8,8 +8,8 @@
  * Features:
  * - Embeds gmail-importer directly for BoA emails
  * - Extracts bill information using LLM from email markdown content
- * - Tracks payment confirmations to auto-mark bills as paid
  * - Supports manual "Mark as Paid" for local tracking
+ * - "Likely paid" heuristic for old bills (BoA doesn't send payment confirmations)
  * - Groups bills by account (last 4 digits)
  *
  * Usage:
