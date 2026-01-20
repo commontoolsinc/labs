@@ -135,6 +135,65 @@ interface TrackedTrip {
 // United sends from various addresses
 const UNITED_GMAIL_QUERY = "from:united.com";
 
+// 32 distinct colors for flight number badges (to reduce collisions)
+const FLIGHT_COLORS = [
+  // Blues (United brand-ish)
+  "#3b82f6",
+  "#2563eb",
+  "#1d4ed8",
+  "#1e40af",
+  // Indigos & purples
+  "#6366f1",
+  "#4f46e5",
+  "#8b5cf6",
+  "#7c3aed",
+  // Teals & cyans
+  "#14b8a6",
+  "#0d9488",
+  "#06b6d4",
+  "#0891b2",
+  // Greens
+  "#22c55e",
+  "#16a34a",
+  "#84cc16",
+  "#65a30d",
+  // Oranges & ambers
+  "#f97316",
+  "#ea580c",
+  "#f59e0b",
+  "#d97706",
+  // Reds & pinks
+  "#ef4444",
+  "#dc2626",
+  "#ec4899",
+  "#db2777",
+  // More blues & slates
+  "#0ea5e9",
+  "#0284c7",
+  "#64748b",
+  "#475569",
+  // More purples
+  "#a855f7",
+  "#9333ea",
+  "#d946ef",
+  "#c026d3",
+];
+
+/**
+ * Get a consistent color for a flight number.
+ * Same flight number always gets the same color.
+ */
+function getFlightColor(flightNumber: string | undefined): string {
+  if (!flightNumber || typeof flightNumber !== "string") {
+    return FLIGHT_COLORS[0];
+  }
+  let hash = 0;
+  for (let i = 0; i < flightNumber.length; i++) {
+    hash = (hash * 31 + flightNumber.charCodeAt(i)) % 32;
+  }
+  return FLIGHT_COLORS[hash];
+}
+
 // Schema for LLM email analysis
 const EMAIL_ANALYSIS_SCHEMA = {
   type: "object",
@@ -1035,8 +1094,13 @@ Extract:
                         <span
                           style={{
                             fontWeight: "700",
-                            fontSize: "16px",
-                            color: "#111827",
+                            fontSize: "14px",
+                            color: "white",
+                            backgroundColor: computed(() =>
+                              getFlightColor(flight.flightNumber)
+                            ),
+                            padding: "3px 10px",
+                            borderRadius: "4px",
                           }}
                         >
                           {flight.flightNumber}
@@ -1158,8 +1222,13 @@ Extract:
                         <span
                           style={{
                             fontWeight: "700",
-                            fontSize: "16px",
-                            color: "#111827",
+                            fontSize: "14px",
+                            color: "white",
+                            backgroundColor: computed(() =>
+                              getFlightColor(flight.flightNumber)
+                            ),
+                            padding: "3px 10px",
+                            borderRadius: "4px",
                           }}
                         >
                           {flight.flightNumber}
@@ -1286,8 +1355,13 @@ Extract:
                         <span
                           style={{
                             fontWeight: "700",
-                            fontSize: "18px",
-                            color: "#1d4ed8",
+                            fontSize: "14px",
+                            color: "white",
+                            backgroundColor: computed(() =>
+                              getFlightColor(flight.flightNumber)
+                            ),
+                            padding: "3px 10px",
+                            borderRadius: "4px",
                           }}
                         >
                           {flight.flightNumber}
@@ -1511,19 +1585,29 @@ Extract:
                           alignItems: "center",
                         }}
                       >
-                        <div>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "10px",
+                          }}
+                        >
                           <span
                             style={{
                               fontWeight: "600",
-                              fontSize: "14px",
-                              color: "#374151",
+                              fontSize: "12px",
+                              color: "white",
+                              backgroundColor: computed(() =>
+                                getFlightColor(flight.flightNumber)
+                              ),
+                              padding: "2px 8px",
+                              borderRadius: "4px",
                             }}
                           >
                             {flight.flightNumber}
                           </span>
                           <span
                             style={{
-                              marginLeft: "12px",
                               color: "#6b7280",
                               fontSize: "14px",
                             }}
