@@ -97,7 +97,7 @@ interface TrackedBill {
  * DEMO_MODE: When true, all dollar amounts are hashed to fake values
  * for privacy during demos. This ensures no real financial data is shown.
  */
-const DEMO_MODE = true;
+const DEMO_MODE = false;
 
 /**
  * Bills older than this threshold (in days overdue) are assumed "likely paid"
@@ -176,7 +176,7 @@ const EMAIL_ANALYSIS_SCHEMA = {
         "other",
       ],
       description:
-        "Type of Bank of America email: bill_due for payment due notifications, payment_received for payment confirmations, payment_reminder for upcoming due reminders, statement_ready for new statement notifications, autopay_scheduled for autopay confirmation, other for unrelated emails",
+        "Type of Bank of America email: bill_due for payment due notifications, payment_reminder for upcoming due reminders, statement_ready for new statement notifications, autopay_scheduled for autopay confirmation, other for unrelated emails",
     },
     accountLast4: {
       type: "string",
@@ -195,7 +195,7 @@ const EMAIL_ANALYSIS_SCHEMA = {
     paymentDate: {
       type: "string",
       description:
-        "Date payment was received/processed in ISO format YYYY-MM-DD (for payment confirmations)",
+        "Date payment was received/processed in ISO format YYYY-MM-DD (not typically present in Bank of America emails)",
     },
     minimumPayment: {
       type: "number",
@@ -254,19 +254,6 @@ function calculateDaysUntilDue(
   return Math.ceil(
     (due.getTime() - referenceDate.getTime()) / (1000 * 60 * 60 * 24),
   );
-}
-
-/**
- * Parse a date string to milliseconds for comparison.
- * Returns NaN if invalid.
- */
-function parseDateToMs(dateStr: string): number {
-  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!match) return NaN;
-  const [, year, month, day] = match;
-  const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-  date.setHours(0, 0, 0, 0);
-  return date.getTime();
 }
 
 /**
@@ -427,7 +414,6 @@ ${email.markdownContent}
 Extract:
 1. The type of email:
    - bill_due: A notification that a payment is due
-   - payment_received: Confirmation that a payment was received/processed
    - payment_reminder: Reminder about upcoming due date
    - statement_ready: New statement is available
    - autopay_scheduled: Autopay confirmation
@@ -439,11 +425,9 @@ Extract:
 
 4. Due date - in YYYY-MM-DD format
 
-5. Payment date - for payment confirmations, in YYYY-MM-DD format
+5. Other details like minimum payment, statement balance, autopay status
 
-6. Other details like minimum payment, statement balance, autopay status
-
-7. Brief summary of what this email is about`;
+6. Brief summary of what this email is about`;
         }),
         schema: EMAIL_ANALYSIS_SCHEMA,
         model: "anthropic:claude-sonnet-4-5",
@@ -475,50 +459,18 @@ Extract:
 
     // ==========================================================================
     // BILL TRACKING
-    // Combine bill notifications and payment confirmations
+    // Build list of bills from email notifications
     // ==========================================================================
 
-    // Extract payment confirmations (to auto-mark bills as paid)
-    // Track ALL payment dates per account to match against bill due dates
-    // IMPORTANT: Use Set for deduplication, then sort for deterministic matching
-    const paymentConfirmations = computed(() => {
-      const confirmations: Record<string, Set<string>> = {}; // accountLast4 -> Set of paymentDates
-
-      for (const analysisItem of emailAnalyses || []) {
-        const result = analysisItem.result;
-        if (!result) continue;
-
-        if (
-          result.emailType === "payment_received" &&
-          result.accountLast4 &&
-          result.paymentDate
-        ) {
-          const key = result.accountLast4;
-          if (!confirmations[key]) {
-            confirmations[key] = new Set();
-          }
-          confirmations[key].add(result.paymentDate);
-        }
-      }
-
-      // Convert Sets to sorted arrays (oldest first) for deterministic matching
-      const result: Record<string, string[]> = {};
-      for (const accountKey of Object.keys(confirmations).sort()) {
-        result[accountKey] = [...confirmations[accountKey]].sort((a, b) =>
-          a.localeCompare(b)
-        );
-      }
-
-      return result;
-    });
+    // NOTE: Bank of America does not send payment confirmation emails, so there's
+    // no auto-detection of payments. Bills are marked paid via manual marking or
+    // the "likely paid" heuristic for old bills.
 
     // Process all analyses and build bill list
     const bills = computed(() => {
       const billMap: Record<string, TrackedBill> = {};
       // manuallyPaid is Writable - use .get() to access value
       const paidKeys = manuallyPaid.get() || [];
-      // Access the computed value - paymentConfirmations returns a Record of arrays
-      const payments = (paymentConfirmations || {}) as Record<string, string[]>;
 
       // CRITICAL: Create a single reference date for ALL calculations in this computed
       // This ensures deterministic results - calling new Date() multiple times would
@@ -570,31 +522,13 @@ Extract:
 
         const daysUntilDue = calculateDaysUntilDue(result.dueDate, today);
 
-        // Check if this bill has been paid (auto or manual)
+        // Check if this bill has been paid
         const isManuallyPaid = paidKeys.includes(key);
-        // Check if any payment was made within a reasonable window of the due date
-        // Payments are sorted chronologically (oldest first), so .find() is deterministic
-        const accountPayments = payments[result.accountLast4] || [];
-        const billDueDate = result.dueDate; // Already verified non-null above
-
-        // Find the first payment within the valid window (payments are sorted by date)
-        // Window: 30 days before due date to 60 days after
-        // Use parseDateToMs for deterministic date parsing (no new Date() calls)
-        const dueDateMs = parseDateToMs(billDueDate);
-        const matchingPayment = accountPayments.find((paymentDate) => {
-          const paymentMs = parseDateToMs(paymentDate);
-          if (isNaN(dueDateMs) || isNaN(paymentMs)) return false;
-          const daysDiff = (paymentMs - dueDateMs) / (1000 * 60 * 60 * 24);
-          return daysDiff >= -30 && daysDiff <= 60;
-        });
-
-        const autoPaid = !!matchingPayment;
-        // Bills past the threshold are "likely paid" - payment wasn't detected but
-        // it's very unlikely a bill this old is genuinely unpaid
+        // Bills past the threshold are "likely paid" - it's very unlikely
+        // a bill this old is genuinely unpaid
         const isLikelyPaid = !isManuallyPaid &&
-          !autoPaid &&
           daysUntilDue < LIKELY_PAID_THRESHOLD_DAYS;
-        const isPaid = isManuallyPaid || autoPaid || isLikelyPaid;
+        const isPaid = isManuallyPaid || isLikelyPaid;
 
         // Determine status
         let status: BillStatus;
@@ -615,7 +549,7 @@ Extract:
           dueDate: result.dueDate,
           status,
           isPaid,
-          paidDate: matchingPayment || undefined,
+          paidDate: undefined,
           emailDate: analysisItem.emailDate,
           emailId: analysisItem.emailId,
           isManuallyPaid,
