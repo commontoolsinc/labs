@@ -290,12 +290,14 @@ function formatDate(dateStr: string): string {
 }
 
 /**
- * Generate a unique event ID.
+ * Generate a deterministic event ID based on flight key and event type.
+ * This ensures stable IDs across re-renders for calendar integration.
  */
-function generateEventId(): string {
-  return `${Date.now().toString(36)}-${
-    Math.random().toString(36).slice(2, 11)
-  }`;
+function generateEventId(
+  flightKey: string,
+  eventType: "flight" | "travel-to" | "travel-from",
+): string {
+  return `${flightKey}-${eventType}`;
 }
 
 // =============================================================================
@@ -362,7 +364,7 @@ function generateFlightEvents(
       .filter(Boolean)
       .join("\n"),
     isHidden: false,
-    eventId: generateEventId(),
+    eventId: generateEventId(flight.key, "flight"),
     eventType: "flight",
     linkedFlightKey: flight.key,
   };
@@ -401,7 +403,7 @@ function generateFlightEvents(
         .filter(Boolean)
         .join("\n"),
       isHidden: false,
-      eventId: generateEventId(),
+      eventId: generateEventId(flight.key, "travel-to"),
       eventType: "travel-to",
       linkedFlightKey: flight.key,
     };
@@ -428,7 +430,7 @@ function generateFlightEvents(
         .filter(Boolean)
         .join("\n"),
       isHidden: false,
-      eventId: generateEventId(),
+      eventId: generateEventId(flight.key, "travel-from"),
       eventType: "travel-from",
       linkedFlightKey: flight.key,
     };
