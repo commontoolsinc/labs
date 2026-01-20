@@ -1789,11 +1789,13 @@ When you're done searching, STOP calling tools and produce your final structured
     // is false during tool execution (only true during initial prompt processing)
     const progressUI = (
       <div>
-        {/* Progress during scanning */}
+        {/* Progress during scanning - hide when scan is complete */}
         {derive(
-          [isScanning, searchProgress],
-          ([scanning, progress]: [boolean, SearchProgress]) =>
-            scanning && progress.status !== "idle" &&
+          [isScanning, searchProgress, scanCompleted],
+          (
+            [scanning, progress, completed]: [boolean, SearchProgress, boolean],
+          ) =>
+            scanning && !completed && progress.status !== "idle" &&
               progress.status !== "auth_error"
               ? (
                 <div
@@ -1972,10 +1974,11 @@ When you're done searching, STOP calling tools and produce your final structured
                     fontSize: "12px",
                     color: "#059669",
                     textAlign: "center",
-                    fontStyle: "italic",
                   }}
                 >
-                  {derive(agentResult, (r: any) => r?.summary || "")}
+                  <ct-markdown>
+                    {derive(agentResult, (r: any) => r?.summary || "")}
+                  </ct-markdown>
                 </div>
                 <ct-button
                   onClick={boundCompleteScan}
