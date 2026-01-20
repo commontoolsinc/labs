@@ -210,6 +210,7 @@ interface PatternInput {
 interface PatternOutput {
   notes: Note[];
   noteCount: number;
+  previewUI: unknown;
 }
 
 export default pattern<PatternInput, PatternOutput>(() => {
@@ -308,10 +309,50 @@ export default pattern<PatternInput, PatternOutput>(() => {
 
   const noteCount = computed(() => notes?.length || 0);
 
+  // Preview UI for compact display
+  const previewUI = (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "12px",
+        padding: "8px 12px",
+      }}
+    >
+      <div
+        style={{
+          width: "36px",
+          height: "36px",
+          borderRadius: "8px",
+          backgroundColor: "#eff6ff",
+          border: "2px solid #3b82f6",
+          color: "#1d4ed8",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontWeight: "bold",
+          fontSize: "16px",
+        }}
+      >
+        {noteCount}
+      </div>
+      <div>
+        <div style={{ fontWeight: "600", fontSize: "14px" }}>Email Notes</div>
+        <div style={{ fontSize: "12px", color: "#6b7280" }}>
+          {computed(() => {
+            const count = noteCount;
+            return count === 1 ? "1 note" : `${count} notes`;
+          })}
+        </div>
+      </div>
+    </div>
+  );
+
   return {
     [NAME]: "Email Notes",
     notes,
     noteCount,
+    previewUI,
 
     [UI]: (
       <ct-screen>
