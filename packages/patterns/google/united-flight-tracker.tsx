@@ -437,12 +437,12 @@ function parseFlightStatus(status: string | undefined): FlightStatus {
 // PATTERN
 // =============================================================================
 
-interface PatternInput {
+interface Input {
   linkedAuth?: Auth;
 }
 
 /** United Airlines flight tracker. #unitedFlights */
-interface PatternOutput {
+interface Output {
   emailCount: number;
   flights: TrackedFlight[];
   upcomingFlights: TrackedFlight[];
@@ -453,7 +453,7 @@ interface PatternOutput {
   previewUI: unknown;
 }
 
-export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
+export default pattern<Input, Output>(({ linkedAuth }) => {
   const gmailImporter = GmailImporter({
     settings: {
       gmailFilterQuery: UNITED_GMAIL_QUERY,
