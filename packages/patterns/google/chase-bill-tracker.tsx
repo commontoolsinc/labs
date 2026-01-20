@@ -1116,7 +1116,8 @@ Extract:
                             }}
                           >
                             Was due: {formatDate(bill.dueDate)} (
-                            {computed(() => Math.abs(bill.daysUntilDue))}{" "}
+                            {computed(() => Math.abs(bill.daysUntilDue ?? 0))}
+                            {" "}
                             days ago)
                           </div>
                         </div>
