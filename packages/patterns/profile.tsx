@@ -148,7 +148,7 @@ interface ProfileInput {
 }
 
 /** Profile blackboard for personal data coordination. #profile */
-export interface ProfileOutput {
+export interface Output {
   [NAME]: string;
   [UI]: VNode;
   self: Person;
@@ -163,6 +163,9 @@ export interface ProfileOutput {
   employment: Employment;
   notes: string;
 }
+
+/** @deprecated Use Output instead - this alias exists for backwards compatibility */
+export type ProfileOutput = Output;
 
 // ============================================================================
 // CONSTANTS
@@ -282,7 +285,7 @@ const bigAddButtonStyle = {
 // MAIN PATTERN
 // ============================================================================
 
-const Profile = pattern<ProfileInput, ProfileOutput>(
+const Profile = pattern<ProfileInput, Output>(
   ({
     self,
     partner,
