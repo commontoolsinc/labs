@@ -1362,20 +1362,21 @@ Note: If this is a forwarded email, look for the original library content within
                                   alignItems: "center",
                                 }}
                               >
-                                {/* Checkbox - pass item to handler for proper reactive resolution */}
-                                <div
-                                  style={{
-                                    cursor: "pointer",
-                                    userSelect: "none",
-                                    flexShrink: "0",
-                                  }}
-                                  onClick={toggleItemSelection({
+                                {/* Native checkbox for reliable one-way binding */}
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={toggleItemSelection({
                                     item,
                                     selectedItems,
                                   })}
-                                >
-                                  <ct-checkbox $checked={isChecked} />
-                                </div>
+                                  style={{
+                                    width: "18px",
+                                    height: "18px",
+                                    cursor: "pointer",
+                                    flexShrink: "0",
+                                  }}
+                                />
 
                                 {/* Book Info */}
                                 <div style={{ flex: 1 }}>
