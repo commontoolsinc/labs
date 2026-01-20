@@ -480,17 +480,12 @@ export default pattern<PatternInput, PatternOutput>(() => {
                           {derive(note, (n) => formatDate(n.date))}
                         </span>
                         <div style={{ display: "flex", gap: "8px" }}>
-                          {/* Copy button - copies plain text content */}
-                          {
-                            /* TODO: Use multi-MIME format once ct-copy-button update lands:
-                              text={derive(note, (n) => ({
-                                "text/plain": n.content,
-                                "text/html": n.htmlContent,
-                              }))}
-                          */
-                          }
+                          {/* Copy button - copies both plain text and HTML for rich pasting */}
                           <ct-copy-button
-                            text={derive(note, (n) => n.content)}
+                            text={derive(note, (n) => ({
+                              "text/plain": n.content,
+                              "text/html": n.htmlContent,
+                            }))}
                             variant="outline"
                             size="sm"
                           />
