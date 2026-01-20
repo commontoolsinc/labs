@@ -16,7 +16,7 @@ Use `Skill("ct")` for ct CLI documentation if debugging deployment or charm issu
 
 1. **Check TypeScript errors:**
    ```bash
-   deno task ct dev pattern.tsx --no-run
+   deno task ct check pattern.tsx --no-run
    ```
 
 2. **Match error to documentation:**

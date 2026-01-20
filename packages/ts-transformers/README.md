@@ -73,7 +73,7 @@ env FIXTURE=map-single-capture deno task test
 To see transformed output:
 
 ```bash
-deno task ct dev --show-transformed test/fixtures/closures/map-single-capture.input.tsx
+deno task ct check --show-transformed test/fixtures/closures/map-single-capture.input.tsx
 ```
 
 ### Adding New Transformations

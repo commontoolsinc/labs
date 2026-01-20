@@ -4,13 +4,13 @@
 
 ```bash
 # Check syntax only (fast)
-deno task ct dev pattern.tsx --no-run
+deno task ct check pattern.tsx --no-run
 
 # Run locally
-deno task ct dev pattern.tsx
+deno task ct check pattern.tsx
 
 # View transformer output (debug compile issues)
-deno task ct dev pattern.tsx --show-transformed
+deno task ct check pattern.tsx --show-transformed
 ```
 
 ## Deployed Testing

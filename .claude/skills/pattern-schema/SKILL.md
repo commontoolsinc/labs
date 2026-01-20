@@ -49,4 +49,4 @@ export interface ItemOutput {
 ## Done When
 - All data types defined with correct Writable/Default wrapping
 - All Input/Output types defined for each sub-pattern
-- No TypeScript errors: `deno task ct dev schemas.tsx --no-run`
+- No TypeScript errors: `deno task ct check schemas.tsx --no-run`

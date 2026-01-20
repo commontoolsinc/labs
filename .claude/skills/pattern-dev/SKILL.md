@@ -49,7 +49,7 @@ Don't create separate files for every entity. A `Project` with `Task[]` can live
 **Don't write finished code.** Write the minimum to see something work:
 
 1. **Sketch** — Types, one handler, minimal UI. Just enough to render.
-2. **Run it** — `deno task ct dev main.tsx` and see what happens.
+2. **Run it** — `deno task ct check main.tsx` and see what happens.
 3. **Verify** — Does it render? Does the handler fire? Check console.
 4. **Iterate** — Add the next piece, run again.
 
@@ -59,7 +59,7 @@ Each iteration should be deployable. If you can't run it, you've written too muc
 
 **Run the code, not just tests.** The primary verification is: does it work when you run it?
 
-- `deno task ct dev main.tsx` — See it render, click things, check console
+- `deno task ct check main.tsx` — See it render, click things, check console
 - Tests for state logic that's hard to verify by clicking
 - Don't write tests for obvious behavior or code that's still evolving
 
@@ -101,7 +101,7 @@ Task({
 
 **Not phases, just common sense:**
 
-1. **Build** — Use pattern-maker to sketch and iterate locally (`ct dev`)
+1. **Build** — Use pattern-maker to sketch and iterate locally (`ct check`)
 2. **Review** — Use pattern-critic before deploying to catch common mistakes
 3. **Deploy** — Use pattern-user to deploy to toolshed
 4. **Fix what's broken** — Iterate with maker, re-review, redeploy
