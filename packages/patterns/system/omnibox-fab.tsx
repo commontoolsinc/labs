@@ -156,7 +156,8 @@ export default pattern<OmniboxFABInput>(
           onct-fab-escape={closeFab({ fabExpanded })}
           onClick={toggle({ value: fabExpanded })}
         >
-          {fabExpanded.get() && (
+          {ifElse(
+            fabExpanded,
             <div style="width: 100%; display: flex; flex-direction: column; max-height: 580px;">
               {/* Chevron at top - the "handle" for the drawer */}
               <div style="border-bottom: 1px solid #e5e5e5; flex-shrink: 0;">
@@ -168,9 +169,18 @@ export default pattern<OmniboxFABInput>(
               </div>
 
               <div
-                style={showHistory.get()
-                  ? "flex: 1; min-height: 0; display: flex; flex-direction: column; opacity: 1; max-height: 480px; overflow: hidden; transition: opacity 300ms ease, max-height 400ms cubic-bezier(0.34, 1.56, 0.64, 1), flex 400ms cubic-bezier(0.34, 1.56, 0.64, 1); pointer-events: auto"
-                  : "flex: 0; min-height: 0; display: flex; flex-direction: column; opacity: 0; max-height: 0; overflow: hidden; transition: opacity 300ms ease, max-height 400ms cubic-bezier(0.34, 1.56, 0.64, 1), flex 400ms cubic-bezier(0.34, 1.56, 0.64, 1); pointer-events: none"}
+                style={computed(() => {
+                  const show = showHistory.get();
+                  return `flex: ${
+                    show ? "1" : "0"
+                  }; min-height: 0; display: flex; flex-direction: column; opacity: ${
+                    show ? "1" : "0"
+                  }; max-height: ${
+                    show ? "480px" : "0"
+                  }; overflow: hidden; transition: opacity 300ms ease, max-height 400ms cubic-bezier(0.34, 1.56, 0.64, 1), flex 400ms cubic-bezier(0.34, 1.56, 0.64, 1); pointer-events: ${
+                    show ? "auto" : "none"
+                  };`;
+                })}
               >
                 <div style="padding: .25rem; flex-shrink: 0;">
                   {omnibot.ui.attachmentsAndTools}
@@ -223,7 +233,8 @@ export default pattern<OmniboxFABInput>(
               <div style="padding: 0.5rem; flex-shrink: 0;">
                 {omnibot.ui.promptInput}
               </div>
-            </div>
+            </div>,
+            null,
           )}
         </ct-fab>
       ),
