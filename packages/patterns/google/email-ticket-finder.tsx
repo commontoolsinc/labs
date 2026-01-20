@@ -119,7 +119,7 @@ const TICKET_ANALYSIS_SCHEMA = {
     isTicket: {
       type: "boolean",
       description:
-        "True if this email contains an actual ticket, reservation, or event confirmation. False for support tickets, lottery tickets, parking tickets, or unrelated emails.",
+        "True ONLY if this email contains a CONFIRMED ticket with a confirmation/booking code. False for promotional emails, invitations to buy tickets, support tickets, lottery tickets, or anything without a clear confirmation code.",
     },
     ticketSource: {
       type: "string",
@@ -251,12 +251,26 @@ function calculateStatus(daysUntil: number): TicketStatus {
 }
 
 /**
+ * Validate and parse a date string in YYYY-MM-DD format.
+ * Returns null if invalid.
+ */
+function parseValidDate(dateStr: string | undefined): Date | null {
+  if (!dateStr) return null;
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  const [, year, month, day] = match;
+  const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+  if (isNaN(date.getTime())) return null;
+  return date;
+}
+
+/**
  * Format date for display.
  */
 function formatDate(dateStr: string | undefined): string {
-  if (!dateStr) return "N/A";
-  const [year, month, day] = dateStr.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
+  if (!dateStr) return "Date TBD";
+  const date = parseValidDate(dateStr);
+  if (!date) return "Date TBD";
   return date.toLocaleDateString("en-US", {
     weekday: "short",
     month: "short",
@@ -406,25 +420,33 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
           return undefined;
         }
 
-        return `Analyze this email and determine if it contains an actual ticket, reservation, or event confirmation.
+        return `Analyze this email and determine if it contains an ACTUAL CONFIRMED ticket or reservation.
 
-IMPORTANT: Only return isTicket=true for REAL tickets/reservations such as:
-- Flight/airline tickets and boarding passes
-- Train, bus, or ferry tickets
-- Concert, sports, theater, or movie tickets
-- Hotel reservations
-- Car rental confirmations
-- Conference/event registrations
-- Restaurant reservations
-- Tour bookings
+CRITICAL DISTINCTION - isTicket=true ONLY for CONFIRMED tickets with:
+- A confirmation/booking/reference code
+- A specific date and time for the event
+- Clear indication that a purchase/booking was completed
 
-Return isTicket=false for:
+CONFIRMED TICKETS (isTicket=true):
+- Flight tickets with PNR/confirmation code (e.g., "Your confirmation: ABC123")
+- Train/bus tickets with booking reference
+- Concert/sports/theater tickets that were PURCHASED (with order number)
+- Hotel reservations with confirmation number
+- Car rental confirmations with reservation number
+- Conference registrations with registration ID
+- Restaurant reservations with confirmation
+
+NOT TICKETS (isTicket=false):
+- Promotional emails ("Get your tickets!", "Buy now!", "Don't miss out!")
+- Event announcements or invitations without a confirmed purchase
+- Emails asking you to RSVP or register (not yet confirmed)
 - Support tickets / help desk tickets
-- Lottery tickets
+- Lottery tickets / sweepstakes
 - Parking tickets / violations
-- Promotional emails
-- Order confirmations for physical goods (unless they include event tickets)
-- Newsletters or marketing emails
+- Order confirmations for physical goods (not events)
+- Newsletters, marketing emails, or reminders to buy
+
+KEY RULE: If there's no confirmation code and no clear indication of a completed purchase, it's NOT a confirmed ticket.
 
 EMAIL SUBJECT: ${email.subject || ""}
 EMAIL DATE: ${email.date || ""}
@@ -434,15 +456,15 @@ EMAIL CONTENT:
 ${email.markdownContent.slice(0, 5000)}
 
 Extract:
-1. Is this a real ticket/reservation? (true/false)
+1. Is this a CONFIRMED ticket/reservation with a confirmation code? (true/false)
 2. Type of ticket (airline, concert, hotel, etc.)
 3. Event name (flight route, show name, hotel name, etc.)
-4. Event date in YYYY-MM-DD format
+4. Event date in YYYY-MM-DD format (MUST be a valid future or recent date)
 5. Event time in HH:MM format (if available)
 6. End date for multi-day events (hotel checkout, etc.)
 7. Location/destination
 8. Venue name
-9. Confirmation/booking code (VERY important - look carefully)
+9. Confirmation/booking code (REQUIRED for isTicket=true)
 10. Seat info if available
 11. Provider/company name
 12. Brief summary`;
@@ -502,6 +524,10 @@ Extract:
       const result = analysisItem.result;
       if (!result || !result.isTicket) continue;
       if (result.ticketSource === "not_a_ticket") continue;
+
+      // Skip tickets without a valid date (likely promotional emails that slipped through)
+      const eventDate = parseValidDate(result.eventDate);
+      if (!eventDate) continue;
 
       const key = createTicketKey(result);
 
