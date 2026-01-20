@@ -1039,23 +1039,17 @@ Extract:
                       fontWeight: "600",
                       fontSize: "16px",
                       marginBottom: "12px",
-                      color: "#92400e",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
+                      color: "#059669",
                     }}
                   >
-                    <span>
-                      Likely Paid ({computed(() =>
-                        likelyPaidBills?.length || 0
-                      )})
-                    </span>
+                    Likely Paid ({computed(() => likelyPaidBills?.length || 0)})
                     <span
                       title="Bills over 45 days old with no detected payment are likely already paid (payment email missing or card changed)"
                       style={{
                         fontSize: "14px",
-                        color: "#78716c",
+                        color: "#9ca3af",
                         cursor: "help",
+                        marginLeft: "8px",
                       }}
                     >
                       ⓘ
@@ -1063,18 +1057,14 @@ Extract:
                   </summary>
                   <div
                     style={{
-                      fontSize: "13px",
-                      color: "#78716c",
+                      fontSize: "12px",
+                      color: "#6b7280",
                       marginBottom: "12px",
-                      padding: "8px 12px",
-                      backgroundColor: "#fef9c3",
-                      borderRadius: "6px",
-                      border: "1px solid #eab308",
+                      fontStyle: "italic",
                     }}
                   >
-                    These bills are over 45 days old without detected payment.
-                    They're likely already paid. Click "Confirm Paid" to move
-                    them to your paid list.
+                    Old bills without detected payment. Click "Confirm Paid" to
+                    move to paid list.
                   </div>
                   <ct-vstack gap="2">
                     {likelyPaidBills.map((bill) => (
@@ -1083,10 +1073,10 @@ Extract:
                           display: "flex",
                           gap: "12px",
                           padding: "12px",
-                          backgroundColor: "#fef3c7",
+                          backgroundColor: "#d1fae5",
                           borderRadius: "8px",
-                          border: "1px solid #d97706",
-                          opacity: 0.85,
+                          border: "1px solid #10b981",
+                          opacity: 0.9,
                         }}
                       >
                         <div style={{ flex: 1 }}>
@@ -1102,7 +1092,7 @@ Extract:
                               style={{
                                 fontWeight: "600",
                                 fontSize: "16px",
-                                color: "#92400e",
+                                color: "#047857",
                               }}
                             >
                               {formatCurrency(bill.amount)}
@@ -1123,7 +1113,7 @@ Extract:
                           <div
                             style={{
                               fontSize: "12px",
-                              color: "#78716c",
+                              color: "#047857",
                             }}
                           >
                             Was due: {formatDate(bill.dueDate)} (
@@ -1139,7 +1129,7 @@ Extract:
                           })}
                           style={{
                             padding: "8px 14px",
-                            backgroundColor: "#10b981",
+                            backgroundColor: "#6b7280",
                             color: "white",
                             border: "none",
                             borderRadius: "6px",
