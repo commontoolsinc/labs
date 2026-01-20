@@ -366,15 +366,22 @@ IMPORTANT: Be strict about filtering. Only mark as a schedule change if it's cle
       changeList.push(change);
     }
 
-    // Sort by urgency (critical first) then by date
+    // Helper to get the relevant date for a change (same logic as urgency calculation)
+    const getRelevantDate = (change: ScheduleChange): string | undefined => {
+      return change.changeType === "cancelled" || change.changeType === "other"
+        ? change.originalDate
+        : change.newDate || change.originalDate;
+    };
+
+    // Sort by urgency (critical first) then by relevant date
     return changeList.sort((a, b) => {
       const urgencyOrder = { critical: 0, urgent: 1, normal: 2 };
       const urgencyDiff = urgencyOrder[a.urgency] - urgencyOrder[b.urgency];
       if (urgencyDiff !== 0) return urgencyDiff;
 
-      // Within same urgency, sort by original date
-      const dateA = parseDate(a.originalDate)?.getTime() || 0;
-      const dateB = parseDate(b.originalDate)?.getTime() || 0;
+      // Within same urgency, sort by relevant date (newDate for reschedules, originalDate for cancellations)
+      const dateA = parseDate(getRelevantDate(a))?.getTime() || 0;
+      const dateB = parseDate(getRelevantDate(b))?.getTime() || 0;
       return dateA - dateB;
     });
   });
