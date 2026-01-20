@@ -19,7 +19,6 @@
  */
 import {
   computed,
-  Default,
   generateObject,
   JSONSchema,
   NAME,
@@ -452,9 +451,15 @@ IMPORTANT: Be strict about filtering. Only mark as a schedule change if it's cle
             if (!hasChanges) return "Schedule: All Clear";
             const critical = criticalChanges?.length || 0;
             const urgent = urgentChanges?.length || 0;
-            if (critical > 0) return `${critical} Critical Change${critical !== 1 ? "s" : ""}!`;
-            if (urgent > 0) return `${urgent} Urgent Change${urgent !== 1 ? "s" : ""}`;
-            return `${changes?.length || 0} Schedule Change${(changes?.length || 0) !== 1 ? "s" : ""}`;
+            if (critical > 0) {
+              return `${critical} Critical Change${critical !== 1 ? "s" : ""}!`;
+            }
+            if (urgent > 0) {
+              return `${urgent} Urgent Change${urgent !== 1 ? "s" : ""}`;
+            }
+            return `${changes?.length || 0} Schedule Change${
+              (changes?.length || 0) !== 1 ? "s" : ""
+            }`;
           })}
         </div>
         <div
