@@ -665,6 +665,35 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
     const selectedCalendarIds = Writable.of<string[]>([]); // Empty = all selected on first fetch
     const PAGE_SIZE = 10;
 
+    // Pre-compute calendar selection state for efficient lookup
+    // Key insight: Can index computed objects with Cell values directly
+    const calendarSelectionMap = computed(() => {
+      const selected = selectedCalendarIds.get() ?? [];
+      const cals = calendars.get() ?? [];
+      const map: Record<string, boolean> = {};
+      for (const cal of cals) {
+        if (cal?.id) {
+          map[cal.id] = selected.includes(cal.id);
+        }
+      }
+      return map;
+    });
+
+    // Pre-compute calendar colors map for efficient lookup
+    const calendarColorsMap = computed(() => {
+      const cals = calendars.get() ?? [];
+      const map: Record<string, { bg: string; fg: string }> = {};
+      for (const cal of cals) {
+        if (cal?.id) {
+          map[cal.id] = {
+            bg: cal.backgroundColor || "#4285f4",
+            fg: cal.foregroundColor || "#ffffff",
+          };
+        }
+      }
+      return map;
+    });
+
     // Use createGoogleAuth utility for auth management
     const {
       auth: wishedAuth,
@@ -929,12 +958,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                   style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}
                 >
                   {calendars.map((cal) => {
-                    // Per-item reactive computation for selection state
-                    // Using computed() inside .map() is fine per framework author
-                    // Just don't call .get() on it
-                    const isSelected = computed(() =>
-                      selectedCalendarIds.get().includes(cal.id)
-                    );
+                    // Use pre-computed map - direct indexing works with Cell values
                     return (
                       <div
                         style={{
@@ -947,9 +971,9 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                           color: cal.foregroundColor,
                           fontSize: "12px",
                           cursor: "pointer",
-                          opacity: ifElse(isSelected, 1, 0.4),
+                          opacity: ifElse(calendarSelectionMap[cal.id], 1, 0.4),
                           textDecoration: ifElse(
-                            isSelected,
+                            calendarSelectionMap[cal.id],
                             "none",
                             "line-through",
                           ),
@@ -965,7 +989,11 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                           fetching,
                         })}
                       >
-                        {ifElse(isSelected, <span>✓</span>, <span />)}
+                        {ifElse(
+                          calendarSelectionMap[cal.id],
+                          <span>✓</span>,
+                          <span />,
+                        )}
                         {cal.primary ? <span>★</span> : null}
                         {cal.summary}
                       </div>
@@ -1018,31 +1046,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                     }}
                   >
                     {events.map((event) => {
-                      // Look up calendar colors for this event
-                      const bgColor = derive(
-                        { calendars, calendarId: event.calendarId },
-                        ({
-                          calendars: cals,
-                          calendarId,
-                        }: { calendars: Calendar[]; calendarId: string }) => {
-                          const cal = cals.find((c: Calendar) =>
-                            c.id === calendarId
-                          );
-                          return cal?.backgroundColor || "#4285f4";
-                        },
-                      );
-                      const fgColor = derive(
-                        { calendars, calendarId: event.calendarId },
-                        ({
-                          calendars: cals,
-                          calendarId,
-                        }: { calendars: Calendar[]; calendarId: string }) => {
-                          const cal = cals.find((c: Calendar) =>
-                            c.id === calendarId
-                          );
-                          return cal?.foregroundColor || "#ffffff";
-                        },
-                      );
+                      // Use pre-computed colors map - direct indexing works with Cell values
                       return (
                         <div
                           style={{
@@ -1062,8 +1066,12 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
                               style={{
                                 padding: "2px 8px",
                                 borderRadius: "12px",
-                                backgroundColor: bgColor,
-                                color: fgColor,
+                                backgroundColor:
+                                  calendarColorsMap[event.calendarId]?.bg ??
+                                    "#4285f4",
+                                color:
+                                  calendarColorsMap[event.calendarId]?.fg ??
+                                    "#ffffff",
                                 fontSize: "11px",
                                 whiteSpace: "nowrap",
                               }}
