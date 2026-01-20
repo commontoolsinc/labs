@@ -94,12 +94,6 @@ interface TrackedBill {
 // =============================================================================
 
 /**
- * DEMO_MODE: When true, all dollar amounts are hashed to fake values
- * for privacy during demos. This ensures no real financial data is shown.
- */
-const DEMO_MODE = true;
-
-/**
  * Bills older than this threshold (in days overdue) are assumed "likely paid"
  * when no payment confirmation was detected. This avoids false positives from
  * missing payment emails (e.g., card number changed, payment made differently).
@@ -307,10 +301,10 @@ function getCardColor(last4: string | undefined): string {
 
 /**
  * In demo mode, hash any price to a deterministic value $0-$5000.
- * Uses a simple string hash on the input to ensure same input = same output.
+ * Uses power-law distribution for more realistic bill amounts.
  */
-function demoPrice(amount: number): number {
-  if (!DEMO_MODE) return amount;
+function demoPrice(amount: number, isDemoMode: boolean): number {
+  if (!isDemoMode) return amount;
   // Handle NaN/undefined/invalid amounts
   if (!Number.isFinite(amount)) return 0;
   // Hash the amount to get deterministic pseudo-random value
@@ -319,8 +313,12 @@ function demoPrice(amount: number): number {
   for (const char of str) {
     hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
   }
-  // Map to 0-5000 range
-  return Math.abs(hash % 500000) / 100; // 0.00 to 4999.99
+  // Normalize to 0-1 range using unsigned conversion
+  const normalized = (hash >>> 0) / 0xFFFFFFFF;
+  // Power-law: x^2 clusters values toward lower end
+  const powerLaw = Math.pow(normalized, 2);
+  // Scale to 0-5000 range, round to cents
+  return Math.round(powerLaw * 500000) / 100;
 }
 
 // =============================================================================
@@ -357,6 +355,7 @@ const unmarkAsPaid = handler<
 interface PatternInput {
   linkedAuth?: Auth;
   manuallyPaid: Writable<Default<string[], []>>;
+  demoMode: Writable<Default<boolean, true>>;
 }
 
 /** Chase credit card bill tracker. #chaseBills */
@@ -370,7 +369,7 @@ interface PatternOutput {
 }
 
 export default pattern<PatternInput, PatternOutput>(
-  ({ linkedAuth, manuallyPaid }) => {
+  ({ linkedAuth, manuallyPaid, demoMode }) => {
     // Directly instantiate GmailImporter with Chase-specific settings
     const gmailImporter = GmailImporter({
       settings: {
@@ -612,7 +611,7 @@ Extract:
         const trackedBill: TrackedBill = {
           key,
           cardLast4: result.cardLast4,
-          amount: demoPrice(billAmount),
+          amount: demoPrice(billAmount, demoMode.get()),
           dueDate: result.dueDate,
           status,
           isPaid,
@@ -1442,7 +1441,10 @@ Extract:
                                 <strong>Amount:</strong> {computed(() =>
                                   formatCurrency(
                                     analysis.result?.amount !== undefined
-                                      ? demoPrice(analysis.result.amount)
+                                      ? demoPrice(
+                                        analysis.result.amount,
+                                        demoMode.get(),
+                                      )
                                       : undefined,
                                   )
                                 )}
@@ -1493,21 +1495,24 @@ Extract:
                 </a>
               </div>
 
-              {/* Demo Mode Indicator */}
-              {DEMO_MODE && (
-                <div
-                  style={{
-                    fontSize: "11px",
-                    color: "#9ca3af",
-                    cursor: "help",
-                    textAlign: "center",
-                    marginTop: "8px",
-                  }}
+              {/* Demo Mode Toggle */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "6px",
+                  marginTop: "8px",
+                }}
+              >
+                <ct-checkbox $checked={demoMode} />
+                <span
+                  style={{ fontSize: "11px", color: "#9ca3af" }}
                   title="Uses fake numbers for privacy"
                 >
-                  ⚠️ Demo Mode
-                </div>
-              )}
+                  Demo mode
+                </span>
+              </div>
             </ct-vstack>
           </ct-vscroll>
         </ct-screen>
