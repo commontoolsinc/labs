@@ -12,7 +12,7 @@ import {
 } from "@commontools/runtime-client";
 import type { DID } from "@commontools/identity";
 import { runtimeContext, spaceContext } from "../../runtime-context.ts";
-import { navigate } from "@commontools/shell/shared";
+import { appViewToUrlPath, navigate } from "@commontools/shell/shared";
 
 /**
  * CTCellLink - Renders a link or cell as a clickable pill
@@ -175,14 +175,22 @@ export class CTCellLink extends BaseElement {
     }
   }
 
-  private _handleClick(e: Event) {
+  private _handleClick(e: MouseEvent) {
     e.stopPropagation();
     // @TODO(runtime-worker-refactor)
     if (this._resolvedCell) {
-      navigate({
+      const view = {
         spaceDid: this._resolvedCell.space(),
         charmId: this._resolvedCell.id(),
-      });
+      };
+
+      // Cmd (Mac) or Ctrl (Windows/Linux) opens in new tab
+      if (e.metaKey || e.ctrlKey) {
+        const url = appViewToUrlPath(view);
+        globalThis.open(url, "_blank");
+      } else {
+        navigate(view);
+      }
     }
   }
 
