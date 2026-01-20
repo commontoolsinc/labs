@@ -16,6 +16,8 @@ type Favorite = {
   cell: Writable<{ [NAME]?: string }>;
   tag: string;
   userTags: Writable<string[]>;
+  spaceName?: string;
+  spaceDid?: string;
 };
 
 const onRemoveFavorite = handler<
