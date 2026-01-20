@@ -355,8 +355,8 @@ const unmarkAsPaid = handler<
 
 interface PatternInput {
   linkedAuth?: Auth;
-  manuallyPaid: Writable<Default<string[], []>>;
-  demoMode: Writable<Default<boolean, true>>;
+  manuallyPaid?: Writable<Default<string[], []>>;
+  demoMode?: Writable<Default<boolean, true>>;
 }
 
 /** Chase credit card bill tracker. #chaseBills */
@@ -1123,7 +1123,8 @@ Extract:
                             }}
                           >
                             Was due: {formatDate(bill.dueDate)} (
-                            {computed(() => Math.abs(bill.daysUntilDue))}{" "}
+                            {computed(() => Math.abs(bill.daysUntilDue ?? 0))}
+                            {" "}
                             days ago)
                           </div>
                         </div>

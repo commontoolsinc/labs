@@ -154,13 +154,15 @@ const _updateLimit = handler<
 const googleUpdater = handler<unknown, {
   emails: Writable<Array<Writable<Email>>>;
   auth: Writable<Auth>;
-  settings: Writable<{
-    gmailFilterQuery: string;
-    limit: number;
-    debugMode: boolean;
-    autoFetchOnAuth: boolean;
-    resolveInlineImages: boolean;
-  }>;
+  settings: Writable<
+    Default<Settings, {
+      gmailFilterQuery: "in:INBOX";
+      limit: 10;
+      debugMode: false;
+      autoFetchOnAuth: false;
+      resolveInlineImages: false;
+    }>
+  >;
   historyId: Writable<string>;
   fetching?: Writable<boolean>;
 }>(
@@ -169,17 +171,28 @@ const googleUpdater = handler<unknown, {
     if (state.fetching) {
       state.fetching.set(true);
     }
-    const debugMode = state.settings.get().debugMode || false;
+
+    // HACK(seefeld): Ensure all cells are synced before proceeding,
+    // otherwise we may end up conflicting.
+    await Promise.all([
+      (state.emails as any).sync(),
+      (state.auth as any).sync(),
+      (state.settings as any).sync(),
+      (state.historyId as any).sync(),
+    ]);
+
+    const settings = state.settings.get() || {};
+
+    const debugMode = settings.debugMode || false;
 
     debugLog(debugMode, "googleUpdater!");
 
-    if (!state.auth.get().token) {
+    if (!state.auth.get()?.token) {
       debugWarn(debugMode, "no token found in auth cell");
       if (state.fetching) state.fetching.set(false);
       return;
     }
 
-    const settings = state.settings.get();
     const gmailFilterQuery = settings.gmailFilterQuery;
 
     debugLog(debugMode, "gmailFilterQuery", gmailFilterQuery);
@@ -1068,7 +1081,7 @@ export default pattern<{
 
     computed(() => {
       if (settings.debugMode) {
-        console.log("emails", emails.get().length);
+        console.log("retrieved emails", emails.get().length);
       }
     });
 

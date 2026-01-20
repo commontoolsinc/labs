@@ -343,8 +343,8 @@ const unmarkAsPaid = handler<
 
 interface PatternInput {
   linkedAuth?: Auth;
-  manuallyPaid: Writable<Default<string[], []>>;
-  demoMode: Writable<Default<boolean, true>>;
+  manuallyPaid?: Writable<Default<string[], []>>;
+  demoMode?: Writable<Default<boolean, true>>;
 }
 
 /** Bank of America bill tracker. #bofaBills */

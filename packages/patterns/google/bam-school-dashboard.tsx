@@ -277,7 +277,7 @@ const restoreEvent = handler<
 // =============================================================================
 
 interface PatternInput {
-  settings: Default<
+  settings?: Default<
     SchoolSettings,
     {
       childName: "Adeline Komoroske";
@@ -286,7 +286,7 @@ interface PatternInput {
       teacher: "Mr. Zaragoza";
     }
   >;
-  dismissedIds: Writable<Default<string[], []>>;
+  dismissedIds?: Writable<Default<string[], []>>;
   linkedAuth?: Auth;
 }
 
