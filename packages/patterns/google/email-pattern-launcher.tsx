@@ -21,6 +21,7 @@
 import {
   //compileAndRun,
   computed,
+  derive,
   fetchData,
   //fetchProgram,
   NAME,
@@ -264,10 +265,10 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
     */
 
     const compiled = {
-      result: computed(() => {
-        const pattern = PATTERNS[matchInfo.patternUri];
+      result: derive(matchInfo.patternUri, (patternUri) => {
+        const pattern = PATTERNS[patternUri];
         if (!pattern) return null;
-        return pattern({} as any);
+        return pattern({} as any).for(patternUri);
       }),
     };
 
@@ -574,10 +575,13 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
                           }}
                         >
                           {/* Render the pattern's previewUI if available */}
-                          <ct-render
+                          {
+                            /*<ct-render
                             $cell={patternInfo.result}
                             variant="preview"
-                          />
+                          />*/
+                          }
+                          {patternInfo.result.previewUI}
                         </div>
                       )}
                     </div>
