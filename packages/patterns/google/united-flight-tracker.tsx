@@ -460,7 +460,7 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
       autoFetchOnAuth: true,
       resolveInlineImages: false,
       limit: 100,
-      debugMode: false,
+      debugMode: true,
     },
     linkedAuth,
   });

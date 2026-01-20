@@ -366,7 +366,7 @@ export default pattern<PatternInput, PatternOutput>(
         autoFetchOnAuth: true,
         resolveInlineImages: false,
         limit: 100,
-        debugMode: false,
+        debugMode: true,
       },
       linkedAuth,
     });
