@@ -21,7 +21,7 @@ export function isArrayIndexPropertyName(name: string): boolean {
   } else {
     // Need to actually check the value. We do this for pedantic correctness, on
     // the assumption that it will rarely if ever be encountered in practice.
-    return Number(name) < (2 ** 31);
+    return parseInt(name) < (2 ** 31);
   }
 }
 
