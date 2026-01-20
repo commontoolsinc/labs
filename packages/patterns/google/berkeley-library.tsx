@@ -508,13 +508,13 @@ interface PatternInput {
   // Use: ct charm link googleAuthCharm/auth berkeleyLibraryCharm/linkedAuth
   linkedAuth?: Auth;
   // Track items manually marked as returned (persisted)
-  manuallyReturned: Writable<Default<string[], []>>;
+  manuallyReturned?: Writable<Default<string[], []>>;
   // Track holds manually dismissed (persisted)
-  dismissedHolds: Writable<Default<string[], []>>;
+  dismissedHolds?: Writable<Default<string[], []>>;
   // Track selected items for bulk operations (per-group checkboxes)
-  selectedItems: Writable<Default<string[], []>>;
+  selectedItems?: Writable<Default<string[], []>>;
   // Track manual due date overrides (persisted)
-  dueDateOverrides: Writable<
+  dueDateOverrides?: Writable<
     Default<Record<string, string>, Record<string, never>>
   >;
 }

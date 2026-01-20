@@ -261,7 +261,7 @@ const deleteMember = handler<
 // =============================================================================
 
 interface PatternInput {
-  householdMembers: Default<HouseholdMember[], []>;
+  householdMembers?: Default<HouseholdMember[], []>;
   // Optional: Link auth directly from a Google Auth charm
   // Use: ct charm link googleAuthCharm/auth uspsCharm/linkedAuth
   linkedAuth?: Auth;

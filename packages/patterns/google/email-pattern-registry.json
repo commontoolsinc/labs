@@ -14,5 +14,46 @@
       "chase@email.chase.com",
       "chase@chase.com"
     ]
+  },
+  {
+    "patternUri": "google/bam-school-dashboard.tsx",
+    "emailPatterns": [
+      "@remind.com",
+      "@homeroom.com",
+      "@berkeley.net"
+    ]
+  },
+  {
+    "patternUri": "google/bofa-bill-tracker.tsx",
+    "emailPatterns": [
+      "billpay@billpay.bankofamerica.com",
+      "onlinebanking@ealerts.bankofamerica.com",
+      "ealerts@ealerts.bankofamerica.com",
+      "alerts@bankofamerica.com"
+    ]
+  },
+  {
+    "patternUri": "google/calendar-change-detector.tsx",
+    "emailPatterns": [
+      "calendar-notification@google.com",
+      "notifications@calendly.com",
+      "@fedex.com",
+      "@ups.com",
+      "@amazon.com"
+    ]
+  },
+  {
+    "patternUri": "google/united-flight-tracker.tsx",
+    "emailPatterns": [
+      "@united.com"
+    ]
+  },
+  {
+    "patternUri": "google/email-ticket-finder.tsx",
+    "emailPatterns": []
+  },
+  {
+    "patternUri": "google/email-notes.tsx",
+    "emailPatterns": []
   }
 ]

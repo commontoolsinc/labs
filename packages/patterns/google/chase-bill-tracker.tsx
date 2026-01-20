@@ -354,8 +354,8 @@ const unmarkAsPaid = handler<
 
 interface PatternInput {
   linkedAuth?: Auth;
-  manuallyPaid: Writable<Default<string[], []>>;
-  demoMode: Writable<Default<boolean, true>>;
+  manuallyPaid?: Writable<Default<string[], []>>;
+  demoMode?: Writable<Default<boolean, true>>;
 }
 
 /** Chase credit card bill tracker. #chaseBills */

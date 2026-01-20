@@ -35,11 +35,23 @@ import GmailImporter, { type Auth } from "./gmail-importer.tsx";
 import USPSInformedDeliveryPattern from "./usps-informed-delivery.tsx";
 import BerkeleyLibraryPattern from "./berkeley-library.tsx";
 import ChaseBillPattern from "./chase-bill-tracker.tsx";
+import BAMSchoolDashboardPattern from "./bam-school-dashboard.tsx";
+import BofABillTrackerPattern from "./bofa-bill-tracker.tsx";
+import EmailTicketFinderPattern from "./email-ticket-finder.tsx";
+import CalendarChangeDetectorPattern from "./calendar-change-detector.tsx";
+import EmailNotesPattern from "./email-notes.tsx";
+import UnitedFlightTrackerPattern from "./united-flight-tracker.tsx";
 
 const PATTERNS: any = {
   "google/usps-informed-delivery.tsx": USPSInformedDeliveryPattern,
   "google/berkeley-library.tsx": BerkeleyLibraryPattern,
   "google/chase-bill-tracker.tsx": ChaseBillPattern,
+  "google/bam-school-dashboard.tsx": BAMSchoolDashboardPattern,
+  "google/bofa-bill-tracker.tsx": BofABillTrackerPattern,
+  "google/email-ticket-finder.tsx": EmailTicketFinderPattern,
+  "google/calendar-change-detector.tsx": CalendarChangeDetectorPattern,
+  "google/email-notes.tsx": EmailNotesPattern,
+  "google/united-flight-tracker.tsx": UnitedFlightTrackerPattern,
 };
 
 // =============================================================================
