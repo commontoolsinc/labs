@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # Change to repository root (parent of scripts directory)
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR/.."
@@ -16,21 +17,41 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Cross-platform function to get PIDs listening on a port
+# Works on both macOS (lsof) and Linux (ss)
+get_pids_on_port() {
+    local port=$1
+    local pids=""
+
+    if command -v lsof &>/dev/null; then
+        # macOS and Linux with lsof installed
+        pids=$(lsof -Pi :$port -sTCP:LISTEN -t 2>/dev/null)
+    elif command -v ss &>/dev/null; then
+        # Linux with ss (part of iproute2, commonly available)
+        pids=$(ss -tlnp "sport = :$port" 2>/dev/null | grep -oP 'pid=\K\d+' | sort -u)
+    elif command -v fuser &>/dev/null; then
+        # Fallback to fuser
+        pids=$(fuser $port/tcp 2>/dev/null | tr -s ' ' '\n' | grep -v '^$')
+    fi
+
+    echo "$pids"
+}
+
 # check if port 8000 + 5173 are free
 # if not, throw error or kill processes if force flag is set
 check_port() {
     local port=$1
-    local pids=$(lsof -Pi :$port -sTCP:LISTEN -t 2>/dev/null)
+    local pids=$(get_pids_on_port $port)
     if [[ -n "$pids" ]]; then
         if [[ "$FORCE" == "true" ]]; then
             echo "Port $port is in use, killing processes: $pids"
-            kill $pids 2>/dev/null
+            echo "$pids" | xargs kill 2>/dev/null
             sleep 1
             # Check if processes are still running and force kill if needed
-            local remaining_pids=$(lsof -Pi :$port -sTCP:LISTEN -t 2>/dev/null)
+            local remaining_pids=$(get_pids_on_port $port)
             if [[ -n "$remaining_pids" ]]; then
                 echo "Force killing remaining processes on port $port: $remaining_pids"
-                kill -9 $remaining_pids 2>/dev/null
+                echo "$remaining_pids" | xargs kill -9 2>/dev/null
                 sleep 1
             fi
         else

@@ -61,8 +61,13 @@ You cannot access spaces without BOTH running. Access the application at **port 
 
 **Check if ports are in use:**
 ```bash
+# macOS or Linux with lsof
 lsof -i :8000  # Toolshed
 lsof -i :5173  # Shell
+
+# Linux without lsof (use ss instead)
+ss -tlnp 'sport = :8000'  # Toolshed
+ss -tlnp 'sport = :5173'  # Shell
 ```
 
 **Force restart:**
@@ -95,9 +100,14 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:5173          # Shell
 If scripts fail completely, manual process:
 
 ```bash
-# 1. Kill by port
+# 1. Kill by port (choose based on your system)
+# macOS or Linux with lsof:
 lsof -ti :8000 | xargs kill -9 2>/dev/null  # Toolshed
 lsof -ti :5173 | xargs kill -9 2>/dev/null  # Shell
+
+# Linux without lsof (use ss + awk):
+kill -9 $(ss -tlnp 'sport = :8000' | grep -oP 'pid=\K\d+') 2>/dev/null  # Toolshed
+kill -9 $(ss -tlnp 'sport = :5173' | grep -oP 'pid=\K\d+') 2>/dev/null  # Shell
 
 # 2. Wait for cleanup
 sleep 2
