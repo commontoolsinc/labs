@@ -557,9 +557,10 @@ Extract:
   const flights = computed(() => {
     const flightMap: Record<string, TrackedFlight> = {};
 
-    // Create a single reference date for all calculations
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Create reference dates for calculations
+    const now = new Date(); // Current time for hour-based calculations
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0); // Midnight for day-based calculations
 
     // Sort emails by date (newest first) so we get latest status
     const sortedAnalyses = [...(emailAnalyses || [])]
@@ -619,10 +620,11 @@ Extract:
           checkInDeadline = result.checkInDeadline;
         } else if (isUpcoming) {
           // Auto-detect check-in window using true 24-hour calculation
+          // Use `now` (current time) not `today` (midnight) for accurate hours
           const hoursUntilFlight = calculateHoursUntilFlight(
             flight.departureDate,
             flight.departureTime,
-            today,
+            now,
           );
           if (hoursUntilFlight >= 0 && hoursUntilFlight <= 24) {
             checkInAvailable = true;
