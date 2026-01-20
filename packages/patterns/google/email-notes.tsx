@@ -35,6 +35,7 @@ import {
   createGoogleAuth,
   type ScopeKey,
 } from "./util/google-auth-manager.tsx";
+import ProcessingStatus from "./processing-status.tsx";
 
 // Debug flag for development
 const DEBUG_NOTES = false;
@@ -309,6 +310,10 @@ export default pattern<PatternInput, PatternOutput>(() => {
 
   const noteCount = computed(() => notes?.length || 0);
 
+  // No processing/analysis in this pattern, so pending is always 0
+  const pendingCount = computed(() => 0);
+  const completedCount = computed(() => noteCount);
+
   // Preview UI for compact display
   const previewUI = (
     <div
@@ -336,7 +341,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
       >
         {noteCount}
       </div>
-      <div>
+      <div style={{ flex: 1 }}>
         <div style={{ fontWeight: "600", fontSize: "14px" }}>Email Notes</div>
         <div style={{ fontSize: "12px", color: "#6b7280" }}>
           {computed(() => {
@@ -344,6 +349,12 @@ export default pattern<PatternInput, PatternOutput>(() => {
             return count === 1 ? "1 note" : `${count} notes`;
           })}
         </div>
+        {/* Loading/progress indicator */}
+        <ProcessingStatus
+          totalCount={noteCount}
+          pendingCount={pendingCount}
+          completedCount={completedCount}
+        />
       </div>
     </div>
   );

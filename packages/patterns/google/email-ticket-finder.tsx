@@ -27,6 +27,7 @@ import {
 } from "commontools";
 import type { Schema } from "commontools/schema";
 import GmailImporter, { type Auth } from "./gmail-importer.tsx";
+import ProcessingStatus from "./processing-status.tsx";
 
 // Email type - matches GmailImporter's Email type
 interface Email {
@@ -598,6 +599,7 @@ Extract:
         alignItems: "center",
         gap: "12px",
         padding: "8px 12px",
+        flex: 1,
       }}
     >
       <div
@@ -621,7 +623,7 @@ Extract:
       >
         {computed(() => todayCount + upcomingCount)}
       </div>
-      <div>
+      <div style={{ flex: 1 }}>
         <div style={{ fontWeight: "600", fontSize: "14px" }}>
           Upcoming Tickets
         </div>
@@ -660,6 +662,12 @@ Extract:
           </span>
         </div>
       </div>
+      {/* Loading/progress indicator */}
+      <ProcessingStatus
+        totalCount={emailCount}
+        pendingCount={pendingCount}
+        completedCount={completedCount}
+      />
     </div>
   );
 
