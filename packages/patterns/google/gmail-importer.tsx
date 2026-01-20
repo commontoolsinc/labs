@@ -1089,6 +1089,12 @@ export default pattern<{
     // Track whether we've already triggered auto-fetch to prevent loops
     const hasAutoFetched = Writable.of(false).for("auto fetched");
 
+    // Track previous auth ready state for transition detection
+    const wasAuthReady = Writable.of(false).for("was auth ready");
+
+    // Track when auth was in an invalid state for recovery detection
+    const wasAuthInvalid = Writable.of(false).for("was auth invalid");
+
     computed(() => {
       const ready = isReady;
       const autoFetch = settings.autoFetchOnAuth;
@@ -1113,6 +1119,45 @@ export default pattern<{
         hasAutoFetched.set(true);
         // Trigger the fetch handler
         googleUpdaterStream.send({});
+      }
+    });
+
+    // Track when auth transitions from ready to invalid (token expires or is cleared)
+    computed(() => {
+      const ready = !!isReady;
+      const previouslyReady = wasAuthReady.get();
+
+      // Only mark as invalid when we transition FROM ready TO not-ready
+      // This prevents false positives on initial load when auth isn't ready yet
+      if (previouslyReady && !ready) {
+        wasAuthInvalid.set(true);
+      }
+
+      // Track current ready state for next comparison
+      wasAuthReady.set(ready);
+    });
+
+    // Detect auth recovery and trigger incremental sync
+    // This handles the case where token expired and was refreshed elsewhere
+    computed(() => {
+      const ready = isReady;
+      const autoFetch = settings.autoFetchOnAuth;
+      const wasInvalid = wasAuthInvalid.get();
+      const currentlyFetching = fetching.get();
+      const hasHistory = !!historyId.get();
+
+      // When auth recovers from invalid state and we have existing data,
+      // trigger an incremental sync (not a full fetch)
+      if (
+        ready && autoFetch && wasInvalid && !currentlyFetching && hasHistory
+      ) {
+        if (settings.debugMode) {
+          console.log(
+            "[GmailImporter] Auth recovered - triggering incremental sync",
+          );
+        }
+        wasAuthInvalid.set(false); // Reset the flag before triggering
+        googleUpdaterStream.send({}); // Trigger sync (will use historyId for incremental)
       }
     });
 
