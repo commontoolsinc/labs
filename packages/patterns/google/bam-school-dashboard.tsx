@@ -30,6 +30,7 @@ import {
 } from "commontools";
 import type { Schema } from "commontools/schema";
 import GmailImporter, { type Auth, type Email } from "./gmail-importer.tsx";
+import ProcessingStatus from "./processing-status.tsx";
 
 // =============================================================================
 // TYPES
@@ -557,6 +558,12 @@ Extract:
             })}
           </div>
         </div>
+        {/* Loading/progress indicator */}
+        {ProcessingStatus({
+          totalCount: emailCount,
+          pendingCount,
+          completedCount,
+        }).ui as JSX.Element}
       </div>
     );
 

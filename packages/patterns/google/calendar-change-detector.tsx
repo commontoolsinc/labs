@@ -27,6 +27,7 @@ import {
 } from "commontools";
 import type { Schema } from "commontools/schema";
 import GmailImporter, { type Auth } from "./gmail-importer.tsx";
+import ProcessingStatus from "./processing-status.tsx";
 
 // Email type - matches GmailImporter's Email type
 interface Email {
@@ -485,6 +486,12 @@ IMPORTANT: Be strict about filtering. Only mark as a schedule change if it's cle
             return `${change.changeType}: ${change.originalEvent}`;
           })}
         </div>
+        {/* Loading/progress indicator */}
+        {ProcessingStatus({
+          totalCount: emailCount,
+          pendingCount,
+          completedCount,
+        }).ui as JSX.Element}
       </div>
     </div>
   );

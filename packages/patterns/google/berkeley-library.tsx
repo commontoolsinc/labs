@@ -36,6 +36,7 @@ import {
 } from "commontools";
 import type { Schema } from "commontools/schema";
 import GmailImporter, { type Auth } from "./gmail-importer.tsx";
+import ProcessingStatus from "./processing-status.tsx";
 
 // Email type - matches GmailImporter's Email type
 interface Email {
@@ -977,6 +978,12 @@ Note: If this is a forwarded email, look for the original library content within
             </span>
           </div>
         </div>
+        {/* Loading/progress indicator */}
+        {ProcessingStatus({
+          totalCount: libraryEmailCount,
+          pendingCount,
+          completedCount,
+        }).ui as JSX.Element}
       </div>
     );
 

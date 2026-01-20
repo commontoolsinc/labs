@@ -30,6 +30,7 @@ import {
 } from "commontools";
 import type { Schema } from "commontools/schema";
 import GmailImporter, { type Auth } from "./gmail-importer.tsx";
+import ProcessingStatus from "./processing-status.tsx";
 
 // Debug flag for development - disable in production
 const DEBUG_USPS = false;
@@ -554,7 +555,7 @@ If you cannot read the image clearly, make your best guess based on what you can
           {mailCount}
         </div>
         {/* Label and summary */}
-        <div>
+        <div style={{ flex: 1 }}>
           <div style={{ fontWeight: "600", fontSize: "14px" }}>USPS Mail</div>
           <div style={{ fontSize: "12px", color: "#6b7280" }}>
             {topCategories.map((cat, idx) => (
@@ -568,6 +569,12 @@ If you cannot read the image clearly, make your best guess based on what you can
             )}
           </div>
         </div>
+        {/* Loading/progress indicator */}
+        {ProcessingStatus({
+          totalCount: uspsEmailCount,
+          pendingCount,
+          completedCount,
+        }).ui as JSX.Element}
       </div>
     );
 
