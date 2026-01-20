@@ -45,7 +45,8 @@ const DEBUG_NOTES = false;
 
 interface Note {
   id: string;
-  content: string;
+  content: string; // Markdown content for display
+  htmlContent: string; // Original HTML for rich-text copying
   date: string;
   snippet: string;
 }
@@ -53,6 +54,33 @@ interface Note {
 // =============================================================================
 // HELPERS
 // =============================================================================
+
+/**
+ * Clean up encoding artifacts from email content.
+ * Common issues: UTF-8 characters decoded as Latin-1 produce mojibake
+ */
+function cleanContent(content: string): string {
+  return content
+    // Replace "Â " (UTF-8 NBSP misread as Latin-1) with regular space
+    .replace(/Â /g, " ")
+    // Replace "Â&nbsp;" and "Â " in HTML (before &nbsp; entity)
+    .replace(/Â&nbsp;/g, "&nbsp;")
+    .replace(/Â&#160;/g, "&#160;")
+    // Replace standalone "Â" that might appear
+    .replace(/Â$/gm, "")
+    .replace(/Â(?=\s)/g, "")
+    .replace(/Â(?=<)/g, "") // Before HTML tags
+    // Fix smart quotes that got mangled (UTF-8 as Latin-1)
+    .replace(/â€™/g, "'") // Right single quote
+    .replace(/â€˜/g, "'") // Left single quote
+    .replace(/â€œ/g, '"') // Left double quote
+    .replace(/â€/g, '"') // Right double quote (partial)
+    .replace(/â€"/g, "—") // Em dash
+    .replace(/â€"/g, "–") // En dash
+    // Normalize multiple spaces
+    .replace(/  +/g, " ")
+    .trim();
+}
 
 /**
  * Format date for display (relative dates for recent, otherwise short format)
@@ -267,7 +295,12 @@ export default pattern<PatternInput, PatternOutput>(() => {
       })
       .map((email: Email) => ({
         id: email.id,
-        content: email.markdownContent || email.plainText || email.snippet,
+        content: cleanContent(
+          email.markdownContent || email.plainText || email.snippet,
+        ),
+        htmlContent: cleanContent(
+          email.htmlContent || email.plainText || email.snippet,
+        ),
         date: email.date,
         snippet: email.snippet,
       }));
@@ -447,14 +480,20 @@ export default pattern<PatternInput, PatternOutput>(() => {
                           {derive(note, (n) => formatDate(n.date))}
                         </span>
                         <div style={{ display: "flex", gap: "8px" }}>
-                          {/* Copy button - uses ct-copy-button component */}
+                          {/* Copy button - copies plain text content */}
+                          {
+                            /* TODO: Use multi-MIME format once ct-copy-button update lands:
+                              text={derive(note, (n) => ({
+                                "text/plain": n.content,
+                                "text/html": n.htmlContent,
+                              }))}
+                          */
+                          }
                           <ct-copy-button
-                            text={note.content}
+                            text={derive(note, (n) => n.content)}
                             variant="outline"
                             size="sm"
-                          >
-                            Copy
-                          </ct-copy-button>
+                          />
 
                           {/* Mark as Done button */}
                           <button
@@ -491,18 +530,13 @@ export default pattern<PatternInput, PatternOutput>(() => {
                         </div>
                       </div>
 
-                      {/* Note content */}
-                      <div
-                        style={{
-                          fontSize: "14px",
-                          lineHeight: "1.5",
-                          color: "#374151",
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-word",
-                        }}
-                      >
-                        {note.content}
-                      </div>
+                      {/* Note content - rendered as markdown */}
+                      <ct-markdown
+                        content={derive(note, (n) =>
+                          n.content)}
+                        compact
+                        style="font-size: 14px; line-height: 1.5; color: #374151;"
+                      />
                     </div>
                   );
                 })}
