@@ -1,0 +1,10 @@
+[
+  {
+    "patternUri": "google/usps-informed-delivery.tsx",
+    "emailPatterns": ["*@informeddelivery.usps.com", "*@email.informeddelivery.usps.com", "*@usps.com"]
+  },
+  {
+    "patternUri": "google/berkeley-library.tsx",
+    "emailPatterns": ["*@library.berkeleypubliclibrary.org"]
+  }
+]
