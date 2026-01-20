@@ -396,11 +396,19 @@ IMPORTANT: Be strict about filtering. Only mark as a schedule change if it's cle
   // Has any changes
   const hasChanges = computed(() => changes.length > 0);
 
-  // Preview UI - only renders if there are relevant changes
+  // Get the most urgent change for preview
+  const mostUrgentChange = computed(() => {
+    if (criticalChanges.length > 0) return criticalChanges[0];
+    if (urgentChanges.length > 0) return urgentChanges[0];
+    if (normalChanges.length > 0) return normalChanges[0];
+    return null;
+  });
+
+  // Preview UI - always renders, shows "All clear" when no changes
   const previewUI = (
     <div
       style={{
-        display: computed(() => (hasChanges ? "flex" : "none")),
+        display: "flex",
         alignItems: "center",
         gap: "12px",
         padding: "8px 12px",
@@ -412,16 +420,19 @@ IMPORTANT: Be strict about filtering. Only mark as a schedule change if it's cle
           height: "36px",
           borderRadius: "8px",
           backgroundColor: computed(() => {
+            if (!hasChanges) return "#d1fae5"; // Green for all clear
             if (criticalChanges.length > 0) return "#fee2e2";
             if (urgentChanges.length > 0) return "#fef3c7";
             return "#eff6ff";
           }),
           border: computed(() => {
+            if (!hasChanges) return "2px solid #10b981";
             if (criticalChanges.length > 0) return "2px solid #ef4444";
             if (urgentChanges.length > 0) return "2px solid #f59e0b";
             return "2px solid #3b82f6";
           }),
           color: computed(() => {
+            if (!hasChanges) return "#059669";
             if (criticalChanges.length > 0) return "#b91c1c";
             if (urgentChanges.length > 0) return "#92400e";
             return "#1d4ed8";
@@ -433,23 +444,33 @@ IMPORTANT: Be strict about filtering. Only mark as a schedule change if it's cle
           fontSize: "16px",
         }}
       >
-        {computed(() => changes?.length || 0)}
+        {computed(() => (hasChanges ? changes?.length || 0 : "✓"))}
       </div>
-      <div>
+      <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: "600", fontSize: "14px" }}>
-          Schedule Changes
-        </div>
-        <div style={{ fontSize: "12px", color: "#6b7280" }}>
           {computed(() => {
+            if (!hasChanges) return "Schedule: All Clear";
             const critical = criticalChanges?.length || 0;
             const urgent = urgentChanges?.length || 0;
-            if (critical > 0) {
-              return `${critical} critical change${critical !== 1 ? "s" : ""}!`;
-            }
-            if (urgent > 0) {
-              return `${urgent} urgent change${urgent !== 1 ? "s" : ""}`;
-            }
-            return "Updates to review";
+            if (critical > 0) return `${critical} Critical Change${critical !== 1 ? "s" : ""}!`;
+            if (urgent > 0) return `${urgent} Urgent Change${urgent !== 1 ? "s" : ""}`;
+            return `${changes?.length || 0} Schedule Change${(changes?.length || 0) !== 1 ? "s" : ""}`;
+          })}
+        </div>
+        <div
+          style={{
+            fontSize: "12px",
+            color: "#6b7280",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {computed(() => {
+            if (!hasChanges) return "No changes in next 7 days";
+            const change = mostUrgentChange;
+            if (!change) return "";
+            return `${change.changeType}: ${change.originalEvent}`;
           })}
         </div>
       </div>
