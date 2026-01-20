@@ -3,6 +3,7 @@ import {
   action,
   computed,
   Default,
+  equals,
   NAME,
   navigateTo,
   pattern,
@@ -15,23 +16,23 @@ import {
 import ReadingItemDetail, {
   type ItemStatus,
   type ItemType,
-  type ReadingItem,
+  type ReadingItemCharm,
 } from "./reading-item-detail.tsx";
 
 // Re-export types for consumers and tests
-export type { ItemStatus, ItemType, ReadingItem };
+export type { ItemStatus, ItemType, ReadingItemCharm };
 
 interface Input {
-  items?: Writable<Default<ReadingItem[], []>>;
+  items?: Writable<Default<ReadingItemCharm[], []>>;
 }
 
 interface Output {
   [NAME]: string;
   [UI]: VNode;
-  items: ReadingItem[];
+  items: ReadingItemCharm[];
   totalCount: number;
   addItem: Stream<{ title: string; author: string; type: ItemType }>;
-  removeItem: Stream<{ item: ReadingItem }>;
+  removeItem: Stream<{ item: ReadingItemCharm }>;
 }
 
 const TYPE_EMOJI: Record<ItemType, string> = {
@@ -66,25 +67,26 @@ export default pattern<Input, Output>(({ items }) => {
     ) => {
       const trimmedTitle = title.trim();
       if (trimmedTitle) {
-        items.push({
+        // Create a new ReadingItemDetail charm and store its reference
+        const newItemCharm = ReadingItemDetail({
           title: trimmedTitle,
           author: author.trim(),
-          url: "",
           type,
-          status: "want",
-          rating: null,
-          notes: "",
           addedAt: Date.now(),
-          finishedAt: null,
         });
+        items.push(newItemCharm);
         newTitle.set("");
         newAuthor.set("");
       }
     },
   );
 
-  const removeItem = action(({ item }: { item: ReadingItem }) => {
-    items.remove(item);
+  const removeItem = action(({ item }: { item: ReadingItemCharm }) => {
+    const current = items.get();
+    const index = current.findIndex((el) => equals(item, el));
+    if (index >= 0) {
+      items.set(current.toSpliced(index, 1));
+    }
   });
 
   // Computed values
@@ -156,10 +158,7 @@ export default pattern<Input, Output>(({ items }) => {
                       </ct-vstack>
                       <ct-button
                         variant="secondary"
-                        onClick={() => {
-                          const detail = ReadingItemDetail({ item });
-                          return navigateTo(detail);
-                        }}
+                        onClick={() => navigateTo(item)}
                       >
                         Edit
                       </ct-button>
