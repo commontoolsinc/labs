@@ -9,13 +9,19 @@ import { isInstance, isRecord } from "@commontools/utils/types";
  *   element of that array.
  */
 export function isArrayIndexPropertyName(name: string): boolean {
-  if (name === "0") {
+  const length = name.length;
+
+  if (length > 10) {
+    // Don't bother with anything more if the name is too long to possibly be a
+    // valid index.
+    return false;
+  } else if (name === "0") {
     // Easy and common special case, making the regex below simpler.
     return true;
   } else if (!/^[1-9][0-9]{0,9}$/.test(name)) {
     // It's not a string of digits starting with not-`0`.
     return false;
-  } else if (name.length < 10) {
+  } else if (length < 10) {
     // It's short enough that it can't possibly be out of range.
     return true;
   } else {
