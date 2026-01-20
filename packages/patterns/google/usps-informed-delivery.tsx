@@ -570,11 +570,11 @@ If you cannot read the image clearly, make your best guess based on what you can
           </div>
         </div>
         {/* Loading/progress indicator */}
-        {ProcessingStatus({
-          totalCount: uspsEmailCount,
-          pendingCount,
-          completedCount,
-        }).ui as JSX.Element}
+        <ProcessingStatus
+          totalCount={uspsEmailCount}
+          pendingCount={pendingCount}
+          completedCount={completedCount}
+        />
       </div>
     );
 

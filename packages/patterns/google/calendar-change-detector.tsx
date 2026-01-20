@@ -487,11 +487,11 @@ IMPORTANT: Be strict about filtering. Only mark as a schedule change if it's cle
           })}
         </div>
         {/* Loading/progress indicator */}
-        {ProcessingStatus({
-          totalCount: emailCount,
-          pendingCount,
-          completedCount,
-        }).ui as JSX.Element}
+        <ProcessingStatus
+          totalCount={emailCount}
+          pendingCount={pendingCount}
+          completedCount={completedCount}
+        />
       </div>
     </div>
   );

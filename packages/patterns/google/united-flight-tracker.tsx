@@ -896,11 +896,11 @@ Extract:
           </span>
         </div>
         {/* Loading/progress indicator */}
-        {ProcessingStatus({
-          totalCount: unitedEmailCount,
-          pendingCount,
-          completedCount,
-        }).ui as JSX.Element}
+        <ProcessingStatus
+          totalCount={unitedEmailCount}
+          pendingCount={pendingCount}
+          completedCount={completedCount}
+        />
       </div>
     </div>
   );

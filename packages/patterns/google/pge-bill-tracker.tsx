@@ -700,11 +700,11 @@ Extract:
             </span>
           </div>
           {/* Loading/progress indicator */}
-          {ProcessingStatus({
-            totalCount: pgeEmailCount,
-            pendingCount,
-            completedCount,
-          }).ui as JSX.Element}
+          <ProcessingStatus
+            totalCount={pgeEmailCount}
+            pendingCount={pendingCount}
+            completedCount={completedCount}
+          />
         </div>
       </div>
     );

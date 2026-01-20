@@ -350,11 +350,11 @@ export default pattern<PatternInput, PatternOutput>(() => {
           })}
         </div>
         {/* Loading/progress indicator */}
-        {ProcessingStatus({
-          totalCount: noteCount,
-          pendingCount,
-          completedCount,
-        }).ui as JSX.Element}
+        <ProcessingStatus
+          totalCount={noteCount}
+          pendingCount={pendingCount}
+          completedCount={completedCount}
+        />
       </div>
     </div>
   );

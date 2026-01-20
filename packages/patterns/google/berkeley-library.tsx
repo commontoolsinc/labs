@@ -979,11 +979,11 @@ Note: If this is a forwarded email, look for the original library content within
           </div>
         </div>
         {/* Loading/progress indicator */}
-        {ProcessingStatus({
-          totalCount: libraryEmailCount,
-          pendingCount,
-          completedCount,
-        }).ui as JSX.Element}
+        <ProcessingStatus
+          totalCount={libraryEmailCount}
+          pendingCount={pendingCount}
+          completedCount={completedCount}
+        />
       </div>
     );
 

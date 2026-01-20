@@ -640,11 +640,11 @@ Extract:
             </span>
           </div>
           {/* Loading/progress indicator */}
-          {ProcessingStatus({
-            totalCount: bofaEmailCount,
-            pendingCount,
-            completedCount,
-          }).ui as JSX.Element}
+          <ProcessingStatus
+            totalCount={bofaEmailCount}
+            pendingCount={pendingCount}
+            completedCount={completedCount}
+          />
         </div>
       </div>
     );
