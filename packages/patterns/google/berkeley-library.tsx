@@ -359,6 +359,7 @@ const markAsReturnedHandler = handler<
   }
 >(({ title }, { manuallyReturned, emailAnalyses }) => {
   const normalizedInput = title.toLowerCase().trim();
+  if (!normalizedInput) return; // Guard against empty input
 
   // Check if input is "Title by Author" format
   const byMatch = normalizedInput.match(/^(.+?)\s+by\s+(.+)$/);
@@ -415,6 +416,7 @@ const dismissHoldHandler = handler<
   }
 >(({ title }, { dismissedHolds, emailAnalyses }) => {
   const normalizedInput = title.toLowerCase().trim();
+  if (!normalizedInput) return; // Guard against empty input
 
   // Check if input is "Title by Author" format
   const byMatch = normalizedInput.match(/^(.+?)\s+by\s+(.+)$/);
