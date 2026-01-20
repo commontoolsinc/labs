@@ -161,7 +161,7 @@ let nav: ((
 ) => unknown) | null = null;
 
 const joinAsP1 = handler<
-  unknown,
+  void,
   { data1: Writable<Container | null>; data2: Writable<Container | null> }
 >((_e, { data1, data2 }) => {
   const items = [
@@ -175,7 +175,7 @@ const joinAsP1 = handler<
 });
 
 const joinAsP2 = handler<
-  unknown,
+  void,
   { data1: Writable<Container | null>; data2: Writable<Container | null> }
 >((_e, { data1, data2 }) => {
   const items = [
