@@ -17,35 +17,13 @@
  * 2. Deploy this pattern
  * 3. Link: ct charm link google-auth/auth united-flight-tracker/linkedAuth
  */
-import {
-  computed,
-  generateObject,
-  ifElse,
-  JSONSchema,
-  NAME,
-  pattern,
-  UI,
-} from "commontools";
+import { computed, ifElse, JSONSchema, NAME, pattern, UI } from "commontools";
 import type { Schema } from "commontools/schema";
-import GmailImporter, {
-  type Auth,
-} from "../building-blocks/gmail-importer.tsx";
+import GmailExtractor from "../building-blocks/gmail-extractor.tsx";
+import type { Auth } from "../building-blocks/gmail-importer.tsx";
 import ProcessingStatus from "../building-blocks/processing-status.tsx";
 
-// Email type - matches GmailImporter's Email type
-interface Email {
-  id: string;
-  from: string;
-  to: string;
-  subject: string;
-  date: string;
-  snippet: string;
-  threadId: string;
-  labelIds: string[];
-  htmlContent: string;
-  plainText: string;
-  markdownContent: string;
-}
+// Email type imported from GmailExtractor
 
 // =============================================================================
 // TYPES
@@ -309,6 +287,47 @@ const EMAIL_ANALYSIS_SCHEMA = {
 
 type EmailAnalysisResult = Schema<typeof EMAIL_ANALYSIS_SCHEMA>;
 
+// Prompt template for LLM extraction
+const EXTRACTION_PROMPT_TEMPLATE =
+  `Analyze this United Airlines email and extract flight information.
+
+EMAIL SUBJECT: {{email.subject}}
+EMAIL DATE: {{email.date}}
+
+EMAIL CONTENT:
+{{email.markdownContent}}
+
+Extract:
+1. The type of email:
+   - booking_confirmation: New booking or itinerary confirmation
+   - check_in_available: Check-in is now open (24h before departure)
+   - check_in_confirmation: Check-in completed successfully
+   - boarding_pass: Mobile boarding pass
+   - flight_delay: Flight has been delayed
+   - flight_cancellation: Flight has been cancelled
+   - gate_change: Gate has changed
+   - upgrade_offer: Upgrade opportunity
+   - itinerary_update: Pre-trip reminder or itinerary change
+   - receipt: Wi-Fi, upgrade, or other purchase receipt
+   - mileageplus: MileagePlus status or miles update
+   - other: Unrelated to flights
+
+2. All flights mentioned with:
+   - Flight number (e.g., "UA 1234")
+   - Confirmation number (6-character code)
+   - Departure/arrival cities and airport codes
+   - Departure date (YYYY-MM-DD) and time (HH:MM 24-hour)
+   - Arrival time
+   - Gate, terminal, seat if mentioned
+   - Status (on-time, delayed, cancelled)
+   - Delay in minutes and new time if delayed
+
+3. Passenger name if mentioned
+
+4. Check-in availability and deadline if mentioned
+
+5. Brief summary of the email`;
+
 // =============================================================================
 // HELPERS
 // =============================================================================
@@ -456,101 +475,30 @@ interface Output {
 }
 
 export default pattern<Input, Output>(({ linkedAuth }) => {
-  const gmailImporter = GmailImporter({
-    settings: {
-      gmailFilterQuery: UNITED_GMAIL_QUERY,
-      autoFetchOnAuth: true,
-      resolveInlineImages: false,
-      limit: 100,
-      debugMode: true,
+  // Use GmailExtractor building block with LLM extraction
+  const extractor = GmailExtractor<EmailAnalysisResult>({
+    gmailQuery: UNITED_GMAIL_QUERY,
+    extraction: {
+      promptTemplate: EXTRACTION_PROMPT_TEMPLATE,
+      schema: EMAIL_ANALYSIS_SCHEMA,
     },
+    title: "United Flights",
+    limit: 100,
     linkedAuth,
   });
 
-  const allEmails = gmailImporter.emails;
-  const unitedEmailCount = computed(() => allEmails?.length || 0);
+  // Get values from extractor
+  const unitedEmailCount = extractor.emailCount;
+  const { pendingCount, completedCount, rawAnalyses } = extractor;
 
-  const isConnected = computed(() => {
-    if (linkedAuth?.token) return true;
-    return gmailImporter?.emailCount !== undefined;
-  });
-
-  // ==========================================================================
-  // REACTIVE LLM ANALYSIS
-  // ==========================================================================
-
-  const emailAnalyses = allEmails.map((email: Email) => {
-    const analysis = generateObject<EmailAnalysisResult>({
-      prompt: computed(() => {
-        if (!email?.markdownContent) {
-          return undefined;
-        }
-
-        return `Analyze this United Airlines email and extract flight information.
-
-EMAIL SUBJECT: ${email.subject || ""}
-EMAIL DATE: ${email.date || ""}
-
-EMAIL CONTENT:
-${email.markdownContent}
-
-Extract:
-1. The type of email:
-   - booking_confirmation: New booking or itinerary confirmation
-   - check_in_available: Check-in is now open (24h before departure)
-   - check_in_confirmation: Check-in completed successfully
-   - boarding_pass: Mobile boarding pass
-   - flight_delay: Flight has been delayed
-   - flight_cancellation: Flight has been cancelled
-   - gate_change: Gate has changed
-   - upgrade_offer: Upgrade opportunity
-   - itinerary_update: Pre-trip reminder or itinerary change
-   - receipt: Wi-Fi, upgrade, or other purchase receipt
-   - mileageplus: MileagePlus status or miles update
-   - other: Unrelated to flights
-
-2. All flights mentioned with:
-   - Flight number (e.g., "UA 1234")
-   - Confirmation number (6-character code)
-   - Departure/arrival cities and airport codes
-   - Departure date (YYYY-MM-DD) and time (HH:MM 24-hour)
-   - Arrival time
-   - Gate, terminal, seat if mentioned
-   - Status (on-time, delayed, cancelled)
-   - Delay in minutes and new time if delayed
-
-3. Passenger name if mentioned
-
-4. Check-in availability and deadline if mentioned
-
-5. Brief summary of the email`;
-      }),
-      schema: EMAIL_ANALYSIS_SCHEMA,
-      model: "anthropic:claude-sonnet-4-5",
-    });
-
-    return {
-      email,
-      emailId: email.id,
-      emailDate: email.date,
-      emailSubject: email.subject,
-      analysis,
-      pending: analysis.pending,
-      error: analysis.error,
-      result: analysis.result,
-    };
-  });
-
-  const pendingCount = computed(
-    () => emailAnalyses?.filter((a) => a?.pending)?.length || 0,
-  );
-
-  const completedCount = computed(
-    () =>
-      emailAnalyses?.filter(
-        (a) =>
-          a?.analysis?.pending === false && a?.analysis?.result !== undefined,
-      ).length || 0,
+  // Add emailSubject to each analysis item for debug view
+  const emailAnalyses = computed(() =>
+    rawAnalyses?.map((item) => ({
+      ...item,
+      emailSubject: item.email?.subject,
+      // Alias analysis.result as result for backward compatibility in flight aggregation
+      result: item.analysis?.result,
+    })) || []
   );
 
   // ==========================================================================
@@ -932,96 +880,13 @@ Extract:
         <ct-vscroll flex showScrollbar>
           <ct-vstack padding="6" gap="4">
             {/* Auth UI */}
-            {gmailImporter.authUI}
+            {extractor.ui.authStatusUI}
 
             {/* Connection Status */}
-            <div
-              style={{
-                padding: "12px 16px",
-                backgroundColor: computed(() =>
-                  isConnected ? "#d1fae5" : "#fef3c7"
-                ),
-                borderRadius: "8px",
-                border: computed(() =>
-                  isConnected ? "1px solid #10b981" : "1px solid #f59e0b"
-                ),
-                display: computed(() => (isConnected ? "block" : "none")),
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                }}
-              >
-                <span
-                  style={{
-                    width: "10px",
-                    height: "10px",
-                    borderRadius: "50%",
-                    backgroundColor: "#10b981",
-                  }}
-                />
-                <span>Connected to Gmail</span>
-                <span style={{ marginLeft: "auto", color: "#059669" }}>
-                  {unitedEmailCount} United emails found
-                </span>
-                <button
-                  type="button"
-                  onClick={gmailImporter.bgUpdater}
-                  style={{
-                    marginLeft: "8px",
-                    padding: "6px 12px",
-                    backgroundColor: "#10b981",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "6px",
-                    cursor: "pointer",
-                    fontSize: "13px",
-                    fontWeight: "500",
-                  }}
-                >
-                  Fetch Emails
-                </button>
-              </div>
-            </div>
+            {extractor.ui.connectionStatusUI}
 
             {/* Analysis Status */}
-            <div
-              style={{
-                padding: "12px 16px",
-                backgroundColor: "#eff6ff",
-                borderRadius: "8px",
-                border: "1px solid #3b82f6",
-                display: computed(() => (isConnected ? "block" : "none")),
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "12px",
-                }}
-              >
-                <span style={{ fontWeight: "600" }}>Analysis:</span>
-                <span>{unitedEmailCount} emails</span>
-                <div
-                  style={{
-                    display: computed(() => pendingCount > 0 ? "flex" : "none"),
-                    alignItems: "center",
-                    gap: "4px",
-                    color: "#2563eb",
-                  }}
-                >
-                  <ct-loader size="sm" />
-                  <span>{pendingCount} analyzing...</span>
-                </div>
-                <span style={{ color: "#059669" }}>
-                  {completedCount} completed
-                </span>
-              </div>
-            </div>
+            {extractor.ui.analysisProgressUI}
 
             {/* Summary Stats */}
             <div
