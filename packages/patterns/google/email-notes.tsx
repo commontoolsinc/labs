@@ -220,6 +220,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
   const loadingLabels = Writable.of(false).for("loadingLabels");
   const hiddenNotes = Writable.of<string[]>([]).for("hiddenNotes");
   const processingNotes = Writable.of<string[]>([]).for("processingNotes");
+  const sortNewestFirst = Writable.of(true).for("sortNewestFirst");
 
   // Use createGoogleAuth for scopes that include gmailModify
   // Note: We use auth directly (not wrapped in ifElse) because GmailSendClient
@@ -305,7 +306,12 @@ export default pattern<PatternInput, PatternOutput>(() => {
         ),
         date: email.date,
         snippet: email.snippet,
-      }));
+      }))
+      .sort((a, b) => {
+        const dateA = new Date(a.date).getTime();
+        const dateB = new Date(b.date).getTime();
+        return sortNewestFirst.get() ? dateB - dateA : dateA - dateB;
+      });
   });
 
   const noteCount = computed(() => notes?.length || 0);
@@ -373,6 +379,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
             <span style={{ color: "#6b7280", fontSize: "14px" }}>
               ({noteCount} notes)
             </span>
+            <ct-checkbox $checked={sortNewestFirst}>Newest first</ct-checkbox>
           </ct-hstack>
         </div>
 
