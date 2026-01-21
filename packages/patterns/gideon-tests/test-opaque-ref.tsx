@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { pattern, generateObject, OpaqueRef, JSONSchema } from "commontools";
+import { generateObject, JSONSchema, OpaqueRef, pattern } from "commontools";
 
 interface Email {
   id: string;
