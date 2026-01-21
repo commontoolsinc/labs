@@ -365,6 +365,10 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
   .option("-c,--charm <charm:string>", "The target charm ID.")
   .option("--json", "Output HTML as JSON")
   .option("-w,--watch", "Watch for changes and re-render")
+  .option(
+    "--no-start",
+    "Render without starting the charm (useful when another instance is running it)",
+  )
   .action(async (options) => {
     const charmConfig = parseCharmOptions(options);
 
@@ -379,6 +383,7 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
         let renderCount = 0;
         const cleanup = await renderCharm(charmConfig, {
           watch: true,
+          start: options.start,
           onUpdate: (html) => {
             renderCount++;
             console.log(`\n--- Render #${renderCount} ---`);
@@ -400,7 +405,9 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
         // Keep the process running
         await new Promise(() => {});
       } else {
-        const html = await renderCharm(charmConfig) as string;
+        const html = await renderCharm(charmConfig, {
+          start: options.start,
+        }) as string;
         if (options.json) {
           render({ html }, { json: true });
         } else {
