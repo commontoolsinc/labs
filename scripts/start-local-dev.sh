@@ -1,6 +1,10 @@
+#!/usr/bin/env bash
 # Change to repository root (parent of scripts directory)
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR/.."
+
+# Source shared utilities
+source "$SCRIPT_DIR/common/port-utils.sh"
 
 # Parse command line arguments
 FORCE=false
@@ -16,25 +20,26 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# check if port 8000 + 5173 are free
-# if not, throw error or kill processes if force flag is set
+# Check if port is free; kill processes if --force, otherwise error
 check_port() {
     local port=$1
-    local pids=$(lsof -Pi :$port -sTCP:LISTEN -t 2>/dev/null)
+    local pids
+    pids=$(get_pids_on_port "$port")
+
     if [[ -n "$pids" ]]; then
         if [[ "$FORCE" == "true" ]]; then
             echo "Port $port is in use, killing processes: $pids"
-            kill $pids 2>/dev/null
+            echo "$pids" | xargs kill 2>/dev/null
             sleep 1
-            # Check if processes are still running and force kill if needed
-            local remaining_pids=$(lsof -Pi :$port -sTCP:LISTEN -t 2>/dev/null)
-            if [[ -n "$remaining_pids" ]]; then
-                echo "Force killing remaining processes on port $port: $remaining_pids"
-                kill -9 $remaining_pids 2>/dev/null
+            # Force kill if still running
+            pids=$(get_pids_on_port "$port")
+            if [[ -n "$pids" ]]; then
+                echo "Force killing remaining processes: $pids"
+                echo "$pids" | xargs kill -9 2>/dev/null
                 sleep 1
             fi
         else
-            echo "Error: Port $port is already in use"
+            echo "Error: Port $port is already in use" >&2
             exit 1
         fi
     fi
