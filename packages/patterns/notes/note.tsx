@@ -423,6 +423,7 @@ const Note = pattern<Input, Output>(
         $mentionable={mentionable}
         $mentioned={mentioned}
         $pattern={patternJson}
+        $self={self}
         onbacklink-click={handleCharmLinkClick({})}
         onbacklink-create={handleNewBacklink({ mentionable, allCharms })}
         language="text/markdown"

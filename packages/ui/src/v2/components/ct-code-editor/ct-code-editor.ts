@@ -1,6 +1,7 @@
 import { html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { styles } from "./styles.ts";
+import { navigate } from "@commontools/shell/shared";
 import { basicSetup } from "codemirror";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { indentWithTab } from "@codemirror/commands";
@@ -306,6 +307,7 @@ export class CTCodeEditor extends BaseElement {
     mentionable: { type: Object },
     mentioned: { type: Array },
     pattern: { type: Object },
+    self: { attribute: false },
     // New editor configuration props
     wordWrap: { type: Boolean },
     lineNumbers: { type: Boolean },
@@ -328,6 +330,10 @@ export class CTCodeEditor extends BaseElement {
   declare mentionable?: CellHandle<MentionableArray> | null;
   declare mentioned?: CellHandle<MentionableArray>;
   declare pattern: CellHandle<string>;
+  /**
+   * The current charm's cell handle, used to exclude self from mentionable dropdown.
+   */
+  declare self?: CellHandle;
   declare wordWrap: boolean;
   declare lineNumbers: boolean;
   declare maxLineWidth?: number;
@@ -348,6 +354,7 @@ export class CTCodeEditor extends BaseElement {
   private _cleanupFns: Array<() => void> = [];
   private _mentionableUnsub: (() => void) | null = null;
   private _mentionedUnsub: (() => void) | null = null;
+  private _rawMentionableUnsub: (() => void) | null = null;
   // Track previous backlink names to detect changes for syncing to charm NAME
   private _previousBacklinkNames = new Map<string, string>();
   // Track subscriptions to charm NAME cells for bidirectional sync
@@ -428,12 +435,11 @@ export class CTCodeEditor extends BaseElement {
       const hasAutoCloseBrackets = afterCursor.startsWith("]]");
 
       // Build options from existing mentionable items
-      const options: Completion[] = mentionable.map((charm) => {
-        const charmId = charm.id();
-        const charmName = charm.key(NAME).get() || "";
-        const insertText = `${charmName} (${charmId})`;
+      const options: Completion[] = mentionable.map(({ cell, name }) => {
+        const charmId = cell.id();
+        const insertText = `${name} (${charmId})`;
         return {
-          label: charmName,
+          label: name || "(unnamed)",
           // Use apply function to handle auto-closed brackets
           apply: (view, _completion, from, to) => {
             // If auto-close added ]], extend replacement to include them
@@ -444,7 +450,7 @@ export class CTCodeEditor extends BaseElement {
             });
           },
           type: "text",
-          info: "Link to " + charmName,
+          info: "Link to " + (name || "(unnamed)"),
         };
       });
 
@@ -458,36 +464,57 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Get filtered mentionable items based on query
+   * Get filtered mentionable items based on query.
+   * Returns pairs of { cell: CellHandle (for ID), name: string (for display) }
+   * Excludes the current charm (self) from results.
    */
-  private getFilteredMentionable(query: string): CellHandle<Mentionable>[] {
+  private getFilteredMentionable(
+    query: string,
+  ): Array<{ cell: CellHandle<Mentionable>; name: string }> {
     if (!this.mentionable) {
       return [];
     }
 
     const rawMentionable = this.mentionable.get();
-    const mentionableData = Array.isArray(rawMentionable)
-      ? rawMentionable as MentionableArray
-      : isCellHandle(rawMentionable)
-      ? ((rawMentionable.get() ?? []) as MentionableArray)
-      : [];
+    const cellHandles =
+      (Array.isArray(rawMentionable) ? rawMentionable : []) as Array<
+        CellHandle<Mentionable>
+      >;
 
-    if (mentionableData.length === 0) {
+    if (cellHandles.length === 0) {
       return [];
     }
 
     const queryLower = query.toLowerCase();
-    const matches: CellHandle<Mentionable>[] = [];
+    const matches: Array<{ cell: CellHandle<Mentionable>; name: string }> = [];
 
-    for (let i = 0; i < mentionableData.length; i++) {
-      const mention = mentionableData[i];
-      if (
-        mention &&
-        mention[NAME]
-          ?.toLowerCase()
-          ?.includes(queryLower)
-      ) {
-        matches.push(this.mentionable.key(i) as CellHandle<Mentionable>);
+    // Get self's NAME for comparison (if self is a CellHandle)
+    // TODO(@seefeldb): Once asCell works without TS2589, use CellHandle.equals() instead
+    let selfName = "";
+    if (this.self) {
+      const selfData = this.self.get();
+      if (selfData && typeof selfData === "object" && NAME in selfData) {
+        selfName = (selfData as Mentionable)[NAME];
+      }
+    }
+
+    // TODO(@seefeldb): We need a way to sync all cell handles at once and then we should trigger and await that.
+    // Currently we rely on array index alignment between cellHandles and _rawMentionableData.
+    for (let i = 0; i < cellHandles.length; i++) {
+      const cell = cellHandles[i];
+      if (!cell) continue;
+
+      // Get name from cached raw data (CellHandle.get() may involve IPC)
+      const rawItem = this._rawMentionableData[i];
+      const name = rawItem?.[NAME] ?? "";
+
+      // Skip the current charm by comparing NAME
+      if (selfName && name === selfName) {
+        continue;
+      }
+
+      if (name.toLowerCase().includes(queryLower)) {
+        matches.push({ cell, name });
       }
     }
 
@@ -495,25 +522,32 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Find exact case-insensitive match in mentionable items
+   * Find exact case-insensitive match in mentionable items.
+   * Returns { cell, name } pair or null if not found.
    */
-  private _findExactMentionable(query: string): CellHandle<Mentionable> | null {
+  private _findExactMentionable(
+    query: string,
+  ): { cell: CellHandle<Mentionable>; name: string } | null {
     if (!this.mentionable) return null;
 
     const rawMentionable = this.mentionable.get();
-    const mentionableData = Array.isArray(rawMentionable)
-      ? rawMentionable as MentionableArray
-      : isCellHandle(rawMentionable)
-      ? ((rawMentionable.get() ?? []) as MentionableArray)
-      : [];
+    const cellHandles =
+      (Array.isArray(rawMentionable) ? rawMentionable : []) as Array<
+        CellHandle<Mentionable>
+      >;
 
     const queryLower = query.toLowerCase();
 
-    for (let i = 0; i < mentionableData.length; i++) {
-      const mention = mentionableData[i];
-      const name = mention?.[NAME] ?? "";
+    for (let i = 0; i < cellHandles.length; i++) {
+      const cell = cellHandles[i];
+      if (!cell) continue;
+
+      // Get name from cached raw data (CellHandle.get() may involve IPC)
+      const rawItem = this._rawMentionableData[i];
+      const name = rawItem?.[NAME] ?? "";
+
       if (name.toLowerCase() === queryLower) {
-        return this.mentionable.key(i);
+        return { cell, name };
       }
     }
 
@@ -578,19 +612,28 @@ export class CTCodeEditor extends BaseElement {
   /**
    * Handle backlink clicks:
    * - Click on pill: navigate to linked charm
+   * - Click on pending pill: create charm and navigate
    * - Click when expanded (editing mode): places cursor normally
    */
   private createBacklinkClickHandler() {
     return EditorView.domEventHandlers({
       mousedown: (event, view) => {
-        // Check if clicking on a collapsed pill (cm-backlink-pill)
         const target = event.target as HTMLElement;
+
+        // Handle complete backlinks (navigate)
         if (target.closest(".cm-backlink-pill")) {
-          // Navigate to the backlink
           event.preventDefault();
           setTimeout(() => this.handlePillClick(view, event), 0);
           return true;
         }
+
+        // Handle pending backlinks (create + navigate)
+        if (target.closest(".cm-backlink-pending")) {
+          event.preventDefault();
+          setTimeout(() => this.handlePendingClick(view, event), 0);
+          return true;
+        }
+
         return false;
       },
     });
@@ -603,7 +646,6 @@ export class CTCodeEditor extends BaseElement {
     view: EditorView,
     event: MouseEvent,
   ): Promise<void> {
-    // Get the position in the document from the click coordinates
     const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
     if (pos === null) return;
 
@@ -617,7 +659,6 @@ export class CTCodeEditor extends BaseElement {
 
     while ((match = backlinkRegex.exec(lineText)) !== null) {
       const matchStart = line.from + match.index;
-      const _matchEnd = matchStart + match[0].length;
       const innerText = match[1];
 
       // Check if has ID
@@ -634,6 +675,14 @@ export class CTCodeEditor extends BaseElement {
         const runtime = this.pattern.runtime();
         const space = this.pattern.space();
 
+        // Navigate using the charm ID from the mention text
+        // Note: We use `id` (parsed from mention) not cell.id() which returns cell's internal ID
+        navigate({
+          spaceDid: space,
+          charmId: id,
+        });
+
+        // Also emit event for any listeners (backward compatibility)
         const cell = await runtime.getCell(space, id);
         this.emit("backlink-click", {
           id,
@@ -644,6 +693,42 @@ export class CTCodeEditor extends BaseElement {
       }
     }
   }
+
+  /**
+   * Handle click on a pending backlink pill - create charm and navigate
+   */
+  private async handlePendingClick(
+    view: EditorView,
+    event: MouseEvent,
+  ): Promise<void> {
+    const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+    if (pos === null) return;
+
+    const doc = view.state.doc;
+    const line = doc.lineAt(pos);
+    const lineText = line.text;
+
+    // Find all backlinks on this line
+    const backlinkRegex = /\[\[([^\]]+)\]\]/g;
+    let match;
+
+    while ((match = backlinkRegex.exec(lineText)) !== null) {
+      const matchStart = line.from + match.index;
+      const matchEnd = matchStart + match[0].length;
+      const innerText = match[1];
+
+      // Skip if has ID (not pending)
+      if (innerText.match(/\(([^)]+)\)$/)) continue;
+
+      // Check if click is within this backlink
+      if (pos >= matchStart && pos <= matchEnd) {
+        // Create the charm and navigate
+        await this.createBacklinkFromPattern(innerText, true);
+        return;
+      }
+    }
+  }
+
   /**
    * Handle backlink activation (Cmd/Ctrl+Click on a backlink)
    */
@@ -698,28 +783,63 @@ export class CTCodeEditor extends BaseElement {
 
   /**
    * Create a backlink from pattern
+   * TODO(@seefeldb): This method digs too deep into internals (runtime.createPage).
+   * Should handle via callback so caller can decide what a new page looks like.
    */
   private async createBacklinkFromPattern(
     backlinkText: string,
-    navigate: boolean,
+    shouldNavigate: boolean,
   ): Promise<void> {
     try {
+      // TODO(@seefeldb): We should remove IDs from notes - they add complexity.
       // Simple random ID generator for noteId (matches pattern used in note.tsx)
       const generateId = () =>
         `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
       const rt = this.pattern.runtime();
-      const program = this.pattern.get();
-      if (!program) return;
-      const pattern = JSON.parse(program);
 
-      // Provide mentionable list so the pattern can wire backlinks immediately
-      const inputs: Record<string, unknown> = {
+      // Try to get the pattern value - may need to wait for it via subscription
+      let program = this.pattern.get();
+
+      if (!program) {
+        // Try subscribing to trigger cell evaluation - wait for non-undefined value
+        program = await new Promise<string | undefined>((resolve) => {
+          let unsub: (() => void) | null = null;
+          let resolved = false;
+          unsub = this.pattern.subscribe((value) => {
+            // Only resolve when we get a non-undefined value
+            if (value !== undefined && !resolved) {
+              resolved = true;
+              if (unsub) unsub();
+              resolve(value);
+            }
+          });
+          // Timeout fallback
+          setTimeout(() => {
+            if (!resolved) {
+              resolved = true;
+              if (unsub) unsub();
+              resolve(undefined);
+            }
+          }, 2000);
+        });
+      }
+
+      if (!program) return;
+
+      const recipe = JSON.parse(program);
+
+      // The recipe object has a nested .program property containing the actual Program
+      // (with main and files). createPage expects a Program, not the full recipe.
+      const programToUse = recipe.program ?? recipe;
+
+      // Provide initial argument for the new charm
+      const argument = {
         title: backlinkText,
         content: "",
         noteId: generateId(), // Ensure notes created via [[mention]] have unique IDs
       };
 
-      const page = await rt.createPage(pattern, inputs);
+      const page = await rt.createPage(programToUse, { argument });
       if (!page) {
         throw new Error("Could not create charm.");
       }
@@ -727,14 +847,14 @@ export class CTCodeEditor extends BaseElement {
 
       // Insert the ID into the text if we have an editor
       if (this._editorView && charmId) {
-        this._insertBacklinkId(backlinkText, charmId, navigate);
+        this._insertBacklinkId(backlinkText, charmId, shouldNavigate);
       }
 
       this.emit("backlink-create", {
         text: backlinkText,
         charmId,
         charm: page.cell(),
-        navigate,
+        navigate: shouldNavigate,
       });
     } catch (error) {
       console.error("Error creating backlink:", error);
@@ -790,28 +910,30 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Find a charm by ID in the mentionable list
+   * Find a charm by ID in the mentionable list.
+   * With asCell: true in the schema, each item is a CellHandle with proper ID.
    */
   private findCharmById(id: string): CellHandle<Mentionable> | null {
     if (!this.mentionable) return null;
 
     const rawMentionable = this.mentionable.get();
     if (!rawMentionable) return null;
-    const mentionableData = Array.isArray(rawMentionable)
-      ? rawMentionable as MentionableArray
-      : isCellHandle(rawMentionable)
-      ? ((rawMentionable.get() ?? []) as MentionableArray)
-      : [];
+    // With asCell: true, each item in the array is a CellHandle<Mentionable>
+    const mentionableData =
+      (Array.isArray(rawMentionable)
+        ? rawMentionable
+        : isCellHandle(rawMentionable)
+        ? (rawMentionable.get() ?? [])
+        : []) as Array<CellHandle<Mentionable>>;
 
     if (mentionableData.length === 0) return null;
 
-    for (let i = 0; i < mentionableData.length; i++) {
-      const charmValue = mentionableData[i];
-      if (!charmValue) continue;
-      const charmCell = this.mentionable.key(i) as CellHandle<Mentionable>;
-      const charmId = charmCell.id();
-      if (charmId === id) {
-        return charmCell;
+    for (const cell of mentionableData) {
+      if (!cell) continue;
+
+      // With asCell: true, each cell is a CellHandle with proper ID
+      if (isCellHandle(cell) && cell.id() === id) {
+        return cell;
       }
     }
 
@@ -1059,6 +1181,10 @@ export class CTCodeEditor extends BaseElement {
       this._mentionedUnsub();
       this._mentionedUnsub = null;
     }
+    if (this._rawMentionableUnsub) {
+      this._rawMentionableUnsub();
+      this._rawMentionableUnsub = null;
+    }
     this._cleanupFns.forEach((fn) => fn());
     this._cleanupFns = [];
     if (this._editorView) {
@@ -1067,9 +1193,27 @@ export class CTCodeEditor extends BaseElement {
     }
   }
 
+  // Cache raw mentionable data before schema transformation
+  // (schema with asCell: true converts items to CellHandles without loaded data)
+  private _rawMentionableData: Mentionable[] = [];
+
   override willUpdate(changedProperties: Map<string, any>) {
     if (changedProperties.has("mentionable")) {
+      // Clean up previous raw mentionable subscription
+      if (this._rawMentionableUnsub) {
+        this._rawMentionableUnsub();
+        this._rawMentionableUnsub = null;
+      }
       if (this.mentionable) {
+        // Subscribe to raw data BEFORE applying schema
+        // This captures name data that may not be available in CellHandles
+        const rawCell = this.mentionable;
+        this._rawMentionableUnsub = rawCell.subscribe((data) => {
+          if (Array.isArray(data)) {
+            this._rawMentionableData = data as Mentionable[];
+          }
+        });
+        // Apply schema to get CellHandles with proper IDs
         this.mentionable = this.mentionable.asSchema(MentionableArraySchema);
       }
       this._setupMentionableSyncHandler();
@@ -1362,8 +1506,8 @@ export class CTCodeEditor extends BaseElement {
 
               if (exactMatch) {
                 // Found exact match - insert complete backlink with ID
-                const charmId = exactMatch.id();
-                const charmName = exactMatch.key(NAME).get() || text;
+                const charmId = exactMatch.cell.id();
+                const charmName = exactMatch.name || text;
                 this._completeBacklinkWithId(view, text, charmName, charmId);
               } else if (this.pattern) {
                 // No exact match - create new charm without navigating
@@ -1482,6 +1626,7 @@ export class CTCodeEditor extends BaseElement {
 
   /**
    * Get IDs of currently mentioned charms by looking them up in mentionable.
+   * With asCell: true in the schema, each item is a CellHandle with proper ID.
    */
   private _getCurrentMentionedIds(): Set<string> {
     const curIds = new Set<string>();
@@ -1499,20 +1644,24 @@ export class CTCodeEditor extends BaseElement {
     if (!this.mentionable) return curIds;
 
     const rawMentionable = this.mentionable.get();
-    const mentionableData = Array.isArray(rawMentionable)
-      ? rawMentionable as MentionableArray
-      : isCellHandle(rawMentionable)
-      ? ((rawMentionable.get() ?? []) as MentionableArray)
-      : [];
+    // With asCell: true, each item in the array is a CellHandle<Mentionable>
+    const mentionableData =
+      (Array.isArray(rawMentionable)
+        ? rawMentionable
+        : isCellHandle(rawMentionable)
+        ? (rawMentionable.get() ?? [])
+        : []) as Array<CellHandle<Mentionable>>;
 
     // For each current mentioned value, find its ID by matching in mentionable
     for (const mentionedValue of currentSource) {
       if (!mentionedValue) continue;
-      for (let i = 0; i < mentionableData.length; i++) {
-        if (mentionableData[i] === mentionedValue) {
-          const charmCell = this.mentionable.key(i) as CellHandle<Mentionable>;
-          const charmId = charmCell.id();
-          if (charmId) curIds.add(charmId);
+      for (const cell of mentionableData) {
+        if (cell === mentionedValue) {
+          // With asCell: true, cell is a CellHandle with proper ID
+          if (isCellHandle(cell)) {
+            const charmId = cell.id();
+            if (charmId) curIds.add(charmId);
+          }
           break;
         }
       }
