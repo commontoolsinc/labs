@@ -177,8 +177,14 @@ export class CTCellLink extends BaseElement {
 
   private _handleClick(e: MouseEvent) {
     e.stopPropagation();
-    // @TODO(runtime-worker-refactor)
     if (this._resolvedCell) {
+      if (this._resolvedCell.ref().path.length > 0) {
+        throw new Error(
+          "Attempted to navigate to a cell that isn't a root cell",
+        );
+      }
+
+      // TODO(runtime-worker-refactor):
       const view = {
         spaceDid: this._resolvedCell.space(),
         charmId: this._resolvedCell.id(),
