@@ -11,6 +11,8 @@ hooks:
           command: "$CLAUDE_PROJECT_DIR/.claude/scripts/pattern-user-post-bash.ts"
 ---
 
+Load `Skill("ct")` first for ct CLI documentation.
+
 **When confused, search `docs/` first.** Key reference: `docs/development/debugging/`
 
 ## FIRST: Get Configuration
