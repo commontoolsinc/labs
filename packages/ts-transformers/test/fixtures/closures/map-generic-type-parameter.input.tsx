@@ -19,7 +19,7 @@ interface State {
  * the closure transformer would try to capture T as: { T: T, prompt: prompt }
  * This caused "ReferenceError: T is not defined" at runtime.
  */
-function processWithType<T>(emails: OpaqueRef<Email[]>, prompt: string) {
+function processWithType<T>(emails: OpaqueRef<Email[]>, _prompt: string) {
   // T is used here but should NOT be captured - it's a type, not a value
   return emails.map((email: Email) => {
     // The type annotation <T> should not cause T to be captured
