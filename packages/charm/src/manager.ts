@@ -709,7 +709,9 @@ export class CharmManager {
    */
   async getCellForLinking(
     id: string,
+    options?: { start?: boolean },
   ): Promise<{ cell: Cell<unknown>; isCharm: boolean }> {
+    const start = options?.start ?? true;
     const charm = this.runtime.getCellFromEntityId(this.space, { "/": id });
     await charm.sync();
 
@@ -718,8 +720,10 @@ export class CharmManager {
     if (processCell) {
       const recipeId = processCell.get()?.[TYPE];
       if (recipeId) {
-        // It's a charm - start it and return the resultRef cell WITHOUT resolving
-        await this.runtime.start(charm);
+        // It's a charm - optionally start it and return the resultRef cell WITHOUT resolving
+        if (start) {
+          await this.runtime.start(charm);
+        }
         return { cell: processCell.key("resultRef"), isCharm: true };
       }
     }
@@ -898,9 +902,13 @@ export class CharmManager {
     sourcePath: (string | number)[],
     targetCharmId: string,
     targetPath: (string | number)[],
+    options?: { start?: boolean },
   ): Promise<void> {
     // Get source cell for linking - preserves resultRef indirection for reactive updates
-    const { cell: sourceCell } = await this.getCellForLinking(sourceCharmId);
+    const { cell: sourceCell } = await this.getCellForLinking(
+      sourceCharmId,
+      options,
+    );
 
     // Get target cell (charm or arbitrary cell)
     const { cell: targetCell, isCharm: targetIsCharm } =
@@ -908,6 +916,7 @@ export class CharmManager {
         this,
         targetCharmId,
         "Target",
+        options,
       );
 
     await this.runtime.editWithRetry((tx) => {
@@ -963,10 +972,12 @@ async function getCellByIdOrCharm(
   manager: CharmManager,
   cellId: string,
   label: string,
+  options?: { start?: boolean },
 ): Promise<{ cell: Cell<unknown>; isCharm: boolean }> {
+  const start = options?.start ?? true;
   try {
     // Try to get as a charm first
-    const charm = await manager.get(cellId, true);
+    const charm = await manager.get(cellId, start);
     if (!charm) {
       throw new Error(`Charm ${cellId} not found`);
     }

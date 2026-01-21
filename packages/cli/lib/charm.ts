@@ -228,6 +228,7 @@ export async function linkCharms(
   sourcePath: (string | number)[],
   targetCharmId: string,
   targetPath: (string | number)[],
+  options?: { start?: boolean },
 ): Promise<void> {
   const manager = await loadManager(config);
 
@@ -244,7 +245,13 @@ export async function linkCharms(
     );
   }
 
-  await manager.link(sourceCharmId, sourcePath, targetCharmId, targetPath);
+  await manager.link(
+    sourceCharmId,
+    sourcePath,
+    targetCharmId,
+    targetPath,
+    options,
+  );
 }
 
 // Constants for charm mapping
