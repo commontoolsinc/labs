@@ -19,7 +19,7 @@
 import { computed, JSONSchema, NAME, pattern, UI } from "commontools";
 import type { Schema } from "commontools/schema";
 import GmailExtractor from "../building-blocks/gmail-extractor.tsx";
-import type { Auth } from "../building-blocks/gmail-importer.tsx";
+import type { Auth } from "../building-blocks/gmail-extractor.tsx";
 import ProcessingStatus from "../building-blocks/processing-status.tsx";
 
 // Email type - matches GmailImporter's Email type

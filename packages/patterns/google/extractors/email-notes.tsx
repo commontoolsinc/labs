@@ -28,9 +28,9 @@ import {
   UI,
   Writable,
 } from "commontools";
-import GmailImporter, {
+import GmailExtractor, {
   type Email,
-} from "../building-blocks/gmail-importer.tsx";
+} from "../building-blocks/gmail-extractor.tsx";
 import type { Auth } from "../building-blocks/util/google-auth-manager.tsx";
 import {
   type GmailLabel,
@@ -254,23 +254,18 @@ export default pattern<PatternInput, PatternOutput>(() => {
     }
   });
 
-  // Directly instantiate GmailImporter with task-current filter
+  // Directly instantiate GmailExtractor with task-current filter (raw mode)
   // Note: Gmail API doesn't support subject:"" for empty subjects, so we only
   // filter by label here and do client-side filtering for empty subjects
   // Pass auth directly to maintain Writable<Auth> for token refresh
-  const gmailImporter = GmailImporter({
-    settings: {
-      gmailFilterQuery: "label:task-current",
-      autoFetchOnAuth: true,
-      resolveInlineImages: false,
-      limit: 100,
-      debugMode: false,
-    },
+  const extractor = GmailExtractor({
+    gmailQuery: "label:task-current",
+    limit: 100,
     linkedAuth: auth,
   });
 
-  // Get emails from importer
-  const allEmails = gmailImporter.emails;
+  // Get emails from extractor
+  const allEmails = extractor.emails;
 
   // Filter for notes (empty subject) and exclude hidden ones
   const notes = computed(() => {
@@ -405,7 +400,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                 </span>
                 <button
                   type="button"
-                  onClick={gmailImporter.bgUpdater}
+                  onClick={extractor.refresh}
                   style={{
                     marginLeft: "8px",
                     padding: "6px 12px",

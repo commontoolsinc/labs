@@ -64,8 +64,8 @@ import GmailImporter, { type Auth, type Email } from "./gmail-importer.tsx";
 import ProcessingStatus from "./processing-status.tsx";
 import { GmailSendClient } from "./util/gmail-send-client.ts";
 
-// Re-export Email type and ProcessingStatus for consumers
-export type { Email } from "./gmail-importer.tsx";
+// Re-export Email and Auth types and ProcessingStatus for consumers
+export type { Auth, Email } from "./gmail-importer.tsx";
 export { default as ProcessingStatus } from "./processing-status.tsx";
 
 // =============================================================================

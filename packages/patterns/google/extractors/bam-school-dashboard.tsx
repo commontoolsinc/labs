@@ -32,7 +32,7 @@ import type { Schema } from "commontools/schema";
 import GmailExtractor, {
   type Email,
 } from "../building-blocks/gmail-extractor.tsx";
-import type { Auth } from "../building-blocks/gmail-importer.tsx";
+import type { Auth } from "../building-blocks/gmail-extractor.tsx";
 import ProcessingStatus from "../building-blocks/processing-status.tsx";
 
 // =============================================================================

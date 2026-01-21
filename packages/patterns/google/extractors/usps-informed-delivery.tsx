@@ -29,9 +29,9 @@ import {
   Writable,
 } from "commontools";
 import type { Schema } from "commontools/schema";
-import GmailImporter, {
+import GmailExtractor, {
   type Auth,
-} from "../building-blocks/gmail-importer.tsx";
+} from "../building-blocks/gmail-extractor.tsx";
 import ProcessingStatus from "../building-blocks/processing-status.tsx";
 
 // Debug flag for development - disable in production
@@ -290,22 +290,18 @@ interface PatternOutput {
 
 export default pattern<PatternInput, PatternOutput>(
   ({ householdMembers, linkedAuth }) => {
-    // Directly instantiate GmailImporter with USPS-specific settings
+    // Directly instantiate GmailExtractor with USPS-specific settings (raw mode)
     // This eliminates the need for separate gmail-importer charm + wish()
-    const gmailImporter = GmailImporter({
-      settings: {
-        gmailFilterQuery:
-          "from:USPSInformeddelivery@email.informeddelivery.usps.com",
-        autoFetchOnAuth: true,
-        resolveInlineImages: true,
-        limit: 20,
-        debugMode: true,
-      },
+    const extractor = GmailExtractor({
+      gmailQuery: "from:USPSInformeddelivery@email.informeddelivery.usps.com",
+      resolveInlineImages: true,
+      limit: 20,
+      title: "USPS Mail",
       linkedAuth, // Pass through from USPS input (user can link google-auth here)
     });
 
-    // Get emails directly from the embedded gmail-importer
-    const allEmails = gmailImporter.emails;
+    // Get emails directly from the embedded extractor
+    const allEmails = extractor.emails;
 
     // Filter for USPS emails
     const uspsEmails = computed(() => {
@@ -317,15 +313,8 @@ export default pattern<PatternInput, PatternOutput>(
     // Count of USPS emails found
     const uspsEmailCount = computed(() => uspsEmails?.length || 0);
 
-    // Check if connected - either linkedAuth is provided or gmailImporter found auth via wish
-    // We check emailCount > 0 OR if the importer is actively fetching
-    const isConnected = computed(() => {
-      // If linkedAuth has a token, we're connected
-      if (linkedAuth?.token) return true;
-      // Otherwise check if gmailImporter has found auth (emailCount will be defined, even if 0)
-      // The importer uses wish() internally to find favorited google-auth
-      return gmailImporter?.emailCount !== undefined;
-    });
+    // Use extractor's isConnected - it handles auth checking internally
+    const isConnected = extractor.isConnected;
 
     // ==========================================================================
     // REACTIVE LLM ANALYSIS
@@ -606,8 +595,8 @@ If you cannot read the image clearly, make your best guess based on what you can
 
           <ct-vscroll flex showScrollbar>
             <ct-vstack padding="6" gap="4">
-              {/* Auth UI from embedded Gmail Importer */}
-              {gmailImporter.authUI}
+              {/* Auth UI from embedded GmailExtractor */}
+              {extractor.ui.authStatusUI}
 
               {/* Connection Status */}
               {isConnected
@@ -641,7 +630,7 @@ If you cannot read the image clearly, make your best guess based on what you can
                       </span>
                       <button
                         type="button"
-                        onClick={gmailImporter.bgUpdater}
+                        onClick={extractor.refresh}
                         style={{
                           marginLeft: "8px",
                           padding: "6px 12px",
