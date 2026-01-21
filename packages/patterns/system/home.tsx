@@ -329,29 +329,45 @@ Write in past tense, personal style, like a thoughtful journal entry. Focus on t
     );
   });
 
+  // Format unprocessed entries for the prompt (in its own reactive context)
+  const entriesForPrompt = computed(() => {
+    const entries = unprocessedEntries;
+    if (!entries || entries.length === 0) return "";
+    // Access each entry's properties within this computed context
+    const lines: string[] = [];
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      const desc = e.narrative || e.snapshot?.name || "unknown";
+      lines.push(`- ${e.eventType}: ${desc}`);
+    }
+    return lines.join("\n");
+  });
+
   // Generate profile insights from unprocessed journal entries
   const profileExtraction = generateObject<ProfileExtraction>({
     prompt: computed(() => {
-      const entries = unprocessedEntries;
-      if (!entries || entries.length === 0) return "";
+      const entriesText = entriesForPrompt;
+      if (!entriesText) return "";
 
       const currentLearned = learned.get();
       const currentFacts = currentLearned.facts;
       const currentPrefs = currentLearned.preferences;
 
+      // Build facts/prefs strings within this reactive context
+      const factsText = currentFacts.length > 0
+        ? currentFacts.map((f) => f.content).join(", ")
+        : "none";
+      const prefsText = currentPrefs.length > 0
+        ? currentPrefs.map((p) => `${p.key}=${p.value}`).join(", ")
+        : "none";
+
       return `Analyze these recent user actions and extract profile insights.
 
 Recent actions:
-${
-        entries.map((e) =>
-          `- ${e.eventType}: ${e.narrative || e.snapshot?.name || "unknown"}`
-        ).join("\n")
-      }
+${entriesText}
 
-Current known facts: ${currentFacts.map((f) => f.content).join(", ") || "none"}
-Current preferences: ${
-        currentPrefs.map((p) => `${p.key}=${p.value}`).join(", ") || "none"
-      }
+Current known facts: ${factsText}
+Current preferences: ${prefsText}
 
 Extract:
 1. facts - clear statements about the user (e.g., "interested in cooking", "has children")
@@ -369,21 +385,33 @@ Return valid JSON matching the schema.`,
     model: "anthropic:claude-haiku-4-5",
   });
 
+  // Compute max timestamp from unprocessed entries (in its own reactive context)
+  const maxUnprocessedTimestamp = computed(() => {
+    const entries = unprocessedEntries;
+    if (!entries || entries.length === 0) return 0;
+    let max = 0;
+    for (let i = 0; i < entries.length; i++) {
+      const ts = entries[i].timestamp || 0;
+      if (ts > max) max = ts;
+    }
+    return max;
+  });
+
   // Idempotent writeback - apply extracted insights to learned section
   const applyExtraction = computed(() => {
     const result = profileExtraction.result;
     const pending = profileExtraction.pending;
-    const entries = unprocessedEntries;
+    const entriesText = entriesForPrompt; // Use pre-computed check
 
     // Guard: only proceed when we have results and entries to process
-    if (pending || !result || !entries || entries.length === 0) return null;
+    if (pending || !result || !entriesText) return null;
 
     // Get current state
     const currentLearned = learned.get();
     const lastProcessed = currentLearned.lastJournalProcessed || 0;
 
     // Find the max timestamp from processed entries
-    const maxTimestamp = Math.max(...entries.map((e) => e.timestamp || 0));
+    const maxTimestamp = maxUnprocessedTimestamp;
 
     // Idempotent check: already processed these entries?
     if (maxTimestamp <= lastProcessed) return null;
