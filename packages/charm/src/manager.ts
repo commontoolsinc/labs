@@ -702,39 +702,6 @@ export class CharmManager {
     return charm;
   }
 
-  /**
-   * Get a cell reference suitable for creating reactive links.
-   * Unlike get(), this returns a cell that preserves the resultRef indirection,
-   * ensuring that reads through a link will re-resolve on each access.
-   *
-   * For charms: returns processCell.key("resultRef") (NOT resolved)
-   * For non-charms: returns the cell as-is
-   */
-  async getCellForLinking(
-    id: string,
-    options?: { start?: boolean },
-  ): Promise<{ cell: Cell<unknown>; isCharm: boolean }> {
-    const start = options?.start ?? true;
-    const charm = this.runtime.getCellFromEntityId(this.space, { "/": id });
-    await charm.sync();
-
-    // Check if this is a charm by looking for source cell with recipe
-    const processCell = charm.getSourceCell();
-    if (processCell) {
-      const recipeId = processCell.get()?.[TYPE];
-      if (recipeId) {
-        // It's a charm - optionally start it and return the resultRef cell WITHOUT resolving
-        if (start) {
-          await this.runtime.start(charm);
-        }
-        return { cell: processCell.key("resultRef"), isCharm: true };
-      }
-    }
-
-    // Not a charm - return cell as-is
-    return { cell: charm, isCharm: false };
-  }
-
   // note: removing a charm doesn't clean up the charm's cells
   async remove(charm: Cell<unknown>) {
     const charmsCell = await this.getCharms();
@@ -901,17 +868,16 @@ export class CharmManager {
   }
 
   async link(
-    sourceCharmId: string,
-    sourcePath: (string | number)[],
+    linkCharmId: string,
+    linkPath: (string | number)[],
     targetCharmId: string,
     targetPath: (string | number)[],
     options?: { start?: boolean },
   ): Promise<void> {
-    // Get source cell for linking - preserves resultRef indirection for reactive updates
-    const { cell: sourceCell } = await this.getCellForLinking(
-      sourceCharmId,
-      options,
-    );
+    let linkCell = this.runtime.getCellFromEntityId(this.space, { "/": linkCharmId });
+    await linkCell.sync();
+    linkCell = linkCell.asSchemaFromLinks(); // Make sure we have the full schema
+    linkCell = linkCell.key(linkPath);
 
     // Get target cell (charm or arbitrary cell)
     const { cell: targetCell, isCharm: targetIsCharm } =
@@ -923,43 +889,19 @@ export class CharmManager {
       );
 
     await this.runtime.editWithRetry((tx) => {
-      // Navigate to the source path
-      // Cannot navigate `Cell<unknown>`
-      // FIXME: types
-      // deno-lint-ignore no-explicit-any
-      let sourceResultCell = sourceCell.withTx(tx) as Cell<any>;
-      // For charms, getCellForLinking() returns the resultRef cell (unresolved),
-      // so path navigation goes through the reactive reference
-
-      for (const segment of sourcePath) {
-        sourceResultCell = sourceResultCell.key(segment);
-      }
-
-      // Navigate to the target path
-      const targetKey = targetPath.pop();
-      if (targetKey === undefined) {
-        throw new Error("Target path cannot be empty");
-      }
-
-      // Cannot navigate `Cell<unknown>`
-      // FIXME: types
-      // deno-lint-ignore no-explicit-any
-      let targetInputCell = targetCell.withTx(tx) as Cell<any>;
+      let targetInputCell = targetCell.withTx(tx);
       if (targetIsCharm) {
         // For charms, target fields are in the source cell's argument
         const sourceCell = targetCell.getSourceCell(processSchema);
         if (!sourceCell) {
           throw new Error("Target charm has no source cell");
         }
-        targetInputCell = sourceCell.key("argument").withTx(tx);
+        targetInputCell = sourceCell.key("argument");
       }
 
-      for (const segment of targetPath) {
-        targetInputCell = targetInputCell.key(segment);
-      }
-
-      targetInputCell.key(targetKey).set(sourceResultCell);
+      targetInputCell.key(targetPath).set(linkCell);
     });
+    
     await this.runtime.idle();
     await this.synced();
   }
