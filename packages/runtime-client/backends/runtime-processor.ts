@@ -19,6 +19,7 @@ import {
 import {
   BooleanResponse,
   type CellGetRequest,
+  type CellResolveAsCellRequest,
   CellResponse,
   type CellSendRequest,
   type CellSetRequest,
@@ -285,6 +286,14 @@ export class RuntimeProcessor {
     return { value: false };
   }
 
+  handleCellResolveAsCell(request: CellResolveAsCellRequest): CellResponse {
+    const cell = getCell(this.runtime, request.cell);
+    const resolved = cell.resolveAsCell();
+    return {
+      cell: createCellRef(resolved),
+    };
+  }
+
   handleGetCell(request: GetCellRequest): CellResponse {
     const cell = this.runtime.getCell(
       request.space,
@@ -548,6 +557,8 @@ export class RuntimeProcessor {
         return this.handleCellSubscribe(request);
       case RequestType.CellUnsubscribe:
         return this.handleCellUnsubscribe(request);
+      case RequestType.CellResolveAsCell:
+        return this.handleCellResolveAsCell(request);
       case RequestType.GetCell:
         return this.handleGetCell(request);
       case RequestType.GetHomeSpaceCell:

@@ -124,6 +124,47 @@ describe("RuntimeClient", () => {
       assertEquals(firstChild?.name, "p");
     });
 
+    it("resolves cell links with resolveAsCell()", async () => {
+      const session = await createSession({ identity, spaceName });
+      await using rt = await createRuntimeClient(session);
+
+      // Create a target cell with some data
+      const targetSchema = {
+        type: "object",
+        properties: { value: { type: "string" } },
+      } as const satisfies JSONSchema;
+
+      const targetCell = await rt.getCell<{ value: string }>(
+        session.space,
+        "resolve-target-" + Date.now(),
+        targetSchema,
+      );
+      await targetCell.set({ value: "resolved!" });
+      await rt.idle();
+
+      // Create a source cell that contains a link to the target
+      const sourceSchema = {
+        type: "object",
+        properties: { link: { type: "object" } },
+      } as const satisfies JSONSchema;
+
+      const sourceCell = await rt.getCell<{ link: unknown }>(
+        session.space,
+        "resolve-source-" + Date.now(),
+        sourceSchema,
+      );
+      await sourceCell.set({ link: targetCell });
+      await rt.idle();
+      await sourceCell.sync();
+
+      // Get the link cell and resolve it
+      const linkCell = sourceCell.key("link");
+      const resolved = await linkCell.resolveAsCell();
+
+      // The resolved cell should point to the target
+      assertEquals(resolved.id(), targetCell.id());
+    });
+
     it("subscribes to cell updates via subscribe()", async () => {
       const session = await createSession({ identity, spaceName });
       await using rt = await createRuntimeClient(session);
