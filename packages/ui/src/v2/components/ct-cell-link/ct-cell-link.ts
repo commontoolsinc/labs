@@ -109,9 +109,9 @@ export class CTCellLink extends BaseElement {
     }
   }
 
-  private _resolveCell() {
+  private async _resolveCell() {
     if (this.cell) {
-      this._resolvedCell = this.cell;
+      this._resolvedCell = await this.cell.resolveAsCell();
       return;
     }
 
@@ -124,9 +124,8 @@ export class CTCellLink extends BaseElement {
         if (!parsedLink.space) {
           throw new Error("Link missing space.");
         }
-        this._resolvedCell = this.runtime.getCellFromRef(
-          parsedLink as CellRef,
-        );
+        const cell = this.runtime.getCellFromRef(parsedLink as CellRef);
+        this._resolvedCell = await cell.resolveAsCell();
       } catch (e) {
         console.error("Failed to resolve link:", e);
         this._resolvedCell = undefined;
