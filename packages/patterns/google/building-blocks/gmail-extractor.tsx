@@ -55,14 +55,11 @@ import {
   computed,
   Default,
   generateObject,
-  handler,
   JSONSchema,
   Stream,
-  Writable,
 } from "commontools";
 import GmailImporter, { type Auth, type Email } from "./gmail-importer.tsx";
 import ProcessingStatus from "./processing-status.tsx";
-import { GmailSendClient } from "./util/gmail-send-client.ts";
 
 // Re-export Email and Auth types and ProcessingStatus for consumers
 export type { Auth, Email } from "./gmail-importer.tsx";
@@ -110,8 +107,9 @@ export interface GmailExtractorInput {
   /** Maximum number of emails to fetch */
   limit?: Default<number, 100>;
 
-  /** LLM model to use for extraction */
-  model?: Default<string, "anthropic:claude-sonnet-4-5">;
+  // Note: model parameter removed - hardcoded to fix HTTP 400 errors
+  // when passing variables through building block input.
+  // Use hardcoded "anthropic:claude-sonnet-4-5" instead.
 
   /** Optional linked auth (overrides wish() default) */
   linkedAuth?: Auth;
@@ -153,12 +151,6 @@ export interface GmailExtractorOutput<T = unknown> {
   // Operations (Streams, not functions)
   /** Refresh emails from Gmail */
   refresh: Stream<unknown>;
-  /** Add labels to a message */
-  addLabels: Stream<{ messageId: string; labels: string[] }>;
-  /** Remove labels from a message */
-  removeLabels: Stream<{ messageId: string; labels: string[] }>;
-  /** Archive a message (remove INBOX label) */
-  archive: Stream<{ messageId: string }>;
 
   /** UI bundle (JSX elements) */
   ui: {
@@ -220,42 +212,6 @@ export function trackAnalyses<T>(analyses: AnalysisItem<T>[]) {
 }
 
 // =============================================================================
-// HANDLERS FOR WRITE OPERATIONS
-// =============================================================================
-
-/**
- * Handler to add labels to a message.
- */
-const addLabelsHandler = handler<
-  { messageId: string; labels: string[] },
-  { auth: Writable<Auth> }
->(async ({ messageId, labels }, { auth }) => {
-  const client = new GmailSendClient(auth, { debugMode: false });
-  await client.modifyLabels(messageId, { addLabelIds: labels });
-});
-
-/**
- * Handler to remove labels from a message.
- */
-const removeLabelsHandler = handler<
-  { messageId: string; labels: string[] },
-  { auth: Writable<Auth> }
->(async ({ messageId, labels }, { auth }) => {
-  const client = new GmailSendClient(auth, { debugMode: false });
-  await client.modifyLabels(messageId, { removeLabelIds: labels });
-});
-
-/**
- * Handler to archive a message (remove INBOX label).
- */
-const archiveHandler = handler<{ messageId: string }, { auth: Writable<Auth> }>(
-  async ({ messageId }, { auth }) => {
-    const client = new GmailSendClient(auth, { debugMode: false });
-    await client.modifyLabels(messageId, { removeLabelIds: ["INBOX"] });
-  },
-);
-
-// =============================================================================
 // BUILDING BLOCK
 // =============================================================================
 
@@ -273,8 +229,6 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
     title,
     resolveInlineImages,
     limit,
-    // Note: model input is currently ignored - using hardcoded value to fix HTTP 400 errors
-    // when passing variables through building block input
     linkedAuth,
   } = input;
 
@@ -357,14 +311,10 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
       ).length || 0,
   );
 
-  // Create a Writable reference to auth for handlers
-  // Note: linkedAuth may be readonly, so we wrap it in Writable.of and update reactively
-  const authForHandlers = Writable.of<Auth | null>(null);
-  computed(() => {
-    if (linkedAuth?.token) {
-      authForHandlers.set(linkedAuth as any);
-    }
-  });
+  // Note: Handler operations removed - they were unused and the authForHandlers wrapper
+  // was an anti-pattern (Writable.of + computed side effect).
+  // GmailImporter already handles auth via wish() when linkedAuth isn't provided.
+  // If write operations are needed in the future, pass linkedAuth directly to handlers.
 
   // UI Components
 
@@ -372,16 +322,23 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
   const authStatusUI = gmailImporter.authUI;
 
   // Connection status UI
+  // Pre-compute reactive values outside JSX to avoid computed() in style attributes
+  const connectedBgColor = computed(
+    () => (isConnected ? "#d1fae5" : "#fef3c7"),
+  );
+  const connectedBorder = computed(() =>
+    isConnected ? "1px solid #10b981" : "1px solid #f59e0b"
+  );
+  const connectedDisplay = computed(() => (isConnected ? "block" : "none"));
+
   const connectionStatusUI = (
     <div
       style={{
         padding: "12px 16px",
-        backgroundColor: computed(() => (isConnected ? "#d1fae5" : "#fef3c7")),
+        backgroundColor: connectedBgColor,
         borderRadius: "8px",
-        border: computed(() =>
-          isConnected ? "1px solid #10b981" : "1px solid #f59e0b"
-        ),
-        display: computed(() => (isConnected ? "block" : "none")),
+        border: connectedBorder,
+        display: connectedDisplay,
       }}
     >
       <div
@@ -425,6 +382,12 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
   );
 
   // Analysis progress UI (only shown when extraction is enabled)
+  // Pre-compute reactive values outside JSX
+  const analysisDisplay = computed(() =>
+    isConnected && shouldRunAnalysis ? "block" : "none"
+  );
+  const pendingDisplay = computed(() => (pendingCount > 0 ? "flex" : "none"));
+
   const analysisProgressUI = (
     <div
       style={{
@@ -432,9 +395,7 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
         backgroundColor: "#eff6ff",
         borderRadius: "8px",
         border: "1px solid #3b82f6",
-        display: computed(() =>
-          isConnected && shouldRunAnalysis ? "block" : "none"
-        ),
+        display: analysisDisplay,
       }}
     >
       <div
@@ -448,7 +409,7 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
         <span>{computed(() => emailCount)} emails</span>
         <div
           style={{
-            display: computed(() => (pendingCount > 0 ? "flex" : "none")),
+            display: pendingDisplay,
             alignItems: "center",
             gap: "4px",
             color: "#2563eb",
@@ -522,9 +483,6 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
     },
     gmailImporter,
     refresh: gmailImporter.bgUpdater,
-    addLabels: addLabelsHandler({ auth: authForHandlers as any }),
-    removeLabels: removeLabelsHandler({ auth: authForHandlers as any }),
-    archive: archiveHandler({ auth: authForHandlers as any }),
   };
 }
 
