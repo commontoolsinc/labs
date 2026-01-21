@@ -263,3 +263,262 @@ describe("getAtPath array index validation", () => {
     expect(result2.value).toBe("one");
   });
 });
+
+describe("SchemaObjectTraverser boolean type handling", () => {
+  it("correctly validates boolean values against boolean schema", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-boolean" as URI;
+    const docEntity = docUri as Entity;
+
+    // Array of booleans (like the hits array in the bug)
+    const docValue = [true, false, true, false];
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const schema = {
+      type: "array",
+      items: { type: "boolean" },
+    } as const satisfies JSONSchema;
+
+    const manager = new StoreObjectManager(store);
+    const traverser = new SchemaObjectTraverser(manager, {
+      path: [],
+      schemaContext: { schema, rootSchema: schema },
+    });
+
+    const result = traverser.traverse({
+      address: { id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // Should return the full array with boolean values preserved
+    expect(result).toEqual([true, false, true, false]);
+  });
+
+  it("rejects boolean values when schema expects different type", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-boolean-reject" as URI;
+    const docEntity = docUri as Entity;
+
+    const docValue = true;
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const schema = {
+      type: "string",
+    } as const satisfies JSONSchema;
+
+    const manager = new StoreObjectManager(store);
+    const traverser = new SchemaObjectTraverser(manager, {
+      path: [],
+      schemaContext: { schema, rootSchema: schema },
+    });
+
+    const result = traverser.traverse({
+      address: { id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // Should return undefined because boolean doesn't match string schema
+    expect(result).toBeUndefined();
+  });
+});
+
+describe("SchemaObjectTraverser {not: true} schema handling", () => {
+  it("returns undefined for {not: true} schema", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-not-true" as URI;
+    const docEntity = docUri as Entity;
+
+    const docValue = { name: "test" };
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    // Schema { not: true } means "nothing is valid"
+    const schema = {
+      not: true,
+    } as JSONSchema;
+
+    const manager = new StoreObjectManager(store);
+    const traverser = new SchemaObjectTraverser(manager, {
+      path: [],
+      schemaContext: { schema, rootSchema: schema },
+    });
+
+    const result = traverser.traverse({
+      address: { id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // Should return undefined because {not: true} rejects everything
+    expect(result).toBeUndefined();
+  });
+});
+
+describe("SchemaObjectTraverser anyOf/oneOf handling", () => {
+  it("resolves anyOf schema by matching value type", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-anyof" as URI;
+    const docEntity = docUri as Entity;
+
+    const docValue = "hello";
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    // anyOf with string or number alternatives
+    const schema = {
+      anyOf: [
+        { type: "string" },
+        { type: "number" },
+      ],
+    } as JSONSchema;
+
+    const manager = new StoreObjectManager(store);
+    const traverser = new SchemaObjectTraverser(manager, {
+      path: [],
+      schemaContext: { schema, rootSchema: schema },
+    });
+
+    const result = traverser.traverse({
+      address: { id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // Should return the string value since it matches the string alternative
+    expect(result).toBe("hello");
+  });
+
+  it("resolves oneOf schema with $ref by matching value type", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-oneof-ref" as URI;
+    const docEntity = docUri as Entity;
+
+    const docValue = { id: 1, name: "Item1" };
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    // oneOf with $ref that resolves to object type
+    const schema = {
+      oneOf: [
+        { $ref: "#/$defs/Item" },
+        { type: "null" },
+      ],
+      $defs: {
+        Item: {
+          type: "object",
+          properties: {
+            id: { type: "number" },
+            name: { type: "string" },
+          },
+        },
+      },
+    } as JSONSchema;
+
+    const manager = new StoreObjectManager(store);
+    const traverser = new SchemaObjectTraverser(manager, {
+      path: [],
+      schemaContext: { schema, rootSchema: schema },
+    });
+
+    const result = traverser.traverse({
+      address: { id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // Should return the object since it matches the Item $ref alternative
+    expect(result).toEqual({ id: 1, name: "Item1" });
+  });
+
+  it("handles nested objects with boolean arrays in anyOf schema", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-nested-boolean-array" as URI;
+    const docEntity = docUri as Entity;
+
+    // This mirrors the battleship bug structure: object with boolean array
+    const docValue = {
+      id: 1,
+      name: "Ship1",
+      hits: [false, false, true],
+    };
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const schema = {
+      type: "object",
+      properties: {
+        id: { type: "number" },
+        name: { type: "string" },
+        hits: {
+          type: "array",
+          items: { type: "boolean" },
+        },
+      },
+    } as JSONSchema;
+
+    const manager = new StoreObjectManager(store);
+    const traverser = new SchemaObjectTraverser(manager, {
+      path: [],
+      schemaContext: { schema, rootSchema: schema },
+    });
+
+    const result = traverser.traverse({
+      address: { id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // Should return the full object with hits array preserved
+    expect(result).toEqual({
+      id: 1,
+      name: "Ship1",
+      hits: [false, false, true],
+    });
+  });
+});

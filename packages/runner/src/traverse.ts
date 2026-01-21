@@ -831,6 +831,14 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
     } else if (schemaContext.schema === false) {
       // This value rejects all objects - just return
       return undefined;
+    } else if (
+      isObject(schemaContext.schema) &&
+      (schemaContext.schema as any).not === true
+    ) {
+      // Schema { not: true } means "nothing is valid" - equivalent to false
+      // This is generated for array items when only array-level properties
+      // (like .length) are accessed but not the items themselves.
+      return undefined;
     } else if (typeof schemaContext.schema !== "object") {
       logger.warn(
         "traverse",
@@ -865,9 +873,62 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
         rootSchema: schemaContext.rootSchema,
       };
     }
+
+    // Handle anyOf/oneOf schemas by trying to find a matching alternative
+    if (
+      isObject(schemaContext.schema) &&
+      ("anyOf" in schemaContext.schema || "oneOf" in schemaContext.schema)
+    ) {
+      const alternatives = (schemaContext.schema as any).anyOf ||
+        (schemaContext.schema as any).oneOf;
+      if (Array.isArray(alternatives)) {
+        // Try to find an alternative that matches the value's type
+        for (const alt of alternatives) {
+          // Resolve $ref in the alternative if present
+          let resolvedAlt = alt;
+          if (
+            isObject(alt) && "$ref" in alt && isObject(schemaContext.rootSchema)
+          ) {
+            resolvedAlt = ContextualFlowControl.resolveSchemaRefs(
+              schemaContext.rootSchema,
+              alt as any,
+            );
+            if (resolvedAlt === undefined) continue;
+          }
+
+          // Check if this alternative matches the value
+          if (typeof resolvedAlt !== "object" || resolvedAlt === null) {
+            continue;
+          }
+
+          const altType = (resolvedAlt as any).type;
+          const valueType = doc.value === null
+            ? "null"
+            : Array.isArray(doc.value)
+            ? "array"
+            : typeof doc.value;
+
+          // If the alternative has a type that matches, or has no type (permissive), use it
+          if (
+            altType === undefined ||
+            altType === valueType ||
+            (Array.isArray(altType) && altType.includes(valueType))
+          ) {
+            schemaContext = {
+              schema: resolvedAlt as JSONSchema,
+              rootSchema: schemaContext.rootSchema,
+            };
+            break;
+          }
+        }
+      }
+    }
+
     const schemaObj = schemaContext.schema as Immutable<JSONObject>;
     if (doc.value === null) {
       return this.isValidType(schemaObj, "null") ? doc.value : undefined;
+    } else if (typeof doc.value === "boolean") {
+      return this.isValidType(schemaObj, "boolean") ? doc.value : undefined;
     } else if (isString(doc.value)) {
       return this.isValidType(schemaObj, "string") ? doc.value : undefined;
     } else if (isNumber(doc.value)) {
