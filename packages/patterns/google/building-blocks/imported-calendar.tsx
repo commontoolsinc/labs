@@ -405,19 +405,30 @@ const ImportedCalendar = pattern<Input, Output>(
     );
 
     // Convert legacy CalendarEvent to ImportedEvent format
-    const legacyAsImported = computed((): ImportedEvent[] => {
-      const legacy = wishedEventsLegacy || [];
-      return legacy.map((e): ImportedEvent => ({
-        id: e.id,
-        title: e.summary,
-        date: extractDate(e.start || e.startDateTime),
-        startTime: e.isAllDay ? "00:00" : extractTime(e.startDateTime),
-        endTime: e.isAllDay ? "23:59" : extractTime(e.endDateTime),
-        color: getColorForCalendar(e.calendarId || "default"),
-        link: e.htmlLink,
-        notes: e.description,
-      }));
-    });
+    // Use derive() to safely unwrap wish result before transformation
+    const legacyAsImported = derive(
+      wishedEventsLegacy,
+      (legacy: CalendarEvent[] | null): ImportedEvent[] => {
+        if (!legacy) return [];
+        return legacy.map((e): ImportedEvent => {
+          const startStr = e?.start || e?.startDateTime || "";
+          const endStr = e?.endDateTime || "";
+          const calId = e?.calendarId || "default";
+          const isAllDay = e?.isAllDay || false;
+
+          return {
+            id: e?.id || "",
+            title: e?.summary || "",
+            date: extractDate(startStr),
+            startTime: isAllDay ? "00:00" : extractTime(startStr),
+            endTime: isAllDay ? "23:59" : extractTime(endStr),
+            color: getColorForCalendar(calId),
+            link: e?.htmlLink || "",
+            notes: e?.description || "",
+          };
+        });
+      },
+    );
 
     // Combine all imported event sources
     const allImportedEvents = computed(() => {
