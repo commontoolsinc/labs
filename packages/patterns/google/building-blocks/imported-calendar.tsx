@@ -41,6 +41,28 @@ import {
 } from "commontools";
 
 /**
+ * Legacy type matching CalendarEvent from google-calendar-importer.tsx
+ * Kept for backward compatibility with #calendarEvents wish tag
+ */
+type CalendarEvent = {
+  id: string;
+  summary: string;
+  description: string;
+  location: string;
+  start: string;
+  end: string;
+  startDateTime: string;
+  endDateTime: string;
+  isAllDay: boolean;
+  status: string;
+  htmlLink: string;
+  calendarId: string;
+  calendarName: string;
+  attendees: { email: string; displayName: string; responseStatus: string }[];
+  organizer: { email: string; displayName: string };
+};
+
+/**
  * Unified event schema for imported events.
  * Any source pattern should normalize events to this format.
  */
@@ -213,6 +235,38 @@ const addMinutesToTime = (time: string, minutes: number): string =>
 const addHoursToTime = (time: string, hours: number): string =>
   addMinutesToTime(time, hours * 60);
 
+// Extract time from ISO datetime (for legacy CalendarEvent format)
+const extractTime = (isoDateTime: string): string => {
+  if (!isoDateTime) return "09:00";
+  const match = isoDateTime.match(/T(\d{2}):(\d{2})/);
+  if (match) {
+    return `${match[1]}:${match[2]}`;
+  }
+  return "09:00";
+};
+
+// Extract date from ISO datetime or date string (for legacy CalendarEvent format)
+const extractDate = (dateOrDateTime: string): string => {
+  if (!dateOrDateTime) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateOrDateTime)) {
+    return dateOrDateTime;
+  }
+  const match = dateOrDateTime.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : "";
+};
+
+// Color assignment for calendars (for legacy CalendarEvent format)
+let globalColorIndex = 0;
+const calendarColorMap = new Map<string, string>();
+
+function getColorForCalendar(calendarId: string): string {
+  if (!calendarColorMap.has(calendarId)) {
+    calendarColorMap.set(calendarId, COLORS[globalColorIndex % COLORS.length]);
+    globalColorIndex++;
+  }
+  return calendarColorMap.get(calendarId)!;
+}
+
 // ============ HOUR DATA ============
 
 const buildHours = (): Array<{ idx: number; label: string }> => {
@@ -338,17 +392,39 @@ const ImportedCalendar = pattern<Input, Output>(
     // ==========================================================================
     // IMPORTED EVENTS FROM MULTIPLE SOURCES
     // 1. sourceEvents: passed in via props (enables chaining)
-    // 2. wishedEvents: discovered via wish("#importedEvents")
+    // 2. wishedEventsNew: discovered via wish("#importedEvents") - new format
+    // 3. wishedEventsLegacy: discovered via wish("#calendarEvents") - legacy format
     // ==========================================================================
-    const { events: wishedEvents } = wish<{ events: ImportedEvent[] }>(
+    const { events: wishedEventsNew } = wish<{ events: ImportedEvent[] }>(
       "#importedEvents",
     );
+
+    // Support legacy #calendarEvents tag for backward compatibility with google-calendar-importer
+    const { events: wishedEventsLegacy } = wish<{ events: CalendarEvent[] }>(
+      "#calendarEvents",
+    );
+
+    // Convert legacy CalendarEvent to ImportedEvent format
+    const legacyAsImported = computed((): ImportedEvent[] => {
+      const legacy = wishedEventsLegacy || [];
+      return legacy.map((e): ImportedEvent => ({
+        id: e.id,
+        title: e.summary,
+        date: extractDate(e.start || e.startDateTime),
+        startTime: e.isAllDay ? "00:00" : extractTime(e.startDateTime),
+        endTime: e.isAllDay ? "23:59" : extractTime(e.endDateTime),
+        color: getColorForCalendar(e.calendarId || "default"),
+        link: e.htmlLink,
+        notes: e.description,
+      }));
+    });
 
     // Combine all imported event sources
     const allImportedEvents = computed(() => {
       const source = sourceEvents || [];
-      const wished = wishedEvents || [];
-      return [...source, ...wished];
+      const wishedNew = wishedEventsNew || [];
+      const wishedLegacy = legacyAsImported ?? [];
+      return [...source, ...wishedNew, ...wishedLegacy];
     });
 
     // Navigation State (Writable so navigation buttons work)
@@ -369,7 +445,7 @@ const ImportedCalendar = pattern<Input, Output>(
 
     // Edit Form State
     const showEditModal = Writable.of<boolean>(false);
-    const editingEventIndex = Writable.of<number>(-1);
+    const editingEventId = Writable.of<string>("");
     const editEventTitle = Writable.of<string>("");
     const editEventDate = Writable.of<string>("");
     const editEventStartTime = Writable.of<string>("09:00");
@@ -380,9 +456,10 @@ const ImportedCalendar = pattern<Input, Output>(
     const lastDropTime = Cell.of(0);
 
     // Computed Values
-    const importedEventCount = computed(() =>
-      allImportedEvents.filter((e) => !e.isHidden)?.length || 0
-    );
+    const importedEventCount = computed(() => {
+      const events = allImportedEvents ?? [];
+      return events.filter((e) => !e.isHidden).length;
+    });
     const localEventCount = computed(() => localEvents.get().length);
     const eventCount = computed(() => importedEventCount + localEventCount);
     const weekDates = computed(() => getWeekDates(startDate.get(), 7));
@@ -403,7 +480,7 @@ const ImportedCalendar = pattern<Input, Output>(
 
     // Combined events for downstream consumption (enables chaining)
     const combinedEvents = computed((): ImportedEvent[] => [
-      ...allImportedEvents,
+      ...(allImportedEvents ?? []).filter((e) => !e.isHidden),
       ...localAsImported,
     ]);
 
@@ -459,12 +536,16 @@ const ImportedCalendar = pattern<Input, Output>(
     // Close edit modal
     const closeEditModal = action(() => {
       showEditModal.set(false);
-      editingEventIndex.set(-1);
+      editingEventId.set("");
     });
 
     // Save edited event
     const saveEditedEvent = action(() => {
-      const idx = editingEventIndex.get();
+      const id = editingEventId.get();
+      if (!id) return;
+
+      const currentEvents = localEvents.get();
+      const idx = currentEvents.findIndex((e) => e.eventId === id);
       if (idx < 0) return;
 
       const eventCell = localEvents.key(idx);
@@ -475,21 +556,24 @@ const ImportedCalendar = pattern<Input, Output>(
       eventCell.key("color").set(editEventColor.get());
 
       showEditModal.set(false);
-      editingEventIndex.set(-1);
+      editingEventId.set("");
     });
 
     // Delete event
     const deleteEvent = action(() => {
-      const idx = editingEventIndex.get();
-      if (idx < 0) return;
+      const id = editingEventId.get();
+      if (!id) return;
 
       const currentEvents = localEvents.get();
+      const idx = currentEvents.findIndex((e) => e.eventId === id);
+      if (idx < 0) return;
+
       const updated = [...currentEvents];
       updated.splice(idx, 1);
       localEvents.set(updated);
 
       showEditModal.set(false);
-      editingEventIndex.set(-1);
+      editingEventId.set("");
     });
 
     // Computed Styles for View Toggle
@@ -1114,7 +1198,8 @@ const ImportedCalendar = pattern<Input, Output>(
                       return `${start} - ${end}`;
                     });
 
-                    const styles = derive(evt, (e) => {
+                    const styles = computed(() => {
+                      const e = evt; // evt is reactive from the map
                       const hidden = {
                         top: "0",
                         height: "0",
@@ -1253,7 +1338,7 @@ const ImportedCalendar = pattern<Input, Output>(
                   })}
 
                   {/* Local Event Blocks - with drag/drop support */}
-                  {localEvents.map((evt, evtIndex) => {
+                  {localEvents.map((evt) => {
                     // Compute position and visibility
                     const styles = computed(() => {
                       const weekStart = startDate.get();
@@ -1312,7 +1397,7 @@ const ImportedCalendar = pattern<Input, Output>(
                         return;
                       }
                       // Populate edit form with event data
-                      editingEventIndex.set(evtIndex);
+                      editingEventId.set(evt.eventId || "");
                       editEventTitle.set(evt.title || "");
                       editEventDate.set(evt.date || "");
                       editEventStartTime.set(evt.startTime || "09:00");
