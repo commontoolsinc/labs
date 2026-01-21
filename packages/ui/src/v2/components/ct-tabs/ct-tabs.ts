@@ -40,14 +40,19 @@ export class CTTabs extends BaseElement {
     BaseElement.baseStyles,
     css`
       :host {
-        display: block;
+        display: flex;
+        flex-direction: column;
         width: 100%;
+        min-height: 0;
+        flex: 1;
       }
 
       .tabs {
         display: flex;
         flex-direction: column;
         width: 100%;
+        flex: 1;
+        min-height: 0;
       }
 
       .tabs[data-orientation="horizontal"] {
