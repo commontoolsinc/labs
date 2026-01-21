@@ -874,10 +874,12 @@ export class CharmManager {
     targetPath: (string | number)[],
     options?: { start?: boolean },
   ): Promise<void> {
-    let linkCell = this.runtime.getCellFromEntityId(this.space, { "/": linkCharmId });
+    let linkCell = this.runtime.getCellFromEntityId(this.space, {
+      "/": linkCharmId,
+    });
     await linkCell.sync();
     linkCell = linkCell.asSchemaFromLinks(); // Make sure we have the full schema
-    linkCell = linkCell.key(linkPath);
+    linkCell = linkCell.key(...linkPath);
 
     // Get target cell (charm or arbitrary cell)
     const { cell: targetCell, isCharm: targetIsCharm } =
@@ -899,9 +901,15 @@ export class CharmManager {
         targetInputCell = sourceCell.key("argument");
       }
 
-      targetInputCell.key(targetPath).set(linkCell);
+      targetInputCell.key(...targetPath).resolveAsCell().setRaw(
+        linkCell.getAsLink({
+          base: targetInputCell,
+          includeSchema: true,
+          keepStreams: true,
+        }),
+      );
     });
-    
+
     await this.runtime.idle();
     await this.synced();
   }
