@@ -2,10 +2,12 @@
 import {
   computed,
   equals,
+  generateObject,
   generateText,
   handler,
   NAME,
   pattern,
+  toSchema,
   UI,
   Writable,
 } from "commontools";
@@ -36,6 +38,59 @@ type JournalEntry = {
   narrativePending?: boolean;
   tags?: string[];
   space?: string;
+};
+
+// === PROFILE TYPES ===
+type Fact = {
+  content: string;
+  confidence: number;
+  source: string;
+  timestamp: number;
+};
+
+type Preference = {
+  key: string;
+  value: string;
+  confidence: number;
+  source: string;
+};
+
+type Question = {
+  id: string;
+  question: string;
+  category: string;
+  priority: number;
+  options?: string[];
+  status: "pending" | "asked" | "answered" | "skipped";
+  answer?: string;
+};
+
+type LearnedSection = {
+  facts: Fact[];
+  preferences: Preference[];
+  openQuestions: Question[];
+  personas: string[];
+  lastJournalProcessed: number;
+};
+
+type ProfileExtraction = {
+  facts: Array<{ content: string; confidence: number }>;
+  preferences: Array<{ key: string; value: string; confidence: number }>;
+  personas: string[];
+  questions: Array<{
+    question: string;
+    category: string;
+    priority: number;
+    options?: string[];
+  }>;
+};
+
+const EMPTY_LEARNED: LearnedSection = {
+  facts: [],
+  preferences: [],
+  openQuestions: [],
+  personas: [],
+  lastJournalProcessed: 0,
 };
 
 /**
@@ -168,6 +223,7 @@ export default pattern((_) => {
   // OWN the data cells (.for for id stability)
   const favorites = Writable.of<Favorite[]>([]).for("favorites");
   const journal = Writable.of<JournalEntry[]>([]).for("journal");
+  const learned = Writable.of<LearnedSection>(EMPTY_LEARNED).for("learned");
 
   // Child components use wish() to access favorites/journal through defaultPattern
   const favoritesComponent = FavoritesManager({});
@@ -263,6 +319,172 @@ Write in past tense, personal style, like a thoughtful journal entry. Focus on t
   // Reference writeNarrative to ensure it's evaluated
   void writeNarrative;
 
+  // === PROFILE LEARNING ===
+  // Find journal entries with narratives that haven't been processed for profile
+  const unprocessedEntries = computed(() => {
+    const entries = journal.get();
+    const lastProcessed = learned.get().lastJournalProcessed || 0;
+    return entries.filter(
+      (e) => (e.timestamp || 0) > lastProcessed && e.narrative,
+    );
+  });
+
+  // Generate profile insights from unprocessed journal entries
+  const profileExtraction = generateObject<ProfileExtraction>({
+    prompt: computed(() => {
+      const entries = unprocessedEntries;
+      if (!entries || entries.length === 0) return "";
+
+      const currentLearned = learned.get();
+      const currentFacts = currentLearned.facts;
+      const currentPrefs = currentLearned.preferences;
+
+      return `Analyze these recent user actions and extract profile insights.
+
+Recent actions:
+${
+        entries.map((e) =>
+          `- ${e.eventType}: ${e.narrative || e.snapshot?.name || "unknown"}`
+        ).join("\n")
+      }
+
+Current known facts: ${currentFacts.map((f) => f.content).join(", ") || "none"}
+Current preferences: ${
+        currentPrefs.map((p) => `${p.key}=${p.value}`).join(", ") || "none"
+      }
+
+Extract:
+1. facts - clear statements about the user (e.g., "interested in cooking", "has children")
+2. preferences - key-value pairs about user preferences
+3. personas - short descriptive labels (e.g., "busy parent", "tech enthusiast")
+4. questions - clarifying questions to ask the user (if needed)
+
+Be conservative - only extract facts you're confident about (confidence 0.5-1.0).
+Avoid duplicating existing facts. Return empty arrays if nothing new to learn.`;
+    }),
+    system: `You extract user profile information from their activity.
+Be conservative - only add facts with clear evidence.
+Return valid JSON matching the schema.`,
+    schema: toSchema<ProfileExtraction>(),
+    model: "anthropic:claude-haiku-4-5",
+  });
+
+  // Idempotent writeback - apply extracted insights to learned section
+  const applyExtraction = computed(() => {
+    const result = profileExtraction.result;
+    const pending = profileExtraction.pending;
+    const entries = unprocessedEntries;
+
+    // Guard: only proceed when we have results and entries to process
+    if (pending || !result || !entries || entries.length === 0) return null;
+
+    // Get current state
+    const currentLearned = learned.get();
+    const lastProcessed = currentLearned.lastJournalProcessed || 0;
+
+    // Find the max timestamp from processed entries
+    const maxTimestamp = Math.max(...entries.map((e) => e.timestamp || 0));
+
+    // Idempotent check: already processed these entries?
+    if (maxTimestamp <= lastProcessed) return null;
+
+    // Build updated learned section
+    let updatedLearned = { ...currentLearned };
+
+    // Apply new facts (with deduplication)
+    if (result.facts && result.facts.length > 0) {
+      const existingContents = new Set(
+        currentLearned.facts.map((f) => f.content),
+      );
+      const newFacts = result.facts
+        .filter((f) => !existingContents.has(f.content))
+        .map((f) => ({
+          content: f.content,
+          confidence: f.confidence,
+          source: `journal:${maxTimestamp}`,
+          timestamp: Date.now(),
+        }));
+      if (newFacts.length > 0) {
+        updatedLearned = {
+          ...updatedLearned,
+          facts: [...currentLearned.facts, ...newFacts],
+        };
+      }
+    }
+
+    // Apply new preferences
+    if (result.preferences && result.preferences.length > 0) {
+      const existingKeys = new Set(
+        currentLearned.preferences.map((p) => p.key),
+      );
+      const newPrefs = result.preferences
+        .filter((p) => !existingKeys.has(p.key))
+        .map((p) => ({
+          key: p.key,
+          value: p.value,
+          confidence: p.confidence,
+          source: `journal:${maxTimestamp}`,
+        }));
+      if (newPrefs.length > 0) {
+        updatedLearned = {
+          ...updatedLearned,
+          preferences: [...currentLearned.preferences, ...newPrefs],
+        };
+      }
+    }
+
+    // Apply new personas
+    if (result.personas && result.personas.length > 0) {
+      const existingPersonas = new Set(currentLearned.personas);
+      const newPersonas = result.personas.filter((p) =>
+        !existingPersonas.has(p)
+      );
+      if (newPersonas.length > 0) {
+        updatedLearned = {
+          ...updatedLearned,
+          personas: [...currentLearned.personas, ...newPersonas],
+        };
+      }
+    }
+
+    // Apply new questions
+    if (result.questions && result.questions.length > 0) {
+      const existingQuestionTexts = new Set(
+        currentLearned.openQuestions.map((q) => q.question),
+      );
+      const newQuestions = result.questions
+        .filter((q) => !existingQuestionTexts.has(q.question))
+        .map((q) => ({
+          id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          question: q.question,
+          category: q.category,
+          priority: q.priority,
+          options: q.options,
+          status: "pending" as const,
+        }));
+      if (newQuestions.length > 0) {
+        updatedLearned = {
+          ...updatedLearned,
+          openQuestions: [...currentLearned.openQuestions, ...newQuestions],
+        };
+      }
+    }
+
+    // Update last processed timestamp
+    updatedLearned = {
+      ...updatedLearned,
+      lastJournalProcessed: maxTimestamp,
+    };
+
+    // Write the updated learned section
+    learned.set(updatedLearned);
+
+    return result;
+  });
+
+  // Reference applyExtraction to ensure it's evaluated
+  void applyExtraction;
+
   return {
     [NAME]: `Home`,
     [UI]: (
@@ -302,6 +524,7 @@ Write in past tense, personal style, like a thoughtful journal entry. Focus on t
     // Exported data
     favorites,
     journal,
+    learned,
 
     // Exported handlers (bound to state cells for external callers)
     addFavorite: addFavorite({ favorites, journal }),
