@@ -319,9 +319,12 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
   const emailCount = computed(() => emails?.length || 0);
 
   // Check connection status
+  // Note: When using wish() for auth (no linkedAuth), we use emailCount > 0 as a proxy
+  // for "connected". This means we won't show "Connected" until emails are actually fetched.
   const isConnected = computed(() => {
     if (linkedAuth?.token) return true;
-    return gmailImporter?.emailCount !== undefined;
+    // For wish() auth, check if we've fetched any emails as proxy for auth success
+    return (emails?.length || 0) > 0;
   });
 
   // Auto-detect whether to run analysis based on presence of extraction config

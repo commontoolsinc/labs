@@ -11,9 +11,9 @@
  * 3. Link: ct charm link google-auth/auth email-pattern-dreamer/linkedAuth
  */
 import { NAME, pattern, UI } from "commontools";
-import GmailExtractor, {
+import GmailImporter, {
   type Auth,
-} from "../building-blocks/gmail-extractor.tsx";
+} from "../building-blocks/gmail-importer.tsx";
 
 import USPSInformedDeliveryPattern from "./usps-informed-delivery.tsx";
 import BerkeleyLibraryPattern from "./berkeley-library.tsx";
@@ -30,10 +30,15 @@ interface PatternInput {
 }
 
 export default pattern<PatternInput>(({ linkedAuth }) => {
-  // Gmail auth for the auth UI only
-  const gmailAuth = GmailExtractor({
-    gmailQuery: "",
-    limit: 1,
+  // Gmail auth for the auth UI only (no email fetching needed)
+  const gmailAuth = GmailImporter({
+    settings: {
+      gmailFilterQuery: "",
+      limit: 0,
+      debugMode: false,
+      autoFetchOnAuth: false,
+      resolveInlineImages: false,
+    },
     linkedAuth,
   });
 
@@ -126,7 +131,7 @@ export default pattern<PatternInput>(({ linkedAuth }) => {
 
         <ct-vscroll flex showScrollbar>
           <ct-vstack padding="6" gap="4">
-            {gmailAuth.ui.authStatusUI}
+            {gmailAuth.authUI}
 
             <h3 style={{ fontSize: "18px", fontWeight: "600" }}>
               Patterns launched based on your emails

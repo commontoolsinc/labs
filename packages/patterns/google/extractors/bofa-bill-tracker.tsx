@@ -3,13 +3,15 @@
  * Bank of America Bill Tracker Pattern
  *
  * Tracks Bank of America credit card bills from email notifications, showing
- * unpaid/upcoming bills and automatically or manually marking them as paid.
+ * unpaid/upcoming bills with payment status tracking.
  *
  * Features:
  * - Uses GmailExtractor building block for email fetching and LLM extraction
- * - Tracks payment confirmations to auto-mark bills as paid
+ * - Uses "likely paid" heuristic for old bills (>45 days past due assumed paid)
  * - Supports manual "Mark as Paid" for local tracking
  * - Groups bills by card (last 4 digits)
+ *
+ * Note: Payment status detection is heuristic-based, not authoritative.
  *
  * Usage:
  * 1. Deploy a google-auth charm and complete OAuth
