@@ -249,9 +249,9 @@ export class CharmManager {
     // The resultRef was created with includeSchema: true during setup
     const processCell = charm.getSourceCell();
     if (processCell) {
-      const resultWithSchema = processCell.key("resultRef").resolveAsCell();
-      if (resultWithSchema) {
-        return resultWithSchema as Cell<T>;
+      const resultRefCell = processCell.key("resultRef").resolveAsCell();
+      if (resultRefCell?.schema) {
+        return charm.asSchema<T>(resultRefCell.schema);
       }
     }
 
@@ -693,7 +693,10 @@ export class CharmManager {
     // Get result cell with schema from processCell.resultRef
     const processCell = charm.getSourceCell();
     if (processCell) {
-      return processCell.key("resultRef").resolveAsCell();
+      const resultRefCell = processCell.key("resultRef").resolveAsCell();
+      if (resultRefCell?.schema) {
+        return charm.asSchema<T>(resultRefCell.schema);
+      }
     }
     // Fallback: return charm without schema
     return charm;
