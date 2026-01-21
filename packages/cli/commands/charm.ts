@@ -437,6 +437,7 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     `Link well-known "allCharms" list to a charm field.`,
   )
   .arguments("<source:string> <target:string>")
+  .option("--no-start", "Only link without starting the charms")
   .action(async (options, sourceRef, targetRef) => {
     setQuietMode(!!options.quiet);
     const spaceConfig = parseSpaceOptions(options);
@@ -463,6 +464,7 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
       source.path || [], // Empty path for well-known IDs
       target.charmId,
       target.path,
+      { start: options.start },
     );
 
     render(`Linked ${sourceRef} to ${targetRef}`);
