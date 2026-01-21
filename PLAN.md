@@ -682,11 +682,16 @@ const enrichedContext = {
 3. ✅ **Phase 2.4**: Add learned section UI to profile.tsx
 4. **Test**: Manual fact/question addition works
 
-### Sprint 3: Profile Learning ✅ COMPLETE
+### Sprint 3: Profile Learning ✅ COMPLETE (with fix)
 
-1. ✅ **Phase 2.2**: Add journal watching + LLM extraction to profile.tsx
-2. ✅ **Phase 2.3**: Profile discoverable via wish("#profile")
-3. **Test**: Favorite items → facts appear in profile
+1. ✅ **Phase 2.2**: Add journal watching + LLM extraction
+   - **Fix**: Moved from profile.tsx to home.tsx (journal owned by home.tsx)
+   - Added `learned` cell with `.for("learned")` persistence
+   - Added `unprocessedEntries` computed for entries with narratives
+   - Added `generateObject` (Haiku) for profile extraction
+   - Added idempotent `applyExtraction` writeback
+2. ✅ **Phase 2.3**: Exported `learned` cell from home.tsx
+3. **Test**: Favorite items → facts appear in learned section
 
 ### Sprint 4: Integration
 
