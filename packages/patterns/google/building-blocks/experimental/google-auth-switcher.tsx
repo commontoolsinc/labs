@@ -19,9 +19,9 @@ import {
   UI,
   Writable,
 } from "commontools";
-import GoogleAuth, { Auth } from "./google-auth.tsx";
-import GoogleAuthPersonal from "./google-auth-personal.tsx";
-import GoogleAuthWork from "./google-auth-work.tsx";
+import GoogleAuth, { Auth } from "../google-auth.tsx";
+import GoogleAuthPersonal from "../google-auth-personal.tsx";
+import GoogleAuthWork from "../google-auth-work.tsx";
 
 // Same selected scopes type as base GoogleAuth
 type SelectedScopes = {

@@ -1,14 +1,14 @@
 [
   {
-    "patternUri": "google/usps-informed-delivery.tsx",
+    "patternUri": "google/extractors/usps-informed-delivery.tsx",
     "emailPatterns": ["USPSInformeddelivery@email.informeddelivery.usps.com"]
   },
   {
-    "patternUri": "google/berkeley-library.tsx",
+    "patternUri": "google/extractors/berkeley-library.tsx",
     "emailPatterns": ["notices@library.berkeleypubliclibrary.org"]
   },
   {
-    "patternUri": "google/chase-bill-tracker.tsx",
+    "patternUri": "google/extractors/chase-bill-tracker.tsx",
     "emailPatterns": [
       "no-reply@alertsp.chase.com",
       "chase@email.chase.com",
@@ -16,7 +16,7 @@
     ]
   },
   {
-    "patternUri": "google/bam-school-dashboard.tsx",
+    "patternUri": "google/extractors/bam-school-dashboard.tsx",
     "emailPatterns": [
       "@remind.com",
       "@homeroom.com",
@@ -24,7 +24,7 @@
     ]
   },
   {
-    "patternUri": "google/bofa-bill-tracker.tsx",
+    "patternUri": "google/extractors/bofa-bill-tracker.tsx",
     "emailPatterns": [
       "billpay@billpay.bankofamerica.com",
       "onlinebanking@ealerts.bankofamerica.com",
@@ -33,7 +33,7 @@
     ]
   },
   {
-    "patternUri": "google/calendar-change-detector.tsx",
+    "patternUri": "google/extractors/calendar-change-detector.tsx",
     "emailPatterns": [
       "calendar-notification@google.com",
       "notifications@calendly.com",
@@ -43,17 +43,17 @@
     ]
   },
   {
-    "patternUri": "google/united-flight-tracker.tsx",
+    "patternUri": "google/extractors/united-flight-tracker.tsx",
     "emailPatterns": [
       "@united.com"
     ]
   },
   {
-    "patternUri": "google/email-ticket-finder.tsx",
+    "patternUri": "google/extractors/email-ticket-finder.tsx",
     "emailPatterns": []
   },
   {
-    "patternUri": "google/email-notes.tsx",
+    "patternUri": "google/extractors/email-notes.tsx",
     "emailPatterns": []
   }
 ]

@@ -1,21 +1,21 @@
 /// <cts-enable />
 /**
- * PGE Bill Tracker Pattern
+ * Chase Bill Tracker Pattern
  *
- * Tracks PGE (Pacific Gas & Electric) utility bills from email notifications,
- * showing unpaid/upcoming bills and automatically or manually marking them as paid.
+ * Tracks Chase credit card bills from email notifications, showing unpaid/upcoming
+ * bills and automatically or manually marking them as paid.
  *
  * Features:
- * - Embeds gmail-importer directly for PGE emails
+ * - Embeds gmail-importer directly for Chase emails
  * - Extracts bill information using LLM from email markdown content
  * - Tracks payment confirmations to auto-mark bills as paid
  * - Supports manual "Mark as Paid" for local tracking
- * - Groups bills by account
+ * - Groups bills by card (last 4 digits)
  *
  * Usage:
  * 1. Deploy a google-auth charm and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct charm link google-auth/auth pge-bill-tracker/linkedAuth
+ * 3. Link: ct charm link google-auth/auth chase-bill-tracker/linkedAuth
  */
 import {
   computed,
@@ -30,8 +30,10 @@ import {
   Writable,
 } from "commontools";
 import type { Schema } from "commontools/schema";
-import GmailImporter, { type Auth } from "./gmail-importer.tsx";
-import ProcessingStatus from "./processing-status.tsx";
+import GmailImporter, {
+  type Auth,
+} from "../building-blocks/gmail-importer.tsx";
+import ProcessingStatus from "../building-blocks/processing-status.tsx";
 
 // Email type - matches GmailImporter's Email type
 interface Email {
@@ -62,9 +64,9 @@ type EmailType =
 
 type BillStatus = "unpaid" | "paid" | "overdue" | "likely_paid";
 
-interface PGEEmailAnalysis {
+interface ChaseEmailAnalysis {
   emailType: EmailType;
-  accountId?: string;
+  cardLast4?: string;
   amount?: number;
   dueDate?: string; // ISO format YYYY-MM-DD
   paymentDate?: string; // For payment confirmations
@@ -77,7 +79,7 @@ interface PGEEmailAnalysis {
 /** A tracked bill */
 interface TrackedBill {
   key: string; // Deduplication key
-  accountId: string;
+  cardLast4: string;
   amount: number;
   dueDate: string;
   status: BillStatus;
@@ -97,12 +99,12 @@ interface TrackedBill {
 /**
  * Bills older than this threshold (in days overdue) are assumed "likely paid"
  * when no payment confirmation was detected. This avoids false positives from
- * missing payment emails (e.g., account number changed, payment made differently).
+ * missing payment emails (e.g., card number changed, payment made differently).
  */
 const LIKELY_PAID_THRESHOLD_DAYS = -45;
 
-// 32 distinct colors for account badges (to reduce collisions)
-const ACCOUNT_COLORS = [
+// 32 distinct colors for card badges (to reduce collisions)
+const CARD_COLORS = [
   // Reds & oranges
   "#ef4444",
   "#dc2626",
@@ -144,11 +146,16 @@ const ACCOUNT_COLORS = [
   "#57534e",
 ];
 
-// PGE sends bill notifications from this address
-const _PGE_SENDERS = ["DoNotReply@billpay.pge.com"] as const;
+// Chase sends from various addresses - capture the main patterns
+const _CHASE_SENDERS = [
+  "no-reply@alertsp.chase.com",
+  "chase@email.chase.com",
+  "no.reply.alerts@chase.com",
+] as const;
 
-// Gmail query to find PGE emails
-const PGE_GMAIL_QUERY = "from:DoNotReply@billpay.pge.com";
+// Gmail query to find Chase emails - build manually to avoid .map() transformation
+const CHASE_GMAIL_QUERY =
+  "from:no-reply@alertsp.chase.com OR from:chase@email.chase.com OR from:no.reply.alerts@chase.com";
 
 // Schema for LLM email analysis
 const EMAIL_ANALYSIS_SCHEMA = {
@@ -165,12 +172,12 @@ const EMAIL_ANALYSIS_SCHEMA = {
         "other",
       ],
       description:
-        "Type of PGE email: bill_due for payment due notifications, payment_received for payment confirmations, payment_reminder for upcoming due reminders, statement_ready for new energy statement notifications, autopay_scheduled for autopay confirmation, other for unrelated emails",
+        "Type of Chase email: bill_due for payment due notifications, payment_received for payment confirmations, payment_reminder for upcoming due reminders, statement_ready for new statement notifications, autopay_scheduled for autopay confirmation, other for unrelated emails",
     },
-    accountId: {
+    cardLast4: {
       type: "string",
       description:
-        "PGE account number or identifier. Look for patterns like 'Account: 1234567890' or 'account ending in 1234' or any account reference",
+        "Last 4 digits of the credit card (e.g., '1234'). Look for patterns like 'ending in 1234' or '...1234'",
     },
     amount: {
       type: "number",
@@ -192,7 +199,7 @@ const EMAIL_ANALYSIS_SCHEMA = {
     },
     statementBalance: {
       type: "number",
-      description: "Statement balance or total amount due if mentioned",
+      description: "Statement balance if mentioned",
     },
     autopayEnabled: {
       type: "boolean",
@@ -214,10 +221,10 @@ type EmailAnalysisResult = Schema<typeof EMAIL_ANALYSIS_SCHEMA>;
 
 /**
  * Create a deduplication key for a bill.
- * Uses account ID + due date to identify unique bills.
+ * Uses card last 4 + due date to identify unique bills.
  */
-function createBillKey(accountId: string, dueDate: string): string {
-  return `${accountId}|${dueDate}`;
+function createBillKey(cardLast4: string, dueDate: string): string {
+  return `${cardLast4}|${dueDate}`;
 }
 
 /**
@@ -283,16 +290,16 @@ function formatDate(dateStr: string | undefined): string {
 }
 
 /**
- * Get a consistent color for an account based on its ID.
- * Same account always gets the same color.
+ * Get a consistent color for a card based on its last 4 digits.
+ * Same card always gets the same color.
  */
-function getAccountColor(accountId: string | undefined): string {
-  if (!accountId || typeof accountId !== "string") return ACCOUNT_COLORS[0];
+function getCardColor(last4: string | undefined): string {
+  if (!last4 || typeof last4 !== "string") return CARD_COLORS[0];
   let hash = 0;
-  for (let i = 0; i < accountId.length; i++) {
-    hash = (hash * 31 + accountId.charCodeAt(i)) % 32;
+  for (let i = 0; i < last4.length; i++) {
+    hash = (hash * 31 + last4.charCodeAt(i)) % 32;
   }
-  return ACCOUNT_COLORS[hash];
+  return CARD_COLORS[hash];
 }
 
 /**
@@ -350,11 +357,11 @@ const unmarkAsPaid = handler<
 
 interface PatternInput {
   linkedAuth?: Auth;
-  manuallyPaid: Writable<Default<string[], []>>;
-  demoMode: Writable<Default<boolean, true>>;
+  manuallyPaid?: Writable<Default<string[], []>>;
+  demoMode?: Writable<Default<boolean, true>>;
 }
 
-/** PGE utility bill tracker. #pgeBills */
+/** Chase credit card bill tracker. #chaseBills */
 interface PatternOutput {
   bills: TrackedBill[];
   unpaidBills: TrackedBill[];
@@ -366,14 +373,14 @@ interface PatternOutput {
 
 export default pattern<PatternInput, PatternOutput>(
   ({ linkedAuth, manuallyPaid, demoMode }) => {
-    // Directly instantiate GmailImporter with PGE-specific settings
+    // Directly instantiate GmailImporter with Chase-specific settings
     const gmailImporter = GmailImporter({
       settings: {
-        gmailFilterQuery: PGE_GMAIL_QUERY,
+        gmailFilterQuery: CHASE_GMAIL_QUERY,
         autoFetchOnAuth: true,
         resolveInlineImages: false,
         limit: 100,
-        debugMode: false,
+        debugMode: true,
       },
       linkedAuth,
     });
@@ -381,16 +388,18 @@ export default pattern<PatternInput, PatternOutput>(
     // Get emails directly from the embedded gmail-importer
     const allEmails = gmailImporter.emails;
 
-    // Filter for PGE emails
-    const pgeEmails = computed(() => {
+    // Filter for Chase emails
+    const chaseEmails = computed(() => {
       return (allEmails || []).filter((e: Email) => {
         const from = (e.from || "").toLowerCase();
-        return from.includes("billpay.pge.com");
+        return from.includes("alertsp.chase.com") ||
+          from.includes("email.chase.com") ||
+          from.includes("alerts@chase.com");
       });
     });
 
-    // Count of PGE emails found
-    const pgeEmailCount = computed(() => pgeEmails?.length || 0);
+    // Count of Chase emails found
+    const chaseEmailCount = computed(() => chaseEmails?.length || 0);
 
     // Check if connected
     const isConnected = computed(() => {
@@ -400,17 +409,17 @@ export default pattern<PatternInput, PatternOutput>(
 
     // ==========================================================================
     // REACTIVE LLM ANALYSIS
-    // Analyze each PGE email to extract bill/payment information
+    // Analyze each Chase email to extract bill/payment information
     // ==========================================================================
 
-    const emailAnalyses = pgeEmails.map((email: Email) => {
+    const emailAnalyses = chaseEmails.map((email: Email) => {
       const analysis = generateObject<EmailAnalysisResult>({
         prompt: computed(() => {
           if (!email?.markdownContent) {
             return undefined;
           }
 
-          return `Analyze this PGE (Pacific Gas & Electric) utility bill email and extract billing/payment information.
+          return `Analyze this Chase credit card email and extract billing/payment information.
 
 EMAIL SUBJECT: ${email.subject || ""}
 EMAIL DATE: ${email.date || ""}
@@ -423,11 +432,11 @@ Extract:
    - bill_due: A notification that a payment is due
    - payment_received: Confirmation that a payment was received/processed
    - payment_reminder: Reminder about upcoming due date
-   - statement_ready: New energy statement is available
+   - statement_ready: New statement is available
    - autopay_scheduled: Autopay confirmation
    - other: Unrelated to billing
 
-2. Account identifier - look for PGE account numbers, patterns like "Account: 1234567890" or account references
+2. Card last 4 digits - look for patterns like "ending in 1234", "...1234", "card ending 1234"
 
 3. Amount - the payment amount or bill amount (number only, no $ sign)
 
@@ -473,10 +482,10 @@ Extract:
     // ==========================================================================
 
     // Extract payment confirmations (to auto-mark bills as paid)
-    // Track ALL payment dates per account to match against bill due dates
+    // Track ALL payment dates per card to match against bill due dates
     // IMPORTANT: Use Set for deduplication, then sort for deterministic matching
     const paymentConfirmations = computed(() => {
-      const confirmations: Record<string, Set<string>> = {}; // accountId -> Set of paymentDates
+      const confirmations: Record<string, Set<string>> = {}; // cardLast4 -> Set of paymentDates
 
       for (const analysisItem of emailAnalyses || []) {
         const result = analysisItem.result;
@@ -484,10 +493,10 @@ Extract:
 
         if (
           result.emailType === "payment_received" &&
-          result.accountId &&
+          result.cardLast4 &&
           result.paymentDate
         ) {
-          const key = result.accountId;
+          const key = result.cardLast4;
           if (!confirmations[key]) {
             confirmations[key] = new Set();
           }
@@ -497,8 +506,8 @@ Extract:
 
       // Convert Sets to sorted arrays (oldest first) for deterministic matching
       const result: Record<string, string[]> = {};
-      for (const accountKey of Object.keys(confirmations).sort()) {
-        result[accountKey] = [...confirmations[accountKey]].sort((a, b) =>
+      for (const cardKey of Object.keys(confirmations).sort()) {
+        result[cardKey] = [...confirmations[cardKey]].sort((a, b) =>
           a.localeCompare(b)
         );
       }
@@ -551,13 +560,13 @@ Extract:
           continue;
         }
 
-        // Need account ID and due date to track a bill
-        if (!result.accountId || !result.dueDate) continue;
+        // Need card last 4 and due date to track a bill
+        if (!result.cardLast4 || !result.dueDate) continue;
 
         // For statement_ready, use statementBalance if amount isn't set
         const billAmount = result.amount || result.statementBalance || 0;
 
-        const key = createBillKey(result.accountId, result.dueDate);
+        const key = createBillKey(result.cardLast4, result.dueDate);
 
         // Skip if we already have this bill (we process newest first)
         if (billMap[key]) continue;
@@ -568,14 +577,14 @@ Extract:
         const isManuallyPaid = paidKeys.includes(key);
         // Check if any payment was made within a reasonable window of the due date
         // Payments are sorted chronologically (oldest first), so .find() is deterministic
-        const accountPayments = payments[result.accountId] || [];
+        const cardPayments = payments[result.cardLast4] || [];
         const billDueDate = result.dueDate; // Already verified non-null above
 
         // Find the first payment within the valid window (payments are sorted by date)
         // Window: 30 days before due date to 60 days after
         // Use parseDateToMs for deterministic date parsing (no new Date() calls)
         const dueDateMs = parseDateToMs(billDueDate);
-        const matchingPayment = accountPayments.find((paymentDate) => {
+        const matchingPayment = cardPayments.find((paymentDate) => {
           const paymentMs = parseDateToMs(paymentDate);
           if (isNaN(dueDateMs) || isNaN(paymentMs)) return false;
           const daysDiff = (paymentMs - dueDateMs) / (1000 * 60 * 60 * 24);
@@ -604,7 +613,7 @@ Extract:
 
         const trackedBill: TrackedBill = {
           key,
-          accountId: result.accountId,
+          cardLast4: result.cardLast4,
           amount: demoPrice(billAmount, demoMode.get()),
           dueDate: result.dueDate,
           status,
@@ -686,7 +695,7 @@ Extract:
           {computed(() => unpaidBills?.length || 0)}
         </div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: "600", fontSize: "14px" }}>PGE Bills</div>
+          <div style={{ fontWeight: "600", fontSize: "14px" }}>Chase Bills</div>
           <div style={{ fontSize: "12px", color: "#6b7280" }}>
             {computed(() => formatCurrency(totalUnpaid))} due
             <span
@@ -701,7 +710,7 @@ Extract:
           </div>
           {/* Loading/progress indicator */}
           <ProcessingStatus
-            totalCount={pgeEmailCount}
+            totalCount={chaseEmailCount}
             pendingCount={pendingCount}
             completedCount={completedCount}
           />
@@ -710,7 +719,7 @@ Extract:
     );
 
     return {
-      [NAME]: "PGE Bill Tracker",
+      [NAME]: "Chase Bill Tracker",
 
       bills,
       unpaidBills,
@@ -722,7 +731,7 @@ Extract:
       [UI]: (
         <ct-screen>
           <div slot="header">
-            <ct-heading level={3}>PGE Bill Tracker</ct-heading>
+            <ct-heading level={3}>Chase Bill Tracker</ct-heading>
           </div>
 
           <ct-vscroll flex showScrollbar>
@@ -761,7 +770,7 @@ Extract:
                   />
                   <span>Connected to Gmail</span>
                   <span style={{ marginLeft: "auto", color: "#059669" }}>
-                    {computed(() => pgeEmailCount)} PGE emails found
+                    {computed(() => chaseEmailCount)} Chase emails found
                   </span>
                   <button
                     type="button"
@@ -801,7 +810,7 @@ Extract:
                   }}
                 >
                   <span style={{ fontWeight: "600" }}>Analysis:</span>
-                  <span>{computed(() => pgeEmailCount)} emails</span>
+                  <span>{computed(() => chaseEmailCount)} emails</span>
                   <div
                     style={{
                       display: computed(() =>
@@ -978,14 +987,14 @@ Extract:
                           <span
                             style={{
                               padding: "2px 8px",
-                              backgroundColor: getAccountColor(bill.accountId),
+                              backgroundColor: getCardColor(bill.cardLast4),
                               borderRadius: "4px",
                               fontSize: "12px",
                               color: "white",
                               fontWeight: "500",
                             }}
                           >
-                            Acct: {bill.accountId}
+                            ...{bill.cardLast4}
                           </span>
                         </div>
                         <div
@@ -1043,7 +1052,7 @@ Extract:
                   >
                     Likely Paid ({computed(() => likelyPaidBills?.length || 0)})
                     <span
-                      title="Bills over 45 days old with no detected payment are likely already paid (payment email missing or account changed)"
+                      title="Bills over 45 days old with no detected payment are likely already paid (payment email missing or card changed)"
                       style={{
                         fontSize: "14px",
                         color: "#9ca3af",
@@ -1099,16 +1108,14 @@ Extract:
                             <span
                               style={{
                                 padding: "2px 6px",
-                                backgroundColor: getAccountColor(
-                                  bill.accountId,
-                                ),
+                                backgroundColor: getCardColor(bill.cardLast4),
                                 borderRadius: "4px",
                                 fontSize: "11px",
                                 color: "white",
                                 fontWeight: "500",
                               }}
                             >
-                              Acct: {bill.accountId}
+                              ...{bill.cardLast4}
                             </span>
                           </div>
                           <div
@@ -1118,7 +1125,8 @@ Extract:
                             }}
                           >
                             Was due: {formatDate(bill.dueDate)} (
-                            {computed(() => Math.abs(bill.daysUntilDue))}{" "}
+                            {computed(() => Math.abs(bill.daysUntilDue ?? 0))}
+                            {" "}
                             days ago)
                           </div>
                         </div>
@@ -1201,16 +1209,14 @@ Extract:
                             <span
                               style={{
                                 padding: "2px 6px",
-                                backgroundColor: getAccountColor(
-                                  bill.accountId,
-                                ),
+                                backgroundColor: getCardColor(bill.cardLast4),
                                 borderRadius: "4px",
                                 fontSize: "11px",
                                 color: "white",
                                 fontWeight: "500",
                               }}
                             >
-                              Acct: {bill.accountId}
+                              ...{bill.cardLast4}
                             </span>
                             <span
                               style={{
@@ -1270,7 +1276,9 @@ Extract:
                   backgroundColor: "#f9fafb",
                   borderRadius: "8px",
                   border: "1px solid #d1d5db",
-                  display: computed(() => pgeEmailCount > 0 ? "block" : "none"),
+                  display: computed(() =>
+                    chaseEmailCount > 0 ? "block" : "none"
+                  ),
                 }}
               >
                 <details>
@@ -1283,7 +1291,7 @@ Extract:
                       color: "#374151",
                     }}
                   >
-                    Debug View ({computed(() => pgeEmailCount)} emails)
+                    Debug View ({computed(() => chaseEmailCount)} emails)
                   </summary>
 
                   <div style={{ marginTop: "12px" }}>
@@ -1295,10 +1303,10 @@ Extract:
                         color: "#6b7280",
                       }}
                     >
-                      Fetched PGE Emails:
+                      Fetched Chase Emails:
                     </h4>
                     <ct-vstack gap="2">
-                      {pgeEmails.map((email: Email) => (
+                      {chaseEmails.map((email: Email) => (
                         <div
                           style={{
                             padding: "8px 12px",
@@ -1399,7 +1407,8 @@ Extract:
                               marginTop: "4px",
                             }}
                           >
-                            Error: {computed(() =>
+                            Error:{" "}
+                            {computed(() =>
                               analysis.error ? String(analysis.error) : ""
                             )}
                           </div>
@@ -1423,15 +1432,17 @@ Extract:
                               }}
                             >
                               <div style={{ color: "#374151" }}>
-                                <strong>Type:</strong> {computed(() =>
+                                <strong>Type:</strong>{" "}
+                                {computed(() =>
                                   analysis.result?.emailType || "N/A"
                                 )}
                               </div>
                               <div
                                 style={{ color: "#374151", marginTop: "4px" }}
                               >
-                                <strong>Account:</strong> {computed(() =>
-                                  analysis.result?.accountId || "N/A"
+                                <strong>Card:</strong> ...
+                                {computed(() =>
+                                  analysis.result?.cardLast4 || "N/A"
                                 )}
                               </div>
                               <div
@@ -1451,14 +1462,16 @@ Extract:
                               <div
                                 style={{ color: "#374151", marginTop: "4px" }}
                               >
-                                <strong>Due:</strong> {computed(() =>
+                                <strong>Due:</strong>{" "}
+                                {computed(() =>
                                   formatDate(analysis.result?.dueDate)
                                 )}
                               </div>
                               <div
                                 style={{ color: "#374151", marginTop: "4px" }}
                               >
-                                <strong>Summary:</strong> {computed(() =>
+                                <strong>Summary:</strong>{" "}
+                                {computed(() =>
                                   analysis.result?.summary || "N/A"
                                 )}
                               </div>
@@ -1471,16 +1484,16 @@ Extract:
                 </details>
               </div>
 
-              {/* PGE Website Link */}
+              {/* Chase Website Link */}
               <div style={{ marginTop: "16px", textAlign: "center" }}>
                 <a
-                  href="https://www.pge.com/"
+                  href="https://www.chase.com/"
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{
                     display: "inline-block",
                     padding: "10px 20px",
-                    backgroundColor: "#004B87",
+                    backgroundColor: "#1a5276",
                     color: "white",
                     borderRadius: "8px",
                     textDecoration: "none",
@@ -1488,7 +1501,7 @@ Extract:
                     fontSize: "14px",
                   }}
                 >
-                  Open PGE Website
+                  Open Chase Website
                 </a>
               </div>
 

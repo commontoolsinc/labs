@@ -31,7 +31,7 @@ import {
   wish,
   Writable,
 } from "commontools";
-import type { Output as ProfileOutput } from "../profile.tsx";
+import type { Output as ProfileOutput } from "../../profile.tsx";
 
 // =============================================================================
 // TYPES

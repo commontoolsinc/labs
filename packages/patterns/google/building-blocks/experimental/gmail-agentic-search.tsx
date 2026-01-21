@@ -42,12 +42,12 @@ import {
   type AccountType as _AccountType,
   createGoogleAuth as createGoogleAuthUtil,
   type ScopeKey,
-} from "./util/google-auth-manager.tsx";
-import GoogleAuth from "./google-auth.tsx";
+} from "../util/google-auth-manager.tsx";
+import GoogleAuth from "../google-auth.tsx";
 import {
   GmailClient,
   validateAndRefreshTokenCrossCharm,
-} from "./util/gmail-client.ts";
+} from "../util/gmail-client.ts";
 import GmailSearchRegistry from "./gmail-search-registry.tsx";
 import type {
   GmailSearchRegistryOutput,
@@ -55,8 +55,8 @@ import type {
 } from "./gmail-search-registry.tsx";
 
 // Re-export Auth type for convenience
-export type { Auth } from "./gmail-importer.tsx";
-import type { Auth } from "./gmail-importer.tsx";
+export type { Auth } from "../gmail-importer.tsx";
+import type { Auth } from "../gmail-importer.tsx";
 
 const _env = getRecipeEnvironment();
 
