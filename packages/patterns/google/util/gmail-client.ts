@@ -400,6 +400,19 @@ Accept: application/json
   }
 
   /**
+   * Decode base64url-encoded string with proper UTF-8 handling.
+   */
+  private decodeBase64Utf8(data: string): string {
+    const sanitized = data.replace(/-/g, "+").replace(/_/g, "/");
+    const binaryString = atob(sanitized);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return new TextDecoder("utf-8").decode(bytes);
+  }
+
+  /**
    * Parse a raw Gmail message into SimpleEmail format.
    */
   private parseMessage(message: any): SimpleEmail | null {
@@ -416,7 +429,7 @@ Accept: application/json
     const extractText = (payload: any): string => {
       if (payload.body?.data) {
         try {
-          return atob(payload.body.data.replace(/-/g, "+").replace(/_/g, "/"));
+          return this.decodeBase64Utf8(payload.body.data);
         } catch {
           return "";
         }
@@ -426,7 +439,7 @@ Accept: application/json
         for (const p of payload.parts) {
           if (p.mimeType === "text/plain" && p.body?.data) {
             try {
-              return atob(p.body.data.replace(/-/g, "+").replace(/_/g, "/"));
+              return this.decodeBase64Utf8(p.body.data);
             } catch {
               continue;
             }
@@ -436,9 +449,7 @@ Accept: application/json
         for (const p of payload.parts) {
           if (p.mimeType === "text/html" && p.body?.data) {
             try {
-              const html = atob(
-                p.body.data.replace(/-/g, "+").replace(/_/g, "/"),
-              );
+              const html = this.decodeBase64Utf8(p.body.data);
               return html
                 .replace(/<[^>]+>/g, " ")
                 .replace(/\s+/g, " ")
