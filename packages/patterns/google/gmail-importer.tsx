@@ -254,12 +254,19 @@ const googleUpdater = handler<unknown, {
   },
 );
 
-// Helper function to decode base64 encoded email parts
-function decodeBase64(data: string) {
+// Helper function to decode base64 encoded email parts with proper UTF-8 handling
+function decodeBase64(data: string): string {
   // Replace URL-safe characters back to their original form
   const sanitized = data.replace(/-/g, "+").replace(/_/g, "/");
-  // Decode the base64 string
-  return atob(sanitized);
+  // Decode the base64 string to binary
+  const binaryString = atob(sanitized);
+  // Convert binary string to Uint8Array for proper UTF-8 decoding
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  // Use TextDecoder to properly decode UTF-8
+  return new TextDecoder("utf-8").decode(bytes);
 }
 
 // Helper function to extract email address from a header value

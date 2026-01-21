@@ -57,27 +57,10 @@ interface Note {
 // =============================================================================
 
 /**
- * Clean up encoding artifacts from email content.
- * Common issues: UTF-8 characters decoded as Latin-1 produce mojibake
+ * Clean up content - minimal cleanup now that UTF-8 decoding is fixed
  */
 function cleanContent(content: string): string {
   return content
-    // Replace "Â " (UTF-8 NBSP misread as Latin-1) with regular space
-    .replace(/Â /g, " ")
-    // Replace "Â&nbsp;" and "Â " in HTML (before &nbsp; entity)
-    .replace(/Â&nbsp;/g, "&nbsp;")
-    .replace(/Â&#160;/g, "&#160;")
-    // Replace standalone "Â" that might appear
-    .replace(/Â$/gm, "")
-    .replace(/Â(?=\s)/g, "")
-    .replace(/Â(?=<)/g, "") // Before HTML tags
-    // Fix smart quotes that got mangled (UTF-8 as Latin-1)
-    .replace(/â€™/g, "'") // Right single quote
-    .replace(/â€˜/g, "'") // Left single quote
-    .replace(/â€œ/g, '"') // Left double quote
-    .replace(/â€/g, '"') // Right double quote (partial)
-    .replace(/â€"/g, "—") // Em dash
-    .replace(/â€"/g, "–") // En dash
     // Normalize multiple spaces
     .replace(/  +/g, " ")
     .trim();
@@ -267,15 +250,16 @@ export default pattern<PatternInput, PatternOutput>(() => {
   });
 
   // Directly instantiate GmailImporter with task-current filter
-  // Note: subject:"" in Gmail search means empty subject
+  // Note: Gmail API doesn't support subject:"" for empty subjects, so we only
+  // filter by label here and do client-side filtering for empty subjects
   // Pass auth directly to maintain Writable<Auth> for token refresh
   const gmailImporter = GmailImporter({
     settings: {
-      gmailFilterQuery: 'label:task-current subject:""',
+      gmailFilterQuery: "label:task-current",
       autoFetchOnAuth: true,
       resolveInlineImages: false,
-      limit: 50,
-      debugMode: true,
+      limit: 100,
+      debugMode: false,
     },
     linkedAuth: auth,
   });
