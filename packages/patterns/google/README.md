@@ -3,6 +3,55 @@
 This folder contains patterns for integrating with Google services (Gmail,
 Calendar, Docs) via OAuth authentication.
 
+## Directory Structure
+
+```
+packages/patterns/google/
+├── building-blocks/          # Core, engineering-supported patterns
+│   ├── util/                 # Shared utilities (clients, auth manager)
+│   │   ├── gmail-client.ts
+│   │   ├── gmail-send-client.ts
+│   │   ├── calendar-write-client.ts
+│   │   ├── google-auth-manager.tsx
+│   │   ├── google-docs-client.ts
+│   │   ├── google-docs-markdown.ts
+│   │   └── agentic-tools.ts
+│   │
+│   ├── google-auth.tsx           # Core OAuth2
+│   ├── google-auth-personal.tsx  # Personal account wrapper
+│   ├── google-auth-work.tsx      # Work account wrapper
+│   ├── gmail-importer.tsx        # Email fetching (heavily used)
+│   ├── google-calendar-importer.tsx
+│   ├── imported-calendar.tsx
+│   ├── processing-status.tsx
+│   │
+│   └── experimental/             # Less hardened
+│       ├── google-auth-switcher.tsx
+│       ├── gmail-agentic-search.tsx
+│       ├── gmail-sender.tsx
+│       ├── gmail-label-manager.tsx
+│       ├── gmail-search-registry.tsx
+│       ├── calendar-event-manager.tsx
+│       ├── calendar-viewer.tsx
+│       └── google-docs-comment-orchestrator.tsx
+│
+├── extractors/               # End-user patterns
+│   ├── usps-informed-delivery.tsx
+│   ├── email-notes.tsx
+│   ├── chase-bill-tracker.tsx
+│   ├── bofa-bill-tracker.tsx
+│   ├── pge-bill-tracker.tsx
+│   ├── berkeley-library.tsx
+│   ├── united-flight-tracker.tsx
+│   ├── hotel-membership-gmail-agent.tsx
+│   ├── favorite-foods-gmail-agent.tsx
+│   ├── email-pattern-launcher.tsx
+│   └── ...
+│
+└── WIP/                      # Work in progress
+    └── google-docs-importer.tsx
+```
+
 ## Quick Start
 
 ### For Staging/Production (Recommended)
@@ -110,49 +159,54 @@ Your Pattern
 
 ## Pattern Categories
 
-### Google Auth
+### building-blocks/ — Core Auth
 
-| Pattern                    | Description                                 |
-| -------------------------- | ------------------------------------------- |
-| `google-auth.tsx`          | OAuth2 authentication flow for Google APIs  |
-| `google-auth-personal.tsx` | Wrapper that adds `#googleAuthPersonal` tag |
-| `google-auth-work.tsx`     | Wrapper that adds `#googleAuthWork` tag     |
-| `google-auth-switcher.tsx` | Post-login account type classification      |
+| Pattern                                    | Description                                 |
+| ------------------------------------------ | ------------------------------------------- |
+| `building-blocks/google-auth.tsx`          | OAuth2 authentication flow for Google APIs  |
+| `building-blocks/google-auth-personal.tsx` | Wrapper that adds `#googleAuthPersonal` tag |
+| `building-blocks/google-auth-work.tsx`     | Wrapper that adds `#googleAuthWork` tag     |
 
-### Gmail
+### building-blocks/ — Gmail & Calendar
 
-| Pattern                      | Description                                    |
-| ---------------------------- | ---------------------------------------------- |
-| `gmail-importer.tsx`         | Import emails from Gmail with search queries   |
-| `gmail-sender.tsx`           | Send emails via Gmail API                      |
-| `gmail-label-manager.tsx`    | Add/remove labels from emails                  |
-| `gmail-agentic-search.tsx`   | Base pattern for Gmail-based agentic searchers |
-| `gmail-search-registry.tsx`  | Community query database for Gmail searches    |
-| `usps-informed-delivery.tsx` | USPS mail analyzer with LLM vision             |
+| Pattern                                        | Description                                  |
+| ---------------------------------------------- | -------------------------------------------- |
+| `building-blocks/gmail-importer.tsx`           | Import emails from Gmail with search queries |
+| `building-blocks/google-calendar-importer.tsx` | Import events from Google Calendar           |
+| `building-blocks/imported-calendar.tsx`        | Display local calendar events                |
+| `building-blocks/processing-status.tsx`        | Loading/progress UI component                |
 
-### Gmail Agentic Patterns
+### building-blocks/experimental/ — Less Hardened
 
-| Pattern                            | Description                              |
-| ---------------------------------- | ---------------------------------------- |
-| `hotel-membership-gmail-agent.tsx` | Extract hotel loyalty numbers from Gmail |
-| `favorite-foods-gmail-agent.tsx`   | Extract food preferences from emails     |
+| Pattern                                                             | Description                                    |
+| ------------------------------------------------------------------- | ---------------------------------------------- |
+| `building-blocks/experimental/google-auth-switcher.tsx`             | Post-login account type classification         |
+| `building-blocks/experimental/gmail-sender.tsx`                     | Send emails via Gmail API                      |
+| `building-blocks/experimental/gmail-label-manager.tsx`              | Add/remove labels from emails                  |
+| `building-blocks/experimental/gmail-agentic-search.tsx`             | Base pattern for Gmail-based agentic searchers |
+| `building-blocks/experimental/gmail-search-registry.tsx`            | Community query database for Gmail searches    |
+| `building-blocks/experimental/calendar-event-manager.tsx`           | Create, update, delete calendar events         |
+| `building-blocks/experimental/calendar-viewer.tsx`                  | View calendar events                           |
+| `building-blocks/experimental/google-docs-comment-orchestrator.tsx` | AI assistant for Google Docs comments          |
+| `building-blocks/experimental/google-docs-comment-confirm.ts`       | Side effects handler for Docs comments         |
 
-### Calendar
+### extractors/ — End-User Patterns
 
-| Pattern                        | Description                            |
-| ------------------------------ | -------------------------------------- |
-| `google-calendar-importer.tsx` | Import events from Google Calendar     |
-| `calendar-event-manager.tsx`   | Create, update, delete calendar events |
-| `calendar-viewer.tsx`          | View calendar events                   |
+| Pattern                                       | Description                              |
+| --------------------------------------------- | ---------------------------------------- |
+| `extractors/usps-informed-delivery.tsx`       | USPS mail analyzer with LLM vision       |
+| `extractors/email-notes.tsx`                  | Task notes sent to self                  |
+| `extractors/chase-bill-tracker.tsx`           | Chase credit card bill tracker           |
+| `extractors/bofa-bill-tracker.tsx`            | Bank of America bill tracker             |
+| `extractors/pge-bill-tracker.tsx`             | PGE utility bill tracker                 |
+| `extractors/berkeley-library.tsx`             | Library holds and due dates              |
+| `extractors/united-flight-tracker.tsx`        | United Airlines flight tracking          |
+| `extractors/hotel-membership-gmail-agent.tsx` | Extract hotel loyalty numbers from Gmail |
+| `extractors/favorite-foods-gmail-agent.tsx`   | Extract food preferences from emails     |
+| `extractors/email-pattern-launcher.tsx`       | Auto-launch patterns based on emails     |
+| `extractors/calendar-change-detector.tsx`     | Detect schedule changes                  |
 
-### Google Docs
-
-| Pattern                                | Description                            |
-| -------------------------------------- | -------------------------------------- |
-| `google-docs-comment-orchestrator.tsx` | AI assistant for Google Docs comments  |
-| `google-docs-comment-confirm.ts`       | Side effects handler for Docs comments |
-
-### WIP (Work In Progress)
+### WIP/ — Work In Progress
 
 | Pattern                        | Description                |
 | ------------------------------ | -------------------------- |

@@ -29,8 +29,11 @@ import {
   Writable,
 } from "commontools";
 import type { Schema } from "commontools/schema";
-import GmailImporter, { type Auth, type Email } from "./gmail-importer.tsx";
-import ProcessingStatus from "./processing-status.tsx";
+import GmailImporter, {
+  type Auth,
+  type Email,
+} from "../building-blocks/gmail-importer.tsx";
+import ProcessingStatus from "../building-blocks/processing-status.tsx";
 
 // =============================================================================
 // TYPES

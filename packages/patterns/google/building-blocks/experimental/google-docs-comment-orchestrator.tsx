@@ -24,7 +24,7 @@ import {
 import {
   createGoogleAuth,
   type ScopeKey,
-} from "./util/google-auth-manager.tsx";
+} from "../util/google-auth-manager.tsx";
 
 const _env = getRecipeEnvironment();
 

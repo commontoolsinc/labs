@@ -10,7 +10,7 @@
  * Note: Since this pattern depends on wish() finding auth charms,
  * we can only test the "no auth found" scenarios without external setup.
  *
- * Run: deno task ct test packages/patterns/google/util/google-auth-manager.test.tsx --verbose
+ * Run: deno task ct test packages/patterns/google/building-blocks/util/google-auth-manager.test.tsx --verbose
  */
 import { computed, pattern } from "commontools";
 import { GoogleAuthManager } from "./google-auth-manager.tsx";

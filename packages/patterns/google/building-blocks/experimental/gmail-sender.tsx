@@ -30,8 +30,8 @@ import {
   UI,
   Writable,
 } from "commontools";
-import { GmailSendClient } from "./util/gmail-send-client.ts";
-import { type Auth, createGoogleAuth } from "./util/google-auth-manager.tsx";
+import { GmailSendClient } from "../util/gmail-send-client.ts";
+import { type Auth, createGoogleAuth } from "../util/google-auth-manager.tsx";
 
 // ============================================================================
 // TYPES

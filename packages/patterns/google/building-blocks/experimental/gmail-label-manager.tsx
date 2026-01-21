@@ -38,12 +38,12 @@ import {
   type GmailLabel,
   GmailSendClient,
   type ModifyLabelsParams,
-} from "./util/gmail-send-client.ts";
+} from "../util/gmail-send-client.ts";
 import {
   type Auth,
   createGoogleAuth,
   type ScopeKey,
-} from "./util/google-auth-manager.tsx";
+} from "../util/google-auth-manager.tsx";
 
 // ============================================================================
 // TYPES

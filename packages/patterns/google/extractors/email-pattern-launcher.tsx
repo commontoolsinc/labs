@@ -30,7 +30,9 @@ import {
   UI,
   when,
 } from "commontools";
-import GmailImporter, { type Auth } from "./gmail-importer.tsx";
+import GmailImporter, {
+  type Auth,
+} from "../building-blocks/gmail-importer.tsx";
 
 import USPSInformedDeliveryPattern from "./usps-informed-delivery.tsx";
 import BerkeleyLibraryPattern from "./berkeley-library.tsx";
@@ -43,15 +45,16 @@ import EmailNotesPattern from "./email-notes.tsx";
 import UnitedFlightTrackerPattern from "./united-flight-tracker.tsx";
 
 const PATTERNS: any = {
-  "google/usps-informed-delivery.tsx": USPSInformedDeliveryPattern,
-  "google/berkeley-library.tsx": BerkeleyLibraryPattern,
-  "google/chase-bill-tracker.tsx": ChaseBillPattern,
-  "google/bam-school-dashboard.tsx": BAMSchoolDashboardPattern,
-  "google/bofa-bill-tracker.tsx": BofABillTrackerPattern,
-  "google/email-ticket-finder.tsx": EmailTicketFinderPattern,
-  "google/calendar-change-detector.tsx": CalendarChangeDetectorPattern,
-  "google/email-notes.tsx": EmailNotesPattern,
-  "google/united-flight-tracker.tsx": UnitedFlightTrackerPattern,
+  "google/extractors/usps-informed-delivery.tsx": USPSInformedDeliveryPattern,
+  "google/extractors/berkeley-library.tsx": BerkeleyLibraryPattern,
+  "google/extractors/chase-bill-tracker.tsx": ChaseBillPattern,
+  "google/extractors/bam-school-dashboard.tsx": BAMSchoolDashboardPattern,
+  "google/extractors/bofa-bill-tracker.tsx": BofABillTrackerPattern,
+  "google/extractors/email-ticket-finder.tsx": EmailTicketFinderPattern,
+  "google/extractors/calendar-change-detector.tsx":
+    CalendarChangeDetectorPattern,
+  "google/extractors/email-notes.tsx": EmailNotesPattern,
+  "google/extractors/united-flight-tracker.tsx": UnitedFlightTrackerPattern,
 };
 
 // =============================================================================
@@ -134,7 +137,7 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
   // ==========================================================================
 
   const registryFetch = fetchData<RegistryEntry[]>({
-    url: "/api/patterns/google/email-pattern-registry.json",
+    url: "/api/patterns/google/extractors/email-pattern-registry.json",
     mode: "json",
   });
 

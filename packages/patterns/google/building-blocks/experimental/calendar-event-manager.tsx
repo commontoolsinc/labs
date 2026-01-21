@@ -35,12 +35,12 @@ import {
 import {
   CalendarWriteClient,
   type RSVPStatus,
-} from "./util/calendar-write-client.ts";
+} from "../util/calendar-write-client.ts";
 import {
   type Auth,
   createGoogleAuth,
   type ScopeKey,
-} from "./util/google-auth-manager.tsx";
+} from "../util/google-auth-manager.tsx";
 
 // ============================================================================
 // TYPES
