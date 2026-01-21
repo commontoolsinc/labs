@@ -327,7 +327,7 @@ const Note = pattern<Input, Output>(
     const mentionable = wish<Default<MentionableCharm[], []>>(
       "#mentionable",
     );
-    const recentCharms = wish<MinimalCharm[]>("#recent");
+    const _recentCharms = wish<MinimalCharm[]>("#recent");
     const mentioned = Writable.of<MentionableCharm[]>([]);
 
     // Dropdown menu state
