@@ -4,6 +4,8 @@ description: Write and run pattern tests
 user-invocable: false
 ---
 
+Use `Skill("ct")` for ct CLI documentation when running commands.
+
 # Test Sub-Pattern
 
 ## Prerequisite Check

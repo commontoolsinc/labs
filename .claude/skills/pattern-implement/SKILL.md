@@ -4,6 +4,8 @@ description: Build sub-patterns with minimal UI
 user-invocable: false
 ---
 
+Use `Skill("ct")` for ct CLI documentation when running commands.
+
 # Implement Sub-Pattern
 
 ## Core Rule
