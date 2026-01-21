@@ -29,10 +29,10 @@ import {
   Writable,
 } from "commontools";
 import type { Schema } from "commontools/schema";
-import GmailImporter, {
-  type Auth,
+import GmailExtractor, {
   type Email,
-} from "../building-blocks/gmail-importer.tsx";
+} from "../building-blocks/gmail-extractor.tsx";
+import type { Auth } from "../building-blocks/gmail-importer.tsx";
 import ProcessingStatus from "../building-blocks/processing-status.tsx";
 
 // =============================================================================
@@ -307,33 +307,20 @@ export default pattern<PatternInput, PatternOutput>(
   ({ settings, dismissedIds, linkedAuth }) => {
     // Build Gmail query to find BAM school emails
     // Excludes fundraising emails (schoolsfund.berkeley.net)
-    const gmailQuery = computed(() => {
-      return `(from:bamannouncements OR from:bamattendance OR from:mail.remind.com OR from:homeroom.com OR from:gracelee06 OR from:zaragoza OR from:berkeley.net OR subject:"Berkeley Arts Magnet" OR subject:"BAM ") -from:schoolsfund.berkeley.net`;
-    });
+    const gmailQuery =
+      `(from:bamannouncements OR from:bamattendance OR from:mail.remind.com OR from:homeroom.com OR from:gracelee06 OR from:zaragoza OR from:berkeley.net OR subject:"Berkeley Arts Magnet" OR subject:"BAM ") -from:schoolsfund.berkeley.net`;
 
-    // Directly instantiate GmailImporter with school-specific settings
-    const gmailImporter = GmailImporter({
-      settings: {
-        gmailFilterQuery: gmailQuery,
-        autoFetchOnAuth: true,
-        resolveInlineImages: false,
-        limit: 50,
-        debugMode: true,
-      },
+    // Use GmailExtractor in raw mode (no extraction config) for custom analysis
+    const extractor = GmailExtractor({
+      gmailQuery,
+      title: "BAM School Emails",
+      limit: 50,
       linkedAuth,
     });
 
-    // Get emails directly from the embedded gmail-importer
-    const allEmails = gmailImporter.emails;
-
-    // Count of emails found
-    const emailCount = computed(() => allEmails?.length || 0);
-
-    // Check if connected
-    const isConnected = computed(() => {
-      if (linkedAuth?.token) return true;
-      return gmailImporter?.emailCount !== undefined;
-    });
+    // Get emails from extractor
+    const allEmails = extractor.emails;
+    const emailCount = extractor.emailCount;
 
     // ==========================================================================
     // LLM ANALYSIS
@@ -591,57 +578,11 @@ Extract:
 
           <ct-vscroll flex showScrollbar>
             <ct-vstack padding="6" gap="4">
-              {/* Auth UI from embedded Gmail Importer */}
-              {gmailImporter.authUI}
+              {/* Auth UI from GmailExtractor */}
+              {extractor.ui.authStatusUI}
 
               {/* Connection Status */}
-              <div
-                style={{
-                  padding: "12px 16px",
-                  backgroundColor: "#d1fae5",
-                  borderRadius: "8px",
-                  border: "1px solid #10b981",
-                  display: computed(() => (isConnected ? "block" : "none")),
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                  }}
-                >
-                  <span
-                    style={{
-                      width: "10px",
-                      height: "10px",
-                      borderRadius: "50%",
-                      backgroundColor: "#10b981",
-                    }}
-                  />
-                  <span>Connected to Gmail</span>
-                  <span style={{ marginLeft: "auto", color: "#059669" }}>
-                    {emailCount} school emails
-                  </span>
-                  <button
-                    type="button"
-                    onClick={gmailImporter.bgUpdater}
-                    style={{
-                      marginLeft: "8px",
-                      padding: "6px 12px",
-                      backgroundColor: "#10b981",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "6px",
-                      cursor: "pointer",
-                      fontSize: "13px",
-                      fontWeight: "500",
-                    }}
-                  >
-                    Refresh
-                  </button>
-                </div>
-              </div>
+              {extractor.ui.connectionStatusUI}
 
               {/* Analysis Progress */}
               <div
