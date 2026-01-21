@@ -682,10 +682,10 @@ const enrichedContext = {
 3. ✅ **Phase 2.4**: Add learned section UI to profile.tsx
 4. **Test**: Manual fact/question addition works
 
-### Sprint 3: Profile Learning
+### Sprint 3: Profile Learning ✅ COMPLETE
 
-1. **Phase 2.2**: Add journal watching + LLM extraction to profile.tsx
-2. **Phase 2.3**: Ensure profile is accessible from home space
+1. ✅ **Phase 2.2**: Add journal watching + LLM extraction to profile.tsx
+2. ✅ **Phase 2.3**: Profile discoverable via wish("#profile")
 3. **Test**: Favorite items → facts appear in profile
 
 ### Sprint 4: Integration

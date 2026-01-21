@@ -15,10 +15,13 @@ import {
   action,
   computed,
   type Default,
+  generateObject,
   NAME,
   pattern,
+  toSchema,
   UI,
   type VNode,
+  wish,
   Writable,
 } from "commontools";
 
@@ -102,6 +105,37 @@ export interface Employment {
   city: string;
   state: string;
   notes: string;
+}
+
+// ============================================================================
+// JOURNAL TYPES - For watching user activity
+// ============================================================================
+
+/** Journal entry from home.tsx - used for learning */
+interface JournalEntry {
+  timestamp?: number;
+  eventType?: string;
+  snapshot?: {
+    name?: string;
+    schemaTag?: string;
+    valueExcerpt?: string;
+  };
+  narrative?: string;
+  tags?: string[];
+  space?: string;
+}
+
+/** Result type for LLM profile extraction */
+interface ProfileExtraction {
+  facts: Array<{ content: string; confidence: number }>;
+  preferences: Array<{ key: string; value: string; confidence: number }>;
+  personas: string[];
+  questions: Array<{
+    question: string;
+    category: string;
+    priority: number;
+    options?: string[];
+  }>;
 }
 
 // ============================================================================
@@ -379,6 +413,158 @@ const Profile = pattern<ProfileInput, Output>(
       const name = self.key("name").get();
       return name ? `${name}'s Profile` : "My Profile";
     });
+
+    // === JOURNAL WATCHING FOR PROFILE LEARNING ===
+    // Get journal entries from home space via wish
+    const journalWish = wish<JournalEntry[]>({ query: "#journal" });
+
+    // Find new entries since last processed
+    const newEntries = computed(() => {
+      const entries = journalWish.result ?? [];
+      const lastTs = learned.key("lastJournalProcessed").get() || 0;
+      // Filter to entries with narratives (meaning LLM has processed them)
+      return entries.filter(
+        (e: JournalEntry) => (e.timestamp || 0) > lastTs && e.narrative,
+      );
+    });
+
+    // Generate profile insights from new journal entries
+    const profileExtraction = generateObject<ProfileExtraction>({
+      prompt: computed(() => {
+        const entries = newEntries;
+        if (!entries || entries.length === 0) return "";
+
+        const currentFacts = learned.key("facts").get();
+        const currentPrefs = learned.key("preferences").get();
+
+        return `Analyze these recent user actions and extract profile insights.
+
+Recent actions:
+${
+          entries.map((e: JournalEntry) =>
+            `- ${e.eventType}: ${e.narrative || e.snapshot?.name || "unknown"}`
+          ).join("\n")
+        }
+
+Current known facts: ${currentFacts.map((f) => f.content).join(", ") || "none"}
+Current preferences: ${
+          currentPrefs.map((p) => `${p.key}=${p.value}`).join(", ") || "none"
+        }
+
+Extract:
+1. facts - clear statements about the user (e.g., "interested in cooking", "has children")
+2. preferences - key-value pairs about user preferences
+3. personas - short descriptive labels (e.g., "busy parent", "tech enthusiast")
+4. questions - clarifying questions to ask the user (if needed)
+
+Be conservative - only extract facts you're confident about (confidence 0.5-1.0).
+Avoid duplicating existing facts. Return empty arrays if nothing new to learn.`;
+      }),
+      system: `You extract user profile information from their activity.
+Be conservative - only add facts with clear evidence.
+Return valid JSON matching the schema.`,
+      schema: toSchema<ProfileExtraction>(),
+      model: "anthropic:claude-haiku-4-5",
+    });
+
+    // Idempotent writeback - apply extracted insights to profile
+    const applyExtraction = computed(() => {
+      const result = profileExtraction.result;
+      const pending = profileExtraction.pending;
+      const entries = newEntries;
+
+      // Guard: only proceed when we have results and entries to process
+      if (pending || !result || !entries || entries.length === 0) return null;
+
+      // Get current state
+      const currentFacts = learned.key("facts").get();
+      const lastProcessed = learned.key("lastJournalProcessed").get() || 0;
+
+      // Find the max timestamp from processed entries
+      const maxTimestamp = Math.max(
+        ...entries.map((e: JournalEntry) => e.timestamp || 0),
+      );
+
+      // Idempotent check: already processed these entries?
+      if (maxTimestamp <= lastProcessed) return null;
+
+      // Apply new facts (with deduplication)
+      if (result.facts && result.facts.length > 0) {
+        const existingContents = new Set(currentFacts.map((f) => f.content));
+        const newFacts = result.facts
+          .filter((f) => !existingContents.has(f.content))
+          .map((f) => ({
+            content: f.content,
+            confidence: f.confidence,
+            source: `journal:${maxTimestamp}`,
+            timestamp: Date.now(),
+          }));
+        if (newFacts.length > 0) {
+          learned.key("facts").set([...currentFacts, ...newFacts]);
+        }
+      }
+
+      // Apply new preferences
+      if (result.preferences && result.preferences.length > 0) {
+        const currentPrefs = learned.key("preferences").get();
+        const existingKeys = new Set(currentPrefs.map((p) => p.key));
+        const newPrefs = result.preferences
+          .filter((p) => !existingKeys.has(p.key))
+          .map((p) => ({
+            key: p.key,
+            value: p.value,
+            confidence: p.confidence,
+            source: `journal:${maxTimestamp}`,
+          }));
+        if (newPrefs.length > 0) {
+          learned.key("preferences").set([...currentPrefs, ...newPrefs]);
+        }
+      }
+
+      // Apply new personas
+      if (result.personas && result.personas.length > 0) {
+        const currentPersonas = learned.key("personas").get();
+        const existingPersonas = new Set(currentPersonas);
+        const newPersonas = result.personas.filter(
+          (p) => !existingPersonas.has(p),
+        );
+        if (newPersonas.length > 0) {
+          learned.key("personas").set([...currentPersonas, ...newPersonas]);
+        }
+      }
+
+      // Apply new questions
+      if (result.questions && result.questions.length > 0) {
+        const currentQuestions = learned.key("openQuestions").get();
+        const existingQuestionTexts = new Set(
+          currentQuestions.map((q) => q.question),
+        );
+        const newQuestions = result.questions
+          .filter((q) => !existingQuestionTexts.has(q.question))
+          .map((q) => ({
+            id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            question: q.question,
+            category: q.category,
+            priority: q.priority,
+            options: q.options,
+            status: "pending" as const,
+          }));
+        if (newQuestions.length > 0) {
+          learned.key("openQuestions").set([
+            ...currentQuestions,
+            ...newQuestions,
+          ]);
+        }
+      }
+
+      // Update last processed timestamp
+      learned.key("lastJournalProcessed").set(maxTimestamp);
+
+      return result;
+    });
+
+    // Reference to ensure applyExtraction is evaluated
+    void applyExtraction;
 
     return {
       [NAME]: computed(() => `👤 ${displayName}`),
