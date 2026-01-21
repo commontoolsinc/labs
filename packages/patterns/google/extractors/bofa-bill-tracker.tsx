@@ -2,15 +2,16 @@
 /**
  * Bank of America Bill Tracker Pattern
  *
- * Tracks Bank of America bill payments from email notifications, showing unpaid/upcoming
- * bills and automatically or manually marking them as paid.
+ * Tracks Bank of America credit card bills from email notifications, showing
+ * unpaid/upcoming bills with payment status tracking.
  *
  * Features:
- * - Embeds gmail-importer directly for BoA emails
- * - Extracts bill information using LLM from email markdown content
+ * - Uses GmailExtractor building block for email fetching and LLM extraction
+ * - Uses "likely paid" heuristic for old bills (>45 days past due assumed paid)
  * - Supports manual "Mark as Paid" for local tracking
- * - "Likely paid" heuristic for old bills (BoA doesn't send payment confirmations)
- * - Groups bills by account (last 4 digits)
+ * - Groups bills by card (last 4 digits)
+ *
+ * Note: Payment status detection is heuristic-based, not authoritative.
  *
  * Usage:
  * 1. Deploy a google-auth charm and complete OAuth
@@ -20,7 +21,6 @@
 import {
   computed,
   Default,
-  generateObject,
   handler,
   ifElse,
   JSONSchema,
@@ -30,25 +30,9 @@ import {
   Writable,
 } from "commontools";
 import type { Schema } from "commontools/schema";
-import GmailImporter, {
-  type Auth,
-} from "../building-blocks/gmail-importer.tsx";
+import GmailExtractor from "../building-blocks/gmail-extractor.tsx";
+import type { Auth } from "../building-blocks/gmail-extractor.tsx";
 import ProcessingStatus from "../building-blocks/processing-status.tsx";
-
-// Email type - matches GmailImporter's Email type
-interface Email {
-  id: string;
-  from: string;
-  to: string;
-  subject: string;
-  date: string;
-  snippet: string;
-  threadId: string;
-  labelIds: string[];
-  htmlContent: string;
-  plainText: string;
-  markdownContent: string;
-}
 
 // =============================================================================
 // TYPES
@@ -64,22 +48,9 @@ type EmailType =
 
 type BillStatus = "unpaid" | "paid" | "overdue" | "likely_paid";
 
-interface BofaEmailAnalysis {
-  emailType: EmailType;
-  accountLast4?: string;
-  amount?: number;
-  dueDate?: string; // ISO format YYYY-MM-DD
-  paymentDate?: string; // For payment confirmations
-  minimumPayment?: number;
-  statementBalance?: number;
-  autopayEnabled?: boolean;
-  summary: string;
-}
-
-/** A tracked bill */
 interface TrackedBill {
-  key: string; // Deduplication key
-  accountLast4: string;
+  key: string;
+  cardLast4: string;
   amount: number;
   dueDate: string;
   status: BillStatus;
@@ -88,7 +59,7 @@ interface TrackedBill {
   emailDate: string;
   emailId: string;
   isManuallyPaid: boolean;
-  isLikelyPaid: boolean; // True for bills assumed paid due to age
+  isLikelyPaid: boolean;
   daysUntilDue: number;
 }
 
@@ -96,36 +67,25 @@ interface TrackedBill {
 // CONSTANTS
 // =============================================================================
 
-/**
- * Bills older than this threshold (in days overdue) are assumed "likely paid"
- * when no payment confirmation was detected. This avoids false positives from
- * missing payment emails (e.g., account number changed, payment made differently).
- */
 const LIKELY_PAID_THRESHOLD_DAYS = -45;
 
-// 32 distinct colors for account badges (to reduce collisions)
-const ACCOUNT_COLORS = [
-  // Reds & oranges
+const CARD_COLORS = [
   "#ef4444",
   "#dc2626",
   "#f97316",
   "#ea580c",
-  // Yellows & limes
   "#eab308",
   "#ca8a04",
   "#84cc16",
   "#65a30d",
-  // Greens
   "#22c55e",
   "#16a34a",
   "#14b8a6",
   "#0d9488",
-  // Cyans & blues
   "#06b6d4",
   "#0891b2",
   "#0ea5e9",
   "#0284c7",
-  // Indigos & purples
   "#3b82f6",
   "#2563eb",
   "#6366f1",
@@ -134,31 +94,19 @@ const ACCOUNT_COLORS = [
   "#7c3aed",
   "#a855f7",
   "#9333ea",
-  // Pinks & roses
   "#d946ef",
   "#c026d3",
   "#ec4899",
   "#db2777",
   "#f43f5e",
   "#e11d48",
-  // Neutrals
   "#78716c",
   "#57534e",
 ];
 
-// Bank of America sends from various addresses - capture the main patterns
-const _BOFA_SENDERS = [
-  "billpay@billpay.bankofamerica.com",
-  "onlinebanking@ealerts.bankofamerica.com",
-  "ealerts@ealerts.bankofamerica.com",
-  "alerts@bankofamerica.com",
-] as const;
-
-// Gmail query to find Bank of America emails
 const BOFA_GMAIL_QUERY =
-  "from:billpay@billpay.bankofamerica.com OR from:onlinebanking@ealerts.bankofamerica.com OR from:ealerts@ealerts.bankofamerica.com OR from:alerts@bankofamerica.com";
+  "from:onlinebanking@ealerts.bankofamerica.com OR from:alerts@bankofamerica.com";
 
-// Schema for LLM email analysis
 const EMAIL_ANALYSIS_SCHEMA = {
   type: "object",
   properties: {
@@ -173,12 +121,12 @@ const EMAIL_ANALYSIS_SCHEMA = {
         "other",
       ],
       description:
-        "Type of Bank of America email: bill_due for payment due notifications, payment_reminder for upcoming due reminders, statement_ready for new statement notifications, autopay_scheduled for autopay confirmation, other for unrelated emails",
+        "Type of Bank of America email: bill_due for payment due notifications, payment_received for payment confirmations, payment_reminder for upcoming due reminders, statement_ready for new statement notifications, autopay_scheduled for autopay confirmation, other for unrelated emails",
     },
-    accountLast4: {
+    cardLast4: {
       type: "string",
       description:
-        "Last 4 digits of the account or card (e.g., '1234'). Look for patterns like 'ending in 1234', '...1234', or 'account ending 1234'",
+        "Last 4 digits of the credit card (e.g., '1234'). Look for patterns like 'ending in 1234' or '...1234' or 'card 1234'",
     },
     amount: {
       type: "number",
@@ -192,7 +140,7 @@ const EMAIL_ANALYSIS_SCHEMA = {
     paymentDate: {
       type: "string",
       description:
-        "Date payment was received/processed in ISO format YYYY-MM-DD (not typically present in Bank of America emails)",
+        "Date payment was received/processed in ISO format YYYY-MM-DD (for payment confirmations)",
     },
     minimumPayment: {
       type: "number",
@@ -216,60 +164,78 @@ const EMAIL_ANALYSIS_SCHEMA = {
 
 type EmailAnalysisResult = Schema<typeof EMAIL_ANALYSIS_SCHEMA>;
 
+const EXTRACTION_PROMPT_TEMPLATE =
+  `Analyze this Bank of America credit card email and extract billing/payment information.
+
+EMAIL SUBJECT: {{email.subject}}
+EMAIL DATE: {{email.date}}
+
+EMAIL CONTENT:
+{{email.markdownContent}}
+
+Extract:
+1. The type of email:
+   - bill_due: A notification that a payment is due
+   - payment_received: Confirmation that a payment was received/processed
+   - payment_reminder: Reminder about upcoming due date
+   - statement_ready: New statement is available
+   - autopay_scheduled: Autopay confirmation
+   - other: Unrelated to billing
+
+2. Card last 4 digits - look for patterns like "ending in 1234", "...1234", "card 1234"
+
+3. Amount - the payment amount or bill amount (number only, no $ sign)
+
+4. Due date - in YYYY-MM-DD format
+
+5. Payment date - for payment confirmations, in YYYY-MM-DD format
+
+6. Other details like minimum payment, statement balance, autopay status
+
+7. Brief summary of what this email is about`;
+
 // =============================================================================
 // HELPERS
 // =============================================================================
 
-/**
- * Create a deduplication key for a bill.
- * Uses account last 4 + due date to identify unique bills.
- */
-function createBillKey(accountLast4: string, dueDate: string): string {
-  return `${accountLast4}|${dueDate}`;
+function createBillKey(cardLast4: string, dueDate: string): string {
+  return `${cardLast4}|${dueDate}`;
 }
 
-/**
- * Calculate days until due date.
- * Returns negative number for overdue items.
- * @param referenceDate - The "today" date to compare against (must be passed in for determinism)
- */
 function calculateDaysUntilDue(
   dueDate: string | undefined,
   referenceDate: Date,
 ): number {
   if (!dueDate) return 999;
-
   const match = dueDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!match) return 999;
-
   const [, year, month, day] = match;
   const due = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-
   if (isNaN(due.getTime())) return 999;
-
   due.setHours(0, 0, 0, 0);
   return Math.ceil(
     (due.getTime() - referenceDate.getTime()) / (1000 * 60 * 60 * 24),
   );
 }
 
-/**
- * Format currency for display.
- */
+function parseDateToMs(dateStr: string): number {
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return NaN;
+  const [, year, month, day] = match;
+  const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
 function formatCurrency(amount: number | undefined): string {
   if (amount === undefined) return "N/A";
   return `$${amount.toFixed(2)}`;
 }
 
-/**
- * Format date for display.
- * Parses YYYY-MM-DD as local date to avoid UTC timezone shift.
- */
 function formatDate(dateStr: string | undefined): string {
   if (!dateStr) return "N/A";
-  // Parse YYYY-MM-DD as local date components to avoid UTC interpretation
   const [year, month, day] = dateStr.split("-").map(Number);
-  const date = new Date(year, month - 1, day); // month is 0-indexed
+  const date = new Date(year, month - 1, day);
   return date.toLocaleDateString("en-US", {
     weekday: "short",
     month: "short",
@@ -277,38 +243,25 @@ function formatDate(dateStr: string | undefined): string {
   });
 }
 
-/**
- * Get a consistent color for an account based on its last 4 digits.
- * Same account always gets the same color.
- */
-function getAccountColor(last4: string | undefined): string {
-  if (!last4 || typeof last4 !== "string") return ACCOUNT_COLORS[0];
+function getCardColor(last4: string | undefined): string {
+  if (!last4 || typeof last4 !== "string") return CARD_COLORS[0];
   let hash = 0;
   for (let i = 0; i < last4.length; i++) {
     hash = (hash * 31 + last4.charCodeAt(i)) % 32;
   }
-  return ACCOUNT_COLORS[hash];
+  return CARD_COLORS[hash];
 }
 
-/**
- * In demo mode, hash any price to a deterministic value $0-$5000.
- * Uses power-law distribution for more realistic bill amounts.
- */
 function demoPrice(amount: number, isDemoMode: boolean): number {
   if (!isDemoMode) return amount;
-  // Handle NaN/undefined/invalid amounts
   if (!Number.isFinite(amount)) return 0;
-  // Hash the amount to get deterministic pseudo-random value
   const str = amount.toFixed(2);
   let hash = 0;
   for (const char of str) {
     hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
   }
-  // Normalize to 0-1 range using unsigned conversion
   const normalized = (hash >>> 0) / 0xFFFFFFFF;
-  // Power-law: x^2 clusters values toward lower end
   const powerLaw = Math.pow(normalized, 2);
-  // Scale to 0-5000 range, round to cents
   return Math.round(powerLaw * 500000) / 100;
 }
 
@@ -316,28 +269,29 @@ function demoPrice(amount: number, isDemoMode: boolean): number {
 // HANDLERS
 // =============================================================================
 
-// Handler to mark a bill as paid
-// Pass the entire bill cell, read key inside handler (idiomatic pattern from shopping-list.tsx)
 const markAsPaid = handler<
   void,
   { paidKeys: Writable<string[]>; bill: TrackedBill }
->((_event, { paidKeys, bill }) => {
-  const current = paidKeys.get() || [];
-  const key = bill.key;
-  if (key && !current.includes(key)) {
-    paidKeys.set([...current, key]);
-  }
-});
+>(
+  (_event, { paidKeys, bill }) => {
+    const current = paidKeys.get() || [];
+    const key = bill.key;
+    if (key && !current.includes(key)) {
+      paidKeys.set([...current, key]);
+    }
+  },
+);
 
-// Handler to unmark a bill as paid
 const unmarkAsPaid = handler<
   void,
   { paidKeys: Writable<string[]>; bill: TrackedBill }
->((_event, { paidKeys, bill }) => {
-  const current = paidKeys.get() || [];
-  const key = bill.key;
-  paidKeys.set(current.filter((k: string) => k !== key));
-});
+>(
+  (_event, { paidKeys, bill }) => {
+    const current = paidKeys.get() || [];
+    const key = bill.key;
+    paidKeys.set(current.filter((k: string) => k !== key));
+  },
+);
 
 // =============================================================================
 // PATTERN
@@ -349,7 +303,6 @@ interface PatternInput {
   demoMode?: Writable<Default<boolean, true>>;
 }
 
-/** Bank of America bill tracker. #bofaBills */
 interface PatternOutput {
   bills: TrackedBill[];
   unpaidBills: TrackedBill[];
@@ -361,239 +314,142 @@ interface PatternOutput {
 
 export default pattern<PatternInput, PatternOutput>(
   ({ linkedAuth, manuallyPaid, demoMode }) => {
-    // Directly instantiate GmailImporter with BoA-specific settings
-    const gmailImporter = GmailImporter({
-      settings: {
-        gmailFilterQuery: BOFA_GMAIL_QUERY,
-        autoFetchOnAuth: true,
-        resolveInlineImages: false,
-        limit: 100,
-        debugMode: true,
+    // Use GmailExtractor building block for email fetching and LLM extraction
+    const extractor = GmailExtractor<EmailAnalysisResult>({
+      gmailQuery: BOFA_GMAIL_QUERY,
+      extraction: {
+        schema: EMAIL_ANALYSIS_SCHEMA,
+        promptTemplate: EXTRACTION_PROMPT_TEMPLATE,
       },
+      title: "BofA Emails",
+      resolveInlineImages: false,
+      limit: 100,
       linkedAuth,
     });
 
-    // Get emails directly from the embedded gmail-importer
-    const allEmails = gmailImporter.emails;
+    // Extract payment confirmations for auto-marking bills as paid
+    const paymentConfirmations = computed(() => {
+      const confirmations: Record<string, Set<string>> = {};
 
-    // Filter for Bank of America emails
-    const bofaEmails = computed(() => {
-      return (allEmails || []).filter((e: Email) => {
-        const from = (e.from || "").toLowerCase();
-        return from.includes("bankofamerica.com");
-      });
+      for (const item of extractor.rawAnalyses || []) {
+        const result = item.analysis?.result;
+        if (!result) continue;
+
+        if (
+          result.emailType === "payment_received" && result.cardLast4 &&
+          result.paymentDate
+        ) {
+          const key = result.cardLast4;
+          if (!confirmations[key]) confirmations[key] = new Set();
+          confirmations[key].add(result.paymentDate);
+        }
+      }
+
+      const sortedResult: Record<string, string[]> = {};
+      for (const cardKey of Object.keys(confirmations).sort()) {
+        sortedResult[cardKey] = [...confirmations[cardKey]].sort((a, b) =>
+          a.localeCompare(b)
+        );
+      }
+      return sortedResult;
     });
 
-    // Count of BoA emails found
-    const bofaEmailCount = computed(() => bofaEmails?.length || 0);
-
-    // Check if connected
-    const isConnected = computed(() => {
-      if (linkedAuth?.token) return true;
-      return gmailImporter?.emailCount !== undefined;
-    });
-
-    // ==========================================================================
-    // REACTIVE LLM ANALYSIS
-    // Analyze each BoA email to extract bill/payment information
-    // ==========================================================================
-
-    const emailAnalyses = bofaEmails.map((email: Email) => {
-      const analysis = generateObject<EmailAnalysisResult>({
-        prompt: computed(() => {
-          if (!email?.markdownContent) {
-            return undefined;
-          }
-
-          return `Analyze this Bank of America bill pay email and extract billing/payment information.
-
-EMAIL SUBJECT: ${email.subject || ""}
-EMAIL DATE: ${email.date || ""}
-
-EMAIL CONTENT:
-${email.markdownContent}
-
-Extract:
-1. The type of email:
-   - bill_due: A notification that a payment is due
-   - payment_reminder: Reminder about upcoming due date
-   - statement_ready: New statement is available
-   - autopay_scheduled: Autopay confirmation
-   - other: Unrelated to billing
-
-2. Account last 4 digits - look for patterns like "ending in 1234", "...1234", "account ending 1234"
-
-3. Amount - the payment amount or bill amount (number only, no $ sign)
-
-4. Due date - in YYYY-MM-DD format
-
-5. Other details like minimum payment, statement balance, autopay status
-
-6. Brief summary of what this email is about`;
-        }),
-        schema: EMAIL_ANALYSIS_SCHEMA,
-        model: "anthropic:claude-sonnet-4-5",
-      });
-
-      return {
-        email,
-        emailId: email.id,
-        emailDate: email.date,
-        analysis,
-        pending: analysis.pending,
-        error: analysis.error,
-        result: analysis.result,
-      };
-    });
-
-    // Count pending analyses
-    const pendingCount = computed(
-      () => emailAnalyses?.filter((a) => a?.pending)?.length || 0,
-    );
-
-    // Count completed analyses
-    const completedCount = computed(
-      () =>
-        emailAnalyses?.filter((a) =>
-          a?.analysis?.pending === false && a?.analysis?.result !== undefined
-        ).length || 0,
-    );
-
-    // ==========================================================================
-    // BILL TRACKING
-    // Build list of bills from email notifications
-    // ==========================================================================
-
-    // NOTE: Bank of America does not send payment confirmation emails, so there's
-    // no auto-detection of payments. Bills are marked paid via manual marking or
-    // the "likely paid" heuristic for old bills.
-
-    // Process all analyses and build bill list
+    // Process analyses and build bill list with domain-specific logic
     const bills = computed(() => {
       const billMap: Record<string, TrackedBill> = {};
-      // manuallyPaid is Writable - use .get() to access value
       const paidKeys = manuallyPaid.get() || [];
-
-      // CRITICAL: Create a single reference date for ALL calculations in this computed
-      // This ensures deterministic results - calling new Date() multiple times would
-      // produce different timestamps and cause oscillation
+      const payments = paymentConfirmations || {};
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      // Sort emails by date (newest first) so we keep most recent data
-      // Use emailId as tie-breaker for stable sorting when dates are equal
-      const sortedAnalyses = [...(emailAnalyses || [])]
-        .filter((a) => a?.result)
+      const sortedAnalyses = [...(extractor.rawAnalyses || [])]
+        .filter((a) => a?.analysis?.result)
         .sort((a, b) => {
           const dateA = new Date(a.emailDate || 0).getTime();
           const dateB = new Date(b.emailDate || 0).getTime();
           if (dateB !== dateA) return dateB - dateA;
-          // Stable tie-breaker: use email ID (deterministic string comparison)
           return (a.emailId || "").localeCompare(b.emailId || "");
         });
 
       for (const analysisItem of sortedAnalyses) {
-        const result = analysisItem.result;
+        const result = analysisItem.analysis?.result;
         if (!result) continue;
 
-        // Track bills from multiple email types:
-        // - bill_due: Explicit "payment due" notifications
-        // - payment_reminder: Upcoming due date reminders
-        // - statement_ready: Statement notifications (these often contain the bill amount/due date)
         const isBillEmail = result.emailType === "bill_due" ||
           result.emailType === "payment_reminder";
         const isStatementWithBillInfo =
           result.emailType === "statement_ready" &&
-          result.dueDate &&
-          (result.amount || result.statementBalance);
+          result.dueDate && (result.amount || result.statementBalance);
 
-        if (!isBillEmail && !isStatementWithBillInfo) {
-          continue;
-        }
+        if (!isBillEmail && !isStatementWithBillInfo) continue;
+        if (!result.cardLast4 || !result.dueDate) continue;
 
-        // Need account last 4 and due date to track a bill
-        if (!result.accountLast4 || !result.dueDate) continue;
-
-        // For statement_ready, use statementBalance if amount isn't set
         const billAmount = result.amount || result.statementBalance || 0;
-
-        const key = createBillKey(result.accountLast4, result.dueDate);
-
-        // Skip if we already have this bill (we process newest first)
+        const key = createBillKey(result.cardLast4, result.dueDate);
         if (billMap[key]) continue;
 
         const daysUntilDue = calculateDaysUntilDue(result.dueDate, today);
-
-        // Check if this bill has been paid
         const isManuallyPaid = paidKeys.includes(key);
-        // Bills past the threshold are "likely paid" - it's very unlikely
-        // a bill this old is genuinely unpaid
-        const isLikelyPaid = !isManuallyPaid &&
+
+        const cardPayments = payments[result.cardLast4] || [];
+        const dueDateMs = parseDateToMs(result.dueDate);
+        const matchingPayment = cardPayments.find((paymentDate) => {
+          const paymentMs = parseDateToMs(paymentDate);
+          if (isNaN(dueDateMs) || isNaN(paymentMs)) return false;
+          const daysDiff = (paymentMs - dueDateMs) / (1000 * 60 * 60 * 24);
+          return daysDiff >= -30 && daysDiff <= 60;
+        });
+
+        const autoPaid = !!matchingPayment;
+        const isLikelyPaid = !isManuallyPaid && !autoPaid &&
           daysUntilDue < LIKELY_PAID_THRESHOLD_DAYS;
-        const isPaid = isManuallyPaid || isLikelyPaid;
+        const isPaid = isManuallyPaid || autoPaid || isLikelyPaid;
 
-        // Determine status
         let status: BillStatus;
-        if (isLikelyPaid) {
-          status = "likely_paid";
-        } else if (isPaid) {
-          status = "paid";
-        } else if (daysUntilDue < 0) {
-          status = "overdue";
-        } else {
-          status = "unpaid";
-        }
+        if (isLikelyPaid) status = "likely_paid";
+        else if (isPaid) status = "paid";
+        else if (daysUntilDue < 0) status = "overdue";
+        else status = "unpaid";
 
-        const trackedBill: TrackedBill = {
+        billMap[key] = {
           key,
-          accountLast4: result.accountLast4,
+          cardLast4: result.cardLast4,
           amount: demoPrice(billAmount, demoMode.get()),
           dueDate: result.dueDate,
           status,
           isPaid,
-          paidDate: undefined,
+          paidDate: matchingPayment || undefined,
           emailDate: analysisItem.emailDate,
           emailId: analysisItem.emailId,
           isManuallyPaid,
           isLikelyPaid,
           daysUntilDue,
         };
-
-        billMap[key] = trackedBill;
       }
 
-      // Convert to array and sort by due date (soonest first)
-      const items = Object.values(billMap);
-      return items.sort((a, b) => a.daysUntilDue - b.daysUntilDue);
+      return Object.values(billMap).sort((a, b) =>
+        a.daysUntilDue - b.daysUntilDue
+      );
     });
 
-    // Unpaid bills (excludes likely paid)
     const unpaidBills = computed(() =>
       bills.filter((bill) => !bill.isPaid && !bill.isLikelyPaid)
     );
-
-    // Likely paid bills - old bills assumed paid but not confirmed
     const likelyPaidBills = computed(() =>
-      bills
-        .filter((bill) => bill.isLikelyPaid)
-        .sort((a, b) => b.dueDate.localeCompare(a.dueDate))
+      bills.filter((bill) => bill.isLikelyPaid).sort((a, b) =>
+        b.dueDate.localeCompare(a.dueDate)
+      )
     );
-
-    // Confirmed paid bills - sorted by due date descending (newest first)
     const paidBills = computed(() =>
-      bills
-        .filter((bill) => bill.isPaid && !bill.isLikelyPaid)
-        .sort((a, b) => b.dueDate.localeCompare(a.dueDate))
+      bills.filter((bill) => bill.isPaid && !bill.isLikelyPaid).sort((a, b) =>
+        b.dueDate.localeCompare(a.dueDate)
+      )
     );
-
-    // Total unpaid amount (excludes likely paid)
     const totalUnpaid = computed(() =>
       unpaidBills.reduce((sum, bill) => sum + bill.amount, 0)
     );
-
-    // Overdue count (excludes likely paid)
-    const overdueCount = computed(
-      () => unpaidBills.filter((bill) => bill.daysUntilDue < 0).length,
+    const overdueCount = computed(() =>
+      unpaidBills.filter((bill) => bill.daysUntilDue < 0).length
     );
 
     // Preview UI for compact display
@@ -612,12 +468,12 @@ Extract:
             height: "36px",
             borderRadius: "8px",
             backgroundColor: computed(() =>
-              overdueCount > 0 ? "#fee2e2" : "#fef2f2"
+              overdueCount > 0 ? "#fee2e2" : "#eff6ff"
             ),
             border: computed(() =>
-              overdueCount > 0 ? "2px solid #ef4444" : "2px solid #c9243f"
+              overdueCount > 0 ? "2px solid #ef4444" : "2px solid #3b82f6"
             ),
-            color: computed(() => (overdueCount > 0 ? "#b91c1c" : "#c9243f")),
+            color: computed(() => overdueCount > 0 ? "#b91c1c" : "#1d4ed8"),
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -628,7 +484,7 @@ Extract:
           {computed(() => unpaidBills?.length || 0)}
         </div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: "600", fontSize: "14px" }}>BoA Bills</div>
+          <div style={{ fontWeight: "600", fontSize: "14px" }}>BofA Bills</div>
           <div style={{ fontSize: "12px", color: "#6b7280" }}>
             {computed(() => formatCurrency(totalUnpaid))} due
             <span
@@ -641,19 +497,17 @@ Extract:
               ({computed(() => overdueCount)} overdue)
             </span>
           </div>
-          {/* Loading/progress indicator */}
           <ProcessingStatus
-            totalCount={bofaEmailCount}
-            pendingCount={pendingCount}
-            completedCount={completedCount}
+            totalCount={extractor.emailCount}
+            pendingCount={extractor.pendingCount}
+            completedCount={extractor.completedCount}
           />
         </div>
       </div>
     );
 
     return {
-      [NAME]: "BoFA Bill Tracker",
-
+      [NAME]: "BofA Bill Tracker",
       bills,
       unpaidBills,
       paidBills,
@@ -669,99 +523,14 @@ Extract:
 
           <ct-vscroll flex showScrollbar>
             <ct-vstack padding="6" gap="4">
-              {/* Auth UI from embedded Gmail Importer */}
-              {gmailImporter.authUI}
+              {/* Auth UI from GmailExtractor */}
+              {extractor.ui.authStatusUI}
 
               {/* Connection Status */}
-              <div
-                style={{
-                  padding: "12px 16px",
-                  backgroundColor: computed(() =>
-                    isConnected ? "#d1fae5" : "#fef3c7"
-                  ),
-                  borderRadius: "8px",
-                  border: computed(() =>
-                    isConnected ? "1px solid #10b981" : "1px solid #f59e0b"
-                  ),
-                  display: computed(() => isConnected ? "block" : "none"),
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                  }}
-                >
-                  <span
-                    style={{
-                      width: "10px",
-                      height: "10px",
-                      borderRadius: "50%",
-                      backgroundColor: "#10b981",
-                    }}
-                  />
-                  <span>Connected to Gmail</span>
-                  <span style={{ marginLeft: "auto", color: "#059669" }}>
-                    {computed(() => bofaEmailCount)} BoA emails found
-                  </span>
-                  <button
-                    type="button"
-                    onClick={gmailImporter.bgUpdater}
-                    style={{
-                      marginLeft: "8px",
-                      padding: "6px 12px",
-                      backgroundColor: "#10b981",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "6px",
-                      cursor: "pointer",
-                      fontSize: "13px",
-                      fontWeight: "500",
-                    }}
-                  >
-                    Fetch Emails
-                  </button>
-                </div>
-              </div>
+              {extractor.ui.connectionStatusUI}
 
               {/* Analysis Status */}
-              <div
-                style={{
-                  padding: "12px 16px",
-                  backgroundColor: "#fef2f2",
-                  borderRadius: "8px",
-                  border: "1px solid #c9243f",
-                  display: computed(() => isConnected ? "block" : "none"),
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "12px",
-                  }}
-                >
-                  <span style={{ fontWeight: "600" }}>Analysis:</span>
-                  <span>{computed(() => bofaEmailCount)} emails</span>
-                  <div
-                    style={{
-                      display: computed(() =>
-                        pendingCount > 0 ? "flex" : "none"
-                      ),
-                      alignItems: "center",
-                      gap: "4px",
-                      color: "#c9243f",
-                    }}
-                  >
-                    <ct-loader size="sm" />
-                    <span>{computed(() => pendingCount)} analyzing...</span>
-                  </div>
-                  <span style={{ color: "#059669" }}>
-                    {computed(() => completedCount)} completed
-                  </span>
-                </div>
-              </div>
+              {extractor.ui.analysisProgressUI}
 
               {/* Summary Stats */}
               <div
@@ -778,7 +547,7 @@ Extract:
                     style={{
                       fontSize: "28px",
                       fontWeight: "bold",
-                      color: "#c9243f",
+                      color: "#1d4ed8",
                     }}
                   >
                     {computed(() => formatCurrency(totalUnpaid))}
@@ -826,9 +595,7 @@ Extract:
                   >
                     {computed(() => overdueCount)}
                   </div>
-                  <div style={{ fontSize: "12px", color: "#666" }}>
-                    Overdue
-                  </div>
+                  <div style={{ fontSize: "12px", color: "#666" }}>Overdue</div>
                 </div>
               </div>
 
@@ -839,9 +606,7 @@ Extract:
                   backgroundColor: "#fee2e2",
                   borderRadius: "12px",
                   border: "2px solid #ef4444",
-                  display: computed(
-                    () => (overdueCount > 0 ? "block" : "none"),
-                  ),
+                  display: computed(() => overdueCount > 0 ? "block" : "none"),
                 }}
               >
                 <div
@@ -920,34 +685,24 @@ Extract:
                           <span
                             style={{
                               padding: "2px 8px",
-                              backgroundColor: getAccountColor(
-                                bill.accountLast4,
-                              ),
+                              backgroundColor: getCardColor(bill.cardLast4),
                               borderRadius: "4px",
                               fontSize: "12px",
                               color: "white",
                               fontWeight: "500",
                             }}
                           >
-                            ...{bill.accountLast4}
+                            ...{bill.cardLast4}
                           </span>
                         </div>
-                        <div
-                          style={{
-                            fontSize: "14px",
-                            color: "#92400e",
-                          }}
-                        >
+                        <div style={{ fontSize: "14px", color: "#92400e" }}>
                           Due in {bill.daysUntilDue} days -{" "}
                           {formatDate(bill.dueDate)}
                         </div>
                       </div>
                       <button
                         type="button"
-                        onClick={markAsPaid({
-                          paidKeys: manuallyPaid,
-                          bill,
-                        })}
+                        onClick={markAsPaid({ paidKeys: manuallyPaid, bill })}
                         style={{
                           padding: "8px 16px",
                           backgroundColor: "#10b981",
@@ -987,7 +742,7 @@ Extract:
                   >
                     Likely Paid ({computed(() => likelyPaidBills?.length || 0)})
                     <span
-                      title="Bills over 45 days old with no detected payment are likely already paid (payment email missing or account changed)"
+                      title="Bills over 45 days old with no detected payment are likely already paid"
                       style={{
                         fontSize: "14px",
                         color: "#9ca3af",
@@ -1043,35 +798,26 @@ Extract:
                             <span
                               style={{
                                 padding: "2px 6px",
-                                backgroundColor: getAccountColor(
-                                  bill.accountLast4,
-                                ),
+                                backgroundColor: getCardColor(bill.cardLast4),
                                 borderRadius: "4px",
                                 fontSize: "11px",
                                 color: "white",
                                 fontWeight: "500",
                               }}
                             >
-                              ...{bill.accountLast4}
+                              ...{bill.cardLast4}
                             </span>
                           </div>
-                          <div
-                            style={{
-                              fontSize: "12px",
-                              color: "#047857",
-                            }}
-                          >
-                            Was due: {formatDate(bill.dueDate)} (
-                            {computed(() => Math.abs(bill.daysUntilDue))}{" "}
+                          <div style={{ fontSize: "12px", color: "#047857" }}>
+                            Was due: {formatDate(bill.dueDate)}{" "}
+                            ({computed(() => Math.abs(bill.daysUntilDue ?? 0))}
+                            {" "}
                             days ago)
                           </div>
                         </div>
                         <button
                           type="button"
-                          onClick={markAsPaid({
-                            paidKeys: manuallyPaid,
-                            bill,
-                          })}
+                          onClick={markAsPaid({ paidKeys: manuallyPaid, bill })}
                           style={{
                             padding: "8px 14px",
                             backgroundColor: "#6b7280",
@@ -1145,22 +891,17 @@ Extract:
                             <span
                               style={{
                                 padding: "2px 6px",
-                                backgroundColor: getAccountColor(
-                                  bill.accountLast4,
-                                ),
+                                backgroundColor: getCardColor(bill.cardLast4),
                                 borderRadius: "4px",
                                 fontSize: "11px",
                                 color: "white",
                                 fontWeight: "500",
                               }}
                             >
-                              ...{bill.accountLast4}
+                              ...{bill.cardLast4}
                             </span>
                             <span
-                              style={{
-                                fontSize: "12px",
-                                color: "#059669",
-                              }}
+                              style={{ fontSize: "12px", color: "#059669" }}
                             >
                               {ifElse(
                                 bill.isManuallyPaid,
@@ -1206,223 +947,7 @@ Extract:
                 </details>
               </div>
 
-              {/* Debug View Section */}
-              <div
-                style={{
-                  marginTop: "24px",
-                  padding: "16px",
-                  backgroundColor: "#f9fafb",
-                  borderRadius: "8px",
-                  border: "1px solid #d1d5db",
-                  display: computed(() =>
-                    bofaEmailCount > 0 ? "block" : "none"
-                  ),
-                }}
-              >
-                <details>
-                  <summary
-                    style={{
-                      cursor: "pointer",
-                      fontWeight: "600",
-                      fontSize: "16px",
-                      marginBottom: "12px",
-                      color: "#374151",
-                    }}
-                  >
-                    Debug View ({computed(() => bofaEmailCount)} emails)
-                  </summary>
-
-                  <div style={{ marginTop: "12px" }}>
-                    <h4
-                      style={{
-                        fontSize: "14px",
-                        fontWeight: "600",
-                        marginBottom: "8px",
-                        color: "#6b7280",
-                      }}
-                    >
-                      Fetched BoA Emails:
-                    </h4>
-                    <ct-vstack gap="2">
-                      {bofaEmails.map((email: Email) => (
-                        <div
-                          style={{
-                            padding: "8px 12px",
-                            backgroundColor: "white",
-                            borderRadius: "6px",
-                            border: "1px solid #e5e7eb",
-                            fontSize: "12px",
-                          }}
-                        >
-                          <div
-                            style={{ fontWeight: "600", marginBottom: "4px" }}
-                          >
-                            {email.subject}
-                          </div>
-                          <div style={{ color: "#6b7280" }}>
-                            From: {email.from} • Date: {email.date}
-                          </div>
-                          <details style={{ marginTop: "4px" }}>
-                            <summary
-                              style={{ cursor: "pointer", color: "#c9243f" }}
-                            >
-                              Show content
-                            </summary>
-                            <pre
-                              style={{
-                                marginTop: "8px",
-                                padding: "8px",
-                                backgroundColor: "#f3f4f6",
-                                borderRadius: "4px",
-                                fontSize: "10px",
-                                overflow: "auto",
-                                maxHeight: "200px",
-                                whiteSpace: "pre-wrap",
-                              }}
-                            >
-                              {email.markdownContent}
-                            </pre>
-                          </details>
-                        </div>
-                      ))}
-                    </ct-vstack>
-
-                    <h4
-                      style={{
-                        fontSize: "14px",
-                        fontWeight: "600",
-                        marginTop: "16px",
-                        marginBottom: "8px",
-                        color: "#6b7280",
-                      }}
-                    >
-                      LLM Analysis Results:
-                    </h4>
-                    <ct-vstack gap="2">
-                      {emailAnalyses.map((analysis) => (
-                        <div
-                          style={{
-                            padding: "12px",
-                            backgroundColor: "white",
-                            borderRadius: "6px",
-                            border: computed(() =>
-                              analysis.pending
-                                ? "1px solid #fbbf24"
-                                : analysis.error
-                                ? "1px solid #ef4444"
-                                : "1px solid #10b981"
-                            ),
-                            fontSize: "12px",
-                          }}
-                        >
-                          <div
-                            style={{
-                              fontWeight: "600",
-                              marginBottom: "4px",
-                              color: "#111827",
-                            }}
-                          >
-                            {analysis.email.subject}
-                          </div>
-
-                          <div
-                            style={{
-                              display: analysis.pending ? "flex" : "none",
-                              alignItems: "center",
-                              gap: "4px",
-                              color: "#f59e0b",
-                              marginTop: "4px",
-                            }}
-                          >
-                            <ct-loader size="sm" />
-                            <span>Analyzing...</span>
-                          </div>
-
-                          <div
-                            style={{
-                              display: analysis.error ? "block" : "none",
-                              color: "#dc2626",
-                              marginTop: "4px",
-                            }}
-                          >
-                            Error:{" "}
-                            {computed(() =>
-                              analysis.error ? String(analysis.error) : ""
-                            )}
-                          </div>
-
-                          <div
-                            style={{
-                              display: computed(() =>
-                                !analysis.pending && !analysis.error &&
-                                  analysis.result
-                                  ? "block"
-                                  : "none"
-                              ),
-                            }}
-                          >
-                            <div
-                              style={{
-                                marginTop: "8px",
-                                padding: "8px",
-                                backgroundColor: "#f3f4f6",
-                                borderRadius: "4px",
-                              }}
-                            >
-                              <div style={{ color: "#374151" }}>
-                                <strong>Type:</strong>{" "}
-                                {computed(() =>
-                                  analysis.result?.emailType || "N/A"
-                                )}
-                              </div>
-                              <div
-                                style={{ color: "#374151", marginTop: "4px" }}
-                              >
-                                <strong>Account:</strong> ...
-                                {computed(() =>
-                                  analysis.result?.accountLast4 || "N/A"
-                                )}
-                              </div>
-                              <div
-                                style={{ color: "#374151", marginTop: "4px" }}
-                              >
-                                <strong>Amount:</strong> {computed(() =>
-                                  formatCurrency(
-                                    analysis.result?.amount !== undefined
-                                      ? demoPrice(
-                                        analysis.result.amount,
-                                        demoMode.get(),
-                                      )
-                                      : undefined,
-                                  )
-                                )}
-                              </div>
-                              <div
-                                style={{ color: "#374151", marginTop: "4px" }}
-                              >
-                                <strong>Due:</strong>{" "}
-                                {computed(() =>
-                                  formatDate(analysis.result?.dueDate)
-                                )}
-                              </div>
-                              <div
-                                style={{ color: "#374151", marginTop: "4px" }}
-                              >
-                                <strong>Summary:</strong>{" "}
-                                {computed(() =>
-                                  analysis.result?.summary || "N/A"
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </ct-vstack>
-                  </div>
-                </details>
-              </div>
-
-              {/* Bank of America Website Link */}
+              {/* BofA Website Link */}
               <div style={{ marginTop: "16px", textAlign: "center" }}>
                 <a
                   href="https://www.bankofamerica.com/"
@@ -1431,7 +956,7 @@ Extract:
                   style={{
                     display: "inline-block",
                     padding: "10px 20px",
-                    backgroundColor: "#c9243f",
+                    backgroundColor: "#c51f23",
                     color: "white",
                     borderRadius: "8px",
                     textDecoration: "none",

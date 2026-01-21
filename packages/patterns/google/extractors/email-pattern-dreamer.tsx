@@ -30,14 +30,14 @@ interface PatternInput {
 }
 
 export default pattern<PatternInput>(({ linkedAuth }) => {
-  // Gmail auth for the auth UI
+  // Gmail auth for the auth UI only (no email fetching needed)
   const gmailAuth = GmailImporter({
     settings: {
       gmailFilterQuery: "",
+      limit: 0,
+      debugMode: false,
       autoFetchOnAuth: false,
       resolveInlineImages: false,
-      limit: 1,
-      debugMode: false,
     },
     linkedAuth,
   });

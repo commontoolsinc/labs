@@ -28,9 +28,9 @@ import {
   UI,
   Writable,
 } from "commontools";
-import GmailImporter, {
+import GmailExtractor, {
   type Email,
-} from "../building-blocks/gmail-importer.tsx";
+} from "../building-blocks/gmail-extractor.tsx";
 import type { Auth } from "../building-blocks/util/google-auth-manager.tsx";
 import {
   type GmailLabel,
@@ -41,6 +41,7 @@ import {
   type ScopeKey,
 } from "../building-blocks/util/google-auth-manager.tsx";
 import ProcessingStatus from "../building-blocks/processing-status.tsx";
+import type { Stream } from "commontools";
 
 // Debug flag for development
 const DEBUG_NOTES = false;
@@ -108,47 +109,49 @@ function formatDate(dateStr: string): string {
 const markAsDone = handler<
   unknown,
   {
-    auth: Writable<Auth>;
+    removeLabels: Stream<{ messageId: string; labels: string[] }>;
     noteId: string;
     taskCurrentLabelId: Writable<string>;
     hiddenNotes: Writable<string[]>;
     processingNotes: Writable<string[]>;
   }
->(async (
-  _event,
-  { auth, noteId, taskCurrentLabelId, hiddenNotes, processingNotes },
-) => {
-  const labelId = taskCurrentLabelId.get();
-  if (!labelId) {
-    console.error("[EmailNotes] task-current label ID not found");
-    return;
-  }
-
-  // Add to processing list
-  const currentProcessing = processingNotes.get();
-  processingNotes.set([...currentProcessing, noteId]);
-
-  try {
-    const client = new GmailSendClient(auth, { debugMode: DEBUG_NOTES });
-    await client.modifyLabels(noteId, {
-      removeLabelIds: [labelId],
-    });
-
-    if (DEBUG_NOTES) {
-      console.log("[EmailNotes] Marked as done:", noteId);
+>(
+  (
+    _event,
+    { removeLabels, noteId, taskCurrentLabelId, hiddenNotes, processingNotes },
+  ) => {
+    const labelId = taskCurrentLabelId.get();
+    if (!labelId) {
+      console.error("[EmailNotes] task-current label ID not found");
+      return;
     }
 
-    // Add to hidden list to remove from display
-    const currentHidden = hiddenNotes.get();
-    hiddenNotes.set([...currentHidden, noteId]);
-  } catch (err) {
-    console.error("[EmailNotes] Failed to mark as done:", err);
-  } finally {
-    // Remove from processing list
-    const stillProcessing = processingNotes.get().filter((id) => id !== noteId);
-    processingNotes.set(stillProcessing);
-  }
-});
+    // Add to processing list
+    const currentProcessing = processingNotes.get();
+    processingNotes.set([...currentProcessing, noteId]);
+
+    try {
+      // Dispatch to extractor's removeLabels stream
+      removeLabels.send({ messageId: noteId, labels: [labelId] });
+
+      if (DEBUG_NOTES) {
+        console.log("[EmailNotes] Marked as done:", noteId);
+      }
+
+      // Add to hidden list to remove from display
+      const currentHidden = hiddenNotes.get();
+      hiddenNotes.set([...currentHidden, noteId]);
+    } catch (err) {
+      console.error("[EmailNotes] Failed to mark as done:", err);
+    } finally {
+      // Remove from processing list
+      const stillProcessing = processingNotes.get().filter((id) =>
+        id !== noteId
+      );
+      processingNotes.set(stillProcessing);
+    }
+  },
+);
 
 /**
  * Fetch labels to find task-current label ID
@@ -254,23 +257,18 @@ export default pattern<PatternInput, PatternOutput>(() => {
     }
   });
 
-  // Directly instantiate GmailImporter with task-current filter
+  // Directly instantiate GmailExtractor with task-current filter (raw mode)
   // Note: Gmail API doesn't support subject:"" for empty subjects, so we only
   // filter by label here and do client-side filtering for empty subjects
   // Pass auth directly to maintain Writable<Auth> for token refresh
-  const gmailImporter = GmailImporter({
-    settings: {
-      gmailFilterQuery: "label:task-current",
-      autoFetchOnAuth: true,
-      resolveInlineImages: false,
-      limit: 100,
-      debugMode: false,
-    },
+  const extractor = GmailExtractor({
+    gmailQuery: "label:task-current",
+    limit: 100,
     linkedAuth: auth,
   });
 
-  // Get emails from importer
-  const allEmails = gmailImporter.emails;
+  // Get emails from extractor
+  const allEmails = extractor.emails;
 
   // Filter for notes (empty subject) and exclude hidden ones
   const notes = computed(() => {
@@ -405,7 +403,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                 </span>
                 <button
                   type="button"
-                  onClick={gmailImporter.bgUpdater}
+                  onClick={extractor.refresh}
                   style={{
                     marginLeft: "8px",
                     padding: "6px 12px",
@@ -542,7 +540,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                           <button
                             type="button"
                             onClick={markAsDone({
-                              auth,
+                              removeLabels: extractor.removeLabels,
                               noteId: note.id,
                               taskCurrentLabelId,
                               hiddenNotes,

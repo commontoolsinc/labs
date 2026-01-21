@@ -30,9 +30,9 @@ import {
   UI,
   when,
 } from "commontools";
-import GmailImporter, {
+import GmailExtractor, {
   type Auth,
-} from "../building-blocks/gmail-importer.tsx";
+} from "../building-blocks/gmail-extractor.tsx";
 
 import USPSInformedDeliveryPattern from "./usps-informed-delivery.tsx";
 import BerkeleyLibraryPattern from "./berkeley-library.tsx";
@@ -156,20 +156,15 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
     return buildGmailQuery(entries);
   });
 
-  // Instantiate GmailImporter with the combined query
-  const gmailImporter = GmailImporter({
-    settings: {
-      gmailFilterQuery: gmailQuery,
-      autoFetchOnAuth: false,
-      resolveInlineImages: false,
-      limit: 100,
-      debugMode: true,
-    },
+  // Instantiate GmailExtractor with the combined query (raw mode - no extraction)
+  const extractor = GmailExtractor({
+    gmailQuery,
+    limit: 100,
     linkedAuth,
   });
 
-  const allEmails = gmailImporter.emails;
-  const emailCount = computed(() => allEmails?.length || 0);
+  const allEmails = extractor.emails;
+  const emailCount = extractor.emailCount;
 
   // ==========================================================================
   // MATCH EMAILS TO PATTERNS
@@ -324,8 +319,8 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
 
         <ct-vscroll flex showScrollbar>
           <ct-vstack padding="6" gap="4">
-            {/* Auth UI from GmailImporter */}
-            {gmailImporter.authUI}
+            {/* Auth UI from GmailExtractor */}
+            {extractor.ui.authStatusUI}
 
             {/* Status Section */}
             <div
@@ -368,7 +363,7 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
             {/* Fetch Button */}
             <button
               type="button"
-              onClick={gmailImporter.bgUpdater}
+              onClick={extractor.refresh}
               style={{
                 padding: "10px 16px",
                 backgroundColor: "#10b981",

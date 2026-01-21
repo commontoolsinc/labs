@@ -6,7 +6,7 @@
  * books with due dates and urgency indicators.
  *
  * Features:
- * - Embeds gmail-importer directly for library emails
+ * - Uses GmailExtractor building block for email fetching and LLM extraction
  * - Extracts book information using LLM from email markdown content
  * - Tracks due dates and calculates urgency levels
  * - Deduplicates books across multiple reminder emails
@@ -25,7 +25,6 @@
 import {
   computed,
   Default,
-  generateObject,
   handler,
   JSONSchema,
   NAME,
@@ -35,12 +34,15 @@ import {
   Writable,
 } from "commontools";
 import type { Schema } from "commontools/schema";
-import GmailImporter, {
-  type Auth,
-} from "../building-blocks/gmail-importer.tsx";
+import GmailExtractor from "../building-blocks/gmail-extractor.tsx";
+import type { Auth } from "../building-blocks/gmail-extractor.tsx";
 import ProcessingStatus from "../building-blocks/processing-status.tsx";
 
-// Email type - matches GmailImporter's Email type
+// =============================================================================
+// TYPES
+// =============================================================================
+
+// Email type - matches GmailExtractor's Email type
 interface Email {
   id: string;
   from: string;
@@ -54,10 +56,6 @@ interface Email {
   plainText: string;
   markdownContent: string;
 }
-
-// =============================================================================
-// TYPES
-// =============================================================================
 
 type EmailType =
   | "due_reminder"
@@ -128,6 +126,9 @@ interface TrackedItem {
 // =============================================================================
 
 const LIBRARY_SENDER = "notices@library.berkeleypubliclibrary.org";
+
+// Gmail query - searches for library sender in from or body (to catch forwarded emails)
+const LIBRARY_GMAIL_QUERY = `from:${LIBRARY_SENDER} OR ${LIBRARY_SENDER}`;
 
 // Schema for LLM email analysis
 const EMAIL_ANALYSIS_SCHEMA = {
@@ -207,6 +208,30 @@ const EMAIL_ANALYSIS_SCHEMA = {
 } as const satisfies JSONSchema;
 
 type EmailAnalysisResult = Schema<typeof EMAIL_ANALYSIS_SCHEMA>;
+
+const EXTRACTION_PROMPT_TEMPLATE =
+  `Analyze this Berkeley Public Library email and extract information about library items (books, DVDs, etc.).
+
+EMAIL SUBJECT: {{email.subject}}
+EMAIL DATE: {{email.date}}
+
+EMAIL CONTENT:
+{{email.markdownContent}}
+
+Extract:
+1. The type of email (due_reminder, hold_ready, checkout_confirmation, renewal_confirmation, overdue_notice, fine_notice, or other)
+2. All library items mentioned with their:
+   - Title
+   - Author (if available)
+   - Due date in YYYY-MM-DD format (if mentioned)
+   - Status (checked_out, hold_ready, overdue, renewed, or returned)
+   - Item type (book, audiobook, dvd, magazine, ebook, or other)
+   - Renewals remaining (if mentioned)
+   - Fine amount in dollars (if applicable)
+3. Account holder name (if this appears to be forwarded)
+4. A brief summary of the email
+
+Note: If this is a forwarded email, look for the original library content within the forwarded message.`;
 
 // =============================================================================
 // HELPERS
@@ -356,11 +381,11 @@ const markAsReturnedHandler = handler<
   { title: string },
   {
     manuallyReturned: Writable<Default<string[], []>>;
-    emailAnalyses: Array<{
-      result?: LibraryEmailAnalysis;
+    rawAnalyses: Array<{
+      analysis?: { result?: LibraryEmailAnalysis };
     }>;
   }
->(({ title }, { manuallyReturned, emailAnalyses }) => {
+>(({ title }, { manuallyReturned, rawAnalyses }) => {
   const normalizedInput = title.toLowerCase().trim();
   if (!normalizedInput) return; // Guard against empty input
 
@@ -373,10 +398,11 @@ const markAsReturnedHandler = handler<
   const keysToAdd: string[] = [];
 
   // Search through all analyzed emails for matching items
-  for (const analysis of emailAnalyses) {
-    if (!analysis.result?.items) continue;
+  for (const analysisItem of rawAnalyses) {
+    const result = analysisItem.analysis?.result;
+    if (!result?.items) continue;
 
-    for (const item of analysis.result.items) {
+    for (const item of result.items) {
       if (item.status === "hold_ready") continue; // Skip holds
 
       const itemTitle = (item.title || "").toLowerCase().trim();
@@ -413,11 +439,11 @@ const dismissHoldHandler = handler<
   { title: string },
   {
     dismissedHolds: Writable<Default<string[], []>>;
-    emailAnalyses: Array<{
-      result?: LibraryEmailAnalysis;
+    rawAnalyses: Array<{
+      analysis?: { result?: LibraryEmailAnalysis };
     }>;
   }
->(({ title }, { dismissedHolds, emailAnalyses }) => {
+>(({ title }, { dismissedHolds, rawAnalyses }) => {
   const normalizedInput = title.toLowerCase().trim();
   if (!normalizedInput) return; // Guard against empty input
 
@@ -430,10 +456,11 @@ const dismissHoldHandler = handler<
   const keysToAdd: string[] = [];
 
   // Search through all analyzed emails for matching holds
-  for (const analysis of emailAnalyses) {
-    if (!analysis.result?.items) continue;
+  for (const analysisItem of rawAnalyses) {
+    const result = analysisItem.analysis?.result;
+    if (!result?.items) continue;
 
-    for (const item of analysis.result.items) {
+    for (const item of result.items) {
       if (item.status !== "hold_ready") continue; // Only holds
 
       const itemTitle = (item.title || "").toLowerCase().trim();
@@ -543,109 +570,26 @@ export default pattern<PatternInput, PatternOutput>(
     selectedItems,
     dueDateOverrides,
   }) => {
-    // Directly instantiate GmailImporter with library-specific settings
-    const gmailImporter = GmailImporter({
-      settings: {
-        // Search for library address anywhere (from OR body) to catch forwarded emails
-        gmailFilterQuery: `from:${LIBRARY_SENDER} OR ${LIBRARY_SENDER}`,
-        autoFetchOnAuth: true,
-        resolveInlineImages: false,
-        limit: 50,
-        debugMode: true,
+    // Use GmailExtractor building block for email fetching and LLM extraction
+    const extractor = GmailExtractor<EmailAnalysisResult>({
+      gmailQuery: LIBRARY_GMAIL_QUERY,
+      extraction: {
+        promptTemplate: EXTRACTION_PROMPT_TEMPLATE,
+        schema: EMAIL_ANALYSIS_SCHEMA,
       },
+      title: "Library Emails",
+      resolveInlineImages: false,
+      limit: 50,
       linkedAuth,
     });
 
-    // Get emails directly from the embedded gmail-importer
-    const allEmails = gmailImporter.emails;
-
-    // Filter for library emails (from library OR forwarded with library content)
-    const libraryEmails = computed(() => {
-      return (allEmails || []).filter((e: Email) => {
-        const fromLibrary = e.from?.toLowerCase().includes(
-          "library.berkeleypubliclibrary.org",
-        );
-        const contentHasLibrary = e.markdownContent?.toLowerCase().includes(
-          "library.berkeleypubliclibrary.org",
-        ) ||
-          e.markdownContent?.toLowerCase().includes(
-            "notices@library.berkeleypubliclibrary.org",
-          );
-        return fromLibrary || contentHasLibrary;
-      });
-    });
-
-    // Count of library emails found
-    const libraryEmailCount = computed(() => libraryEmails?.length || 0);
-
-    // Check if connected
-    const isConnected = computed(() => {
-      if (linkedAuth?.token) return true;
-      return gmailImporter?.emailCount !== undefined;
-    });
-
-    // ==========================================================================
-    // REACTIVE LLM ANALYSIS
-    // Analyze each library email to extract book information
-    // ==========================================================================
-
-    const emailAnalyses = libraryEmails.map((email: Email) => {
-      const analysis = generateObject<EmailAnalysisResult>({
-        prompt: computed(() => {
-          if (!email?.markdownContent) {
-            return undefined;
-          }
-
-          return `Analyze this Berkeley Public Library email and extract information about library items (books, DVDs, etc.).
-
-EMAIL SUBJECT: ${email.subject || ""}
-EMAIL DATE: ${email.date || ""}
-
-EMAIL CONTENT:
-${email.markdownContent}
-
-Extract:
-1. The type of email (due_reminder, hold_ready, checkout_confirmation, renewal_confirmation, overdue_notice, fine_notice, or other)
-2. All library items mentioned with their:
-   - Title
-   - Author (if available)
-   - Due date in YYYY-MM-DD format (if mentioned)
-   - Status (checked_out, hold_ready, overdue, renewed, or returned)
-   - Item type (book, audiobook, dvd, magazine, ebook, or other)
-   - Renewals remaining (if mentioned)
-   - Fine amount in dollars (if applicable)
-3. Account holder name (if this appears to be forwarded)
-4. A brief summary of the email
-
-Note: If this is a forwarded email, look for the original library content within the forwarded message.`;
-        }),
-        schema: EMAIL_ANALYSIS_SCHEMA,
-        model: "anthropic:claude-sonnet-4-5",
-      });
-
-      return {
-        email,
-        emailId: email.id,
-        emailDate: email.date,
-        analysis,
-        pending: analysis.pending,
-        error: analysis.error,
-        result: analysis.result,
-      };
-    });
-
-    // Count pending analyses
-    const pendingCount = computed(
-      () => emailAnalyses?.filter((a) => a?.pending)?.length || 0,
-    );
-
-    // Count completed analyses
-    const completedCount = computed(
-      () =>
-        emailAnalyses?.filter((a) =>
-          a?.analysis?.pending === false && a?.analysis?.result !== undefined
-        ).length || 0,
-    );
+    // Convenience aliases from extractor
+    const {
+      rawAnalyses,
+      emailCount,
+      pendingCount,
+      completedCount,
+    } = extractor;
 
     // ==========================================================================
     // DEDUPLICATION AND TRACKING
@@ -661,8 +605,8 @@ Note: If this is a forwarded email, look for the original library content within
       const overrides = dueDateOverrides.get() || {};
 
       // Sort emails by date (newest first) so we keep most recent data
-      const sortedAnalyses = [...(emailAnalyses || [])]
-        .filter((a) => a?.result?.items)
+      const sortedAnalyses = [...(rawAnalyses || [])]
+        .filter((a) => a?.analysis?.result?.items)
         .sort((a, b) => {
           const dateA = new Date(a.emailDate || 0).getTime();
           const dateB = new Date(b.emailDate || 0).getTime();
@@ -670,7 +614,7 @@ Note: If this is a forwarded email, look for the original library content within
         });
 
       for (const analysisItem of sortedAnalyses) {
-        const result = analysisItem.result;
+        const result = analysisItem.analysis?.result;
         if (!result?.items) continue;
 
         for (const item of result.items) {
@@ -729,8 +673,8 @@ Note: If this is a forwarded email, look for the original library content within
       // dismissedHolds is a Writable Cell, get the actual array value
       const dismissedKeys = dismissedHolds.get() || [];
 
-      for (const analysisItem of emailAnalyses || []) {
-        const result = analysisItem.result;
+      for (const analysisItem of rawAnalyses || []) {
+        const result = analysisItem.analysis?.result;
         if (!result?.items) continue;
 
         for (const item of result.items) {
@@ -778,8 +722,8 @@ Note: If this is a forwarded email, look for the original library content within
       const items: TrackedItem[] = [];
       const dismissedKeys = dismissedHolds.get() || [];
 
-      for (const analysisItem of emailAnalyses || []) {
-        const result = analysisItem.result;
+      for (const analysisItem of rawAnalyses || []) {
+        const result = analysisItem.analysis?.result;
         if (!result?.items) continue;
 
         for (const item of result.items) {
@@ -982,7 +926,7 @@ Note: If this is a forwarded email, look for the original library content within
         </div>
         {/* Loading/progress indicator */}
         <ProcessingStatus
-          totalCount={libraryEmailCount}
+          totalCount={emailCount}
           pendingCount={pendingCount}
           completedCount={completedCount}
         />
@@ -1002,9 +946,9 @@ Note: If this is a forwarded email, look for the original library content within
       // Omnibot actions - bind handlers with current state
       markAsReturned: markAsReturnedHandler({
         manuallyReturned,
-        emailAnalyses,
+        rawAnalyses,
       }),
-      dismissHold: dismissHoldHandler({ dismissedHolds, emailAnalyses }),
+      dismissHold: dismissHoldHandler({ dismissedHolds, rawAnalyses }),
 
       [UI]: (
         <ct-screen>
@@ -1014,97 +958,14 @@ Note: If this is a forwarded email, look for the original library content within
 
           <ct-vscroll flex showScrollbar>
             <ct-vstack padding="6" gap="4">
-              {/* Auth UI from embedded Gmail Importer */}
-              {gmailImporter.authUI}
+              {/* Auth UI from GmailExtractor */}
+              {extractor.ui.authStatusUI}
 
               {/* Connection Status */}
-              <div
-                style={{
-                  padding: "12px 16px",
-                  backgroundColor: computed(() =>
-                    isConnected ? "#d1fae5" : "#fef3c7"
-                  ),
-                  borderRadius: "8px",
-                  border: computed(() =>
-                    isConnected ? "1px solid #10b981" : "1px solid #f59e0b"
-                  ),
-                  display: isConnected ? "block" : "none",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                  }}
-                >
-                  <span
-                    style={{
-                      width: "10px",
-                      height: "10px",
-                      borderRadius: "50%",
-                      backgroundColor: "#10b981",
-                    }}
-                  />
-                  <span>Connected to Gmail</span>
-                  <span style={{ marginLeft: "auto", color: "#059669" }}>
-                    {libraryEmailCount} library emails found
-                  </span>
-                  <button
-                    type="button"
-                    onClick={gmailImporter.bgUpdater}
-                    style={{
-                      marginLeft: "8px",
-                      padding: "6px 12px",
-                      backgroundColor: "#10b981",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "6px",
-                      cursor: "pointer",
-                      fontSize: "13px",
-                      fontWeight: "500",
-                    }}
-                  >
-                    Fetch Emails
-                  </button>
-                </div>
-              </div>
+              {extractor.ui.connectionStatusUI}
 
               {/* Analysis Status */}
-              <div
-                style={{
-                  padding: "12px 16px",
-                  backgroundColor: "#eff6ff",
-                  borderRadius: "8px",
-                  border: "1px solid #3b82f6",
-                  display: isConnected ? "block" : "none",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "12px",
-                  }}
-                >
-                  <span style={{ fontWeight: "600" }}>Analysis:</span>
-                  <span>{libraryEmailCount} emails</span>
-                  <div
-                    style={{
-                      display: pendingCount > 0 ? "flex" : "none",
-                      alignItems: "center",
-                      gap: "4px",
-                      color: "#2563eb",
-                    }}
-                  >
-                    <ct-loader size="sm" />
-                    <span>{pendingCount} analyzing...</span>
-                  </div>
-                  <span style={{ color: "#059669" }}>
-                    {completedCount} completed
-                  </span>
-                </div>
-              </div>
+              {extractor.ui.analysisProgressUI}
 
               {/* Stats Row */}
               <div
@@ -1709,9 +1570,7 @@ Note: If this is a forwarded email, look for the original library content within
                   backgroundColor: "#f9fafb",
                   borderRadius: "8px",
                   border: "1px solid #d1d5db",
-                  display: computed(() =>
-                    libraryEmailCount > 0 ? "block" : "none"
-                  ),
+                  display: computed(() => emailCount > 0 ? "block" : "none"),
                 }}
               >
                 <details>
@@ -1724,7 +1583,7 @@ Note: If this is a forwarded email, look for the original library content within
                       color: "#374151",
                     }}
                   >
-                    🔍 Debug View ({libraryEmailCount} emails)
+                    🔍 Debug View ({emailCount} emails)
                   </summary>
 
                   <div style={{ marginTop: "12px" }}>
@@ -1739,7 +1598,7 @@ Note: If this is a forwarded email, look for the original library content within
                       Fetched Library Emails:
                     </h4>
                     <ct-vstack gap="2">
-                      {libraryEmails.map((email: Email) => (
+                      {extractor.emails.map((email: Email) => (
                         <div
                           style={{
                             padding: "8px 12px",
@@ -1777,16 +1636,16 @@ Note: If this is a forwarded email, look for the original library content within
                       LLM Analysis Results:
                     </h4>
                     <ct-vstack gap="2">
-                      {emailAnalyses.map((analysis) => (
+                      {rawAnalyses.map((analysisItem) => (
                         <div
                           style={{
                             padding: "12px",
                             backgroundColor: "white",
                             borderRadius: "6px",
                             border: computed(() =>
-                              analysis.pending
+                              analysisItem.pending
                                 ? "1px solid #fbbf24"
-                                : analysis.error
+                                : analysisItem.error
                                 ? "1px solid #ef4444"
                                 : "1px solid #10b981"
                             ),
@@ -1800,12 +1659,12 @@ Note: If this is a forwarded email, look for the original library content within
                               color: "#111827",
                             }}
                           >
-                            {analysis.email.subject}
+                            {analysisItem.email.subject}
                           </div>
 
                           <div
                             style={{
-                              display: analysis.pending ? "flex" : "none",
+                              display: analysisItem.pending ? "flex" : "none",
                               alignItems: "center",
                               gap: "4px",
                               color: "#f59e0b",
@@ -1818,22 +1677,24 @@ Note: If this is a forwarded email, look for the original library content within
 
                           <div
                             style={{
-                              display: analysis.error ? "block" : "none",
+                              display: analysisItem.error ? "block" : "none",
                               color: "#dc2626",
                               marginTop: "4px",
                             }}
                           >
                             Error:{" "}
                             {computed(() =>
-                              analysis.error ? String(analysis.error) : ""
+                              analysisItem.error
+                                ? String(analysisItem.error)
+                                : ""
                             )}
                           </div>
 
                           <div
                             style={{
                               display: computed(() =>
-                                !analysis.pending && !analysis.error &&
-                                  analysis.result
+                                !analysisItem.pending && !analysisItem.error &&
+                                  analysisItem.analysis?.result
                                   ? "block"
                                   : "none"
                               ),
@@ -1850,7 +1711,8 @@ Note: If this is a forwarded email, look for the original library content within
                               <div style={{ color: "#374151" }}>
                                 <strong>Email Type:</strong>{" "}
                                 {computed(() =>
-                                  analysis.result?.emailType || "N/A"
+                                  analysisItem.analysis?.result?.emailType ||
+                                  "N/A"
                                 )}
                               </div>
                               <div
@@ -1858,7 +1720,8 @@ Note: If this is a forwarded email, look for the original library content within
                               >
                                 <strong>Summary:</strong>{" "}
                                 {computed(() =>
-                                  analysis.result?.summary || "N/A"
+                                  analysisItem.analysis?.result?.summary ||
+                                  "N/A"
                                 )}
                               </div>
                               <div
@@ -1866,21 +1729,22 @@ Note: If this is a forwarded email, look for the original library content within
                                   color: "#374151",
                                   marginTop: "4px",
                                   display: computed(() =>
-                                    analysis.result?.accountHolder
+                                    analysisItem.analysis?.result?.accountHolder
                                       ? "block"
                                       : "none"
                                   ),
                                 }}
                               >
                                 <strong>Account Holder:</strong>{" "}
-                                {computed(() =>
-                                  analysis.result?.accountHolder || ""
+                                {computed(() => analysisItem.analysis?.result
+                                  ?.accountHolder || ""
                                 )}
                               </div>
                               <div style={{ marginTop: "8px" }}>
                                 <strong>Extracted Items:</strong> (
                                 {computed(() =>
-                                  analysis.result?.items?.length || 0
+                                  analysisItem.analysis?.result?.items
+                                    ?.length || 0
                                 )}
                                 )
                               </div>
@@ -1898,7 +1762,7 @@ Note: If this is a forwarded email, look for the original library content within
                               >
                                 {computed(() =>
                                   JSON.stringify(
-                                    analysis.result?.items || [],
+                                    analysisItem.analysis?.result?.items || [],
                                     null,
                                     2,
                                   )
