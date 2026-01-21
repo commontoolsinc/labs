@@ -55,11 +55,13 @@ import {
   computed,
   Default,
   generateObject,
+  handler,
   JSONSchema,
   Stream,
 } from "commontools";
 import GmailImporter, { type Auth, type Email } from "./gmail-importer.tsx";
 import ProcessingStatus from "./processing-status.tsx";
+import { GmailSendClient } from "./util/gmail-send-client.ts";
 
 // Re-export Email and Auth types and ProcessingStatus for consumers
 export type { Auth, Email } from "./gmail-importer.tsx";
@@ -151,6 +153,10 @@ export interface GmailExtractorOutput<T = unknown> {
   // Operations (Streams, not functions)
   /** Refresh emails from Gmail */
   refresh: Stream<unknown>;
+  /** Add labels to a message */
+  addLabels: Stream<{ messageId: string; labels: string[] }>;
+  /** Remove labels from a message */
+  removeLabels: Stream<{ messageId: string; labels: string[] }>;
 
   /** UI bundle (JSX elements) */
   ui: {
@@ -210,6 +216,70 @@ export function trackAnalyses<T>(analyses: AnalysisItem<T>[]) {
   );
   return { pendingCount, completedCount };
 }
+
+// =============================================================================
+// HANDLERS
+// =============================================================================
+
+/**
+ * Handler to add labels to a message.
+ * Requires gmail.modify scope in the auth token.
+ */
+const addLabelsHandler = handler<
+  { messageId: string; labels: string[] },
+  { auth?: Auth }
+>(async ({ messageId, labels }, { auth }) => {
+  if (!auth?.token) {
+    console.error("[GmailExtractor] addLabels: No auth token available");
+    return;
+  }
+
+  const client = new GmailSendClient(
+    { get: () => auth, update: () => {} } as any,
+    {
+      debugMode: false,
+    },
+  );
+
+  try {
+    await client.modifyLabels(messageId, {
+      addLabelIds: labels,
+    });
+  } catch (error) {
+    console.error("[GmailExtractor] addLabels failed:", error);
+    throw error;
+  }
+});
+
+/**
+ * Handler to remove labels from a message.
+ * Requires gmail.modify scope in the auth token.
+ */
+const removeLabelsHandler = handler<
+  { messageId: string; labels: string[] },
+  { auth?: Auth }
+>(async ({ messageId, labels }, { auth }) => {
+  if (!auth?.token) {
+    console.error("[GmailExtractor] removeLabels: No auth token available");
+    return;
+  }
+
+  const client = new GmailSendClient(
+    { get: () => auth, update: () => {} } as any,
+    {
+      debugMode: false,
+    },
+  );
+
+  try {
+    await client.modifyLabels(messageId, {
+      removeLabelIds: labels,
+    });
+  } catch (error) {
+    console.error("[GmailExtractor] removeLabels failed:", error);
+    throw error;
+  }
+});
 
 // =============================================================================
 // BUILDING BLOCK
@@ -483,6 +553,8 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
     },
     gmailImporter,
     refresh: gmailImporter.bgUpdater,
+    addLabels: addLabelsHandler({ auth: linkedAuth }),
+    removeLabels: removeLabelsHandler({ auth: linkedAuth }),
   };
 }
 
