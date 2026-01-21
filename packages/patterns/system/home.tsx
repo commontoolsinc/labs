@@ -13,7 +13,6 @@ import {
 } from "commontools";
 import FavoritesManager from "./favorites-manager.tsx";
 import Journal from "./journal.tsx";
-import Profile from "../profile.tsx";
 
 // Types from favorites-manager.tsx and journal.tsx
 type Favorite = {
@@ -229,7 +228,6 @@ export default pattern((_) => {
   // Child components use wish() to access favorites/journal through defaultPattern
   const favoritesComponent = FavoritesManager({});
   const journalComponent = Journal({});
-  const profileComponent = Profile({ learned });
   const activeTab = Writable.of("journal").for("activeTab");
 
   // Compute unique spaces from favorites
@@ -532,7 +530,217 @@ Return valid JSON matching the schema.`,
           </ct-tab-list>
           <ct-tab-panel value="journal">{journalComponent}</ct-tab-panel>
           <ct-tab-panel value="favorites">{favoritesComponent}</ct-tab-panel>
-          <ct-tab-panel value="profile">{profileComponent}</ct-tab-panel>
+          <ct-tab-panel value="profile">
+            <ct-vstack gap="4" style={{ padding: "1rem" }}>
+              <h2 style={{ margin: 0, fontSize: "16px" }}>What I've Learned</h2>
+
+              {/* Facts Table */}
+              <ct-vstack gap="2">
+                <h3 style={{ margin: 0, fontSize: "14px", color: "#666" }}>
+                  Facts ({computed(() => learned.get().facts.length)})
+                </h3>
+                {computed(() => learned.get().facts.length === 0) && (
+                  <p style={{ color: "#888", fontStyle: "italic" }}>
+                    No facts learned yet.
+                  </p>
+                )}
+                {computed(() => learned.get().facts.length > 0) && (
+                  <table
+                    style={{
+                      width: "100%",
+                      borderCollapse: "collapse",
+                      fontSize: "13px",
+                      border: "1px solid #e5e5e7",
+                      borderRadius: "8px",
+                    }}
+                  >
+                    <thead>
+                      <tr style={{ background: "#f9fafb" }}>
+                        <th
+                          style={{
+                            padding: "8px 12px",
+                            textAlign: "left",
+                            borderBottom: "1px solid #e5e5e7",
+                          }}
+                        >
+                          Fact
+                        </th>
+                        <th
+                          style={{
+                            padding: "8px 12px",
+                            textAlign: "center",
+                            borderBottom: "1px solid #e5e5e7",
+                            width: "70px",
+                          }}
+                        >
+                          Conf
+                        </th>
+                        <th
+                          style={{
+                            padding: "8px 12px",
+                            textAlign: "left",
+                            borderBottom: "1px solid #e5e5e7",
+                            width: "120px",
+                          }}
+                        >
+                          Source
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {learned.key("facts").map((fact) => (
+                        <tr>
+                          <td
+                            style={{
+                              padding: "8px 12px",
+                              borderBottom: "1px solid #e5e5e7",
+                            }}
+                          >
+                            {fact.content}
+                          </td>
+                          <td
+                            style={{
+                              padding: "8px 12px",
+                              borderBottom: "1px solid #e5e5e7",
+                              textAlign: "center",
+                            }}
+                          >
+                            {computed(
+                              () => `${Math.round(fact.confidence * 100)}%`,
+                            )}
+                          </td>
+                          <td
+                            style={{
+                              padding: "8px 12px",
+                              borderBottom: "1px solid #e5e5e7",
+                              color: "#888",
+                              fontSize: "12px",
+                            }}
+                          >
+                            {fact.source}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </ct-vstack>
+
+              {/* Preferences */}
+              {computed(() => learned.get().preferences.length > 0) && (
+                <ct-vstack gap="2">
+                  <h3 style={{ margin: 0, fontSize: "14px", color: "#666" }}>
+                    Preferences
+                  </h3>
+                  <table
+                    style={{
+                      width: "100%",
+                      borderCollapse: "collapse",
+                      fontSize: "13px",
+                      border: "1px solid #e5e5e7",
+                    }}
+                  >
+                    <thead>
+                      <tr style={{ background: "#f9fafb" }}>
+                        <th
+                          style={{
+                            padding: "8px 12px",
+                            textAlign: "left",
+                            borderBottom: "1px solid #e5e5e7",
+                          }}
+                        >
+                          Key
+                        </th>
+                        <th
+                          style={{
+                            padding: "8px 12px",
+                            textAlign: "left",
+                            borderBottom: "1px solid #e5e5e7",
+                          }}
+                        >
+                          Value
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {learned.key("preferences").map((pref) => (
+                        <tr>
+                          <td
+                            style={{
+                              padding: "8px 12px",
+                              borderBottom: "1px solid #e5e5e7",
+                              fontWeight: "500",
+                            }}
+                          >
+                            {pref.key}
+                          </td>
+                          <td
+                            style={{
+                              padding: "8px 12px",
+                              borderBottom: "1px solid #e5e5e7",
+                            }}
+                          >
+                            {pref.value}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </ct-vstack>
+              )}
+
+              {/* Questions */}
+              {computed(() => learned.get().openQuestions.length > 0) && (
+                <ct-vstack gap="2">
+                  <h3 style={{ margin: 0, fontSize: "14px", color: "#666" }}>
+                    Open Questions
+                  </h3>
+                  <ct-vstack
+                    gap="1"
+                    style={{
+                      padding: "12px",
+                      background: "#f9fafb",
+                      borderRadius: "8px",
+                      fontFamily: "monospace",
+                      fontSize: "13px",
+                    }}
+                  >
+                    {learned.key("openQuestions").map((q) => (
+                      <div>
+                        <span style={{ color: "#888" }}>[{q.category}]</span>
+                        {" "}
+                        {q.question}
+                      </div>
+                    ))}
+                  </ct-vstack>
+                </ct-vstack>
+              )}
+
+              {/* Personas */}
+              {computed(() => learned.get().personas.length > 0) && (
+                <ct-vstack gap="2">
+                  <h3 style={{ margin: 0, fontSize: "14px", color: "#666" }}>
+                    Personas
+                  </h3>
+                  <ct-hstack gap="2" style={{ flexWrap: "wrap" }}>
+                    {learned.key("personas").map((persona) => (
+                      <span
+                        style={{
+                          padding: "4px 12px",
+                          background: "#eff6ff",
+                          color: "#3b82f6",
+                          borderRadius: "16px",
+                          fontSize: "13px",
+                        }}
+                      >
+                        {persona}
+                      </span>
+                    ))}
+                  </ct-hstack>
+                </ct-vstack>
+              )}
+            </ct-vstack>
+          </ct-tab-panel>
           <ct-tab-panel value="spaces">
             <ct-vstack gap="2">
               {uniqueSpaces.map((space) => (
