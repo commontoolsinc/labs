@@ -14,7 +14,7 @@ The `ct` binary is the CLI for CommonTools. **Use `--help` for current commands:
 ```bash
 deno task ct --help           # Top-level commands
 deno task ct charm --help     # Charm operations
-deno task ct dev --help       # Local development
+deno task ct check --help     # Type checking
 ```
 
 ## Environment Setup
@@ -101,6 +101,6 @@ See `docs/development/debugging/cli-debugging.md` for debugging patterns.
 
 ## References
 
-- `references/well-known-ids.md` - System-level charm IDs
+- `packages/patterns/system/default-app.tsx` - System charms (allCharms list lives here)
 - `docs/common/workflows/handlers-cli-testing.md` - Handler testing
 - `docs/development/debugging/cli-debugging.md` - CLI debugging
