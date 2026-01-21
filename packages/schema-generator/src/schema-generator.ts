@@ -271,6 +271,15 @@ export class SchemaGenerator implements ISchemaGenerator {
       return {};
     }
 
+    // Handle conditional types that arise from unresolved type parameters.
+    // When a generic type like OpaqueRef<T | undefined> is used where T is a
+    // type parameter, TypeScript represents this as a conditional type for
+    // deferred evaluation. We treat these as "any" schema since the concrete
+    // type isn't known at compile time.
+    if ((type.flags & ts.TypeFlags.Conditional) !== 0) {
+      return {};
+    }
+
     // All-named strategy:
     // Hoist every named type (excluding wrappers filtered by getNamedTypeKey)
     // into definitions and return $ref for non-root uses. Cycle detection

@@ -320,6 +320,16 @@ export class CaptureCollector {
       return undefined;
     }
 
+    // Skip type parameters (generic type parameters like T, U, etc.)
+    // Type parameters are compile-time only and don't exist at runtime.
+    // Trying to capture them causes "ReferenceError: T is not defined"
+    const isTypeParameter = declarations.some((decl: ts.Declaration) =>
+      ts.isTypeParameterDeclaration(decl)
+    );
+    if (isTypeParameter) {
+      return undefined;
+    }
+
     // If we got here, at least one declaration is outside the callback
     // So it's a captured variable
     return node;
