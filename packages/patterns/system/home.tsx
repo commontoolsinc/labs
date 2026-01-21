@@ -1,5 +1,6 @@
 /// <cts-enable />
 import {
+  action,
   computed,
   equals,
   generateObject,
@@ -598,6 +599,54 @@ If there's an existing summary, update it with new information while preserving 
 
   void writeSummary;
 
+  // === QUESTION ANSWERING ===
+  // Get the top pending question (highest priority, most recent)
+  const topQuestion = computed(() => {
+    const questions = learned.get().openQuestions;
+    const pending = questions.filter((q) => q.status === "pending");
+    if (pending.length === 0) return null;
+    // Sort by priority (desc), then by most recent
+    pending.sort((a, b) => b.priority - a.priority);
+    return pending[0];
+  });
+
+  // Track the current answer input
+  const currentAnswer = Writable.of("");
+
+  // Action to submit an answer to the current question
+  const submitAnswer = action(() => {
+    const question = topQuestion;
+    const answer = currentAnswer.get().trim();
+    if (!question || !answer) return;
+
+    const l = learned.get();
+
+    // Update the question status
+    const updatedQuestions = l.openQuestions.map((q) =>
+      q.id === question.id
+        ? { ...q, status: "answered" as const, answer, answeredAt: Date.now() }
+        : q
+    );
+
+    // Create a new fact from the answer
+    const newFact: Fact = {
+      content: `${question.question} → ${answer}`,
+      confidence: 1.0, // User-provided = high confidence
+      source: `user:question:${question.id}`,
+      timestamp: Date.now(),
+    };
+
+    // Update learned with new fact and updated question
+    learned.set({
+      ...l,
+      facts: [...l.facts, newFact],
+      openQuestions: updatedQuestions,
+    });
+
+    // Clear the input
+    currentAnswer.set("");
+  });
+
   return {
     [NAME]: `Home`,
     [UI]: (
@@ -640,6 +689,82 @@ If there's an existing summary, update it with new information while preserving 
                   This summary is auto-generated but you can edit it freely.
                 </span>
               </ct-vstack>
+
+              {/* Question Answering */}
+              {computed(() => topQuestion !== null) && (
+                <ct-vstack
+                  gap="2"
+                  style={{
+                    padding: "16px",
+                    background: "#fffbeb",
+                    border: "1px solid #fbbf24",
+                    borderRadius: "8px",
+                  }}
+                >
+                  <h3 style={{ margin: 0, fontSize: "14px", color: "#92400e" }}>
+                    Help me understand you better
+                  </h3>
+                  <p style={{ margin: 0, fontSize: "14px" }}>
+                    {computed(() => topQuestion?.question || "")}
+                  </p>
+                  {computed(() =>
+                    topQuestion?.options && topQuestion.options.length > 0
+                  )
+                    ? (
+                      <ct-hstack gap="2" style={{ flexWrap: "wrap" }}>
+                        {computed(() =>
+                          (topQuestion?.options || []).map((opt) => (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                currentAnswer.set(opt);
+                                submitAnswer.send();
+                              }}
+                              style={{
+                                padding: "8px 16px",
+                                background: "#fff",
+                                border: "1px solid #d1d5db",
+                                borderRadius: "6px",
+                                cursor: "pointer",
+                                fontSize: "13px",
+                              }}
+                            >
+                              {opt}
+                            </button>
+                          ))
+                        )}
+                      </ct-hstack>
+                    )
+                    : (
+                      <ct-hstack gap="2">
+                        <ct-input
+                          $value={currentAnswer}
+                          placeholder="Type your answer..."
+                          style={{ flex: 1 }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => submitAnswer.send()}
+                          style={{
+                            padding: "8px 16px",
+                            background: "#f59e0b",
+                            color: "#fff",
+                            border: "none",
+                            borderRadius: "6px",
+                            cursor: "pointer",
+                            fontSize: "13px",
+                            fontWeight: "500",
+                          }}
+                        >
+                          Submit
+                        </button>
+                      </ct-hstack>
+                    )}
+                  <span style={{ fontSize: "11px", color: "#92400e" }}>
+                    Category: {computed(() => topQuestion?.category || "")}
+                  </span>
+                </ct-vstack>
+              )}
 
               <hr
                 style={{
