@@ -19,7 +19,7 @@
  * Patterns find google-auth via wish() - no manual auth linking needed.
  */
 import { NAME, pattern, UI } from "commontools";
-import GmailImporter, { type Auth } from "./gmail-importer.tsx";
+import GmailImporter, { type Auth } from "../building-blocks/gmail-importer.tsx";
 
 // Charm reference type - linked charms come as opaque cell references
 type CharmRef = any;
