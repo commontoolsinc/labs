@@ -11,11 +11,16 @@
  * - Tracks due dates and calculates urgency levels
  * - Deduplicates books across multiple reminder emails
  * - Supports "Mark as Returned" for local tracking
+ * - Omnibot actions: mark books as returned and dismiss holds
  *
  * Usage:
  * 1. Deploy a google-auth charm and complete OAuth
  * 2. Deploy this pattern
  * 3. Link: ct charm link google-auth/auth berkeley-library/linkedAuth
+ *
+ * Omnibot Actions:
+ * - markAsReturned: Mark a book as returned by title
+ * - dismissHold: Dismiss a hold (mark as picked up) by title
  */
 import {
   computed,
@@ -25,11 +30,13 @@ import {
   JSONSchema,
   NAME,
   pattern,
+  Stream,
   UI,
   Writable,
 } from "commontools";
 import type { Schema } from "commontools/schema";
 import GmailImporter, { type Auth } from "./gmail-importer.tsx";
+import ProcessingStatus from "./processing-status.tsx";
 
 // Email type - matches GmailImporter's Email type
 interface Email {
@@ -205,13 +212,14 @@ type EmailAnalysisResult = Schema<typeof EMAIL_ANALYSIS_SCHEMA>;
 
 /**
  * Create a deduplication key for a library item.
- * Uses lowercase title + author + dueDate.
+ * Uses lowercase title + author only (not dueDate).
+ * This allows the same book with different due dates (from renewals/different emails)
+ * to be deduplicated, keeping the most recent information.
  */
 function createItemKey(item: LibraryItem): string {
   const title = (item.title || "").toLowerCase().trim();
   const author = (item.author || "").toLowerCase().trim();
-  const dueDate = item.dueDate || "";
-  return `${title}|${author}|${dueDate}`;
+  return `${title}|${author}`;
 }
 
 /**
@@ -315,24 +323,181 @@ function formatDate(dateStr: string | undefined): string {
 // HANDLERS
 // =============================================================================
 
-// Handler to mark an item as returned
-const markAsReturned = handler<
+// Handler to toggle checkbox selection for an item
+// Pass the entire item Cell, then access .key inside the handler
+// This ensures the reactive reference is resolved in the proper context
+const toggleItemSelection = handler<
   unknown,
-  { returnedKeys: Writable<string[]>; itemKey: string }
->((_event, { returnedKeys, itemKey }) => {
-  const current = returnedKeys.get();
-  if (!current.includes(itemKey)) {
-    returnedKeys.set([...current, itemKey]);
+  {
+    item: TrackedItem;
+    selectedItems: Writable<Default<string[], []>>;
+  }
+>((_, { item, selectedItems }) => {
+  const key = item.key; // Access key inside handler context
+  const current = selectedItems.get() || [];
+  const idx = current.indexOf(key);
+  if (idx >= 0) {
+    selectedItems.set(current.filter((k: string) => k !== key));
+  } else {
+    selectedItems.set([...current, key]);
   }
 });
 
-// Handler to unmark an item as returned
-const unmarkAsReturned = handler<
+/**
+ * Handler for omnibot to mark a book as returned by title.
+ * Usage: Call with { title: "Book Title" }
+ *
+ * This searches for the book by title and marks all matching items as returned.
+ * If you know the author, you can pass "Title by Author" for exact matching.
+ */
+const markAsReturnedHandler = handler<
+  { title: string },
+  {
+    manuallyReturned: Writable<Default<string[], []>>;
+    emailAnalyses: Array<{
+      result?: LibraryEmailAnalysis;
+    }>;
+  }
+>(({ title }, { manuallyReturned, emailAnalyses }) => {
+  const normalizedInput = title.toLowerCase().trim();
+  if (!normalizedInput) return; // Guard against empty input
+
+  // Check if input is "Title by Author" format
+  const byMatch = normalizedInput.match(/^(.+?)\s+by\s+(.+)$/);
+  const searchTitle = byMatch ? byMatch[1].trim() : normalizedInput;
+  const searchAuthor = byMatch ? byMatch[2].trim() : "";
+
+  const current = manuallyReturned.get() || [];
+  const keysToAdd: string[] = [];
+
+  // Search through all analyzed emails for matching items
+  for (const analysis of emailAnalyses) {
+    if (!analysis.result?.items) continue;
+
+    for (const item of analysis.result.items) {
+      if (item.status === "hold_ready") continue; // Skip holds
+
+      const itemTitle = (item.title || "").toLowerCase().trim();
+      const itemAuthor = (item.author || "").toLowerCase().trim();
+
+      // Match by title, optionally also by author if provided
+      const titleMatches = itemTitle === searchTitle ||
+        itemTitle.includes(searchTitle);
+      const authorMatches = !searchAuthor || itemAuthor === searchAuthor ||
+        itemAuthor.includes(searchAuthor);
+
+      if (titleMatches && authorMatches) {
+        const key = createItemKey(item);
+        if (!current.includes(key) && !keysToAdd.includes(key)) {
+          keysToAdd.push(key);
+        }
+      }
+    }
+  }
+
+  if (keysToAdd.length > 0) {
+    manuallyReturned.set([...current, ...keysToAdd]);
+  }
+});
+
+/**
+ * Handler for omnibot to dismiss a hold by title (mark as picked up).
+ * Usage: Call with { title: "Book Title" }
+ *
+ * This searches for the hold by title and dismisses all matching holds.
+ * If you know the author, you can pass "Title by Author" for exact matching.
+ */
+const dismissHoldHandler = handler<
+  { title: string },
+  {
+    dismissedHolds: Writable<Default<string[], []>>;
+    emailAnalyses: Array<{
+      result?: LibraryEmailAnalysis;
+    }>;
+  }
+>(({ title }, { dismissedHolds, emailAnalyses }) => {
+  const normalizedInput = title.toLowerCase().trim();
+  if (!normalizedInput) return; // Guard against empty input
+
+  // Check if input is "Title by Author" format
+  const byMatch = normalizedInput.match(/^(.+?)\s+by\s+(.+)$/);
+  const searchTitle = byMatch ? byMatch[1].trim() : normalizedInput;
+  const searchAuthor = byMatch ? byMatch[2].trim() : "";
+
+  const current = dismissedHolds.get() || [];
+  const keysToAdd: string[] = [];
+
+  // Search through all analyzed emails for matching holds
+  for (const analysis of emailAnalyses) {
+    if (!analysis.result?.items) continue;
+
+    for (const item of analysis.result.items) {
+      if (item.status !== "hold_ready") continue; // Only holds
+
+      const itemTitle = (item.title || "").toLowerCase().trim();
+      const itemAuthor = (item.author || "").toLowerCase().trim();
+
+      // Match by title, optionally also by author if provided
+      const titleMatches = itemTitle === searchTitle ||
+        itemTitle.includes(searchTitle);
+      const authorMatches = !searchAuthor || itemAuthor === searchAuthor ||
+        itemAuthor.includes(searchAuthor);
+
+      if (titleMatches && authorMatches) {
+        const key = createItemKey(item);
+        if (!current.includes(key) && !keysToAdd.includes(key)) {
+          keysToAdd.push(key);
+        }
+      }
+    }
+  }
+
+  if (keysToAdd.length > 0) {
+    dismissedHolds.set([...current, ...keysToAdd]);
+  }
+});
+
+/**
+ * Handler to set a new due date for selected items in a group.
+ */
+const setDueDateForGroup = handler<
   unknown,
-  { returnedKeys: Writable<string[]>; itemKey: string }
->((_event, { returnedKeys, itemKey }) => {
-  const current = returnedKeys.get();
-  returnedKeys.set(current.filter((k) => k !== itemKey));
+  {
+    groupItems: TrackedItem[];
+    selectedItems: Writable<Default<string[], []>>;
+    dueDateOverrides: Writable<
+      Default<Record<string, string>, Record<string, never>>
+    >;
+  }
+>((event, { groupItems, selectedItems, dueDateOverrides }) => {
+  const input = (event as { target: { value: string } }).target;
+  const newDueDate = input.value;
+  if (!newDueDate) return;
+
+  // Get selected items in this group (not in deselected list = selected)
+  const deselectedKeys = selectedItems.get() || [];
+  const selectedInThisGroup = groupItems.filter(
+    (item: TrackedItem) => !deselectedKeys.includes(item.key),
+  );
+
+  if (selectedInThisGroup.length === 0) return;
+
+  // Update due date overrides for selected items
+  const current = dueDateOverrides.get() || {};
+  const updated = { ...current };
+  for (const item of selectedInThisGroup) {
+    updated[item.key] = newDueDate;
+  }
+  dueDateOverrides.set(updated);
+
+  // Clear deselected items for updated items
+  const updatedKeys = selectedInThisGroup.map((item: TrackedItem) => item.key);
+  selectedItems.set(
+    deselectedKeys.filter((k: string) => !updatedKeys.includes(k)),
+  );
+
+  // Reset the input
+  input.value = "";
 });
 
 // =============================================================================
@@ -344,7 +509,15 @@ interface PatternInput {
   // Use: ct charm link googleAuthCharm/auth berkeleyLibraryCharm/linkedAuth
   linkedAuth?: Auth;
   // Track items manually marked as returned (persisted)
-  manuallyReturned: Default<string[], []>;
+  manuallyReturned?: Writable<Default<string[], []>>;
+  // Track holds manually dismissed (persisted)
+  dismissedHolds?: Writable<Default<string[], []>>;
+  // Track selected items for bulk operations (per-group checkboxes)
+  selectedItems?: Writable<Default<string[], []>>;
+  // Track manual due date overrides (persisted)
+  dueDateOverrides?: Writable<
+    Default<Record<string, string>, Record<string, never>>
+  >;
 }
 
 /** Berkeley Public Library book tracker. #berkeleyLibrary */
@@ -355,10 +528,19 @@ interface PatternOutput {
   checkedOutCount: number;
   holdsReadyCount: number;
   previewUI: unknown;
+  // Omnibot actions
+  markAsReturned: Stream<{ title: string }>;
+  dismissHold: Stream<{ title: string }>;
 }
 
 export default pattern<PatternInput, PatternOutput>(
-  ({ linkedAuth, manuallyReturned }) => {
+  ({
+    linkedAuth,
+    manuallyReturned,
+    dismissedHolds,
+    selectedItems,
+    dueDateOverrides,
+  }) => {
     // Directly instantiate GmailImporter with library-specific settings
     const gmailImporter = GmailImporter({
       settings: {
@@ -367,7 +549,7 @@ export default pattern<PatternInput, PatternOutput>(
         autoFetchOnAuth: true,
         resolveInlineImages: false,
         limit: 50,
-        debugMode: false,
+        debugMode: true,
       },
       linkedAuth,
     });
@@ -471,8 +653,10 @@ Note: If this is a forwarded email, look for the original library content within
     // Process all analyses and build deduplicated item list
     const trackedItems = computed(() => {
       const itemMap = new Map<string, TrackedItem>();
-      // manuallyReturned is a reactive Cell, get the actual array value
-      const returnedKeys = (manuallyReturned || []) as string[];
+      // manuallyReturned is a Writable Cell, get the actual array value
+      const returnedKeys = manuallyReturned.get() || [];
+      // Get due date overrides
+      const overrides = dueDateOverrides.get() || {};
 
       // Sort emails by date (newest first) so we keep most recent data
       const sortedAnalyses = [...(emailAnalyses || [])]
@@ -496,14 +680,17 @@ Note: If this is a forwarded email, look for the original library content within
           // Skip items that are holds (not checked out)
           if (item.status === "hold_ready") continue;
 
-          const daysUntilDue = calculateDaysUntilDue(item.dueDate);
+          // Use overridden due date if available, otherwise use original
+          const effectiveDueDate = overrides[key] || item.dueDate;
+
+          const daysUntilDue = calculateDaysUntilDue(effectiveDueDate);
           const urgency = calculateUrgency(daysUntilDue, item.status);
 
           const trackedItem: TrackedItem = {
             key,
             title: item.title,
             author: item.author,
-            dueDate: item.dueDate,
+            dueDate: effectiveDueDate,
             status: item.status,
             itemType: item.itemType,
             renewalsRemaining: item.renewalsRemaining,
@@ -537,6 +724,8 @@ Note: If this is a forwarded email, look for the original library content within
     const holdsReady = computed(() => {
       const holdsSet = new Set<string>();
       const items: TrackedItem[] = [];
+      // dismissedHolds is a Writable Cell, get the actual array value
+      const dismissedKeys = dismissedHolds.get() || [];
 
       for (const analysisItem of emailAnalyses || []) {
         const result = analysisItem.result;
@@ -546,6 +735,8 @@ Note: If this is a forwarded email, look for the original library content within
           if (item.status !== "hold_ready") continue;
 
           const key = createItemKey(item);
+          // Skip dismissed holds
+          if (dismissedKeys.includes(key)) continue;
           if (holdsSet.has(key)) continue;
           holdsSet.add(key);
 
@@ -579,6 +770,45 @@ Note: If this is a forwarded email, look for the original library content within
       (trackedItems || []).filter((item) => item.isManuallyReturned)
     );
 
+    // Dismissed holds (manually dismissed)
+    const dismissedHoldsItems = computed(() => {
+      const holdsSet = new Set<string>();
+      const items: TrackedItem[] = [];
+      const dismissedKeys = dismissedHolds.get() || [];
+
+      for (const analysisItem of emailAnalyses || []) {
+        const result = analysisItem.result;
+        if (!result?.items) continue;
+
+        for (const item of result.items) {
+          if (item.status !== "hold_ready") continue;
+
+          const key = createItemKey(item);
+          // Only include dismissed holds
+          if (!dismissedKeys.includes(key)) continue;
+          if (holdsSet.has(key)) continue;
+          holdsSet.add(key);
+
+          items.push({
+            key,
+            title: item.title,
+            author: item.author,
+            dueDate: undefined,
+            status: "hold_ready",
+            itemType: item.itemType,
+            renewalsRemaining: undefined,
+            fineAmount: undefined,
+            urgency: "ok",
+            daysUntilDue: 999,
+            emailDate: analysisItem.emailDate,
+            isManuallyReturned: false,
+          });
+        }
+      }
+
+      return items;
+    });
+
     // Count statistics
     const overdueCount = computed(
       () =>
@@ -603,6 +833,73 @@ Note: If this is a forwarded email, look for the original library content within
       }
       return "ok";
     });
+
+    // Group active items by due date for checkbox-based bulk returns
+    // Pre-compute ALL derived values here to avoid OpaqueRef issues in UI
+    const itemsByDueDate = computed(() => {
+      const groups = new Map<string, TrackedItem[]>();
+      const items = activeItems || [];
+
+      for (const item of items) {
+        const dueDate = item.dueDate || "No due date";
+        if (!groups.has(dueDate)) {
+          groups.set(dueDate, []);
+        }
+        groups.get(dueDate)!.push(item);
+      }
+
+      // Sort groups by due date (earliest first) and compute group-level properties
+      // NOTE: Selection state is NOT computed here to avoid reactive loops
+      return Array.from(groups.entries())
+        .sort(([dateA], [dateB]) => {
+          if (dateA === "No due date") return 1;
+          if (dateB === "No due date") return -1;
+          return dateA.localeCompare(dateB);
+        })
+        .map(([dueDate, groupItems]) => {
+          // Pre-compute group urgency
+          const rawItems = groupItems;
+          let groupUrgency: UrgencyLevel = "ok";
+          if (rawItems.some((i) => i.urgency === "overdue")) {
+            groupUrgency = "overdue";
+          } else if (rawItems.some((i) => i.urgency === "urgent_1day")) {
+            groupUrgency = "urgent_1day";
+          } else if (rawItems.some((i) => i.urgency === "warning_3days")) {
+            groupUrgency = "warning_3days";
+          } else if (rawItems.some((i) => i.urgency === "notice_7days")) {
+            groupUrgency = "notice_7days";
+          }
+
+          // Pre-compute urgency label from first item
+          const firstItem = rawItems[0];
+          const urgencyLabel = firstItem
+            ? getUrgencyLabel(firstItem.urgency, firstItem.daysUntilDue)
+            : "";
+
+          // Pre-compute urgency colors
+          const urgencyColors = getUrgencyColor(groupUrgency);
+
+          // Pre-compute formatted date
+          const formattedDate = formatDate(dueDate);
+
+          return {
+            dueDate,
+            formattedDate,
+            items: groupItems, // Plain TrackedItem array, no selection wrapping
+            groupUrgency,
+            urgencyLabel,
+            urgencyBgColor: urgencyColors.bg,
+            urgencyTextColor: urgencyColors.text,
+            totalCount: groupItems.length,
+          };
+        });
+    });
+
+    // Pre-compute due tomorrow count for preview UI
+    const dueTomorrowCount = computed(
+      () =>
+        activeItems?.filter((i) => i.urgency === "urgent_1day")?.length || 0,
+    );
 
     // Preview UI for compact display in lists/pickers
     const previewUI = (
@@ -642,28 +939,51 @@ Note: If this is a forwarded email, look for the original library content within
             Library Books
           </div>
           <div style={{ fontSize: "12px", color: "#6b7280" }}>
-            {overdueCount > 0 && (
-              <span style={{ color: "#dc2626" }}>{overdueCount} overdue</span>
-            )}
-            {overdueCount > 0 &&
-              (computed(() =>
-                activeItems?.filter((i) => i.urgency === "urgent_1day")
-                  ?.length || 0
-              ) > 0) && <span>·</span>}
-            {computed(() => {
-              const dueTomorrow = activeItems?.filter((i) =>
-                i.urgency === "urgent_1day"
-              )?.length || 0;
-              return dueTomorrow > 0 ? `${dueTomorrow} due tomorrow` : "";
-            })}
-            {holdsReadyCount > 0 && (
-              <span style={{ color: "#2563eb" }}>
-                {" "}
-                · {holdsReadyCount} holds ready
-              </span>
-            )}
+            <span
+              style={{
+                color: "#dc2626",
+                display: computed(() => (overdueCount > 0 ? "inline" : "none")),
+              }}
+            >
+              {overdueCount} overdue
+            </span>
+            <span
+              style={{
+                display: computed(() =>
+                  overdueCount > 0 && dueTomorrowCount > 0 ? "inline" : "none"
+                ),
+              }}
+            >
+              {" · "}
+            </span>
+            <span
+              style={{
+                display: computed(() =>
+                  dueTomorrowCount > 0 ? "inline" : "none"
+                ),
+              }}
+            >
+              {dueTomorrowCount} due tomorrow
+            </span>
+            <span
+              style={{
+                color: "#2563eb",
+                display: computed(() =>
+                  holdsReadyCount > 0 ? "inline" : "none"
+                ),
+              }}
+            >
+              {" · "}
+              {holdsReadyCount} holds ready
+            </span>
           </div>
         </div>
+        {/* Loading/progress indicator */}
+        <ProcessingStatus
+          totalCount={libraryEmailCount}
+          pendingCount={pendingCount}
+          completedCount={completedCount}
+        />
       </div>
     );
 
@@ -676,6 +996,13 @@ Note: If this is a forwarded email, look for the original library content within
       checkedOutCount,
       holdsReadyCount,
       previewUI,
+
+      // Omnibot actions - bind handlers with current state
+      markAsReturned: markAsReturnedHandler({
+        manuallyReturned,
+        emailAnalyses,
+      }),
+      dismissHold: dismissHoldHandler({ dismissedHolds, emailAnalyses }),
 
       [UI]: (
         <ct-screen>
@@ -857,13 +1184,11 @@ Note: If this is a forwarded email, look for the original library content within
                 </div>
               </div>
 
-              {/* Overdue Items Section */}
+              {/* Checked Out Items - Grouped by Due Date */}
               <div
                 style={{
                   display: computed(() =>
-                    (activeItems || []).some((i) => i.urgency === "overdue")
-                      ? "block"
-                      : "none"
+                    (activeItems || []).length > 0 ? "block" : "none"
                   ),
                 }}
               >
@@ -871,263 +1196,259 @@ Note: If this is a forwarded email, look for the original library content within
                   style={{
                     fontSize: "16px",
                     fontWeight: "600",
-                    marginBottom: "8px",
-                    color: "#b91c1c",
+                    marginBottom: "12px",
+                    color: "#374151",
                   }}
                 >
-                  🔴 Overdue
+                  Checked Out Items
                 </h3>
-                <ct-vstack gap="2">
-                  {activeItems.map((item) => (
-                    <div
-                      style={{
-                        display: item.urgency === "overdue" ? "flex" : "none",
-                        gap: "12px",
-                        padding: "12px",
-                        backgroundColor: "#fee2e2",
-                        borderRadius: "8px",
-                        border: "1px solid #ef4444",
-                      }}
-                    >
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: "600", fontSize: "14px" }}>
-                          {item.title}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "12px",
-                            color: "#6b7280",
-                            display: item.author ? "block" : "none",
-                          }}
-                        >
-                          by {item.author}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "12px",
-                            color: "#b91c1c",
-                            marginTop: "4px",
-                          }}
-                        >
-                          {computed(() =>
-                            getUrgencyLabel(item.urgency, item.daysUntilDue)
-                          )} • Due: {computed(() => formatDate(item.dueDate))}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={markAsReturned({
-                          returnedKeys: manuallyReturned,
-                          itemKey: item.key,
-                        })}
-                        style={{
-                          padding: "6px 12px",
-                          backgroundColor: "#10b981",
-                          color: "white",
-                          border: "none",
-                          borderRadius: "6px",
-                          cursor: "pointer",
-                          fontSize: "12px",
-                          fontWeight: "500",
-                          alignSelf: "center",
-                        }}
-                      >
-                        Mark Returned
-                      </button>
-                    </div>
-                  ))}
-                </ct-vstack>
-              </div>
+                <ct-vstack gap="4">
+                  {itemsByDueDate.map((group) => {
+                    // Compute selected count outside JSX - items not in deselected list are selected
+                    const selectedCount = computed(() => {
+                      const deselected = selectedItems.get() || [];
+                      return group.items.filter(
+                        (item: TrackedItem) => !deselected.includes(item.key),
+                      ).length;
+                    });
 
-              {/* Due Soon Items Section (1-3 days) */}
-              <div
-                style={{
-                  display: computed(() =>
-                    (activeItems || []).some(
-                        (i) =>
-                          i.urgency === "urgent_1day" ||
-                          i.urgency === "warning_3days",
-                      )
-                      ? "block"
-                      : "none"
-                  ),
-                }}
-              >
-                <h3
-                  style={{
-                    fontSize: "16px",
-                    fontWeight: "600",
-                    marginBottom: "8px",
-                    color: "#c2410c",
-                  }}
-                >
-                  🟠 Due Soon
-                </h3>
-                <ct-vstack gap="2">
-                  {activeItems.map((item) => (
-                    <div
-                      style={{
-                        display: item.urgency === "urgent_1day" ||
-                            item.urgency === "warning_3days"
-                          ? "flex"
-                          : "none",
-                        gap: "12px",
-                        padding: "12px",
-                        backgroundColor: computed(() =>
-                          getUrgencyColor(item.urgency).bg
-                        ),
-                        borderRadius: "8px",
-                        border: computed(() =>
-                          `1px solid ${getUrgencyColor(item.urgency).border}`
-                        ),
-                      }}
-                    >
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: "600", fontSize: "14px" }}>
-                          {item.title}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "12px",
-                            color: "#6b7280",
-                            display: item.author ? "block" : "none",
-                          }}
-                        >
-                          by {item.author}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "12px",
-                            color: computed(() =>
-                              getUrgencyColor(item.urgency).text
-                            ),
-                            marginTop: "4px",
-                          }}
-                        >
-                          {computed(() =>
-                            getUrgencyLabel(item.urgency, item.daysUntilDue)
-                          )} • Due: {computed(() => formatDate(item.dueDate))}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={markAsReturned({
-                          returnedKeys: manuallyReturned,
-                          itemKey: item.key,
-                        })}
-                        style={{
-                          padding: "6px 12px",
-                          backgroundColor: "#10b981",
-                          color: "white",
-                          border: "none",
-                          borderRadius: "6px",
-                          cursor: "pointer",
-                          fontSize: "12px",
-                          fontWeight: "500",
-                          alignSelf: "center",
-                        }}
-                      >
-                        Mark Returned
-                      </button>
-                    </div>
-                  ))}
-                </ct-vstack>
-              </div>
-
-              {/* OK Items Section */}
-              <div
-                style={{
-                  display: computed(() =>
-                    (activeItems || []).some(
-                        (i) =>
-                          i.urgency === "notice_7days" || i.urgency === "ok",
-                      )
-                      ? "block"
-                      : "none"
-                  ),
-                }}
-              >
-                <details>
-                  <summary
-                    style={{
-                      cursor: "pointer",
-                      fontWeight: "600",
-                      fontSize: "16px",
-                      marginBottom: "8px",
-                      color: "#047857",
-                    }}
-                  >
-                    🟢 Due Later (
-                    {computed(() =>
-                      (activeItems || []).filter(
-                        (i) =>
-                          i.urgency === "notice_7days" || i.urgency === "ok",
-                      ).length
-                    )}
-                    )
-                  </summary>
-                  <ct-vstack gap="2">
-                    {activeItems.map((item) => (
+                    return (
                       <div
                         style={{
-                          display: item.urgency === "notice_7days" ||
-                              item.urgency === "ok"
-                            ? "flex"
-                            : "none",
-                          gap: "12px",
-                          padding: "12px",
-                          backgroundColor: "#d1fae5",
+                          padding: "16px",
+                          backgroundColor: "#f9fafb",
                           borderRadius: "8px",
-                          border: "1px solid #10b981",
+                          border: "1px solid #e5e7eb",
                         }}
                       >
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: "600", fontSize: "14px" }}>
-                            {item.title}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "12px",
-                              color: "#6b7280",
-                              display: item.author ? "block" : "none",
-                            }}
-                          >
-                            by {item.author}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "12px",
-                              color: "#047857",
-                              marginTop: "4px",
-                            }}
-                          >
-                            Due: {computed(() => formatDate(item.dueDate))}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={markAsReturned({
-                            returnedKeys: manuallyReturned,
-                            itemKey: item.key,
-                          })}
+                        {/* Group Header with Due Date */}
+                        <div
                           style={{
-                            padding: "6px 12px",
-                            backgroundColor: "#10b981",
-                            color: "white",
-                            border: "none",
-                            borderRadius: "6px",
-                            cursor: "pointer",
-                            fontSize: "12px",
-                            fontWeight: "500",
-                            alignSelf: "center",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            marginBottom: "12px",
                           }}
                         >
-                          Mark Returned
-                        </button>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontWeight: "600",
+                                fontSize: "15px",
+                                color: "#111827",
+                              }}
+                            >
+                              Due: {group.formattedDate}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: "13px",
+                                padding: "4px 8px",
+                                borderRadius: "4px",
+                                backgroundColor: group.urgencyBgColor,
+                                color: group.urgencyTextColor,
+                                fontWeight: "500",
+                              }}
+                            >
+                              {group.urgencyLabel}
+                            </div>
+                          </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                            }}
+                          >
+                            {/* Date picker for setting new due date */}
+                            <div
+                              style={{
+                                display: selectedCount > 0 ? "flex" : "none",
+                                alignItems: "center",
+                                gap: "8px",
+                              }}
+                            >
+                              <label
+                                style={{
+                                  fontSize: "13px",
+                                  fontWeight: "500",
+                                  color: "#374151",
+                                }}
+                              >
+                                New due date:
+                              </label>
+                              <input
+                                type="date"
+                                onChange={setDueDateForGroup({
+                                  groupItems: group.items,
+                                  selectedItems,
+                                  dueDateOverrides,
+                                })}
+                                style={{
+                                  padding: "6px 12px",
+                                  border: "1px solid #d1d5db",
+                                  borderRadius: "6px",
+                                  fontSize: "13px",
+                                  cursor: "pointer",
+                                }}
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                // Get selected items in this group (not in deselected = selected)
+                                const deselectedKeys = selectedItems.get() ||
+                                  [];
+                                const selectedInThisGroup = group.items.filter(
+                                  (item: TrackedItem) =>
+                                    !deselectedKeys.includes(item.key),
+                                );
+                                if (selectedInThisGroup.length === 0) return;
+
+                                // Mark them as returned
+                                const current = manuallyReturned.get();
+                                const selectedKeys = selectedInThisGroup.map(
+                                  (item: TrackedItem) => item.key,
+                                );
+                                manuallyReturned.set([
+                                  ...current,
+                                  ...selectedKeys,
+                                ]);
+
+                                // Clear deselected items for returned items
+                                selectedItems.set(
+                                  deselectedKeys.filter(
+                                    (k: string) => !selectedKeys.includes(k),
+                                  ),
+                                );
+                              }}
+                              style={{
+                                padding: "8px 16px",
+                                backgroundColor: selectedCount > 0
+                                  ? "#10b981"
+                                  : "#d1d5db",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "6px",
+                                cursor: selectedCount > 0
+                                  ? "pointer"
+                                  : "not-allowed",
+                                fontSize: "13px",
+                                fontWeight: "600",
+                                display: selectedCount > 0 ? "block" : "none",
+                              }}
+                            >
+                              Mark {selectedCount} Returned
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Items in this group */}
+                        <ct-vstack gap="2">
+                          {group.items.map((item) => {
+                            // Extract key before computed to avoid OpaqueRef issues
+                            const itemKey = item.key;
+                            const isChecked = computed(() => {
+                              const deselected = selectedItems.get() || [];
+                              return !deselected.includes(itemKey);
+                            });
+
+                            return (
+                              <div
+                                style={{
+                                  display: "flex",
+                                  gap: "12px",
+                                  padding: "12px",
+                                  backgroundColor: "white",
+                                  borderRadius: "6px",
+                                  border: "1px solid #e5e7eb",
+                                  alignItems: "center",
+                                }}
+                              >
+                                {/* Native checkbox for reliable one-way binding */}
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={toggleItemSelection({
+                                    item,
+                                    selectedItems,
+                                  })}
+                                  style={{
+                                    width: "18px",
+                                    height: "18px",
+                                    cursor: "pointer",
+                                    flexShrink: "0",
+                                  }}
+                                />
+
+                                {/* Book Info */}
+                                <div style={{ flex: 1 }}>
+                                  <div
+                                    style={{
+                                      fontWeight: "600",
+                                      fontSize: "14px",
+                                    }}
+                                  >
+                                    {item.title}
+                                  </div>
+                                  <div
+                                    style={{
+                                      fontSize: "12px",
+                                      color: "#6b7280",
+                                      display: item.author ? "block" : "none",
+                                    }}
+                                  >
+                                    by {item.author}
+                                  </div>
+                                </div>
+
+                                {/* Individual Mark Returned Button */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const current = manuallyReturned.get();
+                                    if (!current.includes(item.key)) {
+                                      manuallyReturned.set([
+                                        ...current,
+                                        item.key,
+                                      ]);
+                                    }
+                                    // Remove from selected if present
+                                    const currentSelected = selectedItems.get();
+                                    selectedItems.set(
+                                      currentSelected.filter(
+                                        (k: string) => k !== item.key,
+                                      ),
+                                    );
+                                  }}
+                                  style={{
+                                    padding: "6px 12px",
+                                    backgroundColor: "#10b981",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "6px",
+                                    cursor: "pointer",
+                                    fontSize: "12px",
+                                    fontWeight: "500",
+                                    flexShrink: "0",
+                                  }}
+                                >
+                                  Mark Returned
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </ct-vstack>
                       </div>
-                    ))}
-                  </ct-vstack>
-                </details>
+                    );
+                  })}
+                </ct-vstack>
               </div>
 
               {/* Holds Ready Section */}
@@ -1181,9 +1502,116 @@ Note: If this is a forwarded email, look for the original library content within
                           Ready for pickup
                         </div>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const current = dismissedHolds.get();
+                          if (!current.includes(item.key)) {
+                            dismissedHolds.set([...current, item.key]);
+                          }
+                        }}
+                        style={{
+                          padding: "6px 12px",
+                          backgroundColor: "#10b981",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "6px",
+                          cursor: "pointer",
+                          fontSize: "12px",
+                          fontWeight: "500",
+                          alignSelf: "center",
+                        }}
+                      >
+                        Picked Up
+                      </button>
                     </div>
                   ))}
                 </ct-vstack>
+              </div>
+
+              {/* Dismissed Holds Section */}
+              <div
+                style={{
+                  display: computed(() =>
+                    (dismissedHoldsItems || []).length > 0 ? "block" : "none"
+                  ),
+                }}
+              >
+                <details>
+                  <summary
+                    style={{
+                      cursor: "pointer",
+                      fontWeight: "600",
+                      fontSize: "16px",
+                      marginBottom: "8px",
+                      color: "#6b7280",
+                    }}
+                  >
+                    ✓ Dismissed Holds (
+                    {computed(() => (dismissedHoldsItems || []).length)})
+                  </summary>
+                  <ct-vstack gap="2">
+                    {dismissedHoldsItems.map((item) => (
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "12px",
+                          padding: "12px",
+                          backgroundColor: "#f3f4f6",
+                          borderRadius: "8px",
+                          border: "1px solid #d1d5db",
+                          opacity: 0.7,
+                        }}
+                      >
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: "600", fontSize: "14px" }}>
+                            {item.title}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "12px",
+                              color: "#6b7280",
+                              display: item.author ? "block" : "none",
+                            }}
+                          >
+                            by {item.author}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "12px",
+                              color: "#9ca3af",
+                              marginTop: "4px",
+                            }}
+                          >
+                            Dismissed
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const current = dismissedHolds.get();
+                            dismissedHolds.set(
+                              current.filter((k: string) => k !== item.key),
+                            );
+                          }}
+                          style={{
+                            padding: "6px 12px",
+                            backgroundColor: "#6b7280",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "6px",
+                            cursor: "pointer",
+                            fontSize: "12px",
+                            fontWeight: "500",
+                            alignSelf: "center",
+                          }}
+                        >
+                          Undo
+                        </button>
+                      </div>
+                    ))}
+                  </ct-vstack>
+                </details>
               </div>
 
               {/* Historical Items Section */}
@@ -1245,10 +1673,12 @@ Note: If this is a forwarded email, look for the original library content within
                         </div>
                         <button
                           type="button"
-                          onClick={unmarkAsReturned({
-                            returnedKeys: manuallyReturned,
-                            itemKey: item.key,
-                          })}
+                          onClick={() => {
+                            const current = manuallyReturned.get();
+                            manuallyReturned.set(
+                              current.filter((k: string) => k !== item.key),
+                            );
+                          }}
                           style={{
                             padding: "6px 12px",
                             backgroundColor: "#6b7280",
@@ -1391,7 +1821,8 @@ Note: If this is a forwarded email, look for the original library content within
                               marginTop: "4px",
                             }}
                           >
-                            Error: {computed(() =>
+                            Error:{" "}
+                            {computed(() =>
                               analysis.error ? String(analysis.error) : ""
                             )}
                           </div>
@@ -1415,14 +1846,16 @@ Note: If this is a forwarded email, look for the original library content within
                               }}
                             >
                               <div style={{ color: "#374151" }}>
-                                <strong>Email Type:</strong> {computed(() =>
+                                <strong>Email Type:</strong>{" "}
+                                {computed(() =>
                                   analysis.result?.emailType || "N/A"
                                 )}
                               </div>
                               <div
                                 style={{ color: "#374151", marginTop: "4px" }}
                               >
-                                <strong>Summary:</strong> {computed(() =>
+                                <strong>Summary:</strong>{" "}
+                                {computed(() =>
                                   analysis.result?.summary || "N/A"
                                 )}
                               </div>
@@ -1437,7 +1870,8 @@ Note: If this is a forwarded email, look for the original library content within
                                   ),
                                 }}
                               >
-                                <strong>Account Holder:</strong> {computed(() =>
+                                <strong>Account Holder:</strong>{" "}
+                                {computed(() =>
                                   analysis.result?.accountHolder || ""
                                 )}
                               </div>

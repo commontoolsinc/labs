@@ -154,13 +154,15 @@ const _updateLimit = handler<
 const googleUpdater = handler<unknown, {
   emails: Writable<Array<Writable<Email>>>;
   auth: Writable<Auth>;
-  settings: Writable<{
-    gmailFilterQuery: string;
-    limit: number;
-    debugMode: boolean;
-    autoFetchOnAuth: boolean;
-    resolveInlineImages: boolean;
-  }>;
+  settings: Writable<
+    Default<Settings, {
+      gmailFilterQuery: "in:INBOX";
+      limit: 10;
+      debugMode: false;
+      autoFetchOnAuth: false;
+      resolveInlineImages: false;
+    }>
+  >;
   historyId: Writable<string>;
   fetching?: Writable<boolean>;
 }>(
@@ -169,17 +171,28 @@ const googleUpdater = handler<unknown, {
     if (state.fetching) {
       state.fetching.set(true);
     }
-    const debugMode = state.settings.get().debugMode || false;
+
+    // HACK(seefeld): Ensure all cells are synced before proceeding,
+    // otherwise we may end up conflicting.
+    await Promise.all([
+      (state.emails as any).sync(),
+      (state.auth as any).sync(),
+      (state.settings as any).sync(),
+      (state.historyId as any).sync(),
+    ]);
+
+    const settings = state.settings.get() || {};
+
+    const debugMode = settings.debugMode || false;
 
     debugLog(debugMode, "googleUpdater!");
 
-    if (!state.auth.get().token) {
+    if (!state.auth.get()?.token) {
       debugWarn(debugMode, "no token found in auth cell");
       if (state.fetching) state.fetching.set(false);
       return;
     }
 
-    const settings = state.settings.get();
     const gmailFilterQuery = settings.gmailFilterQuery;
 
     debugLog(debugMode, "gmailFilterQuery", gmailFilterQuery);
@@ -241,12 +254,19 @@ const googleUpdater = handler<unknown, {
   },
 );
 
-// Helper function to decode base64 encoded email parts
-function decodeBase64(data: string) {
+// Helper function to decode base64 encoded email parts with proper UTF-8 handling
+function decodeBase64(data: string): string {
   // Replace URL-safe characters back to their original form
   const sanitized = data.replace(/-/g, "+").replace(/_/g, "/");
-  // Decode the base64 string
-  return atob(sanitized);
+  // Decode the base64 string to binary
+  const binaryString = atob(sanitized);
+  // Convert binary string to Uint8Array for proper UTF-8 decoding
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  // Use TextDecoder to properly decode UTF-8
+  return new TextDecoder("utf-8").decode(bytes);
 }
 
 // Helper function to extract email address from a header value
@@ -1068,7 +1088,7 @@ export default pattern<{
 
     computed(() => {
       if (settings.debugMode) {
-        console.log("emails", emails.get().length);
+        console.log("retrieved emails", emails.get().length);
       }
     });
 

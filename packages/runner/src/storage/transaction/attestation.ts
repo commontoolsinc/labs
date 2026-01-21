@@ -1,5 +1,6 @@
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { isRecord } from "@commontools/utils/types";
+import { isArrayIndexPropertyName } from "../../value-codec.ts";
 import type {
   IAttestation,
   IInvalidDataURIError,
@@ -17,6 +18,7 @@ import type {
 } from "../interface.ts";
 import { unclaimed } from "@commontools/memory/fact";
 import { getLogger } from "@commontools/utils/logger";
+import { LRUCache } from "@commontools/utils/cache";
 
 const logger = getLogger("attestation", {
   enabled: false,
@@ -31,11 +33,10 @@ const cacheHitLogger = getLogger("attestation-hit", {
  * Cache for parsed data URIs to avoid redundant parsing.
  * Key format: `${address.id}::${address.type}`
  */
-const dataURICache = new Map<
+const dataURICache = new LRUCache<
   string,
   Result<IAttestation, IInvalidDataURIError | IUnsupportedMediaTypeError>
->();
-const MAX_CACHE_SIZE = 1000;
+>({ capacity: 1000 });
 
 export const InvalidDataURIError = (
   message: string,
@@ -58,17 +59,6 @@ export const UnsupportedMediaTypeError = (
     return this;
   },
 });
-
-/**
- * Checks if a string is a valid non-negative integer array index.
- * Valid: "0", "1", "123"
- * Invalid: "-1", "1.5", "abc", "", "01" (leading zeros except "0"), "length"
- */
-const isValidArrayIndex = (key: string): boolean => {
-  if (key === "" || key === "length") return false;
-  const num = Number(key);
-  return Number.isInteger(num) && num >= 0 && String(num) === key;
-};
 
 /**
  * Sets a value at path using structural sharing. Only clones along the path.
@@ -123,7 +113,7 @@ const setAtPath = (
     }
 
     // Validate array key
-    if (!isValidArrayIndex(key)) {
+    if (!isArrayIndexPropertyName(key)) {
       return { error: { at: 0, type: "array" } };
     }
 
@@ -498,15 +488,7 @@ export const load = (
     };
   }
 
-  // Cache the result (with FIFO eviction)
-  if (dataURICache.size >= MAX_CACHE_SIZE) {
-    // Remove the first (oldest) entry
-    const firstKey = dataURICache.keys().next().value;
-    if (firstKey !== undefined) {
-      dataURICache.delete(firstKey);
-    }
-  }
-  dataURICache.set(cacheKey, result);
+  dataURICache.put(cacheKey, result);
 
   return result;
 };

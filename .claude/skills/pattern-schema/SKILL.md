@@ -4,6 +4,8 @@ description: Design schemas.tsx with Input/Output types for patterns
 user-invocable: false
 ---
 
+Use `Skill("ct")` for ct CLI documentation when running commands.
+
 # Schema Design Phase
 
 ## Goal
@@ -49,4 +51,4 @@ export interface ItemOutput {
 ## Done When
 - All data types defined with correct Writable/Default wrapping
 - All Input/Output types defined for each sub-pattern
-- No TypeScript errors: `deno task ct dev schemas.tsx --no-run`
+- No TypeScript errors: `deno task ct check schemas.tsx --no-run`

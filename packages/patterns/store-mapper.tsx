@@ -1743,8 +1743,17 @@ export default pattern<Input, Output>(
             <ct-tab-panel value="departments">
               <ct-vscroll flex showScrollbar fadeEdges>
                 <ct-vstack gap="2" style="padding: 1rem; max-width: 800px;">
-                  {/* Department list */}
-                  {departments.map((dept) => (
+                  {/* Department list - unassigned shown first, assigned at bottom */}
+                  {computed(() => {
+                    const depts = departments.get();
+                    // Sort: unassigned first, then assigned departments
+                    return [...depts].sort((a, b) => {
+                      const aAssigned = a.location !== "unassigned";
+                      const bAssigned = b.location !== "unassigned";
+                      if (aAssigned === bAssigned) return 0;
+                      return aAssigned ? 1 : -1;
+                    });
+                  }).map((dept) => (
                     <ct-card>
                       <ct-vstack gap="2">
                         <ct-hstack gap="2" align="center">
@@ -1807,7 +1816,7 @@ export default pattern<Input, Output>(
                                 location: "front-left",
                               })}
                             >
-                              L
+                              Left
                             </ct-button>
                             <ct-button
                               size="sm"
@@ -1823,7 +1832,7 @@ export default pattern<Input, Output>(
                                 location: "front-center",
                               })}
                             >
-                              C
+                              Center
                             </ct-button>
                             <ct-button
                               size="sm"
@@ -1839,7 +1848,7 @@ export default pattern<Input, Output>(
                                 location: "front-right",
                               })}
                             >
-                              R
+                              Right
                             </ct-button>
                           </div>
                           {/* Back wall */}
@@ -1875,7 +1884,7 @@ export default pattern<Input, Output>(
                                 location: "back-left",
                               })}
                             >
-                              L
+                              Left
                             </ct-button>
                             <ct-button
                               size="sm"
@@ -1891,7 +1900,7 @@ export default pattern<Input, Output>(
                                 location: "back-center",
                               })}
                             >
-                              C
+                              Center
                             </ct-button>
                             <ct-button
                               size="sm"
@@ -1907,7 +1916,7 @@ export default pattern<Input, Output>(
                                 location: "back-right",
                               })}
                             >
-                              R
+                              Right
                             </ct-button>
                           </div>
                           {/* Left wall */}
@@ -1943,7 +1952,7 @@ export default pattern<Input, Output>(
                                 location: "left-front",
                               })}
                             >
-                              Fr
+                              Front
                             </ct-button>
                             <ct-button
                               size="sm"
@@ -1959,7 +1968,7 @@ export default pattern<Input, Output>(
                                 location: "left-center",
                               })}
                             >
-                              C
+                              Center
                             </ct-button>
                             <ct-button
                               size="sm"
@@ -1975,7 +1984,7 @@ export default pattern<Input, Output>(
                                 location: "left-back",
                               })}
                             >
-                              Bk
+                              Back
                             </ct-button>
                           </div>
                           {/* Right wall */}
@@ -2011,7 +2020,7 @@ export default pattern<Input, Output>(
                                 location: "right-front",
                               })}
                             >
-                              Fr
+                              Front
                             </ct-button>
                             <ct-button
                               size="sm"
@@ -2027,7 +2036,7 @@ export default pattern<Input, Output>(
                                 location: "right-center",
                               })}
                             >
-                              C
+                              Center
                             </ct-button>
                             <ct-button
                               size="sm"
@@ -2043,7 +2052,7 @@ export default pattern<Input, Output>(
                                 location: "right-back",
                               })}
                             >
-                              Bk
+                              Back
                             </ct-button>
                           </div>
                           {/* Special locations */}
@@ -2080,7 +2089,7 @@ export default pattern<Input, Output>(
                                 location: "in-center-aisle",
                               })}
                             >
-                              Center
+                              Normal Aisle
                             </ct-button>
                             <ct-button
                               size="sm"

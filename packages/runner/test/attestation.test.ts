@@ -240,6 +240,56 @@ describe("Attestation Module", () => {
       );
     });
 
+    it("should fail when writing to array with leading-zero key", () => {
+      const source = {
+        address: {
+          id: "test:array-leading-zero",
+          type: "application/json",
+          path: [],
+        },
+        value: { items: ["a", "b", "c"] },
+      } as const;
+
+      // "01" looks numeric but is not a valid array index (leading zero)
+      const result = Attestation.write(source, {
+        id: "test:array-leading-zero",
+        type: "application/json",
+        path: ["items", "01"],
+      }, "value");
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.name).toBe("TypeMismatchError");
+      expect(result.error?.message).toContain("Cannot write property");
+      expect(result.error?.message).toContain(
+        "expected object but found array",
+      );
+    });
+
+    it("should fail when writing to array with index >= 2**31", () => {
+      const source = {
+        address: {
+          id: "test:array-huge-index",
+          type: "application/json",
+          path: [],
+        },
+        value: { items: ["a", "b", "c"] },
+      } as const;
+
+      // 4294967296 is 2**32, which exceeds the valid array index range
+      const result = Attestation.write(source, {
+        id: "test:array-huge-index",
+        type: "application/json",
+        path: ["items", "4294967296"],
+      }, "value");
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.name).toBe("TypeMismatchError");
+      expect(result.error?.message).toContain("Cannot write property");
+      expect(result.error?.message).toContain(
+        "expected object but found array",
+      );
+    });
+
     it("should fail when writing to array with string key (not 'length')", () => {
       const source = {
         address: {

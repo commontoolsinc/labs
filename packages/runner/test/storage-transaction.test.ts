@@ -765,6 +765,317 @@ describe("root value rewriting", () => {
   });
 });
 
+describe("numeric path key edge cases", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      storageManager,
+      apiUrl: new URL("http://localhost:8000"),
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  // Writing to a numeric key creates an array with the value at that index.
+  it("numeric final key creates array index", () => {
+    const transaction = runtime.edit();
+
+    transaction.writeOrThrow({
+      space,
+      id: "of:numeric-final",
+      type: "application/json",
+      path: ["data", "0"],
+    }, "Alice");
+
+    // Read back the structure at "data"
+    const data = transaction.readOrThrow({
+      space,
+      id: "of:numeric-final",
+      type: "application/json",
+      path: ["data"],
+    });
+
+    // It's an array with "Alice" at index 0
+    expect(data).toEqual(["Alice"]);
+    expect(Array.isArray(data)).toBe(true);
+  });
+
+  // Writing numeric key first creates array; writing non-numeric key after fails.
+  it("writing numeric key then non-numeric key at same level fails", () => {
+    const transaction = runtime.edit();
+
+    // Write numeric key first - creates array
+    transaction.writeOrThrow({
+      space,
+      id: "of:mixed-keys",
+      type: "application/json",
+      path: ["data", "0"],
+    }, "Alice");
+
+    // Write non-numeric key second - should fail because data is now an array
+    expect(() => {
+      transaction.writeOrThrow({
+        space,
+        id: "of:mixed-keys",
+        type: "application/json",
+        path: ["data", "name"],
+      }, "Bob");
+    }).toThrow("expected object but found array");
+  });
+
+  // Writing non-numeric key first creates object; numeric key becomes property.
+  it("writing non-numeric key then numeric key at same level works as object", () => {
+    const transaction = runtime.edit();
+
+    // Write non-numeric key first - creates object
+    transaction.writeOrThrow({
+      space,
+      id: "of:mixed-keys-2",
+      type: "application/json",
+      path: ["data", "name"],
+    }, "Bob");
+
+    // Write numeric key second - becomes object property (not array index)
+    transaction.writeOrThrow({
+      space,
+      id: "of:mixed-keys-2",
+      type: "application/json",
+      path: ["data", "0"],
+    }, "Alice");
+
+    const data = transaction.readOrThrow({
+      space,
+      id: "of:mixed-keys-2",
+      type: "application/json",
+      path: ["data"],
+    });
+
+    // Both are object keys (order of writes matters)
+    expect(data).toEqual({ "name": "Bob", "0": "Alice" });
+    expect(Array.isArray(data)).toBe(false);
+  });
+
+  // Numeric intermediate key creates array; non-numeric final key creates object
+  // inside the array. This is now valid JSON structure.
+  it("numeric intermediate key creates array containing object", async () => {
+    const transaction = runtime.edit();
+
+    // Write to path where "0" is intermediate (not final)
+    // This creates { data: [{ name: "Alice" }] } - array with object at index 0
+    transaction.writeOrThrow({
+      space,
+      id: "of:numeric-intermediate",
+      type: "application/json",
+      path: ["data", "0", "name"],
+    }, "Alice");
+
+    // Verify the structure: "data" is an array, index 0 contains an object
+    const data = transaction.readOrThrow({
+      space,
+      id: "of:numeric-intermediate",
+      type: "application/json",
+      path: ["data"],
+    });
+
+    expect(Array.isArray(data)).toBe(true);
+    expect(data).toEqual([{ name: "Alice" }]);
+
+    // This should now commit successfully (valid JSON structure)
+    const result = await transaction.commit();
+    expect(result.error).toBeUndefined();
+  });
+
+  // Documents: if you actually want an array, you must write the whole array
+  // at once - you cannot build it incrementally via path-based writes.
+  it("creating actual array requires writing whole array, not path-based", () => {
+    const transaction = runtime.edit();
+
+    // Write the complete array structure
+    transaction.writeOrThrow({
+      space,
+      id: "of:actual-array",
+      type: "application/json",
+      path: ["data"],
+    }, ["Alice", "Bob"]);
+
+    const data = transaction.readOrThrow({
+      space,
+      id: "of:actual-array",
+      type: "application/json",
+      path: ["data"],
+    });
+
+    expect(Array.isArray(data)).toBe(true);
+    expect(data).toEqual(["Alice", "Bob"]);
+  });
+
+  // Documents: writing to array index on existing array works
+  it("writing to numeric path on existing array sets array index", () => {
+    const transaction = runtime.edit();
+
+    // First create the array
+    transaction.writeOrThrow({
+      space,
+      id: "of:existing-array",
+      type: "application/json",
+      path: ["data"],
+    }, ["original"]);
+
+    // Now write to index 0
+    transaction.writeOrThrow({
+      space,
+      id: "of:existing-array",
+      type: "application/json",
+      path: ["data", "0"],
+    }, "updated");
+
+    const data = transaction.readOrThrow({
+      space,
+      id: "of:existing-array",
+      type: "application/json",
+      path: ["data"],
+    });
+
+    expect(Array.isArray(data)).toBe(true);
+    expect(data).toEqual(["updated"]);
+  });
+
+  // Documents: writing non-numeric key to existing array is rejected immediately
+  // with TypeMismatchError (can't write object property to array).
+  it("writing non-numeric key to existing array throws TypeMismatchError", () => {
+    const transaction = runtime.edit();
+
+    // First create the array
+    transaction.writeOrThrow({
+      space,
+      id: "of:array-named-key",
+      type: "application/json",
+      path: ["data"],
+    }, ["Alice"]);
+
+    // Write a non-numeric key - throws immediately because storage layer
+    // correctly rejects writing object-style property to an array.
+    expect(() => {
+      transaction.writeOrThrow({
+        space,
+        id: "of:array-named-key",
+        type: "application/json",
+        path: ["data", "name"],
+      }, "Bob");
+    }).toThrow("expected object but found array");
+  });
+
+  // Multiple numeric intermediate keys create properly nested arrays with objects.
+  it("multiple numeric intermediate keys create nested arrays with object", async () => {
+    const transaction = runtime.edit();
+
+    // Path: ["data", "0", "1", "name"]
+    // "data" → creates array (next key "0" is numeric)
+    // "0" → creates array at index 0 (next key "1" is numeric)
+    // "1" → creates object at index 1 (next key "name" is non-numeric)
+    // "name" → sets property on that object
+    transaction.writeOrThrow({
+      space,
+      id: "of:nested-numeric",
+      type: "application/json",
+      path: ["data", "0", "1", "name"],
+    }, "Alice");
+
+    // Verify the nested structure
+    const data = transaction.readOrThrow({
+      space,
+      id: "of:nested-numeric",
+      type: "application/json",
+      path: ["data"],
+    });
+    // data is array containing array containing object
+    expect(Array.isArray(data)).toBe(true);
+
+    const level0 = transaction.readOrThrow({
+      space,
+      id: "of:nested-numeric",
+      type: "application/json",
+      path: ["data", "0"],
+    });
+    // data[0] is an array with index 1 set (sparse)
+    expect(Array.isArray(level0)).toBe(true);
+    expect((level0 as unknown[]).length).toBe(2);
+
+    const level1 = transaction.readOrThrow({
+      space,
+      id: "of:nested-numeric",
+      type: "application/json",
+      path: ["data", "0", "1"],
+    });
+    // data[0][1] is an object with name property
+    expect(Array.isArray(level1)).toBe(false);
+    expect(level1).toEqual({ name: "Alice" });
+
+    // This should now commit successfully (valid JSON structure)
+    const result = await transaction.commit();
+    expect(result.error).toBeUndefined();
+  });
+
+  // Writing to high numeric index creates sparse array (densified on commit).
+  it("writing to high numeric index creates sparse array", () => {
+    const transaction = runtime.edit();
+
+    transaction.writeOrThrow({
+      space,
+      id: "of:high-index",
+      type: "application/json",
+      path: ["data", "99"],
+    }, "value");
+
+    const data = transaction.readOrThrow({
+      space,
+      id: "of:high-index",
+      type: "application/json",
+      path: ["data"],
+    });
+
+    // Creates sparse array with value at index 99.
+    // Note: array remains sparse at transaction layer; densification (holes → null)
+    // occurs either during commit (via toDeepStorableValue) or when serialized
+    // to JSON for stable storage.
+    expect(Array.isArray(data)).toBe(true);
+    expect((data as unknown[]).length).toBe(100);
+    expect((data as unknown[])[99]).toBe("value");
+  });
+
+  // Keys like "01" look numeric but aren't valid array indices (leading zero).
+  // The container should be an object, not an array.
+  it("leading-zero numeric key should create object not array", () => {
+    const transaction = runtime.edit();
+
+    transaction.writeOrThrow({
+      space,
+      id: "of:leading-zero",
+      type: "application/json",
+      path: ["data", "01"],
+    }, "value");
+
+    const data = transaction.readOrThrow({
+      space,
+      id: "of:leading-zero",
+      type: "application/json",
+      path: ["data"],
+    });
+
+    // The key "01" is not a valid array index, so data should be an object.
+    // This test documents that this is the EXPECTED behavior - if it fails,
+    // the bug where "01" creates an array is present.
+    expect(Array.isArray(data)).toBe(false);
+    expect(data).toEqual({ "01": "value" });
+  });
+});
+
 describe("data: URI behaviors", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;

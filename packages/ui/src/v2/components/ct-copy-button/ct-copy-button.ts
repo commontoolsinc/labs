@@ -6,7 +6,10 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @element ct-copy-button
  *
- * @attr {string} text - Text to copy to clipboard (required)
+ * @attr {string | Record<string, string>} text - Content to copy to clipboard (required)
+ *   - String: Copied as text/plain (backwards compatible)
+ *   - Object: Keys are MIME types, values are content for each type.
+ *     Common types: "text/plain", "text/html"
  * @attr {string} variant - Button style variant (default: "secondary")
  *   Options: "primary" | "secondary" | "destructive" | "outline" | "ghost" | "link" | "pill"
  * @attr {string} size - Button size (default: "default")
@@ -36,6 +39,14 @@ import { BaseElement } from "../../core/base-element.ts";
  *   size="sm"
  * >📋 Copy List</ct-copy-button>
  *
+ * // Rich text with HTML (pastes as formatted text in rich editors)
+ * <ct-copy-button
+ *   text={{
+ *     "text/plain": "Hello World",
+ *     "text/html": "<b>Hello World</b>"
+ *   }}
+ * >Copy</ct-copy-button>
+ *
  * // With event handler (in pattern)
  * <ct-copy-button
  *   text={ingredientListText}
@@ -61,7 +72,7 @@ export class CTCopyButton extends BaseElement {
   ];
 
   static override properties = {
-    text: { type: String },
+    text: {}, // Can be string or object, no automatic conversion
     variant: { type: String },
     size: { type: String },
     disabled: { type: Boolean, reflect: true },
@@ -69,7 +80,7 @@ export class CTCopyButton extends BaseElement {
     iconOnly: { type: Boolean, attribute: "icon-only", reflect: true },
   };
 
-  declare text: string;
+  declare text: string | Record<string, string>;
   declare variant?:
     | "primary"
     | "secondary"
@@ -103,14 +114,29 @@ export class CTCopyButton extends BaseElement {
     if (this.disabled || !this.text) return;
 
     try {
-      await navigator.clipboard.writeText(this.text);
+      // Determine the plain text content for events
+      const plainText = typeof this.text === "string"
+        ? this.text
+        : this.text["text/plain"] || Object.values(this.text)[0] || "";
+
+      if (typeof this.text === "string") {
+        // Simple case: plain text (backwards compatible)
+        await navigator.clipboard.writeText(this.text);
+      } else {
+        // Rich content: create ClipboardItem with multiple MIME types
+        const clipboardData: Record<string, Blob> = {};
+        for (const [mimeType, content] of Object.entries(this.text)) {
+          clipboardData[mimeType] = new Blob([content], { type: mimeType });
+        }
+        await navigator.clipboard.write([new ClipboardItem(clipboardData)]);
+      }
 
       this._copied = true;
       this.requestUpdate();
 
       this.emit("ct-copy-success", {
-        text: this.text,
-        length: this.text.length,
+        text: plainText,
+        length: plainText.length,
       });
 
       // Reset copied state after duration
@@ -122,9 +148,12 @@ export class CTCopyButton extends BaseElement {
         this.requestUpdate();
       }, this.feedbackDuration);
     } catch (error) {
+      const plainText = typeof this.text === "string"
+        ? this.text
+        : this.text["text/plain"] || Object.values(this.text)[0] || "";
       this.emit("ct-copy-error", {
         error: error as Error,
-        text: this.text,
+        text: plainText,
       });
     }
   }

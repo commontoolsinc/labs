@@ -1789,159 +1789,163 @@ When you're done searching, STOP calling tools and produce your final structured
     // is false during tool execution (only true during initial prompt processing)
     const progressUI = (
       <div>
-        {/* Progress during scanning */}
-        {derive(
-          [isScanning, searchProgress],
-          ([scanning, progress]: [boolean, SearchProgress]) =>
-            scanning && progress.status !== "idle" &&
-              progress.status !== "auth_error"
-              ? (
-                <div
-                  style={{
-                    padding: "16px",
-                    background: "#f8fafc",
-                    border: "1px solid #e2e8f0",
-                    borderRadius: "8px",
-                  }}
-                >
+        {/* Progress during scanning - hide when scan is complete */}
+        {ifElse(
+          scanCompleted,
+          null,
+          derive(
+            [isScanning, searchProgress],
+            ([scanning, progress]: [boolean, SearchProgress]) =>
+              scanning && progress.status !== "idle" &&
+                progress.status !== "auth_error"
+                ? (
                   <div
                     style={{
-                      fontWeight: "600",
-                      marginBottom: "12px",
-                      textAlign: "center",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: "12px",
-                      color: "#475569",
+                      padding: "16px",
+                      background: "#f8fafc",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: "8px",
                     }}
                   >
-                    <ct-loader show-elapsed></ct-loader>
-                    Scanning emails...
-                  </div>
+                    <div
+                      style={{
+                        fontWeight: "600",
+                        marginBottom: "12px",
+                        textAlign: "center",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "12px",
+                        color: "#475569",
+                      }}
+                    >
+                      <ct-loader show-elapsed></ct-loader>
+                      Scanning emails...
+                    </div>
 
-                  {/* Current Activity */}
-                  {derive(searchProgress, (progress: SearchProgress) =>
-                    progress.currentQuery
-                      ? (
-                        <div
-                          style={{
-                            padding: "8px",
-                            background: "#f1f5f9",
-                            borderRadius: "4px",
-                            marginBottom: "12px",
-                          }}
-                        >
+                    {/* Current Activity */}
+                    {derive(searchProgress, (progress: SearchProgress) =>
+                      progress.currentQuery
+                        ? (
                           <div
                             style={{
-                              fontSize: "12px",
-                              color: "#475569",
-                              fontWeight: "600",
+                              padding: "8px",
+                              background: "#f1f5f9",
+                              borderRadius: "4px",
+                              marginBottom: "12px",
                             }}
                           >
-                            🔍 Currently searching:
+                            <div
+                              style={{
+                                fontSize: "12px",
+                                color: "#475569",
+                                fontWeight: "600",
+                              }}
+                            >
+                              🔍 Currently searching:
+                            </div>
+                            <div
+                              style={{
+                                fontSize: "13px",
+                                color: "#334155",
+                                fontFamily: "monospace",
+                                wordBreak: "break-all",
+                              }}
+                            >
+                              {progress.currentQuery}
+                            </div>
                           </div>
+                        )
+                        : (
                           <div
                             style={{
-                              fontSize: "13px",
-                              color: "#334155",
-                              fontFamily: "monospace",
-                              wordBreak: "break-all",
+                              padding: "8px",
+                              background: "#f1f5f9",
+                              borderRadius: "4px",
+                              marginBottom: "12px",
                             }}
                           >
-                            {progress.currentQuery}
+                            <div
+                              style={{
+                                fontSize: "12px",
+                                color: "#475569",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                              }}
+                            >
+                              <ct-loader size="sm"></ct-loader>
+                              Analyzing emails...
+                            </div>
                           </div>
-                        </div>
-                      )
-                      : (
-                        <div
-                          style={{
-                            padding: "8px",
-                            background: "#f1f5f9",
-                            borderRadius: "4px",
-                            marginBottom: "12px",
-                          }}
-                        >
-                          <div
-                            style={{
-                              fontSize: "12px",
-                              color: "#475569",
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "8px",
-                            }}
-                          >
-                            <ct-loader size="sm"></ct-loader>
-                            Analyzing emails...
-                          </div>
-                        </div>
-                      ))}
+                        ))}
 
-                  {/* Completed Searches */}
-                  {derive(searchProgress, (progress: SearchProgress) =>
-                    progress.completedQueries.length > 0
-                      ? (
-                        <div style={{ marginTop: "8px" }}>
-                          <div
-                            style={{
-                              fontSize: "12px",
-                              color: "#475569",
-                              fontWeight: "600",
-                              marginBottom: "4px",
-                            }}
-                          >
-                            ✅ Completed searches ({progress.completedQueries
-                              .length}
-                            ):
-                          </div>
-                          <div
-                            style={{
-                              maxHeight: "120px",
-                              overflowY: "auto",
-                              fontSize: "11px",
-                              color: "#3b82f6",
-                            }}
-                          >
-                            {[...progress.completedQueries]
-                              .reverse()
-                              .slice(0, 5)
-                              .map(
-                                (
-                                  q: { query: string; emailCount: number },
-                                  i: number,
-                                ) => (
-                                  <div
-                                    key={i}
-                                    style={{
-                                      padding: "2px 0",
-                                      borderBottom: "1px solid #dbeafe",
-                                    }}
-                                  >
-                                    <span style={{ fontFamily: "monospace" }}>
-                                      {q?.query
-                                        ? q.query.length > 50
-                                          ? q.query.substring(0, 50) + "..."
-                                          : q.query
-                                        : "unknown"}
-                                    </span>
-                                    <span
+                    {/* Completed Searches */}
+                    {derive(searchProgress, (progress: SearchProgress) =>
+                      progress.completedQueries.length > 0
+                        ? (
+                          <div style={{ marginTop: "8px" }}>
+                            <div
+                              style={{
+                                fontSize: "12px",
+                                color: "#475569",
+                                fontWeight: "600",
+                                marginBottom: "4px",
+                              }}
+                            >
+                              ✅ Completed searches ({progress.completedQueries
+                                .length}
+                              ):
+                            </div>
+                            <div
+                              style={{
+                                maxHeight: "120px",
+                                overflowY: "auto",
+                                fontSize: "11px",
+                                color: "#3b82f6",
+                              }}
+                            >
+                              {[...progress.completedQueries]
+                                .reverse()
+                                .slice(0, 5)
+                                .map(
+                                  (
+                                    q: { query: string; emailCount: number },
+                                    i: number,
+                                  ) => (
+                                    <div
+                                      key={i}
                                       style={{
-                                        marginLeft: "8px",
-                                        color: "#059669",
+                                        padding: "2px 0",
+                                        borderBottom: "1px solid #dbeafe",
                                       }}
                                     >
-                                      ({q?.emailCount ?? 0} emails)
-                                    </span>
-                                  </div>
-                                ),
-                              )}
+                                      <span style={{ fontFamily: "monospace" }}>
+                                        {q?.query
+                                          ? q.query.length > 50
+                                            ? q.query.substring(0, 50) + "..."
+                                            : q.query
+                                          : "unknown"}
+                                      </span>
+                                      <span
+                                        style={{
+                                          marginLeft: "8px",
+                                          color: "#059669",
+                                        }}
+                                      >
+                                        ({q?.emailCount ?? 0} emails)
+                                      </span>
+                                    </div>
+                                  ),
+                                )}
+                            </div>
                           </div>
-                        </div>
-                      )
-                      : null)}
-                </div>
-              )
-              : null,
+                        )
+                        : null)}
+                  </div>
+                )
+                : null,
+          ),
         )}
 
         {/* Scan Complete */}
@@ -1972,10 +1976,11 @@ When you're done searching, STOP calling tools and produce your final structured
                     fontSize: "12px",
                     color: "#059669",
                     textAlign: "center",
-                    fontStyle: "italic",
                   }}
                 >
-                  {derive(agentResult, (r: any) => r?.summary || "")}
+                  <ct-markdown>
+                    {derive(agentResult, (r: any) => r?.summary || "")}
+                  </ct-markdown>
                 </div>
                 <ct-button
                   onClick={boundCompleteScan}

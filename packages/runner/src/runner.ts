@@ -1403,7 +1403,10 @@ export class Runner {
             ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
             : inputsCell.getAsQueryResult([], tx);
 
-          const result = fn(argument);
+          const result =
+            (argument !== undefined || module.argumentSchema === false)
+              ? fn(argument)
+              : undefined;
 
           const postRun = (result: any) => {
             if (

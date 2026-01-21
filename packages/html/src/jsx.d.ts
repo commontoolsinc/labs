@@ -2861,6 +2861,7 @@ type CtListItem = {
 
 interface CTOutlinerElement extends CTHTMLElement {}
 interface CTCellLinkElement extends CTHTMLElement {}
+interface CTSpaceLinkElement extends CTHTMLElement {}
 interface CTListElement extends CTHTMLElement {}
 interface CTListItemElement extends CTHTMLElement {}
 interface CTLoaderElement extends CTHTMLElement {}
@@ -3170,6 +3171,12 @@ interface CTCellLinkAttributes<T> extends CTHTMLAttributes<T> {
   "$cell": CellLike<any>;
 }
 
+interface CTSpaceLinkAttributes<T> extends CTHTMLAttributes<T> {
+  "spaceName"?: string;
+  "spaceDid"?: string;
+  "label"?: string;
+}
+
 interface CTChatMessageAttributes<T> extends CTHTMLAttributes<T> {
   "role"?: "user" | "assistant";
   "content"?: string;
@@ -3214,7 +3221,7 @@ interface CTButtonAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 interface CTCopyButtonAttributes<T> extends CTHTMLAttributes<T> {
-  "text": string;
+  "text": string | Record<string, string>;
   "variant"?:
     | "primary"
     | "secondary"
@@ -4426,6 +4433,10 @@ declare global {
       "ct-cell-link": CTDOM.DetailedHTMLProps<
         CTCellLinkAttributes<CTCellLinkElement>,
         CTCellLinkElement
+      >;
+      "ct-space-link": CTDOM.DetailedHTMLProps<
+        CTSpaceLinkAttributes<CTSpaceLinkElement>,
+        CTSpaceLinkElement
       >;
       "ct-outliner": CTDOM.DetailedHTMLProps<
         CTOutlinerAttributes<CTOutlinerElement>,

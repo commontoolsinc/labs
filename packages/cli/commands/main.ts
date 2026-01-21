@@ -10,7 +10,7 @@ import { test } from "./test.ts";
 const mainDescription = `Tool for running programs on common fabric.
 
 QUICK START:
-  ct dev ./pattern.tsx              # Type-check and test locally
+  ct check ./pattern.tsx             # Type-check and test locally
   ct charm new ./pattern.tsx ...    # Deploy to a space
   ct charm --help                   # Help for deployed patterns (with tips)
 

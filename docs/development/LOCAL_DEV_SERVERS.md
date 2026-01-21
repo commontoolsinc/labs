@@ -11,7 +11,8 @@
 ./scripts/stop-local-dev.sh           # Stop both servers
 ./scripts/restart-local-dev.sh        # Restart both
 ./scripts/restart-local-dev.sh --force       # Force kill first
-./scripts/restart-local-dev.sh --clear-cache # Clear cache on restart
+./scripts/restart-local-dev.sh --clear-cache # Clear disposable caches (preserves spaces)
+./scripts/restart-local-dev.sh --dangerously-clear-all-spaces # Clear databases/spaces
 ```
 
 **URLs:**
@@ -60,8 +61,13 @@ You cannot access spaces without BOTH running. Access the application at **port 
 
 **Check if ports are in use:**
 ```bash
+# macOS or Linux with lsof
 lsof -i :8000  # Toolshed
 lsof -i :5173  # Shell
+
+# Linux without lsof (use ss instead)
+ss -tlnp 'sport = :8000'  # Toolshed
+ss -tlnp 'sport = :5173'  # Shell
 ```
 
 **Force restart:**
@@ -84,7 +90,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:5173          # Shell
 | Commands hang/timeout | Servers not running | Run `./scripts/restart-local-dev.sh` |
 | Space shows errors | Only one server running | Ensure BOTH are running |
 | Port already in use | Previous server didn't stop | Use `--force` flag |
-| Stale data | Cache issues | Use `--clear-cache` flag |
+| Stale data | Cache issues | Use `--clear-cache` flag (or `--dangerously-clear-all-spaces` for database issues) |
 | `*.ts.net` URLs hang | Not on Tailscale | Connect to CT network via Tailscale |
 | OAuth error: `Unexpected token '<'` | Fetching from wrong port | Use port 8000 for API calls ([see below](#oauth-returns-html-instead-of-json)) |
 | UI component changes not appearing | Shell doesn't watch packages/ui | Restart local dev server |
@@ -94,9 +100,14 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:5173          # Shell
 If scripts fail completely, manual process:
 
 ```bash
-# 1. Kill by port
+# 1. Kill by port (choose based on your system)
+# macOS or Linux with lsof:
 lsof -ti :8000 | xargs kill -9 2>/dev/null  # Toolshed
 lsof -ti :5173 | xargs kill -9 2>/dev/null  # Shell
+
+# Linux without lsof (use ss + awk):
+ss -tlnp 'sport = :8000' | awk -F'pid=' 'NF>1{split($2,a,","); print a[1]}' | xargs kill -9 2>/dev/null
+ss -tlnp 'sport = :5173' | awk -F'pid=' 'NF>1{split($2,a,","); print a[1]}' | xargs kill -9 2>/dev/null
 
 # 2. Wait for cleanup
 sleep 2

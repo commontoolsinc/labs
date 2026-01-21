@@ -127,7 +127,11 @@ export class XFavoriteButtonElement extends LitElement {
         await this.rt.favorites().removeFavorite(this.charmId);
         this._localIsFavorite = false;
       } else {
-        await this.rt.favorites().addFavorite(this.charmId);
+        await this.rt.favorites().addFavorite(
+          this.charmId,
+          undefined,
+          this.rt.spaceName(),
+        );
         this._localIsFavorite = true;
       }
       // Server state will update via subscription
