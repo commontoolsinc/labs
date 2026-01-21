@@ -148,8 +148,10 @@ function GmailExtractor<T>(input: GmailExtractorInput<T>) {
   });
 
   // Reactive LLM analysis - analyze each email
+  // Note: consumers access result via item.analysis.result (not item.result)
+  // Result type is inferred from extractionSchema by the runtime
   const rawAnalyses = emails.map((email: Email) => {
-    const analysis = generateObject<T>({
+    const analysis = generateObject({
       prompt: computed(() => {
         if (!email?.markdownContent) {
           return undefined;
@@ -173,7 +175,6 @@ function GmailExtractor<T>(input: GmailExtractorInput<T>) {
       analysis,
       pending: analysis.pending,
       error: analysis.error,
-      result: analysis.result,
     };
   });
 

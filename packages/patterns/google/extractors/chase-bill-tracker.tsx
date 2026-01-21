@@ -340,7 +340,7 @@ export default pattern<PatternInput, PatternOutput>(
       const confirmations: Record<string, Set<string>> = {};
 
       for (const item of extractor.rawAnalyses || []) {
-        const result = item.result;
+        const result = item.analysis?.result;
         if (!result) continue;
 
         if (
@@ -371,7 +371,7 @@ export default pattern<PatternInput, PatternOutput>(
       today.setHours(0, 0, 0, 0);
 
       const sortedAnalyses = [...(extractor.rawAnalyses || [])]
-        .filter((a) => a?.result)
+        .filter((a) => a?.analysis?.result)
         .sort((a, b) => {
           const dateA = new Date(a.emailDate || 0).getTime();
           const dateB = new Date(b.emailDate || 0).getTime();
@@ -380,7 +380,7 @@ export default pattern<PatternInput, PatternOutput>(
         });
 
       for (const analysisItem of sortedAnalyses) {
-        const result = analysisItem.result;
+        const result = analysisItem.analysis?.result;
         if (!result) continue;
 
         const isBillEmail = result.emailType === "bill_due" ||
