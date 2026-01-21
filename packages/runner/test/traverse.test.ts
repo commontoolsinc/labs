@@ -340,45 +340,6 @@ describe("SchemaObjectTraverser boolean type handling", () => {
   });
 });
 
-describe("SchemaObjectTraverser {not: true} schema handling", () => {
-  it("returns undefined for {not: true} schema", () => {
-    const store = new Map<string, Revision<State>>();
-    const type = "application/json" as const;
-    const docUri = "of:doc-not-true" as URI;
-    const docEntity = docUri as Entity;
-
-    const docValue = { name: "test" };
-
-    const docRevision: Revision<State> = {
-      the: type,
-      of: docEntity,
-      is: { value: docValue },
-      cause: refer({ the: type, of: docEntity }),
-      since: 1,
-    };
-    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
-
-    // Schema { not: true } means "nothing is valid"
-    const schema = {
-      not: true,
-    } as JSONSchema;
-
-    const manager = new StoreObjectManager(store);
-    const traverser = new SchemaObjectTraverser(manager, {
-      path: [],
-      schemaContext: { schema, rootSchema: schema },
-    });
-
-    const result = traverser.traverse({
-      address: { id: docUri, type, path: ["value"] },
-      value: docValue,
-    });
-
-    // Should return undefined because {not: true} rejects everything
-    expect(result).toBeUndefined();
-  });
-});
-
 describe("SchemaObjectTraverser anyOf/oneOf handling", () => {
   it("resolves anyOf schema by matching value type", () => {
     const store = new Map<string, Revision<State>>();

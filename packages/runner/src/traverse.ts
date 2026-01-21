@@ -831,14 +831,6 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
     } else if (schemaContext.schema === false) {
       // This value rejects all objects - just return
       return undefined;
-    } else if (
-      isObject(schemaContext.schema) &&
-      (schemaContext.schema as any).not === true
-    ) {
-      // Schema { not: true } means "nothing is valid" - equivalent to false
-      // This is generated for array items when only array-level properties
-      // (like .length) are accessed but not the items themselves.
-      return undefined;
     } else if (typeof schemaContext.schema !== "object") {
       logger.warn(
         "traverse",
