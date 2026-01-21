@@ -1441,7 +1441,7 @@ Return valid JSON matching the schema.`,
                     ...sectionContentStyle,
                   }}
                 >
-                  <ct-vstack style={{ gap: "16px" }}>
+                  <ct-vstack style={{ gap: "20px" }}>
                     {/* Personas */}
                     {computed(() => learned.key("personas").get().length > 0) &&
                       (
@@ -1466,7 +1466,7 @@ Return valid JSON matching the schema.`,
                         </ct-vstack>
                       )}
 
-                    {/* Facts */}
+                    {/* Facts Table */}
                     <ct-vstack style={{ gap: "8px" }}>
                       <label style={labelStyle}>Learned Facts</label>
                       {computed(() =>
@@ -1483,64 +1483,298 @@ Return valid JSON matching the schema.`,
                           use the app.
                         </p>
                       )}
-                      {learned.key("facts").map((fact) => (
-                        <ct-card>
-                          <ct-hstack
+                      {computed(() => learned.key("facts").get().length > 0) &&
+                        (
+                          <div
                             style={{
-                              gap: "8px",
-                              justifyContent: "space-between",
+                              overflowX: "auto",
+                              border:
+                                "1px solid var(--ct-color-border, #e5e5e7)",
+                              borderRadius: "8px",
                             }}
                           >
-                            <span style={{ flex: 1 }}>{fact.content}</span>
-                            <span
+                            <table
                               style={{
-                                padding: "2px 8px",
-                                background: computed(() =>
-                                  fact.confidence > 0.8
-                                    ? "var(--ct-color-success-surface, #f0fdf4)"
-                                    : "var(--ct-color-warning-surface, #fffbeb)"
-                                ),
-                                color: computed(() =>
-                                  fact.confidence > 0.8
-                                    ? "var(--ct-color-success, #22c55e)"
-                                    : "var(--ct-color-warning, #f59e0b)"
-                                ),
-                                borderRadius: "4px",
-                                fontSize: "12px",
+                                width: "100%",
+                                borderCollapse: "collapse",
+                                fontSize: "13px",
                               }}
                             >
-                              {computed(
-                                () => `${Math.round(fact.confidence * 100)}%`,
-                              )}
-                            </span>
-                          </ct-hstack>
-                        </ct-card>
-                      ))}
+                              <thead>
+                                <tr
+                                  style={{
+                                    background:
+                                      "var(--ct-color-bg-secondary, #f9fafb)",
+                                  }}
+                                >
+                                  <th
+                                    style={{
+                                      padding: "10px 12px",
+                                      textAlign: "left",
+                                      fontWeight: "600",
+                                      borderBottom:
+                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                    }}
+                                  >
+                                    Fact
+                                  </th>
+                                  <th
+                                    style={{
+                                      padding: "10px 12px",
+                                      textAlign: "center",
+                                      fontWeight: "600",
+                                      borderBottom:
+                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                      width: "80px",
+                                    }}
+                                  >
+                                    Conf.
+                                  </th>
+                                  <th
+                                    style={{
+                                      padding: "10px 12px",
+                                      textAlign: "left",
+                                      fontWeight: "600",
+                                      borderBottom:
+                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                      width: "140px",
+                                    }}
+                                  >
+                                    Source
+                                  </th>
+                                  <th
+                                    style={{
+                                      padding: "10px 12px",
+                                      textAlign: "left",
+                                      fontWeight: "600",
+                                      borderBottom:
+                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                      width: "100px",
+                                    }}
+                                  >
+                                    When
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {learned.key("facts").map((fact) => (
+                                  <tr>
+                                    <td
+                                      style={{
+                                        padding: "10px 12px",
+                                        borderBottom:
+                                          "1px solid var(--ct-color-border, #e5e5e7)",
+                                      }}
+                                    >
+                                      {fact.content}
+                                    </td>
+                                    <td
+                                      style={{
+                                        padding: "10px 12px",
+                                        borderBottom:
+                                          "1px solid var(--ct-color-border, #e5e5e7)",
+                                        textAlign: "center",
+                                      }}
+                                    >
+                                      <span
+                                        style={{
+                                          padding: "2px 8px",
+                                          background: computed(() =>
+                                            fact.confidence > 0.8
+                                              ? "#dcfce7"
+                                              : fact.confidence > 0.5
+                                              ? "#fef9c3"
+                                              : "#fee2e2"
+                                          ),
+                                          color: computed(() =>
+                                            fact.confidence > 0.8
+                                              ? "#166534"
+                                              : fact.confidence > 0.5
+                                              ? "#854d0e"
+                                              : "#991b1b"
+                                          ),
+                                          borderRadius: "4px",
+                                          fontSize: "12px",
+                                          fontWeight: "500",
+                                        }}
+                                      >
+                                        {computed(
+                                          () =>
+                                            `${
+                                              Math.round(fact.confidence * 100)
+                                            }%`,
+                                        )}
+                                      </span>
+                                    </td>
+                                    <td
+                                      style={{
+                                        padding: "10px 12px",
+                                        borderBottom:
+                                          "1px solid var(--ct-color-border, #e5e5e7)",
+                                        color: "var(--ct-color-text-secondary)",
+                                        fontSize: "12px",
+                                      }}
+                                    >
+                                      {fact.source}
+                                    </td>
+                                    <td
+                                      style={{
+                                        padding: "10px 12px",
+                                        borderBottom:
+                                          "1px solid var(--ct-color-border, #e5e5e7)",
+                                        color: "var(--ct-color-text-secondary)",
+                                        fontSize: "12px",
+                                      }}
+                                    >
+                                      {computed(() => {
+                                        const ts = fact.timestamp;
+                                        if (!ts) return "-";
+                                        const d = new Date(ts);
+                                        return `${
+                                          d.getMonth() + 1
+                                        }/${d.getDate()}`;
+                                      })}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
                     </ct-vstack>
 
-                    {/* Preferences */}
+                    {/* Preferences Table */}
                     {computed(() =>
                       learned.key("preferences").get().length > 0
                     ) && (
                       <ct-vstack style={{ gap: "8px" }}>
                         <label style={labelStyle}>Preferences</label>
-                        {learned.key("preferences").map((pref) => (
-                          <ct-hstack style={{ gap: "8px" }}>
-                            <span
-                              style={{
-                                fontWeight: "500",
-                                color: "var(--ct-color-text-secondary)",
-                              }}
-                            >
-                              {pref.key}:
-                            </span>
-                            <span>{pref.value}</span>
-                          </ct-hstack>
-                        ))}
+                        <div
+                          style={{
+                            overflowX: "auto",
+                            border: "1px solid var(--ct-color-border, #e5e5e7)",
+                            borderRadius: "8px",
+                          }}
+                        >
+                          <table
+                            style={{
+                              width: "100%",
+                              borderCollapse: "collapse",
+                              fontSize: "13px",
+                            }}
+                          >
+                            <thead>
+                              <tr
+                                style={{
+                                  background:
+                                    "var(--ct-color-bg-secondary, #f9fafb)",
+                                }}
+                              >
+                                <th
+                                  style={{
+                                    padding: "10px 12px",
+                                    textAlign: "left",
+                                    fontWeight: "600",
+                                    borderBottom:
+                                      "1px solid var(--ct-color-border, #e5e5e7)",
+                                  }}
+                                >
+                                  Key
+                                </th>
+                                <th
+                                  style={{
+                                    padding: "10px 12px",
+                                    textAlign: "left",
+                                    fontWeight: "600",
+                                    borderBottom:
+                                      "1px solid var(--ct-color-border, #e5e5e7)",
+                                  }}
+                                >
+                                  Value
+                                </th>
+                                <th
+                                  style={{
+                                    padding: "10px 12px",
+                                    textAlign: "center",
+                                    fontWeight: "600",
+                                    borderBottom:
+                                      "1px solid var(--ct-color-border, #e5e5e7)",
+                                    width: "80px",
+                                  }}
+                                >
+                                  Conf.
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {learned.key("preferences").map((pref) => (
+                                <tr>
+                                  <td
+                                    style={{
+                                      padding: "10px 12px",
+                                      borderBottom:
+                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                      fontWeight: "500",
+                                    }}
+                                  >
+                                    {pref.key}
+                                  </td>
+                                  <td
+                                    style={{
+                                      padding: "10px 12px",
+                                      borderBottom:
+                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                    }}
+                                  >
+                                    {pref.value}
+                                  </td>
+                                  <td
+                                    style={{
+                                      padding: "10px 12px",
+                                      borderBottom:
+                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                      textAlign: "center",
+                                    }}
+                                  >
+                                    <span
+                                      style={{
+                                        padding: "2px 8px",
+                                        background: computed(() =>
+                                          pref.confidence > 0.8
+                                            ? "#dcfce7"
+                                            : pref.confidence > 0.5
+                                            ? "#fef9c3"
+                                            : "#fee2e2"
+                                        ),
+                                        color: computed(() =>
+                                          pref.confidence > 0.8
+                                            ? "#166534"
+                                            : pref.confidence > 0.5
+                                            ? "#854d0e"
+                                            : "#991b1b"
+                                        ),
+                                        borderRadius: "4px",
+                                        fontSize: "12px",
+                                        fontWeight: "500",
+                                      }}
+                                    >
+                                      {computed(
+                                        () =>
+                                          `${
+                                            Math.round(pref.confidence * 100)
+                                          }%`,
+                                      )}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       </ct-vstack>
                     )}
 
-                    {/* Open Questions - display only for now */}
+                    {/* Open Questions - Plain Text */}
                     {computed(() => {
                       const questions = learned.key("openQuestions").get();
                       const pending = questions.filter(
@@ -1557,21 +1791,40 @@ Return valid JSON matching the schema.`,
                               .filter((q) => q.status === "pending").length
                           )})
                         </label>
-                        {learned.key("openQuestions").map((q) => (
-                          <div
-                            style={{
-                              display: computed(() =>
-                                q.status === "pending" ? "block" : "none"
-                              ),
-                            }}
-                          >
-                            <ct-card>
-                              <p style={{ margin: 0, fontSize: "14px" }}>
-                                {q.question}
-                              </p>
-                            </ct-card>
-                          </div>
-                        ))}
+                        <ct-vstack
+                          style={{
+                            gap: "4px",
+                            padding: "12px",
+                            background: "var(--ct-color-bg-secondary, #f9fafb)",
+                            borderRadius: "8px",
+                            fontFamily: "monospace",
+                            fontSize: "13px",
+                          }}
+                        >
+                          {learned.key("openQuestions").map((q) => (
+                            <div
+                              style={{
+                                display: computed(() =>
+                                  q.status === "pending" ? "block" : "none"
+                                ),
+                              }}
+                            >
+                              <span
+                                style={{
+                                  color: "var(--ct-color-text-secondary)",
+                                }}
+                              >
+                                [{q.category}]
+                              </span>{" "}
+                              {q.question}
+                              {computed(() =>
+                                q.options && q.options.length > 0
+                                  ? ` (${q.options.join(" | ")})`
+                                  : ""
+                              )}
+                            </div>
+                          ))}
+                        </ct-vstack>
                       </ct-vstack>
                     )}
                   </ct-vstack>
