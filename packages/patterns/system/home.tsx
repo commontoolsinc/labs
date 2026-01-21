@@ -71,6 +71,8 @@ type LearnedSection = {
   openQuestions: Question[];
   personas: string[];
   lastJournalProcessed: number;
+  summary: string; // User-editable text summary, regenerated on new learnings
+  summaryVersion: number; // Tracks when summary was last auto-generated
 };
 
 type ProfileExtraction = {
@@ -91,6 +93,8 @@ const EMPTY_LEARNED: LearnedSection = {
   openQuestions: [],
   personas: [],
   lastJournalProcessed: 0,
+  summary: "",
+  summaryVersion: 0,
 };
 
 /**
@@ -504,14 +508,95 @@ Return valid JSON matching the schema.`,
       lastJournalProcessed: maxTimestamp,
     };
 
-    // Write the updated learned section
-    learned.set(updatedLearned);
+    // Write the updated learned section (mark summary as stale)
+    learned.set({
+      ...updatedLearned,
+      summaryVersion: currentLearned.summaryVersion, // Keep old version, summary regen will bump it
+    });
 
     return result;
   });
 
   // Reference applyExtraction to ensure it's evaluated
   void applyExtraction;
+
+  // === SUMMARY REGENERATION ===
+  // Compute current "data version" based on facts/prefs/personas counts
+  const dataVersion = computed(() => {
+    const l = learned.get();
+    return l.facts.length + l.preferences.length + l.personas.length;
+  });
+
+  // Build prompt content for summary (in its own reactive context)
+  const summaryPromptContent = computed(() => {
+    const l = learned.get();
+    if (l.facts.length === 0 && l.preferences.length === 0) return "";
+
+    const factsList = l.facts.map((f) => `- ${f.content}`).join("\n");
+    const prefsList = l.preferences.map((p) => `- ${p.key}: ${p.value}`).join(
+      "\n",
+    );
+    const personasList = l.personas.join(", ");
+    const questionsList = l.openQuestions
+      .filter((q) => q.status === "pending")
+      .map((q) => `- ${q.question}`)
+      .join("\n");
+
+    return `Facts:\n${factsList || "None"}\n\nPreferences:\n${
+      prefsList || "None"
+    }\n\nPersonas: ${personasList || "None"}\n\nOpen questions:\n${
+      questionsList || "None"
+    }`;
+  });
+
+  // Generate summary when data changes
+  const summaryGen = generateText({
+    prompt: computed(() => {
+      const content = summaryPromptContent;
+      if (!content) return "";
+
+      const currentSummary = learned.get().summary;
+
+      return `${
+        currentSummary ? `Current profile summary:\n${currentSummary}\n\n` : ""
+      }New/updated information about this user:
+${content}
+
+Write a concise, natural profile summary (2-4 paragraphs) that captures who this person is based on their activity. Include:
+- Key facts and interests
+- Notable preferences
+- Any open questions we should ask them
+
+If there's an existing summary, update it with new information while preserving the tone and any user edits. Keep it personal and readable, not a list.`;
+    }),
+    system:
+      "You write concise user profile summaries. Be warm but factual. Write in third person.",
+    model: "anthropic:claude-haiku-4-5",
+  });
+
+  // Write summary when generation completes
+  const writeSummary = computed(() => {
+    const result = summaryGen.result;
+    const pending = summaryGen.pending;
+    const currentVersion = dataVersion;
+    const l = learned.get();
+
+    // Guard: only proceed when we have a result and data has changed
+    if (pending || !result) return null;
+    if (l.summaryVersion >= currentVersion) return null; // Already up to date
+    if (l.facts.length === 0 && l.preferences.length === 0) return null;
+
+    // Update summary and version
+    learned.set({
+      ...l,
+      summary: result,
+      summaryVersion: currentVersion,
+    });
+
+    return result;
+  });
+
+  void writeSummary;
 
   return {
     [NAME]: `Home`,
@@ -532,7 +617,41 @@ Return valid JSON matching the schema.`,
           <ct-tab-panel value="favorites">{favoritesComponent}</ct-tab-panel>
           <ct-tab-panel value="profile">
             <ct-vstack gap="4" style={{ padding: "1rem" }}>
-              <h2 style={{ margin: 0, fontSize: "16px" }}>What I've Learned</h2>
+              <h2 style={{ margin: 0, fontSize: "16px" }}>Profile Summary</h2>
+
+              {/* Editable Summary */}
+              <ct-vstack gap="1">
+                <ct-textarea
+                  $value={learned.key("summary")}
+                  placeholder="Your profile summary will appear here as I learn about you from your activity..."
+                  rows={6}
+                  style={{
+                    width: "100%",
+                    fontFamily: "system-ui, sans-serif",
+                    fontSize: "14px",
+                    lineHeight: "1.5",
+                    padding: "12px",
+                    border: "1px solid #e5e5e7",
+                    borderRadius: "8px",
+                    resize: "vertical",
+                  }}
+                />
+                <span style={{ fontSize: "11px", color: "#888" }}>
+                  This summary is auto-generated but you can edit it freely.
+                </span>
+              </ct-vstack>
+
+              <hr
+                style={{
+                  border: "none",
+                  borderTop: "1px solid #e5e5e7",
+                  margin: "8px 0",
+                }}
+              />
+
+              <h3 style={{ margin: 0, fontSize: "14px", color: "#666" }}>
+                Raw Data
+              </h3>
 
               {/* Facts Table */}
               <ct-vstack gap="2">
