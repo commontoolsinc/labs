@@ -13,16 +13,7 @@
  * See: lobby.tsx for the lobby entry point
  */
 
-import {
-  computed,
-  derive,
-  handler,
-  lift,
-  NAME,
-  pattern,
-  UI,
-  Writable,
-} from "commontools";
+import { action, computed, NAME, pattern, UI } from "commontools";
 
 import {
   areAllShipsSunk,
@@ -33,7 +24,6 @@ import {
   getInitials,
   GRID_INDICES,
   isShipSunk,
-  type PlayerData,
   type RoomInput,
   type RoomOutput,
   ROWS,
@@ -43,218 +33,38 @@ import {
 } from "./schemas.tsx";
 
 // =============================================================================
-// HANDLERS
+// STATIC STYLES (at module scope - safe because they're plain objects, not JSX)
 // =============================================================================
 
-const fireShot = handler<
-  unknown,
-  {
-    row: number;
-    col: number;
-    myPlayerNumber: 1 | 2;
-    player1: Writable<PlayerData | null>;
-    player2: Writable<PlayerData | null>;
-    shots: Writable<ShotsState>;
-    gameState: Writable<GameState>;
-  }
->(
-  (
-    _,
-    {
-      row,
-      col,
-      myPlayerNumber,
-      player1,
-      player2,
-      shots,
-      gameState,
-    },
-  ) => {
-    const state = gameState.get();
+const headerCellStyle = {
+  backgroundColor: "#1a1a2e",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  color: "#888",
+  fontSize: "12px",
+  fontWeight: "bold",
+  height: "30px",
+};
 
-    // Can't fire if game is over
-    if (state.phase === "finished") return;
+const baseCellStyle = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  color: "#fff",
+  fontSize: "16px",
+  fontWeight: "bold",
+  height: "32px",
+  width: "32px",
+};
 
-    // Can only fire on your turn
-    if (state.currentTurn !== myPlayerNumber) return;
-
-    // Get current shots
-    const currentShots = shots.get();
-
-    // Target the opponent's board (shots are stored as "shots received by player X")
-    const targetPlayerNum = myPlayerNumber === 1 ? 2 : 1;
-    const targetShots = currentShots[targetPlayerNum];
-
-    // Can't fire at same spot twice
-    if (targetShots[row]?.[col] !== "empty") return;
-
-    // Get opponent's data directly (no JSON parsing!)
-    const opponentData = targetPlayerNum === 1 ? player1.get() : player2.get();
-    if (!opponentData) return;
-
-    // Check if hit
-    const hitShip = findShipAt(opponentData.ships, { row, col });
-
-    // Update shots grid
-    const newTargetShots = targetShots.map((r, ri) =>
-      r.map((c, ci) =>
-        ri === row && ci === col ? (hitShip ? "hit" : "miss") : c
-      )
-    ) as SquareState[][];
-
-    const updatedShotsData: ShotsState = {
-      ...currentShots,
-      [targetPlayerNum]: newTargetShots,
-    };
-    shots.set(updatedShotsData);
-
-    // Build message
-    let message = "";
-    const coordStr = `${COLS[col]}${row + 1}`;
-
-    if (hitShip) {
-      if (isShipSunk(hitShip, newTargetShots)) {
-        message = `${coordStr}: Hit! You sunk the ${SHIP_NAMES[hitShip.type]}!`;
-      } else {
-        message = `${coordStr}: Hit!`;
-      }
-    } else {
-      message = `${coordStr}: Miss.`;
-    }
-
-    // Check for win
-    const allSunk = areAllShipsSunk(opponentData.ships, newTargetShots);
-
-    if (allSunk) {
-      // Get winner's data directly
-      const winnerData = myPlayerNumber === 1 ? player1.get() : player2.get();
-      const winnerName = winnerData?.name || `Player ${myPlayerNumber}`;
-
-      const newState: GameState = {
-        ...state,
-        phase: "finished",
-        winner: myPlayerNumber,
-        lastMessage: `${message} ${winnerName} wins!`,
-      };
-      gameState.set(newState);
-    } else {
-      // Switch turns
-      const nextTurn = myPlayerNumber === 1 ? 2 : 1;
-      const nextPlayerData = nextTurn === 1 ? player1.get() : player2.get();
-      const nextPlayerName = nextPlayerData?.name || `Player ${nextTurn}`;
-
-      const newState: GameState = {
-        ...state,
-        currentTurn: nextTurn,
-        lastMessage: `${message} ${nextPlayerName}'s turn.`,
-      };
-      gameState.set(newState);
-    }
-  },
-);
-
-// =============================================================================
-// LIFT FUNCTIONS
-// =============================================================================
-
-// Get my player data based on myPlayerNumber (direct access, no parsing)
-const getMyData = lift<
-  {
-    player1: PlayerData | null;
-    player2: PlayerData | null;
-    myPlayerNumber: 1 | 2;
-  },
-  PlayerData | null
->(({ player1, player2, myPlayerNumber }) => {
-  return myPlayerNumber === 1 ? player1 : player2;
-});
-
-// Compute my board cells (my ships + shots I received)
-const computeMyBoardCells = lift<
-  {
-    player1: PlayerData | null;
-    player2: PlayerData | null;
-    shots: ShotsState;
-    myPlayerNumber: 1 | 2;
-  },
-  {
-    row: number;
-    col: number;
-    bgColor: string;
-    content: string;
-    gridRow: string;
-    gridCol: string;
-  }[]
->(({ player1, player2, shots, myPlayerNumber }) => {
-  const playerData = myPlayerNumber === 1 ? player1 : player2;
-  const myShips = playerData?.ships || [];
-  const myShots = shots[myPlayerNumber] || [];
-  const shipPositions = buildShipPositions(myShips);
-
-  return GRID_INDICES.map(({ row, col }) => {
-    const shotState: SquareState = myShots[row]?.[col] ?? "empty";
-    const hasShip = !!shipPositions[`${row},${col}`];
-    const bgColor = shotState === "hit"
-      ? "#dc2626"
-      : shotState === "miss"
-      ? "#374151"
-      : hasShip
-      ? "#22c55e"
-      : "#1e3a5f";
-    const content = shotState === "hit" ? "X" : shotState === "miss" ? "O" : "";
-    return {
-      row,
-      col,
-      bgColor,
-      content,
-      gridRow: `${row + 2}`,
-      gridCol: `${col + 2}`,
-    };
-  });
-});
-
-// Compute enemy board cells (shots I've fired - no ships visible!)
-const computeEnemyBoardCells = lift<
-  {
-    shots: ShotsState;
-    gameState: GameState;
-    myPlayerNumber: 1 | 2;
-  },
-  {
-    row: number;
-    col: number;
-    bgColor: string;
-    content: string;
-    gridRow: string;
-    gridCol: string;
-    cursor: string;
-  }[]
->(({ shots, gameState, myPlayerNumber }) => {
-  const isFinished = gameState.phase === "finished";
-
-  const oppNum = myPlayerNumber === 1 ? 2 : 1;
-  const oppShots = shots[oppNum] || [];
-
-  return GRID_INDICES.map(({ row, col }) => {
-    const shotState: SquareState = oppShots[row]?.[col] ?? "empty";
-    const bgColor = shotState === "hit"
-      ? "#dc2626"
-      : shotState === "miss"
-      ? "#374151"
-      : "#1e3a5f";
-    const content = shotState === "hit" ? "X" : shotState === "miss" ? "O" : "";
-    const canClick = shotState === "empty" && !isFinished;
-    return {
-      row,
-      col,
-      bgColor,
-      content,
-      gridRow: `${row + 2}`,
-      gridCol: `${col + 2}`,
-      cursor: canClick ? "pointer" : "default",
-    };
-  });
-});
+const gridContainerStyle = {
+  display: "grid",
+  gridTemplateColumns: "30px repeat(10, 32px)",
+  gap: "2px",
+  backgroundColor: "#000",
+  padding: "2px",
+};
 
 // =============================================================================
 // PATTERN
@@ -270,130 +80,268 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
     myName,
     myPlayerNumber,
   }) => {
-    // Get typed data directly (no JSON parsing)
-    const player1Data = computed(() => player1.get());
-    const player2Data = computed(() => player2.get());
-    const gameStateData = computed(() => gameState.get());
-    const shotsData = computed(() => shots.get());
+    // Cast once for use throughout
+    const playerNum = myPlayerNumber as 1 | 2;
 
-    // My player data via lift
-    const myData = getMyData({
-      player1: player1Data,
-      player2: player2Data,
-      myPlayerNumber,
-    });
+    // Fire shot action - closes over pattern state directly
+    const fireShot = action<{ row: number; col: number }>(({ row, col }) => {
+      const state = gameState.get();
 
-    // Board cells via lift (all logic inside the lift function)
-    const myBoardCells = computeMyBoardCells({
-      player1: player1Data,
-      player2: player2Data,
-      shots: shotsData,
-      myPlayerNumber,
-    });
-    const enemyBoardCells = computeEnemyBoardCells({
-      shots: shotsData,
-      gameState: gameStateData,
-      myPlayerNumber,
-    });
+      // Can't fire if game is over
+      if (state.phase === "finished") return;
 
-    // Derived values for display
-    const myColor = derive(myData, (md) => md?.color || "#3b82f6");
-    const showTurnIndicator = derive(
-      gameStateData,
-      (gs) =>
-        gs.currentTurn === myPlayerNumber && gs.phase !== "finished"
-          ? "block"
-          : "none",
-    );
+      // Can only fire on your turn
+      if (state.currentTurn !== playerNum) return;
 
-    // Player display values
-    const player1Color = derive(player1Data, (p) => p?.color || "#3b82f6");
-    const player1Name = derive(player1Data, (p) => p?.name || "Player 1");
-    const player1Initials = derive(
-      player1Data,
-      (p) => getInitials(p?.name || "P1"),
-    );
-    const player1BgColor = derive(
-      gameStateData,
-      (gs) => gs.currentTurn === 1 ? "#1e40af" : "#1e293b",
-    );
-    const player1Status = derive(
-      gameStateData,
-      (gs) => gs.currentTurn === 1 ? "Active" : "Waiting",
-    );
+      // Get current shots
+      const currentShots = shots.get();
 
-    const player2Color = derive(player2Data, (p) => p?.color || "#ef4444");
-    const player2Name = derive(player2Data, (p) => p?.name || "Player 2");
-    const player2Initials = derive(
-      player2Data,
-      (p) => getInitials(p?.name || "P2"),
-    );
-    const player2BgColor = derive(
-      gameStateData,
-      (gs) => gs.currentTurn === 2 ? "#1e40af" : "#1e293b",
-    );
-    const player2Status = derive(
-      gameStateData,
-      (gs) => gs.currentTurn === 2 ? "Active" : "Waiting",
-    );
+      // Target the opponent's board (shots are stored as "shots received by player X")
+      const targetPlayerNum = playerNum === 1 ? 2 : 1;
+      const targetShots = currentShots[targetPlayerNum];
 
-    const lastMessage = derive(gameStateData, (gs) => gs.lastMessage);
+      // Can't fire at same spot twice
+      if (targetShots[row]?.[col] !== "empty") return;
 
-    // Styles
-    const gridContainerStyle = {
-      display: "grid",
-      gridTemplateColumns: "30px repeat(10, 32px)",
-      gap: "2px",
-      backgroundColor: "#000",
-      padding: "2px",
-    };
+      // Get opponent's data directly
+      const opponentData = targetPlayerNum === 1
+        ? player1.get()
+        : player2.get();
+      if (!opponentData) return;
 
-    const headerCellStyle = {
-      backgroundColor: "#1a1a2e",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      color: "#888",
-      fontSize: "12px",
-      fontWeight: "bold",
-      height: "30px",
-    };
-
-    const baseCellStyle = {
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      color: "#fff",
-      fontSize: "16px",
-      fontWeight: "bold",
-      height: "32px",
-      width: "32px",
-    };
-
-    // Status display - use derive chains for reactive values
-    const statusBgColor = derive(gameStateData, (gs) => {
-      const finished = gs.phase === "finished";
-      const won = gs.winner === myPlayerNumber;
-      const myTurn = gs.currentTurn === myPlayerNumber;
-      return finished
-        ? (won ? "#166534" : "#991b1b")
-        : myTurn
-        ? "#1e40af"
-        : "#1e293b";
-    });
-
-    const statusMessage = derive(gameStateData, (gs) => {
-      const finished = gs.phase === "finished";
-      const won = gs.winner === myPlayerNumber;
-      const myTurn = gs.currentTurn === myPlayerNumber;
-      if (finished) {
-        return won
-          ? "Victory! You sunk all enemy ships!"
-          : "Defeat. Your fleet was destroyed.";
+      // Debug: Log the raw ships data to understand reactive proxy behavior
+      console.log("[fireShot] opponentData:", opponentData);
+      console.log("[fireShot] opponentData.ships:", opponentData.ships);
+      console.log(
+        "[fireShot] ships array length:",
+        opponentData.ships?.length,
+      );
+      if (opponentData.ships && opponentData.ships.length > 0) {
+        console.log("[fireShot] first ship element:", opponentData.ships[0]);
+        console.log(
+          "[fireShot] first ship type:",
+          opponentData.ships[0]?.type,
+        );
       }
-      return myTurn
-        ? "Your turn - fire at the enemy fleet!"
-        : "Waiting for opponent...";
+
+      // Get ships array, filtering out any undefined elements (can happen with reactive proxies)
+      const ships = (opponentData.ships || []).filter(
+        (s): s is NonNullable<typeof s> => s != null && s.type != null,
+      );
+      console.log("[fireShot] filtered ships length:", ships.length);
+      if (ships.length === 0) {
+        console.warn("[fireShot] No valid ships found in opponent data");
+        return;
+      }
+
+      // Check if hit
+      const hitShip = findShipAt(ships, { row, col });
+
+      // Update shots grid
+      const newTargetShots = targetShots.map((r, ri) =>
+        r.map((c, ci) =>
+          ri === row && ci === col ? (hitShip ? "hit" : "miss") : c
+        )
+      ) as SquareState[][];
+
+      const updatedShotsData: ShotsState = {
+        ...currentShots,
+        [targetPlayerNum]: newTargetShots,
+      };
+      shots.set(updatedShotsData);
+
+      // Build message
+      let message = "";
+      const coordStr = `${COLS[col]}${row + 1}`;
+
+      if (hitShip) {
+        if (isShipSunk(hitShip, newTargetShots)) {
+          message = `${coordStr}: Hit! You sunk the ${
+            SHIP_NAMES[hitShip.type]
+          }!`;
+        } else {
+          message = `${coordStr}: Hit!`;
+        }
+      } else {
+        message = `${coordStr}: Miss.`;
+      }
+
+      // Check for win (use filtered ships array)
+      const allSunk = ships.length > 0 &&
+        areAllShipsSunk(ships, newTargetShots);
+
+      if (allSunk) {
+        // Get winner's data directly
+        const winnerData = playerNum === 1 ? player1.get() : player2.get();
+        const winnerName = winnerData?.name || `Player ${playerNum}`;
+
+        const newState: GameState = {
+          ...state,
+          phase: "finished",
+          winner: playerNum,
+          lastMessage: `${message} ${winnerName} wins!`,
+        };
+        gameState.set(newState);
+      } else {
+        // Switch turns
+        const nextTurn = playerNum === 1 ? 2 : 1;
+        const nextPlayerData = nextTurn === 1 ? player1.get() : player2.get();
+        const nextPlayerName = nextPlayerData?.name || `Player ${nextTurn}`;
+
+        const newState: GameState = {
+          ...state,
+          currentTurn: nextTurn,
+          lastMessage: `${message} ${nextPlayerName}'s turn.`,
+        };
+        gameState.set(newState);
+      }
+    });
+
+    // Board cells computed directly
+    const myBoardCells = computed(() => {
+      const playerNum = myPlayerNumber as 1 | 2;
+      const playerData = playerNum === 1 ? player1.get() : player2.get();
+      const currentShots = shots.get();
+
+      // Guard against null state during hydration
+      if (!playerData || !currentShots) {
+        return [];
+      }
+
+      // Filter out undefined ship elements (reactive proxy issue across pattern boundaries)
+      const myShips = (playerData.ships || []).filter(
+        (s): s is NonNullable<typeof s> => s != null && s.type != null,
+      );
+      const myShots = currentShots[playerNum] || [];
+      const shipPositions = buildShipPositions(myShips);
+
+      return GRID_INDICES.map(({ row, col }) => {
+        const shotState: SquareState = myShots[row]?.[col] ?? "empty";
+        const hasShip = !!shipPositions[`${row},${col}`];
+        const bgColor = shotState === "hit"
+          ? "#dc2626"
+          : shotState === "miss"
+          ? "#374151"
+          : hasShip
+          ? "#22c55e"
+          : "#1e3a5f";
+        const content = shotState === "hit"
+          ? "X"
+          : shotState === "miss"
+          ? "O"
+          : "";
+        return {
+          row,
+          col,
+          bgColor,
+          content,
+          gridRow: `${row + 2}`,
+          gridCol: `${col + 2}`,
+        };
+      });
+    });
+
+    const enemyBoardCells = computed(() => {
+      const playerNum = myPlayerNumber as 1 | 2;
+      const gs = gameState.get();
+      const currentShots = shots.get();
+
+      // Guard against null state during hydration
+      if (!gs || !currentShots) {
+        return [];
+      }
+
+      const isFinished = gs.phase === "finished";
+      const oppNum = playerNum === 1 ? 2 : 1;
+      const oppShots = currentShots[oppNum] || [];
+
+      return GRID_INDICES.map(({ row, col }) => {
+        const shotState: SquareState = oppShots[row]?.[col] ?? "empty";
+        const bgColor = shotState === "hit"
+          ? "#dc2626"
+          : shotState === "miss"
+          ? "#374151"
+          : "#1e3a5f";
+        const content = shotState === "hit"
+          ? "X"
+          : shotState === "miss"
+          ? "O"
+          : "";
+        const canClick = shotState === "empty" && !isFinished;
+        return {
+          row,
+          col,
+          bgColor,
+          content,
+          gridRow: `${row + 2}`,
+          gridCol: `${col + 2}`,
+          cursor: canClick ? "pointer" : "default",
+        };
+      });
+    });
+
+    // Consolidated computed values - reduces subscription overhead
+    const myColor = computed(() => {
+      const data = myPlayerNumber === 1 ? player1.get() : player2.get();
+      return data?.color || "#3b82f6";
+    });
+
+    // Consolidated player 1 display data
+    const player1Display = computed(() => {
+      const p1 = player1.get();
+      const gs = gameState.get();
+      return {
+        color: p1?.color || "#3b82f6",
+        name: p1?.name || "Player 1",
+        initials: getInitials(p1?.name || "P1"),
+        bgColor: gs?.currentTurn === 1 ? "#1e40af" : "#1e293b",
+        status: gs?.currentTurn === 1 ? "Active" : "Waiting",
+      };
+    });
+
+    // Consolidated player 2 display data
+    const player2Display = computed(() => {
+      const p2 = player2.get();
+      const gs = gameState.get();
+      return {
+        color: p2?.color || "#ef4444",
+        name: p2?.name || "Player 2",
+        initials: getInitials(p2?.name || "P2"),
+        bgColor: gs?.currentTurn === 2 ? "#1e40af" : "#1e293b",
+        status: gs?.currentTurn === 2 ? "Active" : "Waiting",
+      };
+    });
+
+    // Consolidated status display data
+    const statusDisplay = computed(() => {
+      const gs = gameState.get();
+      if (!gs) {
+        return {
+          showTurnIndicator: "none",
+          bgColor: "#1e293b",
+          message: "Loading...",
+          lastMessage: "",
+        };
+      }
+      const finished = gs.phase === "finished";
+      const won = gs.winner === myPlayerNumber;
+      const myTurn = gs.currentTurn === myPlayerNumber;
+      return {
+        showTurnIndicator: myTurn && !finished ? "block" : "none",
+        bgColor: finished
+          ? (won ? "#166534" : "#991b1b")
+          : myTurn
+          ? "#1e40af"
+          : "#1e293b",
+        message: finished
+          ? (won
+            ? "Victory! You sunk all enemy ships!"
+            : "Defeat. Your fleet was destroyed.")
+          : (myTurn
+            ? "Your turn - fire at the enemy fleet!"
+            : "Waiting for opponent..."),
+        lastMessage: gs.lastMessage || "",
+      };
     });
 
     return {
@@ -463,20 +411,20 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
             style={{
               textAlign: "center",
               padding: "16px",
-              backgroundColor: statusBgColor,
+              backgroundColor: statusDisplay.bgColor,
               borderRadius: "8px",
               marginBottom: "20px",
               fontSize: "18px",
               fontWeight: "500",
             }}
           >
-            {statusMessage}
+            {statusDisplay.message}
           </div>
 
           {/* Turn indicator */}
           <div
             style={{
-              display: showTurnIndicator,
+              display: statusDisplay.showTurnIndicator,
               textAlign: "center",
               marginBottom: "12px",
             }}
@@ -505,7 +453,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
               flexWrap: "wrap",
             }}
           >
-            {/* My Board (left) */}
+            {/* My Board (left) - uses pre-computed headers from module scope */}
             <div style={{ display: "inline-block" }}>
               <h3 style={{ textAlign: "center", margin: "0 0 8px 0" }}>
                 Your Fleet
@@ -517,6 +465,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                 ))}
                 {ROWS.map((rowIdx) => (
                   <div
+                    key={rowIdx}
                     style={{
                       ...headerCellStyle,
                       gridRow: `${rowIdx + 2}`,
@@ -526,8 +475,9 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                     {rowIdx + 1}
                   </div>
                 ))}
-                {myBoardCells.map((cell) => (
+                {myBoardCells.map((cell, idx) => (
                   <div
+                    key={idx}
                     style={{
                       ...baseCellStyle,
                       gridRow: cell.gridRow,
@@ -541,7 +491,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
               </div>
             </div>
 
-            {/* Enemy Board (right) */}
+            {/* Enemy Board (right) - uses event delegation for clicks */}
             <div style={{ display: "inline-block" }}>
               <h3 style={{ textAlign: "center", margin: "0 0 8px 0" }}>
                 Enemy Waters
@@ -553,6 +503,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                 ))}
                 {ROWS.map((rowIdx) => (
                   <div
+                    key={rowIdx}
                     style={{
                       ...headerCellStyle,
                       gridRow: `${rowIdx + 2}`,
@@ -562,8 +513,9 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                     {rowIdx + 1}
                   </div>
                 ))}
-                {enemyBoardCells.map((cell) => (
+                {enemyBoardCells.map((cell, idx) => (
                   <div
+                    key={idx}
                     style={{
                       ...baseCellStyle,
                       gridRow: cell.gridRow,
@@ -571,15 +523,8 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                       backgroundColor: cell.bgColor,
                       cursor: cell.cursor,
                     }}
-                    onClick={fireShot({
-                      row: cell.row,
-                      col: cell.col,
-                      myPlayerNumber,
-                      player1,
-                      player2,
-                      shots,
-                      gameState,
-                    })}
+                    onClick={() =>
+                      fireShot.send({ row: cell.row, col: cell.col })}
                   >
                     {cell.content}
                   </div>
@@ -681,7 +626,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                 alignItems: "center",
                 gap: "8px",
                 padding: "8px 16px",
-                backgroundColor: player1BgColor,
+                backgroundColor: player1Display.bgColor,
                 borderRadius: "8px",
                 border: myPlayerNumber === 1
                   ? "2px solid #fbbf24"
@@ -693,7 +638,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                   width: "32px",
                   height: "32px",
                   borderRadius: "50%",
-                  backgroundColor: player1Color,
+                  backgroundColor: player1Display.color,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -701,15 +646,15 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                   fontSize: "12px",
                 }}
               >
-                {player1Initials}
+                {player1Display.initials}
               </div>
               <div>
                 <div style={{ fontWeight: "600", fontSize: "14px" }}>
-                  {player1Name}
+                  {player1Display.name}
                   {myPlayerNumber === 1 ? " (you)" : ""}
                 </div>
                 <div style={{ fontSize: "12px", color: "#94a3b8" }}>
-                  {player1Status}
+                  {player1Display.status}
                 </div>
               </div>
             </div>
@@ -732,7 +677,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                 alignItems: "center",
                 gap: "8px",
                 padding: "8px 16px",
-                backgroundColor: player2BgColor,
+                backgroundColor: player2Display.bgColor,
                 borderRadius: "8px",
                 border: myPlayerNumber === 2
                   ? "2px solid #fbbf24"
@@ -744,7 +689,7 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                   width: "32px",
                   height: "32px",
                   borderRadius: "50%",
-                  backgroundColor: player2Color,
+                  backgroundColor: player2Display.color,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -752,15 +697,15 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
                   fontSize: "12px",
                 }}
               >
-                {player2Initials}
+                {player2Display.initials}
               </div>
               <div>
                 <div style={{ fontWeight: "600", fontSize: "14px" }}>
-                  {player2Name}
+                  {player2Display.name}
                   {myPlayerNumber === 2 ? " (you)" : ""}
                 </div>
                 <div style={{ fontSize: "12px", color: "#94a3b8" }}>
-                  {player2Status}
+                  {player2Display.status}
                 </div>
               </div>
             </div>
@@ -778,12 +723,13 @@ const BattleshipRoom = pattern<RoomInput, RoomOutput>(
               color: "#94a3b8",
             }}
           >
-            {lastMessage}
+            {statusDisplay.lastMessage}
           </div>
         </div>
       ),
       myName,
       myPlayerNumber,
+      fireShot,
     };
   },
 );

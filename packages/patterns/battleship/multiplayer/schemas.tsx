@@ -9,7 +9,7 @@
  * in favor of properly typed Cell values.
  */
 
-import { Default, Writable } from "commontools";
+import { Default, Stream, Writable } from "commontools";
 
 // ============ RE-EXPORT SHARED TYPES ============
 export type {
@@ -136,9 +136,11 @@ export interface RoomInput {
 }
 
 /**
- * Room pattern output exposes player identity.
+ * Room pattern output exposes player identity and actions for testing.
  */
 export interface RoomOutput {
   myName: string;
   myPlayerNumber: 1 | 2;
+  /** Fire a shot at the enemy board - exported for testing */
+  fireShot: Stream<{ row: number; col: number }>;
 }
