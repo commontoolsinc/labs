@@ -121,7 +121,8 @@ function GmailExtractor<T>(input: GmailExtractorInput<T>) {
     title,
     resolveInlineImages,
     limit,
-    model,
+    // Note: model input is currently ignored - using hardcoded value to fix HTTP 400 errors
+    // when passing variables through building block input
     linkedAuth,
   } = input;
 
@@ -165,7 +166,7 @@ function GmailExtractor<T>(input: GmailExtractorInput<T>) {
         return interpolateTemplate(template, email);
       }),
       schema: extractionSchema,
-      model: model || "anthropic:claude-sonnet-4-5",
+      model: "anthropic:claude-sonnet-4-5",
     });
 
     return {
