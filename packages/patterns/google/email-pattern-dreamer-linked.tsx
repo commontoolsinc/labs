@@ -186,7 +186,7 @@ export default pattern<PatternInput>(({
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
                     USPS Informed Delivery
                   </div>
-                  <ct-chip variant="secondary">Linked</ct-chip>
+                  <ct-cell-link $cell={usps}>Open</ct-cell-link>
                 </div>
                 <div style={previewBoxStyle}>{usps.previewUI as any}</div>
               </div>
@@ -199,7 +199,7 @@ export default pattern<PatternInput>(({
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
                     Berkeley Library
                   </div>
-                  <ct-chip variant="secondary">Linked</ct-chip>
+                  <ct-cell-link $cell={library}>Open</ct-cell-link>
                 </div>
                 <div style={previewBoxStyle}>{library.previewUI as any}</div>
               </div>
@@ -212,7 +212,7 @@ export default pattern<PatternInput>(({
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
                     Chase Bill Tracker
                   </div>
-                  <ct-chip variant="secondary">Linked</ct-chip>
+                  <ct-cell-link $cell={chase}>Open</ct-cell-link>
                 </div>
                 <div style={previewBoxStyle}>{chase.previewUI as any}</div>
               </div>
@@ -225,7 +225,7 @@ export default pattern<PatternInput>(({
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
                     BAM School Dashboard
                   </div>
-                  <ct-chip variant="secondary">Linked</ct-chip>
+                  <ct-cell-link $cell={bam}>Open</ct-cell-link>
                 </div>
                 <div style={previewBoxStyle}>{bam.previewUI as any}</div>
               </div>
@@ -238,7 +238,7 @@ export default pattern<PatternInput>(({
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
                     Bank of America Bills
                   </div>
-                  <ct-chip variant="secondary">Linked</ct-chip>
+                  <ct-cell-link $cell={bofa}>Open</ct-cell-link>
                 </div>
                 <div style={previewBoxStyle}>{bofa.previewUI as any}</div>
               </div>
@@ -251,7 +251,7 @@ export default pattern<PatternInput>(({
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
                     Email Ticket Finder
                   </div>
-                  <ct-chip variant="secondary">Linked</ct-chip>
+                  <ct-cell-link $cell={tickets}>Open</ct-cell-link>
                 </div>
                 <div style={previewBoxStyle}>{tickets.previewUI as any}</div>
               </div>
