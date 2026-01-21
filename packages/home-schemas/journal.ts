@@ -50,6 +50,8 @@ export const journalEntrySchema = {
     snapshot: journalSnapshotSchema,
     // LLM-generated narrative prose
     narrative: { type: "string", default: "" },
+    // Flag to indicate narrative generation is pending
+    narrativePending: { type: "boolean", default: false },
     // Tags for filtering/searching
     tags: {
       type: "array",
