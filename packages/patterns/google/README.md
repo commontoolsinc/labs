@@ -178,16 +178,17 @@ Your Pattern
 
 ### building-blocks/experimental/ — Less Hardened
 
-| Pattern                                                   | Description                                    |
-| --------------------------------------------------------- | ---------------------------------------------- |
-| `building-blocks/experimental/google-auth-switcher.tsx`   | Post-login account type classification         |
-| `building-blocks/experimental/gmail-sender.tsx`           | Send emails via Gmail API                      |
-| `building-blocks/experimental/gmail-label-manager.tsx`    | Add/remove labels from emails                  |
-| `building-blocks/experimental/gmail-agentic-search.tsx`   | Base pattern for Gmail-based agentic searchers |
-| `building-blocks/experimental/gmail-search-registry.tsx`  | Community query database for Gmail searches    |
-| `building-blocks/experimental/calendar-event-manager.tsx` | Create, update, delete calendar events         |
-| `building-blocks/experimental/calendar-viewer.tsx`        | View calendar events                           |
-| `building-blocks/experimental/google-docs-comment-*.tsx`  | AI assistant for Google Docs comments          |
+| Pattern                                                             | Description                                    |
+| ------------------------------------------------------------------- | ---------------------------------------------- |
+| `building-blocks/experimental/google-auth-switcher.tsx`             | Post-login account type classification         |
+| `building-blocks/experimental/gmail-sender.tsx`                     | Send emails via Gmail API                      |
+| `building-blocks/experimental/gmail-label-manager.tsx`              | Add/remove labels from emails                  |
+| `building-blocks/experimental/gmail-agentic-search.tsx`             | Base pattern for Gmail-based agentic searchers |
+| `building-blocks/experimental/gmail-search-registry.tsx`            | Community query database for Gmail searches    |
+| `building-blocks/experimental/calendar-event-manager.tsx`           | Create, update, delete calendar events         |
+| `building-blocks/experimental/calendar-viewer.tsx`                  | View calendar events                           |
+| `building-blocks/experimental/google-docs-comment-orchestrator.tsx` | AI assistant for Google Docs comments          |
+| `building-blocks/experimental/google-docs-comment-confirm.ts`       | Side effects handler for Docs comments         |
 
 ### extractors/ — End-User Patterns
 
