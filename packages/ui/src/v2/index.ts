@@ -107,6 +107,7 @@ export * from "./components/ct-modal-provider/index.ts";
 export * from "./components/ct-modal/index.ts";
 export * from "./components/ct-attachments-bar/ct-attachments-bar.ts";
 export * from "./components/ct-chip/ct-chip.ts";
+export * from "./components/ct-question/ct-question.ts";
 export * from "./components/ct-cell-link/index.ts";
 export * from "./components/ct-cell-context/index.ts";
 export * from "./components/ct-space-link/index.ts";

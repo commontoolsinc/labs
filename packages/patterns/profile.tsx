@@ -105,6 +105,56 @@ export interface Employment {
 }
 
 // ============================================================================
+// LEARNED TYPES - Inferred from user behavior
+// ============================================================================
+
+/** A fact learned about the user from their behavior */
+export interface Fact {
+  content: string; // "User likes cooking", "User has kids"
+  confidence: number; // 0-1, higher = more certain
+  source: string; // e.g., "journal:1234567890" or "user:direct"
+  timestamp: number;
+}
+
+/** A preference inferred from user behavior */
+export interface Preference {
+  key: string; // e.g., "cooking_style", "communication_tone"
+  value: string;
+  confidence: number;
+  source: string;
+}
+
+/** A question to ask the user for clarification */
+export interface Question {
+  id: string;
+  question: string;
+  category: string; // "preferences", "personal", "context"
+  priority: number; // Higher = ask sooner
+  options?: string[]; // For multiple choice
+  status: "pending" | "asked" | "answered" | "skipped";
+  answer?: string;
+  askedAt?: number;
+  answeredAt?: number;
+}
+
+/** Section containing all learned/inferred data */
+export interface LearnedSection {
+  facts: Fact[];
+  preferences: Preference[];
+  openQuestions: Question[];
+  personas: string[]; // "busy parent", "home cook", "techie"
+  lastJournalProcessed: number; // Timestamp of last processed journal entry
+}
+
+const EMPTY_LEARNED: LearnedSection = {
+  facts: [],
+  preferences: [],
+  openQuestions: [],
+  personas: [],
+  lastJournalProcessed: 0,
+};
+
+// ============================================================================
 // DEFAULT VALUES (for Default<> type parameters)
 // ============================================================================
 
@@ -145,6 +195,7 @@ interface ProfileInput {
   banks?: Writable<Default<Bank[], []>>;
   employment?: Writable<Default<Employment, typeof EMPTY_EMPLOYMENT>>;
   notes?: Writable<Default<string, "">>;
+  learned?: Writable<Default<LearnedSection, typeof EMPTY_LEARNED>>;
 }
 
 /** Profile blackboard for personal data coordination. #profile */
@@ -162,6 +213,7 @@ export interface Output {
   banks: Bank[];
   employment: Employment;
   notes: string;
+  learned: LearnedSection;
 }
 
 /** @deprecated Use Output instead - this alias exists for backwards compatibility */
@@ -298,6 +350,7 @@ const Profile = pattern<ProfileInput, Output>(
     banks,
     employment,
     notes,
+    learned,
   }) => {
     // Section expanded states
     const selfExpanded = Writable.of(true);
@@ -310,6 +363,7 @@ const Profile = pattern<ProfileInput, Output>(
     const membershipsExpanded = Writable.of(false);
     const banksExpanded = Writable.of(false);
     const employmentExpanded = Writable.of(false);
+    const learnedExpanded = Writable.of(false);
 
     // Actions for adding items
     const addChild = action(() => children.push(newPerson()));
@@ -1167,6 +1221,177 @@ const Profile = pattern<ProfileInput, Output>(
                 </div>
               </ct-vstack>
 
+              {/* === LEARNED === */}
+              <ct-vstack style={{ gap: "8px" }}>
+                <button
+                  type="button"
+                  style={sectionHeaderStyle}
+                  onClick={() => learnedExpanded.set(!learnedExpanded.get())}
+                >
+                  <span style={{ fontSize: "18px" }}>🧠</span>
+                  <span style={{ flex: 1, textAlign: "left" }}>
+                    What I've Learned
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "12px",
+                      color: "var(--ct-color-text-secondary)",
+                      background: "var(--ct-color-bg)",
+                      padding: "2px 8px",
+                      borderRadius: "12px",
+                    }}
+                  >
+                    {computed(() => learned.key("facts").get().length)} facts
+                  </span>
+                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                    {computed(() => (learnedExpanded.get() ? "▼" : "▶"))}
+                  </span>
+                </button>
+                <div
+                  style={{
+                    display: computed(() =>
+                      learnedExpanded.get() ? "block" : "none"
+                    ),
+                    ...sectionContentStyle,
+                  }}
+                >
+                  <ct-vstack style={{ gap: "16px" }}>
+                    {/* Personas */}
+                    {computed(() => learned.key("personas").get().length > 0) &&
+                      (
+                        <ct-vstack style={{ gap: "8px" }}>
+                          <label style={labelStyle}>Personas</label>
+                          <ct-hstack style={{ gap: "8px", flexWrap: "wrap" }}>
+                            {learned.key("personas").map((persona) => (
+                              <span
+                                style={{
+                                  padding: "4px 12px",
+                                  background:
+                                    "var(--ct-color-primary-surface, #eff6ff)",
+                                  color: "var(--ct-color-primary, #3b82f6)",
+                                  borderRadius: "16px",
+                                  fontSize: "13px",
+                                }}
+                              >
+                                {persona}
+                              </span>
+                            ))}
+                          </ct-hstack>
+                        </ct-vstack>
+                      )}
+
+                    {/* Facts */}
+                    <ct-vstack style={{ gap: "8px" }}>
+                      <label style={labelStyle}>Learned Facts</label>
+                      {computed(() =>
+                        learned.key("facts").get().length === 0
+                      ) && (
+                        <p
+                          style={{
+                            fontSize: "13px",
+                            color: "var(--ct-color-text-secondary)",
+                            fontStyle: "italic",
+                          }}
+                        >
+                          No facts learned yet. Facts will appear here as you
+                          use the app.
+                        </p>
+                      )}
+                      {learned.key("facts").map((fact) => (
+                        <ct-card>
+                          <ct-hstack
+                            style={{
+                              gap: "8px",
+                              justifyContent: "space-between",
+                            }}
+                          >
+                            <span style={{ flex: 1 }}>{fact.content}</span>
+                            <span
+                              style={{
+                                padding: "2px 8px",
+                                background: computed(() =>
+                                  fact.confidence > 0.8
+                                    ? "var(--ct-color-success-surface, #f0fdf4)"
+                                    : "var(--ct-color-warning-surface, #fffbeb)"
+                                ),
+                                color: computed(() =>
+                                  fact.confidence > 0.8
+                                    ? "var(--ct-color-success, #22c55e)"
+                                    : "var(--ct-color-warning, #f59e0b)"
+                                ),
+                                borderRadius: "4px",
+                                fontSize: "12px",
+                              }}
+                            >
+                              {computed(
+                                () => `${Math.round(fact.confidence * 100)}%`,
+                              )}
+                            </span>
+                          </ct-hstack>
+                        </ct-card>
+                      ))}
+                    </ct-vstack>
+
+                    {/* Preferences */}
+                    {computed(() =>
+                      learned.key("preferences").get().length > 0
+                    ) && (
+                      <ct-vstack style={{ gap: "8px" }}>
+                        <label style={labelStyle}>Preferences</label>
+                        {learned.key("preferences").map((pref) => (
+                          <ct-hstack style={{ gap: "8px" }}>
+                            <span
+                              style={{
+                                fontWeight: "500",
+                                color: "var(--ct-color-text-secondary)",
+                              }}
+                            >
+                              {pref.key}:
+                            </span>
+                            <span>{pref.value}</span>
+                          </ct-hstack>
+                        ))}
+                      </ct-vstack>
+                    )}
+
+                    {/* Open Questions - display only for now */}
+                    {computed(() => {
+                      const questions = learned.key("openQuestions").get();
+                      const pending = questions.filter(
+                        (q) => q.status === "pending",
+                      );
+                      return pending.length > 0;
+                    }) && (
+                      <ct-vstack style={{ gap: "8px" }}>
+                        <label style={labelStyle}>
+                          Pending Questions ({computed(() =>
+                            learned
+                              .key("openQuestions")
+                              .get()
+                              .filter((q) => q.status === "pending").length
+                          )})
+                        </label>
+                        {learned.key("openQuestions").map((q) => (
+                          <div
+                            style={{
+                              display: computed(() =>
+                                q.status === "pending" ? "block" : "none"
+                              ),
+                            }}
+                          >
+                            <ct-card>
+                              <p style={{ margin: 0, fontSize: "14px" }}>
+                                {q.question}
+                              </p>
+                            </ct-card>
+                          </div>
+                        ))}
+                      </ct-vstack>
+                    )}
+                  </ct-vstack>
+                </div>
+              </ct-vstack>
+
               {/* === NOTES === */}
               <ct-vstack style={{ gap: "8px" }}>
                 <label
@@ -1205,6 +1430,7 @@ const Profile = pattern<ProfileInput, Output>(
       banks,
       employment,
       notes,
+      learned,
     };
   },
 );

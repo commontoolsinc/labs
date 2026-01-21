@@ -675,11 +675,11 @@ const enrichedContext = {
 4. ✅ **Phase 1.2**: Add reactive narrative enrichment (generateText)
 5. **Test**: Favorite a charm → verify journal entry appears
 
-### Sprint 2: Profile Infrastructure
+### Sprint 2: Profile Infrastructure ✅ COMPLETE
 
-1. **Phase 2.1**: Add learned section types to profile.tsx
-2. **Phase 3.2**: Build ct-question component
-3. **Phase 2.4**: Add learned section UI to profile.tsx
+1. ✅ **Phase 2.1**: Add learned section types to profile.tsx
+2. ✅ **Phase 3.2**: Build ct-question component
+3. ✅ **Phase 2.4**: Add learned section UI to profile.tsx
 4. **Test**: Manual fact/question addition works
 
 ### Sprint 3: Profile Learning
