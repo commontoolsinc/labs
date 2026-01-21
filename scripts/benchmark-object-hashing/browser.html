@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Object Hashing Benchmark - Browser</title>
+    <style>
+      body {
+        font-family: "Courier New", monospace;
+        padding: 20px;
+        max-width: 1400px;
+        margin: 0 auto;
+        background: #1e1e1e;
+        color: #d4d4d4;
+      }
+      h1, h2, h3 {
+        color: #4ec9b0;
+      }
+      pre {
+        background: #2d2d2d;
+        padding: 10px;
+        border-radius: 4px;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        font-size: 11px;
+      }
+      .status {
+        color: #ce9178;
+      }
+      .complete {
+        color: #4ec9b0;
+      }
+      .error {
+        color: #f48771;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Object Hashing Benchmark - Browser</h1>
+    <div id="status" class="status">Loading libraries...</div>
+    <div id="output"></div>
+
+    <script type="module">
+      const outputDiv = document.getElementById("output");
+      const statusDiv = document.getElementById("status");
+
+      function log(message) {
+        const pre = document.createElement("pre");
+        pre.textContent = message;
+        outputDiv.appendChild(pre);
+        console.log(message);
+      }
+
+      async function main() {
+        try {
+          statusDiv.textContent = "Loading libraries from esm.sh...";
+
+          const [
+            MerkleReference,
+            objectHash,
+            hashIt,
+            fastStableStringify,
+            safeStableStringify,
+            { sha256 },
+            { blake2b },
+            { blake3 },
+            { createSHA256, createBLAKE3 },
+            dagCbor,
+            { CID },
+            multihash,
+          ] = await Promise.all([
+            import("https://esm.sh/merkle-reference@2.2.0"),
+            import("https://esm.sh/object-hash@3.0.0"),
+            import("https://esm.sh/hash-it@6.0.0"),
+            import("https://esm.sh/fast-json-stable-stringify@2.1.0"),
+            import("https://esm.sh/safe-stable-stringify@2.5.0"),
+            import("https://esm.sh/@noble/hashes@1.4.0/sha256"),
+            import("https://esm.sh/@noble/hashes@1.4.0/blake2b"),
+            import("https://esm.sh/@noble/hashes@1.4.0/blake3"),
+            import("https://esm.sh/hash-wasm@4.11.0"),
+            import("https://esm.sh/@ipld/dag-cbor@9.2.1"),
+            import("https://esm.sh/multiformats@13.3.2/cid"),
+            import("https://esm.sh/multiformats@13.3.2/hashes/digest"),
+          ]);
+
+          const blake2b256 = (data) => blake2b(data, { dkLen: 32 });
+
+          statusDiv.textContent = "Creating test data...";
+
+          // Test data - focused on VDOM-like structures
+          const testData = {
+            small: {
+              simple: { a: 1, b: 2, c: 3 },
+              nested: { a: { b: { c: 1 } } },
+              mixed: { a: [1, 2], b: { c: 3 }, d: "hello" },
+            },
+            large: {
+              wide: Object.fromEntries(
+                Array.from({ length: 500 }, (_, i) => [`key${i}`, i]),
+              ),
+              deep: (() => {
+                let obj = { value: "bottom" };
+                for (let i = 0; i < 50; i++) obj = { nested: obj };
+                return obj;
+              })(),
+            },
+            vdom: {
+              simpleComponent: {
+                type: "div",
+                props: {
+                  className: "container mx-auto p-4",
+                  style: { display: "flex" },
+                },
+                children: [
+                  {
+                    type: "h1",
+                    props: { className: "text-2xl" },
+                    children: ["Hello"],
+                  },
+                  { type: "p", props: {}, children: ["World"] },
+                ],
+              },
+              formComponent: {
+                type: "form",
+                props: { className: "space-y-4" },
+                children: Array.from({ length: 10 }, (_, i) => ({
+                  type: "div",
+                  props: { className: "form-group" },
+                  children: [
+                    {
+                      type: "label",
+                      props: { htmlFor: `field-${i}` },
+                      children: [`Field ${i}`],
+                    },
+                    {
+                      type: "input",
+                      props: {
+                        type: "text",
+                        id: `field-${i}`,
+                        name: `field_${i}`,
+                      },
+                      children: [],
+                    },
+                  ],
+                })),
+              },
+              dataTable: {
+                type: "table",
+                props: { className: "min-w-full" },
+                children: [{
+                  type: "tbody",
+                  props: {},
+                  children: Array.from({ length: 50 }, (_, i) => ({
+                    type: "tr",
+                    props: { key: `row-${i}` },
+                    children: [
+                      { type: "td", props: {}, children: [String(i)] },
+                      {
+                        type: "td",
+                        props: {},
+                        children: [`User ${i}`],
+                      },
+                      {
+                        type: "td",
+                        props: {},
+                        children: [`user${i}@example.com`],
+                      },
+                    ],
+                  })),
+                }],
+              },
+              dashboard: {
+                type: "div",
+                props: { className: "flex" },
+                children: [
+                  {
+                    type: "nav",
+                    props: { className: "w-64" },
+                    children: Array.from({ length: 10 }, (_, i) => ({
+                      type: "a",
+                      props: { href: `/section/${i}` },
+                      children: [`Menu ${i}`],
+                    })),
+                  },
+                  {
+                    type: "main",
+                    props: { className: "flex-1" },
+                    children: Array.from({ length: 4 }, (_, i) => ({
+                      type: "div",
+                      props: { className: "card" },
+                      children: [
+                        {
+                          type: "h3",
+                          props: {},
+                          children: [`Card ${i}`],
+                        },
+                        {
+                          type: "div",
+                          props: { className: "chart" },
+                          children: Array.from(
+                            { length: 20 },
+                            (_, j) => ({
+                              type: "div",
+                              props: {
+                                style: {
+                                  height: `${Math.random() * 100}%`,
+                                },
+                              },
+                              children: [],
+                            }),
+                          ),
+                        },
+                      ],
+                    })),
+                  },
+                ],
+              },
+            },
+          };
+
+          statusDiv.textContent = "Creating hash functions...";
+
+          const hashFunctions = {};
+          hashFunctions["noble"] = (data) => sha256(data);
+
+          const sha256Hasher = await createSHA256();
+          hashFunctions["hash-wasm"] = (data) => {
+            sha256Hasher.init();
+            sha256Hasher.update(data);
+            return sha256Hasher.digest("binary");
+          };
+
+          const blake3Hasher = await createBLAKE3();
+          hashFunctions["blake3-wasm"] = (data) => {
+            blake3Hasher.init();
+            blake3Hasher.update(data);
+            return blake3Hasher.digest("binary");
+          };
+
+          statusDiv.textContent = "Creating strategies...";
+
+          const strategies = {};
+          const encoder = new TextEncoder();
+          const toHex = (hash) =>
+            Array.from(hash).map((b) => b.toString(16).padStart(2, "0"))
+              .join("");
+
+          // merkle-reference with default (noble)
+          strategies["merkle-reference[noble]"] = (obj) =>
+            MerkleReference.refer(obj).toString();
+
+          // merkle-reference with hash-wasm
+          const treeBuilderWasm = MerkleReference.Tree.createBuilder(
+            hashFunctions["hash-wasm"],
+          );
+          strategies["merkle-reference[hash-wasm]"] = (obj) =>
+            treeBuilderWasm.refer(obj).toString();
+
+          // merkle-reference with blake3-wasm
+          const treeBuilderBlake3 = MerkleReference.Tree.createBuilder(
+            hashFunctions["blake3-wasm"],
+          );
+          strategies["merkle-reference[blake3-wasm]"] = (obj) =>
+            treeBuilderBlake3.refer(obj).toString();
+
+          // object-hash
+          strategies["object-hash"] = (obj) => objectHash.default(obj);
+
+          // hash-it
+          strategies["hash-it"] = (obj) =>
+            hashIt.default(obj).toString();
+
+          // safe-stable-stringify with all hash functions
+          for (
+            const [hashName, hashFn] of Object.entries(hashFunctions)
+          ) {
+            strategies[`safe-stable-stringify+${hashName}`] = (obj) => {
+              const str = safeStableStringify.default(obj);
+              return toHex(hashFn(encoder.encode(str)));
+            };
+          }
+          strategies["safe-stable-stringify+blake3"] = (obj) => {
+            const str = safeStableStringify.default(obj);
+            return toHex(blake3(encoder.encode(str)));
+          };
+
+          // dag-cbor with all hash functions
+          for (
+            const [hashName, hashFn] of Object.entries(hashFunctions)
+          ) {
+            strategies[`dag-cbor+${hashName}`] = (obj) =>
+              toHex(hashFn(dagCbor.encode(obj)));
+          }
+          strategies["dag-cbor+blake3"] = (obj) =>
+            toHex(blake3(dagCbor.encode(obj)));
+
+          // Benchmark with fresh objects (no caching)
+          async function benchmark(strategy, templateData, iterations) {
+            const jsonStr = JSON.stringify(templateData);
+            const objects = Array.from(
+              { length: iterations },
+              () => JSON.parse(jsonStr),
+            );
+
+            // Warmup
+            for (let i = 0; i < Math.min(50, iterations / 10); i++) {
+              strategy(objects[i % objects.length]);
+            }
+
+            const start = performance.now();
+            for (let i = 0; i < iterations; i++) {
+              strategy(objects[i]);
+            }
+            return performance.now() - start;
+          }
+
+          function testStability(strategy) {
+            const obj1 = { a: 1, b: 2, c: 3 };
+            const obj2 = { c: 3, b: 2, a: 1 };
+            return strategy(obj1) === strategy(obj2);
+          }
+
+          statusDiv.textContent = "Running benchmarks...";
+          log("=== Object Hashing Benchmark (Browser) ===\n");
+          log(
+            "Note: Using fresh objects each iteration (no caching effects)\n",
+          );
+
+          // Stability test
+          log("## Stability Test\n");
+          for (const [name, strategy] of Object.entries(strategies)) {
+            const stable = testStability(strategy);
+            log(
+              `${name.padEnd(35)} ${
+                stable ? "✓ STABLE" : "✗ UNSTABLE"
+              }`,
+            );
+          }
+
+          const results = {};
+          const testCases = [
+            {
+              cat: "small",
+              name: "simple",
+              data: testData.small.simple,
+              iter: 500,
+            },
+            {
+              cat: "small",
+              name: "nested",
+              data: testData.small.nested,
+              iter: 500,
+            },
+            {
+              cat: "small",
+              name: "mixed",
+              data: testData.small.mixed,
+              iter: 500,
+            },
+            {
+              cat: "large",
+              name: "wide",
+              data: testData.large.wide,
+              iter: 50,
+            },
+            {
+              cat: "large",
+              name: "deep",
+              data: testData.large.deep,
+              iter: 50,
+            },
+            {
+              cat: "vdom",
+              name: "simple",
+              data: testData.vdom.simpleComponent,
+              iter: 200,
+            },
+            {
+              cat: "vdom",
+              name: "form",
+              data: testData.vdom.formComponent,
+              iter: 50,
+            },
+            {
+              cat: "vdom",
+              name: "table",
+              data: testData.vdom.dataTable,
+              iter: 30,
+            },
+            {
+              cat: "vdom",
+              name: "dashboard",
+              data: testData.vdom.dashboard,
+              iter: 30,
+            },
+          ];
+
+          for (const tc of testCases) {
+            log(`\n## ${tc.cat}/${tc.name}\n`);
+            statusDiv.textContent = `Running: ${tc.cat}/${tc.name}...`;
+
+            for (const [name, strategy] of Object.entries(strategies)) {
+              try {
+                const time = await benchmark(
+                  strategy,
+                  tc.data,
+                  tc.iter,
+                );
+                const ops = (tc.iter / time) * 1000;
+                if (!results[name]) results[name] = {};
+                results[name][`${tc.cat}/${tc.name}`] = ops;
+
+                const opsStr = ops > 1000000
+                  ? `${(ops / 1000000).toFixed(1)}M`
+                  : ops > 1000
+                  ? `${(ops / 1000).toFixed(1)}K`
+                  : ops.toFixed(0);
+                log(
+                  `${name.padEnd(35)} ${
+                    time.toFixed(1)
+                  }ms (${opsStr} ops/sec)`,
+                );
+              } catch (err) {
+                log(`${name.padEnd(35)} ERROR: ${err.message}`);
+              }
+            }
+          }
+
+          // Summary
+          log("\n\n=== SUMMARY (ops/sec) ===\n");
+          const names = Object.keys(strategies);
+          const tests = testCases.map((t) => `${t.cat}/${t.name}`);
+
+          log(
+            "Strategy".padEnd(35) +
+              tests.map((t) =>
+                t.split("/")[1].substring(0, 8).padEnd(10)
+              ).join(""),
+          );
+          log("-".repeat(35 + tests.length * 10));
+
+          for (const name of names) {
+            const vals = tests.map((t) => {
+              const v = results[name]?.[t];
+              if (!v) return "N/A".padEnd(10);
+              return (v > 1000000
+                ? `${(v / 1000000).toFixed(1)}M`
+                : v > 1000
+                ? `${(v / 1000).toFixed(1)}K`
+                : v.toFixed(0)).padEnd(10);
+            });
+            log(name.padEnd(35) + vals.join(""));
+          }
+
+          log("\n=== DONE ===");
+          statusDiv.className = "complete";
+          statusDiv.textContent = "Benchmark complete!";
+          window.benchmarkResults = results;
+          window.benchmarkComplete = true;
+        } catch (err) {
+          statusDiv.className = "error";
+          statusDiv.textContent = `Error: ${err.message}`;
+          log(`\nERROR: ${err.message}\n${err.stack}`);
+          console.error(err);
+        }
+      }
+
+      main();
+    </script>
+  </body>
+</html>
