@@ -17,34 +17,11 @@
  * 2. Deploy this pattern
  * 3. Link: ct charm link google-auth/auth calendar-change-detector/linkedAuth
  */
-import {
-  computed,
-  generateObject,
-  JSONSchema,
-  NAME,
-  pattern,
-  UI,
-} from "commontools";
+import { computed, JSONSchema, NAME, pattern, UI } from "commontools";
 import type { Schema } from "commontools/schema";
-import GmailImporter, {
-  type Auth,
-} from "../building-blocks/gmail-importer.tsx";
+import GmailExtractor from "../building-blocks/gmail-extractor.tsx";
+import type { Auth } from "../building-blocks/gmail-importer.tsx";
 import ProcessingStatus from "../building-blocks/processing-status.tsx";
-
-// Email type - matches GmailImporter's Email type
-interface Email {
-  id: string;
-  from: string;
-  to: string;
-  subject: string;
-  date: string;
-  snippet: string;
-  threadId: string;
-  labelIds: string[];
-  htmlContent: string;
-  plainText: string;
-  markdownContent: string;
-}
 
 // =============================================================================
 // TYPES
@@ -128,6 +105,32 @@ const SCHEDULE_CHANGE_SCHEMA = {
 } as const satisfies JSONSchema;
 
 type ScheduleChangeAnalysisResult = Schema<typeof SCHEDULE_CHANGE_SCHEMA>;
+
+// Prompt template for LLM extraction
+const EXTRACTION_PROMPT_TEMPLATE =
+  `Analyze this email and determine if it's about a schedule change (cancellation, reschedule, delay, etc.).
+
+EMAIL SUBJECT: {{email.subject}}
+EMAIL DATE: {{email.date}}
+EMAIL FROM: {{email.from}}
+
+EMAIL CONTENT:
+{{email.markdownContent}}
+
+Determine:
+1. Is this a legitimate schedule change notification?
+   - YES: Appointment cancellations, meeting reschedules, delivery delays, event time changes
+   - NO: Marketing emails, promotional offers, subscription notices, spam, newsletters, order confirmations without changes
+
+2. If it IS a schedule change:
+   - What type of change is it? (cancelled, rescheduled, delayed, time_changed)
+   - What event/appointment/delivery was affected?
+   - What was the original date/time? (in YYYY-MM-DD or YYYY-MM-DDTHH:mm format)
+   - What is the new date/time if applicable?
+   - Who/what service sent this notification?
+   - Provide a brief summary
+
+IMPORTANT: Be strict about filtering. Only mark as a schedule change if it's clearly about an existing appointment, meeting, delivery, or event being modified. Ignore marketing, promotions, and general notifications.`;
 
 // =============================================================================
 // HELPERS
@@ -227,93 +230,28 @@ interface PatternOutput {
 }
 
 export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
-  // Directly instantiate GmailImporter with schedule-change query
-  const gmailImporter = GmailImporter({
-    settings: {
-      gmailFilterQuery: SCHEDULE_CHANGE_GMAIL_QUERY,
-      autoFetchOnAuth: true,
-      resolveInlineImages: false,
-      limit: 50,
-      debugMode: true,
+  // Use GmailExtractor with built-in LLM extraction
+  const extractor = GmailExtractor<ScheduleChangeAnalysisResult>({
+    gmailQuery: SCHEDULE_CHANGE_GMAIL_QUERY,
+    extraction: {
+      promptTemplate: EXTRACTION_PROMPT_TEMPLATE,
+      schema: SCHEDULE_CHANGE_SCHEMA,
     },
+    title: "Schedule Changes",
+    limit: 50,
     linkedAuth,
   });
 
-  // Get emails directly from the embedded gmail-importer
-  const allEmails = gmailImporter.emails;
+  // Get values from extractor
+  const emailCount = extractor.emailCount;
+  const { pendingCount, completedCount, rawAnalyses } = extractor;
 
-  // Count of emails found
-  const emailCount = computed(() => allEmails?.length || 0);
-
-  // Check if connected
-  const isConnected = computed(() => {
-    if (linkedAuth?.token) return true;
-    return gmailImporter?.emailCount !== undefined;
-  });
-
-  // ==========================================================================
-  // REACTIVE LLM ANALYSIS
-  // Analyze each email to extract schedule change information
-  // ==========================================================================
-
-  const emailAnalyses = allEmails.map((email: Email) => {
-    const analysis = generateObject<ScheduleChangeAnalysisResult>({
-      prompt: computed(() => {
-        if (!email?.markdownContent) {
-          return undefined;
-        }
-
-        return `Analyze this email and determine if it's about a schedule change (cancellation, reschedule, delay, etc.).
-
-EMAIL SUBJECT: ${email.subject || ""}
-EMAIL DATE: ${email.date || ""}
-EMAIL FROM: ${email.from || ""}
-
-EMAIL CONTENT:
-${email.markdownContent}
-
-Determine:
-1. Is this a legitimate schedule change notification?
-   - YES: Appointment cancellations, meeting reschedules, delivery delays, event time changes
-   - NO: Marketing emails, promotional offers, subscription notices, spam, newsletters, order confirmations without changes
-
-2. If it IS a schedule change:
-   - What type of change is it? (cancelled, rescheduled, delayed, time_changed)
-   - What event/appointment/delivery was affected?
-   - What was the original date/time? (in YYYY-MM-DD or YYYY-MM-DDTHH:mm format)
-   - What is the new date/time if applicable?
-   - Who/what service sent this notification?
-   - Provide a brief summary
-
-IMPORTANT: Be strict about filtering. Only mark as a schedule change if it's clearly about an existing appointment, meeting, delivery, or event being modified. Ignore marketing, promotions, and general notifications.`;
-      }),
-      schema: SCHEDULE_CHANGE_SCHEMA,
-      model: "anthropic:claude-sonnet-4-5",
-    });
-
-    return {
-      email,
-      emailId: email.id,
-      emailDate: email.date,
-      analysis,
-      pending: analysis.pending,
-      error: analysis.error,
-      result: analysis.result,
-    };
-  });
-
-  // Count pending analyses
-  const pendingCount = computed(
-    () => emailAnalyses?.filter((a) => a?.pending)?.length || 0,
-  );
-
-  // Count completed analyses
-  const completedCount = computed(
-    () =>
-      emailAnalyses?.filter(
-        (a) =>
-          a?.analysis?.pending === false && a?.analysis?.result !== undefined,
-      ).length || 0,
+  // Create emailAnalyses with result alias for backward compatibility
+  const emailAnalyses = computed(() =>
+    rawAnalyses?.map((item) => ({
+      ...item,
+      result: item.analysis?.result,
+    })) || []
   );
 
   // ==========================================================================
@@ -516,70 +454,25 @@ IMPORTANT: Be strict about filtering. Only mark as a schedule change if it's cle
 
         <ct-vscroll flex showScrollbar>
           <ct-vstack padding="6" gap="4">
-            {/* Auth UI from embedded Gmail Importer */}
-            {gmailImporter.authUI}
+            {/* Auth UI from GmailExtractor */}
+            {extractor.ui.authStatusUI}
 
             {/* Connection Status */}
-            <div
-              style={{
-                padding: "12px 16px",
-                backgroundColor: computed(() =>
-                  isConnected ? "#d1fae5" : "#fef3c7"
-                ),
-                borderRadius: "8px",
-                border: computed(() =>
-                  isConnected ? "1px solid #10b981" : "1px solid #f59e0b"
-                ),
-                display: computed(() => (isConnected ? "block" : "none")),
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                }}
-              >
-                <span
-                  style={{
-                    width: "10px",
-                    height: "10px",
-                    borderRadius: "50%",
-                    backgroundColor: "#10b981",
-                  }}
-                />
-                <span>Connected to Gmail</span>
-                <span style={{ marginLeft: "auto", color: "#059669" }}>
-                  {computed(() => emailCount)} emails found
-                </span>
-                <button
-                  type="button"
-                  onClick={gmailImporter.bgUpdater}
-                  style={{
-                    marginLeft: "8px",
-                    padding: "6px 12px",
-                    backgroundColor: "#10b981",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "6px",
-                    cursor: "pointer",
-                    fontSize: "13px",
-                    fontWeight: "500",
-                  }}
-                >
-                  Fetch Emails
-                </button>
-              </div>
-            </div>
+            {extractor.ui.connectionStatusUI}
 
             {/* Analysis Status */}
+            {extractor.ui.analysisProgressUI}
+
+            {/* Additional analysis info */}
             <div
               style={{
                 padding: "12px 16px",
                 backgroundColor: "#eff6ff",
                 borderRadius: "8px",
                 border: "1px solid #3b82f6",
-                display: computed(() => (isConnected ? "block" : "none")),
+                display: computed(
+                  () => (extractor.isConnected ? "block" : "none"),
+                ),
               }}
             >
               <div
@@ -589,7 +482,7 @@ IMPORTANT: Be strict about filtering. Only mark as a schedule change if it's cle
                   gap: "12px",
                 }}
               >
-                <span style={{ fontWeight: "600" }}>Analysis:</span>
+                <span style={{ fontWeight: "600" }}>Results:</span>
                 <span>{computed(() => emailCount)} emails</span>
                 <div
                   style={{
@@ -1072,7 +965,7 @@ IMPORTANT: Be strict about filtering. Only mark as a schedule change if it's cle
                     Fetched Emails:
                   </h4>
                   <ct-vstack gap="2">
-                    {allEmails.map((email: Email) => (
+                    {extractor.emails.map((email) => (
                       <div
                         style={{
                           padding: "8px 12px",
