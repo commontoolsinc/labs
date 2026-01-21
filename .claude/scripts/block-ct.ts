@@ -18,8 +18,11 @@ try {
   // If the JSON is malformed we allow the call rather than choke the hook.
 }
 
-// Remove quoted strings before checking for ct commands
-const cmdWithoutQuotes = cmd.replace(/(['"`])[^'"`]*?\1/g, "");
+// Remove quoted strings and heredoc content before checking for ct commands
+// This prevents false positives from file paths or commit messages containing "ct"
+let cmdWithoutQuotes = cmd.replace(/(['"`])[^'"`]*?\1/g, "");
+// Remove heredoc content: <<'EOF' ... EOF or <<EOF ... EOF
+cmdWithoutQuotes = cmdWithoutQuotes.replace(/<<'?(\w+)'?[\s\S]*?\1/g, "");
 
 // Match `ct` as a standalone command (not `deno task ct` or part of another word)
 // Matches: ct, ./ct, /path/to/ct but not `deno task ct` or `select`
