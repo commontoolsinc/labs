@@ -13,6 +13,7 @@ import {
 } from "commontools";
 import FavoritesManager from "./favorites-manager.tsx";
 import Journal from "./journal.tsx";
+import Profile from "../profile.tsx";
 
 // Types from favorites-manager.tsx and journal.tsx
 type Favorite = {
@@ -228,6 +229,7 @@ export default pattern((_) => {
   // Child components use wish() to access favorites/journal through defaultPattern
   const favoritesComponent = FavoritesManager({});
   const journalComponent = Journal({});
+  const profileComponent = Profile({ learned });
   const activeTab = Writable.of("journal").for("activeTab");
 
   // Compute unique spaces from favorites
@@ -526,9 +528,11 @@ Return valid JSON matching the schema.`,
             <ct-tab value="journal">Journal</ct-tab>
             <ct-tab value="favorites">Favorites</ct-tab>
             <ct-tab value="spaces">Spaces</ct-tab>
+            <ct-tab value="profile">Profile</ct-tab>
           </ct-tab-list>
           <ct-tab-panel value="journal">{journalComponent}</ct-tab-panel>
           <ct-tab-panel value="favorites">{favoritesComponent}</ct-tab-panel>
+          <ct-tab-panel value="profile">{profileComponent}</ct-tab-panel>
           <ct-tab-panel value="spaces">
             <ct-vstack gap="2">
               {uniqueSpaces.map((space) => (
