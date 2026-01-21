@@ -127,7 +127,10 @@ export class CTSelect extends BaseElement {
     private _cellController = createCellController<unknown | unknown[]>(this, {
       timing: { strategy: "immediate" }, // Select changes should be immediate
       onChange: (newValue, oldValue) => {
-        // Emit change events (DOM sync is now handled reactively in render())
+        // Sync cell value changes to DOM
+        this.applyValueToDom();
+
+        // Emit change events
         this.emit("ct-change", {
           value: newValue,
           oldValue,
@@ -189,6 +192,7 @@ export class CTSelect extends BaseElement {
 
       // Initialize cell controller binding
       this._cellController.bind(this.value);
+      this.applyValueToDom();
       // Apply theme on first render
       applyThemeToElement(this, this.theme ?? defaultTheme);
     }
@@ -196,14 +200,22 @@ export class CTSelect extends BaseElement {
     override willUpdate(changedProperties: Map<string, any>) {
       super.willUpdate(changedProperties);
 
-      // Bind on first render or when value property changes
-      // This ensures getValue() works during render()
-      if (changedProperties.has("value") || !this._cellController.hasCell()) {
+      // If the value property itself changed (e.g., switched to a different cell)
+      if (changedProperties.has("value")) {
+        // Bind the new value (Cell or plain) to the controller
         this._cellController.bind(this.value);
       }
     }
 
     override updated(changed: Map<string | number | symbol, unknown>) {
+      if (changed.has("items")) {
+        // Rebuild key map each time items array changes
+        this._buildKeyMap();
+      }
+
+      if (changed.has("value") || changed.has("items")) {
+        this.applyValueToDom();
+      }
       if (changed.has("theme")) {
         applyThemeToElement(this, this.theme ?? defaultTheme);
       }
@@ -216,12 +228,6 @@ export class CTSelect extends BaseElement {
 
     /* ---------- Render ---------- */
     override render() {
-      // Build key map first so _getSelectedKey() can use it
-      this._buildKeyMap();
-
-      // Compute selected key for single-select mode
-      const selectedKey = this.multiple ? undefined : this._getSelectedKey();
-
       return html`
         <select
           ?disabled="${this.disabled}"
@@ -231,7 +237,6 @@ export class CTSelect extends BaseElement {
             this.multiple && this.size ? this.size : undefined,
           )}"
           name="${ifDefined(this.name || undefined)}"
-          .value="${ifDefined(selectedKey)}"
           @change="${this._onChange}"
           @focus="${() => this.emit("ct-focus")}"
           @blur="${() => this.emit("ct-blur")}"
@@ -240,22 +245,6 @@ export class CTSelect extends BaseElement {
           ${this._renderPlaceholder()} ${this._renderOptions()}
         </select>
       `;
-    }
-
-    /**
-     * Get the option key for the currently selected value (single-select mode)
-     */
-    private _getSelectedKey(): string {
-      const currentValue = this.getCurrentValue();
-      if (currentValue === undefined || currentValue === null) return "";
-
-      // Find the matching option key
-      for (const [key, item] of this._keyMap.entries()) {
-        if (this.valuesEqual(item.value, currentValue)) {
-          return key;
-        }
-      }
-      return "";
     }
 
     private _renderPlaceholder() {
@@ -282,9 +271,6 @@ export class CTSelect extends BaseElement {
     private _renderOptions() {
       if (!this.items?.length) return nothing;
 
-      // Get current value for reactive selection (keyMap already built in render())
-      const currentValue = this.getCurrentValue();
-
       // Group items by `group` key
       const groups = new Map<string | undefined, SelectItem[]>();
       this.items.forEach((item) => {
@@ -297,18 +283,10 @@ export class CTSelect extends BaseElement {
 
       const renderItem = (item: SelectItem, index: number) => {
         const optionKey = this._makeKey(item, index);
-        // Compute selected state reactively in render
-        const isSelected = this.multiple
-          ? ((currentValue as unknown[]) ?? []).some((v) =>
-            this.valuesEqual(item.value, v)
-          )
-          : this.valuesEqual(item.value, currentValue);
-
         return html`
           <option
             value="${optionKey}"
             ?disabled="${item.disabled ?? false}"
-            ?selected="${isSelected}"
             data-index="${index}"
           >
             ${item.label}
@@ -330,6 +308,9 @@ export class CTSelect extends BaseElement {
           templates.push(...items.map((i) => renderItem(i, runningIndex++)));
         }
       });
+
+      // Build key map once per render
+      this._buildKeyMap();
 
       return templates;
     }
@@ -393,26 +374,27 @@ export class CTSelect extends BaseElement {
     }
 
     /**
-     * Compare two values for equality, handling proxied values from reactive system.
-     * Uses JSON stringification for objects, strict equality for primitives.
+     * After any update, ensure DOM option selection state
+     * matches the current value.
      */
-    private valuesEqual(a: unknown, b: unknown): boolean {
-      // Handle null/undefined
-      if (a === b) return true;
-      if (a === null || b === null) return false;
-      if (a === undefined || b === undefined) return false;
+    private applyValueToDom() {
+      if (!this._select) return;
 
-      // For primitives (string, number, boolean), use strict equality
-      // But also try string comparison in case one is proxied
-      if (typeof a !== "object" && typeof b !== "object") {
-        return a === b || String(a) === String(b);
-      }
+      const currentValue = this.getCurrentValue();
 
-      // For objects, compare by JSON (handles proxied objects)
-      try {
-        return JSON.stringify(a) === JSON.stringify(b);
-      } catch {
-        return a === b;
+      if (this.multiple) {
+        const values = (currentValue as unknown[] | undefined) ?? [];
+        Array.from(this._select.options).forEach((opt) => {
+          const item = this._keyMap.get(opt.value);
+          opt.selected = item ? values.some((v) => item.value === v) : false;
+        });
+      } else {
+        const val = currentValue;
+        const matchKey = [...this._keyMap.entries()].find(
+          ([, item]) => item.value === val,
+        )?.[0];
+
+        this._select.value = matchKey ?? "";
       }
     }
   }

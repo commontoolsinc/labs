@@ -10,6 +10,7 @@ import {
   themeContext,
 } from "../theme-context.ts";
 import { type CellHandle } from "@commontools/runtime-client";
+import { stringSchema } from "@commontools/runner/schemas";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
 
@@ -488,9 +489,11 @@ export class CTInput extends BaseElement {
       override willUpdate(changedProperties: Map<string, any>) {
         super.willUpdate(changedProperties);
 
-        // Bind on first render or when value property changes
-        if (changedProperties.has("value") || !this._cellController.hasCell()) {
-          this._cellController.bind(this.value);
+        // If the value property itself changed (e.g., switched to a different cell)
+        if (changedProperties.has("value")) {
+          // Bind the new value (Cell or plain) to the controller
+          // This updates the internal reference so getValue() returns the correct value
+          this._cellController.bind(this.value, stringSchema);
         }
       }
 
@@ -526,7 +529,7 @@ export class CTInput extends BaseElement {
         this._input = this.shadowRoot?.querySelector("input") || null;
 
         // Bind the initial value to the cell controller
-        this._cellController.bind(this.value);
+        this._cellController.bind(this.value, stringSchema);
 
         // Update timing options to match current properties
         this._cellController.updateTimingOptions({

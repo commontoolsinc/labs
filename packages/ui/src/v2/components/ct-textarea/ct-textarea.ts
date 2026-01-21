@@ -10,6 +10,7 @@ import {
   themeContext,
 } from "../theme-context.ts";
 import { type CellHandle } from "@commontools/runtime-client";
+import { stringSchema } from "@commontools/runner/schemas";
 import { createStringCellController } from "../../core/cell-controller.ts";
 
 export type TimingStrategy = "immediate" | "debounce" | "throttle" | "blur";
@@ -336,7 +337,7 @@ export class CTTextarea extends BaseElement {
           | null;
 
         // Bind the initial value to the cell controller
-        this._cellController.bind(this.value);
+        this._cellController.bind(this.value, stringSchema);
 
         // Update timing options to match current properties
         this._cellController.updateTimingOptions({
@@ -363,9 +364,9 @@ export class CTTextarea extends BaseElement {
       ) {
         super.updated(changedProperties);
 
-        if (changedProperties.has("value") || !this._cellController.hasCell()) {
+        if (changedProperties.has("value")) {
           // Bind the new value (Cell or plain) to the controller
-          this._cellController.bind(this.value);
+          this._cellController.bind(this.value, stringSchema);
         }
 
         // Update timing options if they changed
