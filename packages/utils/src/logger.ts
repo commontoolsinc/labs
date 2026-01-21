@@ -174,6 +174,127 @@ export type LogMessage = unknown | (() => unknown);
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 /**
+ * Statistics for timing measurements
+ */
+export interface TimingStats {
+  count: number; // Total measurements
+  min: number; // Minimum time (ms)
+  max: number; // Maximum time (ms)
+  totalTime: number; // Sum for average calculation
+  average: number; // totalTime / count
+  p50: number; // Median (50th percentile)
+  p95: number; // 95th percentile
+  lastTime: number; // Most recent measurement
+  lastTimestamp: number; // When last recorded
+}
+
+/**
+ * Default reservoir size for timing samples.
+ * 1000 samples provides good percentile accuracy with bounded memory.
+ */
+const TIMING_RESERVOIR_SIZE = 1000;
+
+/**
+ * Internal class for storing timing data with reservoir sampling.
+ * Uses Algorithm R for random sampling to maintain representative distribution
+ * with O(1) memory regardless of measurement count.
+ */
+class TimingDataStore {
+  private count = 0;
+  private min = Infinity;
+  private max = -Infinity;
+  private totalTime = 0;
+  private lastTime = 0;
+  private lastTimestamp = 0;
+  private samples: number[] = [];
+
+  /**
+   * Record a timing measurement.
+   * @param elapsed - The elapsed time in milliseconds
+   */
+  record(elapsed: number): void {
+    this.count++;
+    this.totalTime += elapsed;
+    this.lastTime = elapsed;
+    this.lastTimestamp = performance.now();
+
+    if (elapsed < this.min) this.min = elapsed;
+    if (elapsed > this.max) this.max = elapsed;
+
+    // Reservoir sampling (Algorithm R)
+    if (this.samples.length < TIMING_RESERVOIR_SIZE) {
+      this.samples.push(elapsed);
+    } else {
+      const j = Math.floor(Math.random() * this.count);
+      if (j < TIMING_RESERVOIR_SIZE) {
+        this.samples[j] = elapsed;
+      }
+    }
+  }
+
+  /**
+   * Get computed statistics from the recorded data.
+   */
+  getStats(): TimingStats {
+    if (this.count === 0) {
+      return {
+        count: 0,
+        min: 0,
+        max: 0,
+        totalTime: 0,
+        average: 0,
+        p50: 0,
+        p95: 0,
+        lastTime: 0,
+        lastTimestamp: 0,
+      };
+    }
+
+    // Sort samples for percentile calculation
+    const sorted = [...this.samples].sort((a, b) => a - b);
+    const p50Index = Math.floor(sorted.length * 0.5);
+    const p95Index = Math.floor(sorted.length * 0.95);
+
+    return {
+      count: this.count,
+      min: this.min,
+      max: this.max,
+      totalTime: this.totalTime,
+      average: this.totalTime / this.count,
+      p50: sorted[p50Index] ?? 0,
+      p95: sorted[p95Index] ?? sorted[sorted.length - 1] ?? 0,
+      lastTime: this.lastTime,
+      lastTimestamp: this.lastTimestamp,
+    };
+  }
+
+  /**
+   * Reset all timing data.
+   */
+  reset(): void {
+    this.count = 0;
+    this.min = Infinity;
+    this.max = -Infinity;
+    this.totalTime = 0;
+    this.lastTime = 0;
+    this.lastTimestamp = 0;
+    this.samples = [];
+  }
+}
+
+/**
+ * Build all hierarchical key paths from an array of key segments.
+ * @example buildKeyPaths(["cell", "get", "user"]) => ["cell", "cell/get", "cell/get/user"]
+ */
+function buildKeyPaths(keys: string[]): string[] {
+  const paths: string[] = [];
+  for (let i = 1; i <= keys.length; i++) {
+    paths.push(keys.slice(0, i).join("/"));
+  }
+  return paths;
+}
+
+/**
  * Numeric values for log levels to enable comparison
  */
 const LOG_LEVELS: Record<LogLevel, number> = {
@@ -278,6 +399,8 @@ export class Logger {
   >;
   private _logCountEvery: number;
   private _lastLoggedAt: number;
+  private _timingsByKey: Map<string, TimingDataStore> = new Map();
+  private _activeTimers: Map<string, number> = new Map();
 
   constructor(private moduleName?: string, options?: GetLoggerOptions) {
     // Set initial disabled state from options
@@ -487,6 +610,131 @@ export class Logger {
       console.error(prefix, color, key, ...resolveMessages(messages));
     }
   }
+
+  // ============================================================
+  // Timing Methods
+  // ============================================================
+
+  /**
+   * Start a timer for the given key path.
+   * Hierarchical keys are supported - passing multiple segments will record
+   * stats at each level when timeEnd is called.
+   *
+   * @example
+   * logger.timeStart("cell", "get", "user-data");
+   * // ... operation ...
+   * logger.timeEnd("cell", "get", "user-data");
+   * // Records to: "cell", "cell/get", "cell/get/user-data"
+   */
+  timeStart(...keys: string[]): void {
+    const keyPath = keys.join("/");
+    this._activeTimers.set(keyPath, performance.now());
+  }
+
+  /**
+   * End a timer and record the elapsed time.
+   * Returns the elapsed time in milliseconds, or undefined if no matching timer exists.
+   *
+   * Stats are recorded to all levels of the hierarchical key path.
+   */
+  timeEnd(...keys: string[]): number | undefined {
+    const keyPath = keys.join("/");
+    const startTime = this._activeTimers.get(keyPath);
+    if (startTime === undefined) {
+      return undefined;
+    }
+    this._activeTimers.delete(keyPath);
+
+    const elapsed = performance.now() - startTime;
+    this._recordTime(elapsed, keys);
+    return elapsed;
+  }
+
+  /**
+   * Record a timing measurement directly.
+   * Useful for measuring IPC latency or other cases where you have explicit timestamps.
+   *
+   * Overloads:
+   * - time(startTime, ...keys) - end time defaults to performance.now()
+   * - time(startTime, endTime, ...keys) - explicit end time
+   *
+   * @example
+   * // End time defaults to now
+   * logger.time(startTimestamp, "ipc", "CellGet");
+   *
+   * // Explicit end time
+   * logger.time(startTimestamp, endTimestamp, "ipc", "CellGet");
+   *
+   * @returns The elapsed time in milliseconds
+   */
+  time(startTime: number, ...rest: (string | number)[]): number {
+    let endTime: number;
+    let keys: string[];
+
+    // Determine if second argument is endTime or first key
+    if (rest.length > 0 && typeof rest[0] === "number") {
+      endTime = rest[0] as number;
+      keys = rest.slice(1) as string[];
+    } else {
+      endTime = performance.now();
+      keys = rest as string[];
+    }
+
+    const elapsed = endTime - startTime;
+    if (keys.length > 0) {
+      this._recordTime(elapsed, keys);
+    }
+    return elapsed;
+  }
+
+  /**
+   * Internal method to record timing to all levels of a key hierarchy.
+   */
+  private _recordTime(elapsed: number, keys: string[]): void {
+    const paths = buildKeyPaths(keys);
+    for (const path of paths) {
+      let store = this._timingsByKey.get(path);
+      if (!store) {
+        store = new TimingDataStore();
+        this._timingsByKey.set(path, store);
+      }
+      store.record(elapsed);
+    }
+  }
+
+  /**
+   * Get timing statistics for a specific key path.
+   * Accepts either separate key segments or a single "/" joined path.
+   *
+   * @example
+   * logger.getTimeStats("cell", "get");  // Using segments
+   * logger.getTimeStats("cell/get");     // Using joined path
+   */
+  getTimeStats(...keys: string[]): TimingStats | undefined {
+    const keyPath = keys.join("/");
+    const store = this._timingsByKey.get(keyPath);
+    return store?.getStats();
+  }
+
+  /**
+   * Get all timing statistics for this logger.
+   * Returns a flat map with "/" joined keys.
+   */
+  get timeStats(): Record<string, TimingStats> {
+    const result: Record<string, TimingStats> = {};
+    for (const [key, store] of this._timingsByKey) {
+      result[key] = store.getStats();
+    }
+    return result;
+  }
+
+  /**
+   * Reset all timing statistics for this logger.
+   */
+  resetTimeStats(): void {
+    this._timingsByKey.clear();
+    this._activeTimers.clear();
+  }
 }
 
 /**
@@ -612,6 +860,64 @@ export function getLoggerCountsBreakdown(): Record<string, LoggerBreakdown> & {
   };
 }
 
+/**
+ * Breakdown of timing stats by logger name
+ */
+export type TimingStatsBreakdown = {
+  [loggerName: string]: Record<string, TimingStats>;
+};
+
+/**
+ * Get a breakdown of timing statistics by logger name and key.
+ * @returns Object with nested timing stats per logger and key
+ *
+ * @example
+ * getTimingStatsBreakdown()
+ * // {
+ * //   "runtime-client": {
+ * //     "ipc": { count: 2415, min: 0.1, max: 45.2, average: 1.9, p50: 1.5, p95: 6.8, ... },
+ * //     "ipc/CellGet": { count: 1523, min: 0.1, max: 45.2, average: 2.3, p50: 1.8, p95: 8.4, ... }
+ * //   },
+ * //   "runner": {
+ * //     "cell": { count: 500, min: 0.1, p50: 2.0, p95: 8.5, max: 45.0, ... },
+ * //     "cell/get": { count: 450, min: 0.1, p50: 2.1, p95: 8.7, max: 45.0, ... }
+ * //   }
+ * // }
+ */
+export function getTimingStatsBreakdown(): TimingStatsBreakdown {
+  const global = globalThis as unknown as {
+    commontools?: { logger?: Record<string, Logger> };
+  };
+
+  const breakdown: TimingStatsBreakdown = {};
+
+  if (global.commontools?.logger) {
+    for (const [name, logger] of Object.entries(global.commontools.logger)) {
+      const stats = logger.timeStats;
+      if (Object.keys(stats).length > 0) {
+        breakdown[name] = stats;
+      }
+    }
+  }
+
+  return breakdown;
+}
+
+/**
+ * Reset timing statistics for all registered loggers.
+ * Iterates through all loggers in globalThis.commontools.logger and resets their timing stats.
+ */
+export function resetAllTimingStats(): void {
+  const global = globalThis as unknown as {
+    commontools?: { logger?: Record<string, Logger> };
+  };
+  if (global.commontools?.logger) {
+    Object.values(global.commontools.logger).forEach((logger) =>
+      logger.resetTimeStats()
+    );
+  }
+}
+
 // Make helper functions available globally for browser console access
 if (typeof globalThis !== "undefined") {
   const global = globalThis as unknown as {
@@ -620,6 +926,8 @@ if (typeof globalThis !== "undefined") {
       getTotalLoggerCounts?: typeof getTotalLoggerCounts;
       getLoggerCountsBreakdown?: typeof getLoggerCountsBreakdown;
       resetAllLoggerCounts?: typeof resetAllLoggerCounts;
+      getTimingStatsBreakdown?: typeof getTimingStatsBreakdown;
+      resetAllTimingStats?: typeof resetAllTimingStats;
     };
   };
   if (!global.commontools) {
@@ -628,4 +936,6 @@ if (typeof globalThis !== "undefined") {
   global.commontools.getTotalLoggerCounts = getTotalLoggerCounts;
   global.commontools.getLoggerCountsBreakdown = getLoggerCountsBreakdown;
   global.commontools.resetAllLoggerCounts = resetAllLoggerCounts;
+  global.commontools.getTimingStatsBreakdown = getTimingStatsBreakdown;
+  global.commontools.resetAllTimingStats = resetAllTimingStats;
 }

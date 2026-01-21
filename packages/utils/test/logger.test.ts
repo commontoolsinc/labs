@@ -3,10 +3,13 @@ import { expect } from "@std/expect";
 import {
   getLogger,
   getLoggerCountsBreakdown,
+  getTimingStatsBreakdown,
   getTotalLoggerCounts,
   log,
   LOG_COLORS,
   resetAllLoggerCounts,
+  resetAllTimingStats,
+  type TimingStats,
 } from "../src/logger.ts";
 
 describe("logger", () => {
@@ -1363,6 +1366,366 @@ describe("logger", () => {
       expect(breakdown["multi-2"]["action-a"].total).toBe(1);
       expect(breakdown["multi-2"]["action-c"].total).toBe(1);
       expect(breakdown.total).toBe(4);
+    });
+  });
+
+  describe("timing statistics", () => {
+    describe("timeStart/timeEnd", () => {
+      it("should record timing with timeStart/timeEnd pair", () => {
+        const logger = getLogger("timing-test-basic");
+
+        logger.timeStart("operation");
+        // Small delay to ensure measurable time
+        const start = performance.now();
+        while (performance.now() - start < 2) {
+          // busy wait
+        }
+        const elapsed = logger.timeEnd("operation");
+
+        expect(elapsed).toBeDefined();
+        expect(elapsed).toBeGreaterThanOrEqual(0);
+
+        const stats = logger.getTimeStats("operation");
+        expect(stats).toBeDefined();
+        expect(stats?.count).toBe(1);
+        expect(stats?.min).toBeGreaterThanOrEqual(0);
+        expect(stats?.max).toBeGreaterThanOrEqual(0);
+      });
+
+      it("should return undefined when ending timer that was not started", () => {
+        const logger = getLogger("timing-test-no-start");
+
+        const elapsed = logger.timeEnd("nonexistent");
+        expect(elapsed).toBeUndefined();
+      });
+
+      it("should support hierarchical keys", () => {
+        const logger = getLogger("timing-test-hierarchy");
+
+        logger.timeStart("cell", "get", "user-data");
+        const elapsed = logger.timeEnd("cell", "get", "user-data");
+
+        expect(elapsed).toBeDefined();
+
+        // Stats should be recorded at all levels
+        const cellStats = logger.getTimeStats("cell");
+        const cellGetStats = logger.getTimeStats("cell", "get");
+        const cellGetUserStats = logger.getTimeStats(
+          "cell",
+          "get",
+          "user-data",
+        );
+
+        expect(cellStats).toBeDefined();
+        expect(cellGetStats).toBeDefined();
+        expect(cellGetUserStats).toBeDefined();
+
+        // All should have count of 1
+        expect(cellStats?.count).toBe(1);
+        expect(cellGetStats?.count).toBe(1);
+        expect(cellGetUserStats?.count).toBe(1);
+      });
+
+      it("should allow accessing stats with joined path", () => {
+        const logger = getLogger("timing-test-path");
+
+        logger.timeStart("a", "b", "c");
+        logger.timeEnd("a", "b", "c");
+
+        // Both ways should work
+        const stats1 = logger.getTimeStats("a", "b", "c");
+        const stats2 = logger.getTimeStats("a/b/c");
+
+        expect(stats1).toBeDefined();
+        expect(stats2).toBeDefined();
+        expect(stats1?.count).toBe(1);
+        expect(stats2?.count).toBe(1);
+      });
+    });
+
+    describe("time() direct recording", () => {
+      it("should record timing with explicit start time", () => {
+        const logger = getLogger("timing-test-direct");
+
+        const startTime = performance.now();
+        // Small delay
+        const delay = performance.now();
+        while (performance.now() - delay < 2) {
+          // busy wait
+        }
+
+        const elapsed = logger.time(startTime, "ipc", "request");
+
+        expect(elapsed).toBeGreaterThanOrEqual(0);
+
+        const stats = logger.getTimeStats("ipc", "request");
+        expect(stats).toBeDefined();
+        expect(stats?.count).toBe(1);
+      });
+
+      it("should record timing with explicit start and end times", () => {
+        const logger = getLogger("timing-test-explicit");
+
+        const startTime = 100;
+        const endTime = 150;
+
+        const elapsed = logger.time(startTime, endTime, "ipc", "test");
+
+        expect(elapsed).toBe(50);
+
+        const stats = logger.getTimeStats("ipc", "test");
+        expect(stats?.min).toBe(50);
+        expect(stats?.max).toBe(50);
+      });
+
+      it("should record hierarchical stats with direct recording", () => {
+        const logger = getLogger("timing-test-direct-hierarchy");
+
+        logger.time(100, 120, "ipc", "CellGet");
+
+        expect(logger.getTimeStats("ipc")?.count).toBe(1);
+        expect(logger.getTimeStats("ipc", "CellGet")?.count).toBe(1);
+        expect(logger.getTimeStats("ipc")?.min).toBe(20);
+        expect(logger.getTimeStats("ipc", "CellGet")?.min).toBe(20);
+      });
+    });
+
+    describe("timing statistics calculation", () => {
+      it("should calculate min/max/average correctly", () => {
+        const logger = getLogger("timing-test-stats");
+
+        // Record with explicit times for predictable values
+        logger.time(0, 10, "op");
+        logger.time(0, 20, "op");
+        logger.time(0, 30, "op");
+        logger.time(0, 40, "op");
+        logger.time(0, 50, "op");
+
+        const stats = logger.getTimeStats("op");
+
+        expect(stats?.count).toBe(5);
+        expect(stats?.min).toBe(10);
+        expect(stats?.max).toBe(50);
+        expect(stats?.totalTime).toBe(150);
+        expect(stats?.average).toBe(30);
+      });
+
+      it("should calculate percentiles from samples", () => {
+        const logger = getLogger("timing-test-percentiles");
+
+        // Record 100 samples: 1-100ms
+        for (let i = 1; i <= 100; i++) {
+          logger.time(0, i, "op");
+        }
+
+        const stats = logger.getTimeStats("op");
+
+        expect(stats?.count).toBe(100);
+        expect(stats?.min).toBe(1);
+        expect(stats?.max).toBe(100);
+
+        // p50 should be around 50
+        expect(stats?.p50).toBeGreaterThanOrEqual(40);
+        expect(stats?.p50).toBeLessThanOrEqual(60);
+
+        // p95 should be around 95
+        expect(stats?.p95).toBeGreaterThanOrEqual(85);
+        expect(stats?.p95).toBeLessThanOrEqual(100);
+      });
+
+      it("should track lastTime and lastTimestamp", () => {
+        const logger = getLogger("timing-test-last");
+
+        logger.time(0, 25, "op");
+        const stats1 = logger.getTimeStats("op");
+        expect(stats1?.lastTime).toBe(25);
+        expect(stats1?.lastTimestamp).toBeGreaterThan(0);
+
+        logger.time(0, 75, "op");
+        const stats2 = logger.getTimeStats("op");
+        expect(stats2?.lastTime).toBe(75);
+        expect(stats2?.lastTimestamp).toBeGreaterThanOrEqual(
+          stats1?.lastTimestamp ?? 0,
+        );
+      });
+    });
+
+    describe("timeStats property", () => {
+      it("should return all timing stats as flat map", () => {
+        const logger = getLogger("timing-test-all");
+
+        logger.time(0, 10, "a", "b");
+        logger.time(0, 20, "c");
+        logger.time(0, 30, "d", "e", "f");
+
+        const allStats = logger.timeStats;
+
+        expect(Object.keys(allStats)).toContain("a");
+        expect(Object.keys(allStats)).toContain("a/b");
+        expect(Object.keys(allStats)).toContain("c");
+        expect(Object.keys(allStats)).toContain("d");
+        expect(Object.keys(allStats)).toContain("d/e");
+        expect(Object.keys(allStats)).toContain("d/e/f");
+      });
+
+      it("should return empty object when no timings recorded", () => {
+        const logger = getLogger("timing-test-empty");
+        const allStats = logger.timeStats;
+
+        expect(Object.keys(allStats)).toHaveLength(0);
+      });
+    });
+
+    describe("resetTimeStats", () => {
+      it("should clear all timing data", () => {
+        const logger = getLogger("timing-test-reset");
+
+        logger.time(0, 10, "op1");
+        logger.time(0, 20, "op2");
+        logger.timeStart("op3");
+
+        expect(Object.keys(logger.timeStats).length).toBeGreaterThan(0);
+
+        logger.resetTimeStats();
+
+        expect(Object.keys(logger.timeStats)).toHaveLength(0);
+        expect(logger.getTimeStats("op1")).toBeUndefined();
+        expect(logger.getTimeStats("op2")).toBeUndefined();
+
+        // Active timer should also be cleared
+        const elapsed = logger.timeEnd("op3");
+        expect(elapsed).toBeUndefined();
+      });
+    });
+
+    describe("getTimingStatsBreakdown", () => {
+      it("should aggregate timing stats from all loggers", () => {
+        const logger1 = getLogger("timing-breakdown-1");
+        const logger2 = getLogger("timing-breakdown-2");
+
+        logger1.time(0, 10, "op1");
+        logger2.time(0, 20, "op2");
+
+        const breakdown = getTimingStatsBreakdown();
+
+        expect(breakdown["timing-breakdown-1"]).toBeDefined();
+        expect(breakdown["timing-breakdown-2"]).toBeDefined();
+        expect(breakdown["timing-breakdown-1"]["op1"]?.count).toBe(1);
+        expect(breakdown["timing-breakdown-2"]["op2"]?.count).toBe(1);
+      });
+
+      it("should not include loggers with no timing data", () => {
+        const loggerWithTiming = getLogger("timing-breakdown-has-data");
+        const loggerNoTiming = getLogger("timing-breakdown-no-data");
+
+        loggerWithTiming.time(0, 10, "op");
+        // loggerNoTiming has no timing data
+
+        const breakdown = getTimingStatsBreakdown();
+
+        expect(breakdown["timing-breakdown-has-data"]).toBeDefined();
+        expect(breakdown["timing-breakdown-no-data"]).toBeUndefined();
+      });
+    });
+
+    describe("resetAllTimingStats", () => {
+      it("should reset timing stats for all loggers", () => {
+        const logger1 = getLogger("timing-reset-all-1");
+        const logger2 = getLogger("timing-reset-all-2");
+
+        logger1.time(0, 10, "op");
+        logger2.time(0, 20, "op");
+
+        expect(Object.keys(logger1.timeStats).length).toBeGreaterThan(0);
+        expect(Object.keys(logger2.timeStats).length).toBeGreaterThan(0);
+
+        resetAllTimingStats();
+
+        expect(Object.keys(logger1.timeStats)).toHaveLength(0);
+        expect(Object.keys(logger2.timeStats)).toHaveLength(0);
+      });
+
+      it("should handle empty logger registry gracefully", () => {
+        // Clean up registry
+        const global = globalThis as unknown as {
+          commontools?: { logger?: Record<string, unknown> };
+        };
+        if (global.commontools?.logger) {
+          global.commontools.logger = {};
+        }
+
+        expect(() => resetAllTimingStats()).not.toThrow();
+      });
+    });
+
+    describe("reservoir sampling", () => {
+      it("should maintain bounded memory with many samples", () => {
+        const logger = getLogger("timing-reservoir-test");
+
+        // Record many samples to test reservoir behavior
+        for (let i = 1; i <= 2000; i++) {
+          logger.time(0, i, "high-volume");
+        }
+
+        const stats = logger.getTimeStats("high-volume");
+
+        expect(stats?.count).toBe(2000);
+        expect(stats?.min).toBe(1);
+        expect(stats?.max).toBe(2000);
+
+        // Percentiles should still be approximately correct due to reservoir sampling
+        // With 2000 samples uniformly distributed 1-2000:
+        // p50 should be around 1000, p95 should be around 1900
+        // Allow wider margin due to random sampling
+        expect(stats?.p50).toBeGreaterThan(500);
+        expect(stats?.p50).toBeLessThan(1500);
+        expect(stats?.p95).toBeGreaterThan(1500);
+        expect(stats?.p95).toBeLessThanOrEqual(2000);
+      });
+    });
+
+    describe("edge cases", () => {
+      it("should handle zero elapsed time", () => {
+        const logger = getLogger("timing-zero");
+
+        logger.time(100, 100, "zero-time");
+
+        const stats = logger.getTimeStats("zero-time");
+        expect(stats?.min).toBe(0);
+        expect(stats?.max).toBe(0);
+        expect(stats?.average).toBe(0);
+      });
+
+      it("should handle single key (non-hierarchical)", () => {
+        const logger = getLogger("timing-single");
+
+        logger.time(0, 10, "single");
+
+        const stats = logger.getTimeStats("single");
+        expect(stats?.count).toBe(1);
+
+        // Should NOT create parent paths for single keys
+        expect(Object.keys(logger.timeStats)).toEqual(["single"]);
+      });
+
+      it("should accumulate stats for repeated measurements", () => {
+        const logger = getLogger("timing-accumulate");
+
+        logger.time(0, 10, "op");
+        logger.time(0, 20, "op");
+        logger.time(0, 30, "op");
+
+        const stats = logger.getTimeStats("op");
+        expect(stats?.count).toBe(3);
+        expect(stats?.totalTime).toBe(60);
+      });
+
+      it("should handle stats request for nonexistent key", () => {
+        const logger = getLogger("timing-nonexistent");
+
+        const stats = logger.getTimeStats("does-not-exist");
+        expect(stats).toBeUndefined();
+      });
     });
   });
 });

@@ -1,4 +1,5 @@
 import { defer, type Deferred } from "@commontools/utils/defer";
+import { getLogger } from "@commontools/utils/logger";
 import {
   CellUpdateNotification,
   CommandRequest,
@@ -23,6 +24,8 @@ import { RuntimeTransport } from "./transport.ts";
 import { EventEmitter } from "./emitter.ts";
 import { $onCellUpdate, CellHandle } from "../cell-handle.ts";
 import { cellRefToKey } from "../shared/utils.ts";
+
+const ipcLogger = getLogger("runtime-client");
 
 const DEBUG_IPC = false;
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -225,6 +228,9 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
 
     clearTimeout(pending.timeoutId);
     this.#pendingRequests.delete(msgId);
+
+    // Record IPC round-trip time using hierarchical keys
+    ipcLogger.time(pending.startTime, "ipc", pending.type);
 
     if ("error" in message && message.error) {
       if (DEBUG_IPC) {
