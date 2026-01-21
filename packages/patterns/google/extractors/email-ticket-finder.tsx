@@ -6,8 +6,7 @@
  * and more. Displays them in a dashboard with status indicators.
  *
  * Features:
- * - Embeds gmail-importer directly with broad keyword search
- * - LLM analyzes each email to extract ticket information
+ * - Uses GmailExtractor building block for email fetching and LLM extraction
  * - Deduplicates by confirmation code or title+date
  * - Groups by status: Today, Action Needed, This Week, Later
  * - Supports multiple ticket types: airline, concert, hotel, etc.
@@ -17,18 +16,10 @@
  * 2. Deploy this pattern
  * 3. Link: ct charm link google-auth/auth email-ticket-finder/linkedAuth
  */
-import {
-  computed,
-  generateObject,
-  JSONSchema,
-  NAME,
-  pattern,
-  UI,
-} from "commontools";
+import { computed, JSONSchema, NAME, pattern, UI } from "commontools";
 import type { Schema } from "commontools/schema";
-import GmailImporter, {
-  type Auth,
-} from "../building-blocks/gmail-importer.tsx";
+import GmailExtractor from "../building-blocks/gmail-extractor.tsx";
+import type { Auth } from "../building-blocks/gmail-importer.tsx";
 import ProcessingStatus from "../building-blocks/processing-status.tsx";
 
 // Email type - matches GmailImporter's Email type
@@ -198,6 +189,56 @@ const TICKET_ANALYSIS_SCHEMA = {
 } as const satisfies JSONSchema;
 
 type TicketAnalysisResult = Schema<typeof TICKET_ANALYSIS_SCHEMA>;
+
+const EXTRACTION_PROMPT_TEMPLATE =
+  `Analyze this email and determine if it contains an ACTUAL CONFIRMED ticket or reservation.
+
+CRITICAL DISTINCTION - isTicket=true ONLY for CONFIRMED tickets with:
+- A confirmation/booking/reference code
+- A specific date and time for the event
+- Clear indication that a purchase/booking was completed
+
+CONFIRMED TICKETS (isTicket=true):
+- Flight tickets with PNR/confirmation code (e.g., "Your confirmation: ABC123")
+- Train/bus tickets with booking reference
+- Concert/sports/theater tickets that were PURCHASED (with order number)
+- Hotel reservations with confirmation number
+- Car rental confirmations with reservation number
+- Conference registrations with registration ID
+- Restaurant reservations with confirmation
+
+NOT TICKETS (isTicket=false):
+- Promotional emails ("Get your tickets!", "Buy now!", "Don't miss out!")
+- Event announcements or invitations without a confirmed purchase
+- Emails asking you to RSVP or register (not yet confirmed)
+- Support tickets / help desk tickets
+- Lottery tickets / sweepstakes
+- Parking tickets / violations
+- Order confirmations for physical goods (not events)
+- Newsletters, marketing emails, or reminders to buy
+
+KEY RULE: If there's no confirmation code and no clear indication of a completed purchase, it's NOT a confirmed ticket.
+
+EMAIL SUBJECT: {{email.subject}}
+EMAIL DATE: {{email.date}}
+EMAIL FROM: {{email.from}}
+
+EMAIL CONTENT:
+{{email.markdownContent}}
+
+Extract:
+1. Is this a CONFIRMED ticket/reservation with a confirmation code? (true/false)
+2. Type of ticket (airline, concert, hotel, etc.)
+3. Event name (flight route, show name, hotel name, etc.)
+4. Event date in YYYY-MM-DD format (MUST be a valid future or recent date)
+5. Event time in HH:MM format (if available)
+6. End date for multi-day events (hotel checkout, etc.)
+7. Location/destination
+8. Venue name
+9. Confirmation/booking code (REQUIRED for isTicket=true)
+10. Seat info if available
+11. Provider/company name
+12. Brief summary`;
 
 // =============================================================================
 // HELPERS
@@ -380,124 +421,21 @@ interface PatternOutput {
 }
 
 export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
-  // Directly instantiate GmailImporter with ticket-specific settings
-  const gmailImporter = GmailImporter({
-    settings: {
-      gmailFilterQuery: TICKET_GMAIL_QUERY,
-      autoFetchOnAuth: true,
-      resolveInlineImages: false,
-      limit: 100,
-      debugMode: true,
+  // Use GmailExtractor building block for email fetching and LLM extraction
+  const extractor = GmailExtractor<TicketAnalysisResult>({
+    gmailQuery: TICKET_GMAIL_QUERY,
+    extraction: {
+      promptTemplate: EXTRACTION_PROMPT_TEMPLATE,
+      schema: TICKET_ANALYSIS_SCHEMA,
     },
+    title: "Ticket Emails",
+    resolveInlineImages: false,
+    limit: 100,
     linkedAuth,
   });
 
-  // Get emails directly from the embedded gmail-importer
-  const allEmails = gmailImporter.emails;
-
-  // All potentially ticket-related emails (we'll let LLM filter)
-  const ticketEmails = computed(() => {
-    return allEmails || [];
-  });
-
-  // Count of emails found
-  const emailCount = computed(() => ticketEmails?.length || 0);
-
-  // Check if connected
-  const isConnected = computed(() => {
-    if (linkedAuth?.token) return true;
-    return gmailImporter?.emailCount !== undefined;
-  });
-
-  // ==========================================================================
-  // REACTIVE LLM ANALYSIS
-  // Analyze each email to extract ticket information
-  // ==========================================================================
-
-  const emailAnalyses = ticketEmails.map((email: Email) => {
-    const analysis = generateObject<TicketAnalysisResult>({
-      prompt: computed(() => {
-        if (!email?.markdownContent) {
-          return undefined;
-        }
-
-        return `Analyze this email and determine if it contains an ACTUAL CONFIRMED ticket or reservation.
-
-CRITICAL DISTINCTION - isTicket=true ONLY for CONFIRMED tickets with:
-- A confirmation/booking/reference code
-- A specific date and time for the event
-- Clear indication that a purchase/booking was completed
-
-CONFIRMED TICKETS (isTicket=true):
-- Flight tickets with PNR/confirmation code (e.g., "Your confirmation: ABC123")
-- Train/bus tickets with booking reference
-- Concert/sports/theater tickets that were PURCHASED (with order number)
-- Hotel reservations with confirmation number
-- Car rental confirmations with reservation number
-- Conference registrations with registration ID
-- Restaurant reservations with confirmation
-
-NOT TICKETS (isTicket=false):
-- Promotional emails ("Get your tickets!", "Buy now!", "Don't miss out!")
-- Event announcements or invitations without a confirmed purchase
-- Emails asking you to RSVP or register (not yet confirmed)
-- Support tickets / help desk tickets
-- Lottery tickets / sweepstakes
-- Parking tickets / violations
-- Order confirmations for physical goods (not events)
-- Newsletters, marketing emails, or reminders to buy
-
-KEY RULE: If there's no confirmation code and no clear indication of a completed purchase, it's NOT a confirmed ticket.
-
-EMAIL SUBJECT: ${email.subject || ""}
-EMAIL DATE: ${email.date || ""}
-EMAIL FROM: ${email.from || ""}
-
-EMAIL CONTENT:
-${email.markdownContent.slice(0, 5000)}
-
-Extract:
-1. Is this a CONFIRMED ticket/reservation with a confirmation code? (true/false)
-2. Type of ticket (airline, concert, hotel, etc.)
-3. Event name (flight route, show name, hotel name, etc.)
-4. Event date in YYYY-MM-DD format (MUST be a valid future or recent date)
-5. Event time in HH:MM format (if available)
-6. End date for multi-day events (hotel checkout, etc.)
-7. Location/destination
-8. Venue name
-9. Confirmation/booking code (REQUIRED for isTicket=true)
-10. Seat info if available
-11. Provider/company name
-12. Brief summary`;
-      }),
-      schema: TICKET_ANALYSIS_SCHEMA,
-      model: "anthropic:claude-sonnet-4-5",
-    });
-
-    return {
-      email,
-      emailId: email.id,
-      emailDate: email.date,
-      emailSubject: email.subject,
-      analysis,
-      pending: analysis.pending,
-      error: analysis.error,
-      result: analysis.result,
-    };
-  });
-
-  // Count pending analyses
-  const pendingCount = computed(
-    () => emailAnalyses?.filter((a) => a?.pending)?.length || 0,
-  );
-
-  // Count completed analyses
-  const completedCount = computed(
-    () =>
-      emailAnalyses?.filter((a) =>
-        a?.analysis?.pending === false && a?.analysis?.result !== undefined
-      ).length || 0,
-  );
+  // Convenience aliases from extractor
+  const { rawAnalyses, emailCount, pendingCount, completedCount } = extractor;
 
   // ==========================================================================
   // TICKET TRACKING
@@ -512,8 +450,8 @@ Extract:
     today.setHours(0, 0, 0, 0);
 
     // Sort emails by date (newest first) so we keep most recent data
-    const sortedAnalyses = [...(emailAnalyses || [])]
-      .filter((a) => a?.result && a.result.isTicket)
+    const sortedAnalyses = [...(rawAnalyses || [])]
+      .filter((a) => a?.analysis?.result?.isTicket)
       .sort((a, b) => {
         const dateA = new Date(a.emailDate || 0).getTime();
         const dateB = new Date(b.emailDate || 0).getTime();
@@ -522,7 +460,7 @@ Extract:
       });
 
     for (const analysisItem of sortedAnalyses) {
-      const result = analysisItem.result;
+      const result = analysisItem.analysis?.result;
       if (!result || !result.isTicket) continue;
       if (result.ticketSource === "not_a_ticket") continue;
 
@@ -554,7 +492,7 @@ Extract:
         daysUntil,
         emailId: analysisItem.emailId,
         emailDate: analysisItem.emailDate,
-        emailSubject: analysisItem.emailSubject,
+        emailSubject: analysisItem.email?.subject || "",
       };
 
       ticketMap.set(key, trackedTicket);
@@ -692,97 +630,14 @@ Extract:
 
         <ct-vscroll flex showScrollbar>
           <ct-vstack padding="6" gap="4">
-            {/* Auth UI from embedded Gmail Importer */}
-            {gmailImporter.authUI}
+            {/* Auth UI from GmailExtractor */}
+            {extractor.ui.authStatusUI}
 
             {/* Connection Status */}
-            <div
-              style={{
-                padding: "12px 16px",
-                backgroundColor: computed(() =>
-                  isConnected ? "#d1fae5" : "#fef3c7"
-                ),
-                borderRadius: "8px",
-                border: computed(() =>
-                  isConnected ? "1px solid #10b981" : "1px solid #f59e0b"
-                ),
-                display: computed(() => (isConnected ? "block" : "none")),
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                }}
-              >
-                <span
-                  style={{
-                    width: "10px",
-                    height: "10px",
-                    borderRadius: "50%",
-                    backgroundColor: "#10b981",
-                  }}
-                />
-                <span>Connected to Gmail</span>
-                <span style={{ marginLeft: "auto", color: "#059669" }}>
-                  {emailCount} potential ticket emails found
-                </span>
-                <button
-                  type="button"
-                  onClick={gmailImporter.bgUpdater}
-                  style={{
-                    marginLeft: "8px",
-                    padding: "6px 12px",
-                    backgroundColor: "#10b981",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "6px",
-                    cursor: "pointer",
-                    fontSize: "13px",
-                    fontWeight: "500",
-                  }}
-                >
-                  Fetch Emails
-                </button>
-              </div>
-            </div>
+            {extractor.ui.connectionStatusUI}
 
             {/* Analysis Status */}
-            <div
-              style={{
-                padding: "12px 16px",
-                backgroundColor: "#eff6ff",
-                borderRadius: "8px",
-                border: "1px solid #3b82f6",
-                display: computed(() => (isConnected ? "block" : "none")),
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "12px",
-                }}
-              >
-                <span style={{ fontWeight: "600" }}>Analysis:</span>
-                <span>{emailCount} emails</span>
-                <div
-                  style={{
-                    display: computed(() => pendingCount > 0 ? "flex" : "none"),
-                    alignItems: "center",
-                    gap: "4px",
-                    color: "#2563eb",
-                  }}
-                >
-                  <ct-loader size="sm" />
-                  <span>{pendingCount} analyzing...</span>
-                </div>
-                <span style={{ color: "#059669" }}>
-                  {completedCount} completed
-                </span>
-              </div>
-            </div>
+            {extractor.ui.analysisProgressUI}
 
             {/* Summary Stats */}
             <div
@@ -1133,18 +988,18 @@ Extract:
                     LLM Analysis Results:
                   </h4>
                   <ct-vstack gap="2">
-                    {emailAnalyses.map((analysis) => (
+                    {rawAnalyses.map((analysisItem) => (
                       <div
                         style={{
                           padding: "12px",
                           backgroundColor: "white",
                           borderRadius: "6px",
                           border: computed(() =>
-                            analysis.pending
+                            analysisItem.pending
                               ? "1px solid #fbbf24"
-                              : analysis.error
+                              : analysisItem.error
                               ? "1px solid #ef4444"
-                              : analysis.result?.isTicket
+                              : analysisItem.analysis?.result?.isTicket
                               ? "1px solid #10b981"
                               : "1px solid #d1d5db"
                           ),
@@ -1158,12 +1013,12 @@ Extract:
                             color: "#111827",
                           }}
                         >
-                          {analysis.email.subject}
+                          {analysisItem.email.subject}
                         </div>
 
                         <div
                           style={{
-                            display: analysis.pending ? "flex" : "none",
+                            display: analysisItem.pending ? "flex" : "none",
                             alignItems: "center",
                             gap: "4px",
                             color: "#f59e0b",
@@ -1176,22 +1031,22 @@ Extract:
 
                         <div
                           style={{
-                            display: analysis.error ? "block" : "none",
+                            display: analysisItem.error ? "block" : "none",
                             color: "#dc2626",
                             marginTop: "4px",
                           }}
                         >
                           Error: {computed(() =>
-                            analysis.error ? String(analysis.error) : ""
+                            analysisItem.error ? String(analysisItem.error) : ""
                           )}
                         </div>
 
                         <div
                           style={{
                             display: computed(() =>
-                              !analysis.pending &&
-                                !analysis.error &&
-                                analysis.result
+                              !analysisItem.pending &&
+                                !analysisItem.error &&
+                                analysisItem.analysis?.result
                                 ? "block"
                                 : "none"
                             ),
@@ -1202,7 +1057,7 @@ Extract:
                               marginTop: "8px",
                               padding: "8px",
                               backgroundColor: computed(() =>
-                                analysis.result?.isTicket
+                                analysisItem.analysis?.result?.isTicket
                                   ? "#d1fae5"
                                   : "#f3f4f6"
                               ),
@@ -1210,9 +1065,10 @@ Extract:
                             }}
                           >
                             <div style={{ color: "#374151" }}>
-                              <strong>Is Ticket:</strong>{" "}
-                              {computed(() =>
-                                analysis.result?.isTicket ? "Yes ✓" : "No"
+                              <strong>Is Ticket:</strong> {computed(() =>
+                                analysisItem.analysis?.result?.isTicket
+                                  ? "Yes ✓"
+                                  : "No"
                               )}
                             </div>
                             <div
@@ -1220,12 +1076,16 @@ Extract:
                                 color: "#374151",
                                 marginTop: "4px",
                                 display: computed(() =>
-                                  analysis.result?.isTicket ? "block" : "none"
+                                  analysisItem.analysis?.result?.isTicket
+                                    ? "block"
+                                    : "none"
                                 ),
                               }}
                             >
                               <strong>Type:</strong> {computed(
-                                () => analysis.result?.ticketSource || "N/A",
+                                () =>
+                                  analysisItem.analysis?.result?.ticketSource ||
+                                  "N/A",
                               )}
                             </div>
                             <div
@@ -1233,12 +1093,16 @@ Extract:
                                 color: "#374151",
                                 marginTop: "4px",
                                 display: computed(() =>
-                                  analysis.result?.isTicket ? "block" : "none"
+                                  analysisItem.analysis?.result?.isTicket
+                                    ? "block"
+                                    : "none"
                                 ),
                               }}
                             >
                               <strong>Event:</strong> {computed(
-                                () => analysis.result?.eventName || "N/A",
+                                () =>
+                                  analysisItem.analysis?.result?.eventName ||
+                                  "N/A",
                               )}
                             </div>
                             <div
@@ -1246,13 +1110,16 @@ Extract:
                                 color: "#374151",
                                 marginTop: "4px",
                                 display: computed(() =>
-                                  analysis.result?.eventDate ? "block" : "none"
+                                  analysisItem.analysis?.result?.eventDate
+                                    ? "block"
+                                    : "none"
                                 ),
                               }}
                             >
-                              <strong>Date:</strong>{" "}
-                              {computed(() =>
-                                formatDate(analysis.result?.eventDate)
+                              <strong>Date:</strong> {computed(() =>
+                                formatDate(
+                                  analysisItem.analysis?.result?.eventDate,
+                                )
                               )}
                             </div>
                             <div
@@ -1260,21 +1127,26 @@ Extract:
                                 color: "#374151",
                                 marginTop: "4px",
                                 display: computed(() =>
-                                  analysis.result?.confirmationCode
+                                  analysisItem.analysis?.result
+                                      ?.confirmationCode
                                     ? "block"
                                     : "none"
                                 ),
                               }}
                             >
                               <strong>Confirmation:</strong> {computed(
-                                () => analysis.result?.confirmationCode || "",
+                                () =>
+                                  analysisItem.analysis?.result
+                                    ?.confirmationCode || "",
                               )}
                             </div>
                             <div
                               style={{ color: "#374151", marginTop: "4px" }}
                             >
                               <strong>Summary:</strong> {computed(
-                                () => analysis.result?.summary || "N/A",
+                                () =>
+                                  analysisItem.analysis?.result?.summary ||
+                                  "N/A",
                               )}
                             </div>
                           </div>

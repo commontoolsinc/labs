@@ -315,8 +315,10 @@ export default pattern<PatternInput, PatternOutput>(
     // Use GmailExtractor building block for email fetching and LLM extraction
     const extractor = GmailExtractor<EmailAnalysisResult>({
       gmailQuery: BOFA_GMAIL_QUERY,
-      extractionSchema: EMAIL_ANALYSIS_SCHEMA,
-      extractionPromptTemplate: EXTRACTION_PROMPT_TEMPLATE,
+      extraction: {
+        schema: EMAIL_ANALYSIS_SCHEMA,
+        promptTemplate: EXTRACTION_PROMPT_TEMPLATE,
+      },
       title: "BofA Emails",
       resolveInlineImages: false,
       limit: 100,
