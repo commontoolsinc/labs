@@ -21,7 +21,7 @@ interface Output {
   text: string;
 }
 
-export default pattern<{}, Output>(() => {
+export default pattern<Record<string, never>, Output>(() => {
   const text = Writable.of<string>("hello");
 
   return {
@@ -32,7 +32,9 @@ export default pattern<{}, Output>(() => {
           <ct-card>
             <ct-vstack gap="2">
               <ct-heading level={4}>Schema Subscription Bug Repro</ct-heading>
-              <p>Type in the input below. The text interpolation should update.</p>
+              <p>
+                Type in the input below. The text interpolation should update.
+              </p>
 
               <ct-input $value={text} placeholder="Type here..." />
 
@@ -41,7 +43,8 @@ export default pattern<{}, Output>(() => {
               </p>
 
               <p style="color: gray; font-size: 0.875rem;">
-                If the "Current value" doesn't update when you type, the bug is present.
+                If the "Current value" doesn't update when you type, the bug is
+                present.
               </p>
             </ct-vstack>
           </ct-card>
