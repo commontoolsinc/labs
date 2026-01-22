@@ -902,6 +902,7 @@ type StripCellInner<T> =
     : [T] extends [AnyBrandedCell<infer U>] ? StripCell<U>
     // Convert VNode types that contain cells to one that doesn't
     // It's also a complex recursive type that we don't want to go into
+    : [T] extends [UIRenderable] ? { [UI]: VNodeResult }
     : [T] extends [VNode] ? VNodeResult
     : [T] extends [JSXElement] ? VNodeResult
     // Don't convert internal types for now
@@ -1829,10 +1830,21 @@ export type VNode = {
   [UI]?: VNode;
 };
 
+export type PropsResult = {
+  [key: string]:
+    | string
+    | number
+    | boolean
+    | object
+    | Array<any>
+    | null
+    | Stream<any>;
+};
+
 export type VNodeResult = {
   type: "vnode";
   name: string;
-  props: Props;
+  props: PropsResult;
   children?: Array<VNodeResult | string | number | boolean | null | undefined>;
   [UI]?: VNodeResult;
 };
