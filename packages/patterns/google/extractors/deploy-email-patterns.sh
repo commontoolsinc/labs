@@ -18,6 +18,7 @@ if [ -z "$SPACE_NAME" ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CT="deno task ct"
 API_URL="${CT_API_URL:-http://localhost:8000}"
 FLAGS="-s $SPACE_NAME -a $API_URL -q"
@@ -26,10 +27,11 @@ echo "Deploying email patterns to space: $SPACE_NAME"
 echo ""
 
 # Helper to deploy and extract charm ID
+# Uses --root to allow imports from parent directories (building-blocks/)
 deploy() {
     local file="$1"
     local output
-    output=$($CT charm new $FLAGS "$SCRIPT_DIR/$file" 2>&1)
+    output=$($CT charm new $FLAGS --root "$ROOT_DIR" "$SCRIPT_DIR/$file" 2>&1)
     echo "$output" | grep -oE 'ba[a-z0-9]{57,}' | head -1
 }
 

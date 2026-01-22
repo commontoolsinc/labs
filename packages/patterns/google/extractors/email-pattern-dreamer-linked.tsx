@@ -19,7 +19,9 @@
  * Patterns find google-auth via wish() - no manual auth linking needed.
  */
 import { NAME, pattern, UI } from "commontools";
-import GmailImporter, { type Auth } from "../building-blocks/gmail-importer.tsx";
+import GmailImporter, {
+  type Auth,
+} from "../building-blocks/gmail-importer.tsx";
 
 // Charm reference type - linked charms come as opaque cell references
 type CharmRef = any;
@@ -59,6 +61,16 @@ const previewBoxStyle = {
   borderRadius: "8px",
 };
 
+// Check if a linked charm has actual data
+// Inputs are Cell objects - JSON.stringify returns "null" when empty
+const hasData = (charm: CharmRef | undefined): boolean => {
+  if (!charm) return false;
+  // When a cell has no linked data, JSON.stringify returns "null"
+  const serialized = JSON.stringify(charm);
+  return serialized !== "null" && serialized !== "{}" &&
+    serialized !== "undefined";
+};
+
 export default pattern<PatternInput>(({
   linkedAuth,
   usps,
@@ -94,7 +106,7 @@ export default pattern<PatternInput>(({
     calendar,
     notes,
     united,
-  ].filter(Boolean);
+  ].filter(hasData);
 
   const linkedCount = linkedPatterns.length;
 
@@ -180,7 +192,7 @@ export default pattern<PatternInput>(({
             )}
 
             {/* USPS */}
-            {usps && (
+            {hasData(usps) && (
               <div style={cardStyle}>
                 <div style={headerStyle}>
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
@@ -193,7 +205,7 @@ export default pattern<PatternInput>(({
             )}
 
             {/* Berkeley Library */}
-            {library && (
+            {hasData(library) && (
               <div style={cardStyle}>
                 <div style={headerStyle}>
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
@@ -206,7 +218,7 @@ export default pattern<PatternInput>(({
             )}
 
             {/* Chase */}
-            {chase && (
+            {hasData(chase) && (
               <div style={cardStyle}>
                 <div style={headerStyle}>
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
@@ -219,7 +231,7 @@ export default pattern<PatternInput>(({
             )}
 
             {/* BAM School */}
-            {bam && (
+            {hasData(bam) && (
               <div style={cardStyle}>
                 <div style={headerStyle}>
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
@@ -232,7 +244,7 @@ export default pattern<PatternInput>(({
             )}
 
             {/* BofA */}
-            {bofa && (
+            {hasData(bofa) && (
               <div style={cardStyle}>
                 <div style={headerStyle}>
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
@@ -245,7 +257,7 @@ export default pattern<PatternInput>(({
             )}
 
             {/* Tickets */}
-            {tickets && (
+            {hasData(tickets) && (
               <div style={cardStyle}>
                 <div style={headerStyle}>
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
@@ -258,7 +270,7 @@ export default pattern<PatternInput>(({
             )}
 
             {/* Calendar */}
-            {calendar && (
+            {hasData(calendar) && (
               <div style={cardStyle}>
                 <div style={headerStyle}>
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
@@ -271,7 +283,7 @@ export default pattern<PatternInput>(({
             )}
 
             {/* Notes */}
-            {notes && (
+            {hasData(notes) && (
               <div style={cardStyle}>
                 <div style={headerStyle}>
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
@@ -284,7 +296,7 @@ export default pattern<PatternInput>(({
             )}
 
             {/* United */}
-            {united && (
+            {hasData(united) && (
               <div style={cardStyle}>
                 <div style={headerStyle}>
                   <div style={{ fontWeight: "600", fontSize: "16px" }}>
