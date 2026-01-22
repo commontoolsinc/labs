@@ -34,6 +34,10 @@
           {
             "type": "command",
             "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/deno-test-filter.ts\""
+          },
+          {
+            "type": "command",
+            "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/ask-before-delete-spaces.ts\""
           }
         ]
       },
