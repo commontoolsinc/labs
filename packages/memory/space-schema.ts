@@ -419,11 +419,8 @@ const redactCommits = <Space extends MemorySpace>(
       commitData.transaction.args.changes,
     );
     const labels = getLabels(session, changedFacts);
-    if (Object.keys(labels).length > 0) {
-      commitData.labels = labels;
-    }
     // we don't need the since field anymore for these facts
-    const redactedData = redactCommitData(commitData);
+    const redactedData = redactCommitData(commitData, labels);
     const redactedValue = (redactedData !== undefined)
       ? { is: redactedData, since: commitData.since }
       : { since: commitData.since };
