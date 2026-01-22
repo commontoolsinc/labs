@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { NAME, pattern, UI, Writable, derive } from "commontools";
+import { NAME, pattern, UI, Writable } from "commontools";
 
 /**
  * Reproduction case for late subscriber initial value bug.
@@ -35,12 +35,6 @@ export default pattern<{}, Output>(() => {
   const textareaValue = Writable.of<string>("multi\nline");
   const checkboxValue = Writable.of<boolean>(true);
 
-  // derive() converts boolean to string reactively for display
-  const checkboxDisplay = derive(
-    { checkboxValue },
-    ({ checkboxValue }) => (checkboxValue ? "true" : "false"),
-  );
-
   return {
     [NAME]: "Late Subscriber Repro",
     [UI]: (
@@ -71,10 +65,7 @@ export default pattern<{}, Output>(() => {
               <ct-heading level={4}>ct-checkbox</ct-heading>
               <ct-checkbox $checked={checkboxValue}>Toggle me</ct-checkbox>
               <p>
-                <strong>Interpolated (via derive):</strong> {checkboxDisplay}
-              </p>
-              <p>
-                <strong>Raw boolean cell:</strong> [{checkboxValue}]
+                <strong>Interpolated:</strong> [{checkboxValue}]
               </p>
             </ct-vstack>
           </ct-card>
