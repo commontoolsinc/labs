@@ -121,6 +121,8 @@ interface Output {
   authUI: VNode;
   /** Handler to trigger email fetch from external patterns */
   bgUpdater: Stream<unknown>;
+  /** Whether auth is ready (has valid token) */
+  isReady: boolean;
   // /** Search emails by query string (searches subject, from, snippet) */
   // searchEmails: PatternToolResult<{ query: string }>;
   // /** Get count of imported emails */
@@ -1075,7 +1077,7 @@ export default pattern<{
 
     // Choose auth source based on linkedAuth availability
     const auth = ifElse(linkedAuth.token, linkedAuth, wishedAuth);
-    const isReady = auth.token;
+    const isReady = computed(() => !!auth.token);
     const currentEmail = computed(() => auth.user?.email ?? "");
 
     const googleUpdaterStream = googleUpdater({
@@ -1364,6 +1366,7 @@ export default pattern<{
       emails,
       emailCount: derive(emails, (list: Email[]) => list?.length || 0),
       bgUpdater: googleUpdaterStream,
+      isReady,
       // Pattern tools for omnibot - using module-scope callbacks
       searchEmails: patternTool(searchEmailsCallback, { emails }),
       getEmailCount: patternTool(getEmailCountCallback, { emails }),

@@ -172,10 +172,10 @@ export interface GmailExtractorOutput<T = unknown> {
 
   /** UI bundle (JSX elements) */
   ui: {
-    authStatusUI: unknown;
-    connectionStatusUI: unknown;
-    analysisProgressUI: unknown;
-    previewUI: unknown;
+    authStatusUI: JSX.Element;
+    connectionStatusUI: JSX.Element;
+    analysisProgressUI: JSX.Element;
+    previewUI: JSX.Element;
   };
 
   /** Access to underlying GmailImporter (for advanced use) */
@@ -397,7 +397,9 @@ const removeLabelsHandler = handler<
  *
  * @typeParam T - The shape of extracted items (must match extraction.schema)
  */
-function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
+function GmailExtractor<T = unknown>(
+  input: GmailExtractorInput,
+): GmailExtractorOutput<T> {
   const {
     gmailQuery,
     extraction,
@@ -423,14 +425,10 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
   const emails = gmailImporter.emails;
   const emailCount = computed(() => emails?.length || 0);
 
-  // Check connection status
-  // Note: When using wish() for auth (no linkedAuth), we use emailCount > 0 as a proxy
-  // for "connected". This means we won't show "Connected" until emails are actually fetched.
-  const isConnected = computed(() => {
-    if (linkedAuth?.token) return true;
-    // For wish() auth, check if we've fetched any emails as proxy for auth success
-    return (emails?.length || 0) > 0;
-  });
+  // Check connection status using the importer's resolved auth state
+  // GmailImporter exposes isReady which checks: ifElse(linkedAuth.token, linkedAuth, wishedAuth).token
+  // This properly handles both linkedAuth and wish()-based auth
+  const isConnected = gmailImporter.isReady;
 
   // Auto-detect whether to run analysis based on presence of extraction config
   const shouldRunAnalysis = computed(() => {
