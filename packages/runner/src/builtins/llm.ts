@@ -120,21 +120,54 @@ const GenerateObjectResultSchema = {
 
 /**
  * Creates an updatePartial callback that safely updates the partial cell
- * during streaming, checking if the transaction is still valid and the
- * run hasn't been superseded.
+ * during streaming. Uses batched updates to reduce transaction overhead
+ * while maintaining reactive updates.
+ *
+ * Updates are batched every 66ms (~15fps) to avoid creating many small
+ * transactions during rapid streaming. Each batch waits for the scheduler
+ * to be idle, then commits the latest partial text.
  */
 function createUpdatePartialCallback<T>(
-  partialCell: Cell<T>,
-  tx: IExtendedStorageTransaction,
+  resultCell: Cell<any>,
+  runtime: Runtime,
   getCurrentRun: () => number,
   thisRun: number,
 ): (text: string) => void {
-  return (text: string) => {
-    if (thisRun !== getCurrentRun()) return;
-    const status = tx.status();
-    if (status.status !== "ready") return;
+  let pendingText: string | null = null;
+  let batchTimer: ReturnType<typeof setTimeout> | null = null;
 
-    partialCell.withTx(tx).set(text as T);
+  return (text: string) => {
+    if (thisRun !== getCurrentRun()) {
+      return;
+    }
+
+    // Store the latest text (overwrites any pending update)
+    pendingText = text;
+
+    // If no batch is scheduled, start one
+    if (!batchTimer) {
+      batchTimer = setTimeout(() => {
+        batchTimer = null;
+        const textToWrite = pendingText;
+        pendingText = null;
+
+        // Check run is still valid before committing
+        if (textToWrite === null || thisRun !== getCurrentRun()) {
+          return;
+        }
+
+        // Wait for scheduler to be idle, then commit the batched update
+        runtime.idle().then(() => {
+          if (thisRun !== getCurrentRun()) {
+            return;
+          }
+          return runtime.editWithRetry((tx) => {
+            const partialCell = resultCell.key("partial").withTx(tx);
+            partialCell.set(textToWrite as T);
+          });
+        });
+      }, 66); // ~15fps batching
+    }
   };
 }
 
@@ -403,8 +436,8 @@ export function llm(
     pendingWithLog.set(true);
 
     const updatePartial = createUpdatePartialCallback(
-      resultCell.key("partial"),
-      tx,
+      resultCell,
+      runtime,
       () => currentRun,
       thisRun,
     );
@@ -589,8 +622,8 @@ export function generateText(
     pendingWithLog.set(true);
 
     const updatePartial = createUpdatePartialCallback(
-      resultCell.key("partial"),
-      tx,
+      resultCell,
+      runtime,
       () => currentRun,
       thisRun,
     );
@@ -787,8 +820,8 @@ export function generateObject<T extends Record<string, unknown>>(
       pendingWithLog.set(true);
 
       const updatePartial = createUpdatePartialCallback(
-        resultCell.key("partial"),
-        tx,
+        resultCell,
+        runtime,
         () => currentRun,
         thisRun,
       );
