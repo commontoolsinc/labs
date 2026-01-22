@@ -1,0 +1,10 @@
+name = "cfc"
+version = "0.1.0"
+defaultTargets = ["cfc"]
+
+[[lean_lib]]
+name = "Cfc"
+
+[[lean_exe]]
+name = "cfc"
+root = "Main"

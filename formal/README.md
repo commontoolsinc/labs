@@ -1,0 +1,17 @@
+# cfc (Lean4)
+
+Tiny, self-contained Lean4 formalization of a *core* slice of the CFC spec in `docs/specs/cfc/`.
+
+Build:
+
+```sh
+cd formal
+lake build
+```
+
+What is modeled:
+
+- CNF confidentiality labels as lists of clauses, integrity as a list of atoms
+- Access check (`canAccess`) and label join (conf concatenation, integrity intersection)
+- A tiny expression language with PC/flow-path taint
+- Proofs are added incrementally in `formal/Cfc/Proofs/`.
