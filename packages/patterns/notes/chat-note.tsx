@@ -423,18 +423,30 @@ const ChatNote = pattern<Input, Output>(
     );
 
     // Can generate when there's content and not already generating
+    // Optimized to avoid splitting entire content on every keystroke
     const canGenerate = computed(() => {
       if (isGenerating.get()) return false;
       const currentContent = content.get();
       if (!currentContent.trim()) return false;
 
-      // Check if last section is from user (not AI)
-      const sections = currentContent.split(/\n---+\n/);
-      const lastSection = sections[sections.length - 1]?.trim();
-      if (!lastSection) return false;
+      // Find the last section separator efficiently using lastIndexOf
+      const lastSepIdx = currentContent.lastIndexOf("\n---");
+      let lastSection: string;
+      if (lastSepIdx === -1) {
+        lastSection = currentContent;
+      } else {
+        // Find the end of the separator line (skip past the ---\n)
+        const afterSep = currentContent.indexOf("\n", lastSepIdx + 4);
+        lastSection = afterSep === -1
+          ? currentContent.substring(lastSepIdx + 4)
+          : currentContent.substring(afterSep + 1);
+      }
+
+      const trimmedLast = lastSection.trim();
+      if (!trimmedLast) return false;
 
       // If last section starts with ## AI, we can't generate
-      if (lastSection.match(/^##\s*(?:AI|Assistant)\b/i)) return false;
+      if (trimmedLast.match(/^##\s*(?:AI|Assistant)\b/i)) return false;
 
       return true;
     });
