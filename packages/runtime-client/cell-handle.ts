@@ -273,32 +273,17 @@ export class CellHandle<T = unknown> {
   // Called when cell has been updated from the backend with
   // a raw value that may contain CellRefs.
   [$onCellUpdate](value: unknown): void {
-    const instanceId = (this as any).__debugId ?? "no-id";
     const applied = applyValue(
       value,
       this.#value,
       this as CellHandle<unknown>,
     ) as T;
-    const isEqual = valuesEqual(applied, this.#value);
-    console.log("[DEBUG CellHandle.$onCellUpdate]", {
-      instanceId,
-      path: this.#ref.path,
-      incomingValue: value,
-      appliedValue: applied,
-      previousValue: this.#value,
-      isEqual,
-      callbackCount: this.#callbacks.size,
-    });
-    if (isEqual) {
+    if (valuesEqual(applied, this.#value)) {
       return;
     }
 
     this.#value = applied;
     for (const callback of this.#callbacks.values()) {
-      console.log(
-        "[DEBUG CellHandle.$onCellUpdate] firing callback for instance:",
-        instanceId,
-      );
       callback(this.#value);
     }
   }
