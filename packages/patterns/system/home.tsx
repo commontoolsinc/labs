@@ -596,22 +596,28 @@ Return valid JSON matching the schema.`,
       const content = summaryPromptContent;
       if (!content) return "";
 
-      const currentSummary = learned.get().summary;
+      const currentSummary = learned.get().summary?.trim();
+      // Only include current summary if it looks like real content (not empty or placeholder)
+      const hasRealSummary = currentSummary &&
+        currentSummary.length > 20 &&
+        !currentSummary.toLowerCase().includes("no profile") &&
+        !currentSummary.toLowerCase().includes("no existing");
 
-      return `${
-        currentSummary ? `Current profile summary:\n${currentSummary}\n\n` : ""
-      }New/updated information about this user:
+      return `Information about this user:
 ${content}
+${hasRealSummary ? `\nPrevious summary (preserve tone if user edited it):\n${currentSummary}` : ""}
 
-Write a concise, natural profile summary (2-4 paragraphs) that captures who this person is based on their activity. Include:
-- Key facts and interests
-- Notable preferences
-- Any open questions we should ask them
+Write a fresh, complete profile summary in 200 words or less. This should be a cohesive narrative, not a list. Write in second person ("You...") to feel personal.
 
-If there's an existing summary, update it with new information while preserving the tone and any user edits. Keep it personal and readable, not a list.`;
+IMPORTANT:
+- Write a COMPLETE rewrite, not an addition to the previous summary
+- Maximum 200 words
+- Focus on the most important/interesting facts
+- Be warm and personal but factual
+- Do NOT mention "no profile exists" or similar - just write the profile based on available data`;
     }),
     system:
-      "You write concise user profile summaries. Be warm but factual. Write in third person.",
+      "You write concise user profile summaries. Maximum 200 words. Write in second person (You...). Never mention missing data or empty profiles - just write based on what you know.",
     model: "anthropic:claude-haiku-4-5",
   });
 
