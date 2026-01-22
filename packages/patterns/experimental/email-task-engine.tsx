@@ -33,18 +33,18 @@ import {
 } from "commontools";
 import GmailExtractor, {
   type Email,
-} from "../building-blocks/gmail-extractor.tsx";
-import type { Auth } from "../building-blocks/util/google-auth-manager.tsx";
+} from "../google/building-blocks/gmail-extractor.tsx";
+import type { Auth } from "../google/building-blocks/util/google-auth-manager.tsx";
 import {
   type GmailLabel,
   GmailSendClient,
-} from "../building-blocks/util/gmail-send-client.ts";
+} from "../google/building-blocks/util/gmail-send-client.ts";
 import {
   createGoogleAuth,
   type ScopeKey,
-} from "../building-blocks/util/google-auth-manager.tsx";
-import ProcessingStatus from "../building-blocks/processing-status.tsx";
-import Note from "../../notes/note.tsx";
+} from "../google/building-blocks/util/google-auth-manager.tsx";
+import ProcessingStatus from "../google/building-blocks/processing-status.tsx";
+import Note from "../notes/note.tsx";
 
 // Debug flag for development
 const DEBUG_TASKS = false;
