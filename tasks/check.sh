@@ -60,21 +60,12 @@ PATHS=(
   "packages/patterns/weekly-calendar"
   "packages/patterns/google/core/util"
   "packages/patterns/google/core/integration"
+  "packages/patterns/google/building-blocks"
+  "packages/patterns/google/extractors"
+  "packages/patterns/google/WIP"
 )
 
 # Check each path separately
 for path in "${PATHS[@]}"; do
   check_path "$path"
-done
-
-# Google patterns are checked individually to avoid TypeScript exhaustion
-# due to their large file sizes
-echo "Checking google patterns individually..."
-for file in packages/patterns/google/core/*.ts packages/patterns/google/core/*.tsx \
-            packages/patterns/google/core/experimental/*.ts packages/patterns/google/core/experimental/*.tsx \
-            packages/patterns/google/extractors/*.ts packages/patterns/google/extractors/*.tsx \
-            packages/patterns/google/WIP/*.ts packages/patterns/google/WIP/*.tsx; do
-  if [[ -f "$file" ]]; then
-    check_path "$file"
-  fi
 done
