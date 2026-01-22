@@ -21,4 +21,4 @@ Proofs:
 
 - Termination-insensitive noninterference (with implicit-flow/PC taint): `formal/Cfc/Proofs/Noninterference.lean`
 - Guarded declassification only rewrites confidentiality when the guard token is present: `formal/Cfc/Proofs/RobustDeclassification.lean`
-- Integrity-guarded confidentiality exchange + scenario checks (spaces/links, multi-party, authority-only): `formal/Cfc/Proofs/Scenarios.lean`
+- Integrity-guarded confidentiality exchange + scenario checks (spaces/links, multi-party, authority-only, expires): `formal/Cfc/Proofs/Scenarios.lean`

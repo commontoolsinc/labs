@@ -199,6 +199,61 @@ theorem authority_only_drop_allows_with_guards (acting : String) :
     pUser, ℓ, Principal.satisfies,
     canAccess, canAccessConf, clauseSat]
 
+/-- `GoogleAuth`-style exchange can add an alternative principal to a policy clause. -/
+theorem googleauth_adds_userresource_alternative (acting : String) :
+    let googleAuth : Atom := Atom.policy "GoogleAuth" acting "h"
+    let userRes : Atom := Atom.other ("UserResource:" ++ acting)
+    let need : IntegLabel := [Atom.integrityTok "AuthorizedRequest"]
+    let boundary : IntegLabel := need
+    let ℓ : Label := { conf := [[Atom.user acting], [googleAuth]], integ := [] }
+    canAccess { now := 0, atoms := [Atom.user acting, userRes] }
+      (Exchange.exchangeAddAltIf need googleAuth userRes boundary ℓ) := by
+  classical
+  intro googleAuth userRes need boundary ℓ
+  have hNeed : Exchange.hasAll need boundary := by
+    intro a ha
+    simpa [boundary] using ha
+  simp [Exchange.exchangeAddAltIf, Exchange.availIntegrity, hNeed,
+    Exchange.confAddAltFor, Exchange.clauseInsert,
+    ℓ, Principal.satisfies,
+    canAccess, canAccessConf, clauseSat]
+
+/-- Expiration is a confidentiality clause: once expired, access fails. -/
+theorem expires_clause_denies_after_deadline (u : String) (t : Nat) :
+    let p : Principal := { now := t + 1, atoms := [Atom.user u] }
+    let ℓ : Label := { conf := [[Atom.user u], [Atom.expires t]], integ := [] }
+    ¬ canAccess p ℓ := by
+  classical
+  intro p ℓ
+  unfold canAccess
+  intro hAcc
+  have hMem : ([Atom.expires t] : Clause) ∈ ℓ.conf := by
+    simp [ℓ]
+  have hClause : clauseSat p [Atom.expires t] := hAcc [Atom.expires t] hMem
+  rcases hClause with ⟨a, ha, hs⟩
+  have : a = Atom.expires t := by
+    simpa using ha
+  subst this
+  -- `p.now ≤ t` is false when `p.now = t + 1`.
+  exact (Nat.not_succ_le_self t) (by simpa [p, Principal.satisfies] using hs)
+
+/-- Policies may drop an `Expires(t)` clause when explicitly guarded (retention relaxation). -/
+theorem expires_clause_can_be_dropped_with_guard (u : String) (t : Nat) :
+    let p : Principal := { now := t + 1, atoms := [Atom.user u] }
+    let ℓ : Label := { conf := [[Atom.user u], [Atom.expires t]], integ := [] }
+    let need : IntegLabel := [Atom.integrityTok "RetainOk"]
+    let boundary : IntegLabel := need
+    canAccess p (Exchange.exchangeDropSingletonIf need (Atom.expires t) boundary ℓ) := by
+  classical
+  intro p ℓ need boundary
+  have hNeed : Exchange.hasAll need boundary := by
+    intro a ha
+    simpa [boundary] using ha
+  simp [Exchange.exchangeDropSingletonIf, Exchange.availIntegrity, hNeed,
+    Exchange.confDropSingleton,
+    p, ℓ, Principal.satisfies,
+    canAccess, canAccessConf, clauseSat]
+
 end Scenarios
 end Proofs
 
