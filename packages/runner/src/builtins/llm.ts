@@ -126,18 +126,30 @@ const GenerateObjectResultSchema = {
  * Updates are batched every 66ms (~15fps) to avoid creating many small
  * transactions during rapid streaming. Each batch waits for the scheduler
  * to be idle, then commits the latest partial text.
+ *
+ * Returns both the callback and a cleanup function that should be called
+ * when streaming completes to clear any pending timers.
  */
 function createUpdatePartialCallback<T>(
   resultCell: Cell<any>,
   runtime: Runtime,
   getCurrentRun: () => number,
   thisRun: number,
-): (text: string) => void {
+): { callback: (text: string) => void; cleanup: () => void } {
   let pendingText: string | null = null;
   let batchTimer: ReturnType<typeof setTimeout> | null = null;
 
-  return (text: string) => {
+  const cleanup = () => {
+    if (batchTimer) {
+      clearTimeout(batchTimer);
+      batchTimer = null;
+    }
+    pendingText = null;
+  };
+
+  const callback = (text: string) => {
     if (thisRun !== getCurrentRun()) {
+      cleanup();
       return;
     }
 
@@ -169,6 +181,8 @@ function createUpdatePartialCallback<T>(
       }, 66); // ~15fps batching
     }
   };
+
+  return { callback, cleanup };
 }
 
 /**
@@ -435,46 +449,51 @@ export function llm(
     partialWithLog.set(undefined);
     pendingWithLog.set(true);
 
-    const updatePartial = createUpdatePartialCallback(
-      resultCell,
-      runtime,
-      () => currentRun,
-      thisRun,
-    );
+    const { callback: updatePartial, cleanup: cleanupPartial } =
+      createUpdatePartialCallback(
+        resultCell,
+        runtime,
+        () => currentRun,
+        thisRun,
+      );
 
     // Build tool catalog if tools are present, then start execution
     const resultPromise = (async () => {
-      const toolsCell = inputs.key("tools").asSchema({
-        type: "object",
-        additionalProperties: LLMToolSchema,
-      });
-      const toolCatalog = toolsCell
-        ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
-        : undefined;
+      try {
+        const toolsCell = inputs.key("tools").asSchema({
+          type: "object",
+          additionalProperties: LLMToolSchema,
+        });
+        const toolCatalog = toolsCell
+          ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
+          : undefined;
 
-      await executeWithToolsLoop({
-        initialMessages: (messages as unknown as BuiltInLLMMessage[]) ?? [],
-        llmParams,
-        toolCatalog: toolCatalog!,
-        updatePartial,
-        runtime,
-        space: parentCell.space,
-        getCurrentRun: () => currentRun,
-        thisRun,
-        onComplete: async (llmResult) => {
-          await runtime.idle();
+        await executeWithToolsLoop({
+          initialMessages: (messages as unknown as BuiltInLLMMessage[]) ?? [],
+          llmParams,
+          toolCatalog: toolCatalog!,
+          updatePartial,
+          runtime,
+          space: parentCell.space,
+          getCurrentRun: () => currentRun,
+          thisRun,
+          onComplete: async (llmResult) => {
+            await runtime.idle();
 
-          await runtime.editWithRetry((tx) => {
-            resultCell.key("pending").withTx(tx).set(false);
-            resultCell.key("result").withTx(tx).set(llmResult.content);
-            resultCell.key("error").withTx(tx).set(undefined);
-            resultCell.key("partial").withTx(tx).set(
-              extractTextFromLLMResponse(llmResult),
-            );
-            resultCell.key("requestHash").withTx(tx).set(hash);
-          });
-        },
-      });
+            await runtime.editWithRetry((tx) => {
+              resultCell.key("pending").withTx(tx).set(false);
+              resultCell.key("result").withTx(tx).set(llmResult.content);
+              resultCell.key("error").withTx(tx).set(undefined);
+              resultCell.key("partial").withTx(tx).set(
+                extractTextFromLLMResponse(llmResult),
+              );
+              resultCell.key("requestHash").withTx(tx).set(hash);
+            });
+          },
+        });
+      } finally {
+        cleanupPartial();
+      }
     })();
 
     resultPromise.catch((e) =>
@@ -621,46 +640,51 @@ export function generateText(
     partialWithLog.set(undefined);
     pendingWithLog.set(true);
 
-    const updatePartial = createUpdatePartialCallback(
-      resultCell,
-      runtime,
-      () => currentRun,
-      thisRun,
-    );
+    const { callback: updatePartial, cleanup: cleanupPartial } =
+      createUpdatePartialCallback(
+        resultCell,
+        runtime,
+        () => currentRun,
+        thisRun,
+      );
 
     // Build tool catalog if tools are present, then start execution
     const resultPromise = (async () => {
-      const toolsCell = inputs.key("tools").asSchema({
-        type: "object",
-        additionalProperties: LLMToolSchema,
-      });
-      const toolCatalog = toolsCell
-        ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
-        : undefined;
+      try {
+        const toolsCell = inputs.key("tools").asSchema({
+          type: "object",
+          additionalProperties: LLMToolSchema,
+        });
+        const toolCatalog = toolsCell
+          ? llmToolExecutionHelpers.buildToolCatalog(toolsCell)
+          : undefined;
 
-      await executeWithToolsLoop({
-        initialMessages: requestMessages,
-        llmParams,
-        toolCatalog: toolCatalog!,
-        updatePartial,
-        runtime,
-        space: parentCell.space,
-        getCurrentRun: () => currentRun,
-        thisRun,
-        onComplete: async (llmResult) => {
-          await runtime.idle();
+        await executeWithToolsLoop({
+          initialMessages: requestMessages,
+          llmParams,
+          toolCatalog: toolCatalog!,
+          updatePartial,
+          runtime,
+          space: parentCell.space,
+          getCurrentRun: () => currentRun,
+          thisRun,
+          onComplete: async (llmResult) => {
+            await runtime.idle();
 
-          const textResult = extractTextFromLLMResponse(llmResult);
+            const textResult = extractTextFromLLMResponse(llmResult);
 
-          await runtime.editWithRetry((tx) => {
-            resultCell.key("pending").withTx(tx).set(false);
-            resultCell.key("result").withTx(tx).set(textResult);
-            resultCell.key("error").withTx(tx).set(undefined);
-            resultCell.key("partial").withTx(tx).set(textResult);
-            resultCell.key("requestHash").withTx(tx).set(hash);
-          });
-        },
-      });
+            await runtime.editWithRetry((tx) => {
+              resultCell.key("pending").withTx(tx).set(false);
+              resultCell.key("result").withTx(tx).set(textResult);
+              resultCell.key("error").withTx(tx).set(undefined);
+              resultCell.key("partial").withTx(tx).set(textResult);
+              resultCell.key("requestHash").withTx(tx).set(hash);
+            });
+          },
+        });
+      } finally {
+        cleanupPartial();
+      }
     })();
 
     resultPromise.catch((e) =>
@@ -819,115 +843,121 @@ export function generateObject<T extends Record<string, unknown>>(
       partialWithLog.set(undefined);
       pendingWithLog.set(true);
 
-      const updatePartial = createUpdatePartialCallback(
-        resultCell,
-        runtime,
-        () => currentRun,
-        thisRun,
-      );
+      const { callback: updatePartial, cleanup: cleanupPartial } =
+        createUpdatePartialCallback(
+          resultCell,
+          runtime,
+          () => currentRun,
+          thisRun,
+        );
 
       // Build tool catalog with finalResult tool
       const resultPromise = (async () => {
-        const toolsCell = inputs.key("tools").asSchema({
-          type: "object",
-          additionalProperties: LLMToolSchema,
-        });
-        const baseCatalog = llmToolExecutionHelpers.buildToolCatalog(
-          toolsCell,
-        );
+        try {
+          const toolsCell = inputs.key("tools").asSchema({
+            type: "object",
+            additionalProperties: LLMToolSchema,
+          });
+          const baseCatalog = llmToolExecutionHelpers.buildToolCatalog(
+            toolsCell,
+          );
 
-        // Add finalResult builtin tool
-        const toolCatalog = {
-          ...baseCatalog,
-          llmTools: {
-            ...baseCatalog.llmTools,
-            [llmToolExecutionHelpers.FINAL_RESULT_TOOL_NAME]: {
-              description:
-                "Call this tool with the final structured result matching the required schema. This should be your last action.",
-              inputSchema: JSON.parse(JSON.stringify(schema)),
+          // Add finalResult builtin tool
+          const toolCatalog = {
+            ...baseCatalog,
+            llmTools: {
+              ...baseCatalog.llmTools,
+              [llmToolExecutionHelpers.FINAL_RESULT_TOOL_NAME]: {
+                description:
+                  "Call this tool with the final structured result matching the required schema. This should be your last action.",
+                inputSchema: JSON.parse(JSON.stringify(schema)),
+              },
             },
-          },
-        };
-
-        // Execute with tools - capture finalResult when called
-        let finalResult: T | undefined;
-
-        // Custom execution loop for generateObject with finalResult extraction
-        const executeRecursive = async (
-          currentMessages: BuiltInLLMMessage[],
-        ): Promise<void> => {
-          if (thisRun !== currentRun) return;
-
-          const requestParams: LLMRequest = {
-            ...llmParams,
-            messages: currentMessages,
-            tools: toolCatalog.llmTools,
           };
 
-          const llmResult = await client.sendRequest(
-            requestParams,
-            updatePartial,
-          );
+          // Execute with tools - capture finalResult when called
+          let finalResult: T | undefined;
 
-          if (thisRun !== currentRun) return;
+          // Custom execution loop for generateObject with finalResult extraction
+          const executeRecursive = async (
+            currentMessages: BuiltInLLMMessage[],
+          ): Promise<void> => {
+            if (thisRun !== currentRun) return;
 
-          const toolCallParts = llmToolExecutionHelpers.extractToolCallParts(
-            llmResult.content,
-          );
-          const hasToolCalls = toolCallParts.length > 0;
+            const requestParams: LLMRequest = {
+              ...llmParams,
+              messages: currentMessages,
+              tools: toolCatalog.llmTools,
+            };
 
-          if (hasToolCalls) {
-            const assistantMessage = llmToolExecutionHelpers
-              .buildAssistantMessage(
-                llmResult.content,
-                toolCallParts,
+            const llmResult = await client.sendRequest(
+              requestParams,
+              updatePartial,
+            );
+
+            if (thisRun !== currentRun) return;
+
+            const toolCallParts = llmToolExecutionHelpers.extractToolCallParts(
+              llmResult.content,
+            );
+            const hasToolCalls = toolCallParts.length > 0;
+
+            if (hasToolCalls) {
+              const assistantMessage = llmToolExecutionHelpers
+                .buildAssistantMessage(
+                  llmResult.content,
+                  toolCallParts,
+                );
+
+              const toolResults = await llmToolExecutionHelpers
+                .executeToolCalls(
+                  runtime,
+                  parentCell.space,
+                  toolCatalog,
+                  toolCallParts,
+                );
+
+              // Check if finalResult was called and grab the result.
+              // It's post de-serialization so might contain cells
+              // (unlike the input to the tool)
+              const finalResultCall = toolResults.find(
+                (p) =>
+                  p.toolName === llmToolExecutionHelpers.FINAL_RESULT_TOOL_NAME,
               );
+              if (finalResultCall) {
+                finalResult = finalResultCall.result as T;
+              }
 
-            const toolResults = await llmToolExecutionHelpers.executeToolCalls(
-              runtime,
-              parentCell.space,
-              toolCatalog,
-              toolCallParts,
-            );
+              const toolResultMessages = llmToolExecutionHelpers
+                .createToolResultMessages(toolResults);
 
-            // Check if finalResult was called and grab the result.
-            // It's post de-serialization so might contain cells
-            // (unlike the input to the tool)
-            const finalResultCall = toolResults.find(
-              (p) =>
-                p.toolName === llmToolExecutionHelpers.FINAL_RESULT_TOOL_NAME,
-            );
-            if (finalResultCall) {
-              finalResult = finalResultCall.result as T;
+              const updatedMessages = [
+                ...currentMessages,
+                assistantMessage,
+                ...toolResultMessages,
+              ];
+
+              // Continue if finalResult wasn't called yet
+              if (!finalResultCall) {
+                await executeRecursive(updatedMessages);
+              }
+            } else {
+              throw new Error(
+                "LLM did not call finalResult tool with structured data",
+              );
             }
+          };
 
-            const toolResultMessages = llmToolExecutionHelpers
-              .createToolResultMessages(toolResults);
+          await executeRecursive(requestMessages);
 
-            const updatedMessages = [
-              ...currentMessages,
-              assistantMessage,
-              ...toolResultMessages,
-            ];
-
-            // Continue if finalResult wasn't called yet
-            if (!finalResultCall) {
-              await executeRecursive(updatedMessages);
-            }
-          } else {
-            throw new Error(
-              "LLM did not call finalResult tool with structured data",
-            );
+          if (finalResult === undefined) {
+            throw new Error("finalResult was never called");
           }
-        };
 
-        await executeRecursive(requestMessages);
-
-        if (finalResult === undefined) {
-          throw new Error("finalResult was never called");
+          return finalResult;
+        } finally {
+          cleanupPartial();
         }
-
-        return finalResult;
       })();
 
       resultPromise
