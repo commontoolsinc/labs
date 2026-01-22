@@ -961,6 +961,29 @@ const execute = <
   }
 };
 
+/**
+ * Attaches labels to a commit so providers can redact classified entries
+ * before sending to subscribers. This is separate from the transaction
+ * to keep labels attachment outside the SQLite transaction.
+ */
+export function attachLabelsToCommit<Space extends MemorySpace>(
+  space: SpaceSession<Space>,
+  commit: Commit<Space>,
+): void {
+  // SpaceSession is implemented by Space class which has store
+  const session = space as unknown as Session<Space>;
+  for (const item of SelectionBuilder.iterate<{ is: CommitData }>(commit)) {
+    const changedFacts = toSelection(
+      item.value.is.since,
+      item.value.is.transaction.args.changes,
+    );
+    const labels = getLabels(session, changedFacts);
+    if (Object.keys(labels).length > 0) {
+      item.value.is.labels = labels;
+    }
+  }
+}
+
 export const transact = <Space extends MemorySpace>(
   session: Session<Space>,
   transaction: Transaction<Space>,
@@ -976,32 +999,11 @@ export const transact = <Space extends MemorySpace>(
 
     // Use IMMEDIATE transaction to acquire write lock at start, reducing
     // lock contention with external processes like litestream
-    const result = execute(
+    return execute(
       session.store.transaction(commit).immediate,
       session,
       transaction,
     );
-
-    // Attach labels to the commit (outside the DB transaction) so the provider
-    // can remove classified entries before sending to subscribers
-    if (result.ok) {
-      for (
-        const item of SelectionBuilder.iterate<{ is: CommitData }>(
-          result.ok,
-        )
-      ) {
-        const changedFacts = toSelection(
-          item.value.is.since,
-          item.value.is.transaction.args.changes,
-        );
-        const labels = getLabels(session, changedFacts);
-        if (Object.keys(labels).length > 0) {
-          item.value.is.labels = labels;
-        }
-      }
-    }
-
-    return result;
   });
 };
 

@@ -225,26 +225,30 @@ export const transact = async (session: Session, transaction: Transaction) => {
 
     if (result.error) {
       return result;
-    } else {
-      return await traceAsync(
-        "memory.notify_subscribers",
-        async (notifySpan) => {
-          notifySpan.setAttribute(
-            "memory.subscriber_count",
-            session.subscribers.size,
-          );
-
-          const promises = [];
-          // Copy here, in case a subscriber modifies the set of subscribers
-          for (const subscriber of [...session.subscribers]) {
-            promises.push(subscriber.commit(result.ok));
-          }
-          await Promise.all(promises);
-
-          return result;
-        },
-      );
     }
+
+    // Attach labels to the commit so the provider can remove classified
+    // entries before sending to subscribers
+    Space.attachLabelsToCommit(space, result.ok);
+
+    return await traceAsync(
+      "memory.notify_subscribers",
+      async (notifySpan) => {
+        notifySpan.setAttribute(
+          "memory.subscriber_count",
+          session.subscribers.size,
+        );
+
+        const promises = [];
+        // Copy here, in case a subscriber modifies the set of subscribers
+        for (const subscriber of [...session.subscribers]) {
+          promises.push(subscriber.commit(result.ok));
+        }
+        await Promise.all(promises);
+
+        return result;
+      },
+    );
   });
 };
 
