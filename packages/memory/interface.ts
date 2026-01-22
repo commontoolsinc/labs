@@ -491,8 +491,19 @@ export interface MemorySession<Space extends MemorySpace = MemorySpace>
 }
 
 export interface Subscriber<Space extends MemorySpace = MemorySpace> {
-  // Notifies a subscriber of a commit that has been applied
-  commit(commit: Commit<Space>): AwaitResult<Unit, SystemError>;
+  /**
+   * Notifies a subscriber of a commit that has been applied.
+   *
+   * @param commit - The commit data to be processed and broadcast to listeners.
+   * @param labels - Label facts associated with documents in this commit. Used
+   *   to redact classified content before broadcasting to listeners who lack the
+   *   appropriate claims.
+   */
+  commit(
+    commit: Commit<Space>,
+    labels?: FactSelection,
+  ): AwaitResult<Unit, SystemError>;
+
   close(): AwaitResult<Unit, SystemError>;
 }
 
@@ -658,12 +669,9 @@ export type EnhancedCommit<Subject extends string = MemorySpace> = {
   commit: Commit<Subject>;
 };
 
-// We include labels here so we can use the commit data to redact the transaction
-// results before sending them to subscribers with insufficient access.
 export type CommitData = {
   since: number;
   transaction: Transaction;
-  labels?: FactSelection;
 };
 
 export type CommitFact<Subject extends MemorySpace = MemorySpace> = Assertion<
