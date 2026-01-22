@@ -101,6 +101,7 @@ const EMPTY_LEARNED: LearnedSection = {
 /**
  * Capture a snapshot of a cell's current state for journaling.
  * Extracts name, schema tag, and a value excerpt.
+ * Uses schema to properly resolve nested cell references.
  */
 function captureSnapshot(
   cell: Writable<{ [NAME]?: string }>,
@@ -119,11 +120,22 @@ function captureSnapshot(
   }
 
   try {
-    const value = cell.get();
+    // Try to get the schema from the cell to properly resolve nested data
+    let schemaCell = cell as any;
+    try {
+      const { schema } = schemaCell.asSchemaFromLinks?.()?.getAsNormalizedFullLink?.() || {};
+      if (schema) {
+        schemaCell = schemaCell.asSchema(schema);
+      }
+    } catch {
+      // Ignore schema errors, fall back to direct get
+    }
+
+    const value = schemaCell.get();
     if (value !== undefined) {
       const str = JSON.stringify(value);
-      // Capture up to 1000 chars to give LLM more context about content
-      valueExcerpt = str.length > 1000 ? str.slice(0, 1000) + "..." : str;
+      // Capture up to 2000 chars to give LLM more context about content
+      valueExcerpt = str.length > 2000 ? str.slice(0, 2000) + "..." : str;
     }
   } catch {
     // Ignore errors - excerpt is optional
