@@ -268,7 +268,7 @@ export default pattern<PatternInput>(
                       </div>
                       <button
                         type="button"
-                        onClick={markAsPaid({ paidKeys: manuallyPaid, bill })}
+                        onClick={markAsPaid({ paidKeys: manuallyPaid!, bill })}
                         style={{
                           padding: "8px 16px",
                           backgroundColor: "#10b981",
@@ -389,7 +389,10 @@ export default pattern<PatternInput>(
                         </div>
                         <button
                           type="button"
-                          onClick={markAsPaid({ paidKeys: manuallyPaid, bill })}
+                          onClick={markAsPaid({
+                            paidKeys: manuallyPaid!,
+                            bill,
+                          })}
                           style={{
                             padding: "8px 14px",
                             backgroundColor: "#6b7280",
@@ -501,7 +504,7 @@ export default pattern<PatternInput>(
                         <button
                           type="button"
                           onClick={unmarkAsPaid({
-                            paidKeys: manuallyPaid,
+                            paidKeys: manuallyPaid!,
                             bill,
                           })}
                           style={{
