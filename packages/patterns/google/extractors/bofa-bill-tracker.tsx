@@ -14,7 +14,7 @@
  * Usage:
  * 1. Deploy a google-auth charm and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct charm link google-auth/auth bofa-bill-tracker/linkedAuth
+ * 3. Link: ct charm link google-auth/auth bofa-bill-tracker/overrideAuth
  */
 import {
   computed,
@@ -28,18 +28,19 @@ import {
 } from "commontools";
 import BillExtractor, {
   type Auth,
-  type TrackedBill,
   formatCurrency,
   formatDate,
   formatIdentifier,
   getIdentifierColor,
   processBills,
+  type TrackedBill,
 } from "../building-blocks/bill-extractor/index.tsx";
 
 const BOFA_GMAIL_QUERY =
   "from:onlinebanking@ealerts.bankofamerica.com OR from:alerts@bankofamerica.com";
 
-const BOFA_EXTRACTION_PROMPT = `Analyze this Bank of America credit card email and extract billing/payment information.
+const BOFA_EXTRACTION_PROMPT =
+  `Analyze this Bank of America credit card email and extract billing/payment information.
 
 EMAIL SUBJECT: {{email.subject}}
 EMAIL DATE: {{email.date}}
@@ -98,13 +99,13 @@ const unmarkAsPaid = handler<
 // =============================================================================
 
 interface PatternInput {
-  linkedAuth?: Auth;
+  overrideAuth?: Auth;
   manuallyPaid?: Writable<Default<string[], []>>;
   demoMode?: Writable<Default<boolean, true>>;
 }
 
 export default pattern<PatternInput>(
-  ({ linkedAuth, manuallyPaid, demoMode }) => {
+  ({ overrideAuth, manuallyPaid, demoMode }) => {
     // Use BillExtractor building block for data processing
     const tracker = BillExtractor({
       gmailQuery: BOFA_GMAIL_QUERY,
@@ -114,7 +115,7 @@ export default pattern<PatternInput>(
       shortName: "BofA",
       brandColor: "#c51f23",
       websiteUrl: "https://www.bankofamerica.com/",
-      linkedAuth,
+      overrideAuth,
       manuallyPaid,
       demoMode,
     });
@@ -129,7 +130,7 @@ export default pattern<PatternInput>(
         tracker.rawAnalyses || [],
         tracker.paymentConfirmations || {},
         paidKeys,
-        isDemoMode
+        isDemoMode,
       );
     });
 
@@ -244,7 +245,7 @@ export default pattern<PatternInput>(
                             style={{
                               padding: "2px 8px",
                               backgroundColor: getIdentifierColor(
-                                bill.identifier
+                                bill.identifier,
                               ),
                               borderRadius: "4px",
                               fontSize: "12px",
@@ -360,7 +361,7 @@ export default pattern<PatternInput>(
                               style={{
                                 padding: "2px 6px",
                                 backgroundColor: getIdentifierColor(
-                                  bill.identifier
+                                  bill.identifier,
                                 ),
                                 borderRadius: "4px",
                                 fontSize: "11px",
@@ -370,13 +371,14 @@ export default pattern<PatternInput>(
                             >
                               {formatIdentifier(
                                 bill.identifier,
-                                tracker.identifierType
+                                tracker.identifierType,
                               )}
                             </span>
                           </div>
                           <div style={{ fontSize: "12px", color: "#047857" }}>
                             Was due: {formatDate(bill.dueDate)} (
-                            {computed(() => Math.abs(bill.daysUntilDue ?? 0))}{" "}
+                            {computed(() => Math.abs(bill.daysUntilDue ?? 0))}
+                            {" "}
                             days ago)
                           </div>
                         </div>
@@ -458,7 +460,7 @@ export default pattern<PatternInput>(
                               style={{
                                 padding: "2px 6px",
                                 backgroundColor: getIdentifierColor(
-                                  bill.identifier
+                                  bill.identifier,
                                 ),
                                 borderRadius: "4px",
                                 fontSize: "11px",
@@ -468,7 +470,7 @@ export default pattern<PatternInput>(
                             >
                               {formatIdentifier(
                                 bill.identifier,
-                                tracker.identifierType
+                                tracker.identifierType,
                               )}
                             </span>
                             <span
@@ -477,7 +479,7 @@ export default pattern<PatternInput>(
                               {ifElse(
                                 bill.isManuallyPaid,
                                 "(manually marked)",
-                                "(auto-detected)"
+                                "(auto-detected)",
                               )}
                             </span>
                           </div>
@@ -493,7 +495,10 @@ export default pattern<PatternInput>(
                         </div>
                         <button
                           type="button"
-                          onClick={unmarkAsPaid({ paidKeys: manuallyPaid, bill })}
+                          onClick={unmarkAsPaid({
+                            paidKeys: manuallyPaid,
+                            bill,
+                          })}
                           style={{
                             padding: "6px 12px",
                             backgroundColor: "#6b7280",
@@ -541,5 +546,5 @@ export default pattern<PatternInput>(
         </ct-screen>
       ),
     };
-  }
+  },
 );

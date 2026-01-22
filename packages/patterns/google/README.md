@@ -255,23 +255,23 @@ Navigate to the google-auth charm in browser and complete OAuth flow.
 # Format: source/path target/path
 ct charm link \
   GOOGLE_AUTH_CHARM_ID/auth \
-  GMAIL_IMPORTER_CHARM_ID/linkedAuth
+  GMAIL_IMPORTER_CHARM_ID/overrideAuth
 ```
 
 **Critical paths:**
 
 - Source: `GOOGLE_AUTH_CHARM_ID/auth` - the auth result from google-auth
-- Target: `GMAIL_IMPORTER_CHARM_ID/linkedAuth` - the linkedAuth input of
+- Target: `GMAIL_IMPORTER_CHARM_ID/overrideAuth` - the overrideAuth input of
   gmail-importer
 
 #### 4. Verify the link
 
 ```bash
-# Check that linkedAuth is populated
+# Check that overrideAuth is populated
 ct charm inspect --charm GMAIL_IMPORTER_CHARM_ID
 ```
 
-You should see `linkedAuth` in the Source (Inputs) with token, user info, etc.
+You should see `overrideAuth` in the Source (Inputs) with token, user info, etc.
 
 ### Important Notes
 
@@ -280,9 +280,9 @@ You should see `linkedAuth` in the Source (Inputs) with token, user info, etc.
 2. **Link direction**: Source -> Target. The target charm "reads from" the
    source.
 
-3. **The pattern must support linkedAuth**: The gmail-importer has:
+3. **The pattern must support overrideAuth**: The gmail-importer has:
    ```typescript
-   linkedAuth?: Auth;
+   overrideAuth?: Auth;
    ```
    This optional input is what receives the linked auth data.
 
@@ -297,9 +297,9 @@ You should see `linkedAuth` in the Source (Inputs) with token, user info, etc.
 ### Link exists but auth not working in UI
 
 - The pattern might be showing both the "Connect Google Account" UI AND using
-  linkedAuth
-- Check that the pattern's logic correctly uses linkedAuth when available
-- The charm name should show the email if linkedAuth is working (e.g., "GMail
+  overrideAuth
+- Check that the pattern's logic correctly uses overrideAuth when available
+- The charm name should show the email if overrideAuth is working (e.g., "GMail
   Importer email@example.com")
 
 ### Settings not being read in handler

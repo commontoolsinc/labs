@@ -16,7 +16,7 @@
  * Usage:
  * 1. Deploy a google-auth charm and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct charm link google-auth/auth berkeley-library/linkedAuth
+ * 3. Link: ct charm link google-auth/auth berkeley-library/overrideAuth
  *
  * Omnibot Actions:
  * - markAsReturned: Mark a book as returned by title
@@ -535,8 +535,8 @@ const setDueDateForGroup = handler<
 
 interface PatternInput {
   // Optional: Link auth directly from a Google Auth charm
-  // Use: ct charm link googleAuthCharm/auth berkeleyLibraryCharm/linkedAuth
-  linkedAuth?: Auth;
+  // Use: ct charm link googleAuthCharm/auth berkeleyLibraryCharm/overrideAuth
+  overrideAuth?: Auth;
   // Track items manually marked as returned (persisted)
   manuallyReturned?: Writable<Default<string[], []>>;
   // Track holds manually dismissed (persisted)
@@ -564,7 +564,7 @@ interface PatternOutput {
 
 export default pattern<PatternInput, PatternOutput>(
   ({
-    linkedAuth,
+    overrideAuth,
     manuallyReturned,
     dismissedHolds,
     selectedItems,
@@ -580,7 +580,7 @@ export default pattern<PatternInput, PatternOutput>(
       title: "Library Emails",
       resolveInlineImages: false,
       limit: 50,
-      linkedAuth,
+      overrideAuth,
     });
 
     // Convenience aliases from extractor

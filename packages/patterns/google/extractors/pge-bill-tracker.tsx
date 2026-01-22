@@ -14,7 +14,7 @@
  * Usage:
  * 1. Deploy a google-auth charm and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct charm link google-auth/auth pge-bill-tracker/linkedAuth
+ * 3. Link: ct charm link google-auth/auth pge-bill-tracker/overrideAuth
  */
 import {
   computed,
@@ -28,17 +28,18 @@ import {
 } from "commontools";
 import BillExtractor, {
   type Auth,
-  type TrackedBill,
   formatCurrency,
   formatDate,
   formatIdentifier,
   getIdentifierColor,
   processBills,
+  type TrackedBill,
 } from "../building-blocks/bill-extractor/index.tsx";
 
 const PGE_GMAIL_QUERY = "from:DoNotReply@billpay.pge.com";
 
-const PGE_EXTRACTION_PROMPT = `Analyze this PGE (Pacific Gas & Electric) utility bill email and extract billing/payment information.
+const PGE_EXTRACTION_PROMPT =
+  `Analyze this PGE (Pacific Gas & Electric) utility bill email and extract billing/payment information.
 
 EMAIL SUBJECT: {{email.subject}}
 EMAIL DATE: {{email.date}}
@@ -97,13 +98,13 @@ const unmarkAsPaid = handler<
 // =============================================================================
 
 interface PatternInput {
-  linkedAuth?: Auth;
+  overrideAuth?: Auth;
   manuallyPaid?: Writable<Default<string[], []>>;
   demoMode?: Writable<Default<boolean, true>>;
 }
 
 export default pattern<PatternInput>(
-  ({ linkedAuth, manuallyPaid, demoMode }) => {
+  ({ overrideAuth, manuallyPaid, demoMode }) => {
     // Use BillExtractor building block for data processing
     const tracker = BillExtractor({
       gmailQuery: PGE_GMAIL_QUERY,
@@ -113,7 +114,7 @@ export default pattern<PatternInput>(
       shortName: "PGE",
       brandColor: "#004B87",
       websiteUrl: "https://www.pge.com/",
-      linkedAuth,
+      overrideAuth,
       manuallyPaid,
       demoMode,
     });
@@ -128,7 +129,7 @@ export default pattern<PatternInput>(
         tracker.rawAnalyses || [],
         tracker.paymentConfirmations || {},
         paidKeys,
-        isDemoMode
+        isDemoMode,
       );
     });
 
@@ -243,7 +244,7 @@ export default pattern<PatternInput>(
                             style={{
                               padding: "2px 8px",
                               backgroundColor: getIdentifierColor(
-                                bill.identifier
+                                bill.identifier,
                               ),
                               borderRadius: "4px",
                               fontSize: "12px",
@@ -359,7 +360,7 @@ export default pattern<PatternInput>(
                               style={{
                                 padding: "2px 6px",
                                 backgroundColor: getIdentifierColor(
-                                  bill.identifier
+                                  bill.identifier,
                                 ),
                                 borderRadius: "4px",
                                 fontSize: "11px",
@@ -372,7 +373,8 @@ export default pattern<PatternInput>(
                           </div>
                           <div style={{ fontSize: "12px", color: "#047857" }}>
                             Was due: {formatDate(bill.dueDate)} (
-                            {computed(() => Math.abs(bill.daysUntilDue ?? 0))}{" "}
+                            {computed(() => Math.abs(bill.daysUntilDue ?? 0))}
+                            {" "}
                             days ago)
                           </div>
                         </div>
@@ -454,7 +456,7 @@ export default pattern<PatternInput>(
                               style={{
                                 padding: "2px 6px",
                                 backgroundColor: getIdentifierColor(
-                                  bill.identifier
+                                  bill.identifier,
                                 ),
                                 borderRadius: "4px",
                                 fontSize: "11px",
@@ -470,7 +472,7 @@ export default pattern<PatternInput>(
                               {ifElse(
                                 bill.isManuallyPaid,
                                 "(manually marked)",
-                                "(auto-detected)"
+                                "(auto-detected)",
                               )}
                             </span>
                           </div>
@@ -486,7 +488,10 @@ export default pattern<PatternInput>(
                         </div>
                         <button
                           type="button"
-                          onClick={unmarkAsPaid({ paidKeys: manuallyPaid, bill })}
+                          onClick={unmarkAsPaid({
+                            paidKeys: manuallyPaid,
+                            bill,
+                          })}
                           style={{
                             padding: "6px 12px",
                             backgroundColor: "#6b7280",
@@ -534,5 +539,5 @@ export default pattern<PatternInput>(
         </ct-screen>
       ),
     };
-  }
+  },
 );

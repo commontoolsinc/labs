@@ -15,7 +15,7 @@
  * Usage:
  * 1. Deploy a google-auth charm and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct charm link google-auth/auth calendar-change-detector/linkedAuth
+ * 3. Link: ct charm link google-auth/auth calendar-change-detector/overrideAuth
  */
 import { computed, JSONSchema, NAME, pattern, UI } from "commontools";
 import type { Schema } from "commontools/schema";
@@ -216,7 +216,7 @@ function formatDate(dateStr: string | undefined): string {
 // =============================================================================
 
 interface PatternInput {
-  linkedAuth?: Auth;
+  overrideAuth?: Auth;
 }
 
 /** Calendar change detector for tracking schedule changes. #calendarChanges */
@@ -229,7 +229,7 @@ interface PatternOutput {
   previewUI: unknown;
 }
 
-export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
+export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   // Use GmailExtractor with built-in LLM extraction
   const extractor = GmailExtractor<ScheduleChangeAnalysisResult>({
     gmailQuery: SCHEDULE_CHANGE_GMAIL_QUERY,
@@ -239,7 +239,7 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
     },
     title: "Schedule Changes",
     limit: 50,
-    linkedAuth,
+    overrideAuth,
   });
 
   // Get values from extractor

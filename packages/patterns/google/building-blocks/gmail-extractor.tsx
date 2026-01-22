@@ -35,7 +35,7 @@
  *     schema: MY_SCHEMA,
  *   },
  *   title: "My Items",
- *   linkedAuth,
+ *   overrideAuth,
  * });
  * // Use extractor.rawAnalyses, extractor.emails, extractor.ui.* for UI pieces
  * ```
@@ -46,7 +46,7 @@
  * const extractor = GmailExtractor({
  *   gmailQuery: "from:usps.com",
  *   resolveInlineImages: true,
- *   linkedAuth,
+ *   overrideAuth,
  * });
  *
  * // Custom multimodal analysis
@@ -125,7 +125,7 @@ export interface GmailExtractorInput {
   // Use hardcoded "anthropic:claude-sonnet-4-5" instead.
 
   /** Optional linked auth (overrides wish() default) */
-  linkedAuth?: Auth;
+  overrideAuth?: Auth;
 }
 
 /**
@@ -406,7 +406,7 @@ function GmailExtractor<T = unknown>(
     title,
     resolveInlineImages,
     limit,
-    linkedAuth,
+    overrideAuth,
   } = input;
 
   // Instantiate Gmail Importer with the provided settings
@@ -418,7 +418,7 @@ function GmailExtractor<T = unknown>(
       limit: limit ?? 100,
       debugMode: false,
     },
-    linkedAuth,
+    overrideAuth,
   });
 
   // Get emails from the importer
@@ -426,8 +426,8 @@ function GmailExtractor<T = unknown>(
   const emailCount = computed(() => emails?.length || 0);
 
   // Check connection status using the importer's resolved auth state
-  // GmailImporter exposes isReady which checks: ifElse(linkedAuth.token, linkedAuth, wishedAuth).token
-  // This properly handles both linkedAuth and wish()-based auth
+  // GmailImporter exposes isReady which checks: ifElse(overrideAuth.token, overrideAuth, wishedAuth).token
+  // This properly handles both overrideAuth and wish()-based auth
   const isConnected = gmailImporter.isReady;
 
   // Auto-detect whether to run analysis based on presence of extraction config
@@ -491,8 +491,8 @@ function GmailExtractor<T = unknown>(
 
   // Note: Handler operations removed - they were unused and the authForHandlers wrapper
   // was an anti-pattern (Writable.of + computed side effect).
-  // GmailImporter already handles auth via wish() when linkedAuth isn't provided.
-  // If write operations are needed in the future, pass linkedAuth directly to handlers.
+  // GmailImporter already handles auth via wish() when overrideAuth isn't provided.
+  // If write operations are needed in the future, pass overrideAuth directly to handlers.
 
   // UI Components
 
@@ -661,8 +661,8 @@ function GmailExtractor<T = unknown>(
     },
     gmailImporter,
     refresh: gmailImporter.bgUpdater,
-    addLabels: addLabelsHandler({ auth: linkedAuth }),
-    removeLabels: removeLabelsHandler({ auth: linkedAuth }),
+    addLabels: addLabelsHandler({ auth: overrideAuth }),
+    removeLabels: removeLabelsHandler({ auth: overrideAuth }),
   };
 }
 

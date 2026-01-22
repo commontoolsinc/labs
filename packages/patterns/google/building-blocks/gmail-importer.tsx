@@ -1052,10 +1052,10 @@ export default pattern<{
     resolveInlineImages: false;
   }>;
   // Optional: Link auth directly from a Google Auth charm when wish() is unavailable
-  // Use: ct charm link googleAuthCharm/auth gmailImporterCharm/linkedAuth
-  linkedAuth?: Auth;
+  // Use: ct charm link googleAuthCharm/auth gmailImporterCharm/overrideAuth
+  overrideAuth?: Auth;
 }, Output>(
-  ({ settings, linkedAuth }) => {
+  ({ settings, overrideAuth }) => {
     const emails = Writable.of<Confidential<Email[]>>([]).for("emails");
     const historyId = Writable.of("").for("historyId");
     const fetching = Writable.of(false).for("fetching");
@@ -1075,8 +1075,8 @@ export default pattern<{
       debugMode: settings.debugMode,
     });
 
-    // Choose auth source based on linkedAuth availability
-    const auth = ifElse(linkedAuth.token, linkedAuth, wishedAuth);
+    // Choose auth source based on overrideAuth availability
+    const auth = ifElse(overrideAuth.token, overrideAuth, wishedAuth);
     const isReady = computed(() => !!auth.token);
     const currentEmail = computed(() => auth.user?.email ?? "");
 

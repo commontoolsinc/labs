@@ -26,7 +26,7 @@
  *   createUnmarkAsPaidHandler,
  * } from "../building-blocks/bill-extractor/index.tsx";
  *
- * export default pattern(({ linkedAuth, manuallyPaid, demoMode }) => {
+ * export default pattern(({ overrideAuth, manuallyPaid, demoMode }) => {
  *   const tracker = BillExtractor({
  *     gmailQuery: "from:alerts@bank.com",
  *     extractionPrompt: `Analyze this email...`,
@@ -35,7 +35,7 @@
  *     shortName: "MyBank",
  *     brandColor: "#ff0000",
  *     websiteUrl: "https://bank.com",
- *     linkedAuth,
+ *     overrideAuth,
  *     manuallyPaid,
  *     demoMode,
  *   });
@@ -134,7 +134,7 @@ export interface BillExtractorInput {
   websiteUrl?: string;
 
   /** Gmail auth (optional - uses wish() if not provided) */
-  linkedAuth?: Auth;
+  overrideAuth?: Auth;
 
   /** State for persistence - which bills user manually marked as paid */
   manuallyPaid?: Writable<Default<string[], []>>;
@@ -342,7 +342,7 @@ function BillExtractor(input: BillExtractorInput): BillExtractorOutput {
     shortName,
     brandColor,
     websiteUrl,
-    linkedAuth,
+    overrideAuth,
     manuallyPaid,
     demoMode,
     limit,
@@ -360,7 +360,7 @@ function BillExtractor(input: BillExtractorInput): BillExtractorOutput {
     title: `${shortName} Emails`,
     resolveInlineImages: false,
     limit: limit ?? 100,
-    linkedAuth,
+    overrideAuth,
   });
 
   // Extract payment confirmations for auto-marking bills as paid

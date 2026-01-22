@@ -8,7 +8,7 @@
  * Usage:
  * 1. Deploy a google-auth charm and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct charm link google-auth/auth email-pattern-dreamer/linkedAuth
+ * 3. Link: ct charm link google-auth/auth email-pattern-dreamer/overrideAuth
  */
 import { NAME, pattern, UI } from "commontools";
 import GmailImporter, {
@@ -26,10 +26,10 @@ import EmailNotesPattern from "./email-notes.tsx";
 import UnitedFlightTrackerPattern from "./united-flight-tracker.tsx";
 
 interface PatternInput {
-  linkedAuth?: Auth;
+  overrideAuth?: Auth;
 }
 
-export default pattern<PatternInput>(({ linkedAuth }) => {
+export default pattern<PatternInput>(({ overrideAuth }) => {
   // Gmail auth for the auth UI only (no email fetching needed)
   const gmailAuth = GmailImporter({
     settings: {
@@ -39,19 +39,19 @@ export default pattern<PatternInput>(({ linkedAuth }) => {
       autoFetchOnAuth: false,
       resolveInlineImages: false,
     },
-    linkedAuth,
+    overrideAuth,
   });
 
   // Instantiate all patterns directly
-  const usps = USPSInformedDeliveryPattern({ linkedAuth });
-  const library = BerkeleyLibraryPattern({ linkedAuth });
-  const chase = ChaseBillPattern({ linkedAuth });
-  const bam = BAMSchoolDashboardPattern({ linkedAuth });
-  const bofa = BofABillTrackerPattern({ linkedAuth });
-  const tickets = EmailTicketFinderPattern({ linkedAuth });
-  const calendar = CalendarChangeDetectorPattern({ linkedAuth });
-  const notes = EmailNotesPattern({ linkedAuth });
-  const united = UnitedFlightTrackerPattern({ linkedAuth });
+  const usps = USPSInformedDeliveryPattern({ overrideAuth });
+  const library = BerkeleyLibraryPattern({ overrideAuth });
+  const chase = ChaseBillPattern({ overrideAuth });
+  const bam = BAMSchoolDashboardPattern({ overrideAuth });
+  const bofa = BofABillTrackerPattern({ overrideAuth });
+  const tickets = EmailTicketFinderPattern({ overrideAuth });
+  const calendar = CalendarChangeDetectorPattern({ overrideAuth });
+  const notes = EmailNotesPattern({ overrideAuth });
+  const united = UnitedFlightTrackerPattern({ overrideAuth });
 
   const previewUI = (
     <div
