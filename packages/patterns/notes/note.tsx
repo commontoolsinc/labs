@@ -199,6 +199,7 @@ const createNewNote = handler<
     content: "",
     noteId: generateId(),
     isHidden: !!notebook, // Hide from default-app if in a notebook
+    parentNotebook: notebook ?? undefined, // Set parent for back navigation
   });
   allCharms.push(note);
 
@@ -326,7 +327,7 @@ const Note = pattern<Input, Output>(
     const mentionable = wish<Default<MentionableCharm[], []>>(
       "#mentionable",
     );
-    const recentCharms = wish<MinimalCharm[]>("#recent");
+    const _recentCharms = wish<MinimalCharm[]>("#recent");
     const mentioned = Writable.of<MentionableCharm[]>([]);
 
     // Dropdown menu state
@@ -335,24 +336,31 @@ const Note = pattern<Input, Output>(
     // State for inline title editing
     const isEditingTitle = Writable.of<boolean>(false);
 
-    // Filter to find all notebooks (using 📓 prefix in NAME)
-    const notebooks = computed(() =>
-      allCharms.filter((charm: any) => {
+    // LAZY: Only filter notebooks when menu is open (dropdown needs them)
+    // This avoids O(n) filter on every allCharms change for every note
+    const notebooks = computed(() => {
+      if (!menuOpen.get()) return [];
+      return allCharms.filter((charm: any) => {
         const name = charm?.[NAME];
         return typeof name === "string" && name.startsWith("📓");
-      })
-    );
+      });
+    });
 
-    // Check if "All Notes" charm exists in the space
-    const allNotesCharm = computed(() =>
-      allCharms.find((charm: any) => {
+    // LAZY: Only check for "All Notes" charm when menu is open
+    const allNotesCharm = computed(() => {
+      if (!menuOpen.get()) return null;
+      return allCharms.find((charm: any) => {
         const name = charm?.[NAME];
         return typeof name === "string" && name.startsWith("All Notes");
-      })
-    );
+      });
+    });
 
-    // Compute which notebooks contain this note by noteId
+    // LAZY: Only compute which notebooks contain this note when menu is open
+    // This avoids O(n*m) computation on every allCharms change
     const containingNotebookNames = computed(() => {
+      // Only compute when menu is actually open
+      if (!menuOpen.get()) return [];
+
       const myId = noteId; // CTS handles Cell unwrapping
       if (!myId) return []; // Can't match if we have no noteId
       const result: string[] = [];
@@ -369,17 +377,8 @@ const Note = pattern<Input, Output>(
       return result;
     });
 
-    // Compute actual notebook references that contain this note
-    const containingNotebooks = computed(() => {
-      const myId = noteId; // CTS handles Cell unwrapping
-      if (!myId) return []; // Can't match if we have no noteId
-      return notebooks.filter((nb) => {
-        const nbNotes = (nb as any)?.notes ?? [];
-        return nbNotes.some((n: any) => n?.noteId && n.noteId === myId);
-      });
-    });
-
-    // Find parent notebook: use explicit prop if provided, else fall back to wish-based lookup
+    // Parent notebook: use direct reference (set when navigating from notebook)
+    // No expensive fallback - if parentNotebook isn't set, it's null
     const parentNotebook = computed(() => {
       // Read from self.parentNotebook for reactive updates when navigating
       const selfParent = (self as any)?.parentNotebook;
@@ -388,20 +387,8 @@ const Note = pattern<Input, Output>(
       // If parent was passed explicitly as prop, use it
       if (parentNotebookProp) return parentNotebookProp;
 
-      // Fallback: search for containing notebook (backward compatibility)
-      if (containingNotebooks.length === 0) return null;
-
-      // Find most recent notebook that contains this note
-      for (const recent of (recentCharms ?? [])) {
-        const name = (recent as any)?.[NAME];
-        if (typeof name === "string" && name.startsWith("📓")) {
-          if (containingNotebooks.some((nb: any) => nb?.[NAME] === name)) {
-            return recent;
-          }
-        }
-      }
-      // Fall back to first containing notebook
-      return containingNotebooks[0];
+      // No expensive fallback - just return null if not set
+      return null;
     });
 
     // populated in backlinks-index.tsx

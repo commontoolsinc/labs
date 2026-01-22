@@ -163,14 +163,16 @@ const createNoteAndContinue = handler<
     notes: Writable<NoteCharm[]>;
     allCharms: Writable<NoteCharm[]>;
     usedCreateAnotherNote: Writable<boolean>;
+    self: any;
   }
->((_, { newNoteTitle, notes, allCharms, usedCreateAnotherNote }) => {
+>((_, { newNoteTitle, notes, allCharms, usedCreateAnotherNote, self }) => {
   const title = newNoteTitle.get() || "New Note";
   const newNote = Note({
     title,
     content: "",
     isHidden: true,
     noteId: generateId(),
+    parentNotebook: self, // Set parent for back navigation
   });
   allCharms.push(newNote as any); // Required for persistence
   notes.push(newNote);
@@ -1058,13 +1060,15 @@ const handleCreateNote = handler<
   {
     notes: Writable<NoteCharm[]>;
     allCharms: Writable<NoteCharm[]>;
+    self: any;
   }
->(({ title: noteTitle, content }, { notes, allCharms }) => {
+>(({ title: noteTitle, content }, { notes, allCharms, self }) => {
   const newNote = Note({
     title: noteTitle,
     content,
     isHidden: true,
     noteId: generateId(),
+    parentNotebook: self, // Set parent for back navigation
   });
   allCharms.push(newNote as any); // Required for persistence
   notes.push(newNote);
@@ -1077,8 +1081,9 @@ const handleCreateNotes = handler<
   {
     notes: Writable<NoteCharm[]>;
     allCharms: Writable<NoteCharm[]>;
+    self: any;
   }
->(({ notesData }, { notes, allCharms }) => {
+>(({ notesData }, { notes, allCharms, self }) => {
   // Collect notes first, then batch push (reduces N reactive cycles to 1)
   const created: NoteCharm[] = [];
   for (const data of notesData) {
@@ -1087,6 +1092,7 @@ const handleCreateNotes = handler<
       content: data.content,
       isHidden: true,
       noteId: generateId(),
+      parentNotebook: self, // Set parent for back navigation
     }));
   }
   allCharms.push(...created); // Required for persistence
@@ -1191,6 +1197,7 @@ const Notebook = pattern<Input, Output>(
             content: (original as any).content ?? "",
             isHidden: true,
             noteId: generateId(),
+            parentNotebook: self, // Set parent for back navigation
           });
           allCharms.push(newNote as any);
           notes.push(newNote);
@@ -1861,6 +1868,7 @@ const Notebook = pattern<Input, Output>(
                   notes,
                   allCharms,
                   usedCreateAnotherNote,
+                  self,
                 })}
               >
                 Create Another
@@ -1979,8 +1987,8 @@ const Notebook = pattern<Input, Output>(
       // Make notes discoverable via [[ autocomplete system-wide
       mentionable: notes,
       // LLM-callable streams for omnibot integration
-      createNote: handleCreateNote({ notes, allCharms }),
-      createNotes: handleCreateNotes({ notes, allCharms }),
+      createNote: handleCreateNote({ notes, allCharms, self }),
+      createNotes: handleCreateNotes({ notes, allCharms, self }),
       setTitle: handleSetTitle({ title }),
       createNotebook: handleCreateNotebook({ allCharms }),
     };
