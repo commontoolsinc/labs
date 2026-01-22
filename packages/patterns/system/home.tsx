@@ -708,8 +708,8 @@ If there's an existing summary, update it with new information while preserving 
                     {computed(() => topQuestion?.question || "")}
                   </p>
                   {computed(() =>
-                    topQuestion?.options && topQuestion.options.length > 0
-                  )
+                      topQuestion?.options && topQuestion.options.length > 0
+                    )
                     ? (
                       <ct-hstack gap="2" style={{ flexWrap: "wrap" }}>
                         {computed(() =>
