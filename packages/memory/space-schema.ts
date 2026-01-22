@@ -412,7 +412,7 @@ const redactCommits = <Space extends MemorySpace>(
   if (change !== undefined) {
     const [cause, value] = change;
     const commitData = value.is as CommitData;
-    // attach labels to the commit, so the provider can remove any classified entries from the commit before we send it to subscribers
+    // Compute labels for the commit, used to redact classified entries before sending to subscribers
     // For this, we need since fields on our objects to determine labels
     const changedFacts = toSelection(
       commitData.since,
