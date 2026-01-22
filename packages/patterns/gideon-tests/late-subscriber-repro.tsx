@@ -2,16 +2,25 @@
 import { NAME, pattern, UI, Writable, derive } from "commontools";
 
 /**
- * Test pattern to verify whether the schema subscription bug affects
- * multiple component types beyond ct-input.
+ * Reproduction case for late subscriber initial value bug.
  *
- * Components tested:
- * - ct-input (stringSchema) - FIXED in this branch
- * - ct-textarea (stringSchema) - still passes stringSchema
- * - ct-checkbox (booleanSchema) - passes booleanSchema
+ * Bug: When multiple CellHandle instances subscribe to the same cell with the
+ * same schema key, late subscribers would miss the initial value. This happened
+ * because the subscription was already established, so no new backend request
+ * was made, and the late subscriber's CellHandle never received the cached value.
  *
- * For each, we test if text interpolation {value} updates when
- * the component modifies the same cell.
+ * Example: ct-input binds to a cell with stringSchema, creating a new CellHandle.
+ * Text interpolation {value} also subscribes to the same cell with the same schema.
+ * On initial page load, the text interpolation would show blank because it subscribed
+ * after the initial value was already sent to the first subscriber.
+ *
+ * Fix: In connection.subscribe(), when adding a CellHandle to an existing
+ * subscription, copy the cached value from an existing subscriber to the new one.
+ *
+ * To test:
+ * 1. Deploy this pattern with `charm new`
+ * 2. On initial page load, all "Interpolated" values should show their initial values
+ * 3. Interacting with any component should update its interpolated value
  */
 
 interface Output {
@@ -26,21 +35,20 @@ export default pattern<{}, Output>(() => {
   const textareaValue = Writable.of<string>("multi\nline");
   const checkboxValue = Writable.of<boolean>(true);
 
-  // Need derive to convert boolean to string reactively
+  // derive() converts boolean to string reactively for display
   const checkboxDisplay = derive(
     { checkboxValue },
     ({ checkboxValue }) => (checkboxValue ? "true" : "false"),
   );
 
   return {
-    [NAME]: "Multi-Component Schema Repro",
+    [NAME]: "Late Subscriber Repro",
     [UI]: (
       <ct-screen>
         <ct-vstack gap="4" style="padding: 1rem;">
-          {/* ct-input test - FIXED */}
           <ct-card>
             <ct-vstack gap="2">
-              <ct-heading level={4}>ct-input (FIXED)</ct-heading>
+              <ct-heading level={4}>ct-input</ct-heading>
               <ct-input $value={textValue} placeholder="Type here..." />
               <p>
                 <strong>Interpolated:</strong> {textValue}
@@ -48,10 +56,9 @@ export default pattern<{}, Output>(() => {
             </ct-vstack>
           </ct-card>
 
-          {/* ct-textarea test */}
           <ct-card>
             <ct-vstack gap="2">
-              <ct-heading level={4}>ct-textarea (stringSchema)</ct-heading>
+              <ct-heading level={4}>ct-textarea</ct-heading>
               <ct-textarea $value={textareaValue} placeholder="Type here..." />
               <p>
                 <strong>Interpolated:</strong> {textareaValue}
@@ -59,10 +66,9 @@ export default pattern<{}, Output>(() => {
             </ct-vstack>
           </ct-card>
 
-          {/* ct-checkbox test */}
           <ct-card>
             <ct-vstack gap="2">
-              <ct-heading level={4}>ct-checkbox (booleanSchema)</ct-heading>
+              <ct-heading level={4}>ct-checkbox</ct-heading>
               <ct-checkbox $checked={checkboxValue}>Toggle me</ct-checkbox>
               <p>
                 <strong>Interpolated (via derive):</strong> {checkboxDisplay}
@@ -74,8 +80,8 @@ export default pattern<{}, Output>(() => {
           </ct-card>
 
           <p style="color: gray; font-size: 0.875rem;">
-            If any "Interpolated" value doesn't update when you interact with
-            the component, that component has the schema subscription bug.
+            If any "Interpolated" value is blank on initial page load, the late
+            subscriber bug is present. All values should appear immediately.
           </p>
         </ct-vstack>
       </ct-screen>
