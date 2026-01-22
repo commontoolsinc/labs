@@ -227,20 +227,18 @@ const bindChildren = (
     }
 
     // Now update the parent element so that its children appear in newKeyOrder.
-    // We build an array of current DOM nodes to compare by index.
-    const domNodes = Array.from(element.childNodes);
+    // We use element.childNodes directly (a live NodeList) instead of a static
+    // snapshot, because insertBefore() mutates the DOM and a static array would
+    // have stale references after the first move.
     for (let i = 0; i < newKeyOrder.length; i++) {
       const key = newKeyOrder[i];
+      // element() always returns a valid ChildNode (real element or placeholder)
       const desiredNode = newMapping.get(key)!.element();
-      if (!desiredNode) {
-        console.warn("No element for VdomChildNode");
-        continue;
-      }
       // If there's no node at this position, or it's different, insert desiredNode there.
-      if (domNodes[i] !== desiredNode) {
-        // Using domNodes[i] (which may be undefined) is equivalent to appending
-        // if there's no node at that index.
-        element.insertBefore(desiredNode, domNodes[i] ?? null);
+      if (element.childNodes[i] !== desiredNode) {
+        // Using element.childNodes[i] (which may be undefined) is equivalent to
+        // appending if there's no node at that index.
+        element.insertBefore(desiredNode, element.childNodes[i] ?? null);
         //animate(element, "moved");
       }
     }
@@ -268,6 +266,8 @@ class VdomChildNode {
   private document: Document;
   private options: RenderOptions;
   private visited: Set<object>;
+  // Placeholder used when element hasn't been created yet (async CellHandle case)
+  private _placeholder: ChildNode;
 
   constructor(
     child: RenderNode,
@@ -277,6 +277,12 @@ class VdomChildNode {
     this.document = options.document ?? globalThis.document;
     this.options = options;
     this.visited = visited;
+
+    // Create a placeholder text node. This ensures element() always returns
+    // something insertable, so the reorder loop can position it correctly. When
+    // the real element is created (possibly async for CellHandle children), it
+    // replaces this placeholder via replaceWith().
+    this._placeholder = this.document.createTextNode("") as ChildNode;
 
     this.setupEffect(child);
   }
@@ -347,21 +353,30 @@ class VdomChildNode {
     }
 
     if (this._element && element) {
+      // Replace existing element with new element
       this._element.replaceWith(element);
     } else if (this._element) {
+      // Remove existing element (new element is null/undefined)
       this._element.remove();
+    } else if (element && this._placeholder.parentNode) {
+      // First real element arriving - replace the placeholder
+      this._placeholder.replaceWith(element);
     }
     this._element = element;
     return cancel;
   };
 
-  element(): ChildNode | null {
-    return this._element;
+  element(): ChildNode {
+    // Return the real element if available, otherwise the placeholder.
+    // This ensures the reorder loop always has something to insert.
+    return this._element ?? this._placeholder;
   }
 
   dispose() {
     if (this.cancel) this.cancel();
     if (this._element) this._element.remove();
+    // Also remove placeholder if it's still in the DOM (e.g., async element never arrived)
+    if (this._placeholder.parentNode) this._placeholder.remove();
   }
 }
 
