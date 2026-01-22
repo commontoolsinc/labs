@@ -175,21 +175,21 @@ export const LocationTrackModule = recipe<
 
   // Computed display text
   const displayText = computed(() => {
-    const count = (locations || []).length || 0;
+    const count = locations.length || 0;
     const labelText = label ? `${label}: ` : "";
     return count > 0
       ? `${labelText}${count} point${count !== 1 ? "s" : ""}`
       : `${labelText}No points`;
   });
 
-  const hasPoints = computed(() => (locations || []).length > 0);
-  const hasMultiplePoints = computed(() => (locations || []).length > 1);
+  const hasPoints = computed(() => locations.length > 0);
+  const hasMultiplePoints = computed(() => locations.length > 1);
 
   // Pre-compute filtered locations with indices for the list
   // IMPORTANT: We pre-compute index here because closures over index in .map() callbacks
   // don't work correctly with the reactive system
   const validLocationsWithIndex = computed(() => {
-    return (locations || [])
+    return locations
       .map((point, index) => ({ point, index }))
       .filter(({ point }) => point && typeof point.latitude === "number");
   });
@@ -233,7 +233,7 @@ export const LocationTrackModule = recipe<
             style={{ fontSize: "14px", color: "#374151", padding: "0 8px" }}
           >
             {computed(() => {
-              const count = (locations || []).length || 0;
+              const count = locations.length || 0;
               return `${count} point${count !== 1 ? "s" : ""} captured`;
             })}
           </span>
