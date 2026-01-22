@@ -616,21 +616,21 @@ If there's an existing summary, update it with new information while preserving 
   // Action to submit an answer to the current question
   const submitAnswer = action(() => {
     const question = topQuestion;
-    const answer = currentAnswer.get().trim();
-    if (!question || !answer) return;
+    const userAnswer = currentAnswer.get().trim();
+    if (!question || !userAnswer) return;
 
     const l = learned.get();
 
     // Update the question status
     const updatedQuestions = l.openQuestions.map((q) =>
       q.id === question.id
-        ? { ...q, status: "answered" as const, answer, answeredAt: Date.now() }
+        ? { ...q, status: "answered" as const, answer: userAnswer, answeredAt: Date.now() }
         : q
     );
 
     // Create a new fact from the answer
     const newFact: Fact = {
-      content: `${question.question} → ${answer}`,
+      content: `${question.question} → ${userAnswer}`,
       confidence: 1.0, // User-provided = high confidence
       source: `user:question:${question.id}`,
       timestamp: Date.now(),
