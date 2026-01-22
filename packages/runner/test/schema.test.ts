@@ -13,6 +13,7 @@ import { txToReactivityLog } from "../src/scheduler.ts";
 import { sortAndCompactPaths } from "../src/reactive-dependencies.ts";
 import { toCell } from "../src/back-to-cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { CellResult } from "../src/query-result-proxy.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -3190,13 +3191,13 @@ describe("Schema Support", () => {
       // Result is a Cell pointing to `second` (not `first`, not `data`)
 
       // data: holds the actual value
-      const data = runtime.getCell<{ test: string }>(
+      const data = runtime.getCell<{ test: { foo: string } }>(
         space,
         "redirect-test-ascell-data",
         undefined,
         tx,
       );
-      data.set({ test: "foo" });
+      data.set({ test: { foo: "bar" } });
 
       // second: regular link to data
       const second = runtime.getCell<any>(
@@ -3225,32 +3226,228 @@ describe("Schema Support", () => {
       );
       redir.setRaw(first.getAsWriteRedirectLink());
 
-      // start: redirect link to redir (entry point for query)
-      const start = runtime.getCell<any>(
+      // inner: redirect link to redir (entry point for query)
+      const inner = runtime.getCell<any>(
         space,
-        "redirect-test-ascell-start",
+        "redirect-test-ascell-inner",
         undefined,
         tx,
       );
-      start.setRaw(redir.getAsWriteRedirectLink());
+      inner.setRaw(redir.getAsWriteRedirectLink());
+
+      // outer: redirect link to redir (entry point for query)
+      const outer = runtime.getCell<any>(
+        space,
+        "redirect-test-ascell-outer",
+        undefined,
+        tx,
+      );
+      outer.setRaw({ inner: redir.getAsWriteRedirectLink() });
+
+      const asObjectSchema = {
+        type: "object",
+        properties: {
+          test: { type: "object", properties: { foo: { type: "string" } } },
+        },
+      } as const satisfies JSONSchema;
 
       const asCellSchema = {
         type: "object",
         properties: {
-          test: { type: "string" },
+          test: { type: "object", properties: { foo: { type: "string" } } },
         },
         asCell: true,
       } as const satisfies JSONSchema;
 
-      const resultCell = start.asSchema(asCellSchema).get();
+      const resultCell = outer.asSchema({
+        type: "object",
+        properties: { inner: asObjectSchema },
+        asCell: true,
+      }).get();
       expect(isCell(resultCell)).toBe(true);
+
+      const resultInnerCell = outer.asSchema({
+        type: "object",
+        properties: { inner: asCellSchema },
+      }).key("inner").get();
+      expect(isCell(resultInnerCell)).toBe(true);
+
+      const resultInnerCell2 = outer.asSchema({
+        type: "object",
+        properties: { inner: asObjectSchema },
+      }).key("inner").asSchema(asCellSchema).get();
+      expect(isCell(resultInnerCell2)).toBe(true);
+
+      const outerInnerCell = outer.asSchema({
+        type: "object",
+        properties: { inner: asObjectSchema },
+      }).key("inner");
+      expect(isCell(outerInnerCell)).toBe(true);
+
+      const resultContents = outer.asSchema({
+        type: "object",
+        properties: { inner: asCellSchema },
+      }).get();
+
+      const resultInnerContents = outer.asSchema({
+        type: "object",
+        properties: { inner: asObjectSchema },
+      }).key("inner").get();
+
+      // Set these up for easier comparisons
+      const dataCellLink = data.getAsNormalizedFullLink();
+      const secondCellLink = second.getAsNormalizedFullLink();
+      const firstCellLink = first.getAsNormalizedFullLink();
+      // const redirCellLink = redir.getAsNormalizedFullLink();
+      // const innerCellLink = inner.getAsNormalizedFullLink();
+      const outerCellLink = outer.getAsNormalizedFullLink();
 
       // Result Cell points to `second` (one step past the first non-redirect)
       const resultCellLink = resultCell.getAsNormalizedFullLink();
-      const secondLink = second.getAsNormalizedFullLink();
+      const outerLink = outer.getAsNormalizedFullLink();
 
-      expect(resultCellLink.id).toBe(secondLink.id);
-      expect(resultCellLink.path).toEqual(secondLink.path);
+      expect(resultCellLink.id).toBe(outerCellLink.id);
+      // resultContents was returned from outer.get(), so its toCell() returns outer
+      const resultContentsToCell = (resultContents as any)[toCell]();
+      expect(resultContentsToCell.getAsNormalizedFullLink().id).toBe(
+        outerLink.id,
+      );
+
+      // resultInnerContents was returned from outer's inner.get(), and
+      // inner->redir->first are all writeRedirect, so its toCell() returns
+      // the first cell.
+      const resultContentsInnerToCell = (resultInnerContents as any)[toCell]();
+      const resultContentsInnerToCellLink = resultContentsInnerToCell
+        .getAsNormalizedFullLink();
+      expect(resultContentsInnerToCellLink.id).toBe(firstCellLink.id);
+      expect(resultContentsInnerToCellLink.path).toEqual([]);
+
+      // inner->redir->first are all writeRedirect, and then first->second is
+      // the non-redirect
+      const resultInnerCellLink = resultInnerCell!.getAsNormalizedFullLink();
+      expect(resultInnerCellLink.id).toBe(secondCellLink.id);
+      expect(resultInnerCellLink.path).toEqual([]);
+
+      // really just the same as above, but the asCell comes from parent
+      // (our cell object) instead of from the link (the data)
+      const resultInnerCell2Link = resultInnerCell2!.getAsNormalizedFullLink();
+      expect(resultInnerCell2Link.id).toBe(secondCellLink.id);
+      expect(resultInnerCell2Link.path).toEqual([]);
+
+      // outerInnerCell is the outer cell, but with a key of "inner"
+      // we shouldn't do any link following here.
+      const outerInnerCellLink = outerInnerCell.getAsNormalizedFullLink();
+      expect(outerInnerCellLink.id).toBe(outerCellLink.id);
+      expect(outerInnerCellLink.path).toEqual(["inner"]);
+
+      // const resultContentsInnerToCell =
+      //   (resultInnerContents as CellResult<unknown>)[toCell]();
+
+      // Round trip through the get/toCell chain.
+      const innerCellLink2 = (inner.get() as any)[toCell]()
+        .getAsNormalizedFullLink();
+      expect(innerCellLink2.id).toBe(dataCellLink.id);
+      expect(innerCellLink2.path).toEqual([]);
+    });
+
+    it("with toCell: returns Cell pointing to the last redirect with proper path", () => {
+      // A.foo => B.label (getAsRedirectLink)
+      // B.label.bar -> C.value (getAsLink)
+      // C.value -> D.value (getAsLink)
+      // D.value = {baz: {text: "dummy"}
+      // A.foo[toCell] should be B[label] (matches redirDoc)
+      // Arguably A.foo.bar[toCell] should be B[label.bar] (carries the remaining "bar" down to B),
+      //  but our current implementation is:
+      // A.foo.bar[toCell] returns C[value]
+      // Similarly A.foo.bar[toCell] should be B[label.bar] (carries the remaining "bar" down to B),
+      //  but our current implementation is:
+      // A.foo.bar.baz[toCell] should be D[value.baz]
+
+      const cellD = runtime.getCell<{ value: { baz: { text: string } } }>(
+        space,
+        "redirect-test-ascell-d",
+        undefined,
+        tx,
+      );
+      const cellDLink = cellD.getAsNormalizedFullLink();
+      cellD.set({ value: { baz: { text: "dummy" } } });
+
+      const cellC = runtime.getCell<{ value: { baz: { text: string } } }>(
+        space,
+        "redirect-test-ascell-c",
+        undefined,
+        tx,
+      );
+      cellC.set({ value: { baz: { text: "dummy" } } });
+      cellC.key("value").setRaw(cellD.key("value").getAsLink());
+
+      const cellB = runtime.getCell<
+        { label: { bar: { baz: { text: string } } } }
+      >(
+        space,
+        "redirect-test-ascell-b",
+        undefined,
+        tx,
+      );
+      const cellBLink = cellB.getAsNormalizedFullLink();
+      // Set a valid starter value
+      cellB.set({ label: { bar: { baz: { text: "initial" } } } });
+      // Then set up the link
+      cellB.key("label").key("bar").setRaw(
+        cellC.key("value").getAsLink(),
+      );
+
+      const cellA = runtime.getCell<
+        { foo: { bar: { baz: { text: string } } } }
+      >(
+        space,
+        "redirect-test-ascell-a",
+        undefined,
+        tx,
+      );
+      // Set a valid starter value
+      cellA.set({ foo: { bar: { baz: { text: "initial" } } } });
+      // Then set up the link
+      cellA.key("foo").setRaw(
+        cellB.key("label").getAsWriteRedirectLink(),
+      );
+
+      // A.foo[toCell] should be B[label] (matches redirDoc)
+      // A.foo.bar[toCell] should be B[label.bar] (carries the remaining "bar" down to B)
+      // A.foo.bar.baz[toCell] should be C[value.baz]
+      const cellAContents = cellA.get();
+      const cellAFooLink = (cellAContents.foo as CellResult<any>)[toCell]()
+        .getAsNormalizedFullLink();
+      expect(cellAFooLink.id).toBe(cellBLink.id);
+      expect(cellAFooLink.path).toEqual(["label"]);
+
+      const cellAFooBarLink = (cellAContents.foo.bar as CellResult<any>)
+        [toCell]()
+        .getAsNormalizedFullLink();
+
+      expect(cellAContents.foo.bar).toEqualIgnoringSymbols({
+        baz: { text: "dummy" },
+      });
+
+      expect(cellAFooBarLink.id).toBe(cellDLink.id);
+      expect(cellAFooBarLink.path).toEqual(["value"]);
+
+      //expect(cellAFooBarLink.id).toBe(cellBLink.id);
+      //expect(cellAFooBarLink.path).toEqual(["label", "bar"]);
+
+      //const newCell = getCellOrThrow(cellAContents.foo.bar.baz);
+      expect(cellB.key("label").get()).toEqualIgnoringSymbols({
+        bar: { baz: { text: "dummy" } },
+      });
+      expect(cellAContents.foo.bar.baz).toEqualIgnoringSymbols({
+        text: "dummy",
+      });
+
+      const cellAFooBarBazLink = (cellAContents.foo.bar.baz as CellResult<any>)
+        [toCell]()
+        .getAsNormalizedFullLink();
+      expect(cellAFooBarBazLink.id).toBe(cellDLink.id);
+      expect(cellAFooBarBazLink.path).toEqual(["value", "baz"]);
     });
   });
 });
