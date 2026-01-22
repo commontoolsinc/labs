@@ -30,7 +30,7 @@ interface Output {
   checkboxValue: boolean;
 }
 
-export default pattern<{}, Output>(() => {
+export default pattern<Record<string, never>, Output>(() => {
   const textValue = Writable.of<string>("hello");
   const textareaValue = Writable.of<string>("multi\nline");
   const checkboxValue = Writable.of<boolean>(true);
