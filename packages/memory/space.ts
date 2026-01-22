@@ -6,6 +6,7 @@ import {
 } from "@db/sqlite";
 
 import { COMMIT_LOG_TYPE, create as createCommit } from "./commit.ts";
+import * as SelectionBuilder from "./selection.ts";
 import { unclaimedRef } from "./fact.ts";
 import { fromString, refer } from "./reference.ts";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
@@ -924,16 +925,6 @@ const commit = <Space extends MemorySpace>(
 
   swap(session, { assert: commit }, commit.is);
 
-  // attach labels to the commit, so the provider can remove any classified entries from the commit before we send it to subscribers
-  // For this, we need since fields on our objects
-  const changedFacts = toSelection(
-    commit.is.since,
-    commit.is.transaction.args.changes,
-  );
-  const labels = getLabels(session, changedFacts);
-  if (Object.keys(labels).length > 0) {
-    commit.is.labels = labels;
-  }
   const changes: Commit<Space> = {} as Commit<Space>;
   set(changes, commit.of, commit.the, commit.cause.toString() as CauseString, {
     is: commit.is,
@@ -985,11 +976,32 @@ export const transact = <Space extends MemorySpace>(
 
     // Use IMMEDIATE transaction to acquire write lock at start, reducing
     // lock contention with external processes like litestream
-    return execute(
+    const result = execute(
       session.store.transaction(commit).immediate,
       session,
       transaction,
     );
+
+    // Attach labels to the commit (outside the DB transaction) so the provider
+    // can remove classified entries before sending to subscribers
+    if (result.ok) {
+      for (
+        const item of SelectionBuilder.iterate<{ is: CommitData }>(
+          result.ok,
+        )
+      ) {
+        const changedFacts = toSelection(
+          item.value.is.since,
+          item.value.is.transaction.args.changes,
+        );
+        const labels = getLabels(session, changedFacts);
+        if (Object.keys(labels).length > 0) {
+          item.value.is.labels = labels;
+        }
+      }
+    }
+
+    return result;
   });
 };
 
@@ -1255,6 +1267,18 @@ export function redactCommitData(
   if (effectiveLabels == null || Object.keys(effectiveLabels).length === 0) {
     return commitData;
   }
+
+  // TEMPORARY! REMOVE BEFORE PR! FOR WIP TESTING ONLY!
+  // Add a synthetic `labels` property to the incoming `commitData`, which
+  // `throws`, thereby indicating that we are looking at a site that depended
+  // on a non-empty `labels` being defined on the object.
+  Object.defineProperty(commitData, "labels", {
+    get: () => {
+      throw new globalThis.Error("`labels` CULPRIT!");
+    },
+  });
+  // END TEMPORARY WIP TESTING CODE!
+
   // Make a copy of the transaction with no changes
   const newChanges: Changes = {};
   // Add any non-redacted changes to the newCommitData
