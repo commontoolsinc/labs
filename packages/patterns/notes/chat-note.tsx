@@ -372,21 +372,21 @@ const ChatNote = pattern<Input, Output>(
     const beforeAIInsert = Writable.of<string>("");
 
     // Watch for LLM streaming partial updates
-    const _streamingWatcher = derive(
-      [isGenerating, llmResponse.partial],
-      ([generating, partial]) => {
-        if (generating && partial) {
-          const prefix = beforeAIInsert.get();
-          if (prefix) {
-            content.set(prefix + partial);
-          }
+    // Use explicit dependency array for proper reactive tracking
+    derive(
+      [isGenerating, llmResponse.partial, beforeAIInsert],
+      () => {
+        const generating = isGenerating.get();
+        const partial = llmResponse.partial;
+        const prefix = beforeAIInsert.get();
+        if (generating && partial && prefix) {
+          content.set(prefix + partial);
         }
-        return null;
       },
     );
 
     // Watch for LLM completion
-    const _completionWatcher = derive(
+    derive(
       [isGenerating, llmResponse.pending, llmResponse.result],
       ([generating, pending, result]) => {
         // When complete, finalize with result and closing separator
@@ -399,8 +399,6 @@ const ChatNote = pattern<Input, Output>(
           llmMessages.set([]);
           beforeAIInsert.set("");
         }
-
-        return null;
       },
     );
 
