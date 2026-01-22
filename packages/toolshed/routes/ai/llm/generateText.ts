@@ -5,6 +5,7 @@ import { type BuiltInLLMMessage } from "@commontools/api";
 import { findModel } from "./models.ts";
 import { provider as otelProvider } from "@/lib/otel.ts";
 import env from "@/env.ts";
+import { acquireSlot, releaseSlot } from "./throttle.ts";
 
 // Constants for JSON mode
 const JSON_SYSTEM_PROMPTS = {
@@ -231,8 +232,22 @@ export async function generateText(
     tracer: otelProvider.getTracer(env.OTEL_SERVICE_NAME || "toolshed-dev"),
   };
 
+  // Extract space from metadata for per-space throttling
+  const spaceId = typeof params.metadata?.space === "string"
+    ? params.metadata.space
+    : undefined;
+
+  // Throttle concurrent LLM requests to prevent CPU saturation (per-space)
+  await acquireSlot(spaceId);
+
   // This is where the LLM API call is made
-  const llmStream = await streamText(streamParams);
+  let llmStream;
+  try {
+    llmStream = await streamText(streamParams);
+  } catch (error) {
+    releaseSlot(spaceId);
+    throw error;
+  }
 
   // Get the active span from OpenTelemetry and set attributes
   const activeSpan = trace.getActiveSpan();
@@ -269,6 +284,7 @@ export async function generateText(
     }
 
     if (!result) {
+      releaseSlot(spaceId);
       throw new Error("No response from LLM");
     }
 
@@ -291,6 +307,7 @@ export async function generateText(
       messages[messages.length - 1].content = result;
     }
 
+    releaseSlot(spaceId);
     return {
       message: messages[messages.length - 1] as BuiltInLLMMessage,
       messages: [...messages] as BuiltInLLMMessage[],
@@ -299,6 +316,8 @@ export async function generateText(
   }
 
   // Create streaming response
+  // Capture spaceId in closure for releaseSlot call
+  const capturedSpaceId = spaceId;
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
@@ -450,6 +469,8 @@ export async function generateText(
           ),
         );
         controller.error(error);
+      } finally {
+        releaseSlot(capturedSpaceId);
       }
     },
   });
