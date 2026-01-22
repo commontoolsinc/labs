@@ -1242,9 +1242,9 @@ export function getClassifications(
  *
  * @param commitData The commit data to redact
  * @param labels Optional labels to use for redaction. If not provided, falls
- *   back to `commitData.labels`. Pass `null` explicitly to indicate no labels.
+ *   back to `commitData.labels`. Pass `null` explicitly to use the fallback.
  * @returns A new CommitData without the `labels` property, or the original
- *   if no labels were present.
+ *   if labels were null, undefined, or empty.
  */
 export function redactCommitData(
   commitData: CommitData,
@@ -1252,7 +1252,7 @@ export function redactCommitData(
 ): CommitData {
   // Use explicit labels parameter if provided, otherwise fall back to .labels
   const effectiveLabels = labels ?? commitData.labels;
-  if (effectiveLabels == null) {
+  if (effectiveLabels == null || Object.keys(effectiveLabels).length === 0) {
     return commitData;
   }
   // Make a copy of the transaction with no changes
