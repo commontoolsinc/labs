@@ -266,8 +266,6 @@ class VdomChildNode {
   private document: Document;
   private options: RenderOptions;
   private visited: Set<object>;
-  // Placeholder used when element hasn't been created yet (async CellHandle case)
-  private _placeholder: ChildNode;
 
   constructor(
     child: RenderNode,
@@ -277,12 +275,6 @@ class VdomChildNode {
     this.document = options.document ?? globalThis.document;
     this.options = options;
     this.visited = visited;
-
-    // Create a placeholder text node. This ensures element() always returns
-    // something insertable, so the reorder loop can position it correctly. When
-    // the real element is created (possibly async for CellHandle children), it
-    // replaces this placeholder via replaceWith().
-    this._placeholder = this.document.createTextNode("") as ChildNode;
 
     this.setupEffect(child);
   }
@@ -353,30 +345,29 @@ class VdomChildNode {
     }
 
     if (this._element && element) {
-      // Replace existing element with new element
       this._element.replaceWith(element);
     } else if (this._element) {
-      // Remove existing element (new element is null/undefined)
       this._element.remove();
-    } else if (element && this._placeholder.parentNode) {
-      // First real element arriving - replace the placeholder
-      this._placeholder.replaceWith(element);
     }
     this._element = element;
     return cancel;
   };
 
   element(): ChildNode {
-    // Return the real element if available, otherwise the placeholder.
-    // This ensures the reorder loop always has something to insert.
-    return this._element ?? this._placeholder;
+    // CellHandle.subscribe() always calls the callback synchronously with the
+    // current value, so _element should always be set by the time this is called.
+    if (!this._element) {
+      throw new Error(
+        "VdomChildNode.element() called before element was created. " +
+          "This indicates a bug - subscribe should be synchronous.",
+      );
+    }
+    return this._element;
   }
 
   dispose() {
     if (this.cancel) this.cancel();
     if (this._element) this._element.remove();
-    // Also remove placeholder if it's still in the DOM (e.g., async element never arrived)
-    if (this._placeholder.parentNode) this._placeholder.remove();
   }
 }
 
