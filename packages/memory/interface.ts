@@ -669,12 +669,9 @@ export type EnhancedCommit<Subject extends string = MemorySpace> = {
   commit: Commit<Subject>;
 };
 
-// We include labels here so we can use the commit data to redact the transaction
-// results before sending them to subscribers with insufficient access.
 export type CommitData = {
   since: number;
   transaction: Transaction;
-  labels?: FactSelection;
 };
 
 export type CommitFact<Subject extends MemorySpace = MemorySpace> = Assertion<

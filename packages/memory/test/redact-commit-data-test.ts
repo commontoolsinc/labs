@@ -53,10 +53,9 @@ Deno.test("redactCommitData - returns same object when labels is empty", () => {
   const commitData: CommitData = {
     since: 0,
     transaction,
-    labels,
   };
 
-  const result = redactCommitData(commitData);
+  const result = redactCommitData(commitData, labels);
 
   // Should return the exact same object reference when labels is empty
   assertStrictEquals(result, commitData);
@@ -73,34 +72,12 @@ Deno.test("redactCommitData - returns new object when labels present", () => {
   const commitData: CommitData = {
     since: 0,
     transaction,
-    labels,
   };
 
-  const result = redactCommitData(commitData);
+  const result = redactCommitData(commitData, labels);
 
   // Should return a different object reference
   assertNotStrictEquals(result, commitData);
-});
-
-Deno.test("redactCommitData - result has no labels property", () => {
-  const v1 = Fact.assert({ the, of: "of:test-doc", is: { value: 1 } });
-  const transaction = Transaction.create({
-    issuer: alice.did(),
-    subject: space.did(),
-    changes: Changes.from([v1]),
-  });
-  const labels = makeNonEmptyLabels();
-  const commitData: CommitData = {
-    since: 0,
-    transaction,
-    labels,
-  };
-
-  const result = redactCommitData(commitData);
-
-  // Result should not have labels property
-  assertEquals("labels" in result, false);
-  assertEquals(result.labels, undefined);
 });
 
 Deno.test("redactCommitData - preserves since value", () => {
@@ -114,10 +91,9 @@ Deno.test("redactCommitData - preserves since value", () => {
   const commitData: CommitData = {
     since: 42,
     transaction,
-    labels,
   };
 
-  const result = redactCommitData(commitData);
+  const result = redactCommitData(commitData, labels);
 
   assertEquals(result.since, 42);
 });
@@ -134,10 +110,9 @@ Deno.test("redactCommitData - preserves transaction metadata", () => {
   const commitData: CommitData = {
     since: 5,
     transaction,
-    labels,
   };
 
-  const result = redactCommitData(commitData);
+  const result = redactCommitData(commitData, labels);
 
   // Should preserve transaction metadata
   assertEquals(result.transaction.iss, alice.did());
@@ -158,10 +133,9 @@ Deno.test("redactCommitData - copies changes to new object", () => {
   const commitData: CommitData = {
     since: 0,
     transaction,
-    labels,
   };
 
-  const result = redactCommitData(commitData);
+  const result = redactCommitData(commitData, labels);
 
   // Changes should be copied (different reference)
   assertNotStrictEquals(
@@ -186,10 +160,9 @@ Deno.test("redactCommitData - skips claim entries (value === true)", () => {
   const commitData: CommitData = {
     since: 0,
     transaction,
-    labels,
   };
 
-  const result = redactCommitData(commitData);
+  const result = redactCommitData(commitData, labels);
 
   // The assertion should be present, but the claim (true) should be skipped
   const doc1Changes = result.transaction.args.changes["of:doc1"];
@@ -218,10 +191,9 @@ Deno.test("redactCommitData - includes label type facts unchanged", () => {
   const commitData: CommitData = {
     since: 0,
     transaction,
-    labels,
   };
 
-  const result = redactCommitData(commitData);
+  const result = redactCommitData(commitData, labels);
 
   // Label type facts should be included in the result
   const doc1Changes = result.transaction.args.changes["of:doc1"];
@@ -239,7 +211,6 @@ Deno.test("redactCommitData - explicit non-empty labels triggers processing", ()
     subject: space.did(),
     changes: Changes.from([v1]),
   });
-  // commitData has NO labels
   const commitData: CommitData = {
     since: 0,
     transaction,
@@ -251,7 +222,6 @@ Deno.test("redactCommitData - explicit non-empty labels triggers processing", ()
 
   // Should process (return new object) because explicit labels were provided
   assertNotStrictEquals(result, commitData);
-  assertEquals("labels" in result, false);
 });
 
 Deno.test("redactCommitData - explicit empty labels returns original", () => {
@@ -274,7 +244,7 @@ Deno.test("redactCommitData - explicit empty labels returns original", () => {
   assertStrictEquals(result, commitData);
 });
 
-Deno.test("redactCommitData - null labels param with no commitData.labels returns original", () => {
+Deno.test("redactCommitData - null labels returns original", () => {
   const v1 = Fact.assert({ the, of: "of:doc1", is: { a: 1 } });
   const transaction = Transaction.create({
     issuer: alice.did(),
@@ -284,77 +254,11 @@ Deno.test("redactCommitData - null labels param with no commitData.labels return
   const commitData: CommitData = {
     since: 0,
     transaction,
-    // no labels on commitData
   };
 
   // Pass null explicitly
   const result = redactCommitData(commitData, null);
 
-  // Should return same object since no labels anywhere
+  // Should return same object since labels is null
   assertStrictEquals(result, commitData);
-});
-
-Deno.test("redactCommitData - null labels param falls back to non-empty commitData.labels", () => {
-  const v1 = Fact.assert({ the, of: "of:doc1", is: { a: 1 } });
-  const transaction = Transaction.create({
-    issuer: alice.did(),
-    subject: space.did(),
-    changes: Changes.from([v1]),
-  });
-  const labelsOnCommit = makeNonEmptyLabels();
-  const commitData: CommitData = {
-    since: 0,
-    transaction,
-    labels: labelsOnCommit,
-  };
-
-  // Pass null explicitly - should fall back to commitData.labels
-  const result = redactCommitData(commitData, null);
-
-  // null means "use commitData.labels", so should process
-  assertNotStrictEquals(result, commitData);
-  assertEquals("labels" in result, false);
-});
-
-Deno.test("redactCommitData - null labels param with empty commitData.labels returns original", () => {
-  const v1 = Fact.assert({ the, of: "of:doc1", is: { a: 1 } });
-  const transaction = Transaction.create({
-    issuer: alice.did(),
-    subject: space.did(),
-    changes: Changes.from([v1]),
-  });
-  const emptyLabels: FactSelection = {} as FactSelection;
-  const commitData: CommitData = {
-    since: 0,
-    transaction,
-    labels: emptyLabels,
-  };
-
-  // Pass null explicitly - falls back to empty commitData.labels
-  const result = redactCommitData(commitData, null);
-
-  // Empty labels should return original
-  assertStrictEquals(result, commitData);
-});
-
-Deno.test("redactCommitData - omitted labels param falls back to non-empty commitData.labels", () => {
-  const v1 = Fact.assert({ the, of: "of:doc1", is: { a: 1 } });
-  const transaction = Transaction.create({
-    issuer: alice.did(),
-    subject: space.did(),
-    changes: Changes.from([v1]),
-  });
-  const labelsOnCommit = makeNonEmptyLabels();
-  const commitData: CommitData = {
-    since: 0,
-    transaction,
-    labels: labelsOnCommit,
-  };
-
-  // Don't pass labels parameter at all
-  const result = redactCommitData(commitData);
-
-  // Should use commitData.labels and process
-  assertNotStrictEquals(result, commitData);
-  assertEquals("labels" in result, false);
 });

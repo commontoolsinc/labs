@@ -1262,35 +1262,21 @@ export function getClassifications(
 }
 
 /**
- * Strips the `labels` property from commit data and redacts any classified
- * content based on those labels.
+ * Redacts any classified content from commit data based on the provided labels.
  *
  * @param commitData The commit data to redact
- * @param labels Optional labels to use for redaction. If not provided, falls
- *   back to `commitData.labels`. Pass `null` explicitly to use the fallback.
- * @returns A new CommitData without the `labels` property, or the original
- *   if labels were null, undefined, or empty.
+ * @param labels Labels to use for redaction. If null or empty, returns the
+ *   original commit data unchanged.
+ * @returns A redacted copy of the commit data, or the original if no redaction
+ *   was needed.
  */
 export function redactCommitData(
   commitData: CommitData,
   labels: FactSelection | null = null,
 ): CommitData {
-  // Use explicit labels parameter if provided, otherwise fall back to .labels
-  const effectiveLabels = labels ?? commitData.labels;
-  if (effectiveLabels == null || Object.keys(effectiveLabels).length === 0) {
+  if (labels == null || Object.keys(labels).length === 0) {
     return commitData;
   }
-
-  // TEMPORARY! REMOVE BEFORE PR! FOR WIP TESTING ONLY!
-  // Add a synthetic `labels` property to the incoming `commitData`, which
-  // `throws`, thereby indicating that we are looking at a site that depended
-  // on a non-empty `labels` being defined on the object.
-  Object.defineProperty(commitData, "labels", {
-    get: () => {
-      throw new globalThis.Error("`labels` CULPRIT!");
-    },
-  });
-  // END TEMPORARY WIP TESTING CODE!
 
   // Make a copy of the transaction with no changes
   const newChanges: Changes = {};
@@ -1305,7 +1291,7 @@ export function redactCommitData(
       continue;
     }
     // FIXME(@ubik2): Re-enable this once we've tracked down other issues
-    // const labelFact = getRevision(commitData.labels, fact.of, LABEL_TYPE);
+    // const labelFact = getRevision(labels, fact.of, LABEL_TYPE);
     // if (labelFact !== undefined && getClassifications(labelFact).size > 0) {
     //   setEmptyObj(newChanges, fact.of, fact.the);
     // } else {
