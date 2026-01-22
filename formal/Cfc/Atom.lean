@@ -10,7 +10,11 @@ This is intentionally a tiny core model; the full CFC spec has many atom variant
 
 inductive Atom where
   | user (did : String)
+  | space (id : String)
   | policy (name : String) (subject : String) (hash : String)
+  | hasRole (principal : String) (space : String) (role : String)
+  | multiPartyResult (participants : List String)
+  | multiPartyConsent (participant : String) (participants : List String)
   | integrityTok (name : String)
   | expires (t : Nat)
   | other (name : String)
@@ -20,4 +24,3 @@ def trustedScope : Atom :=
   Atom.integrityTok "TrustedScope"
 
 end Cfc
-

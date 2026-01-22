@@ -24,7 +24,15 @@ theorem satisfies_mono_atoms {p₁ p₂ : Principal} {a : Atom}
     simpa [Principal.satisfies, hNow] using h
   | user did =>
     exact hAtoms h
+  | space id =>
+    exact hAtoms h
   | policy name subject hash =>
+    exact hAtoms h
+  | hasRole principal space role =>
+    exact hAtoms h
+  | multiPartyResult participants =>
+    exact hAtoms h
+  | multiPartyConsent participant participants =>
     exact hAtoms h
   | integrityTok name =>
     exact hAtoms h
@@ -74,4 +82,3 @@ theorem canAccess_join_iff (p : Principal) (ℓ₁ ℓ₂ : Label) :
   simpa [canAccess, Label.join] using canAccessConf_append_iff p ℓ₁.conf ℓ₂.conf
 
 end Cfc
-
