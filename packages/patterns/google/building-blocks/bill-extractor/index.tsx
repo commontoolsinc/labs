@@ -144,6 +144,13 @@ export interface BillExtractorInput {
 
   /** Maximum number of emails to fetch */
   limit?: Default<number, 100>;
+
+  /**
+   * Whether this provider sends payment confirmation emails.
+   * When false, shows a banner explaining manual tracking is required.
+   * Defaults to true.
+   */
+  supportsAutoDetect?: Default<boolean, true>;
 }
 
 /**
@@ -172,6 +179,7 @@ export interface BillExtractorOutput {
   shortName: string;
   brandColor: string;
   websiteUrl?: string;
+  supportsAutoDetect: boolean;
 
   // Status
   pendingCount: number;
@@ -191,6 +199,8 @@ export interface BillExtractorOutput {
     summaryStatsUI: JSX.Element;
     overdueAlertUI: JSX.Element;
     websiteLinkUI: JSX.Element | null;
+    /** Banner shown when supportsAutoDetect is false */
+    manualTrackingBannerUI: JSX.Element | null;
   };
 
   // Access to underlying GmailExtractor (for advanced use)
@@ -346,9 +356,11 @@ function BillExtractor(input: BillExtractorInput): BillExtractorOutput {
     manuallyPaid,
     demoMode,
     limit,
+    supportsAutoDetect,
   } = input;
 
   const resolvedBrandColor = brandColor ?? "#3b82f6";
+  const resolvedSupportsAutoDetect = supportsAutoDetect ?? true;
 
   // Use GmailExtractor building block for email fetching and LLM extraction
   const extractor = GmailExtractor<BillAnalysis>({
@@ -676,7 +688,51 @@ function BillExtractor(input: BillExtractorInput): BillExtractorOutput {
     )
     : null;
 
-  // Demo toggle UI
+  // Manual tracking banner UI (shown when provider doesn't send payment confirmation emails)
+  const manualTrackingBannerUI = !resolvedSupportsAutoDetect
+    ? (
+      <div
+        style={{
+          padding: "12px 16px",
+          backgroundColor: "#eff6ff",
+          borderRadius: "8px",
+          border: "1px solid #3b82f6",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: "10px",
+          }}
+        >
+          <span style={{ fontSize: "16px", color: "#3b82f6" }}>ℹ</span>
+          <div>
+            <div
+              style={{
+                fontWeight: "600",
+                fontSize: "14px",
+                color: "#1e40af",
+                marginBottom: "4px",
+              }}
+            >
+              Manual Tracking Required
+            </div>
+            <div
+              style={{ fontSize: "13px", color: "#3730a3", lineHeight: "1.4" }}
+            >
+              {shortName}{" "}
+              doesn't send payment confirmation emails. Use "Mark Paid" to track
+              payments, or bills over {Math.abs(LIKELY_PAID_THRESHOLD_DAYS)}
+              {" "}
+              days old will be assumed paid.
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+    : null;
+
   return {
     // Pre-computed data (building-block scope)
     bills,
@@ -696,6 +752,7 @@ function BillExtractor(input: BillExtractorInput): BillExtractorOutput {
     shortName,
     brandColor: resolvedBrandColor,
     websiteUrl,
+    supportsAutoDetect: resolvedSupportsAutoDetect,
 
     // Status
     pendingCount: extractor.pendingCount,
@@ -715,6 +772,7 @@ function BillExtractor(input: BillExtractorInput): BillExtractorOutput {
       summaryStatsUI,
       overdueAlertUI,
       websiteLinkUI,
+      manualTrackingBannerUI,
     },
 
     // Access to underlying extractor

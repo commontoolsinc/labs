@@ -118,6 +118,8 @@ export default pattern<PatternInput>(
       overrideAuth,
       manuallyPaid,
       demoMode,
+      // BofA doesn't send payment confirmation emails, so auto-detection isn't possible
+      supportsAutoDetect: false,
     });
 
     // Create computed arrays in PATTERN scope (not building block scope)
@@ -183,6 +185,9 @@ export default pattern<PatternInput>(
 
               {/* Connection Status */}
               {ui.connectionStatusUI}
+
+              {/* Manual Tracking Banner (BofA doesn't send payment confirmation emails) */}
+              {ui.manualTrackingBannerUI}
 
               {/* Analysis Status */}
               {ui.analysisProgressUI}
