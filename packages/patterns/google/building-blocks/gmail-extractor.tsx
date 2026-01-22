@@ -140,6 +140,7 @@ export interface GmailExtractorOutput<T = unknown> {
     emailId: string;
     emailDate: string;
     analysis: { pending?: boolean; result?: T; error?: unknown };
+    result?: T;
     pending: boolean;
     error: unknown;
   }>;
@@ -333,11 +334,11 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
   });
 
   // Reactive LLM analysis - analyze each email (only if extraction is provided)
-  // Note: consumers access result via item.analysis.result (not item.result)
+  // Note: consumers can access result via item.analysis.result or item.result
   // Result type is inferred from extraction.schema by the runtime
   const rawAnalyses = shouldRunAnalysis
     ? emails.map((email: Email) => {
-      const analysis = generateObject({
+      const analysis = generateObject<T>({
         prompt: computed(() => {
           if (!email?.markdownContent) {
             return undefined;
@@ -359,6 +360,7 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
         emailId: email.id,
         emailDate: email.date,
         analysis,
+        result: analysis.result,
         pending: analysis.pending,
         error: analysis.error,
       };
@@ -368,6 +370,7 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
       emailId: string;
       emailDate: string;
       analysis: { pending?: boolean; result?: T; error?: unknown };
+      result?: T;
       pending: boolean;
       error: unknown;
     }>);
