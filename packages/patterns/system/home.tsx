@@ -225,10 +225,12 @@ const addJournalEntry = handler<
 });
 
 // Handler to submit an answer to a question (reads question from learned state)
+// Uses ct-message-input event format: { detail: { message: string } }
 const submitAnswerHandler = handler<
-  { userAnswer: string },
-  { learned: Writable<LearnedSection>; currentAnswer: Writable<string> }
->(({ userAnswer }, { learned, currentAnswer }) => {
+  { detail: { message: string } },
+  { learned: Writable<LearnedSection> }
+>(({ detail }, { learned }) => {
+  const userAnswer = detail?.message?.trim();
   if (!userAnswer) return;
 
   const l = learned.get();
@@ -260,9 +262,6 @@ const submitAnswerHandler = handler<
     facts: [...l.facts, newFact],
     openQuestions: updatedQuestions,
   });
-
-  // Clear the input
-  currentAnswer.set("");
 });
 
 export default pattern((_) => {
@@ -651,11 +650,8 @@ If there's an existing summary, update it with new information while preserving 
     return pending[0];
   });
 
-  // Track the current answer input
-  const currentAnswer = Writable.of("");
-
   // Bound handler with state
-  const submitAnswer = submitAnswerHandler({ learned, currentAnswer });
+  const submitAnswer = submitAnswerHandler({ learned });
 
   return {
     [NAME]: `Home`,
@@ -717,56 +713,11 @@ If there's an existing summary, update it with new information while preserving 
                   <p style={{ margin: 0, fontSize: "14px" }}>
                     {computed(() => topQuestion?.question || "")}
                   </p>
-                  {computed(() =>
-                      topQuestion?.options && topQuestion.options.length > 0
-                    )
-                    ? (
-                      <ct-hstack gap="2" style={{ flexWrap: "wrap" }}>
-                        {computed(() =>
-                          (topQuestion?.options || []).map((opt) => (
-                            <button
-                              type="button"
-                              onClick={() => submitAnswer.send({ userAnswer: opt })}
-                              style={{
-                                padding: "8px 16px",
-                                background: "#fff",
-                                border: "1px solid #d1d5db",
-                                borderRadius: "6px",
-                                cursor: "pointer",
-                                fontSize: "13px",
-                              }}
-                            >
-                              {opt}
-                            </button>
-                          ))
-                        )}
-                      </ct-hstack>
-                    )
-                    : (
-                      <ct-hstack gap="2">
-                        <ct-input
-                          $value={currentAnswer}
-                          placeholder="Type your answer..."
-                          style={{ flex: 1 }}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => submitAnswer.send({ userAnswer: currentAnswer.get() })}
-                          style={{
-                            padding: "8px 16px",
-                            background: "#f59e0b",
-                            color: "#fff",
-                            border: "none",
-                            borderRadius: "6px",
-                            cursor: "pointer",
-                            fontSize: "13px",
-                            fontWeight: "500",
-                          }}
-                        >
-                          Submit
-                        </button>
-                      </ct-hstack>
-                    )}
+                  <ct-message-input
+                    placeholder="Type your answer..."
+                    appearance="rounded"
+                    onct-send={submitAnswer}
+                  />
                   <span style={{ fontSize: "11px", color: "#92400e" }}>
                     Category: {computed(() => topQuestion?.category || "")}
                   </span>
