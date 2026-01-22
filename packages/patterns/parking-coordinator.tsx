@@ -279,9 +279,18 @@ const getHostName = lift(
   },
 );
 
-const isArrayEmpty = lift((arr: unknown[]): boolean => arr.length === 0);
-
 const isNumberZero = lift((n: number): boolean => n === 0);
+
+// Combined helpers for "no pending" state to avoid nested ternary reactivity issues
+const showGetStartedMessage = lift(
+  (args: { pendingRequests: SpotRequest[]; peopleCount: number }): boolean =>
+    args.pendingRequests.length === 0 && args.peopleCount === 0,
+);
+
+const showNoPendingMessage = lift(
+  (args: { pendingRequests: SpotRequest[]; peopleCount: number }): boolean =>
+    args.pendingRequests.length === 0 && args.peopleCount > 0,
+);
 
 const isPendingGreaterThanZero = lift(
   (day: { pending: number }): boolean => day.pending > 0,
@@ -1245,31 +1254,36 @@ export default pattern<Input, Output>(
                     );
                   })}
 
-                  {isArrayEmpty(todayPending)
+                  {showGetStartedMessage({
+                      pendingRequests: todayPending,
+                      peopleCount: personCount,
+                    })
                     ? (
-                      isNumberZero(personCount)
-                        ? (
-                          <ct-card style="background: var(--ct-color-blue-50); border: 1px solid var(--ct-color-blue-200);">
-                            <ct-vstack
-                              gap="2"
-                              style="text-align: center; padding: 1rem;"
-                            >
-                              <span style="font-size: 1.5rem;">🚗</span>
-                              <span style="font-weight: 600; color: var(--ct-color-blue-700);">
-                                Get Started
-                              </span>
-                              <span style="color: var(--ct-color-gray-600); font-size: 0.875rem;">
-                                Add team members in the Admin tab to begin
-                                coordinating parking spots.
-                              </span>
-                            </ct-vstack>
-                          </ct-card>
-                        )
-                        : (
-                          <div style="text-align: center; color: var(--ct-color-gray-500); padding: 1rem;">
-                            No pending requests for today
-                          </div>
-                        )
+                      <ct-card style="background: var(--ct-color-blue-50); border: 1px solid var(--ct-color-blue-200);">
+                        <ct-vstack
+                          gap="2"
+                          style="text-align: center; padding: 1rem;"
+                        >
+                          <span style="font-size: 1.5rem;">🚗</span>
+                          <span style="font-weight: 600; color: var(--ct-color-blue-700);">
+                            Get Started
+                          </span>
+                          <span style="color: var(--ct-color-gray-600); font-size: 0.875rem;">
+                            Add team members in the Admin tab to begin
+                            coordinating parking spots.
+                          </span>
+                        </ct-vstack>
+                      </ct-card>
+                    )
+                    : null}
+                  {showNoPendingMessage({
+                      pendingRequests: todayPending,
+                      peopleCount: personCount,
+                    })
+                    ? (
+                      <div style="text-align: center; color: var(--ct-color-gray-500); padding: 1rem;">
+                        No pending requests for today
+                      </div>
                     )
                     : null}
                 </ct-vstack>
