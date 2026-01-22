@@ -17,7 +17,8 @@ What is modeled:
 - An integrity-guarded declassification operator (minimal stand-in for guarded exchange)
 - Proofs are added incrementally in `formal/Cfc/Proofs/`.
 
-Initial proof:
+Proofs:
 
 - Termination-insensitive noninterference (with implicit-flow/PC taint): `formal/Cfc/Proofs/Noninterference.lean`
 - Guarded declassification only rewrites confidentiality when the guard token is present: `formal/Cfc/Proofs/RobustDeclassification.lean`
+- Integrity-guarded confidentiality exchange + scenario checks (spaces/links, multi-party, authority-only): `formal/Cfc/Proofs/Scenarios.lean`

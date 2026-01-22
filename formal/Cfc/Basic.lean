@@ -3,5 +3,8 @@ import Cfc.Label
 import Cfc.Access
 import Cfc.Language
 import Cfc.Language.Declassify
+import Cfc.Exchange
 import Cfc.Proofs.Noninterference
 import Cfc.Proofs.RobustDeclassification
+import Cfc.Proofs.Exchange
+import Cfc.Proofs.Scenarios
