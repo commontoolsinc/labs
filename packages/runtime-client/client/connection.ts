@@ -118,7 +118,6 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     cell: CellHandle<any>,
   ): Promise<void> {
     const key = cellRefToKey(cell.ref());
-
     let instances = this.#subscribed.get(key);
     if (instances) {
       if (!instances.has(cell)) {
@@ -135,7 +134,6 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       }
       return;
     }
-
     instances = new Set([cell]);
     this.#subscribed.set(key, instances);
     const _ = await this.request<RequestType.CellSubscribe>({
@@ -250,7 +248,6 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
 
   private _handleCellUpdate(message: CellUpdateNotification): void {
     const { cell: cellRef, value } = message;
-
     if (value === undefined) {
       // A value can be reported as `undefined` only when there's been a
       // conflict, and will be followed by the settled value. Ignore
@@ -258,9 +255,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       return;
     }
 
-    const key = cellRefToKey(cellRef);
-    const subscribed = this.#subscribed.get(key);
-
+    const subscribed = this.#subscribed.get(cellRefToKey(cellRef));
     if (subscribed && subscribed.size > 0) {
       for (const instance of subscribed) {
         instance[$onCellUpdate](value);
