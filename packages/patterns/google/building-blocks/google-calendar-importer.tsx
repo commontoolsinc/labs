@@ -637,8 +637,8 @@ interface GoogleCalendarImporterInput {
     debugMode: false;
   }>;
   // Optional: Link auth directly from a Google Auth charm when wish() is unavailable
-  // Use: ct charm link googleAuthCharm/auth calendarImporterCharm/linkedAuth
-  linkedAuth?: Auth;
+  // Use: ct charm link googleAuthCharm/auth calendarImporterCharm/overrideAuth
+  overrideAuth?: Auth;
 }
 
 /** Google Calendar event importer. #calendarEvents */
@@ -656,7 +656,7 @@ const toggleShowEvents = handler<unknown, { showEvents: Writable<boolean> }>(
 );
 
 const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
-  ({ settings, linkedAuth }) => {
+  ({ settings, overrideAuth }) => {
     const events = Writable.of<Confidential<CalendarEvent[]>>([]);
     const calendars = Writable.of<Calendar[]>([]);
     const fetching = Writable.of(false);
@@ -704,32 +704,32 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
       requiredScopes: ["calendar"] as ScopeKey[],
     });
 
-    // Check if linkedAuth is provided (for manual linking when wish() is unavailable)
+    // Check if overrideAuth is provided (for manual linking when wish() is unavailable)
     const hasLinkedAuth = derive(
-      { linkedAuth },
-      ({ linkedAuth: la }) => !!(la?.token),
+      { overrideAuth },
+      ({ overrideAuth: la }) => !!(la?.token),
     );
-    const linkedAuthEmail = derive(
-      { linkedAuth },
-      ({ linkedAuth: la }) => la?.user?.email || "",
+    const overrideAuthEmail = derive(
+      { overrideAuth },
+      ({ overrideAuth: la }) => la?.user?.email || "",
     );
 
-    // Use linkedAuth if provided, otherwise use wished auth
+    // Use overrideAuth if provided, otherwise use wished auth
     // This allows manual linking via CLI when wish() is unavailable (e.g., favorites disabled)
-    // Note: We wrap linkedAuth in Writable.of outside of reactive context
-    const linkedAuthCell = Writable.of<Auth | null>(null);
+    // Note: We wrap overrideAuth in Writable.of outside of reactive context
+    const overrideAuthCell = Writable.of<Auth | null>(null);
     computed(() => {
-      if (linkedAuth?.token) {
-        linkedAuthCell.set(linkedAuth as any);
+      if (overrideAuth?.token) {
+        overrideAuthCell.set(overrideAuth as any);
       }
     });
 
-    // Choose auth source based on linkedAuth availability
-    const auth = ifElse(hasLinkedAuth, linkedAuthCell, wishedAuth) as any;
+    // Choose auth source based on overrideAuth availability
+    const auth = ifElse(hasLinkedAuth, overrideAuthCell, wishedAuth) as any;
     const isReady = ifElse(hasLinkedAuth, hasLinkedAuth, wishedIsReady);
     const currentEmail = ifElse(
       hasLinkedAuth,
-      linkedAuthEmail,
+      overrideAuthEmail,
       wishedCurrentEmail,
     );
 

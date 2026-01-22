@@ -15,7 +15,7 @@
  * Usage:
  * 1. Deploy a google-auth charm and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct charm link google-auth/auth usps/linkedAuth
+ * 3. Link: ct charm link google-auth/auth usps/overrideAuth
  */
 import {
   computed,
@@ -266,8 +266,8 @@ const deleteMember = handler<
 interface PatternInput {
   householdMembers?: Default<HouseholdMember[], []>;
   // Optional: Link auth directly from a Google Auth charm
-  // Use: ct charm link googleAuthCharm/auth uspsCharm/linkedAuth
-  linkedAuth?: Auth;
+  // Use: ct charm link googleAuthCharm/auth uspsCharm/overrideAuth
+  overrideAuth?: Auth;
 }
 
 /** USPS Informed Delivery mail analyzer. #uspsInformedDelivery */
@@ -289,7 +289,7 @@ interface PatternOutput {
 }
 
 export default pattern<PatternInput, PatternOutput>(
-  ({ householdMembers, linkedAuth }) => {
+  ({ householdMembers, overrideAuth }) => {
     // Directly instantiate GmailExtractor with USPS-specific settings (raw mode)
     // This eliminates the need for separate gmail-importer charm + wish()
     const extractor = GmailExtractor({
@@ -297,7 +297,7 @@ export default pattern<PatternInput, PatternOutput>(
       resolveInlineImages: true,
       limit: 20,
       title: "USPS Mail",
-      linkedAuth, // Pass through from USPS input (user can link google-auth here)
+      overrideAuth, // Pass through from USPS input (user can link google-auth here)
     });
 
     // Get emails directly from the embedded extractor

@@ -264,7 +264,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
   const extractor = GmailExtractor({
     gmailQuery: "label:task-current",
     limit: 100,
-    linkedAuth: auth,
+    overrideAuth: auth,
   });
 
   // Get emails from extractor

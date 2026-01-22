@@ -16,7 +16,7 @@
  * Usage:
  * 1. Deploy a google-auth charm and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct charm link google-auth/auth email-pattern-launcher/linkedAuth
+ * 3. Link: ct charm link google-auth/auth email-pattern-launcher/overrideAuth
  */
 import {
   //compileAndRun,
@@ -119,8 +119,8 @@ function buildGmailQuery(entries: RegistryEntry[]): string { // Build "from:@dom
 
 interface PatternInput {
   // Optional: Link auth directly from a Google Auth charm
-  // Use: ct charm link googleAuthCharm/auth emailPatternLauncher/linkedAuth
-  linkedAuth?: Auth;
+  // Use: ct charm link googleAuthCharm/auth emailPatternLauncher/overrideAuth
+  overrideAuth?: Auth;
 }
 
 /** Email pattern launcher that discovers and runs relevant patterns. #emailPatternLauncher */
@@ -131,7 +131,7 @@ interface PatternOutput {
   previewUI: unknown;
 }
 
-export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
+export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   // ==========================================================================
   // FETCH REGISTRY
   // ==========================================================================
@@ -160,7 +160,7 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
   const extractor = GmailExtractor({
     gmailQuery,
     limit: 100,
-    linkedAuth,
+    overrideAuth,
   });
 
   const allEmails = extractor.emails;
@@ -236,7 +236,7 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
         (f) => f !== undefined && f !== null && typeof f.name === "string",
       ),
       main: programFetch.result?.main ?? "",
-      input: { linkedAuth },
+      input: { overrideAuth },
     }));
 
     // Compile and run the pattern

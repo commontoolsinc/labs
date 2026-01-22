@@ -14,7 +14,7 @@
  * Usage:
  * 1. Deploy a google-auth charm and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct charm link google-auth/auth email-ticket-finder/linkedAuth
+ * 3. Link: ct charm link google-auth/auth email-ticket-finder/overrideAuth
  */
 import { computed, JSONSchema, NAME, pattern, UI } from "commontools";
 import type { Schema } from "commontools/schema";
@@ -404,7 +404,7 @@ function getStatusLabel(status: TicketStatus, daysUntil: number): string {
 // =============================================================================
 
 interface PatternInput {
-  linkedAuth?: Auth;
+  overrideAuth?: Auth;
   // No additional writable state needed for this pattern
   // (could add dismissed/hidden tickets later)
 }
@@ -420,7 +420,7 @@ interface PatternOutput {
   previewUI: unknown;
 }
 
-export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
+export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   // Use GmailExtractor building block for email fetching and LLM extraction
   const extractor = GmailExtractor<TicketAnalysisResult>({
     gmailQuery: TICKET_GMAIL_QUERY,
@@ -431,7 +431,7 @@ export default pattern<PatternInput, PatternOutput>(({ linkedAuth }) => {
     title: "Ticket Emails",
     resolveInlineImages: false,
     limit: 100,
-    linkedAuth,
+    overrideAuth,
   });
 
   // Convenience aliases from extractor

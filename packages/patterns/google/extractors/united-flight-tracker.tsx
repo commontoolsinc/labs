@@ -15,7 +15,7 @@
  * Usage:
  * 1. Deploy a google-auth charm and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct charm link google-auth/auth united-flight-tracker/linkedAuth
+ * 3. Link: ct charm link google-auth/auth united-flight-tracker/overrideAuth
  */
 import { computed, ifElse, JSONSchema, NAME, pattern, UI } from "commontools";
 import type { Schema } from "commontools/schema";
@@ -459,7 +459,7 @@ function parseFlightStatus(status: string | undefined): FlightStatus {
 // =============================================================================
 
 interface Input {
-  linkedAuth?: Auth;
+  overrideAuth?: Auth;
 }
 
 /** United Airlines flight tracker. #unitedFlights */
@@ -474,7 +474,7 @@ interface Output {
   previewUI: unknown;
 }
 
-export default pattern<Input, Output>(({ linkedAuth }) => {
+export default pattern<Input, Output>(({ overrideAuth }) => {
   // Use GmailExtractor building block with LLM extraction
   const extractor = GmailExtractor<EmailAnalysisResult>({
     gmailQuery: UNITED_GMAIL_QUERY,
@@ -484,7 +484,7 @@ export default pattern<Input, Output>(({ linkedAuth }) => {
     },
     title: "United Flights",
     limit: 100,
-    linkedAuth,
+    overrideAuth,
   });
 
   // Get values from extractor

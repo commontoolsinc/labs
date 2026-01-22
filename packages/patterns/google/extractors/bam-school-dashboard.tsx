@@ -15,7 +15,7 @@
  * Usage:
  * 1. Deploy a google-auth charm and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct charm link google-auth/auth bam-school-dashboard/linkedAuth
+ * 3. Link: ct charm link google-auth/auth bam-school-dashboard/overrideAuth
  */
 import {
   computed,
@@ -290,7 +290,7 @@ interface PatternInput {
     }
   >;
   dismissedIds?: Writable<Default<string[], []>>;
-  linkedAuth?: Auth;
+  overrideAuth?: Auth;
 }
 
 /** BAM School Dashboard - At-a-glance view of school events and announcements. #bamSchool */
@@ -304,7 +304,7 @@ interface PatternOutput {
 }
 
 export default pattern<PatternInput, PatternOutput>(
-  ({ settings, dismissedIds, linkedAuth }) => {
+  ({ settings, dismissedIds, overrideAuth }) => {
     // Build Gmail query to find BAM school emails
     // Excludes fundraising emails (schoolsfund.berkeley.net)
     const gmailQuery =
@@ -315,7 +315,7 @@ export default pattern<PatternInput, PatternOutput>(
       gmailQuery,
       title: "BAM School Emails",
       limit: 50,
-      linkedAuth,
+      overrideAuth,
     });
 
     // Get emails from extractor

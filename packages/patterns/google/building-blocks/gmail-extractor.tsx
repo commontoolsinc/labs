@@ -35,7 +35,7 @@
  *     schema: MY_SCHEMA,
  *   },
  *   title: "My Items",
- *   linkedAuth,
+ *   overrideAuth,
  * });
  * // Use extractor.rawAnalyses, extractor.emails, extractor.ui.* for UI pieces
  * ```
@@ -46,7 +46,7 @@
  * const extractor = GmailExtractor({
  *   gmailQuery: "from:usps.com",
  *   resolveInlineImages: true,
- *   linkedAuth,
+ *   overrideAuth,
  * });
  *
  * // Custom multimodal analysis
@@ -125,7 +125,7 @@ export interface GmailExtractorInput {
   // Use hardcoded "anthropic:claude-sonnet-4-5" instead.
 
   /** Optional linked auth (overrides wish() default) */
-  linkedAuth?: Auth;
+  overrideAuth?: Auth;
 }
 
 /**
@@ -172,10 +172,10 @@ export interface GmailExtractorOutput<T = unknown> {
 
   /** UI bundle (JSX elements) */
   ui: {
-    authStatusUI: unknown;
-    connectionStatusUI: unknown;
-    analysisProgressUI: unknown;
-    previewUI: unknown;
+    authStatusUI: JSX.Element;
+    connectionStatusUI: JSX.Element;
+    analysisProgressUI: JSX.Element;
+    previewUI: JSX.Element;
   };
 
   /** Access to underlying GmailImporter (for advanced use) */
@@ -404,7 +404,7 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
     title,
     resolveInlineImages,
     limit,
-    linkedAuth,
+    overrideAuth,
   } = input;
 
   // Instantiate Gmail Importer with the provided settings
@@ -416,21 +416,17 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
       limit: limit ?? 100,
       debugMode: false,
     },
-    linkedAuth,
+    overrideAuth,
   });
 
   // Get emails from the importer
   const emails = gmailImporter.emails;
   const emailCount = computed(() => emails?.length || 0);
 
-  // Check connection status
-  // Note: When using wish() for auth (no linkedAuth), we use emailCount > 0 as a proxy
-  // for "connected". This means we won't show "Connected" until emails are actually fetched.
-  const isConnected = computed(() => {
-    if (linkedAuth?.token) return true;
-    // For wish() auth, check if we've fetched any emails as proxy for auth success
-    return (emails?.length || 0) > 0;
-  });
+  // Check connection status using the importer's resolved auth state
+  // GmailImporter exposes isReady which checks: ifElse(overrideAuth.token, overrideAuth, wishedAuth).token
+  // This properly handles both overrideAuth and wish()-based auth
+  const isConnected = gmailImporter.isReady;
 
   // Auto-detect whether to run analysis based on presence of extraction config
   const shouldRunAnalysis = computed(() => {
@@ -493,8 +489,8 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
 
   // Note: Handler operations removed - they were unused and the authForHandlers wrapper
   // was an anti-pattern (Writable.of + computed side effect).
-  // GmailImporter already handles auth via wish() when linkedAuth isn't provided.
-  // If write operations are needed in the future, pass linkedAuth directly to handlers.
+  // GmailImporter already handles auth via wish() when overrideAuth isn't provided.
+  // If write operations are needed in the future, pass overrideAuth directly to handlers.
 
   // UI Components
 
@@ -663,8 +659,8 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
     },
     gmailImporter,
     refresh: gmailImporter.bgUpdater,
-    addLabels: addLabelsHandler({ auth: linkedAuth }),
-    removeLabels: removeLabelsHandler({ auth: linkedAuth }),
+    addLabels: addLabelsHandler({ auth: overrideAuth }),
+    removeLabels: removeLabelsHandler({ auth: overrideAuth }),
   };
 }
 
