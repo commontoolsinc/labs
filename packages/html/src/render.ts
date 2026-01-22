@@ -227,20 +227,18 @@ const bindChildren = (
     }
 
     // Now update the parent element so that its children appear in newKeyOrder.
-    // We build an array of current DOM nodes to compare by index.
-    const domNodes = Array.from(element.childNodes);
+    // We use element.childNodes directly (a live NodeList) instead of a static
+    // snapshot, because insertBefore() mutates the DOM and a static array would
+    // have stale references after the first move.
     for (let i = 0; i < newKeyOrder.length; i++) {
       const key = newKeyOrder[i];
+      // element() always returns a valid ChildNode (real element or placeholder)
       const desiredNode = newMapping.get(key)!.element();
-      if (!desiredNode) {
-        console.warn("No element for VdomChildNode");
-        continue;
-      }
       // If there's no node at this position, or it's different, insert desiredNode there.
-      if (domNodes[i] !== desiredNode) {
-        // Using domNodes[i] (which may be undefined) is equivalent to appending
-        // if there's no node at that index.
-        element.insertBefore(desiredNode, domNodes[i] ?? null);
+      if (element.childNodes[i] !== desiredNode) {
+        // Using element.childNodes[i] (which may be undefined) is equivalent to
+        // appending if there's no node at that index.
+        element.insertBefore(desiredNode, element.childNodes[i] ?? null);
         //animate(element, "moved");
       }
     }
@@ -355,7 +353,15 @@ class VdomChildNode {
     return cancel;
   };
 
-  element(): ChildNode | null {
+  element(): ChildNode {
+    // CellHandle.subscribe() always calls the callback synchronously with the
+    // current value, so _element should always be set by the time this is called.
+    if (!this._element) {
+      throw new Error(
+        "VdomChildNode.element() called before element was created. " +
+          "This indicates a bug - subscribe should be synchronous.",
+      );
+    }
     return this._element;
   }
 

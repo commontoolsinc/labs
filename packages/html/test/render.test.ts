@@ -1061,6 +1061,292 @@ describe("cycle detection", () => {
   });
 });
 
+describe("DOM reordering algorithm", () => {
+  it("correctly reorders children [A, B] to [B, A] using live childNodes", () => {
+    // This test verifies the fix for the stale childNodes reference bug.
+    // The bug: capturing element.childNodes into a static array, then using
+    // insertBefore() which mutates the DOM, causing subsequent iterations
+    // to reference stale positions.
+    const { document } = mock;
+    const parent = document.createElement("div");
+
+    // Create two children
+    const childA = document.createElement("span");
+    childA.textContent = "Alice";
+    const childB = document.createElement("span");
+    childB.textContent = "Bob";
+
+    // Initial order: [Alice, Bob]
+    parent.appendChild(childA);
+    parent.appendChild(childB);
+    assert.equal(parent.childNodes[0], childA);
+    assert.equal(parent.childNodes[1], childB);
+
+    // Simulate the reorder algorithm using LIVE childNodes (the fix)
+    // Desired order: [Bob, Alice]
+    const desiredOrder = [childB, childA];
+    for (let i = 0; i < desiredOrder.length; i++) {
+      const desiredNode = desiredOrder[i];
+      // Use live childNodes[i] instead of a stale snapshot
+      if (parent.childNodes[i] !== desiredNode) {
+        parent.insertBefore(desiredNode, parent.childNodes[i] ?? null);
+      }
+    }
+
+    // Verify final order is [Bob, Alice]
+    assert.equal(parent.childNodes[0], childB, "First child should be Bob");
+    assert.equal(parent.childNodes[1], childA, "Second child should be Alice");
+    assert.equal(
+      (parent.childNodes[0] as Element).textContent,
+      "Bob",
+      "First child text should be Bob",
+    );
+    assert.equal(
+      (parent.childNodes[1] as Element).textContent,
+      "Alice",
+      "Second child text should be Alice",
+    );
+  });
+
+  it("correctly reverses [A, B, C] to [C, B, A] using live childNodes", () => {
+    const { document } = mock;
+    const parent = document.createElement("div");
+
+    const childA = document.createElement("span");
+    childA.textContent = "A";
+    const childB = document.createElement("span");
+    childB.textContent = "B";
+    const childC = document.createElement("span");
+    childC.textContent = "C";
+
+    // Initial order: [A, B, C]
+    parent.appendChild(childA);
+    parent.appendChild(childB);
+    parent.appendChild(childC);
+
+    // Desired order: [C, B, A]
+    const desiredOrder = [childC, childB, childA];
+    for (let i = 0; i < desiredOrder.length; i++) {
+      const desiredNode = desiredOrder[i];
+      if (parent.childNodes[i] !== desiredNode) {
+        parent.insertBefore(desiredNode, parent.childNodes[i] ?? null);
+      }
+    }
+
+    // Verify final order is [C, B, A]
+    assert.equal(
+      (parent.childNodes[0] as Element).textContent,
+      "C",
+      "First should be C",
+    );
+    assert.equal(
+      (parent.childNodes[1] as Element).textContent,
+      "B",
+      "Second should be B",
+    );
+    assert.equal(
+      (parent.childNodes[2] as Element).textContent,
+      "A",
+      "Third should be A",
+    );
+  });
+
+  it("demonstrates the bug with stale snapshot (for documentation)", () => {
+    // This test shows what WOULD happen with the bug (stale snapshot)
+    // We don't actually want this behavior, but it documents the issue.
+    const { document } = mock;
+    const parent = document.createElement("div");
+
+    const childA = document.createElement("span");
+    childA.textContent = "Alice";
+    const childB = document.createElement("span");
+    childB.textContent = "Bob";
+
+    // Initial order: [Alice, Bob]
+    parent.appendChild(childA);
+    parent.appendChild(childB);
+
+    // THE BUG: Capture a STATIC snapshot (this is what the old code did)
+    const domNodes = Array.from(parent.childNodes);
+
+    // Desired order: [Bob, Alice]
+    const desiredOrder = [childB, childA];
+    for (let i = 0; i < desiredOrder.length; i++) {
+      const desiredNode = desiredOrder[i];
+      // Bug: using stale domNodes[i] instead of live childNodes[i]
+      if (domNodes[i] !== desiredNode) {
+        parent.insertBefore(desiredNode, domNodes[i] ?? null);
+      }
+    }
+
+    // With the bug, the final order is WRONG: [Alice, Bob] instead of [Bob, Alice]
+    // i=0: domNodes[0]=Alice, desired=Bob, Alice≠Bob, so insertBefore(Bob, Alice) → [Bob, Alice] ✓
+    // i=1: domNodes[1]=Bob (STALE!), desired=Alice, Bob≠Alice, so insertBefore(Alice, Bob)
+    //      But Bob is now at position 0, so this inserts Alice before Bob → [Alice, Bob] ✗
+    assert.equal(
+      (parent.childNodes[0] as Element).textContent,
+      "Alice",
+      "Bug: First child is Alice (wrong!)",
+    );
+    assert.equal(
+      (parent.childNodes[1] as Element).textContent,
+      "Bob",
+      "Bug: Second child is Bob (wrong!)",
+    );
+  });
+
+  it("handles shrinking array [A, B, C] to [A] correctly", () => {
+    // This simulates the full bindChildren algorithm:
+    // 1. Remove obsolete nodes (B, C)
+    // 2. Reorder remaining nodes
+    const { document } = mock;
+    const parent = document.createElement("div");
+
+    const childA = document.createElement("span");
+    childA.textContent = "A";
+    const childB = document.createElement("span");
+    childB.textContent = "B";
+    const childC = document.createElement("span");
+    childC.textContent = "C";
+
+    // Initial: [A, B, C]
+    parent.appendChild(childA);
+    parent.appendChild(childB);
+    parent.appendChild(childC);
+    assert.equal(parent.childNodes.length, 3);
+
+    // Simulate bindChildren update to [A]:
+    // Step 1: Remove obsolete nodes (B and C)
+    childB.remove();
+    childC.remove();
+
+    // Step 2: Reorder (only A remains, should be at position 0)
+    const desiredOrder = [childA];
+    for (let i = 0; i < desiredOrder.length; i++) {
+      const desiredNode = desiredOrder[i];
+      if (parent.childNodes[i] !== desiredNode) {
+        parent.insertBefore(desiredNode, parent.childNodes[i] ?? null);
+      }
+    }
+
+    // Verify: only A remains
+    assert.equal(parent.childNodes.length, 1, "Should have 1 child");
+    assert.equal(
+      (parent.childNodes[0] as Element).textContent,
+      "A",
+      "Only child should be A",
+    );
+  });
+
+  it("handles growing array [A] to [A, B, C] correctly", () => {
+    const { document } = mock;
+    const parent = document.createElement("div");
+
+    const childA = document.createElement("span");
+    childA.textContent = "A";
+    const childB = document.createElement("span");
+    childB.textContent = "B";
+    const childC = document.createElement("span");
+    childC.textContent = "C";
+
+    // Initial: [A]
+    parent.appendChild(childA);
+    assert.equal(parent.childNodes.length, 1);
+
+    // Simulate bindChildren update to [A, B, C]:
+    // B and C are new nodes (not yet in DOM)
+    const desiredOrder = [childA, childB, childC];
+    for (let i = 0; i < desiredOrder.length; i++) {
+      const desiredNode = desiredOrder[i];
+      if (parent.childNodes[i] !== desiredNode) {
+        // childNodes[i] ?? null handles appending when i >= length
+        parent.insertBefore(desiredNode, parent.childNodes[i] ?? null);
+      }
+    }
+
+    // Verify: [A, B, C]
+    assert.equal(parent.childNodes.length, 3, "Should have 3 children");
+    assert.equal((parent.childNodes[0] as Element).textContent, "A");
+    assert.equal((parent.childNodes[1] as Element).textContent, "B");
+    assert.equal((parent.childNodes[2] as Element).textContent, "C");
+  });
+
+  it("handles shrink AND reorder [A, B, C] to [C, A] correctly", () => {
+    const { document } = mock;
+    const parent = document.createElement("div");
+
+    const childA = document.createElement("span");
+    childA.textContent = "A";
+    const childB = document.createElement("span");
+    childB.textContent = "B";
+    const childC = document.createElement("span");
+    childC.textContent = "C";
+
+    // Initial: [A, B, C]
+    parent.appendChild(childA);
+    parent.appendChild(childB);
+    parent.appendChild(childC);
+
+    // Simulate bindChildren update to [C, A]:
+    // Step 1: Remove obsolete node (B)
+    childB.remove();
+    // DOM is now [A, C]
+
+    // Step 2: Reorder to [C, A]
+    const desiredOrder = [childC, childA];
+    for (let i = 0; i < desiredOrder.length; i++) {
+      const desiredNode = desiredOrder[i];
+      if (parent.childNodes[i] !== desiredNode) {
+        parent.insertBefore(desiredNode, parent.childNodes[i] ?? null);
+      }
+    }
+
+    // Verify: [C, A]
+    assert.equal(parent.childNodes.length, 2, "Should have 2 children");
+    assert.equal(
+      (parent.childNodes[0] as Element).textContent,
+      "C",
+      "First should be C",
+    );
+    assert.equal(
+      (parent.childNodes[1] as Element).textContent,
+      "A",
+      "Second should be A",
+    );
+  });
+
+  it("handles grow AND reorder [A] to [C, B, A] correctly", () => {
+    const { document } = mock;
+    const parent = document.createElement("div");
+
+    const childA = document.createElement("span");
+    childA.textContent = "A";
+    const childB = document.createElement("span");
+    childB.textContent = "B";
+    const childC = document.createElement("span");
+    childC.textContent = "C";
+
+    // Initial: [A]
+    parent.appendChild(childA);
+
+    // Simulate bindChildren update to [C, B, A]:
+    // B and C are new (not in DOM yet)
+    const desiredOrder = [childC, childB, childA];
+    for (let i = 0; i < desiredOrder.length; i++) {
+      const desiredNode = desiredOrder[i];
+      if (parent.childNodes[i] !== desiredNode) {
+        parent.insertBefore(desiredNode, parent.childNodes[i] ?? null);
+      }
+    }
+
+    // Verify: [C, B, A]
+    assert.equal(parent.childNodes.length, 3, "Should have 3 children");
+    assert.equal((parent.childNodes[0] as Element).textContent, "C");
+    assert.equal((parent.childNodes[1] as Element).textContent, "B");
+    assert.equal((parent.childNodes[2] as Element).textContent, "A");
+  });
+});
+
 describe("bidirectional binding validation", () => {
   it("throws when $value is a primitive string", () => {
     assert.throws(
