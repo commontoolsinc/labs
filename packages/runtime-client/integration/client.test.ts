@@ -204,6 +204,41 @@ describe("RuntimeClient", () => {
       assertEquals(receivedValues.length >= 3, true);
       assertEquals(receivedValues[receivedValues.length - 1], { counter: 3 });
     });
+
+    it("updates multiple instances of the same cell with different schema", async () => {
+      const session = await createSession({ identity, spaceName });
+      await using rt = await createRuntimeClient(session);
+
+      const schema = {
+        type: "string",
+      } as const satisfies JSONSchema;
+
+      const cause = "test-cell-" + Date.now();
+      const cell = await rt.getCell<string>(
+        session.space,
+        cause,
+        schema,
+      );
+
+      const cell2 = cell.asSchema<string>({
+        type: "string",
+        default: "default-string",
+      });
+
+      let _updatedValue1 = undefined;
+      const cancel1 = cell.subscribe((value) => {
+        _updatedValue1 = value;
+      });
+      let _updatedValue2 = undefined;
+      const cancel2 = cell2.subscribe((value) => {
+        _updatedValue2 = value;
+      });
+
+      await cell.set("my-value");
+      await waitFor(() => Promise.resolve(cell2.get() === "my-value"));
+      cancel1();
+      cancel2();
+    });
   });
 
   describe("page operations", () => {
