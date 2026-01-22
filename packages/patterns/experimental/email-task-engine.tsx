@@ -548,17 +548,14 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
 
   // Analyze each task email with LLM
   const analyses = taskEmails.map((email: TaskEmail) => {
-    // Build prompt with available notes context
-    const notesContext = computed(() => {
-      const notes = availableNotes || [];
-      if (notes.length === 0) return "No existing notes found.";
-      return notes
-        .map((n) => `- "${n.title}": ${n.contentPreview}`)
-        .join("\n");
-    });
-
     const prompt = computed(() => {
       if (!email?.subject) return undefined;
+
+      // Build notes context directly from availableNotes
+      const notes = availableNotes || [];
+      const notesContext = notes.length === 0
+        ? "No existing notes found."
+        : notes.map((n) => `- "${n.title}": ${n.contentPreview}`).join("\n");
 
       return `You are analyzing an email to suggest an action. The email has been labeled "task-current" indicating the user wants to take action on it.
 
@@ -836,6 +833,37 @@ Respond with the most appropriate action.`;
                       if (result.confidence >= 0.8) return "#10b981"; // High confidence - green
                       if (result.confidence >= 0.5) return "#f59e0b"; // Medium - amber
                       return "#e5e7eb"; // Low - neutral
+                    },
+                  );
+
+                  // Pre-compute the handler based on action type BEFORE the button
+                  const executeHandler = derive(
+                    analysis.result,
+                    (result) => {
+                      if (result?.actionType === "edit-note") {
+                        return executeEditNote({
+                          removeLabels: extractor.removeLabels,
+                          emailId: analysis.email.id,
+                          noteTitle: result.noteTitle || "",
+                          addition: result.addition || "",
+                          taskCurrentLabelId,
+                          hiddenTasks,
+                          processingTasks,
+                          allCharms,
+                        });
+                      } else if (result?.actionType === "create-note") {
+                        return executeCreateNote({
+                          removeLabels: extractor.removeLabels,
+                          emailId: analysis.email.id,
+                          title: result.title || "",
+                          content: result.content || "",
+                          taskCurrentLabelId,
+                          hiddenTasks,
+                          processingTasks,
+                          allCharms,
+                        });
+                      }
+                      return null;
                     },
                   );
 
@@ -1145,57 +1173,7 @@ Respond with the most appropriate action.`;
                             ),
                             <button
                               type="button"
-                              onClick={ifElse(
-                                derive(
-                                  analysis.result,
-                                  (result) =>
-                                    result?.actionType === "edit-note",
-                                ),
-                                executeEditNote({
-                                  removeLabels: extractor.removeLabels,
-                                  emailId: analysis.email.id,
-                                  noteTitle: derive(
-                                    analysis.result,
-                                    (result) =>
-                                      result?.actionType === "edit-note"
-                                        ? result.noteTitle || ""
-                                        : "",
-                                  ),
-                                  addition: derive(
-                                    analysis.result,
-                                    (result) =>
-                                      result?.actionType === "edit-note"
-                                        ? result.addition || ""
-                                        : "",
-                                  ),
-                                  taskCurrentLabelId,
-                                  hiddenTasks,
-                                  processingTasks,
-                                  allCharms,
-                                }),
-                                executeCreateNote({
-                                  removeLabels: extractor.removeLabels,
-                                  emailId: analysis.email.id,
-                                  title: derive(
-                                    analysis.result,
-                                    (result) =>
-                                      result?.actionType === "create-note"
-                                        ? result.title || ""
-                                        : "",
-                                  ),
-                                  content: derive(
-                                    analysis.result,
-                                    (result) =>
-                                      result?.actionType === "create-note"
-                                        ? result.content || ""
-                                        : "",
-                                  ),
-                                  taskCurrentLabelId,
-                                  hiddenTasks,
-                                  processingTasks,
-                                  allCharms,
-                                }),
-                              )}
+                              onClick={executeHandler}
                               disabled={derive(
                                 { isProcessing, taskCurrentLabelId },
                                 ({ isProcessing, taskCurrentLabelId }) =>
