@@ -649,7 +649,8 @@ function GmailExtractor<T = unknown>(
   return {
     emails,
     emailCount,
-    rawAnalyses,
+    // Cast needed: reactive .map() returns cells, but interface uses simplified plain types
+    rawAnalyses: rawAnalyses as GmailExtractorOutput<T>["rawAnalyses"],
     pendingCount,
     completedCount,
     isConnected,
