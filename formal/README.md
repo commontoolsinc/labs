@@ -15,3 +15,7 @@ What is modeled:
 - Access check (`canAccess`) and label join (conf concatenation, integrity intersection)
 - A tiny expression language with PC/flow-path taint
 - Proofs are added incrementally in `formal/Cfc/Proofs/`.
+
+Initial proof:
+
+- Termination-insensitive noninterference (with implicit-flow/PC taint): `formal/Cfc/Proofs/Noninterference.lean`
