@@ -481,23 +481,8 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     loadingLabels,
   });
 
-  // Auto-fetch labels when auth becomes ready
-  const hasAutoFetchedLabels = Writable.of(false).for("hasAutoFetchedLabels");
-
-  computed(() => {
-    const ready = isReady;
-    const alreadyFetched = hasAutoFetchedLabels.get();
-    const hasLabelId = !!taskCurrentLabelId.get();
-    const currentlyLoading = loadingLabels.get();
-
-    if (ready && !alreadyFetched && !hasLabelId && !currentlyLoading) {
-      if (DEBUG_TASKS) {
-        console.log("[EmailTaskEngine] Auto-fetching labels on auth ready");
-      }
-      hasAutoFetchedLabels.set(true);
-      labelFetcherStream.send({});
-    }
-  });
+  // Auto-fetch labels is handled by the UI button - removed auto-trigger
+  // to avoid reactivity loops from side effects in computed()
 
   // Instantiate GmailExtractor in raw mode (no extraction)
   const extractor = GmailExtractor({
