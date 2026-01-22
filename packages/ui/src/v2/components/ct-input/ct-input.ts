@@ -10,7 +10,6 @@ import {
   themeContext,
 } from "../theme-context.ts";
 import { type CellHandle } from "@commontools/runtime-client";
-import { stringSchema } from "@commontools/runner/schemas";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
 
@@ -493,7 +492,9 @@ export class CTInput extends BaseElement {
         if (changedProperties.has("value")) {
           // Bind the new value (Cell or plain) to the controller
           // This updates the internal reference so getValue() returns the correct value
-          this._cellController.bind(this.value, stringSchema);
+          // Note: Don't pass stringSchema here - use the CellHandle's existing schema
+          // to avoid creating a new CellHandle that won't share subscriptions
+          this._cellController.bind(this.value);
         }
       }
 
@@ -529,7 +530,9 @@ export class CTInput extends BaseElement {
         this._input = this.shadowRoot?.querySelector("input") || null;
 
         // Bind the initial value to the cell controller
-        this._cellController.bind(this.value, stringSchema);
+        // Note: Don't pass stringSchema here - use the CellHandle's existing schema
+        // to avoid creating a new CellHandle that won't share subscriptions
+        this._cellController.bind(this.value);
 
         // Update timing options to match current properties
         this._cellController.updateTimingOptions({
