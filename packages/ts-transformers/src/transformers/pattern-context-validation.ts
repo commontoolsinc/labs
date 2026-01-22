@@ -26,6 +26,7 @@
  * - Calling .get() on cells: ERROR (must wrap in computed())
  * - Function creation in pattern context: ERROR (move to module scope)
  * - lift()/handler() inside pattern: ERROR (move to module scope)
+ * - .map() on fallback expression (x ?? [] or x || []): ERROR (use direct property access)
  */
 import ts from "typescript";
 import { TransformationContext, Transformer } from "../core/mod.ts";
@@ -36,6 +37,7 @@ import {
   isInsideRestrictedContext,
   isInsideSafeCallbackWrapper,
 } from "../ast/mod.ts";
+import { isOpaqueRefType } from "./opaque-ref/opaque-ref.ts";
 
 export class PatternContextValidationTransformer extends Transformer {
   transform(context: TransformationContext): ts.SourceFile {
@@ -78,6 +80,9 @@ export class PatternContextValidationTransformer extends Transformer {
       if (ts.isCallExpression(node)) {
         // Check for lift/handler inside pattern
         this.validateBuilderPlacement(node, context, checker);
+
+        // Check for .map() on fallback expressions (x ?? [] or x || [])
+        this.validateMapOnFallbackExpression(node, context, checker);
 
         // Check for .get() calls
         if (
@@ -364,5 +369,57 @@ export class PatternContextValidationTransformer extends Transformer {
     }
 
     return false;
+  }
+
+  /**
+   * Validates that .map() is not called on a fallback expression like (x ?? []) or (x || [])
+   * where one side is reactive (OpaqueRef) and the other is not.
+   *
+   * This pattern fails at runtime because the transformer can't properly detect that
+   * the result needs mapWithPattern transformation.
+   */
+  private validateMapOnFallbackExpression(
+    node: ts.CallExpression,
+    context: TransformationContext,
+    checker: ts.TypeChecker,
+  ): void {
+    if (!ts.isPropertyAccessExpression(node.expression)) return;
+    if (node.expression.name.text !== "map") return;
+
+    let target: ts.Expression = node.expression.expression;
+
+    // Unwrap parentheses
+    while (ts.isParenthesizedExpression(target)) {
+      target = target.expression;
+    }
+
+    // Check if target is (x ?? y) or (x || y)
+    if (!ts.isBinaryExpression(target)) return;
+
+    const op = target.operatorToken.kind;
+    if (
+      op !== ts.SyntaxKind.QuestionQuestionToken &&
+      op !== ts.SyntaxKind.BarBarToken
+    ) {
+      return;
+    }
+
+    // Check if left side is OpaqueRef and right side is not
+    const leftType = checker.getTypeAtLocation(target.left);
+    const rightType = checker.getTypeAtLocation(target.right);
+
+    const leftIsOpaque = isOpaqueRefType(leftType, checker);
+    const rightIsOpaque = isOpaqueRefType(rightType, checker);
+
+    if (leftIsOpaque && !rightIsOpaque) {
+      context.reportDiagnostic({
+        severity: "error",
+        type: "pattern-context:map-on-fallback",
+        message:
+          `'.map()' on fallback expression with mixed reactive/non-reactive types is not supported. ` +
+          `Use direct property access: 'x.map(...)' rather than '(x ?? fallback).map(...)'`,
+        node,
+      });
+    }
   }
 }
