@@ -962,16 +962,19 @@ const execute = <
 };
 
 /**
- * Attaches labels to a commit so providers can redact classified entries
- * before sending to subscribers. This is separate from the transaction
- * to keep labels attachment outside the SQLite transaction.
+ * Computes labels for a commit, used by providers to redact classified entries
+ * before sending to subscribers.
+ *
+ * @returns Label facts for documents in the commit, or undefined if none.
  */
-export function attachLabelsToCommit<Space extends MemorySpace>(
+export function getLabelsForCommit<Space extends MemorySpace>(
   space: SpaceSession<Space>,
   commit: Commit<Space>,
-): void {
+): FactSelection | undefined {
   // SpaceSession is implemented by Space class which has store
   const session = space as unknown as Session<Space>;
+  let allLabels: FactSelection | undefined;
+
   for (const item of SelectionBuilder.iterate<{ is: CommitData }>(commit)) {
     const changedFacts = toSelection(
       item.value.is.since,
@@ -979,9 +982,11 @@ export function attachLabelsToCommit<Space extends MemorySpace>(
     );
     const labels = getLabels(session, changedFacts);
     if (Object.keys(labels).length > 0) {
-      item.value.is.labels = labels;
+      allLabels = { ...allLabels, ...labels } as FactSelection;
     }
   }
+
+  return allLabels;
 }
 
 export const transact = <Space extends MemorySpace>(

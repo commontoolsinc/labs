@@ -227,9 +227,8 @@ export const transact = async (session: Session, transaction: Transaction) => {
       return result;
     }
 
-    // Attach labels to the commit so the provider can remove classified
-    // entries before sending to subscribers
-    Space.attachLabelsToCommit(space, result.ok);
+    // Get labels for classified content redaction
+    const labels = Space.getLabelsForCommit(space, result.ok);
 
     return await traceAsync(
       "memory.notify_subscribers",
@@ -242,7 +241,7 @@ export const transact = async (session: Session, transaction: Transaction) => {
         const promises = [];
         // Copy here, in case a subscriber modifies the set of subscribers
         for (const subscriber of [...session.subscribers]) {
-          promises.push(subscriber.commit(result.ok));
+          promises.push(subscriber.commit(result.ok, labels));
         }
         await Promise.all(promises);
 

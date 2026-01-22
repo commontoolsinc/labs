@@ -491,8 +491,19 @@ export interface MemorySession<Space extends MemorySpace = MemorySpace>
 }
 
 export interface Subscriber<Space extends MemorySpace = MemorySpace> {
-  // Notifies a subscriber of a commit that has been applied
-  commit(commit: Commit<Space>): AwaitResult<Unit, SystemError>;
+  /**
+   * Notifies a subscriber of a commit that has been applied.
+   *
+   * @param commit - The commit data to be processed and broadcast to listeners.
+   * @param labels - Label facts associated with documents in this commit. Used
+   *   to redact classified content before broadcasting to listeners who lack the
+   *   appropriate claims.
+   */
+  commit(
+    commit: Commit<Space>,
+    labels?: FactSelection,
+  ): AwaitResult<Unit, SystemError>;
+
   close(): AwaitResult<Unit, SystemError>;
 }
 
