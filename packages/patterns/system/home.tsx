@@ -122,7 +122,8 @@ function captureSnapshot(
     const value = cell.get();
     if (value !== undefined) {
       const str = JSON.stringify(value);
-      valueExcerpt = str.length > 200 ? str.slice(0, 200) + "..." : str;
+      // Capture up to 1000 chars to give LLM more context about content
+      valueExcerpt = str.length > 1000 ? str.slice(0, 1000) + "..." : str;
     }
   } catch {
     // Ignore errors - excerpt is optional
@@ -312,20 +313,23 @@ export default pattern((_) => {
       if (!entry) return ""; // No-op when nothing pending
       const eventDesc = eventDescriptions[entry.eventType || ""] ||
         entry.eventType;
-      return `Generate a brief journal entry (1-2 sentences) describing this user action.
+      const excerpt = entry.snapshot?.valueExcerpt || "";
+
+      return `Generate a brief journal entry (2-3 sentences) describing this user action.
 
 Event: User ${eventDesc} a charm
 Charm name: ${entry.snapshot?.name || "unnamed"}
-${
-        entry.snapshot?.valueExcerpt
-          ? `Content preview: ${entry.snapshot.valueExcerpt.slice(0, 100)}`
-          : ""
-      }
+${excerpt ? `\nContent/Data:\n${excerpt}\n` : ""}
 
-Write in past tense, personal style, like a thoughtful journal entry. Focus on the meaning and what it might indicate about the user's goals. Be concise.`;
+IMPORTANT: Analyze the CONTENT of what they saved, not just the title. If it's a note, what is it about? If it has data, what kind? Extract meaningful insights about their interests, work, or life from the actual content.
+
+Write in past tense, personal style. Focus on:
+1. What the content reveals about the user's interests/goals
+2. Any specific topics, projects, or themes in the data
+3. What this might indicate about what they care about`;
     }),
     system:
-      "You are writing brief journal entries about user activity. Be concise, observational, and connect actions to potential user intent when relevant.",
+      "You analyze user activity and content to understand their interests. Look at the actual data/content, not just titles. Extract meaningful insights about what they care about, work on, or are interested in.",
     model: "anthropic:claude-sonnet-4-5",
   });
 
