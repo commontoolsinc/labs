@@ -302,6 +302,14 @@ export interface Session<Space extends MemorySpace> {
   store: Database;
 }
 
+/**
+ * A space instance that provides both low-level database access (Session)
+ * and high-level operations (SpaceSession).
+ */
+export type SpaceInstance<Space extends MemorySpace> =
+  & Session<Space>
+  & SpaceSession<Space>;
+
 class Space<Subject extends MemorySpace = MemorySpace>
   implements Session<Subject>, SpaceSession {
   constructor(public subject: Subject, public store: Database) {}
@@ -967,12 +975,10 @@ const execute = <
  *
  * @returns Label facts for documents in the commit, or undefined if none.
  */
-export function getLabelsForCommit<Space extends MemorySpace>(
-  space: SpaceSession<Space>,
-  commit: Commit<Space>,
+export function getLabelsForCommit<S extends MemorySpace>(
+  session: Session<S>,
+  commit: Commit<S>,
 ): FactSelection | undefined {
-  // SpaceSession is implemented by Space class which has store
-  const session = space as unknown as Session<Space>;
   let allLabels: FactSelection | undefined;
 
   for (const item of SelectionBuilder.iterate<{ is: CommitData }>(commit)) {
