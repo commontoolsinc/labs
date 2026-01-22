@@ -50,6 +50,7 @@ import {
   type SetLoggerEnabledRequest,
   type SetLoggerLevelRequest,
   type SetPullModeRequest,
+  type SetTelemetryEnabledRequest,
 } from "../protocol/mod.ts";
 import { HttpProgramResolver, Program } from "@commontools/js-compiler";
 import { setLLMUrl } from "@commontools/llm";
@@ -72,6 +73,7 @@ export class RuntimeProcessor {
   private disposingPromise: Promise<void> | undefined;
   private subscriptions = new Map<string, Cancel>();
   private telemetry: RuntimeTelemetry;
+  #telemetryEnabled = false;
 
   private constructor(
     runtime: Runtime,
@@ -501,6 +503,10 @@ export class RuntimeProcessor {
     }
   }
 
+  setTelemetryEnabled(request: SetTelemetryEnabledRequest): void {
+    this.#telemetryEnabled = request.enabled;
+  }
+
   #getLoggers(loggerName?: string): Logger[] {
     const global = globalThis as unknown as {
       commontools?: { logger?: Record<string, Logger> };
@@ -516,6 +522,7 @@ export class RuntimeProcessor {
   }
 
   #onTelemetry = (event: Event) => {
+    if (!this.#telemetryEnabled) return;
     const marker = (event as RuntimeTelemetryEvent).marker;
     self.postMessage({
       type: NotificationType.Telemetry,
@@ -601,6 +608,8 @@ export class RuntimeProcessor {
         return this.setLoggerLevel(request);
       case RequestType.SetLoggerEnabled:
         return this.setLoggerEnabled(request);
+      case RequestType.SetTelemetryEnabled:
+        return this.setTelemetryEnabled(request);
       default:
         throw new Error(`Unknown message type: ${(request as any).type}`);
     }

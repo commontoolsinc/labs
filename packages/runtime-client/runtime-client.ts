@@ -274,6 +274,18 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     });
   }
 
+  /**
+   * Enable or disable telemetry data emission from the worker.
+   * When disabled, telemetry events will not be sent over IPC.
+   * @param enabled - Whether to enable or disable telemetry
+   */
+  async setTelemetryEnabled(enabled: boolean): Promise<void> {
+    await this.#conn.request<RequestType.SetTelemetryEnabled>({
+      type: RequestType.SetTelemetryEnabled,
+      enabled,
+    });
+  }
+
   async dispose(): Promise<void> {
     await this.#conn.dispose();
   }
