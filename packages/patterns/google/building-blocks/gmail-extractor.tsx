@@ -12,6 +12,17 @@
  * 4. Progress tracking - pendingCount, completedCount
  * 5. UI components - auth, connection status, progress
  *
+ * ## Content Truncation
+ *
+ * Email content fields (markdownContent, htmlContent, plainText) are automatically
+ * truncated to prevent token limit errors. The limits are:
+ * - markdownContent/plainText: 100k chars (~25k tokens)
+ * - htmlContent: 50k chars (~12.5k tokens)
+ *
+ * Base64 image data (data:image/...) embedded in email content is stripped and
+ * replaced with [embedded-image] placeholders. For image analysis, use raw mode
+ * with the image URLs passed directly to generateObject.
+ *
  * ## API Modes
  *
  * **Simple mode (with built-in analysis)**:
@@ -172,23 +183,116 @@ export interface GmailExtractorOutput<T = unknown> {
 }
 
 // =============================================================================
+// CONSTANTS
+// =============================================================================
+
+/**
+ * Maximum characters for email content fields to prevent token limit errors.
+ *
+ * Claude's context window is ~200k tokens. A conservative estimate is ~4 chars per token.
+ * We want to leave room for:
+ * - System prompt and schema (~2k tokens)
+ * - User's prompt template (~1k tokens)
+ * - Response generation (~8k tokens)
+ *
+ * Target: ~180k tokens for content = ~720k chars max.
+ * But to be safe with multi-part prompts and overhead, we limit to ~400k chars (~100k tokens).
+ *
+ * For markdown content specifically, we're more conservative because:
+ * - It's the most commonly used field
+ * - Large HTML emails convert to verbose markdown
+ * - We want individual emails to fit comfortably
+ */
+const MAX_CONTENT_CHARS = 100_000; // ~25k tokens, safe limit for email body
+const MAX_HTML_CONTENT_CHARS = 50_000; // HTML is often more verbose, use smaller limit
+
+/**
+ * Truncation suffix to indicate content was cut off.
+ */
+const TRUNCATION_SUFFIX = "\n\n[Content truncated due to length...]";
+
+// =============================================================================
 // HELPERS
 // =============================================================================
 
 /**
+ * Truncate a string to a maximum length, adding a suffix if truncated.
+ * Tries to truncate at a natural boundary (newline or space) if possible.
+ */
+function truncateContent(
+  content: string | undefined,
+  maxLength: number,
+): string {
+  if (!content) return "";
+  if (content.length <= maxLength) return content;
+
+  // Find a good break point (newline or space) near the limit
+  const targetLength = maxLength - TRUNCATION_SUFFIX.length;
+  let breakPoint = targetLength;
+
+  // Look for a newline within the last 500 chars of the target
+  const searchStart = Math.max(0, targetLength - 500);
+  const lastNewline = content.lastIndexOf("\n", targetLength);
+  if (lastNewline > searchStart) {
+    breakPoint = lastNewline;
+  } else {
+    // Fall back to looking for a space
+    const lastSpace = content.lastIndexOf(" ", targetLength);
+    if (lastSpace > searchStart) {
+      breakPoint = lastSpace;
+    }
+  }
+
+  return content.slice(0, breakPoint) + TRUNCATION_SUFFIX;
+}
+
+/**
+ * Strip base64 image data from content while preserving structure.
+ * Replaces data:image/... URLs with a placeholder.
+ * This dramatically reduces token count for emails with embedded images.
+ */
+function stripBase64Images(content: string | undefined): string {
+  if (!content) return "";
+
+  // Match data:image URLs (base64 encoded images)
+  // These can be massive - a single image can be 100k+ chars
+  return content.replace(
+    /data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g,
+    "[embedded-image]",
+  );
+}
+
+/**
  * Interpolate a template string with email field values.
  * Supports {{email.field}} placeholders.
+ *
+ * Content fields are automatically truncated to prevent token limit errors.
+ * Base64 image data is stripped from content fields.
  */
 function interpolateTemplate(template: string, email: Email): string {
+  // Prepare content fields with truncation and base64 stripping
+  const markdownContent = truncateContent(
+    stripBase64Images(email.markdownContent),
+    MAX_CONTENT_CHARS,
+  );
+  const plainText = truncateContent(
+    stripBase64Images(email.plainText),
+    MAX_CONTENT_CHARS,
+  );
+  const htmlContent = truncateContent(
+    stripBase64Images(email.htmlContent),
+    MAX_HTML_CONTENT_CHARS,
+  );
+
   return template
     .replace(/\{\{email\.subject\}\}/g, email.subject || "")
     .replace(/\{\{email\.date\}\}/g, email.date || "")
     .replace(/\{\{email\.from\}\}/g, email.from || "")
     .replace(/\{\{email\.to\}\}/g, email.to || "")
     .replace(/\{\{email\.snippet\}\}/g, email.snippet || "")
-    .replace(/\{\{email\.markdownContent\}\}/g, email.markdownContent || "")
-    .replace(/\{\{email\.plainText\}\}/g, email.plainText || "")
-    .replace(/\{\{email\.htmlContent\}\}/g, email.htmlContent || "");
+    .replace(/\{\{email\.markdownContent\}\}/g, markdownContent)
+    .replace(/\{\{email\.plainText\}\}/g, plainText)
+    .replace(/\{\{email\.htmlContent\}\}/g, htmlContent);
 }
 
 /**
