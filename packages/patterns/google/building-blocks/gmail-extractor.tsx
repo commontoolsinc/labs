@@ -397,9 +397,7 @@ const removeLabelsHandler = handler<
  *
  * @typeParam T - The shape of extracted items (must match extraction.schema)
  */
-function GmailExtractor<T = unknown>(
-  input: GmailExtractorInput,
-): GmailExtractorOutput<T> {
+function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
   const {
     gmailQuery,
     extraction,
