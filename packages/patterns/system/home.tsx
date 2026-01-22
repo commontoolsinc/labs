@@ -832,7 +832,7 @@ If there's an existing summary, update it with new information while preserving 
                       </tr>
                     </thead>
                     <tbody>
-                      {learned.key("facts").map((fact) => (
+                      {computed(() => learned.get().facts).map((fact) => (
                         <tr>
                           <td
                             style={{
@@ -849,9 +849,7 @@ If there's an existing summary, update it with new information while preserving 
                               textAlign: "center",
                             }}
                           >
-                            {computed(
-                              () => `${Math.round(fact.confidence * 100)}%`,
-                            )}
+                            {`${Math.round(fact.confidence * 100)}%`}
                           </td>
                           <td
                             style={{
@@ -907,7 +905,7 @@ If there's an existing summary, update it with new information while preserving 
                       </tr>
                     </thead>
                     <tbody>
-                      {learned.key("preferences").map((pref) => (
+                      {computed(() => learned.get().preferences).map((pref) => (
                         <tr>
                           <td
                             style={{
@@ -949,7 +947,7 @@ If there's an existing summary, update it with new information while preserving 
                       fontSize: "13px",
                     }}
                   >
-                    {learned.key("openQuestions").map((q) => (
+                    {computed(() => learned.get().openQuestions).map((q) => (
                       <div>
                         <span style={{ color: "#888" }}>[{q.category}]</span>
                         {" "}
@@ -967,7 +965,7 @@ If there's an existing summary, update it with new information while preserving 
                     Personas
                   </h3>
                   <ct-hstack gap="2" style={{ flexWrap: "wrap" }}>
-                    {learned.key("personas").map((persona) => (
+                    {computed(() => learned.get().personas).map((persona) => (
                       <span
                         style={{
                           padding: "4px 12px",
