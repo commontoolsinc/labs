@@ -902,7 +902,6 @@ type StripCellInner<T> =
     : [T] extends [AnyBrandedCell<infer U>] ? StripCell<U>
     // Convert VNode types that contain cells to one that doesn't
     // It's also a complex recursive type that we don't want to go into
-    : [T] extends [UIRenderable] ? { [UI]: VNodeResult }
     : [T] extends [VNode] ? VNodeResult
     : [T] extends [JSXElement] ? VNodeResult
     // Don't convert internal types for now
