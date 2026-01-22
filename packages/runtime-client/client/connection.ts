@@ -118,13 +118,51 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     cell: CellHandle<any>,
   ): Promise<void> {
     const key = cellRefToKey(cell.ref());
+    const ref = cell.ref();
+
+    // Generate a unique ID for this CellHandle instance for debugging
+    const instanceId = (cell as any).__debugId ??
+      ((cell as any).__debugId = Math.random().toString(36).slice(2, 8));
+
+    console.log("[DEBUG connection.subscribe]", {
+      key,
+      path: ref.path,
+      schema: ref.schema,
+      instanceId,
+      existingKeys: [...this.#subscribed.keys()],
+    });
+
     let instances = this.#subscribed.get(key);
     if (instances) {
+      const existingIds = [...instances].map((c: any) =>
+        c.__debugId ?? "no-id"
+      );
+      console.log(
+        "[DEBUG connection.subscribe] reusing existing, adding instance",
+        { instanceId, existingIds, alreadyHas: instances.has(cell) },
+      );
       if (!instances.has(cell)) {
         instances.add(cell);
+        // Copy the cached value from an existing subscriber to the new one
+        // This ensures late subscribers get the initial value
+        const existingInstance = instances.values().next().value;
+        if (existingInstance) {
+          const cachedValue = existingInstance.get();
+          if (cachedValue !== undefined) {
+            console.log(
+              "[DEBUG connection.subscribe] copying cached value to new instance",
+              { instanceId, cachedValue },
+            );
+            cell[$onCellUpdate](cachedValue);
+          }
+        }
       }
       return;
     }
+
+    console.log("[DEBUG connection.subscribe] NEW subscription to backend", {
+      instanceId,
+    });
     instances = new Set([cell]);
     this.#subscribed.set(key, instances);
     const _ = await this.request<RequestType.CellSubscribe>({
@@ -239,6 +277,15 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
 
   private _handleCellUpdate(message: CellUpdateNotification): void {
     const { cell: cellRef, value } = message;
+
+    console.log("[DEBUG connection._handleCellUpdate]", {
+      path: cellRef.path,
+      schema: cellRef.schema,
+      key: cellRefToKey(cellRef),
+      valueType: typeof value,
+      allKeys: [...this.#subscribed.keys()],
+    });
+
     if (value === undefined) {
       // A value can be reported as `undefined` only when there's been a
       // conflict, and will be followed by the settled value. Ignore
@@ -246,9 +293,25 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       return;
     }
 
-    const subscribed = this.#subscribed.get(cellRefToKey(cellRef));
+    const key = cellRefToKey(cellRef);
+    const subscribed = this.#subscribed.get(key);
+    const instanceIds = subscribed
+      ? [...subscribed].map((c: any) => c.__debugId ?? "no-id")
+      : [];
+    console.log("[DEBUG connection._handleCellUpdate] lookup:", {
+      key,
+      found: !!subscribed,
+      instanceCount: subscribed?.size ?? 0,
+      instanceIds,
+    });
+
     if (subscribed && subscribed.size > 0) {
       for (const instance of subscribed) {
+        const id = (instance as any).__debugId ?? "no-id";
+        console.log(
+          "[DEBUG connection._handleCellUpdate] calling $onCellUpdate for instance:",
+          id,
+        );
         instance[$onCellUpdate](value);
       }
     }
