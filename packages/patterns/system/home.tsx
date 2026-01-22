@@ -224,6 +224,47 @@ const addJournalEntry = handler<
   journal.push(entry);
 });
 
+// Handler to submit an answer to a question (reads question from learned state)
+const submitAnswerHandler = handler<
+  { userAnswer: string },
+  { learned: Writable<LearnedSection>; currentAnswer: Writable<string> }
+>(({ userAnswer }, { learned, currentAnswer }) => {
+  if (!userAnswer) return;
+
+  const l = learned.get();
+
+  // Find the top pending question
+  const pending = l.openQuestions.filter((q) => q.status === "pending");
+  if (pending.length === 0) return;
+  pending.sort((a, b) => b.priority - a.priority);
+  const question = pending[0];
+
+  // Update the question status
+  const updatedQuestions = l.openQuestions.map((q) =>
+    q.id === question.id
+      ? { ...q, status: "answered" as const, answer: userAnswer, answeredAt: Date.now() }
+      : q
+  );
+
+  // Create a new fact from the answer
+  const newFact: Fact = {
+    content: `${question.question} → ${userAnswer}`,
+    confidence: 1.0, // User-provided = high confidence
+    source: `user:question:${question.id}`,
+    timestamp: Date.now(),
+  };
+
+  // Update learned with new fact and updated question
+  learned.set({
+    ...l,
+    facts: [...l.facts, newFact],
+    openQuestions: updatedQuestions,
+  });
+
+  // Clear the input
+  currentAnswer.set("");
+});
+
 export default pattern((_) => {
   // OWN the data cells (.for for id stability)
   const favorites = Writable.of<Favorite[]>([]).for("favorites");
@@ -613,39 +654,8 @@ If there's an existing summary, update it with new information while preserving 
   // Track the current answer input
   const currentAnswer = Writable.of("");
 
-  // Action to submit an answer to the current question
-  const submitAnswer = action(() => {
-    const question = topQuestion;
-    const userAnswer = currentAnswer.get().trim();
-    if (!question || !userAnswer) return;
-
-    const l = learned.get();
-
-    // Update the question status
-    const updatedQuestions = l.openQuestions.map((q) =>
-      q.id === question.id
-        ? { ...q, status: "answered" as const, answer: userAnswer, answeredAt: Date.now() }
-        : q
-    );
-
-    // Create a new fact from the answer
-    const newFact: Fact = {
-      content: `${question.question} → ${userAnswer}`,
-      confidence: 1.0, // User-provided = high confidence
-      source: `user:question:${question.id}`,
-      timestamp: Date.now(),
-    };
-
-    // Update learned with new fact and updated question
-    learned.set({
-      ...l,
-      facts: [...l.facts, newFact],
-      openQuestions: updatedQuestions,
-    });
-
-    // Clear the input
-    currentAnswer.set("");
-  });
+  // Bound handler with state
+  const submitAnswer = submitAnswerHandler({ learned, currentAnswer });
 
   return {
     [NAME]: `Home`,
@@ -716,10 +726,7 @@ If there's an existing summary, update it with new information while preserving 
                           (topQuestion?.options || []).map((opt) => (
                             <button
                               type="button"
-                              onClick={() => {
-                                currentAnswer.set(opt);
-                                submitAnswer.send();
-                              }}
+                              onClick={() => submitAnswer.send({ userAnswer: opt })}
                               style={{
                                 padding: "8px 16px",
                                 background: "#fff",
@@ -744,7 +751,7 @@ If there's an existing summary, update it with new information while preserving 
                         />
                         <button
                           type="button"
-                          onClick={() => submitAnswer.send()}
+                          onClick={() => submitAnswer.send({ userAnswer: currentAnswer.get() })}
                           style={{
                             padding: "8px 16px",
                             background: "#f59e0b",
