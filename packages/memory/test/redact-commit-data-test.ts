@@ -196,3 +196,93 @@ Deno.test("redactCommitData - includes label type facts unchanged", () => {
   const doc1Changes = result.transaction.args.changes["of:doc1"];
   assertEquals(labelType in doc1Changes, true);
 });
+
+// =============================================================================
+// Tests for explicit labels parameter
+// =============================================================================
+
+Deno.test("redactCommitData - explicit labels parameter overrides commitData.labels", () => {
+  const v1 = Fact.assert({ the, of: "of:doc1", is: { a: 1 } });
+  const transaction = Transaction.create({
+    issuer: alice.did(),
+    subject: space.did(),
+    changes: Changes.from([v1]),
+  });
+  // commitData has NO labels
+  const commitData: CommitData = {
+    since: 0,
+    transaction,
+  };
+
+  // Pass labels explicitly - should trigger processing even though commitData has none
+  const explicitLabels: FactSelection = {} as FactSelection;
+  const result = redactCommitData(commitData, explicitLabels);
+
+  // Should process (return new object) because explicit labels were provided
+  assertNotStrictEquals(result, commitData);
+  assertEquals("labels" in result, false);
+});
+
+Deno.test("redactCommitData - null labels param with no commitData.labels returns original", () => {
+  const v1 = Fact.assert({ the, of: "of:doc1", is: { a: 1 } });
+  const transaction = Transaction.create({
+    issuer: alice.did(),
+    subject: space.did(),
+    changes: Changes.from([v1]),
+  });
+  const commitData: CommitData = {
+    since: 0,
+    transaction,
+    // no labels on commitData
+  };
+
+  // Pass null explicitly
+  const result = redactCommitData(commitData, null);
+
+  // Should return same object since no labels anywhere
+  assertStrictEquals(result, commitData);
+});
+
+Deno.test("redactCommitData - null labels param falls back to commitData.labels", () => {
+  const v1 = Fact.assert({ the, of: "of:doc1", is: { a: 1 } });
+  const transaction = Transaction.create({
+    issuer: alice.did(),
+    subject: space.did(),
+    changes: Changes.from([v1]),
+  });
+  const labelsOnCommit: FactSelection = {} as FactSelection;
+  const commitData: CommitData = {
+    since: 0,
+    transaction,
+    labels: labelsOnCommit, // has labels
+  };
+
+  // Pass null explicitly - should fall back to commitData.labels
+  const result = redactCommitData(commitData, null);
+
+  // null means "use commitData.labels", so should process
+  assertNotStrictEquals(result, commitData);
+  assertEquals("labels" in result, false);
+});
+
+Deno.test("redactCommitData - omitted labels param falls back to commitData.labels", () => {
+  const v1 = Fact.assert({ the, of: "of:doc1", is: { a: 1 } });
+  const transaction = Transaction.create({
+    issuer: alice.did(),
+    subject: space.did(),
+    changes: Changes.from([v1]),
+  });
+  const labelsOnCommit: FactSelection = {} as FactSelection;
+  const commitData: CommitData = {
+    since: 0,
+    transaction,
+    labels: labelsOnCommit,
+  };
+
+  // Don't pass labels parameter at all
+  const result = redactCommitData(commitData);
+
+  // Should use commitData.labels and process
+  assertNotStrictEquals(result, commitData);
+  assertEquals("labels" in result, false);
+});

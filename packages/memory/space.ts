@@ -1236,9 +1236,23 @@ export function getClassifications(
   return classifications;
 }
 
-// Return the item with any classified results and the labels removed.
-export function redactCommitData(commitData: CommitData): CommitData {
-  if (commitData.labels === undefined) {
+/**
+ * Strips the `labels` property from commit data and redacts any classified
+ * content based on those labels.
+ *
+ * @param commitData The commit data to redact
+ * @param labels Optional labels to use for redaction. If not provided, falls
+ *   back to `commitData.labels`. Pass `null` explicitly to indicate no labels.
+ * @returns A new CommitData without the `labels` property, or the original
+ *   if no labels were present.
+ */
+export function redactCommitData(
+  commitData: CommitData,
+  labels: FactSelection | null = null,
+): CommitData {
+  // Use explicit labels parameter if provided, otherwise fall back to .labels
+  const effectiveLabels = labels ?? commitData.labels;
+  if (effectiveLabels == null) {
     return commitData;
   }
   // Make a copy of the transaction with no changes
