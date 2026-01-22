@@ -325,13 +325,47 @@ export default pattern((_) => {
       if (!entry) return ""; // No-op when nothing pending
       const eventDesc = eventDescriptions[entry.eventType || ""] ||
         entry.eventType;
-      const excerpt = entry.snapshot?.valueExcerpt || "";
+
+      // Try to read full content from the subject cell
+      let fullContent = "";
+      try {
+        const subjectCell = entry.subject as Writable<any> | undefined;
+        if (subjectCell) {
+          // Try to apply schema and get full value
+          let cellToRead = subjectCell as any;
+          try {
+            const linkInfo = cellToRead.asSchemaFromLinks?.()
+              ?.getAsNormalizedFullLink?.();
+            if (linkInfo?.schema) {
+              cellToRead = cellToRead.asSchema(linkInfo.schema);
+            }
+          } catch {
+            // Ignore schema errors
+          }
+          const value = cellToRead.get?.();
+          if (value !== undefined) {
+            fullContent = JSON.stringify(value, null, 2);
+            // Limit to 3000 chars
+            if (fullContent.length > 3000) {
+              fullContent = fullContent.slice(0, 3000) + "\n...";
+            }
+          }
+        }
+      } catch {
+        // Fall back to snapshot excerpt
+        fullContent = entry.snapshot?.valueExcerpt || "";
+      }
+
+      // Fall back to snapshot if no content
+      if (!fullContent) {
+        fullContent = entry.snapshot?.valueExcerpt || "";
+      }
 
       return `Generate a brief journal entry (2-3 sentences) describing this user action.
 
 Event: User ${eventDesc} a charm
 Charm name: ${entry.snapshot?.name || "unnamed"}
-${excerpt ? `\nContent/Data:\n${excerpt}\n` : ""}
+${fullContent ? `\nFull Content/Data:\n${fullContent}\n` : ""}
 
 IMPORTANT: Analyze the CONTENT of what they saved, not just the title. If it's a note, what is it about? If it has data, what kind? Extract meaningful insights about their interests, work, or life from the actual content.
 
