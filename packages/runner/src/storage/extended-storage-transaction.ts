@@ -1,5 +1,6 @@
 import { isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
+import type { JSONValue } from "@commontools/memory/interface";
 import type {
   CommitError,
   IAttestation,
@@ -12,7 +13,6 @@ import type {
   ITransactionJournal,
   ITransactionReader,
   ITransactionWriter,
-  JSONValue,
   MemorySpace,
   ReaderError,
   ReadError,

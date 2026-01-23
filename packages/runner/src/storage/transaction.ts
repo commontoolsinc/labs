@@ -1,4 +1,5 @@
 import { getLogger } from "@commontools/utils/logger";
+import type { JSONValue } from "@commontools/memory/interface";
 import type {
   ChangeGroup,
   CommitError,
@@ -13,7 +14,6 @@ import type {
   IStorageTransactionWriteIsolationError,
   ITransactionReader,
   ITransactionWriter,
-  JSONValue,
   MemorySpace,
   ReaderError,
   Result,
