@@ -2,7 +2,10 @@ import { isRecord } from "@commontools/utils/types";
 import { isArrayIndexPropertyName, toStorableValue } from "./value-codec.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
-import { type StorableValue } from "@commontools/memory/interface";
+import type {
+  StorableObject,
+  StorableValue,
+} from "@commontools/memory/interface";
 import { createRef } from "./create-ref.ts";
 import { CellImpl, isCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
@@ -19,10 +22,9 @@ import {
   parseLink,
 } from "./link-utils.ts";
 import { isCellResultForDereferencing } from "./query-result-proxy.ts";
-import {
-  type IExtendedStorageTransaction,
-  type IReadOptions,
-  type JSONValue,
+import type {
+  IExtendedStorageTransaction,
+  IReadOptions,
 } from "./storage/interface.ts";
 import { type Runtime } from "./runtime.ts";
 import { toURI } from "./uri-utils.ts";
@@ -157,7 +159,7 @@ export function normalizeAndDiff(
     );
     const { [ID_FIELD]: fieldName, ...rest } = newValue as
       & { [ID_FIELD]: string }
-      & Record<string, JSONValue>;
+      & StorableObject;
     const id = newValue[fieldName as PropertyKey];
     if (link.path.length > 1) {
       const parent = tx.readValueOrThrow({
@@ -379,7 +381,7 @@ export function normalizeAndDiff(
     );
     const { [ID]: id, ...rest } = newValue as
       & { [ID]: string }
-      & Record<string, JSONValue>;
+      & StorableObject;
     let path = link.path;
 
     // If we're setting an array element, make the array the context for the
