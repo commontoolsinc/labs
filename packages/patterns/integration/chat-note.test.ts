@@ -234,10 +234,12 @@ describe("Chat Note pattern test", () => {
       assert(editorContent, "Should find editor");
 
       // Clear existing content by selecting all and deleting
+      // Use OS-specific modifier: Meta on macOS, Control on Windows/Linux
       await editorContent.click();
-      await page.keyboard.down("Meta");
+      const modifier = Deno.build.os === "darwin" ? "Meta" : "Control";
+      await page.keyboard.down(modifier);
       await page.keyboard.press("a");
-      await page.keyboard.up("Meta");
+      await page.keyboard.up(modifier);
       await page.keyboard.press("Backspace");
       await sleep(500);
 
