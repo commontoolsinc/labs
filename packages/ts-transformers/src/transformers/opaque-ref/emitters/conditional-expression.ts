@@ -55,8 +55,13 @@ export const emitConditionalExpression: Emitter = ({
   context,
   analyze,
   rewriteChildren,
+  inSafeContext,
 }) => {
   if (!ts.isConditionalExpression(expression)) return undefined;
+
+  // Skip ternary transformation in safe contexts - they don't need ifElse wrapping
+  if (inSafeContext) return undefined;
+
   if (dataFlows.all.length === 0) return undefined;
 
   const predicateDataFlows = selectDataFlowsReferencedIn(
