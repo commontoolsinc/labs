@@ -41,6 +41,25 @@ export interface StorableArray extends ArrayLike<StorableDatum> {}
 /** An object/record of storable data. */
 export interface StorableObject extends Record<string, StorableDatum> {}
 
+/**
+ * A storable value that allows `undefined` at any nesting level.
+ * This is used during traversal/processing where intermediate values
+ * may not yet be resolved.
+ */
+export type OptStorableValue =
+  | undefined
+  | StorableDatum
+  | OptStorableArray
+  | OptStorableObject;
+
+/** An array that can contain optional storable values at any nesting level. */
+export interface OptStorableArray extends Array<OptStorableValue> {}
+
+/** An object that can contain optional storable values at any nesting level. */
+export interface OptStorableObject {
+  [key: string]: OptStorableValue;
+}
+
 export interface Clock {
   now(): UTCUnixTimestampInSeconds;
 }
