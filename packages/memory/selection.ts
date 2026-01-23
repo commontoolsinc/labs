@@ -3,24 +3,24 @@ import type {
   Changes,
   Fact,
   FactSelection,
-  JSONValue,
   MIME,
   OfTheCause,
   Select,
   SelectAll,
+  StorableDatum,
   URI,
 } from "./interface.ts";
 import { SelectAllString } from "./schema.ts";
 
 export const from = (
   source: Iterable<[fact: Fact, since: number]>,
-): OfTheCause<{ is?: JSONValue; since: number }> => {
+): OfTheCause<{ is?: StorableDatum; since: number }> => {
   const selection = {} as FactSelection;
   for (const [fact, since] of source) {
     const { cause, is } = fact;
     set<
-      { is?: JSONValue; since: number },
-      OfTheCause<{ is?: JSONValue; since: number }>
+      { is?: StorableDatum; since: number },
+      OfTheCause<{ is?: StorableDatum; since: number }>
     >(
       selection,
       fact.of,
