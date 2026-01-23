@@ -13,6 +13,13 @@ import {
 } from "commontools";
 import FavoritesManager from "./favorites-manager.tsx";
 import Journal from "./journal.tsx";
+import {
+  EMPTY_LEARNED,
+  type Fact,
+  type LearnedSection,
+  type Preference,
+  type Question,
+} from "../profile.tsx";
 
 // Types from favorites-manager.tsx and journal.tsx
 type Favorite = {
@@ -40,41 +47,6 @@ type JournalEntry = {
   space?: string;
 };
 
-// === PROFILE TYPES ===
-type Fact = {
-  content: string;
-  confidence: number;
-  source: string;
-  timestamp: number;
-};
-
-type Preference = {
-  key: string;
-  value: string;
-  confidence: number;
-  source: string;
-};
-
-type Question = {
-  id: string;
-  question: string;
-  category: string;
-  priority: number;
-  options?: string[];
-  status: "pending" | "asked" | "answered" | "skipped";
-  answer?: string;
-};
-
-type LearnedSection = {
-  facts: Fact[];
-  preferences: Preference[];
-  openQuestions: Question[];
-  personas: string[];
-  lastJournalProcessed: number;
-  summary: string; // User-editable text summary, regenerated on new learnings
-  summaryVersion: number; // Tracks when summary was last auto-generated
-};
-
 type ProfileExtraction = {
   facts: Array<{ content: string; confidence: number }>;
   preferences: Array<{ key: string; value: string; confidence: number }>;
@@ -85,16 +57,6 @@ type ProfileExtraction = {
     priority: number;
     options?: string[];
   }>;
-};
-
-const EMPTY_LEARNED: LearnedSection = {
-  facts: [],
-  preferences: [],
-  openQuestions: [],
-  personas: [],
-  lastJournalProcessed: 0,
-  summary: "",
-  summaryVersion: 0,
 };
 
 /**
@@ -309,6 +271,10 @@ export default pattern((_) => {
   });
 
   // === REACTIVE NARRATIVE ENRICHMENT ===
+  // LLM Error Handling: generateText/generateObject return { pending, result, error }.
+  // On LLM failure, `error` is set and `result` remains undefined. The writeback
+  // computations check for errors and mark entries as failed to prevent retry loops.
+
   // Find the first pending entry that needs a narrative
   const pendingEntry = computed(() =>
     journal.get().find((e) => e.narrativePending && !e.narrative)
@@ -355,22 +321,39 @@ Write in past tense, personal style. Focus on:
     }),
   });
 
-  // Idempotent writeback - update entry when narrative is ready
+  // Idempotent writeback - update entry when narrative is ready (or on error)
   const writeNarrative = computed(() => {
     const result = narrativeGen.result;
     const pending = narrativeGen.pending;
+    const error = (narrativeGen as any).error;
     const entry = pendingEntry;
 
-    // Guard: only proceed when we have a result and entry
-    if (pending || !result || !entry) return null;
+    // Guard: only proceed when not pending and we have an entry
+    if (pending || !entry) return null;
 
     // Idempotent check: already written?
     if (entry.narrative !== "") return null;
 
-    // Find and update the entry in the array
+    // Find the entry in the array
     const entries = journal.get();
     const idx = entries.findIndex((e) => e.timestamp === entry.timestamp);
     if (idx === -1) return null;
+
+    // Handle error: mark as processed to prevent retry loop
+    if (error && !result) {
+      const updatedEntry = {
+        ...entries[idx],
+        narrative: "[Failed to generate narrative]",
+        narrativePending: false,
+      };
+      const newEntries = [...entries];
+      newEntries[idx] = updatedEntry;
+      journal.set(newEntries);
+      return null;
+    }
+
+    // Guard: need a result to proceed
+    if (!result) return null;
 
     // Create updated entry
     const updatedEntry = {
@@ -387,7 +370,7 @@ Write in past tense, personal style. Focus on:
     return result;
   });
 
-  // Reference writeNarrative to ensure it's evaluated
+  // Reference writeNarrative to ensure it's evaluated (required for reactive side effects)
   void writeNarrative;
 
   // === PROFILE LEARNING ===
@@ -468,14 +451,31 @@ Return valid JSON matching the schema.`,
     return max;
   });
 
-  // Idempotent writeback - apply extracted insights to learned section
+  // Idempotent writeback - apply extracted insights to learned section (or skip on error)
   const applyExtraction = computed(() => {
     const result = profileExtraction.result;
     const pending = profileExtraction.pending;
+    const error = (profileExtraction as any).error;
     const entriesText = entriesForPrompt; // Use pre-computed check
 
-    // Guard: only proceed when we have results and entries to process
-    if (pending || !result || !entriesText) return null;
+    // Guard: only proceed when not pending and we have entries to process
+    if (pending || !entriesText) return null;
+
+    // Handle error: skip extraction but still update lastJournalProcessed to prevent retry loop
+    if (error && !result) {
+      const currentLearned = learned.get();
+      const maxTimestamp = maxUnprocessedTimestamp;
+      if (maxTimestamp > currentLearned.lastJournalProcessed) {
+        learned.set({
+          ...currentLearned,
+          lastJournalProcessed: maxTimestamp,
+        });
+      }
+      return null;
+    }
+
+    // Guard: need a result to proceed
+    if (!result) return null;
 
     // Get current state
     const currentLearned = learned.get();
@@ -584,7 +584,7 @@ Return valid JSON matching the schema.`,
     return result;
   });
 
-  // Reference applyExtraction to ensure it's evaluated
+  // Reference applyExtraction to ensure it's evaluated (required for reactive side effects)
   void applyExtraction;
 
   // === SUMMARY REGENERATION ===
@@ -652,17 +652,30 @@ IMPORTANT:
     model: "anthropic:claude-haiku-4-5",
   });
 
-  // Write summary when generation completes
+  // Write summary when generation completes (or skip on error)
   const writeSummary = computed(() => {
     const result = summaryGen.result;
     const pending = summaryGen.pending;
+    const error = (summaryGen as any).error;
     const currentVersion = dataVersion;
     const l = learned.get();
 
-    // Guard: only proceed when we have a result and data has changed
-    if (pending || !result) return null;
+    // Guard: only proceed when not pending
+    if (pending) return null;
     if (l.summaryVersion >= currentVersion) return null; // Already up to date
     if (l.facts.length === 0 && l.preferences.length === 0) return null;
+
+    // Handle error: bump version to prevent retry loop, keep existing summary
+    if (error && !result) {
+      learned.set({
+        ...l,
+        summaryVersion: currentVersion,
+      });
+      return null;
+    }
+
+    // Guard: need a result to proceed
+    if (!result) return null;
 
     // Update summary and version
     learned.set({
@@ -674,6 +687,7 @@ IMPORTANT:
     return result;
   });
 
+  // Reference writeSummary to ensure it's evaluated (required for reactive side effects)
   void writeSummary;
 
   // === QUESTION ANSWERING ===

@@ -11,24 +11,7 @@ import {
   Writable,
 } from "commontools";
 import { fetchAndRunPattern, listPatternIndex } from "./common-tools.tsx";
-
-// Types from home.tsx learned section
-type Fact = {
-  content: string;
-  confidence: number;
-};
-
-type Preference = {
-  key: string;
-  value: string;
-};
-
-type LearnedSection = {
-  facts: Fact[];
-  preferences: Preference[];
-  personas: string[];
-  summary: string;
-};
+import type { LearnedSection } from "../profile.tsx";
 
 export default pattern<
   { situation: string; context: { [id: string]: any } },

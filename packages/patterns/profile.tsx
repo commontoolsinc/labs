@@ -144,14 +144,19 @@ export interface LearnedSection {
   openQuestions: Question[];
   personas: string[]; // "busy parent", "home cook", "techie"
   lastJournalProcessed: number; // Timestamp of last processed journal entry
+  summary: string; // User-editable text summary
+  summaryVersion: number; // Tracks when summary was last auto-generated
 }
 
-const EMPTY_LEARNED: LearnedSection = {
+/** Default empty learned section for initialization */
+export const EMPTY_LEARNED: LearnedSection = {
   facts: [],
   preferences: [],
   openQuestions: [],
   personas: [],
   lastJournalProcessed: 0,
+  summary: "",
+  summaryVersion: 0,
 };
 
 // ============================================================================

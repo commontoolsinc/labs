@@ -1445,8 +1445,7 @@ describe("compactChangeSet", () => {
       // Parent writes array [1, 2], child writes to index "01"
       // "01" is not a valid array index (has leading zero), so the child
       // path does NOT exist in the parent and should NOT be subsumed.
-      // BUG: Current code uses parseInt("01") which returns 1, incorrectly
-      // treating "01" as if it were index 1.
+      // Fixed by isArrayIndexPropertyName() which correctly rejects "01".
       const changes: ChangeSet = [
         makeChange(["items"], [1, 2]),
         makeChange(["items", "01"], 99),
