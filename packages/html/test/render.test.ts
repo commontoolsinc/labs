@@ -138,8 +138,11 @@ describe("renderImpl", () => {
     const parent = document.getElementById("root")!;
     const cancel = renderImpl(parent, vnode, renderOptions);
     const div = parent.getElementsByTagName("div")[0]!;
-    // false, null, and undefined should render as empty text nodes
-    // true should render as "true"
+    // CURRENT BEHAVIOR: false, null, and undefined create empty text nodes
+    // true renders as "true"
+    // NOTE: This means null creates a DOM text node with "", which is different
+    // from "no node at all". This could affect CSS :empty selectors or childNodes
+    // count. Some frameworks render null as nothing instead.
     // So innerHTML should be "visibletrue" (no "false")
     assert.equal(div.innerHTML, "visibletrue");
     cancel();
@@ -1061,99 +1064,184 @@ describe("cycle detection", () => {
   });
 });
 
-describe("DOM reordering algorithm", () => {
-  it("correctly reorders children [A, B] to [B, A] using live childNodes", () => {
-    // This test verifies the fix for the stale childNodes reference bug.
-    // The bug: capturing element.childNodes into a static array, then using
-    // insertBefore() which mutates the DOM, causing subsequent iterations
-    // to reference stale positions.
-    const { document } = mock;
-    const parent = document.createElement("div");
+describe("children rendering", () => {
+  // These tests verify that children are rendered in the correct order through
+  // the actual renderer. Note: Testing reactive reordering (changing children
+  // after initial render) requires a runtime with CellHandles, which is covered
+  // by integration tests in packages/generated-patterns/integration/.
 
-    // Create two children
-    const childA = document.createElement("span");
-    childA.textContent = "Alice";
-    const childB = document.createElement("span");
-    childB.textContent = "Bob";
-
-    // Initial order: [Alice, Bob]
-    parent.appendChild(childA);
-    parent.appendChild(childB);
-    assert.equal(parent.childNodes[0], childA);
-    assert.equal(parent.childNodes[1], childB);
-
-    // Simulate the reorder algorithm using LIVE childNodes (the fix)
-    // Desired order: [Bob, Alice]
-    const desiredOrder = [childB, childA];
-    for (let i = 0; i < desiredOrder.length; i++) {
-      const desiredNode = desiredOrder[i];
-      // Use live childNodes[i] instead of a stale snapshot
-      if (parent.childNodes[i] !== desiredNode) {
-        parent.insertBefore(desiredNode, parent.childNodes[i] ?? null);
-      }
-    }
-
-    // Verify final order is [Bob, Alice]
-    assert.equal(parent.childNodes[0], childB, "First child should be Bob");
-    assert.equal(parent.childNodes[1], childA, "Second child should be Alice");
+  it("renders children in correct order [A, B]", () => {
+    const { renderOptions, document } = mock;
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {},
+      children: [
+        {
+          type: "vnode" as const,
+          name: "span",
+          props: { id: "a" },
+          children: ["Alice"],
+        },
+        {
+          type: "vnode" as const,
+          name: "span",
+          props: { id: "b" },
+          children: ["Bob"],
+        },
+      ],
+    };
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, vnode, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    const spans = div.getElementsByTagName("span");
+    assert.equal(spans.length, 2, "Should have 2 span children");
+    assert.equal(spans[0].getAttribute("id"), "a", "First span should be A");
+    assert.equal(spans[1].getAttribute("id"), "b", "Second span should be B");
     assert.equal(
-      (parent.childNodes[0] as Element).textContent,
-      "Bob",
-      "First child text should be Bob",
-    );
-    assert.equal(
-      (parent.childNodes[1] as Element).textContent,
+      spans[0].innerHTML,
       "Alice",
-      "Second child text should be Alice",
+      "First span text should be Alice",
     );
+    assert.equal(spans[1].innerHTML, "Bob", "Second span text should be Bob");
+    cancel();
   });
 
-  it("correctly reverses [A, B, C] to [C, B, A] using live childNodes", () => {
-    const { document } = mock;
-    const parent = document.createElement("div");
-
-    const childA = document.createElement("span");
-    childA.textContent = "A";
-    const childB = document.createElement("span");
-    childB.textContent = "B";
-    const childC = document.createElement("span");
-    childC.textContent = "C";
-
-    // Initial order: [A, B, C]
-    parent.appendChild(childA);
-    parent.appendChild(childB);
-    parent.appendChild(childC);
-
-    // Desired order: [C, B, A]
-    const desiredOrder = [childC, childB, childA];
-    for (let i = 0; i < desiredOrder.length; i++) {
-      const desiredNode = desiredOrder[i];
-      if (parent.childNodes[i] !== desiredNode) {
-        parent.insertBefore(desiredNode, parent.childNodes[i] ?? null);
-      }
-    }
-
-    // Verify final order is [C, B, A]
-    assert.equal(
-      (parent.childNodes[0] as Element).textContent,
-      "C",
-      "First should be C",
-    );
-    assert.equal(
-      (parent.childNodes[1] as Element).textContent,
-      "B",
-      "Second should be B",
-    );
-    assert.equal(
-      (parent.childNodes[2] as Element).textContent,
-      "A",
-      "Third should be A",
-    );
+  it("renders children in correct order [C, B, A]", () => {
+    const { renderOptions, document } = mock;
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {},
+      children: [
+        {
+          type: "vnode" as const,
+          name: "span",
+          props: { id: "c" },
+          children: ["C"],
+        },
+        {
+          type: "vnode" as const,
+          name: "span",
+          props: { id: "b" },
+          children: ["B"],
+        },
+        {
+          type: "vnode" as const,
+          name: "span",
+          props: { id: "a" },
+          children: ["A"],
+        },
+      ],
+    };
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, vnode, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    const spans = div.getElementsByTagName("span");
+    assert.equal(spans.length, 3, "Should have 3 span children");
+    assert.equal(spans[0].getAttribute("id"), "c", "First should be C");
+    assert.equal(spans[1].getAttribute("id"), "b", "Second should be B");
+    assert.equal(spans[2].getAttribute("id"), "a", "Third should be A");
+    cancel();
   });
 
-  it("demonstrates the bug with stale snapshot (for documentation)", () => {
-    // This test shows what WOULD happen with the bug (stale snapshot)
-    // We don't actually want this behavior, but it documents the issue.
+  it("renders mixed children types in correct order", () => {
+    const { renderOptions, document } = mock;
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {},
+      children: [
+        "text1",
+        {
+          type: "vnode" as const,
+          name: "span",
+          props: {},
+          children: ["element"],
+        },
+        "text2",
+      ],
+    };
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, vnode, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    // Verify the innerHTML contains all children in order
+    assert.equal(
+      div.innerHTML.includes("text1"),
+      true,
+      "Should contain text1",
+    );
+    assert.equal(
+      div.innerHTML.includes("<span>element</span>"),
+      true,
+      "Should contain span element",
+    );
+    assert.equal(
+      div.innerHTML.includes("text2"),
+      true,
+      "Should contain text2",
+    );
+    // Verify order by checking text1 comes before span which comes before text2
+    const text1Pos = div.innerHTML.indexOf("text1");
+    const spanPos = div.innerHTML.indexOf("<span>");
+    const text2Pos = div.innerHTML.indexOf("text2");
+    assert.equal(text1Pos < spanPos, true, "text1 should come before span");
+    assert.equal(spanPos < text2Pos, true, "span should come before text2");
+    cancel();
+  });
+
+  it("renders single child correctly", () => {
+    const { renderOptions, document } = mock;
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {},
+      children: [
+        {
+          type: "vnode" as const,
+          name: "span",
+          props: { id: "only" },
+          children: ["Only Child"],
+        },
+      ],
+    };
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, vnode, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    const spans = div.getElementsByTagName("span");
+    assert.equal(spans.length, 1, "Should have 1 span child");
+    assert.equal(spans[0].getAttribute("id"), "only");
+    assert.equal(spans[0].innerHTML, "Only Child");
+    cancel();
+  });
+
+  it("renders empty children array correctly", () => {
+    const { renderOptions, document } = mock;
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: { id: "empty-parent" },
+      children: [],
+    };
+    const parent = document.getElementById("root")!;
+    const cancel = renderImpl(parent, vnode, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    assert.equal(div.getAttribute("id"), "empty-parent");
+    assert.equal(div.innerHTML, "", "Should have no children");
+    cancel();
+  });
+});
+
+describe("DOM reordering algorithm (documentation)", () => {
+  // This test documents the stale childNodes bug that was fixed.
+  // It demonstrates what would happen with the OLD buggy code that used
+  // Array.from(element.childNodes) instead of live element.childNodes.
+  // The fix uses live childNodes directly so insertBefore mutations
+  // don't cause stale references.
+
+  it("demonstrates the stale snapshot bug (for documentation)", () => {
+    // This test shows what WOULD happen with the bug (stale snapshot).
+    // The actual fix uses live element.childNodes instead of a static array.
     const { document } = mock;
     const parent = document.createElement("div");
 
@@ -1180,9 +1268,9 @@ describe("DOM reordering algorithm", () => {
     }
 
     // With the bug, the final order is WRONG: [Alice, Bob] instead of [Bob, Alice]
-    // i=0: domNodes[0]=Alice, desired=Bob, Alice≠Bob, so insertBefore(Bob, Alice) → [Bob, Alice] ✓
-    // i=1: domNodes[1]=Bob (STALE!), desired=Alice, Bob≠Alice, so insertBefore(Alice, Bob)
-    //      But Bob is now at position 0, so this inserts Alice before Bob → [Alice, Bob] ✗
+    // i=0: domNodes[0]=Alice, desired=Bob, Alice!=Bob, so insertBefore(Bob, Alice) -> [Bob, Alice]
+    // i=1: domNodes[1]=Bob (STALE!), desired=Alice, Bob!=Alice, so insertBefore(Alice, Bob)
+    //      But Bob is now at position 0, so this inserts Alice before Bob -> [Alice, Bob]
     assert.equal(
       (parent.childNodes[0] as Element).textContent,
       "Alice",
@@ -1193,157 +1281,6 @@ describe("DOM reordering algorithm", () => {
       "Bob",
       "Bug: Second child is Bob (wrong!)",
     );
-  });
-
-  it("handles shrinking array [A, B, C] to [A] correctly", () => {
-    // This simulates the full bindChildren algorithm:
-    // 1. Remove obsolete nodes (B, C)
-    // 2. Reorder remaining nodes
-    const { document } = mock;
-    const parent = document.createElement("div");
-
-    const childA = document.createElement("span");
-    childA.textContent = "A";
-    const childB = document.createElement("span");
-    childB.textContent = "B";
-    const childC = document.createElement("span");
-    childC.textContent = "C";
-
-    // Initial: [A, B, C]
-    parent.appendChild(childA);
-    parent.appendChild(childB);
-    parent.appendChild(childC);
-    assert.equal(parent.childNodes.length, 3);
-
-    // Simulate bindChildren update to [A]:
-    // Step 1: Remove obsolete nodes (B and C)
-    childB.remove();
-    childC.remove();
-
-    // Step 2: Reorder (only A remains, should be at position 0)
-    const desiredOrder = [childA];
-    for (let i = 0; i < desiredOrder.length; i++) {
-      const desiredNode = desiredOrder[i];
-      if (parent.childNodes[i] !== desiredNode) {
-        parent.insertBefore(desiredNode, parent.childNodes[i] ?? null);
-      }
-    }
-
-    // Verify: only A remains
-    assert.equal(parent.childNodes.length, 1, "Should have 1 child");
-    assert.equal(
-      (parent.childNodes[0] as Element).textContent,
-      "A",
-      "Only child should be A",
-    );
-  });
-
-  it("handles growing array [A] to [A, B, C] correctly", () => {
-    const { document } = mock;
-    const parent = document.createElement("div");
-
-    const childA = document.createElement("span");
-    childA.textContent = "A";
-    const childB = document.createElement("span");
-    childB.textContent = "B";
-    const childC = document.createElement("span");
-    childC.textContent = "C";
-
-    // Initial: [A]
-    parent.appendChild(childA);
-    assert.equal(parent.childNodes.length, 1);
-
-    // Simulate bindChildren update to [A, B, C]:
-    // B and C are new nodes (not yet in DOM)
-    const desiredOrder = [childA, childB, childC];
-    for (let i = 0; i < desiredOrder.length; i++) {
-      const desiredNode = desiredOrder[i];
-      if (parent.childNodes[i] !== desiredNode) {
-        // childNodes[i] ?? null handles appending when i >= length
-        parent.insertBefore(desiredNode, parent.childNodes[i] ?? null);
-      }
-    }
-
-    // Verify: [A, B, C]
-    assert.equal(parent.childNodes.length, 3, "Should have 3 children");
-    assert.equal((parent.childNodes[0] as Element).textContent, "A");
-    assert.equal((parent.childNodes[1] as Element).textContent, "B");
-    assert.equal((parent.childNodes[2] as Element).textContent, "C");
-  });
-
-  it("handles shrink AND reorder [A, B, C] to [C, A] correctly", () => {
-    const { document } = mock;
-    const parent = document.createElement("div");
-
-    const childA = document.createElement("span");
-    childA.textContent = "A";
-    const childB = document.createElement("span");
-    childB.textContent = "B";
-    const childC = document.createElement("span");
-    childC.textContent = "C";
-
-    // Initial: [A, B, C]
-    parent.appendChild(childA);
-    parent.appendChild(childB);
-    parent.appendChild(childC);
-
-    // Simulate bindChildren update to [C, A]:
-    // Step 1: Remove obsolete node (B)
-    childB.remove();
-    // DOM is now [A, C]
-
-    // Step 2: Reorder to [C, A]
-    const desiredOrder = [childC, childA];
-    for (let i = 0; i < desiredOrder.length; i++) {
-      const desiredNode = desiredOrder[i];
-      if (parent.childNodes[i] !== desiredNode) {
-        parent.insertBefore(desiredNode, parent.childNodes[i] ?? null);
-      }
-    }
-
-    // Verify: [C, A]
-    assert.equal(parent.childNodes.length, 2, "Should have 2 children");
-    assert.equal(
-      (parent.childNodes[0] as Element).textContent,
-      "C",
-      "First should be C",
-    );
-    assert.equal(
-      (parent.childNodes[1] as Element).textContent,
-      "A",
-      "Second should be A",
-    );
-  });
-
-  it("handles grow AND reorder [A] to [C, B, A] correctly", () => {
-    const { document } = mock;
-    const parent = document.createElement("div");
-
-    const childA = document.createElement("span");
-    childA.textContent = "A";
-    const childB = document.createElement("span");
-    childB.textContent = "B";
-    const childC = document.createElement("span");
-    childC.textContent = "C";
-
-    // Initial: [A]
-    parent.appendChild(childA);
-
-    // Simulate bindChildren update to [C, B, A]:
-    // B and C are new (not in DOM yet)
-    const desiredOrder = [childC, childB, childA];
-    for (let i = 0; i < desiredOrder.length; i++) {
-      const desiredNode = desiredOrder[i];
-      if (parent.childNodes[i] !== desiredNode) {
-        parent.insertBefore(desiredNode, parent.childNodes[i] ?? null);
-      }
-    }
-
-    // Verify: [C, B, A]
-    assert.equal(parent.childNodes.length, 3, "Should have 3 children");
-    assert.equal((parent.childNodes[0] as Element).textContent, "C");
-    assert.equal((parent.childNodes[1] as Element).textContent, "B");
-    assert.equal((parent.childNodes[2] as Element).textContent, "A");
   });
 });
 
