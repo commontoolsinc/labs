@@ -1,11 +1,14 @@
 import { isRecord } from "@commontools/utils/types";
+import {
+  type StorableDatum,
+  type StorableValue,
+} from "@commontools/memory/interface";
 import { type LegacyAlias } from "../sigil-types.ts";
 import {
   isRecipe,
   type JSONSchema,
   type JSONSchemaMutable,
   type JSONSchemaTypes,
-  type JSONValue,
   type Module,
   type Opaque,
   type OpaqueRef,
@@ -33,7 +36,7 @@ export function toJSONWithLegacyAliases(
   paths: Map<OpaqueRef<any>, PropertyKey[]>,
   ignoreSelfAliases: boolean = false,
   path: PropertyKey[] = [],
-): JSONValue | undefined {
+): StorableValue {
   // Turn strongly typed builder values into legacy JSON structures while
   // preserving alias metadata for consumers that still rely on it.
 
@@ -44,7 +47,7 @@ export function toJSONWithLegacyAliases(
     const { external, frame, schema, rootSchema } = value.export();
 
     // If this is an external reference, just copy the reference as is.
-    if (external) return external as JSONValue;
+    if (external) return external as StorableDatum;
 
     // Verify that opaque refs are not in a parent frame
     if (frame !== getTopFrame()) {
