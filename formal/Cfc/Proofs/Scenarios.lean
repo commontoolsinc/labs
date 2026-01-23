@@ -2,7 +2,9 @@ import Std
 
 import Cfc.Access
 import Cfc.Exchange
+import Cfc.Link
 import Cfc.Proofs.Exchange
+import Cfc.Proofs.Link
 
 namespace Cfc
 
@@ -34,7 +36,25 @@ theorem space_reader_exchange_allows (acting space : String) :
   classical
   -- Unfold to a single clause and witness `User(acting)`.
   simp [pUser, ℓSpace, Exchange.exchangeSpaceReader, Exchange.availIntegrity,
-    Exchange.clauseHasSpaceReaderB, Exchange.clauseInsert,
+    Exchange.clauseHasSpaceReaderB, Exchange.hasSpaceReaderRoleB, Exchange.clauseInsert,
+    canAccess, canAccessConf, clauseSat, Principal.satisfies]
+
+/-- Role hierarchy: `writer` implies `reader` for purposes of `SpaceReaderAccess`. -/
+theorem space_writer_exchange_allows (acting space : String) :
+    canAccess (pUser acting)
+      (Exchange.exchangeSpaceReader acting [Atom.hasRole acting space "writer"] (ℓSpace space)) := by
+  classical
+  simp [pUser, ℓSpace, Exchange.exchangeSpaceReader, Exchange.availIntegrity,
+    Exchange.clauseHasSpaceReaderB, Exchange.hasSpaceReaderRoleB, Exchange.clauseInsert,
+    canAccess, canAccessConf, clauseSat, Principal.satisfies]
+
+/-- Role hierarchy: `owner` implies `reader` for purposes of `SpaceReaderAccess`. -/
+theorem space_owner_exchange_allows (acting space : String) :
+    canAccess (pUser acting)
+      (Exchange.exchangeSpaceReader acting [Atom.hasRole acting space "owner"] (ℓSpace space)) := by
+  classical
+  simp [pUser, ℓSpace, Exchange.exchangeSpaceReader, Exchange.availIntegrity,
+    Exchange.clauseHasSpaceReaderB, Exchange.hasSpaceReaderRoleB, Exchange.clauseInsert,
     canAccess, canAccessConf, clauseSat, Principal.satisfies]
 
 /-- Without the required role integrity, exchange does not grant access. -/
@@ -44,7 +64,7 @@ theorem space_reader_exchange_denies_without_role (acting space : String) :
   classical
   -- No role fact means the clause stays `Space(space)`, which `pUser` cannot satisfy.
   simp [pUser, ℓSpace, Exchange.exchangeSpaceReader, Exchange.availIntegrity,
-    Exchange.clauseHasSpaceReaderB,
+    Exchange.clauseHasSpaceReaderB, Exchange.hasSpaceReaderRoleB,
     canAccess, canAccessConf, clauseSat, Principal.satisfies]
 
 /-- Cross-space links are conjunctive: access requires roles in both spaces. -/
@@ -63,7 +83,7 @@ theorem link_requires_both_spaces (acting A B : String) :
   have hMem : ([Atom.space B] : Clause) ∈
       (Exchange.exchangeSpaceReader acting [Atom.hasRole acting A "reader"] ℓ).conf := by
     simp [ℓ, ℓSpace, Exchange.exchangeSpaceReader, Exchange.availIntegrity, Exchange.clauseInsert,
-      Exchange.clauseHasSpaceReaderB, Label.joinIntegrity, hBA]
+      Exchange.clauseHasSpaceReaderB, Exchange.hasSpaceReaderRoleB, Label.joinIntegrity, hBA]
   have hClause : clauseSat (pUser acting) [Atom.space B] := hAcc [Atom.space B] hMem
   rcases hClause with ⟨a, ha, hs⟩
   have : a = Atom.space B := by
@@ -81,8 +101,19 @@ theorem link_allows_with_roles (acting A B : String) :
   classical
   intro ℓ
   simp [ℓ, pUser, ℓSpace, Exchange.exchangeSpaceReader, Exchange.availIntegrity, Exchange.clauseInsert,
-    Exchange.clauseHasSpaceReaderB,
+    Exchange.clauseHasSpaceReaderB, Exchange.hasSpaceReaderRoleB,
     canAccess, canAccessConf, clauseSat, Principal.satisfies, Label.joinIntegrity]
+
+/-- Link dereference adds endorsement integrity (spec 3.7.2), unlike integrity join. -/
+theorem link_deref_adds_integrity_example :
+    let link : Label := { conf := [[Atom.space "A"]], integ := [Atom.integrityTok "LinkedByAlice"] }
+    let target : Label := { conf := [[Atom.space "B"]], integ := [Atom.integrityTok "AuthoredByBob"] }
+    (link + target).integ = [] ∧
+      (Cfc.Link.deref link target).integ =
+        [Atom.integrityTok "AuthoredByBob", Atom.integrityTok "LinkedByAlice"] := by
+  classical
+  intro link target
+  simp [link, target, Cfc.Link.deref, Label.endorseIntegrity, Label.joinIntegrity]
 
 /-- Default CNF join yields conjunctive multi-user confidentiality: a single user cannot access. -/
 theorem multiparty_default_join_denies_single (alice bob carol : String) :

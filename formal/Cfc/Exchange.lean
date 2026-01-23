@@ -58,10 +58,16 @@ def exchangeDropSingletonIf (needInteg : List Atom) (a : Atom)
     ℓ
 
 /-- Boolean check: the clause contains some `Space(s)` whose `HasRole(acting,s,"reader")` is available. -/
+def hasSpaceReaderRoleB (acting : String) (space : String) (avail : IntegLabel) : Bool :=
+  decide (Atom.hasRole acting space "reader" ∈ avail) ||
+  decide (Atom.hasRole acting space "writer" ∈ avail) ||
+  decide (Atom.hasRole acting space "owner" ∈ avail)
+
+/-- Boolean check: the clause contains some `Space(s)` whose reader-or-higher role is available. -/
 def clauseHasSpaceReaderB (acting : String) (avail : IntegLabel) (c : Clause) : Bool :=
   c.any (fun a =>
     match a with
-    | .space s => decide (Atom.hasRole acting s "reader" ∈ avail)
+    | .space s => hasSpaceReaderRoleB acting s avail
     | _ => false)
 
 /-- Space reader exchange:
