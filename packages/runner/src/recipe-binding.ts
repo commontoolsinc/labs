@@ -1,6 +1,6 @@
 import { isRecord } from "@commontools/utils/types";
+import type { StorableValue } from "@commontools/memory/interface";
 import {
-  type JSONValue,
   type Recipe,
   unsafe_originalRecipe,
   unsafe_parentRecipe,
@@ -48,7 +48,7 @@ export function sendValueToBinding<T>(
       cell.runtime,
       tx,
       ref,
-      value as JSONValue,
+      value as StorableValue,
       { cell: cell.getAsNormalizedFullLink(), binding },
       { meta: ignoreReadForScheduling },
     );
