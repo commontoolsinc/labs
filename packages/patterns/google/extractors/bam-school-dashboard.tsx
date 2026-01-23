@@ -160,7 +160,8 @@ const SOURCE_INFO: Record<SourceType, { label: string; priority: number }> = {
 /**
  * Classify email source based on sender address
  */
-function classifySource(from: string): SourceType {
+function classifySource(from: string | null | undefined): SourceType {
+  if (!from) return "school";
   const fromLower = from.toLowerCase();
 
   // Teacher - Mr. Zaragoza

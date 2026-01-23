@@ -195,7 +195,8 @@ function extractMailPieceImages(htmlContent: string): string[] {
 /**
  * Normalize a recipient name for comparison.
  */
-function normalizeName(name: string): string {
+function normalizeName(name: string | null | undefined): string {
+  if (!name) return "";
   return name
     .trim()
     .toLowerCase()

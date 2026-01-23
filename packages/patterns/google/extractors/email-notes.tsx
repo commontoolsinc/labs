@@ -169,7 +169,7 @@ const fetchLabels = handler<
 
     // Find task-current label (case-insensitive)
     const taskLabel = labels.find(
-      (l: GmailLabel) => l.name.toLowerCase() === "task-current",
+      (l: GmailLabel) => l?.name?.toLowerCase() === "task-current",
     );
 
     if (taskLabel) {
