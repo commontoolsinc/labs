@@ -699,12 +699,14 @@ const enrichedContext = {
    - Added `wish<LearnedSection>({ query: "#learned" })` to fetch user data
    - Built `profileContext` computed that formats facts/preferences/personas
    - Added profile context to LLM system prompt
-2. ✅ **Phase 4.2**: Added `#learned` wish target in `packages/runner/src/builtins/wish.ts`
+2. ✅ **Phase 4.2**: Added `#learned` wish target in
+   `packages/runner/src/builtins/wish.ts`
 3. ✅ **Phase 4.3**: Fixed cross-space reads for journal content
    - Issue: LLM couldn't read favorited charm content (different space)
    - Solution: Extended link format to include space DID for cross-space cells
    - Files modified: `link-types.ts`, `llm-dialog.ts`
-4. **Test**: Suggestions reflect learned preferences (pending manual verification)
+4. **Test**: Suggestions reflect learned preferences (pending manual
+   verification)
 
 ### Sprint 4.3: Cross-Space Read Support ✅ COMPLETE
 
@@ -712,17 +714,79 @@ const enrichedContext = {
 generation LLM (running in home space) couldn't read the charm's content because
 the serialized link didn't include the source space DID.
 
-**Solution**: Extended the LLM-friendly link format to support cross-space references:
+**Solution**: Extended the LLM-friendly link format to support cross-space
+references:
+
 - Standard (same space): `/of:bafyabc123/path`
 - Cross-space: `/@did:key:z6Mk.../of:bafyabc123/path`
 
 **Changes**:
+
 - `packages/runner/src/link-types.ts`:
   - `parseLLMFriendlyLink`: Extract embedded space DID from `/@did:...` prefix
   - `createLLMFriendlyLink`: Include space DID when context space differs
 - `packages/runner/src/builtins/llm-dialog.ts`:
   - `traverseAndSerialize`: Added `contextSpace` parameter
   - Updated all call sites to pass space context for proper serialization
+
+### Sprint 4.4: Cell Serialization Fix ✅ COMPLETE
+
+**Problem**: Even with Sprint 4.3 changes, the space DID wasn't appearing in the
+LLM context documentation. Root cause: `Cell.toJSON()` was using the legacy
+`LegacyJSONCellLink` format which doesn't include the space property:
+
+```ts
+// OLD format - no space!
+{ cell: { "/": "bafyabc123" }, path: [] }
+```
+
+When a cell (like a favorited charm) is stored in a data structure (journal
+array), `toJSON()` is called. When read back, the link resolves in the current
+space (home) instead of the original space (charm space).
+
+**Solution**: Updated `Cell.toJSON()` to use the sigil link format which
+includes the space property:
+
+```ts
+// NEW format - includes space for cross-space resolution
+{ "/": { "link@1": { id: "of:bafyabc123", path: [], space: "did:key:z6Mk..." } } }
+```
+
+**Changes**:
+
+- `packages/runner/src/cell.ts`:
+  - Changed `toJSON()` return type from `LegacyJSONCellLink | null` to
+    `SigilLink | null`
+  - Updated implementation to use `createSigilLinkFromParsedLink(this.link)`
+  - This ensures space is preserved when cells are serialized in data structures
+
+**Flow after fix**:
+
+1. User favorites a charm from charm space
+2. Handler stores charm cell in journal array → `toJSON()` serializes with space
+3. When read back, `parseLinkPrimitive` extracts space from sigil link
+4. LLM receives context with cross-space link → `read()` tool resolves correctly
+
+### Sprint 4.5: Schema Size Fix ✅ COMPLETE
+
+**Problem**: After Sprint 4.4 changes, the schema inlined in LLM context
+documentation became so large it filled the entire context window, causing
+request failures. Complex schemas with recursive types have large `$defs`
+sections.
+
+**Solution**: Added schema simplification and truncation in
+`buildAvailableCellsDocumentation`:
+
+1. `simplifySchemaForContext()` - Strips `$defs` and `$ref`, keeps only
+   essential type info
+2. `MAX_SCHEMA_LENGTH = 1000` - Truncates if still too large
+
+**Changes**:
+
+- `packages/runner/src/builtins/llm-dialog.ts`:
+  - Added `simplifySchemaForContext()` helper function
+  - Applied to both context cells and pinned cells
+  - Schema is simplified then truncated if over 1000 chars
 
 ---
 

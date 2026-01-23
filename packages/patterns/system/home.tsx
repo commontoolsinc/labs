@@ -123,7 +123,8 @@ function captureSnapshot(
     // Try to get the schema from the cell to properly resolve nested data
     let schemaCell = cell as any;
     try {
-      const { schema } = schemaCell.asSchemaFromLinks?.()?.getAsNormalizedFullLink?.() || {};
+      const { schema } =
+        schemaCell.asSchemaFromLinks?.()?.getAsNormalizedFullLink?.() || {};
       if (schema) {
         schemaCell = schemaCell.asSchema(schema);
       }
@@ -257,7 +258,12 @@ const submitAnswerHandler = handler<
   // Update the question status
   const updatedQuestions = l.openQuestions.map((q) =>
     q.id === question.id
-      ? { ...q, status: "answered" as const, answer: userAnswer, answeredAt: Date.now() }
+      ? {
+        ...q,
+        status: "answered" as const,
+        answer: userAnswer,
+        answeredAt: Date.now(),
+      }
       : q
   );
 
@@ -626,7 +632,11 @@ Return valid JSON matching the schema.`,
 
       return `Information about this user:
 ${content}
-${hasRealSummary ? `\nPrevious summary (preserve tone if user edited it):\n${currentSummary}` : ""}
+${
+        hasRealSummary
+          ? `\nPrevious summary (preserve tone if user edited it):\n${currentSummary}`
+          : ""
+      }
 
 Write a fresh, complete profile summary in 200 words or less. This should be a cohesive narrative, not a list. Write in second person ("You...") to feel personal.
 

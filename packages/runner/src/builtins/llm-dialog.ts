@@ -133,6 +133,60 @@ function buildMinimalSchemaFromValue(charm: Cell<any>): JSONSchema | undefined {
 }
 
 /**
+ * Simplifies a schema for LLM context documentation.
+ * Removes $defs and $ref which can make schemas very large with recursive types.
+ * Keeps only essential type information.
+ */
+function simplifySchemaForContext(schema: JSONSchema): JSONSchema {
+  if (typeof schema !== "object" || schema === null) {
+    return schema;
+  }
+
+  // Create a shallow copy without $defs and $ref
+  const simplified: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(schema)) {
+    // Skip $defs (definitions) and $ref (references) - these can be huge
+    if (key === "$defs" || key === "$ref") {
+      continue;
+    }
+
+    // Recursively simplify nested schemas (properties, items, etc.)
+    if (key === "properties" && typeof value === "object" && value !== null) {
+      const simplifiedProps: Record<string, unknown> = {};
+      for (const [propKey, propValue] of Object.entries(value)) {
+        if (typeof propValue === "object" && propValue !== null) {
+          // For nested properties, just keep type info, don't recurse deeply
+          const propSchema = propValue as Record<string, unknown>;
+          const simpleProp: Record<string, unknown> = {};
+          if (propSchema.type) simpleProp.type = propSchema.type;
+          if (propSchema.description) {
+            simpleProp.description = propSchema.description;
+          }
+          simplifiedProps[propKey] = simpleProp;
+        } else {
+          simplifiedProps[propKey] = propValue;
+        }
+      }
+      simplified[key] = simplifiedProps;
+    } else if (key === "items" && typeof value === "object" && value !== null) {
+      // For array items, simplify recursively but not too deep
+      const itemSchema = value as Record<string, unknown>;
+      const simpleItem: Record<string, unknown> = {};
+      if (itemSchema.type) simpleItem.type = itemSchema.type;
+      if (itemSchema.description) {
+        simpleItem.description = itemSchema.description;
+      }
+      simplified[key] = simpleItem;
+    } else {
+      simplified[key] = value;
+    }
+  }
+
+  return simplified as JSONSchema;
+}
+
+/**
  * Traverses a value and serializes any cells mentioned to our LLM-friendly JSON
  * link object format.
  *
@@ -791,7 +845,15 @@ function buildAvailableCellsDocumentation(
         let entry = `## ${name} (${path})\n`;
 
         if (schemaInfo?.schema) {
-          const schemaJson = JSON.stringify(schemaInfo.schema, null, 2);
+          // Simplify schema for context - remove $defs to reduce size
+          const simplifiedSchema = simplifySchemaForContext(schemaInfo.schema);
+          let schemaJson = JSON.stringify(simplifiedSchema, null, 2);
+
+          const MAX_SCHEMA_LENGTH = 1000;
+          if (schemaJson.length > MAX_SCHEMA_LENGTH) {
+            schemaJson = schemaJson.substring(0, MAX_SCHEMA_LENGTH) +
+              "\n... (schema truncated)";
+          }
           entry += `- Schema: \`\`\`json\n${schemaJson}\n\`\`\`\n`;
         }
 
@@ -857,7 +919,15 @@ function buildAvailableCellsDocumentation(
 
       // Add schema if available
       if (schemaInfo?.schema) {
-        const schemaJson = JSON.stringify(schemaInfo.schema, null, 2);
+        // Simplify schema for context - remove $defs to reduce size
+        const simplifiedSchema = simplifySchemaForContext(schemaInfo.schema);
+        let schemaJson = JSON.stringify(simplifiedSchema, null, 2);
+
+        const MAX_SCHEMA_LENGTH = 1000;
+        if (schemaJson.length > MAX_SCHEMA_LENGTH) {
+          schemaJson = schemaJson.substring(0, MAX_SCHEMA_LENGTH) +
+            "\n... (schema truncated)";
+        }
         entry += `- Schema: \`\`\`json\n${schemaJson}\n\`\`\`\n`;
       }
 
