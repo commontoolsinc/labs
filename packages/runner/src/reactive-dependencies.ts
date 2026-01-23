@@ -1,7 +1,7 @@
 import { isRecord } from "@commontools/utils/types";
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { arrayEqual } from "./path-utils.ts";
-import type { StorableValue } from "./interface.ts";
+import type { StorableValue } from "@commontools/memory/interface";
 import type { Action, SpaceAndURI } from "./scheduler.ts";
 import type {
   IMemorySpaceAddress,

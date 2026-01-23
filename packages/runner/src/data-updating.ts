@@ -2,7 +2,7 @@ import { isRecord } from "@commontools/utils/types";
 import { isArrayIndexPropertyName, toStorableValue } from "./value-codec.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
-import { type StorableValue } from "./interface.ts";
+import { type StorableValue } from "@commontools/memory/interface";
 import { createRef } from "./create-ref.ts";
 import { CellImpl, isCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";

@@ -18,7 +18,7 @@ import type {
   Result,
   State,
 } from "../interface.ts";
-import type { StorableValue } from "../../interface.ts";
+import type { StorableValue } from "@commontools/memory/interface";
 import * as Address from "./address.ts";
 import {
   attest,
