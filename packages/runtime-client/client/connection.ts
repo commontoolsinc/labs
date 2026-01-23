@@ -122,6 +122,15 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     if (instances) {
       if (!instances.has(cell)) {
         instances.add(cell);
+        // Copy the cached value from an existing subscriber to the new one
+        // This ensures late subscribers get the initial value
+        const existingInstance = instances.values().next().value;
+        if (existingInstance) {
+          const cachedValue = existingInstance.get();
+          if (cachedValue !== undefined) {
+            cell[$onCellUpdate](cachedValue);
+          }
+        }
       }
       return;
     }
