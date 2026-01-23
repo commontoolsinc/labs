@@ -1,6 +1,7 @@
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { isRecord } from "@commontools/utils/types";
 import { isArrayIndexPropertyName } from "../../value-codec.ts";
+import type { StorableValue } from "@commontools/memory/interface";
 import type {
   IAttestation,
   IInvalidDataURIError,
@@ -68,10 +69,10 @@ export const UnsupportedMediaTypeError = (
  * with O(D) structural sharing where D is path depth.
  */
 const setAtPath = (
-  root: JSONValue | undefined,
+  root: StorableValue,
   path: readonly MemoryAddressPathComponent[],
-  value: JSONValue | undefined,
-): { ok: JSONValue | undefined } | {
+  value: StorableValue,
+): { ok: StorableValue } | {
   error: { at: number; type: string; notFound?: boolean };
 } => {
   // Base case: empty path = replace root
@@ -192,7 +193,7 @@ const setAtPath = (
 export const write = (
   source: IAttestation,
   address: IMemoryAddress,
-  value: JSONValue | undefined,
+  value: StorableValue,
 ): Result<
   IAttestation,
   IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
