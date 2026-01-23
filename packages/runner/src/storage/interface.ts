@@ -15,6 +15,7 @@ import type {
   SchemaPathSelector,
   Signer,
   State,
+  StorableDatum,
   StorableValue,
   The as MediaType,
   TransactionError,
@@ -816,7 +817,7 @@ export type MemoryAddressPathComponent = string;
 export interface Assert {
   the: MediaType;
   of: URI;
-  is: JSONValue;
+  is: StorableDatum;
 
   claim?: void;
 }
