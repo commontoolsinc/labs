@@ -38,7 +38,7 @@ describe("Chat Note pattern test", () => {
       // Create the chat-note charm
       const charm = await cc.create(
         await Deno.readTextFile(
-          join(import.meta.dirname!, "..", "notes", "chat-note.tsx"),
+          join(import.meta.dirname!, "..", "experimental", "chat-note.tsx"),
         ),
         { start: true },
       );
