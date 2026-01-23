@@ -359,6 +359,129 @@ Accept: application/json
   }
 
   /**
+   * Fetch multiple attachments in a single batch request.
+   * PERFORMANCE: Uses Gmail batch API to fetch all attachments in parallel,
+   * significantly faster than sequential getAttachment() calls.
+   *
+   * @param attachments Array of { messageId, attachmentId } to fetch
+   * @returns Array of { messageId, attachmentId, data, success } results
+   */
+  async getAttachmentsBatch(
+    attachments: Array<{ messageId: string; attachmentId: string }>,
+  ): Promise<
+    Array<{
+      messageId: string;
+      attachmentId: string;
+      data: string | null;
+      success: boolean;
+    }>
+  > {
+    if (attachments.length === 0) return [];
+
+    // For small batches, parallel individual requests may be faster than batch API overhead
+    if (attachments.length <= 2) {
+      const results = await Promise.all(
+        attachments.map(async ({ messageId, attachmentId }) => {
+          try {
+            const data = await this.getAttachment(messageId, attachmentId);
+            return { messageId, attachmentId, data, success: true };
+          } catch {
+            return { messageId, attachmentId, data: null, success: false };
+          }
+        }),
+      );
+      return results;
+    }
+
+    const boundary = `batch_${Math.random().toString(36).substring(2)}`;
+    debugLog(
+      this.debugMode,
+      `Processing attachment batch of ${attachments.length} items`,
+    );
+
+    const batchBody = attachments
+      .map(
+        ({ messageId, attachmentId }, index) => `
+--${boundary}
+Content-Type: application/http
+Content-ID: <batch-${index}+${messageId}+${attachmentId}>
+
+GET /gmail/v1/users/me/messages/${messageId}/attachments/${attachmentId}
+Authorization: Bearer $PLACEHOLDER
+Accept: application/json
+
+`,
+      )
+      .join("") + `--${boundary}--`;
+
+    try {
+      const batchResponse = await this.googleRequest(
+        new URL("https://gmail.googleapis.com/batch/gmail/v1"),
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": `multipart/mixed; boundary=${boundary}`,
+          },
+          body: batchBody,
+        },
+      );
+
+      const responseText = await batchResponse.text();
+      debugLog(
+        this.debugMode,
+        `Received attachment batch response of length: ${responseText.length}`,
+      );
+
+      // Parse batch response - similar to fetchBatch but for attachments
+      // Use exact boundary to avoid false splits on attachment data containing "--batch_"
+      const parts = responseText.split(`--${boundary}`).slice(1, -1);
+
+      return attachments.map(({ messageId, attachmentId }, index) => {
+        try {
+          const part = parts[index];
+          if (!part) {
+            return { messageId, attachmentId, data: null, success: false };
+          }
+
+          const jsonStart = part.indexOf(`\n{`);
+          if (jsonStart === -1) {
+            return { messageId, attachmentId, data: null, success: false };
+          }
+
+          const jsonContent = part.slice(jsonStart).trim();
+          const parsed = JSON.parse(jsonContent);
+
+          if (parsed.error) {
+            debugLog(
+              this.debugMode,
+              `Attachment batch error for ${attachmentId}: ${parsed.error.message}`,
+            );
+            return { messageId, attachmentId, data: null, success: false };
+          }
+
+          return {
+            messageId,
+            attachmentId,
+            data: parsed.data || null,
+            success: !!parsed.data,
+          };
+        } catch {
+          return { messageId, attachmentId, data: null, success: false };
+        }
+      });
+    } catch (error) {
+      debugLog(this.debugMode, `Attachment batch request failed:`, error);
+      // Return all as failed
+      return attachments.map(({ messageId, attachmentId }) => ({
+        messageId,
+        attachmentId,
+        data: null,
+        success: false,
+      }));
+    }
+  }
+
+  /**
    * Fetch Gmail history for incremental sync.
    */
   async fetchHistory(

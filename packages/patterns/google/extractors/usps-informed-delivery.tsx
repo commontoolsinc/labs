@@ -29,10 +29,8 @@ import {
   Writable,
 } from "commontools";
 import type { Schema } from "commontools/schema";
-import GmailExtractor, {
-  type Auth,
-} from "../building-blocks/gmail-extractor.tsx";
-import ProcessingStatus from "../building-blocks/processing-status.tsx";
+import GmailExtractor, { type Auth } from "../core/gmail-extractor.tsx";
+import ProcessingStatus from "../core/processing-status.tsx";
 
 // Debug flag for development - disable in production
 const DEBUG_USPS = false;
@@ -197,7 +195,8 @@ function extractMailPieceImages(htmlContent: string): string[] {
 /**
  * Normalize a recipient name for comparison.
  */
-function normalizeName(name: string): string {
+function normalizeName(name: string | null | undefined): string {
+  if (!name) return "";
   return name
     .trim()
     .toLowerCase()

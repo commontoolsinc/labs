@@ -11,9 +11,7 @@
  * 3. Link: ct charm link google-auth/auth email-pattern-dreamer/overrideAuth
  */
 import { NAME, pattern, UI } from "commontools";
-import GmailImporter, {
-  type Auth,
-} from "../building-blocks/gmail-importer.tsx";
+import GmailImporter, { type Auth } from "../core/gmail-importer.tsx";
 
 import USPSInformedDeliveryPattern from "./usps-informed-delivery.tsx";
 import BerkeleyLibraryPattern from "./berkeley-library.tsx";

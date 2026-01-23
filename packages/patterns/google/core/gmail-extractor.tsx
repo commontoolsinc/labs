@@ -72,7 +72,10 @@ import {
 } from "commontools";
 import GmailImporter, { type Auth, type Email } from "./gmail-importer.tsx";
 import ProcessingStatus from "./processing-status.tsx";
-import { GmailSendClient } from "./util/gmail-send-client.ts";
+import {
+  createReadOnlyAuthCell,
+  GmailSendClient,
+} from "./util/gmail-send-client.ts";
 
 // Re-export Email and Auth types and ProcessingStatus for consumers
 export type { Auth, Email } from "./gmail-importer.tsx";
@@ -339,12 +342,11 @@ const addLabelsHandler = handler<
     return;
   }
 
-  const client = new GmailSendClient(
-    { get: () => auth, update: () => {} } as any,
-    {
-      debugMode: false,
-    },
-  );
+  // Type assertion needed because handler state provides readonly Auth properties,
+  // but createReadOnlyAuthCell expects mutable Auth. Safe because we only read from it.
+  const client = new GmailSendClient(createReadOnlyAuthCell(auth as Auth), {
+    debugMode: false,
+  });
 
   try {
     await client.modifyLabels(messageId, {
@@ -369,12 +371,11 @@ const removeLabelsHandler = handler<
     return;
   }
 
-  const client = new GmailSendClient(
-    { get: () => auth, update: () => {} } as any,
-    {
-      debugMode: false,
-    },
-  );
+  // Type assertion needed because handler state provides readonly Auth properties,
+  // but createReadOnlyAuthCell expects mutable Auth. Safe because we only read from it.
+  const client = new GmailSendClient(createReadOnlyAuthCell(auth as Auth), {
+    debugMode: false,
+  });
 
   try {
     await client.modifyLabels(messageId, {

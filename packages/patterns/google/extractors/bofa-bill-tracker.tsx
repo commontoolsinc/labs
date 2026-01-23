@@ -34,7 +34,7 @@ import BillExtractor, {
   getIdentifierColor,
   processBills,
   type TrackedBill,
-} from "../building-blocks/bill-extractor/index.tsx";
+} from "../core/bill-extractor/index.tsx";
 
 const BOFA_GMAIL_QUERY =
   "from:onlinebanking@ealerts.bankofamerica.com OR from:alerts@bankofamerica.com";

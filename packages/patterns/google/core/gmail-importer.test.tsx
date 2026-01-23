@@ -10,7 +10,7 @@
  * initial state without mocking. The googleUpdater handler is not tested
  * here as it requires real API credentials.
  *
- * Run: deno task ct test packages/patterns/google/building-blocks/gmail-importer.test.tsx --root packages/patterns/google --verbose
+ * Run: deno task ct test packages/patterns/google/core/gmail-importer.test.tsx --root packages/patterns/google --verbose
  */
 import { computed, pattern } from "commontools";
 import GmailImporter from "./gmail-importer.tsx";

@@ -28,19 +28,17 @@ import {
   UI,
   Writable,
 } from "commontools";
-import GmailExtractor, {
-  type Email,
-} from "../building-blocks/gmail-extractor.tsx";
-import type { Auth } from "../building-blocks/util/google-auth-manager.tsx";
+import GmailExtractor, { type Email } from "../core/gmail-extractor.tsx";
+import type { Auth } from "../core/util/google-auth-manager.tsx";
 import {
   type GmailLabel,
   GmailSendClient,
-} from "../building-blocks/util/gmail-send-client.ts";
+} from "../core/util/gmail-send-client.ts";
 import {
   createGoogleAuth,
   type ScopeKey,
-} from "../building-blocks/util/google-auth-manager.tsx";
-import ProcessingStatus from "../building-blocks/processing-status.tsx";
+} from "../core/util/google-auth-manager.tsx";
+import ProcessingStatus from "../core/processing-status.tsx";
 import type { Stream } from "commontools";
 
 // Debug flag for development
@@ -171,7 +169,7 @@ const fetchLabels = handler<
 
     // Find task-current label (case-insensitive)
     const taskLabel = labels.find(
-      (l: GmailLabel) => l.name.toLowerCase() === "task-current",
+      (l: GmailLabel) => l?.name?.toLowerCase() === "task-current",
     );
 
     if (taskLabel) {
@@ -232,30 +230,11 @@ export default pattern<PatternInput, PatternOutput>(() => {
     loadingLabels,
   });
 
-  // Auto-fetch labels when auth becomes ready
-  // Track whether we've already triggered auto-fetch to prevent loops
-  const hasAutoFetchedLabels = Writable.of(false).for("hasAutoFetchedLabels");
-
-  computed(() => {
-    const ready = isReady;
-    const alreadyFetched = hasAutoFetchedLabels.get();
-    const hasLabelId = !!taskCurrentLabelId.get();
-    const currentlyLoading = loadingLabels.get();
-
-    // Only auto-fetch once when:
-    // - Auth is ready
-    // - We haven't already auto-fetched this session
-    // - No label ID loaded yet
-    // - Not currently loading labels
-    if (ready && !alreadyFetched && !hasLabelId && !currentlyLoading) {
-      if (DEBUG_NOTES) {
-        console.log("[EmailNotes] Auto-fetching labels on auth ready");
-      }
-      hasAutoFetchedLabels.set(true);
-      // Trigger the label fetch via stream
-      labelFetcherStream.send({});
-    }
-  });
+  // NOTE: Auto-fetch labels was removed because having side effects (writes to
+  // Writable cells, sending to streams) inside computed() caused infinite reactive
+  // loops that kept CPU at 88%. Users can click "Load Labels" button when needed.
+  // See docs/common/concepts/computed/side-effects.md for why computed() with
+  // side effects is problematic.
 
   // Directly instantiate GmailExtractor with task-current filter (raw mode)
   // Note: Gmail API doesn't support subject:"" for empty subjects, so we only
@@ -337,10 +316,8 @@ export default pattern<PatternInput, PatternOutput>(() => {
       <div style={{ flex: 1 }}>
         <div style={{ fontWeight: "600", fontSize: "14px" }}>Email Notes</div>
         <div style={{ fontSize: "12px", color: "#6b7280" }}>
-          {computed(() => {
-            const count = noteCount;
-            return count === 1 ? "1 note" : `${count} notes`;
-          })}
+          {derive(noteCount, (count) =>
+            count === 1 ? "1 note" : `${count} notes`)}
         </div>
         {/* Loading/progress indicator */}
         <ProcessingStatus
@@ -493,9 +470,10 @@ export default pattern<PatternInput, PatternOutput>(() => {
               <ct-vstack gap="3">
                 {notes.map((note) => {
                   // Check if this note is being processed
-                  // Note: Inside .map(), 'note' is a reactive cell reference
+                  // Extract noteId before computed to avoid OpaqueRef issues
+                  const noteId = note.id;
                   const isProcessing = computed(() =>
-                    processingNotes.get().includes(note.id)
+                    (processingNotes.get() || []).includes(noteId)
                   );
 
                   return (
@@ -553,17 +531,26 @@ export default pattern<PatternInput, PatternOutput>(() => {
                             )}
                             style={{
                               padding: "4px 10px",
-                              backgroundColor: isProcessing
-                                ? "#e5e7eb"
-                                : "#3b82f6",
-                              color: isProcessing ? "#9ca3af" : "white",
+                              backgroundColor: derive(
+                                isProcessing,
+                                (p) => p ? "#e5e7eb" : "#3b82f6",
+                              ),
+                              color: derive(
+                                isProcessing,
+                                (p) => p ? "#9ca3af" : "white",
+                              ),
                               border: "none",
                               borderRadius: "4px",
                               fontSize: "12px",
-                              cursor: isProcessing ? "not-allowed" : "pointer",
+                              cursor: derive(
+                                isProcessing,
+                                (p) => p ? "not-allowed" : "pointer",
+                              ),
                               fontWeight: "500",
-                              opacity: derive(taskCurrentLabelId, (id) =>
-                                id ? 1 : 0.5),
+                              opacity: derive(
+                                taskCurrentLabelId,
+                                (id) => id ? 1 : 0.5,
+                              ),
                             }}
                           >
                             {ifElse(isProcessing, "Processing...", "Done")}
@@ -573,8 +560,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
 
                       {/* Note content - rendered as markdown */}
                       <ct-markdown
-                        content={derive(note, (n) =>
-                          n.content)}
+                        content={derive(note, (n) => n.content)}
                         compact
                         style="font-size: 14px; line-height: 1.5; color: #374151;"
                       />

@@ -30,9 +30,7 @@ import {
   UI,
   when,
 } from "commontools";
-import GmailExtractor, {
-  type Auth,
-} from "../building-blocks/gmail-extractor.tsx";
+import GmailExtractor, { type Auth } from "../core/gmail-extractor.tsx";
 
 import USPSInformedDeliveryPattern from "./usps-informed-delivery.tsx";
 import BerkeleyLibraryPattern from "./berkeley-library.tsx";

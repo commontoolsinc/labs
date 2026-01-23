@@ -15,20 +15,20 @@ import {
 import {
   createGoogleAuth,
   type ScopeKey,
-} from "../building-blocks/util/google-auth-manager.tsx";
+} from "../core/util/google-auth-manager.tsx";
 
 // Import markdown conversion utilities
 import {
   convertDocToMarkdown,
   extractDocTitle,
-} from "../building-blocks/util/google-docs-markdown.ts";
+} from "../core/util/google-docs-markdown.ts";
 
 // Import Google Docs client
 import {
   extractFileId,
   type GoogleComment,
   GoogleDocsClient,
-} from "../building-blocks/util/google-docs-client.ts";
+} from "../core/util/google-docs-client.ts";
 
 // Import Note pattern for "Save as Note" feature
 // NOTE: This requires deploying with --root packages/patterns to resolve the import

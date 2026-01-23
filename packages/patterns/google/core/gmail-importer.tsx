@@ -29,6 +29,15 @@ type Secret<T> = CFC<T, "secret">;
 type Confidential<T> = CFC<T, "confidential">;
 
 /**
+ * Writable cell with sync method.
+ * The sync() method is added by the runner via module augmentation,
+ * but isn't visible in the base Cell type from the api package.
+ */
+type SyncableWritable<T> = Writable<T> & {
+  sync(): Promise<Writable<T>> | Writable<T>;
+};
+
+/**
  * Auth data structure for Google OAuth tokens.
  *
  * ⚠️ CRITICAL: When consuming this auth, DO NOT use derive()!
@@ -154,9 +163,9 @@ const _updateLimit = handler<
 // consistent token refresh behavior across all Gmail patterns.
 
 const googleUpdater = handler<unknown, {
-  emails: Writable<Array<Writable<Email>>>;
-  auth: Writable<Auth>;
-  settings: Writable<
+  emails: SyncableWritable<Array<Writable<Email>>>;
+  auth: SyncableWritable<Auth>;
+  settings: SyncableWritable<
     Default<Settings, {
       gmailFilterQuery: "in:INBOX";
       limit: 10;
@@ -165,7 +174,7 @@ const googleUpdater = handler<unknown, {
       resolveInlineImages: false;
     }>
   >;
-  historyId: Writable<string>;
+  historyId: SyncableWritable<string>;
   fetching?: Writable<boolean>;
 }>(
   async (_event, state) => {
@@ -174,13 +183,13 @@ const googleUpdater = handler<unknown, {
       state.fetching.set(true);
     }
 
-    // HACK(seefeld): Ensure all cells are synced before proceeding,
+    // Ensure all cells are synced before proceeding,
     // otherwise we may end up conflicting.
     await Promise.all([
-      (state.emails as any).sync(),
-      (state.auth as any).sync(),
-      (state.settings as any).sync(),
-      (state.historyId as any).sync(),
+      state.emails.sync(),
+      state.auth.sync(),
+      state.settings.sync(),
+      state.historyId.sync(),
     ]);
 
     const settings = state.settings.get() || {};
@@ -272,7 +281,8 @@ function decodeBase64(data: string): string {
 }
 
 // Helper function to extract email address from a header value
-function extractEmailAddress(header: string): string {
+function extractEmailAddress(header: string | null | undefined): string {
+  if (!header) return "";
   const emailMatch = header.match(/<([^>]*)>/);
   if (emailMatch && emailMatch[1]) {
     return emailMatch[1];
@@ -281,11 +291,12 @@ function extractEmailAddress(header: string): string {
 }
 
 // Helper function to extract header value from message headers
-function getHeader(headers: any[], name: string): string {
+function getHeader(headers: any[] | null | undefined, name: string): string {
+  if (!headers || !Array.isArray(headers)) return "";
   const header = headers.find((h) =>
-    h.name.toLowerCase() === name.toLowerCase()
+    h?.name?.toLowerCase() === name.toLowerCase()
   );
-  return header ? header.value : "";
+  return header?.value ?? "";
 }
 
 // Helper to escape special regex characters
@@ -303,6 +314,10 @@ function escapeRegExp(string: string): string {
  *
  * This is common in USPS Informed Delivery emails where mail piece scans
  * are embedded as inline attachments rather than external URLs.
+ *
+ * PERFORMANCE: Uses Promise.all() for parallel attachment fetching instead
+ * of sequential fetching, significantly reducing latency for emails with
+ * multiple inline images (e.g., USPS Informed Delivery with 5-10 mail scans).
  */
 async function resolveCidReferences(
   messageId: string,
@@ -347,36 +362,53 @@ async function resolveCidReferences(
 
   debugLog(
     debugMode,
-    `[CID] Found ${cidMap.size} inline attachments to resolve`,
+    `[CID] Found ${cidMap.size} inline attachments to resolve (fetching in parallel)`,
   );
 
-  // Fetch each attachment and replace in HTML
+  // Fetch all attachments in parallel using Promise.all for better performance
+  const cidEntries = Array.from(cidMap.entries());
+  const fetchResults = await Promise.all(
+    cidEntries.map(async ([cid, { attachmentId, mimeType }]) => {
+      try {
+        debugLog(debugMode, `[CID] Fetching attachment for cid:${cid}`);
+        const data = await client.getAttachment(messageId, attachmentId);
+        // Convert base64url to standard base64
+        const base64 = data.replace(/-/g, "+").replace(/_/g, "/");
+        const dataUrl = `data:${mimeType};base64,${base64}`;
+        debugLog(
+          debugMode,
+          `[CID] Resolved cid:${cid} (${data.length} chars of base64 data)`,
+        );
+        return { cid, dataUrl, success: true as const };
+      } catch (error) {
+        debugWarn(
+          debugMode,
+          `[CID] Failed to fetch attachment for cid:${cid}:`,
+          error,
+        );
+        return { cid, dataUrl: null, success: false as const };
+      }
+    }),
+  );
+
+  // Apply all successful replacements to HTML
   let resolvedHtml = htmlContent;
-  for (const [cid, { attachmentId, mimeType }] of cidMap) {
-    try {
-      debugLog(debugMode, `[CID] Fetching attachment for cid:${cid}`);
-      const data = await client.getAttachment(messageId, attachmentId);
-      // Convert base64url to standard base64
-      const base64 = data.replace(/-/g, "+").replace(/_/g, "/");
-      const dataUrl = `data:${mimeType};base64,${base64}`;
+  for (const result of fetchResults) {
+    if (result.success && result.dataUrl) {
       // Replace all occurrences of this cid: reference
       resolvedHtml = resolvedHtml.replace(
-        new RegExp(`cid:${escapeRegExp(cid)}`, "gi"),
-        dataUrl,
+        new RegExp(`cid:${escapeRegExp(result.cid)}`, "gi"),
+        result.dataUrl,
       );
-      debugLog(
-        debugMode,
-        `[CID] Resolved cid:${cid} (${data.length} chars of base64 data)`,
-      );
-    } catch (error) {
-      debugWarn(
-        debugMode,
-        `[CID] Failed to fetch attachment for cid:${cid}:`,
-        error,
-      );
-      // Leave cid: reference as-is on failure
     }
   }
+
+  debugLog(
+    debugMode,
+    `[CID] Batch resolution complete: ${
+      fetchResults.filter((r) => r.success).length
+    }/${cidEntries.length} successful`,
+  );
 
   return resolvedHtml;
 }

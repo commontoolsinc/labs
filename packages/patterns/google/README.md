@@ -7,7 +7,7 @@ Calendar, Docs) via OAuth authentication.
 
 ```
 packages/patterns/google/
-├── building-blocks/          # Core, engineering-supported patterns
+├── core/          # Core, engineering-supported patterns
 │   ├── util/                 # Shared utilities (clients, auth manager)
 │   │   ├── gmail-client.ts
 │   │   ├── gmail-send-client.ts
@@ -159,36 +159,36 @@ Your Pattern
 
 ## Pattern Categories
 
-### building-blocks/ — Core Auth
+### core/ — Core Auth
 
-| Pattern                                    | Description                                 |
-| ------------------------------------------ | ------------------------------------------- |
-| `building-blocks/google-auth.tsx`          | OAuth2 authentication flow for Google APIs  |
-| `building-blocks/google-auth-personal.tsx` | Wrapper that adds `#googleAuthPersonal` tag |
-| `building-blocks/google-auth-work.tsx`     | Wrapper that adds `#googleAuthWork` tag     |
+| Pattern                         | Description                                 |
+| ------------------------------- | ------------------------------------------- |
+| `core/google-auth.tsx`          | OAuth2 authentication flow for Google APIs  |
+| `core/google-auth-personal.tsx` | Wrapper that adds `#googleAuthPersonal` tag |
+| `core/google-auth-work.tsx`     | Wrapper that adds `#googleAuthWork` tag     |
 
-### building-blocks/ — Gmail & Calendar
+### core/ — Gmail & Calendar
 
-| Pattern                                        | Description                                  |
-| ---------------------------------------------- | -------------------------------------------- |
-| `building-blocks/gmail-importer.tsx`           | Import emails from Gmail with search queries |
-| `building-blocks/google-calendar-importer.tsx` | Import events from Google Calendar           |
-| `building-blocks/imported-calendar.tsx`        | Display local calendar events                |
-| `building-blocks/processing-status.tsx`        | Loading/progress UI component                |
+| Pattern                             | Description                                  |
+| ----------------------------------- | -------------------------------------------- |
+| `core/gmail-importer.tsx`           | Import emails from Gmail with search queries |
+| `core/google-calendar-importer.tsx` | Import events from Google Calendar           |
+| `core/imported-calendar.tsx`        | Display local calendar events                |
+| `core/processing-status.tsx`        | Loading/progress UI component                |
 
-### building-blocks/experimental/ — Less Hardened
+### core/experimental/ — Less Hardened
 
-| Pattern                                                             | Description                                    |
-| ------------------------------------------------------------------- | ---------------------------------------------- |
-| `building-blocks/experimental/google-auth-switcher.tsx`             | Post-login account type classification         |
-| `building-blocks/experimental/gmail-sender.tsx`                     | Send emails via Gmail API                      |
-| `building-blocks/experimental/gmail-label-manager.tsx`              | Add/remove labels from emails                  |
-| `building-blocks/experimental/gmail-agentic-search.tsx`             | Base pattern for Gmail-based agentic searchers |
-| `building-blocks/experimental/gmail-search-registry.tsx`            | Community query database for Gmail searches    |
-| `building-blocks/experimental/calendar-event-manager.tsx`           | Create, update, delete calendar events         |
-| `building-blocks/experimental/calendar-viewer.tsx`                  | View calendar events                           |
-| `building-blocks/experimental/google-docs-comment-orchestrator.tsx` | AI assistant for Google Docs comments          |
-| `building-blocks/experimental/google-docs-comment-confirm.ts`       | Side effects handler for Docs comments         |
+| Pattern                                                  | Description                                    |
+| -------------------------------------------------------- | ---------------------------------------------- |
+| `core/experimental/google-auth-switcher.tsx`             | Post-login account type classification         |
+| `core/experimental/gmail-sender.tsx`                     | Send emails via Gmail API                      |
+| `core/experimental/gmail-label-manager.tsx`              | Add/remove labels from emails                  |
+| `core/experimental/gmail-agentic-search.tsx`             | Base pattern for Gmail-based agentic searchers |
+| `core/experimental/gmail-search-registry.tsx`            | Community query database for Gmail searches    |
+| `core/experimental/calendar-event-manager.tsx`           | Create, update, delete calendar events         |
+| `core/experimental/calendar-viewer.tsx`                  | View calendar events                           |
+| `core/experimental/google-docs-comment-orchestrator.tsx` | AI assistant for Google Docs comments          |
+| `core/experimental/google-docs-comment-confirm.ts`       | Side effects handler for Docs comments         |
 
 ### extractors/ — End-User Patterns
 

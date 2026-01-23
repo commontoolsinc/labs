@@ -24,7 +24,7 @@
  *   getIdentifierColor,
  *   createMarkAsPaidHandler,
  *   createUnmarkAsPaidHandler,
- * } from "../building-blocks/bill-extractor/index.tsx";
+ * } from "../core/bill-extractor/index.tsx";
  *
  * export default pattern(({ overrideAuth, manuallyPaid, demoMode }) => {
  *   const tracker = BillExtractor({

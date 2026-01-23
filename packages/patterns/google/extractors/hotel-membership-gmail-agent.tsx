@@ -20,12 +20,12 @@ import {
 } from "commontools";
 import GmailAgenticSearch, {
   type SearchProgress,
-} from "../building-blocks/experimental/gmail-agentic-search.tsx";
+} from "../core/experimental/gmail-agentic-search.tsx";
 import {
   defineItemSchema,
   InferItem,
   listTool,
-} from "../building-blocks/util/agentic-tools.ts";
+} from "../core/util/agentic-tools.ts";
 
 // Scan mode: "full" = comprehensive all-time search, "recent" = last 7 days only
 type ScanMode = "full" | "recent";
@@ -92,8 +92,10 @@ const MembershipSchema = defineItemSchema({
 ]);
 
 // Derive TypeScript type from schema (for UI code)
+// Note: _fromWish is an internal property added by the wish system for imported records
 type MembershipRecord = InferItem<typeof MembershipSchema> & {
   extractedAt: number;
+  _fromWish?: boolean;
 };
 
 interface HotelMembershipInput {
@@ -833,11 +835,9 @@ Report memberships as you find them. Don't wait until the end.`,
                           <div
                             style={{
                               padding: "8px",
-                              background: (m as any)._fromWish
-                                ? "#e0f2fe"
-                                : "#f8f9fa",
+                              background: m._fromWish ? "#e0f2fe" : "#f8f9fa",
                               borderRadius: "4px",
-                              border: (m as any)._fromWish
+                              border: m._fromWish
                                 ? "1px dashed #0ea5e9"
                                 : "none",
                             }}
@@ -853,7 +853,7 @@ Report memberships as you find them. Don't wait until the end.`,
                               }}
                             >
                               {m.programName}
-                              {(m as any)._fromWish && (
+                              {m._fromWish && (
                                 <span
                                   style={{
                                     fontSize: "10px",

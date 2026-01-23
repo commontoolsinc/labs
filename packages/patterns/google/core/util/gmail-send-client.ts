@@ -45,6 +45,55 @@ import type { Auth } from "../google-auth.tsx";
 // TYPES
 // ============================================================================
 
+/**
+ * Interface describing the minimum auth cell requirements for GmailSendClient.
+ * This allows passing either a full Writable<Auth> cell or a simpler wrapper
+ * for read-only contexts where token refresh doesn't need to persist.
+ */
+export interface AuthCell {
+  get(): Auth | undefined;
+  update(values: Partial<Auth>): void;
+}
+
+/**
+ * Read-only auth type that accepts both mutable and readonly arrays.
+ * When reading from reactive cells, scope becomes `readonly string[]`.
+ */
+type ReadableAuth = {
+  token: string;
+  tokenType: string;
+  scope: readonly string[] | string[];
+  expiresIn: number;
+  expiresAt: number;
+  refreshToken: string;
+  user: {
+    email: string;
+    name: string;
+    picture: string;
+  };
+};
+
+/**
+ * Creates a read-only auth wrapper for use with GmailSendClient.
+ * Token refresh calls update() but changes don't persist.
+ * Use this when you only have a plain Auth value.
+ */
+export function createReadOnlyAuthCell(
+  auth: ReadableAuth | undefined,
+): AuthCell {
+  // Create a mutable copy to avoid readonly issues
+  let currentAuth: Auth | undefined = auth
+    ? { ...auth, scope: [...auth.scope] }
+    : undefined;
+  return {
+    get: () => currentAuth,
+    update: (values: Partial<Auth>) => {
+      // Update in-memory for this request, but don't persist
+      currentAuth = currentAuth ? { ...currentAuth, ...values } : undefined;
+    },
+  };
+}
+
 export interface GmailSendClientConfig {
   /** Enable verbose console logging */
   debugMode?: boolean;
@@ -177,14 +226,15 @@ function encodeHeaderValue(value: string): string {
  * - Modify labels (requires gmail.modify scope)
  * - List available labels (requires gmail.modify or gmail.readonly scope)
  *
- * IMPORTANT: The auth cell MUST be writable for token refresh to work!
+ * Accepts either a Writable<Auth> cell (for full token refresh support)
+ * or an AuthCell wrapper (for read-only contexts).
  */
 export class GmailSendClient {
-  private auth: Writable<Auth>;
+  private auth: AuthCell;
   private debugMode: boolean;
 
   constructor(
-    auth: Writable<Auth>,
+    auth: AuthCell | Writable<Auth>,
     { debugMode = false }: GmailSendClientConfig = {},
   ) {
     this.auth = auth;

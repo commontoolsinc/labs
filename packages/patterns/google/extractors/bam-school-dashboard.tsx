@@ -29,11 +29,9 @@ import {
   Writable,
 } from "commontools";
 import type { Schema } from "commontools/schema";
-import GmailExtractor, {
-  type Email,
-} from "../building-blocks/gmail-extractor.tsx";
-import type { Auth } from "../building-blocks/gmail-extractor.tsx";
-import ProcessingStatus from "../building-blocks/processing-status.tsx";
+import GmailExtractor, { type Email } from "../core/gmail-extractor.tsx";
+import type { Auth } from "../core/gmail-extractor.tsx";
+import ProcessingStatus from "../core/processing-status.tsx";
 
 // =============================================================================
 // TYPES
@@ -162,7 +160,8 @@ const SOURCE_INFO: Record<SourceType, { label: string; priority: number }> = {
 /**
  * Classify email source based on sender address
  */
-function classifySource(from: string): SourceType {
+function classifySource(from: string | null | undefined): SourceType {
+  if (!from) return "school";
   const fromLower = from.toLowerCase();
 
   // Teacher - Mr. Zaragoza
