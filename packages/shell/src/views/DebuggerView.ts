@@ -781,7 +781,7 @@ export class XDebuggerView extends LitElement {
       color: #3b82f6;
     }
 
-    /* Timing histogram styles */
+    /* Timing histogram styles - Tufte-inspired minimal design */
     .timing-histogram {
       margin-top: 0.5rem;
       padding: 0.5rem;
@@ -789,82 +789,118 @@ export class XDebuggerView extends LitElement {
       border-radius: 0.25rem;
     }
 
-    .timing-key-row {
+    .timing-key-header {
       display: flex;
       align-items: center;
-      gap: 0.5rem;
-      padding: 0.25rem 0;
-      font-size: 0.6875rem;
-      font-family: monospace;
+      justify-content: space-between;
+      margin-bottom: 0.5rem;
+      font-size: 0.625rem;
+      color: #94a3b8;
     }
 
     .timing-key-name {
-      min-width: 8rem;
+      font-family: monospace;
       color: #cbd5e1;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      font-weight: 600;
     }
 
-    .histogram-bar-container {
-      flex: 1;
-      position: relative;
-      height: 1.25rem;
-      background-color: #1e293b;
-      border-radius: 0.25rem;
-      overflow: hidden;
-    }
-
-    .histogram-bar {
-      position: absolute;
-      height: 100%;
+    .timing-stats-summary {
       display: flex;
-      align-items: center;
-    }
-
-    .histogram-segment {
-      height: 100%;
-    }
-
-    .histogram-min {
-      background-color: #3b82f6;
-      opacity: 0.3;
-    }
-
-    .histogram-p50 {
-      background-color: #3b82f6;
-      opacity: 0.6;
-    }
-
-    .histogram-p95 {
-      background-color: #3b82f6;
-      opacity: 0.9;
-    }
-
-    .histogram-max {
-      background-color: #ef4444;
-      opacity: 0.7;
-    }
-
-    .timing-stats-text {
-      display: flex;
-      gap: 0.5rem;
+      gap: 0.75rem;
       font-size: 0.625rem;
       color: #64748b;
-      white-space: nowrap;
     }
 
-    .stat-item {
+    .histogram-container {
+      position: relative;
+      height: 60px;
+      margin: 0.25rem 0;
+    }
+
+    .histogram-chart {
+      position: relative;
+      height: 100%;
       display: flex;
-      gap: 0.125rem;
+      align-items: flex-end;
+      gap: 1px;
+      padding: 0 20px;
     }
 
-    .stat-label {
+    .histogram-bucket {
+      flex: 1;
+      position: relative;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+    }
+
+    .bucket-bar-count {
+      position: absolute;
+      bottom: 0;
+      width: 100%;
+      background-color: #3b82f6;
+      opacity: 0.4;
+      transition: opacity 0.2s;
+    }
+
+    .bucket-bar-time {
+      position: absolute;
+      bottom: 0;
+      width: 100%;
+      background-color: #10b981;
+      opacity: 0.4;
+      transition: opacity 0.2s;
+    }
+
+    .histogram-bucket:hover .bucket-bar-count,
+    .histogram-bucket:hover .bucket-bar-time {
       opacity: 0.7;
     }
 
-    .stat-value {
-      color: #94a3b8;
+    .histogram-median-line {
+      position: absolute;
+      left: calc(50% + 10px);
+      top: 0;
+      bottom: 0;
+      width: 1px;
+      background-color: #64748b;
+      opacity: 0.5;
+    }
+
+    .histogram-axes {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      pointer-events: none;
+    }
+
+    .histogram-y-label-left {
+      position: absolute;
+      left: 2px;
+      top: 0;
+      font-size: 0.5625rem;
+      color: #3b82f6;
+      opacity: 0.7;
+    }
+
+    .histogram-y-label-right {
+      position: absolute;
+      right: 2px;
+      top: 0;
+      font-size: 0.5625rem;
+      color: #10b981;
+      opacity: 0.7;
+    }
+
+    .histogram-x-labels {
+      display: flex;
+      justify-content: space-between;
+      padding: 0 20px;
+      margin-top: 2px;
+      font-size: 0.5625rem;
+      color: #64748b;
     }
   `;
 
@@ -1715,68 +1751,94 @@ export class XDebuggerView extends LitElement {
       `;
     }
 
-    // Find max time across all keys for scaling
-    const maxTime = Math.max(...keys.map((k) => timingData[k].max));
-
     return html`
       <div class="timing-histogram">
-        <div
-          style="color: #94a3b8; font-size: 0.625rem; margin-bottom: 0.25rem; font-weight: 600;"
-        >
-          Timing Histograms
-        </div>
         ${keys.map((key) => {
           const stats = timingData[key];
-          const scale = (val: number) => (val / maxTime) * 100;
+          if (!stats.histogram || stats.histogram.length === 0) {
+            return html`
 
-          return html`
-            <div class="timing-key-row">
-              <span class="timing-key-name" title="${key}">${key}</span>
-              <div class="histogram-bar-container">
-                <div class="histogram-bar">
+            `;
+          }
+
+          return this.renderHistogramForKey(key, stats);
+        })}
+      </div>
+    `;
+  }
+
+  private renderHistogramForKey(
+    key: string,
+    stats: TimingStats,
+  ): TemplateResult {
+    const buckets = stats.histogram;
+
+    // Find max values for scaling
+    const maxCount = Math.max(...buckets.map((b) => b.count), 1);
+    const maxTotalTime = Math.max(...buckets.map((b) => b.totalTime), 1);
+
+    // Format time for display
+    const formatTime = (ms: number) => {
+      if (ms < 1) return `${(ms * 1000).toFixed(0)}μs`;
+      if (ms < 1000) return `${ms.toFixed(1)}ms`;
+      return `${(ms / 1000).toFixed(2)}s`;
+    };
+
+    return html`
+      <div style="margin-bottom: 1rem;">
+        <div class="timing-key-header">
+          <span class="timing-key-name">${key}</span>
+          <div class="timing-stats-summary">
+            <span>n=${stats.count}</span>
+            <span>p50=${formatTime(stats.p50)}</span>
+            <span>p95=${formatTime(stats.p95)}</span>
+            <span>avg=${formatTime(stats.average)}</span>
+          </div>
+        </div>
+
+        <div class="histogram-container">
+          <div class="histogram-axes">
+            <div class="histogram-y-label-left">count</div>
+            <div class="histogram-y-label-right">time</div>
+          </div>
+
+          <div class="histogram-median-line"></div>
+
+          <div class="histogram-chart">
+            ${buckets.map((bucket) => {
+              const countHeight = (bucket.count / maxCount) * 100;
+              const timeHeight = (bucket.totalTime / maxTotalTime) * 100;
+
+              return html`
+                <div
+                  class="histogram-bucket"
+                  title="${formatTime(bucket.lowerBound)} - ${formatTime(
+                    bucket.upperBound,
+                  )}: ${bucket.count} samples, ${formatTime(
+                    bucket.totalTime,
+                  )} total"
+                >
                   <div
-                    class="histogram-segment histogram-min"
-                    style="width: ${scale(stats.min)}%"
+                    class="bucket-bar-count"
+                    style="height: ${countHeight}%"
                   >
                   </div>
                   <div
-                    class="histogram-segment histogram-p50"
-                    style="width: ${scale(stats.p50 - stats.min)}%"
-                  >
-                  </div>
-                  <div
-                    class="histogram-segment histogram-p95"
-                    style="width: ${scale(stats.p95 - stats.p50)}%"
-                  >
-                  </div>
-                  <div
-                    class="histogram-segment histogram-max"
-                    style="width: ${scale(stats.max - stats.p95)}%"
+                    class="bucket-bar-time"
+                    style="height: ${timeHeight}%"
                   >
                   </div>
                 </div>
-              </div>
-              <div class="timing-stats-text">
-                <span class="stat-item">
-                  <span class="stat-label">n:</span>
-                  <span class="stat-value">${stats.count}</span>
-                </span>
-                <span class="stat-item">
-                  <span class="stat-label">p50:</span>
-                  <span class="stat-value">${stats.p50.toFixed(1)}ms</span>
-                </span>
-                <span class="stat-item">
-                  <span class="stat-label">p95:</span>
-                  <span class="stat-value">${stats.p95.toFixed(1)}ms</span>
-                </span>
-                <span class="stat-item">
-                  <span class="stat-label">max:</span>
-                  <span class="stat-value">${stats.max.toFixed(1)}ms</span>
-                </span>
-              </div>
-            </div>
-          `;
-        })}
+              `;
+            })}
+          </div>
+
+          <div class="histogram-x-labels">
+            <span>${formatTime(stats.min)}</span>
+            <span>median</span>
+            <span>${formatTime(stats.max)}</span>
+          </div>
+        </div>
       </div>
     `;
   }

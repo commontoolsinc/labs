@@ -174,6 +174,16 @@ export type LogMessage = unknown | (() => unknown);
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 /**
+ * Histogram bucket data for timing visualization
+ */
+export interface TimingHistogramBucket {
+  lowerBound: number; // Lower bound of bucket (ms)
+  upperBound: number; // Upper bound of bucket (ms)
+  count: number; // Number of samples in this bucket
+  totalTime: number; // Sum of all samples in this bucket (ms)
+}
+
+/**
  * Statistics for timing measurements
  */
 export interface TimingStats {
@@ -186,6 +196,7 @@ export interface TimingStats {
   p95: number; // 95th percentile
   lastTime: number; // Most recent measurement
   lastTimestamp: number; // When last recorded
+  histogram: TimingHistogramBucket[]; // 10 buckets, median at boundary 5/6
 }
 
 /**
@@ -247,6 +258,7 @@ class TimingDataStore {
         p95: 0,
         lastTime: 0,
         lastTimestamp: 0,
+        histogram: [],
       };
     }
 
@@ -254,6 +266,10 @@ class TimingDataStore {
     const sorted = [...this.samples].sort((a, b) => a - b);
     const p50Index = Math.floor(sorted.length * 0.5);
     const p95Index = Math.floor(sorted.length * 0.95);
+    const median = sorted[p50Index] ?? 0;
+
+    // Calculate 10 histogram buckets with median at 5/6 boundary
+    const histogram = this.calculateHistogram(sorted, median);
 
     return {
       count: this.count,
@@ -261,11 +277,81 @@ class TimingDataStore {
       max: this.max,
       totalTime: this.totalTime,
       average: this.totalTime / this.count,
-      p50: sorted[p50Index] ?? 0,
+      p50: median,
       p95: sorted[p95Index] ?? sorted[sorted.length - 1] ?? 0,
       lastTime: this.lastTime,
       lastTimestamp: this.lastTimestamp,
+      histogram,
     };
+  }
+
+  /**
+   * Calculate 10 histogram buckets where median is at the 5/6 boundary.
+   * Buckets 1-5 span [min, median], buckets 6-10 span [median, max].
+   */
+  private calculateHistogram(
+    sorted: number[],
+    median: number,
+  ): TimingHistogramBucket[] {
+    if (sorted.length === 0) return [];
+
+    const buckets: TimingHistogramBucket[] = [];
+    const min = sorted[0];
+    const max = sorted[sorted.length - 1];
+
+    // Create 5 buckets from min to median
+    const lowerRange = median - min;
+    const lowerBucketWidth = lowerRange / 5;
+
+    for (let i = 0; i < 5; i++) {
+      const lowerBound = min + i * lowerBucketWidth;
+      const upperBound = i === 4 ? median : min + (i + 1) * lowerBucketWidth;
+      buckets.push({
+        lowerBound,
+        upperBound,
+        count: 0,
+        totalTime: 0,
+      });
+    }
+
+    // Create 5 buckets from median to max
+    const upperRange = max - median;
+    const upperBucketWidth = upperRange / 5;
+
+    for (let i = 0; i < 5; i++) {
+      const lowerBound = i === 0 ? median : median + i * upperBucketWidth;
+      const upperBound = i === 4 ? max : median + (i + 1) * upperBucketWidth;
+      buckets.push({
+        lowerBound,
+        upperBound,
+        count: 0,
+        totalTime: 0,
+      });
+    }
+
+    // Fill buckets with sample data
+    for (const sample of sorted) {
+      // Find which bucket this sample belongs to
+      let bucketIndex = -1;
+      for (let i = 0; i < buckets.length; i++) {
+        const bucket = buckets[i];
+        // Include lower bound, exclude upper bound (except for last bucket)
+        if (
+          sample >= bucket.lowerBound &&
+          (sample < bucket.upperBound || i === buckets.length - 1)
+        ) {
+          bucketIndex = i;
+          break;
+        }
+      }
+
+      if (bucketIndex >= 0) {
+        buckets[bucketIndex].count++;
+        buckets[bucketIndex].totalTime += sample;
+      }
+    }
+
+    return buckets;
   }
 
   /**
@@ -817,6 +903,7 @@ export class Logger {
           p95: current.p95,
           lastTime: current.lastTime,
           lastTimestamp: current.lastTimestamp,
+          histogram: current.histogram, // Use current histogram
         };
       } else {
         // New key since baseline

@@ -223,6 +223,13 @@ export interface LoggerInfo {
 export type LoggerMetadata = Record<string, LoggerInfo>;
 
 // Timing stats types for IPC (matches @commontools/utils/logger types)
+export interface TimingHistogramBucket {
+  lowerBound: number; // Lower bound of bucket (ms)
+  upperBound: number; // Upper bound of bucket (ms)
+  count: number; // Number of samples in this bucket
+  totalTime: number; // Sum of all samples in this bucket (ms)
+}
+
 export interface TimingStats {
   count: number; // Total measurements
   min: number; // Minimum time (ms)
@@ -233,6 +240,7 @@ export interface TimingStats {
   p95: number; // 95th percentile
   lastTime: number; // Most recent measurement
   lastTimestamp: number; // When last recorded
+  histogram: TimingHistogramBucket[]; // 10 buckets, median at boundary 5/6
 }
 
 export type LoggerTimingData = Record<
