@@ -2,6 +2,7 @@ import { isRecord } from "@commontools/utils/types";
 import { isArrayIndexPropertyName, toStorableValue } from "./value-codec.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
+import { type StorableValue } from "./interface.ts";
 import { createRef } from "./create-ref.ts";
 import { CellImpl, isCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
@@ -80,7 +81,7 @@ export function diffAndUpdate(
 
 export type ChangeSet = {
   location: NormalizedFullLink;
-  value: JSONValue | undefined;
+  value: StorableValue;
 }[];
 
 /**
@@ -280,7 +281,7 @@ export function normalizeAndDiff(
         () =>
           `[BRANCH_WRITE_REDIRECT] Different redirect, updating at path=${pathStr}`,
       );
-      changes.push({ location: link, value: newValue as JSONValue });
+      changes.push({ location: link, value: newValue as StorableValue });
       return changes;
     }
   }
@@ -365,7 +366,7 @@ export function normalizeAndDiff(
       );
       return [
         // TODO(seefeld): Normalize the link to a sigil link?
-        { location: link, value: newValue as JSONValue },
+        { location: link, value: newValue as StorableValue },
       ];
     }
   }
@@ -604,7 +605,7 @@ export function normalizeAndDiff(
 
   // Handle primitive values and other cases (Object.is handles NaN and -0)
   if (!Object.is(currentValue, newValue)) {
-    changes.push({ location: link, value: newValue as JSONValue });
+    changes.push({ location: link, value: newValue as StorableValue });
   }
 
   return changes;
