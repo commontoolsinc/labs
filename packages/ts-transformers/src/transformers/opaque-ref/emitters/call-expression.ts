@@ -14,6 +14,7 @@ export const emitCallExpression: Emitter = ({
   context,
   analysis,
   rewriteChildren,
+  inSafeContext,
 }) => {
   if (!ts.isCallExpression(expression)) return undefined;
   if (dataFlows.all.length === 0) return undefined;
@@ -101,6 +102,11 @@ export const emitCallExpression: Emitter = ({
       expression.typeArguments,
       rewrittenArgs,
     );
+  }
+
+  // Skip derive wrapping in safe contexts - they don't need it
+  if (inSafeContext) {
+    return undefined;
   }
 
   const relevantDataFlows = filterRelevantDataFlows(
