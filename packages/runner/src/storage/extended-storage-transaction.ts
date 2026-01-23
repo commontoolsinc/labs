@@ -1,6 +1,11 @@
 import { isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
-import type { JSONValue, StorableValue } from "@commontools/memory/interface";
+import type {
+  JSONValue,
+  StorableDatum,
+  StorableObject,
+  StorableValue,
+} from "@commontools/memory/interface";
 import type {
   CommitError,
   IAttestation,
@@ -134,7 +139,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // just start with {}. But if errorPath has content (e.g., ["foo"]), the
       // document exists and we need to read from lastExistingPath to preserve
       // existing fields.
-      let valueObj: Record<string, JSONValue>;
+      let valueObj: StorableObject;
       if (errorPath.length === 0) {
         valueObj = {};
       } else {
@@ -148,7 +153,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             `Value at path ${address.path.join("/")} is not an object`,
           );
         }
-        valueObj = currentValue as Record<string, JSONValue>;
+        valueObj = currentValue as StorableObject;
       }
       const remainingPath = address.path.slice(lastExistingPath.length);
       if (remainingPath.length === 0) {
@@ -157,7 +162,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         );
       }
       const lastKey = remainingPath.pop()!;
-      let nextValue: Record<string, JSONValue> = valueObj;
+      let nextValue: StorableObject = valueObj;
       // Create intermediate containers. The container type depends on whether
       // the NEXT key (the one that will access this container) is a valid array
       // index.
@@ -167,9 +172,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         const isNextKeyArrayIndex = isArrayIndexPropertyName(nextKey);
         nextValue =
           nextValue[key] =
-            (isNextKeyArrayIndex ? [] : {}) as Record<string, JSONValue>;
+            (isNextKeyArrayIndex ? [] : {}) as StorableObject;
       }
-      nextValue[lastKey] = value as JSONValue;
+      nextValue[lastKey] = value as StorableDatum;
       const parentAddress = { ...address, path: lastExistingPath };
       const writeResultRetry = this.tx.write(parentAddress, valueObj);
       logResult(
