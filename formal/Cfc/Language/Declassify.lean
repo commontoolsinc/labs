@@ -17,6 +17,7 @@ inductive ExprD where
   | not (e : ExprD)
   | and (e₁ e₂ : ExprD)
   | ite (c t e : ExprD)
+  | endorseIf (tok : Atom) (guard : ExprD) (x : ExprD)
   | declassifyIf (tok : Atom) (guard : ExprD) (secret : ExprD)
   deriving Repr
 
@@ -39,6 +40,15 @@ def evalD (env : Env) (pc : ConfLabel) : ExprD → LVal
       let vc := evalD env pc c
       let pc' := pc ++ vc.lbl.conf
       if vc.val then evalD env pc' t else evalD env pc' e
+  | .endorseIf tok guard x =>
+      let vg := evalD env pc guard
+      -- The endorsement decision is control-flow; propagate its flow-path confidentiality.
+      let pc' := pc ++ vg.lbl.conf
+      let vx := evalD env pc' x
+      if vg.val then
+        { vx with lbl := Label.endorse vx.lbl [tok] }
+      else
+        vx
   | .declassifyIf tok guard secret =>
       let vg := evalD env pc guard
       let vs := evalD env pc secret
@@ -54,4 +64,3 @@ def evalD0 (env : Env) (e : ExprD) : LVal :=
   evalD env [] e
 
 end Cfc
-

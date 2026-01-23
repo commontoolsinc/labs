@@ -7,6 +7,7 @@ import Cfc.Language.Declassify
 import Cfc.Exchange
 import Cfc.Proofs.Noninterference
 import Cfc.Proofs.RobustDeclassification
+import Cfc.Proofs.TransparentEndorsement
 import Cfc.Proofs.Exchange
 import Cfc.Proofs.Link
 import Cfc.Proofs.Scenarios
