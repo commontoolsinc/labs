@@ -1,5 +1,8 @@
-import type { Revision, State } from "@commontools/memory/interface";
-import type { JSONValue } from "../builder/types.ts";
+import type {
+  Revision,
+  State,
+  StorableValue,
+} from "@commontools/memory/interface";
 
 import {
   type BaseMemoryAddress,
@@ -8,7 +11,7 @@ import {
 } from "../traverse.ts";
 
 export abstract class ClientObjectManager
-  extends BaseObjectManager<BaseMemoryAddress, JSONValue | undefined> {
+  extends BaseObjectManager<BaseMemoryAddress, StorableValue> {
   // Cache our read labels, and any docs we can't read
   public missingDocs = new Map<string, BaseMemoryAddress>();
 
