@@ -224,10 +224,21 @@ export type LoggerMetadata = Record<string, LoggerInfo>;
 
 // Timing stats types for IPC (matches @commontools/utils/logger types)
 export interface TimingHistogramBucket {
+  // Shared bounds (from count-quantiles)
   lowerBound: number; // Lower bound of bucket (ms)
   upperBound: number; // Upper bound of bucket (ms)
-  count: number; // Number of samples in this bucket
-  totalTime: number; // Sum of all samples in this bucket (ms)
+
+  // Count-quantile data (buckets by sample percentile)
+  countQuantile: {
+    count: number; // Number of samples (~10% of total)
+    totalTime: number; // Total time for these samples
+  };
+
+  // Time-quantile data (buckets by cumulative time percentile)
+  timeQuantile: {
+    count: number; // Number of samples in this time bucket
+    totalTime: number; // Total time (~10% of total time)
+  };
 }
 
 export interface TimingStats {

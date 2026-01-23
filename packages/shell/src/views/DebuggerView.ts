@@ -1774,9 +1774,15 @@ export class XDebuggerView extends LitElement {
   ): TemplateResult {
     const buckets = stats.histogram;
 
-    // Find max values for scaling
-    const maxCount = Math.max(...buckets.map((b) => b.count), 1);
-    const maxTotalTime = Math.max(...buckets.map((b) => b.totalTime), 1);
+    // Find max values for scaling both quantile schemes
+    const maxCountQuantileCount = Math.max(
+      ...buckets.map((b) => b.countQuantile.count),
+      1,
+    );
+    const maxTimeQuantileCount = Math.max(
+      ...buckets.map((b) => b.timeQuantile.count),
+      1,
+    );
 
     // Format time for display
     const formatTime = (ms: number) => {
@@ -1799,34 +1805,48 @@ export class XDebuggerView extends LitElement {
 
         <div class="histogram-container">
           <div class="histogram-axes">
-            <div class="histogram-y-label-left">count</div>
-            <div class="histogram-y-label-right">time</div>
+            <div class="histogram-y-label-left">count-q</div>
+            <div class="histogram-y-label-right">time-q</div>
           </div>
 
           <div class="histogram-median-line"></div>
 
           <div class="histogram-chart">
-            ${buckets.map((bucket) => {
-              const countHeight = (bucket.count / maxCount) * 100;
-              const timeHeight = (bucket.totalTime / maxTotalTime) * 100;
+            ${buckets.map((bucket, idx) => {
+              // Blue bars: count-quantile (each bucket has ~10% of samples)
+              const countQuantileHeight =
+                (bucket.countQuantile.count / maxCountQuantileCount) * 100;
+
+              // Green bars: time-quantile (each bucket accounts for ~10% of total time)
+              const timeQuantileHeight =
+                (bucket.timeQuantile.count / maxTimeQuantileCount) * 100;
+
+              const tooltip = `Bucket ${idx + 1} [${
+                formatTime(
+                  bucket.lowerBound,
+                )
+              } - ${formatTime(bucket.upperBound)}]
+Count-quantile: ${bucket.countQuantile.count} samples (${
+                formatTime(
+                  bucket.countQuantile.totalTime,
+                )
+              } total)
+Time-quantile: ${bucket.timeQuantile.count} samples (${
+                formatTime(
+                  bucket.timeQuantile.totalTime,
+                )
+              } total)`;
 
               return html`
-                <div
-                  class="histogram-bucket"
-                  title="${formatTime(bucket.lowerBound)} - ${formatTime(
-                    bucket.upperBound,
-                  )}: ${bucket.count} samples, ${formatTime(
-                    bucket.totalTime,
-                  )} total"
-                >
+                <div class="histogram-bucket" title="${tooltip}">
                   <div
                     class="bucket-bar-count"
-                    style="height: ${countHeight}%"
+                    style="height: ${countQuantileHeight}%"
                   >
                   </div>
                   <div
                     class="bucket-bar-time"
-                    style="height: ${timeHeight}%"
+                    style="height: ${timeQuantileHeight}%"
                   >
                   </div>
                 </div>
@@ -1835,9 +1855,9 @@ export class XDebuggerView extends LitElement {
           </div>
 
           <div class="histogram-x-labels">
-            <span>${formatTime(stats.min)}</span>
+            <span>fast</span>
             <span>median</span>
-            <span>${formatTime(stats.max)}</span>
+            <span>slow</span>
           </div>
         </div>
       </div>

@@ -174,13 +174,25 @@ export type LogMessage = unknown | (() => unknown);
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 /**
- * Histogram bucket data for timing visualization
+ * Histogram bucket data for timing visualization.
+ * Contains data for both count-quantile and time-quantile bucketing.
  */
 export interface TimingHistogramBucket {
+  // Shared bounds (from count-quantiles)
   lowerBound: number; // Lower bound of bucket (ms)
   upperBound: number; // Upper bound of bucket (ms)
-  count: number; // Number of samples in this bucket
-  totalTime: number; // Sum of all samples in this bucket (ms)
+
+  // Count-quantile data (buckets by sample percentile)
+  countQuantile: {
+    count: number; // Number of samples (~10% of total)
+    totalTime: number; // Total time for these samples
+  };
+
+  // Time-quantile data (buckets by cumulative time percentile)
+  timeQuantile: {
+    count: number; // Number of samples in this time bucket
+    totalTime: number; // Total time (~10% of total time)
+  };
 }
 
 /**
@@ -286,68 +298,68 @@ class TimingDataStore {
   }
 
   /**
-   * Calculate 10 histogram buckets where median is at the 5/6 boundary.
-   * Buckets 1-5 span [min, median], buckets 6-10 span [median, max].
+   * Calculate 10 histogram buckets using dual quantile schemes:
+   * - Count-quantiles: buckets by sample percentile (each ~10% of samples)
+   * - Time-quantiles: buckets by cumulative time percentile (each ~10% of total time)
    */
   private calculateHistogram(
     sorted: number[],
-    median: number,
+    _median: number,
   ): TimingHistogramBucket[] {
     if (sorted.length === 0) return [];
 
     const buckets: TimingHistogramBucket[] = [];
-    const min = sorted[0];
-    const max = sorted[sorted.length - 1];
+    const totalSamples = sorted.length;
+    const totalTime = sorted.reduce((sum, val) => sum + val, 0);
+    const samplesPerBucket = totalSamples / 10;
 
-    // Create 5 buckets from min to median
-    const lowerRange = median - min;
-    const lowerBucketWidth = lowerRange / 5;
+    // Calculate count-quantile buckets (by sample percentile)
+    for (let i = 0; i < 10; i++) {
+      const startIdx = Math.floor(i * samplesPerBucket);
+      const endIdx = Math.min(
+        Math.floor((i + 1) * samplesPerBucket),
+        totalSamples,
+      );
 
-    for (let i = 0; i < 5; i++) {
-      const lowerBound = min + i * lowerBucketWidth;
-      const upperBound = i === 4 ? median : min + (i + 1) * lowerBucketWidth;
+      // Handle edge case for last bucket
+      const actualEndIdx = i === 9 ? totalSamples : endIdx;
+
+      const bucketSamples = sorted.slice(startIdx, actualEndIdx);
+      const lowerBound = bucketSamples[0] ?? 0;
+      const upperBound = bucketSamples[bucketSamples.length - 1] ?? 0;
+
       buckets.push({
         lowerBound,
         upperBound,
-        count: 0,
-        totalTime: 0,
+        countQuantile: {
+          count: bucketSamples.length,
+          totalTime: bucketSamples.reduce((sum, val) => sum + val, 0),
+        },
+        timeQuantile: {
+          count: 0,
+          totalTime: 0,
+        },
       });
     }
 
-    // Create 5 buckets from median to max
-    const upperRange = max - median;
-    const upperBucketWidth = upperRange / 5;
+    // Calculate time-quantile buckets (by cumulative time percentile)
+    let cumulativeTime = 0;
+    let currentBucket = 0;
+    const timePerBucket = totalTime / 10;
 
-    for (let i = 0; i < 5; i++) {
-      const lowerBound = i === 0 ? median : median + i * upperBucketWidth;
-      const upperBound = i === 4 ? max : median + (i + 1) * upperBucketWidth;
-      buckets.push({
-        lowerBound,
-        upperBound,
-        count: 0,
-        totalTime: 0,
-      });
-    }
-
-    // Fill buckets with sample data
     for (const sample of sorted) {
-      // Find which bucket this sample belongs to
-      let bucketIndex = -1;
-      for (let i = 0; i < buckets.length; i++) {
-        const bucket = buckets[i];
-        // Include lower bound, exclude upper bound (except for last bucket)
-        if (
-          sample >= bucket.lowerBound &&
-          (sample < bucket.upperBound || i === buckets.length - 1)
-        ) {
-          bucketIndex = i;
-          break;
-        }
-      }
+      // Find which time-quantile bucket this sample belongs to
+      const targetTime = (currentBucket + 1) * timePerBucket;
 
-      if (bucketIndex >= 0) {
-        buckets[bucketIndex].count++;
-        buckets[bucketIndex].totalTime += sample;
+      // Add sample to current bucket
+      buckets[currentBucket].timeQuantile.count++;
+      buckets[currentBucket].timeQuantile.totalTime += sample;
+      cumulativeTime += sample;
+
+      // Move to next bucket if we've exceeded the time threshold
+      // (but not on the last bucket)
+      if (cumulativeTime >= targetTime && currentBucket < 9) {
+        currentBucket++;
       }
     }
 
