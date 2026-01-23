@@ -39,6 +39,8 @@ export default recipe({
             anyOf: [{
                     $ref: "#/$defs/VNode"
                 }, {
+                    $ref: "#/$defs/VNodeResult"
+                }, {
                     type: "object",
                     properties: {}
                 }, {
@@ -54,6 +56,72 @@ export default recipe({
                 }
             },
             required: ["$UI"]
+        },
+        VNodeResult: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/PropsResult"
+                },
+                children: {
+                    type: "array",
+                    items: {
+                        anyOf: [{
+                                type: "string"
+                            }, {
+                                type: "number"
+                            }, {
+                                type: "boolean",
+                                "enum": [false]
+                            }, {
+                                type: "boolean",
+                                "enum": [true]
+                            }, {
+                                $ref: "#/$defs/VNodeResult"
+                            }, {
+                                type: "null"
+                            }]
+                    }
+                },
+                $UI: {
+                    $ref: "#/$defs/VNodeResult"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        PropsResult: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "number"
+                    }, {
+                        type: "boolean",
+                        "enum": [false]
+                    }, {
+                        type: "boolean",
+                        "enum": [true]
+                    }, {
+                        type: "object",
+                        additionalProperties: true
+                    }, {
+                        type: "array",
+                        items: true
+                    }, {
+                        asStream: true
+                    }, {
+                        type: "null"
+                    }]
+            }
         },
         VNode: {
             type: "object",
@@ -90,6 +158,8 @@ export default recipe({
                     "enum": [true]
                 }, {
                     $ref: "#/$defs/VNode"
+                }, {
+                    $ref: "#/$defs/VNodeResult"
                 }, {
                     type: "object",
                     properties: {}
@@ -175,6 +245,8 @@ export default recipe({
                 anyOf: [{
                         $ref: "#/$defs/VNode"
                     }, {
+                        $ref: "#/$defs/VNodeResult"
+                    }, {
                         type: "object",
                         properties: {}
                     }, {
@@ -190,6 +262,72 @@ export default recipe({
                             }
                         },
                         required: ["$UI"]
+                    },
+                    VNodeResult: {
+                        type: "object",
+                        properties: {
+                            type: {
+                                type: "string",
+                                "enum": ["vnode"]
+                            },
+                            name: {
+                                type: "string"
+                            },
+                            props: {
+                                $ref: "#/$defs/PropsResult"
+                            },
+                            children: {
+                                type: "array",
+                                items: {
+                                    anyOf: [{
+                                            type: "string"
+                                        }, {
+                                            type: "number"
+                                        }, {
+                                            type: "boolean",
+                                            "enum": [false]
+                                        }, {
+                                            type: "boolean",
+                                            "enum": [true]
+                                        }, {
+                                            $ref: "#/$defs/VNodeResult"
+                                        }, {
+                                            type: "null"
+                                        }]
+                                }
+                            },
+                            $UI: {
+                                $ref: "#/$defs/VNodeResult"
+                            }
+                        },
+                        required: ["type", "name", "props"]
+                    },
+                    PropsResult: {
+                        type: "object",
+                        properties: {},
+                        additionalProperties: {
+                            anyOf: [{
+                                    type: "string"
+                                }, {
+                                    type: "number"
+                                }, {
+                                    type: "boolean",
+                                    "enum": [false]
+                                }, {
+                                    type: "boolean",
+                                    "enum": [true]
+                                }, {
+                                    type: "object",
+                                    additionalProperties: true
+                                }, {
+                                    type: "array",
+                                    items: true
+                                }, {
+                                    asStream: true
+                                }, {
+                                    type: "null"
+                                }]
+                        }
                     },
                     VNode: {
                         type: "object",
@@ -226,6 +364,8 @@ export default recipe({
                                 "enum": [true]
                             }, {
                                 $ref: "#/$defs/VNode"
+                            }, {
+                                $ref: "#/$defs/VNodeResult"
                             }, {
                                 type: "object",
                                 properties: {}

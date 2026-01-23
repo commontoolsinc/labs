@@ -895,14 +895,26 @@ export type StripCell<T> =
     // Non-distributive for everything else (preserves unions like RenderNode)
     : StripCellInner<T>;
 
-type StripCellInner<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - it's a callable interface
-  : [T] extends [AnyBrandedCell<infer U>] ? StripCell<U>
-  : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
-  : [T] extends [Array<infer U>] ? StripCell<U>[]
-  // deno-lint-ignore ban-types
-  : [T] extends [Function] ? T // Preserve function types
-  : [T] extends [object] ? { [K in keyof T]: StripCell<T[K]> }
-  : T;
+type StripCellInner<T> =
+  // Preserve Stream<T> - it's a callable interface
+  [T] extends [Stream<any>] ? T
+    // Strip cells
+    : [T] extends [AnyBrandedCell<infer U>] ? StripCell<U>
+    // Convert VNode types that contain cells to one that doesn't
+    // It's also a complex recursive type that we don't want to go into
+    : [T] extends [VNode] ? VNodeResult
+    : [T] extends [JSXElement] ? VNodeResult
+    // Don't convert internal types for now
+    : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
+    // Descend into arrays
+    : [T] extends [Array<infer U>] ? StripCell<U>[]
+    // Preserve function types
+    // deno-lint-ignore ban-types
+    : [T] extends [Function] ? T
+    // Descend into objects
+    : [T] extends [object] ? { [K in keyof T]: StripCell<T[K]> }
+    // Otherwise, including primitive types, return as-is
+    : T;
 
 /**
  * Opaque accepts T or any cell wrapping T, recursively at any nesting level.
@@ -1558,17 +1570,17 @@ export type IfElseFunction = <T = any, U = any, V = any>(
   condition: Opaque<T>,
   ifTrue: Opaque<U>,
   ifFalse: Opaque<V>,
-) => OpaqueRef<U | V>;
+) => OpaqueRef<StripCell<U | V>>;
 
 export type WhenFunction = <T = any, U = any>(
   condition: Opaque<T>,
   value: Opaque<U>,
-) => OpaqueRef<T | U>;
+) => OpaqueRef<StripCell<T | U>>;
 
 export type UnlessFunction = <T = any, U = any>(
   condition: Opaque<T>,
   fallback: Opaque<U>,
-) => OpaqueRef<T | U>;
+) => OpaqueRef<StripCell<T | U>>;
 
 /** @deprecated Use generateText() or generateObject() instead */
 export type LLMFunction = (
@@ -1804,6 +1816,7 @@ export type UIRenderable = {
  */
 export type JSXElement =
   | VNode
+  | VNodeResult
   | AnyBrandedCell<UIRenderable>
   | OpaqueRef<UIRenderable>;
 
@@ -1814,4 +1827,23 @@ export type VNode = {
   props: Props;
   children?: RenderNode;
   [UI]?: VNode;
+};
+
+export type PropsResult = {
+  [key: string]:
+    | string
+    | number
+    | boolean
+    | object
+    | Array<any>
+    | null
+    | Stream<any>;
+};
+
+export type VNodeResult = {
+  type: "vnode";
+  name: string;
+  props: PropsResult;
+  children?: Array<VNodeResult | string | number | boolean | null | undefined>;
+  [UI]?: VNodeResult;
 };
