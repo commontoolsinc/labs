@@ -1,6 +1,6 @@
 import { isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
-import type { JSONValue } from "@commontools/memory/interface";
+import type { JSONValue, StorableValue } from "@commontools/memory/interface";
 import type {
   CommitError,
   IAttestation,
@@ -117,7 +117,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   writeOrThrow(
     address: IMemorySpaceAddress,
-    value: JSONValue | undefined,
+    value: StorableValue,
   ): void {
     const writeResult = this.tx.write(address, value);
     logResult("writeOrThrow, initial", writeResult, address, value);
@@ -188,7 +188,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   writeValueOrThrow(
     address: IMemorySpaceAddress,
-    value: JSONValue | undefined,
+    value: StorableValue,
   ): void {
     this.writeOrThrow({ ...address, path: ["value", ...address.path] }, value);
   }
@@ -334,21 +334,21 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   write(
     address: IMemorySpaceAddress,
-    value: JSONValue | undefined,
+    value: StorableValue,
   ): Result<IAttestation, WriteError | WriterError> {
     return this.wrapped.write(address, value);
   }
 
   writeOrThrow(
     address: IMemorySpaceAddress,
-    value: JSONValue | undefined,
+    value: StorableValue,
   ): void {
     return this.wrapped.writeOrThrow(address, value);
   }
 
   writeValueOrThrow(
     address: IMemorySpaceAddress,
-    value: JSONValue | undefined,
+    value: StorableValue,
   ): void {
     return this.wrapped.writeValueOrThrow(address, value);
   }

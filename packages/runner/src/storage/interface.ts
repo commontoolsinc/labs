@@ -581,7 +581,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    */
   writeOrThrow(
     address: IMemorySpaceAddress,
-    value: JSONValue | undefined,
+    value: StorableValue,
   ): void;
 
   /**
@@ -595,7 +595,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    */
   writeValueOrThrow(
     address: IMemorySpaceAddress,
-    value: JSONValue | undefined,
+    value: StorableValue,
   ): void;
 }
 
