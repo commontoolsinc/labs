@@ -9,7 +9,6 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @attr {string} question - The question text to display
  * @attr {string[]} options - Optional multiple choice options (JSON array)
- * @attr {string} $answer - Two-way binding for the answer (Writable<string>)
  *
  * @fires ct-answer - Fired when user submits an answer, detail: { answer: string }
  *

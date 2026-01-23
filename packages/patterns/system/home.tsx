@@ -588,10 +588,11 @@ Return valid JSON matching the schema.`,
   void applyExtraction;
 
   // === SUMMARY REGENERATION ===
-  // Compute current "data version" based on facts/prefs/personas counts
+  // Compute current "data version" based on facts/prefs/personas/questions counts
   const dataVersion = computed(() => {
     const l = learned.get();
-    return l.facts.length + l.preferences.length + l.personas.length;
+    return l.facts.length + l.preferences.length + l.personas.length +
+      l.openQuestions.length;
   });
 
   // Build prompt content for summary (in its own reactive context)
