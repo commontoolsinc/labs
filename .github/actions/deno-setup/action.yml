@@ -21,4 +21,4 @@ runs:
         path: |
           ~/.deno
           ~/.cache/deno
-        key: v2-${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
+        key: v2-${{ runner.os }}-deno-2.6.4-${{ hashFiles('**/deno.json', '**/deno.lock') }}
