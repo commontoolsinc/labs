@@ -15,6 +15,7 @@ import type {
   SchemaPathSelector,
   Signer,
   State,
+  StorableValue,
   The as MediaType,
   TransactionError,
   Unit,
@@ -397,11 +398,11 @@ export interface IMemoryChange {
   /**
    * Value memory address had before change.
    */
-  before: JSONValue | undefined;
+  before: StorableValue;
   /**
    * Value memory address has after change.
    */
-  after: JSONValue | undefined;
+  after: StorableValue;
 }
 
 export type StorageTransactionStatus =
