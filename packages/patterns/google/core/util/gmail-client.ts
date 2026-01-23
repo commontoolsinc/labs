@@ -433,7 +433,8 @@ Accept: application/json
       );
 
       // Parse batch response - similar to fetchBatch but for attachments
-      const parts = responseText.split(`--batch_`).slice(1, -1);
+      // Use exact boundary to avoid false splits on attachment data containing "--batch_"
+      const parts = responseText.split(`--${boundary}`).slice(1, -1);
 
       return attachments.map(({ messageId, attachmentId }, index) => {
         try {
