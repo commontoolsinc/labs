@@ -1,5 +1,5 @@
 import { getLogger } from "@commontools/utils/logger";
-import type { JSONValue } from "@commontools/memory/interface";
+import type { StorableDatum } from "@commontools/memory/interface";
 import type {
   ChangeGroup,
   CommitError,
@@ -102,7 +102,7 @@ class StorageTransaction implements IStorageTransaction {
     return read(this, address, options);
   }
 
-  write(address: IMemorySpaceAddress, value?: JSONValue) {
+  write(address: IMemorySpaceAddress, value?: StorableDatum) {
     return write(this, address, value);
   }
 
@@ -271,7 +271,7 @@ export const read = (
 export const write = (
   transaction: StorageTransaction,
   address: IMemorySpaceAddress,
-  value?: JSONValue,
+  value?: StorableDatum,
 ): Result<IAttestation, WriterError | WriteError> => {
   const { ok: space, error } = writer(transaction, address.space);
   if (error) {

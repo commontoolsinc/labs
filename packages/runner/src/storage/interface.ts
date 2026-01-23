@@ -490,7 +490,7 @@ export interface IStorageTransaction {
    */
   write(
     address: IMemorySpaceAddress,
-    value?: JSONValue,
+    value?: StorableDatum,
   ): Result<IAttestation, WriterError | WriteError>;
 
   /**
@@ -650,7 +650,7 @@ export interface ITransactionWriter extends ITransactionReader {
    */
   write(
     address: IMemoryAddress,
-    value?: JSONValue,
+    value?: StorableDatum,
   ): Result<IAttestation, WriteError>;
 }
 
