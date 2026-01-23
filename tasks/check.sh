@@ -80,5 +80,5 @@ FILES_TO_CHECK+=(packages/patterns/google/WIP/*.ts)
 FILES_TO_CHECK+=(packages/patterns/google/WIP/*.tsx)
 
 echo "Type checking ${#FILES_TO_CHECK[@]} paths..."
-deno check --reload --no-code-cache "${FILES_TO_CHECK[@]}"
+deno check "${FILES_TO_CHECK[@]}"
 echo "Type check complete."
