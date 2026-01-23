@@ -121,6 +121,15 @@ export class DebuggerController implements ReactiveController {
         this.handleTelemetryUpdate,
       );
 
+      // Enable/disable telemetry based on current visibility
+      const rt = this.runtime.runtime();
+      rt.setTelemetryEnabled(this.visible).catch((e) => {
+        console.error(
+          "[DebuggerController] Failed to set telemetry enabled:",
+          e,
+        );
+      });
+
       // Load existing telemetry markers
       this.telemetryMarkers = this.runtime.telemetry().slice(
         -MAX_TELEMETRY_EVENTS,
@@ -166,6 +175,18 @@ export class DebuggerController implements ReactiveController {
 
     this.visible = visible;
     localStorage.setItem(STORAGE_KEY, String(visible));
+
+    // Toggle telemetry in the worker based on visibility
+    const rt = this.runtime?.runtime();
+    if (rt) {
+      rt.setTelemetryEnabled(visible).catch((e) => {
+        console.error(
+          "[DebuggerController] Failed to set telemetry enabled:",
+          e,
+        );
+      });
+    }
+
     this.host.requestUpdate();
   }
 

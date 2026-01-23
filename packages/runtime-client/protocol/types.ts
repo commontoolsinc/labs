@@ -40,6 +40,7 @@ export enum RequestType {
   GetLoggerCounts = "runtime:getLoggerCounts",
   SetLoggerLevel = "runtime:setLoggerLevel",
   SetLoggerEnabled = "runtime:setLoggerEnabled",
+  SetTelemetryEnabled = "runtime:setTelemetryEnabled",
 
   // Page operations (main -> worker)
   GetSpaceRootPattern = "pattern:getSpaceRoot",
@@ -185,6 +186,11 @@ export interface SetLoggerEnabledRequest extends BaseRequest {
   enabled: boolean;
 }
 
+export interface SetTelemetryEnabledRequest extends BaseRequest {
+  type: RequestType.SetTelemetryEnabled;
+  enabled: boolean;
+}
+
 // Logger count types for IPC (matches @commontools/utils/logger types)
 export interface LogCounts {
   debug: number;
@@ -277,6 +283,7 @@ export type IPCClientRequest =
   | GetLoggerCountsRequest
   | SetLoggerLevelRequest
   | SetLoggerEnabledRequest
+  | SetTelemetryEnabledRequest
   | IdleRequest
   | PageCreateRequest
   | PageGetSpaceDefault
@@ -410,6 +417,10 @@ export type Commands = {
   };
   [RequestType.SetLoggerEnabled]: {
     request: SetLoggerEnabledRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.SetTelemetryEnabled]: {
+    request: SetTelemetryEnabledRequest;
     response: EmptyResponse;
   };
   // Cell requests
