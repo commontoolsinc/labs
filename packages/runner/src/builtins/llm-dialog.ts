@@ -137,6 +137,10 @@ function buildMinimalSchemaFromValue(charm: Cell<any>): JSONSchema | undefined {
  * link object format.
  *
  * @param value - The value to traverse and serialize
+ * @param schema - The schema for the value
+ * @param rootSchema - The root schema for reference resolution
+ * @param seen - Set of already-visited values (for cycle detection)
+ * @param contextSpace - The current execution space (for cross-space link encoding)
  * @returns The serialized value
  */
 function traverseAndSerialize(
@@ -144,6 +148,7 @@ function traverseAndSerialize(
   schema: JSONSchema | undefined,
   rootSchema: JSONSchema | undefined = schema,
   seen: Set<unknown> = new Set(),
+  contextSpace?: MemorySpace,
 ): unknown {
   if (!isRecord(value)) return value;
 
@@ -161,9 +166,16 @@ function traverseAndSerialize(
   if (isCell(value)) {
     const link = value.resolveAsCell().getAsNormalizedFullLink();
     if (link.id.startsWith("data:")) {
-      return traverseAndSerialize(value.get(), schema, rootSchema, seen);
+      return traverseAndSerialize(
+        value.get(),
+        schema,
+        rootSchema,
+        seen,
+        contextSpace,
+      );
     } else {
-      return { "@link": encodeJsonPointer(["", link.id, ...link.path]) };
+      // Use createLLMFriendlyLink to include space for cross-space cells
+      return { "@link": createLLMFriendlyLink(link, contextSpace) };
     }
   }
 
@@ -176,6 +188,7 @@ function traverseAndSerialize(
         schema,
         rootSchema,
         seen,
+        contextSpace,
       );
     } else {
       throw new Error(
@@ -192,7 +205,13 @@ function traverseAndSerialize(
       const linkSchema = schema !== undefined
         ? cfc.schemaAtPath(schema, [index.toString()], rootSchema)
         : undefined;
-      let result = traverseAndSerialize(v, linkSchema, rootSchema, seen);
+      let result = traverseAndSerialize(
+        v,
+        linkSchema,
+        rootSchema,
+        seen,
+        contextSpace,
+      );
       // Decorate array entries with links that point to underlying cells, if
       // any. Ignores data: URIs, since they're not useful as links for the LLM.
       if (isRecord(result) && isCellResultForDereferencing(v)) {
@@ -200,7 +219,8 @@ function traverseAndSerialize(
           .getAsNormalizedFullLink();
         if (!link.id.startsWith("data:")) {
           result = {
-            "@arrayEntry": encodeJsonPointer(["", link.id, ...link.path]),
+            // Use createLLMFriendlyLink for cross-space support
+            "@arrayEntry": createLLMFriendlyLink(link, contextSpace),
             ...result,
           };
         }
@@ -220,6 +240,7 @@ function traverseAndSerialize(
             : undefined,
           rootSchema,
           seen,
+          contextSpace,
         ),
       ]),
     );
@@ -764,7 +785,7 @@ function buildAvailableCellsDocumentation(
       try {
         const resolvedCell = cell.resolveAsCell();
         const link = resolvedCell.getAsNormalizedFullLink();
-        const path = createLLMFriendlyLink(link);
+        const path = createLLMFriendlyLink(link, space);
         const schemaInfo = getCellSchema(resolvedCell);
 
         let entry = `## ${name} (${path})\n`;
@@ -780,6 +801,8 @@ function buildAvailableCellsDocumentation(
             value,
             schemaInfo?.schema,
             schemaInfo?.rootSchema,
+            new Set(),
+            space,
           );
 
           let valueJson = JSON.stringify(serialized, null, 2);
@@ -845,6 +868,8 @@ function buildAvailableCellsDocumentation(
           value,
           schemaInfo?.schema,
           schemaInfo?.rootSchema,
+          new Set(),
+          space,
         );
 
         let valueJson = JSON.stringify(serialized, null, 2);
@@ -1342,6 +1367,7 @@ function handleSchema(
  */
 function handleRead(
   resolved: ResolvedToolCall & { type: "read" },
+  space: MemorySpace,
 ): { type: string; value: unknown } {
   let cell = resolved.cellRef;
   if (!cell.schema) {
@@ -1349,7 +1375,13 @@ function handleRead(
   }
 
   const schema = cell.schema;
-  const serialized = traverseAndSerialize(cell.get(), schema);
+  const serialized = traverseAndSerialize(
+    cell.get(),
+    schema,
+    schema,
+    new Set(),
+    space,
+  );
 
   // Handle undefined by returning null (valid JSON) instead
   return {
@@ -1487,11 +1519,14 @@ async function handleInvoke(
   }
 
   // Get the actual entity ID from the result cell
-  const resultLink = createLLMFriendlyLink(result.getAsNormalizedFullLink());
+  const resultLink = createLLMFriendlyLink(
+    result.getAsNormalizedFullLink(),
+    space,
+  );
 
   const resultSchema = getCellSchema(result);
 
-  // Patterns a lways write to the result cell, so always return the link
+  // Patterns always write to the result cell, so always return the link
   if (pattern) {
     return {
       type: "json",
@@ -1501,6 +1536,8 @@ async function handleInvoke(
           result.get(),
           resultSchema?.schema,
           resultSchema?.rootSchema,
+          new Set(),
+          space,
         ),
         schema: resultSchema?.schema,
       },
@@ -1521,6 +1558,8 @@ async function handleInvoke(
             resultValue,
             resultSchema?.schema,
             resultSchema?.rootSchema,
+            new Set(),
+            space,
           ),
           schema: resultSchema?.schema,
         },
@@ -1565,7 +1604,7 @@ async function invokeToolCall(
   }
 
   if (resolved.type === "read") {
-    return handleRead(resolved);
+    return handleRead(resolved, space);
   }
 
   if (resolved.type === "finalResult") {
@@ -1860,7 +1899,7 @@ async function startRequest(
     .map(
       ([name, cell]) => {
         const link = cell.resolveAsCell().getAsNormalizedFullLink();
-        const path = createLLMFriendlyLink(link);
+        const path = createLLMFriendlyLink(link, space);
         return { name, path };
       },
     )

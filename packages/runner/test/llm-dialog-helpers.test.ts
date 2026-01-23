@@ -52,6 +52,27 @@ Deno.test("parseTargetString recognizes ~ encoded path elements", () => {
   assertEquals(parsed.path, ["foo/bar", "~"]);
 });
 
+Deno.test("parseTargetString parses cross-space link with embedded space DID", () => {
+  const parsed = parseLLMFriendlyLink(
+    "/@did:key:z6MkrX123abc/of:bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai/foo/bar",
+    "did:test:fallback",
+  );
+  assertEquals(
+    parsed.id,
+    "of:bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai",
+  );
+  assertEquals(parsed.path, ["foo", "bar"]);
+  assertEquals(parsed.space, "did:key:z6MkrX123abc");
+});
+
+Deno.test("parseTargetString uses fallback space for standard link format", () => {
+  const parsed = parseLLMFriendlyLink(
+    "/of:bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai/foo",
+    "did:test:fallback",
+  );
+  assertEquals(parsed.space, "did:test:fallback");
+});
+
 Deno.test("parseTargetString errors on human name", () => {
   expect(() => parseLLMFriendlyLink("CharmName/foo/bar", "did:test:123"))
     .toThrow("must include");
