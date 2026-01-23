@@ -237,6 +237,18 @@ function resolveBase(
         pathPrefix: ["defaultPattern", "journal"],
       }];
     }
+    case "#learned": {
+      // Learned profile data comes from the HOME space (user identity DID)
+      const userDID = ctx.runtime.userIdentityDID;
+      if (!userDID) {
+        throw new WishError("User identity DID not available for #learned");
+      }
+
+      return [{
+        cell: ctx.runtime.getHomeSpaceCell(ctx.tx),
+        pathPrefix: ["defaultPattern", "learned"],
+      }];
+    }
     default: {
       // Check if it's a well-known target
       const resolution = WISH_TARGETS[parsed.key];

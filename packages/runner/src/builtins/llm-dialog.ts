@@ -31,7 +31,6 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { formatTransactionSummary } from "../storage/transaction-summary.ts";
 import {
   createLLMFriendlyLink,
-  encodeJsonPointer,
   matchLLMFriendlyLink,
   parseLink,
   parseLLMFriendlyLink,
@@ -133,10 +132,68 @@ function buildMinimalSchemaFromValue(charm: Cell<any>): JSONSchema | undefined {
 }
 
 /**
+ * Simplifies a schema for LLM context documentation.
+ * Removes $defs and $ref which can make schemas very large with recursive types.
+ * Keeps only essential type information.
+ */
+function simplifySchemaForContext(schema: JSONSchema): JSONSchema {
+  if (typeof schema !== "object" || schema === null) {
+    return schema;
+  }
+
+  // Create a shallow copy without $defs and $ref
+  const simplified: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(schema)) {
+    // Skip $defs (definitions) and $ref (references) - these can be huge
+    if (key === "$defs" || key === "$ref") {
+      continue;
+    }
+
+    // Recursively simplify nested schemas (properties, items, etc.)
+    if (key === "properties" && typeof value === "object" && value !== null) {
+      const simplifiedProps: Record<string, unknown> = {};
+      for (const [propKey, propValue] of Object.entries(value)) {
+        if (typeof propValue === "object" && propValue !== null) {
+          // For nested properties, just keep type info, don't recurse deeply
+          const propSchema = propValue as Record<string, unknown>;
+          const simpleProp: Record<string, unknown> = {};
+          if (propSchema.type) simpleProp.type = propSchema.type;
+          if (propSchema.description) {
+            simpleProp.description = propSchema.description;
+          }
+          simplifiedProps[propKey] = simpleProp;
+        } else {
+          simplifiedProps[propKey] = propValue;
+        }
+      }
+      simplified[key] = simplifiedProps;
+    } else if (key === "items" && typeof value === "object" && value !== null) {
+      // For array items, simplify recursively but not too deep
+      const itemSchema = value as Record<string, unknown>;
+      const simpleItem: Record<string, unknown> = {};
+      if (itemSchema.type) simpleItem.type = itemSchema.type;
+      if (itemSchema.description) {
+        simpleItem.description = itemSchema.description;
+      }
+      simplified[key] = simpleItem;
+    } else {
+      simplified[key] = value;
+    }
+  }
+
+  return simplified as JSONSchema;
+}
+
+/**
  * Traverses a value and serializes any cells mentioned to our LLM-friendly JSON
  * link object format.
  *
  * @param value - The value to traverse and serialize
+ * @param schema - The schema for the value
+ * @param rootSchema - The root schema for reference resolution
+ * @param seen - Set of already-visited values (for cycle detection)
+ * @param contextSpace - The current execution space (for cross-space link encoding)
  * @returns The serialized value
  */
 function traverseAndSerialize(
@@ -144,6 +201,7 @@ function traverseAndSerialize(
   schema: JSONSchema | undefined,
   rootSchema: JSONSchema | undefined = schema,
   seen: Set<unknown> = new Set(),
+  contextSpace?: MemorySpace,
 ): unknown {
   if (!isRecord(value)) return value;
 
@@ -161,9 +219,16 @@ function traverseAndSerialize(
   if (isCell(value)) {
     const link = value.resolveAsCell().getAsNormalizedFullLink();
     if (link.id.startsWith("data:")) {
-      return traverseAndSerialize(value.get(), schema, rootSchema, seen);
+      return traverseAndSerialize(
+        value.get(),
+        schema,
+        rootSchema,
+        seen,
+        contextSpace,
+      );
     } else {
-      return { "@link": encodeJsonPointer(["", link.id, ...link.path]) };
+      // Use createLLMFriendlyLink to include space for cross-space cells
+      return { "@link": createLLMFriendlyLink(link, contextSpace) };
     }
   }
 
@@ -176,6 +241,7 @@ function traverseAndSerialize(
         schema,
         rootSchema,
         seen,
+        contextSpace,
       );
     } else {
       throw new Error(
@@ -192,7 +258,13 @@ function traverseAndSerialize(
       const linkSchema = schema !== undefined
         ? cfc.schemaAtPath(schema, [index.toString()], rootSchema)
         : undefined;
-      let result = traverseAndSerialize(v, linkSchema, rootSchema, seen);
+      let result = traverseAndSerialize(
+        v,
+        linkSchema,
+        rootSchema,
+        seen,
+        contextSpace,
+      );
       // Decorate array entries with links that point to underlying cells, if
       // any. Ignores data: URIs, since they're not useful as links for the LLM.
       if (isRecord(result) && isCellResultForDereferencing(v)) {
@@ -200,7 +272,8 @@ function traverseAndSerialize(
           .getAsNormalizedFullLink();
         if (!link.id.startsWith("data:")) {
           result = {
-            "@arrayEntry": encodeJsonPointer(["", link.id, ...link.path]),
+            // Use createLLMFriendlyLink for cross-space support
+            "@arrayEntry": createLLMFriendlyLink(link, contextSpace),
             ...result,
           };
         }
@@ -209,19 +282,23 @@ function traverseAndSerialize(
     });
   } else {
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map((
-        [key, value],
-      ) => [
-        key,
-        traverseAndSerialize(
-          value,
-          schema !== undefined
-            ? cfc.schemaAtPath(schema, [key], rootSchema)
-            : undefined,
-          rootSchema,
-          seen,
-        ),
-      ]),
+      Object.entries(value as Record<string, unknown>)
+        // Skip $-prefixed properties ($UI, $TYPE, etc.) - these are internal/VDOM
+        .filter(([key]) => !key.startsWith("$"))
+        .map((
+          [key, value],
+        ) => [
+          key,
+          traverseAndSerialize(
+            value,
+            schema !== undefined
+              ? cfc.schemaAtPath(schema, [key], rootSchema)
+              : undefined,
+            rootSchema,
+            seen,
+            contextSpace,
+          ),
+        ]),
     );
   }
 }
@@ -764,13 +841,21 @@ function buildAvailableCellsDocumentation(
       try {
         const resolvedCell = cell.resolveAsCell();
         const link = resolvedCell.getAsNormalizedFullLink();
-        const path = createLLMFriendlyLink(link);
+        const path = createLLMFriendlyLink(link, space);
         const schemaInfo = getCellSchema(resolvedCell);
 
         let entry = `## ${name} (${path})\n`;
 
         if (schemaInfo?.schema) {
-          const schemaJson = JSON.stringify(schemaInfo.schema, null, 2);
+          // Simplify schema for context - remove $defs to reduce size
+          const simplifiedSchema = simplifySchemaForContext(schemaInfo.schema);
+          let schemaJson = JSON.stringify(simplifiedSchema, null, 2);
+
+          const MAX_SCHEMA_LENGTH = 1000;
+          if (schemaJson.length > MAX_SCHEMA_LENGTH) {
+            schemaJson = schemaJson.substring(0, MAX_SCHEMA_LENGTH) +
+              "\n... (schema truncated)";
+          }
           entry += `- Schema: \`\`\`json\n${schemaJson}\n\`\`\`\n`;
         }
 
@@ -780,6 +865,8 @@ function buildAvailableCellsDocumentation(
             value,
             schemaInfo?.schema,
             schemaInfo?.rootSchema,
+            new Set(),
+            space,
           );
 
           let valueJson = JSON.stringify(serialized, null, 2);
@@ -834,7 +921,15 @@ function buildAvailableCellsDocumentation(
 
       // Add schema if available
       if (schemaInfo?.schema) {
-        const schemaJson = JSON.stringify(schemaInfo.schema, null, 2);
+        // Simplify schema for context - remove $defs to reduce size
+        const simplifiedSchema = simplifySchemaForContext(schemaInfo.schema);
+        let schemaJson = JSON.stringify(simplifiedSchema, null, 2);
+
+        const MAX_SCHEMA_LENGTH = 1000;
+        if (schemaJson.length > MAX_SCHEMA_LENGTH) {
+          schemaJson = schemaJson.substring(0, MAX_SCHEMA_LENGTH) +
+            "\n... (schema truncated)";
+        }
         entry += `- Schema: \`\`\`json\n${schemaJson}\n\`\`\`\n`;
       }
 
@@ -845,6 +940,8 @@ function buildAvailableCellsDocumentation(
           value,
           schemaInfo?.schema,
           schemaInfo?.rootSchema,
+          new Set(),
+          space,
         );
 
         let valueJson = JSON.stringify(serialized, null, 2);
@@ -1342,6 +1439,7 @@ function handleSchema(
  */
 function handleRead(
   resolved: ResolvedToolCall & { type: "read" },
+  space: MemorySpace,
 ): { type: string; value: unknown } {
   let cell = resolved.cellRef;
   if (!cell.schema) {
@@ -1349,7 +1447,13 @@ function handleRead(
   }
 
   const schema = cell.schema;
-  const serialized = traverseAndSerialize(cell.get(), schema);
+  const serialized = traverseAndSerialize(
+    cell.get(),
+    schema,
+    schema,
+    new Set(),
+    space,
+  );
 
   // Handle undefined by returning null (valid JSON) instead
   return {
@@ -1487,11 +1591,14 @@ async function handleInvoke(
   }
 
   // Get the actual entity ID from the result cell
-  const resultLink = createLLMFriendlyLink(result.getAsNormalizedFullLink());
+  const resultLink = createLLMFriendlyLink(
+    result.getAsNormalizedFullLink(),
+    space,
+  );
 
   const resultSchema = getCellSchema(result);
 
-  // Patterns a lways write to the result cell, so always return the link
+  // Patterns always write to the result cell, so always return the link
   if (pattern) {
     return {
       type: "json",
@@ -1501,6 +1608,8 @@ async function handleInvoke(
           result.get(),
           resultSchema?.schema,
           resultSchema?.rootSchema,
+          new Set(),
+          space,
         ),
         schema: resultSchema?.schema,
       },
@@ -1521,6 +1630,8 @@ async function handleInvoke(
             resultValue,
             resultSchema?.schema,
             resultSchema?.rootSchema,
+            new Set(),
+            space,
           ),
           schema: resultSchema?.schema,
         },
@@ -1565,7 +1676,7 @@ async function invokeToolCall(
   }
 
   if (resolved.type === "read") {
-    return handleRead(resolved);
+    return handleRead(resolved, space);
   }
 
   if (resolved.type === "finalResult") {
@@ -1860,7 +1971,7 @@ async function startRequest(
     .map(
       ([name, cell]) => {
         const link = cell.resolveAsCell().getAsNormalizedFullLink();
-        const path = createLLMFriendlyLink(link);
+        const path = createLLMFriendlyLink(link, space);
         return { name, path };
       },
     )

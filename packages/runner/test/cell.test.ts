@@ -2478,7 +2478,7 @@ describe("getAsLink method", () => {
     expect(link["/"][LINK_V1_TAG].path).toEqual(["nested", "value"]);
   });
 
-  it("should return different formats for getAsLink vs toJSON", () => {
+  it("should return sigil format for both getAsLink and toJSON", () => {
     const cell = runtime.getCell<{ value: number }>(
       space,
       "getAsLink-json-test",
@@ -2490,14 +2490,17 @@ describe("getAsLink method", () => {
     const link = cell.getAsLink();
     const json = cell.toJSON();
 
-    // getAsLink returns new sigil format
+    // getAsLink returns sigil format
     expect(link).toHaveProperty("/");
     expect(link["/"][LINK_V1_TAG]).toBeDefined();
 
-    // toJSON returns old format for backward compatibility
-    expect(json).toHaveProperty("cell");
-    expect(json).toHaveProperty("path");
-    expect((json as any).cell).toHaveProperty("/");
+    // toJSON now also returns sigil format (includes space for cross-space references)
+    expect(json).toHaveProperty("/");
+    expect((json as any)["/"][LINK_V1_TAG]).toBeDefined();
+    expect((json as any)["/"][LINK_V1_TAG].id).toBeDefined();
+    expect((json as any)["/"][LINK_V1_TAG].path).toEqual([]);
+    // Verify space is included for cross-space resolution
+    expect((json as any)["/"][LINK_V1_TAG].space).toEqual(space);
   });
 
   it("should create relative links with base parameter - same document", () => {

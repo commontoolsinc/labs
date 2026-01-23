@@ -105,6 +105,61 @@ export interface Employment {
 }
 
 // ============================================================================
+// LEARNED TYPES - Inferred from user behavior (populated by home.tsx)
+// ============================================================================
+
+/** A fact learned about the user from their behavior */
+export interface Fact {
+  content: string; // "User likes cooking", "User has kids"
+  confidence: number; // 0-1, higher = more certain
+  source: string; // e.g., "journal:1234567890" or "user:direct"
+  timestamp: number;
+}
+
+/** A preference inferred from user behavior */
+export interface Preference {
+  key: string; // e.g., "cooking_style", "communication_tone"
+  value: string;
+  confidence: number;
+  source: string;
+}
+
+/** A question to ask the user for clarification */
+export interface Question {
+  id: string;
+  question: string;
+  category: string; // "preferences", "personal", "context"
+  priority: number; // Higher = ask sooner
+  options?: string[]; // For multiple choice
+  status: "pending" | "asked" | "answered" | "skipped";
+  answer?: string;
+  askedAt?: number;
+  answeredAt?: number;
+}
+
+/** Section containing all learned/inferred data */
+export interface LearnedSection {
+  facts: Fact[];
+  preferences: Preference[];
+  openQuestions: Question[];
+  personas: string[]; // "busy parent", "home cook", "techie"
+  lastJournalProcessed: number; // Timestamp of last processed journal entry
+  summary: string; // User-editable text summary
+  summaryVersion: number; // Tracks when summary was last auto-generated
+}
+
+/** Default empty learned section for initialization */
+export const EMPTY_LEARNED: LearnedSection = {
+  facts: [],
+  preferences: [],
+  openQuestions: [],
+  personas: [],
+  lastJournalProcessed: 0,
+  summary: "",
+  summaryVersion: 0,
+};
+
+// ============================================================================
 // DEFAULT VALUES (for Default<> type parameters)
 // ============================================================================
 
@@ -145,6 +200,7 @@ interface ProfileInput {
   banks?: Writable<Default<Bank[], []>>;
   employment?: Writable<Default<Employment, typeof EMPTY_EMPLOYMENT>>;
   notes?: Writable<Default<string, "">>;
+  learned?: Writable<Default<LearnedSection, typeof EMPTY_LEARNED>>;
 }
 
 /** Profile blackboard for personal data coordination. #profile */
@@ -162,6 +218,7 @@ export interface Output {
   banks: Bank[];
   employment: Employment;
   notes: string;
+  learned: LearnedSection;
 }
 
 /** @deprecated Use Output instead - this alias exists for backwards compatibility */
@@ -298,6 +355,7 @@ const Profile = pattern<ProfileInput, Output>(
     banks,
     employment,
     notes,
+    learned,
   }) => {
     // Section expanded states
     const selfExpanded = Writable.of(true);
@@ -310,6 +368,7 @@ const Profile = pattern<ProfileInput, Output>(
     const membershipsExpanded = Writable.of(false);
     const banksExpanded = Writable.of(false);
     const employmentExpanded = Writable.of(false);
+    const learnedExpanded = Writable.of(false);
 
     // Actions for adding items
     const addChild = action(() => children.push(newPerson()));
@@ -325,6 +384,9 @@ const Profile = pattern<ProfileInput, Output>(
       const name = self.key("name").get();
       return name ? `${name}'s Profile` : "My Profile";
     });
+
+    // Note: Journal watching and profile learning is handled by home.tsx
+    // This pattern is purely UI - it displays the learned cell passed to it
 
     return {
       [NAME]: computed(() => `👤 ${displayName}`),
@@ -1167,6 +1229,430 @@ const Profile = pattern<ProfileInput, Output>(
                 </div>
               </ct-vstack>
 
+              {/* === LEARNED === */}
+              <ct-vstack style={{ gap: "8px" }}>
+                <button
+                  type="button"
+                  style={sectionHeaderStyle}
+                  onClick={() => learnedExpanded.set(!learnedExpanded.get())}
+                >
+                  <span style={{ fontSize: "18px" }}>🧠</span>
+                  <span style={{ flex: 1, textAlign: "left" }}>
+                    What I've Learned
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "12px",
+                      color: "var(--ct-color-text-secondary)",
+                      background: "var(--ct-color-bg)",
+                      padding: "2px 8px",
+                      borderRadius: "12px",
+                    }}
+                  >
+                    {computed(() => learned.key("facts").get().length)} facts
+                  </span>
+                  <span style={{ color: "var(--ct-color-text-secondary)" }}>
+                    {computed(() => (learnedExpanded.get() ? "▼" : "▶"))}
+                  </span>
+                </button>
+                <div
+                  style={{
+                    display: computed(() =>
+                      learnedExpanded.get() ? "block" : "none"
+                    ),
+                    ...sectionContentStyle,
+                  }}
+                >
+                  <ct-vstack style={{ gap: "20px" }}>
+                    {/* Personas */}
+                    {computed(() => learned.key("personas").get().length > 0) &&
+                      (
+                        <ct-vstack style={{ gap: "8px" }}>
+                          <label style={labelStyle}>Personas</label>
+                          <ct-hstack style={{ gap: "8px", flexWrap: "wrap" }}>
+                            {learned.key("personas").map((persona) => (
+                              <span
+                                style={{
+                                  padding: "4px 12px",
+                                  background:
+                                    "var(--ct-color-primary-surface, #eff6ff)",
+                                  color: "var(--ct-color-primary, #3b82f6)",
+                                  borderRadius: "16px",
+                                  fontSize: "13px",
+                                }}
+                              >
+                                {persona}
+                              </span>
+                            ))}
+                          </ct-hstack>
+                        </ct-vstack>
+                      )}
+
+                    {/* Facts Table */}
+                    <ct-vstack style={{ gap: "8px" }}>
+                      <label style={labelStyle}>Learned Facts</label>
+                      {computed(() =>
+                        learned.key("facts").get().length === 0
+                      ) && (
+                        <p
+                          style={{
+                            fontSize: "13px",
+                            color: "var(--ct-color-text-secondary)",
+                            fontStyle: "italic",
+                          }}
+                        >
+                          No facts learned yet. Facts will appear here as you
+                          use the app.
+                        </p>
+                      )}
+                      {computed(() => learned.key("facts").get().length > 0) &&
+                        (
+                          <div
+                            style={{
+                              overflowX: "auto",
+                              border:
+                                "1px solid var(--ct-color-border, #e5e5e7)",
+                              borderRadius: "8px",
+                            }}
+                          >
+                            <table
+                              style={{
+                                width: "100%",
+                                borderCollapse: "collapse",
+                                fontSize: "13px",
+                              }}
+                            >
+                              <thead>
+                                <tr
+                                  style={{
+                                    background:
+                                      "var(--ct-color-bg-secondary, #f9fafb)",
+                                  }}
+                                >
+                                  <th
+                                    style={{
+                                      padding: "10px 12px",
+                                      textAlign: "left",
+                                      fontWeight: "600",
+                                      borderBottom:
+                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                    }}
+                                  >
+                                    Fact
+                                  </th>
+                                  <th
+                                    style={{
+                                      padding: "10px 12px",
+                                      textAlign: "center",
+                                      fontWeight: "600",
+                                      borderBottom:
+                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                      width: "80px",
+                                    }}
+                                  >
+                                    Conf.
+                                  </th>
+                                  <th
+                                    style={{
+                                      padding: "10px 12px",
+                                      textAlign: "left",
+                                      fontWeight: "600",
+                                      borderBottom:
+                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                      width: "140px",
+                                    }}
+                                  >
+                                    Source
+                                  </th>
+                                  <th
+                                    style={{
+                                      padding: "10px 12px",
+                                      textAlign: "left",
+                                      fontWeight: "600",
+                                      borderBottom:
+                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                      width: "100px",
+                                    }}
+                                  >
+                                    When
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {learned.key("facts").map((fact) => (
+                                  <tr>
+                                    <td
+                                      style={{
+                                        padding: "10px 12px",
+                                        borderBottom:
+                                          "1px solid var(--ct-color-border, #e5e5e7)",
+                                      }}
+                                    >
+                                      {fact.content}
+                                    </td>
+                                    <td
+                                      style={{
+                                        padding: "10px 12px",
+                                        borderBottom:
+                                          "1px solid var(--ct-color-border, #e5e5e7)",
+                                        textAlign: "center",
+                                      }}
+                                    >
+                                      <span
+                                        style={{
+                                          padding: "2px 8px",
+                                          background: computed(() =>
+                                            fact.confidence > 0.8
+                                              ? "#dcfce7"
+                                              : fact.confidence > 0.5
+                                              ? "#fef9c3"
+                                              : "#fee2e2"
+                                          ),
+                                          color: computed(() =>
+                                            fact.confidence > 0.8
+                                              ? "#166534"
+                                              : fact.confidence > 0.5
+                                              ? "#854d0e"
+                                              : "#991b1b"
+                                          ),
+                                          borderRadius: "4px",
+                                          fontSize: "12px",
+                                          fontWeight: "500",
+                                        }}
+                                      >
+                                        {computed(
+                                          () =>
+                                            `${
+                                              Math.round(fact.confidence * 100)
+                                            }%`,
+                                        )}
+                                      </span>
+                                    </td>
+                                    <td
+                                      style={{
+                                        padding: "10px 12px",
+                                        borderBottom:
+                                          "1px solid var(--ct-color-border, #e5e5e7)",
+                                        color: "var(--ct-color-text-secondary)",
+                                        fontSize: "12px",
+                                      }}
+                                    >
+                                      {fact.source}
+                                    </td>
+                                    <td
+                                      style={{
+                                        padding: "10px 12px",
+                                        borderBottom:
+                                          "1px solid var(--ct-color-border, #e5e5e7)",
+                                        color: "var(--ct-color-text-secondary)",
+                                        fontSize: "12px",
+                                      }}
+                                    >
+                                      {computed(() => {
+                                        const ts = fact.timestamp;
+                                        if (!ts) return "-";
+                                        const d = new Date(ts);
+                                        return `${
+                                          d.getMonth() + 1
+                                        }/${d.getDate()}`;
+                                      })}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                    </ct-vstack>
+
+                    {/* Preferences Table */}
+                    {computed(() =>
+                      learned.key("preferences").get().length > 0
+                    ) && (
+                      <ct-vstack style={{ gap: "8px" }}>
+                        <label style={labelStyle}>Preferences</label>
+                        <div
+                          style={{
+                            overflowX: "auto",
+                            border: "1px solid var(--ct-color-border, #e5e5e7)",
+                            borderRadius: "8px",
+                          }}
+                        >
+                          <table
+                            style={{
+                              width: "100%",
+                              borderCollapse: "collapse",
+                              fontSize: "13px",
+                            }}
+                          >
+                            <thead>
+                              <tr
+                                style={{
+                                  background:
+                                    "var(--ct-color-bg-secondary, #f9fafb)",
+                                }}
+                              >
+                                <th
+                                  style={{
+                                    padding: "10px 12px",
+                                    textAlign: "left",
+                                    fontWeight: "600",
+                                    borderBottom:
+                                      "1px solid var(--ct-color-border, #e5e5e7)",
+                                  }}
+                                >
+                                  Key
+                                </th>
+                                <th
+                                  style={{
+                                    padding: "10px 12px",
+                                    textAlign: "left",
+                                    fontWeight: "600",
+                                    borderBottom:
+                                      "1px solid var(--ct-color-border, #e5e5e7)",
+                                  }}
+                                >
+                                  Value
+                                </th>
+                                <th
+                                  style={{
+                                    padding: "10px 12px",
+                                    textAlign: "center",
+                                    fontWeight: "600",
+                                    borderBottom:
+                                      "1px solid var(--ct-color-border, #e5e5e7)",
+                                    width: "80px",
+                                  }}
+                                >
+                                  Conf.
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {learned.key("preferences").map((pref) => (
+                                <tr>
+                                  <td
+                                    style={{
+                                      padding: "10px 12px",
+                                      borderBottom:
+                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                      fontWeight: "500",
+                                    }}
+                                  >
+                                    {pref.key}
+                                  </td>
+                                  <td
+                                    style={{
+                                      padding: "10px 12px",
+                                      borderBottom:
+                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                    }}
+                                  >
+                                    {pref.value}
+                                  </td>
+                                  <td
+                                    style={{
+                                      padding: "10px 12px",
+                                      borderBottom:
+                                        "1px solid var(--ct-color-border, #e5e5e7)",
+                                      textAlign: "center",
+                                    }}
+                                  >
+                                    <span
+                                      style={{
+                                        padding: "2px 8px",
+                                        background: computed(() =>
+                                          pref.confidence > 0.8
+                                            ? "#dcfce7"
+                                            : pref.confidence > 0.5
+                                            ? "#fef9c3"
+                                            : "#fee2e2"
+                                        ),
+                                        color: computed(() =>
+                                          pref.confidence > 0.8
+                                            ? "#166534"
+                                            : pref.confidence > 0.5
+                                            ? "#854d0e"
+                                            : "#991b1b"
+                                        ),
+                                        borderRadius: "4px",
+                                        fontSize: "12px",
+                                        fontWeight: "500",
+                                      }}
+                                    >
+                                      {computed(
+                                        () =>
+                                          `${
+                                            Math.round(pref.confidence * 100)
+                                          }%`,
+                                      )}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </ct-vstack>
+                    )}
+
+                    {/* Open Questions - Plain Text */}
+                    {computed(() => {
+                      const questions = learned.key("openQuestions").get();
+                      const pending = questions.filter(
+                        (q) => q.status === "pending",
+                      );
+                      return pending.length > 0;
+                    }) && (
+                      <ct-vstack style={{ gap: "8px" }}>
+                        <label style={labelStyle}>
+                          Pending Questions ({computed(() =>
+                            learned
+                              .key("openQuestions")
+                              .get()
+                              .filter((q) => q.status === "pending").length
+                          )})
+                        </label>
+                        <ct-vstack
+                          style={{
+                            gap: "4px",
+                            padding: "12px",
+                            background: "var(--ct-color-bg-secondary, #f9fafb)",
+                            borderRadius: "8px",
+                            fontFamily: "monospace",
+                            fontSize: "13px",
+                          }}
+                        >
+                          {learned.key("openQuestions").map((q) => (
+                            <div
+                              style={{
+                                display: computed(() =>
+                                  q.status === "pending" ? "block" : "none"
+                                ),
+                              }}
+                            >
+                              <span
+                                style={{
+                                  color: "var(--ct-color-text-secondary)",
+                                }}
+                              >
+                                [{q.category}]
+                              </span>{" "}
+                              {q.question}
+                              {computed(() =>
+                                q.options && q.options.length > 0
+                                  ? ` (${q.options.join(" | ")})`
+                                  : ""
+                              )}
+                            </div>
+                          ))}
+                        </ct-vstack>
+                      </ct-vstack>
+                    )}
+                  </ct-vstack>
+                </div>
+              </ct-vstack>
+
               {/* === NOTES === */}
               <ct-vstack style={{ gap: "8px" }}>
                 <label
@@ -1205,6 +1691,7 @@ const Profile = pattern<ProfileInput, Output>(
       banks,
       employment,
       notes,
+      learned,
     };
   },
 );

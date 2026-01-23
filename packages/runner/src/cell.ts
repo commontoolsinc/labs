@@ -60,7 +60,6 @@ import {
 import { toURI } from "./uri-utils.ts";
 import { createRef } from "./create-ref.ts";
 import {
-  type LegacyJSONCellLink,
   LINK_V1_TAG,
   type SigilLink,
   type SigilWriteRedirectLink,
@@ -216,7 +215,7 @@ declare module "@commontools/api" {
     getAsOpaqueRefProxy(
       boundTarget?: (...args: unknown[]) => unknown,
     ): OpaqueRef<T>;
-    toJSON(): LegacyJSONCellLink | null;
+    toJSON(): SigilLink | null;
     runtime: Runtime;
     tx: IExtendedStorageTransaction | undefined;
     schema?: JSONSchema;
@@ -1491,23 +1490,14 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     });
   }
 
-  toJSON(): LegacyJSONCellLink | null {
+  toJSON(): SigilLink | null {
     // Return null when no link exists (cell hasn't been created yet)
     if (!this.hasFullLink()) {
       return null;
     }
 
-    // Otherwise return current Cell toJSON behavior
-    // Keep old format for backward compatibility
-    return {
-      cell: {
-        "/":
-          (this.link.id.startsWith("data:")
-            ? this.link.id
-            : fromURI(this.link.id)),
-      },
-      path: this.path as (string | number)[],
-    };
+    // Use sigil link format which includes space for cross-space references
+    return createSigilLinkFromParsedLink(this.link);
   }
 
   get value(): T {
