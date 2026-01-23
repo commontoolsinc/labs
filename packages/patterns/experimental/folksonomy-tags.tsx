@@ -92,25 +92,33 @@ interface AutocompleteItem {
 }
 
 // Helper to send stream events safely
-// The stream is a derived Cell - just call .send() if it has the method
-function sendStreamEvent(postEventStream: any, event: TagEvent) {
-  if (!postEventStream?.send) return;
-  postEventStream.send(event);
+// The Stream<T> type in handler state ensures proper schema generation.
+// At runtime, streams arrive as Cells wrapping { $stream: true } marker.
+function sendStreamEvent(postEventStream: Stream<TagEvent>, event: TagEvent) {
+  if (!postEventStream) return;
+  // Streams arrive as Cells, not unwrapped callables
+  const streamCell = postEventStream as any;
+  const inner = streamCell.get ? streamCell.get() : streamCell;
+  if (inner && inner.$stream) {
+    streamCell.send(event);
+  }
 }
 
 // Handler for selecting a tag from autocomplete
 const handleSelectTag = handler<
   { detail: { value: string; group?: string; isCustom?: boolean } },
   {
-    scope: any;
+    scope: string;
     tags: Writable<string[]>;
-    postEventStream: any;
+    postEventStream: Stream<TagEvent>;
   }
 >((event, state) => {
   const value = event.detail?.value;
   if (!value) return;
 
-  const scopeVal = state.scope?.get ? state.scope.get() : state.scope;
+  // Cast to any for Cell unwrapping (runtime may wrap primitives)
+  const scopeCell = state.scope as any;
+  const scopeVal = scopeCell?.get ? scopeCell.get() : state.scope;
   const currentTags = state.tags.get() || [];
   const tagLower = value.toLowerCase().trim();
 
@@ -142,13 +150,15 @@ const handleSelectTag = handler<
 const handleRemoveTag = handler<
   unknown,
   {
-    scope: any;
+    scope: string;
     tags: Writable<string[]>;
     tag: string;
-    postEventStream: any;
+    postEventStream: Stream<TagEvent>;
   }
 >((_event, state) => {
-  const scopeVal = state.scope?.get ? state.scope.get() : state.scope;
+  // Cast to any for Cell unwrapping (runtime may wrap primitives)
+  const scopeCell = state.scope as any;
+  const scopeVal = scopeCell?.get ? scopeCell.get() : state.scope;
   const currentTags = state.tags.get() || [];
   state.tags.set(currentTags.filter((t: string) => t !== state.tag));
 
@@ -165,15 +175,17 @@ const handleRemoveTag = handler<
 const addTagHandler = handler<
   { tag: string },
   {
-    scope: any;
+    scope: string;
     tags: Writable<string[]>;
-    postEventStream: any;
+    postEventStream: Stream<TagEvent>;
   }
 >((event, state) => {
   const tag = event.tag?.trim();
   if (!tag) return;
 
-  const scopeVal = state.scope?.get ? state.scope.get() : state.scope;
+  // Cast to any for Cell unwrapping (runtime may wrap primitives)
+  const scopeCell = state.scope as any;
+  const scopeVal = scopeCell?.get ? scopeCell.get() : state.scope;
   const currentTags = state.tags.get() || [];
   if (currentTags.some((t: string) => t.toLowerCase() === tag.toLowerCase())) {
     return;
@@ -193,15 +205,17 @@ const addTagHandler = handler<
 const removeTagHandler = handler<
   { tag: string },
   {
-    scope: any;
+    scope: string;
     tags: Writable<string[]>;
-    postEventStream: any;
+    postEventStream: Stream<TagEvent>;
   }
 >((event, state) => {
   const tag = event.tag?.trim();
   if (!tag) return;
 
-  const scopeVal = state.scope?.get ? state.scope.get() : state.scope;
+  // Cast to any for Cell unwrapping (runtime may wrap primitives)
+  const scopeCell = state.scope as any;
+  const scopeVal = scopeCell?.get ? scopeCell.get() : state.scope;
   const currentTags = state.tags.get() || [];
   state.tags.set(currentTags.filter((t: string) => t !== tag));
 
@@ -269,17 +283,16 @@ export const FolksonomyTags = recipe<FolksonomyTagsInput, FolksonomyTagsOutput>(
   "FolksonomyTags",
   ({ scope, tags }) => {
     // Wish for the aggregator charm (may not exist)
-    // Using object form { query: "#..." } to get WishState with .result property
+    // The AggregatorCharm type has Stream<TagEvent> on postEvent,
+    // which the transformer should convert to { asStream: true } in the schema
     const aggregatorWish = wish<AggregatorCharm>({
       query: "#folksonomy-aggregator",
     });
 
-    // Extract the aggregator result
+    // Extract the aggregator result - postEvent is now properly resolved as a stream
     const aggregator = aggregatorWish.result;
 
-    // Derive just the postEvent stream Cell
-    // Following verified pattern from test-cross-charm-client.tsx:
-    // Derive the stream so it arrives as a Cell in handlers
+    // Derive the postEvent stream - with schema, this should have proper $stream marker
     const postEventStream = derive(aggregator, (agg: any) => agg?.postEvent);
 
     // Get community suggestions for this scope
