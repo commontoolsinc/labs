@@ -832,6 +832,7 @@ export class XDebuggerView extends LitElement {
       display: flex;
       align-items: flex-end;
       justify-content: center;
+      align-self: stretch;
     }
 
     .bucket-bar-count {
