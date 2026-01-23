@@ -9,6 +9,7 @@ import type {
   OpaqueRef,
   RecipeFactory,
   Schema,
+  StripCell,
 } from "./types.ts";
 import type { Cell as CellType } from "./types.ts";
 import type {
@@ -153,7 +154,7 @@ export function ifElse<T = unknown, U = unknown, V = unknown>(
   condition?: Opaque<T>,
   ifTrue?: Opaque<U>,
   ifFalse?: Opaque<V>,
-): OpaqueRef<U | V> {
+): OpaqueRef<StripCell<U | V>> {
   ifElseFactory ||= createNodeFactory({
     type: "ref",
     implementation: "ifElse",
@@ -168,7 +169,7 @@ export function ifElse<T = unknown, U = unknown, V = unknown>(
       condition,
       ifTrue,
       ifFalse,
-    }) as OpaqueRef<U | V>;
+    }) as OpaqueRef<StripCell<U | V>>;
   }
 
   // Legacy signature: ifElse(cond, ifTrue, ifFalse)
@@ -176,7 +177,7 @@ export function ifElse<T = unknown, U = unknown, V = unknown>(
     condition: conditionSchemaOrCondition,
     ifTrue: ifTrueSchemaOrIfTrue,
     ifFalse: ifFalseSchemaOrIfFalse,
-  }) as OpaqueRef<U | V>;
+  }) as OpaqueRef<StripCell<U | V>>;
 }
 
 let ifElseFactory:
@@ -199,7 +200,7 @@ export function when<T = unknown, U = unknown>(
   resultSchemaOrCondition?: JSONSchema | Opaque<T>,
   condition?: Opaque<T>,
   value?: Opaque<U>,
-): OpaqueRef<T | U> {
+): OpaqueRef<StripCell<T | U>> {
   whenFactory ||= createNodeFactory({
     type: "ref",
     implementation: "when",
@@ -212,14 +213,14 @@ export function when<T = unknown, U = unknown>(
       resultSchema: resultSchemaOrCondition as JSONSchema,
       condition,
       value,
-    }) as OpaqueRef<T | U>;
+    }) as OpaqueRef<StripCell<T | U>>;
   }
 
   // Legacy signature: when(cond, value)
   return whenFactory({
     condition: conditionSchemaOrCondition,
     value: valueSchemaOrValue,
-  }) as OpaqueRef<T | U>;
+  }) as OpaqueRef<StripCell<T | U>>;
 }
 
 let whenFactory:
@@ -240,7 +241,7 @@ export function unless<T = unknown, U = unknown>(
   resultSchemaOrCondition?: JSONSchema | Opaque<T>,
   condition?: Opaque<T>,
   fallback?: Opaque<U>,
-): OpaqueRef<T | U> {
+): OpaqueRef<StripCell<T | U>> {
   unlessFactory ||= createNodeFactory({
     type: "ref",
     implementation: "unless",
@@ -253,14 +254,14 @@ export function unless<T = unknown, U = unknown>(
       resultSchema: resultSchemaOrCondition as JSONSchema,
       condition,
       fallback,
-    }) as OpaqueRef<T | U>;
+    }) as OpaqueRef<StripCell<T | U>>;
   }
 
   // Legacy signature: unless(cond, fallback)
   return unlessFactory({
     condition: conditionSchemaOrCondition,
     fallback: fallbackSchemaOrFallback,
-  }) as OpaqueRef<T | U>;
+  }) as OpaqueRef<StripCell<T | U>>;
 }
 
 let unlessFactory:
