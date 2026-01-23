@@ -17,8 +17,6 @@ import {
   EMPTY_LEARNED,
   type Fact,
   type LearnedSection,
-  type Preference,
-  type Question,
 } from "../profile.tsx";
 
 // Types from favorites-manager.tsx and journal.tsx
