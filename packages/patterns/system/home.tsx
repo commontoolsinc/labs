@@ -319,6 +319,7 @@ export default pattern((_) => {
   };
 
   // Generate narrative for pending entry
+  // Uses context parameter to properly serialize cell content with schema
   const narrativeGen = generateText({
     prompt: computed(() => {
       const entry = pendingEntry;
@@ -326,48 +327,12 @@ export default pattern((_) => {
       const eventDesc = eventDescriptions[entry.eventType || ""] ||
         entry.eventType;
 
-      // Try to read full content from the subject cell
-      let fullContent = "";
-      try {
-        const subjectCell = entry.subject as Writable<any> | undefined;
-        if (subjectCell) {
-          // Try to apply schema and get full value
-          let cellToRead = subjectCell as any;
-          try {
-            const linkInfo = cellToRead.asSchemaFromLinks?.()
-              ?.getAsNormalizedFullLink?.();
-            if (linkInfo?.schema) {
-              cellToRead = cellToRead.asSchema(linkInfo.schema);
-            }
-          } catch {
-            // Ignore schema errors
-          }
-          const value = cellToRead.get?.();
-          if (value !== undefined) {
-            fullContent = JSON.stringify(value, null, 2);
-            // Limit to 3000 chars
-            if (fullContent.length > 3000) {
-              fullContent = fullContent.slice(0, 3000) + "\n...";
-            }
-          }
-        }
-      } catch {
-        // Fall back to snapshot excerpt
-        fullContent = entry.snapshot?.valueExcerpt || "";
-      }
-
-      // Fall back to snapshot if no content
-      if (!fullContent) {
-        fullContent = entry.snapshot?.valueExcerpt || "";
-      }
-
       return `Generate a brief journal entry (2-3 sentences) describing this user action.
 
 Event: User ${eventDesc} a charm
 Charm name: ${entry.snapshot?.name || "unnamed"}
-${fullContent ? `\nFull Content/Data:\n${fullContent}\n` : ""}
 
-IMPORTANT: Analyze the CONTENT of what they saved, not just the title. If it's a note, what is it about? If it has data, what kind? Extract meaningful insights about their interests, work, or life from the actual content.
+The full content of the charm is available in the context below. IMPORTANT: Read and analyze the CONTENT, not just the title. If it's a note, what is it about? If it has data, what kind? Extract meaningful insights about their interests, work, or life from the actual content.
 
 Write in past tense, personal style. Focus on:
 1. What the content reveals about the user's interests/goals
@@ -375,8 +340,14 @@ Write in past tense, personal style. Focus on:
 3. What this might indicate about what they care about`;
     }),
     system:
-      "You analyze user activity and content to understand their interests. Look at the actual data/content, not just titles. Extract meaningful insights about what they care about, work on, or are interested in.",
+      "You analyze user activity and content to understand their interests. The charm content is provided in the context. Look at the actual data/content, not just titles. Extract meaningful insights about what they care about, work on, or are interested in.",
     model: "anthropic:claude-sonnet-4-5",
+    // Pass the subject cell as context - system will serialize it properly
+    context: computed(() => {
+      const entry = pendingEntry;
+      if (!entry?.subject) return {};
+      return { favoritedCharm: entry.subject };
+    }),
   });
 
   // Idempotent writeback - update entry when narrative is ready
