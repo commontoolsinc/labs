@@ -20,8 +20,8 @@
  * - Events are posted to the aggregator in real-time
  */
 import {
-  computed,
   type Default,
+  derive,
   NAME,
   pattern,
   UI,
@@ -56,18 +56,16 @@ export default pattern<Input, Output>(
     const aggregatorWish = wish<{ events: unknown[] }>({
       query: "#folksonomy-aggregator",
     });
-    const hasAggregator = computed(() => {
-      return (
-        aggregatorWish.result !== undefined && aggregatorWish.result !== null
-      );
-    });
+    const hasAggregator = derive(
+      aggregatorWish.result,
+      (agg: any) => agg != null,
+    );
 
     // Shared scope for A and B
-    const sharedScope = computed(
-      () =>
-        `https://github.com/commontools/folksonomy-demo/${
-          customScope || "demo-shared"
-        }`,
+    const sharedScope = derive(
+      customScope,
+      (cs: string) =>
+        `https://github.com/commontools/folksonomy-demo/${cs || "demo-shared"}`,
     );
 
     // Isolated scope for C
@@ -75,20 +73,20 @@ export default pattern<Input, Output>(
       "https://github.com/commontools/folksonomy-demo/demo-isolated",
     );
 
-    // Create tag instances
+    // Create tag instances - pass Cells directly without casting
     const tagsA = FolksonomyTags({
-      scope: sharedScope as unknown as Writable<Default<string, "">>,
-      tags: itemATags as unknown as Writable<Default<string[], []>>,
+      scope: sharedScope,
+      tags: itemATags,
     });
 
     const tagsB = FolksonomyTags({
-      scope: sharedScope as unknown as Writable<Default<string, "">>,
-      tags: itemBTags as unknown as Writable<Default<string[], []>>,
+      scope: sharedScope,
+      tags: itemBTags,
     });
 
     const tagsC = FolksonomyTags({
-      scope: isolatedScope as unknown as Writable<Default<string, "">>,
-      tags: itemCTags as unknown as Writable<Default<string[], []>>,
+      scope: isolatedScope,
+      tags: itemCTags,
     });
 
     return {

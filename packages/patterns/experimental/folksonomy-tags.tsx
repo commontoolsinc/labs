@@ -26,7 +26,6 @@
  * Without the aggregator, falls back to local-only mode.
  */
 import {
-  computed,
   type Default,
   derive,
   handler,
@@ -92,36 +91,38 @@ interface AutocompleteItem {
   data?: { count?: number };
 }
 
+// Helper to send stream events safely
+// The stream is a derived Cell - just call .send() if it has the method
+function sendStreamEvent(postEventStream: any, event: TagEvent) {
+  if (!postEventStream?.send) return;
+  postEventStream.send(event);
+}
+
 // Handler for selecting a tag from autocomplete
 const handleSelectTag = handler<
   { detail: { value: string; group?: string; isCustom?: boolean } },
   {
-    scope: string;
+    scope: any;
     tags: Writable<string[]>;
-    aggregatorStream: Stream<TagEvent> | undefined;
+    postEventStream: any;
   }
 >((event, state) => {
   const value = event.detail?.value;
   if (!value) return;
 
+  const scopeVal = state.scope?.get ? state.scope.get() : state.scope;
   const currentTags = state.tags.get() || [];
   const tagLower = value.toLowerCase().trim();
 
   // Check if already exists
-  if (currentTags.some((t) => t.toLowerCase() === tagLower)) {
+  if (currentTags.some((t: string) => t.toLowerCase() === tagLower)) {
     // Post "use" event - user selected an existing tag
-    if (state.aggregatorStream) {
-      const streamCell = state.aggregatorStream as any;
-      const inner = streamCell.get ? streamCell.get() : streamCell;
-      if (inner && inner.$stream) {
-        streamCell.send({
-          scope: state.scope,
-          tag: value.trim(),
-          action: "use",
-          timestamp: Date.now(),
-        });
-      }
-    }
+    sendStreamEvent(state.postEventStream, {
+      scope: scopeVal,
+      tag: value.trim(),
+      action: "use",
+      timestamp: Date.now(),
+    });
     return;
   }
 
@@ -129,156 +130,140 @@ const handleSelectTag = handler<
   state.tags.set([...currentTags, value.trim()]);
 
   // Post "add" event to aggregator
-  if (state.aggregatorStream) {
-    const streamCell = state.aggregatorStream as any;
-    const inner = streamCell.get ? streamCell.get() : streamCell;
-    if (inner && inner.$stream) {
-      streamCell.send({
-        scope: state.scope,
-        tag: value.trim(),
-        action: "add",
-        timestamp: Date.now(),
-      });
-    }
-  }
+  sendStreamEvent(state.postEventStream, {
+    scope: scopeVal,
+    tag: value.trim(),
+    action: "add",
+    timestamp: Date.now(),
+  });
 });
 
 // Handler for removing a tag
 const handleRemoveTag = handler<
   unknown,
   {
-    scope: string;
+    scope: any;
     tags: Writable<string[]>;
     tag: string;
-    aggregatorStream: Stream<TagEvent> | undefined;
+    postEventStream: any;
   }
 >((_event, state) => {
+  const scopeVal = state.scope?.get ? state.scope.get() : state.scope;
   const currentTags = state.tags.get() || [];
-  state.tags.set(currentTags.filter((t) => t !== state.tag));
+  state.tags.set(currentTags.filter((t: string) => t !== state.tag));
 
   // Post "remove" event to aggregator
-  if (state.aggregatorStream) {
-    const streamCell = state.aggregatorStream as any;
-    const inner = streamCell.get ? streamCell.get() : streamCell;
-    if (inner && inner.$stream) {
-      streamCell.send({
-        scope: state.scope,
-        tag: state.tag,
-        action: "remove",
-        timestamp: Date.now(),
-      });
-    }
-  }
+  sendStreamEvent(state.postEventStream, {
+    scope: scopeVal,
+    tag: state.tag,
+    action: "remove",
+    timestamp: Date.now(),
+  });
 });
 
 // Handler exposed for programmatic tag addition
 const addTagHandler = handler<
   { tag: string },
   {
-    scope: string;
+    scope: any;
     tags: Writable<string[]>;
-    aggregatorStream: Stream<TagEvent> | undefined;
+    postEventStream: any;
   }
 >((event, state) => {
   const tag = event.tag?.trim();
   if (!tag) return;
 
+  const scopeVal = state.scope?.get ? state.scope.get() : state.scope;
   const currentTags = state.tags.get() || [];
-  if (currentTags.some((t) => t.toLowerCase() === tag.toLowerCase())) {
+  if (currentTags.some((t: string) => t.toLowerCase() === tag.toLowerCase())) {
     return;
   }
 
   state.tags.set([...currentTags, tag]);
 
-  if (state.aggregatorStream) {
-    const streamCell = state.aggregatorStream as any;
-    const inner = streamCell.get ? streamCell.get() : streamCell;
-    if (inner && inner.$stream) {
-      streamCell.send({
-        scope: state.scope,
-        tag: tag,
-        action: "add",
-        timestamp: Date.now(),
-      });
-    }
-  }
+  sendStreamEvent(state.postEventStream, {
+    scope: scopeVal,
+    tag: tag,
+    action: "add",
+    timestamp: Date.now(),
+  });
 });
 
 // Handler exposed for programmatic tag removal
 const removeTagHandler = handler<
   { tag: string },
   {
-    scope: string;
+    scope: any;
     tags: Writable<string[]>;
-    aggregatorStream: Stream<TagEvent> | undefined;
+    postEventStream: any;
   }
 >((event, state) => {
   const tag = event.tag?.trim();
   if (!tag) return;
 
+  const scopeVal = state.scope?.get ? state.scope.get() : state.scope;
   const currentTags = state.tags.get() || [];
-  state.tags.set(currentTags.filter((t) => t !== tag));
+  state.tags.set(currentTags.filter((t: string) => t !== tag));
 
-  if (state.aggregatorStream) {
-    const streamCell = state.aggregatorStream as any;
-    const inner = streamCell.get ? streamCell.get() : streamCell;
-    if (inner && inner.$stream) {
-      streamCell.send({
-        scope: state.scope,
-        tag: tag,
-        action: "remove",
-        timestamp: Date.now(),
-      });
-    }
-  }
+  sendStreamEvent(state.postEventStream, {
+    scope: scopeVal,
+    tag: tag,
+    action: "remove",
+    timestamp: Date.now(),
+  });
 });
 
 // Lift function to check if we have tags
-const hasTags = lift<string[], boolean>((tags) => tags && tags.length > 0);
+const hasTags = lift((tags: string[]) => tags && tags.length > 0);
 
 // Lift function to build autocomplete items
-const buildAutocompleteItems = lift<
-  {
+const buildAutocompleteItems = lift(
+  ({
+    localTags,
+    communitySuggestions,
+    currentTags,
+  }: {
     localTags: string[];
     communitySuggestions: CommunityTagSuggestion[];
     currentTags: string[];
+  }): AutocompleteItem[] => {
+    const items: AutocompleteItem[] = [];
+    const currentTagsLower = new Set(
+      (currentTags || []).map((t) => t.toLowerCase()),
+    );
+
+    // Add local tags first (from user's space with same scope)
+    for (const tag of localTags || []) {
+      if (!currentTagsLower.has(tag.toLowerCase())) {
+        items.push({
+          value: tag,
+          label: tag,
+          group: "Your tags",
+        });
+      }
+    }
+
+    // Add community suggestions (not already in local or current)
+    const localTagsLower = new Set(
+      (localTags || []).map((t) => t.toLowerCase()),
+    );
+    for (const suggestion of communitySuggestions || []) {
+      if (
+        !currentTagsLower.has(suggestion.tag.toLowerCase()) &&
+        !localTagsLower.has(suggestion.tag.toLowerCase())
+      ) {
+        items.push({
+          value: suggestion.tag,
+          label: `${suggestion.tag} (${suggestion.count})`,
+          group: "Community",
+          data: { count: suggestion.count },
+        });
+      }
+    }
+
+    return items;
   },
-  AutocompleteItem[]
->(({ localTags, communitySuggestions, currentTags }) => {
-  const items: AutocompleteItem[] = [];
-  const currentTagsLower = new Set(
-    (currentTags || []).map((t) => t.toLowerCase()),
-  );
-
-  // Add local tags first (from user's space with same scope)
-  for (const tag of localTags || []) {
-    if (!currentTagsLower.has(tag.toLowerCase())) {
-      items.push({
-        value: tag,
-        label: tag,
-        group: "Your tags",
-      });
-    }
-  }
-
-  // Add community suggestions (not already in local or current)
-  const localTagsLower = new Set((localTags || []).map((t) => t.toLowerCase()));
-  for (const suggestion of communitySuggestions || []) {
-    if (
-      !currentTagsLower.has(suggestion.tag.toLowerCase()) &&
-      !localTagsLower.has(suggestion.tag.toLowerCase())
-    ) {
-      items.push({
-        value: suggestion.tag,
-        label: `${suggestion.tag} (${suggestion.count})`,
-        group: "Community",
-        data: { count: suggestion.count },
-      });
-    }
-  }
-
-  return items;
-});
+);
 
 export const FolksonomyTags = recipe<FolksonomyTagsInput, FolksonomyTagsOutput>(
   "FolksonomyTags",
@@ -289,51 +274,41 @@ export const FolksonomyTags = recipe<FolksonomyTagsInput, FolksonomyTagsOutput>(
       query: "#folksonomy-aggregator",
     });
 
-    // Extract the aggregator result and stream
+    // Extract the aggregator result
     const aggregator = aggregatorWish.result;
-    const aggregatorStream = derive(
-      aggregator,
-      (agg: AggregatorCharm | undefined | null) => agg?.postEvent,
-    );
+
+    // Derive just the postEvent stream Cell
+    // Following verified pattern from test-cross-charm-client.tsx:
+    // Derive the stream so it arrives as a Cell in handlers
+    const postEventStream = derive(aggregator, (agg: any) => agg?.postEvent);
 
     // Get community suggestions for this scope
-    const communitySuggestions = computed(() => {
-      const agg = aggregator as AggregatorCharm | undefined;
-      const scopeValue = (scope as any)?.get?.() ?? scope;
-      if (!agg || !scopeValue) return [];
-      const suggs = agg.suggestions || {};
-      return suggs[scopeValue] || [];
-    });
+    const communitySuggestions = derive(
+      [aggregator, scope],
+      ([agg, scopeValue]: [any, string]) => {
+        if (!agg || !scopeValue) return [];
+        const suggs = agg.suggestions || {};
+        return suggs[scopeValue] || [];
+      },
+    );
 
     // For now, local tags are just the current tags (same scope within same charm)
-    // In a more advanced version, this could query all charms with the same scope
-    const localTags = derive(tags, (t: string[] | undefined) => t || []);
+    const localTags = derive(tags, (t: string[]) => t || []);
 
     // Build autocomplete items combining local and community
-    const autocompleteItems = computed(() => {
-      return buildAutocompleteItems({
-        localTags: localTags as unknown as string[],
-        communitySuggestions:
-          communitySuggestions as unknown as CommunityTagSuggestion[],
-        currentTags: (tags || []) as unknown as string[],
-      });
+    const autocompleteItems = buildAutocompleteItems({
+      localTags,
+      communitySuggestions,
+      currentTags: tags,
     });
 
     // Check if aggregator is connected
-    const hasAggregator = computed(() => {
-      const agg = aggregator as AggregatorCharm | undefined;
-      return agg !== undefined && agg !== null;
-    });
+    const hasAggregator = derive(aggregator, (agg: any) => agg != null);
 
     // Computed name for display
-    const displayName = derive(tags, (tagList: string[] | undefined) => {
+    const displayName = derive(tags, (tagList: string[]) => {
       if (!tagList || tagList.length === 0) return "🏷️ Tags";
       return `🏷️ Tags (${tagList.length})`;
-    });
-
-    // Get scope value for handlers
-    const scopeValue = computed(() => {
-      return ((scope as any)?.get?.() ?? scope) as string;
     });
 
     return {
@@ -341,21 +316,25 @@ export const FolksonomyTags = recipe<FolksonomyTagsInput, FolksonomyTagsOutput>(
       [UI]: (
         <ct-vstack gap="3" style={{ padding: "8px 0" }}>
           {/* Autocomplete input */}
+          {/* Hidden render to force aggregator to execute */}
+          <div style={{ display: "none" }}>
+            <ct-render $cell={aggregator} />
+          </div>
+
+          {/* Autocomplete input */}
           <ct-autocomplete
             items={autocompleteItems}
             placeholder="Add a tag..."
             allowCustom
             onct-select={handleSelectTag({
-              scope: scopeValue as unknown as string,
+              scope,
               tags,
-              aggregatorStream: aggregatorStream as unknown as
-                | Stream<TagEvent>
-                | undefined,
+              postEventStream,
             })}
           />
 
           {/* Current tags */}
-          {hasTags(tags as unknown as string[])
+          {hasTags(tags)
             ? (
               <ct-hstack gap="2" wrap>
                 {tags.map((tag: string, index: number) => (
@@ -375,12 +354,10 @@ export const FolksonomyTags = recipe<FolksonomyTagsInput, FolksonomyTagsOutput>(
                     <button
                       type="button"
                       onClick={handleRemoveTag({
-                        scope: scopeValue as unknown as string,
+                        scope,
                         tags,
                         tag,
-                        aggregatorStream: aggregatorStream as unknown as
-                          | Stream<TagEvent>
-                          | undefined,
+                        postEventStream,
                       })}
                       style={{
                         background: "none",
@@ -429,18 +406,14 @@ export const FolksonomyTags = recipe<FolksonomyTagsInput, FolksonomyTagsOutput>(
       ),
       tags,
       addTag: addTagHandler({
-        scope: scopeValue as unknown as string,
+        scope,
         tags,
-        aggregatorStream: aggregatorStream as unknown as
-          | Stream<TagEvent>
-          | undefined,
+        postEventStream,
       }),
       removeTag: removeTagHandler({
-        scope: scopeValue as unknown as string,
+        scope,
         tags,
-        aggregatorStream: aggregatorStream as unknown as
-          | Stream<TagEvent>
-          | undefined,
+        postEventStream,
       }),
     };
   },
