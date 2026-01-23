@@ -1,3 +1,4 @@
+import type { StorableValue } from "@commontools/memory/interface";
 import type {
   Activity,
   IAttestation,
@@ -12,7 +13,6 @@ import type {
   ITransactionReader,
   ITransactionWriter,
   JournalArchive,
-  JSONValue,
   MemorySpace,
   ReadError,
   Result,
@@ -131,7 +131,7 @@ export const write = (
   journal: IJournal,
   space: MemorySpace,
   address: IMemoryAddress,
-  value?: JSONValue,
+  value?: StorableValue,
 ): Result<IAttestation, WriteError> => {
   const { ok: branch, error } = checkout(journal, space);
   if (error) {
@@ -342,7 +342,7 @@ export class TransactionWriter implements ITransactionWriter {
    */
   write(
     address: IMemoryAddress,
-    value?: JSONValue,
+    value?: StorableValue,
   ) {
     return write(this.#journal, this.#space, address, value);
   }
