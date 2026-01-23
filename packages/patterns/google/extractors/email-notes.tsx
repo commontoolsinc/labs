@@ -316,7 +316,8 @@ export default pattern<PatternInput, PatternOutput>(() => {
       <div style={{ flex: 1 }}>
         <div style={{ fontWeight: "600", fontSize: "14px" }}>Email Notes</div>
         <div style={{ fontSize: "12px", color: "#6b7280" }}>
-          {derive(noteCount, (count) => count === 1 ? "1 note" : `${count} notes`)}
+          {derive(noteCount, (count) =>
+            count === 1 ? "1 note" : `${count} notes`)}
         </div>
         {/* Loading/progress indicator */}
         <ProcessingStatus
@@ -530,18 +531,26 @@ export default pattern<PatternInput, PatternOutput>(() => {
                             )}
                             style={{
                               padding: "4px 10px",
-                              backgroundColor: derive(isProcessing, (p) =>
-                                p ? "#e5e7eb" : "#3b82f6"),
-                              color: derive(isProcessing, (p) =>
-                                p ? "#9ca3af" : "white"),
+                              backgroundColor: derive(
+                                isProcessing,
+                                (p) => p ? "#e5e7eb" : "#3b82f6",
+                              ),
+                              color: derive(
+                                isProcessing,
+                                (p) => p ? "#9ca3af" : "white",
+                              ),
                               border: "none",
                               borderRadius: "4px",
                               fontSize: "12px",
-                              cursor: derive(isProcessing, (p) =>
-                                p ? "not-allowed" : "pointer"),
+                              cursor: derive(
+                                isProcessing,
+                                (p) => p ? "not-allowed" : "pointer",
+                              ),
                               fontWeight: "500",
-                              opacity: derive(taskCurrentLabelId, (id) =>
-                                id ? 1 : 0.5),
+                              opacity: derive(
+                                taskCurrentLabelId,
+                                (id) => id ? 1 : 0.5,
+                              ),
                             }}
                           >
                             {ifElse(isProcessing, "Processing...", "Done")}
