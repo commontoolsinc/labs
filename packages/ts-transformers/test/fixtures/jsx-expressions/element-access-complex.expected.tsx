@@ -279,9 +279,9 @@ export default recipe({
                         type: "array",
                         items: true
                     }, {
-                        asCell: true
-                    }, {
                         asStream: true
+                    }, {
+                        asCell: true
                     }, {
                         type: "null"
                     }]

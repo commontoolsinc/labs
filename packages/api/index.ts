@@ -1570,17 +1570,17 @@ export type IfElseFunction = <T = any, U = any, V = any>(
   condition: Opaque<T>,
   ifTrue: Opaque<U>,
   ifFalse: Opaque<V>,
-) => OpaqueRef<U | V>;
+) => OpaqueRef<StripCell<U | V>>;
 
 export type WhenFunction = <T = any, U = any>(
   condition: Opaque<T>,
   value: Opaque<U>,
-) => OpaqueRef<T | U>;
+) => OpaqueRef<StripCell<T | U>>;
 
 export type UnlessFunction = <T = any, U = any>(
   condition: Opaque<T>,
   fallback: Opaque<U>,
-) => OpaqueRef<T | U>;
+) => OpaqueRef<StripCell<T | U>>;
 
 /** @deprecated Use generateText() or generateObject() instead */
 export type LLMFunction = (

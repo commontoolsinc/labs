@@ -272,22 +272,16 @@ export default recipe({
                         properties: {}
                     }]
             } as const satisfies __ctHelpers.JSONSchema, {
-                $ref: "#/$defs/AnonymousType_1",
+                type: "object",
+                properties: {
+                    $UI: {
+                        $ref: "#/$defs/VNodeResult"
+                    }
+                },
+                required: ["$UI"],
+                asOpaque: true,
                 $defs: {
-                    AnonymousType_1: {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    },
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "#/$defs/VNode"
-                            }
-                        },
-                        required: ["$UI"]
-                    },
-                    VNode: {
+                    VNodeResult: {
                         type: "object",
                         properties: {
                             type: {
@@ -297,37 +291,31 @@ export default recipe({
                                 type: "string"
                             },
                             props: {
-                                $ref: "#/$defs/Props"
+                                $ref: "#/$defs/PropsResult"
                             },
                             children: {
-                                $ref: "#/$defs/RenderNode"
+                                type: "array",
+                                items: {
+                                    anyOf: [{
+                                            type: "string"
+                                        }, {
+                                            type: "number"
+                                        }, {
+                                            type: "boolean"
+                                        }, {
+                                            $ref: "#/$defs/VNodeResult"
+                                        }, {
+                                            type: "null"
+                                        }]
+                                }
                             },
                             $UI: {
-                                $ref: "#/$defs/VNode"
+                                $ref: "#/$defs/VNodeResult"
                             }
                         },
                         required: ["type", "name", "props"]
                     },
-                    RenderNode: {
-                        anyOf: [{
-                                type: "string"
-                            }, {
-                                type: "number"
-                            }, {
-                                type: "boolean"
-                            }, {}, {
-                                type: "object",
-                                properties: {}
-                            }, {
-                                type: "array",
-                                items: {
-                                    $ref: "#/$defs/RenderNode"
-                                }
-                            }, {
-                                type: "null"
-                            }]
-                    },
-                    Props: {
+                    PropsResult: {
                         type: "object",
                         properties: {},
                         additionalProperties: {
@@ -343,7 +331,9 @@ export default recipe({
                                 }, {
                                     type: "array",
                                     items: true
-                                }, {}, {
+                                }, {
+                                    asStream: true
+                                }, {
                                     type: "null"
                                 }]
                         }
