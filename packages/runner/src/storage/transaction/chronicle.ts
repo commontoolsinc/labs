@@ -18,6 +18,7 @@ import type {
   Result,
   State,
 } from "../interface.ts";
+import type { StorableValue } from "../../interface.ts";
 import * as Address from "./address.ts";
 import {
   attest,
@@ -121,7 +122,7 @@ export class Chronicle {
    */
   write(
     address: IMemoryAddress,
-    value?: JSONValue,
+    value?: StorableValue,
   ): Result<
     IAttestation,
     | IStorageTransactionInconsistent
@@ -521,7 +522,7 @@ class Changes {
    */
   applyWrite(
     address: IMemoryAddress,
-    value: JSONValue | undefined,
+    value: StorableValue,
   ): Result<
     IAttestation,
     IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
