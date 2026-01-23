@@ -4,14 +4,16 @@ inputs:
   cache:
     description: "Load deno dependencies from github cache"
     default: true
+env:
+  DENO_VERSION: "2.6.4"
 runs:
   using: "composite"
   steps:
     # Keep in sync with `./tasks/check.sh` version
-    - name: 🦕 Setup Deno 2.6.4
+    - name: 🦕 Setup Deno ${{ env.DENO_VERSION }}
       uses: denoland/setup-deno@v2
       with:
-        deno-version: "2.6.4"
+        deno-version: ${{ env.DENO_VERSION }}
 
     # Cache version: bump to invalidate all caches (e.g., v1 -> v2)
     - name: 📦 Cache Deno dependencies
@@ -21,4 +23,4 @@ runs:
         path: |
           ~/.deno
           ~/.cache/deno
-        key: v2-${{ runner.os }}-deno-2.6.4-${{ hashFiles('**/deno.json', '**/deno.lock') }}
+        key: v2-${{ runner.os }}-deno-${{ env.DENO_VERSION }}-${{ hashFiles('**/deno.json', '**/deno.lock') }}
