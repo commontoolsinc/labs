@@ -1375,7 +1375,7 @@ export class Replica {
       return;
     }
 
-    const initialACL: JSONValue = {
+    const initialACL: StorableDatum = {
       value: {
         [userIdentity.did()]: "OWNER",
         [ANYONE_USER]: "WRITE",
@@ -1925,7 +1925,7 @@ export class Provider implements IStorageProvider {
           facts.push(assert({
             the,
             of: uri,
-            is: JSON.parse(content) as JSONValue,
+            is: JSON.parse(content) as StorableDatum,
             // If fact has no `cause` it is unclaimed fact.
             cause: current?.cause ? current : null,
           }));
@@ -1940,7 +1940,7 @@ export class Provider implements IStorageProvider {
             facts.push(assert({
               the: LABEL_TYPE,
               of: uri,
-              is: value.labels as JSONValue,
+              is: value.labels as StorableDatum,
               // If fact has no `cause` it is unclaimed fact.
               cause: currentLabel?.cause ? currentLabel : null,
             }));
