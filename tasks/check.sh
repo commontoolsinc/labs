@@ -10,11 +10,6 @@ if [[ ! " ${DENO_VERSIONS_ALLOWED[@]} " =~ " ${DENO_VERSION} " ]]; then
   exit 1
 fi
 
-# Increase V8 heap limit to handle complex type instantiations across all packages.
-# Without this, checking all packages together causes OOM due to recursive types
-# like StripCell, Opaque, and IKeyable in packages/api.
-export DENO_V8_FLAGS="--max-old-space-size=8192"
-
 # Collect all paths to check. Glob patterns will be expanded by bash.
 FILES_TO_CHECK=()
 
