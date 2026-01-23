@@ -62,6 +62,54 @@ theorem canAccessConf_mono_confAddAltFor (p : Principal) (target alt : Atom) (C 
     have : clauseSat p c0 := h c0 hc0
     simpa [confAddAltFor, htarget] using this
 
+theorem canAccessConf_mono_confDropSingleton (p : Principal) (a : Atom) (C : ConfLabel)
+    (h : canAccessConf p C) : canAccessConf p (confDropSingleton a C) := by
+  refine canAccessConf_of_subset (p := p) (C₁ := confDropSingleton a C) (C₂ := C) ?_ h
+  intro c hc
+  exact (List.mem_filter.1 hc).1
+
+theorem canAccessConf_mono_exchangeAddAltIf (p : Principal) (needInteg : List Atom)
+    (target alt : Atom) (boundary : IntegLabel) (ℓ : Label)
+    (h : canAccess p ℓ) : canAccess p (exchangeAddAltIf needInteg target alt boundary ℓ) := by
+  classical
+  let avail := availIntegrity ℓ boundary
+  cases hNeed : hasAllB needInteg avail with
+  | false =>
+    simpa [exchangeAddAltIf, avail, hNeed] using h
+  | true =>
+    have : canAccessConf p (confAddAltFor target alt ℓ.conf) :=
+      canAccessConf_mono_confAddAltFor p target alt ℓ.conf h
+    simpa [exchangeAddAltIf, avail, hNeed, canAccess] using this
+
+theorem canAccessConf_mono_exchangeDropSingletonIf (p : Principal) (needInteg : List Atom)
+    (a : Atom) (boundary : IntegLabel) (ℓ : Label)
+    (h : canAccess p ℓ) : canAccess p (exchangeDropSingletonIf needInteg a boundary ℓ) := by
+  classical
+  let avail := availIntegrity ℓ boundary
+  cases hNeed : hasAllB needInteg avail with
+  | false =>
+    simpa [exchangeDropSingletonIf, avail, hNeed] using h
+  | true =>
+    have : canAccessConf p (confDropSingleton a ℓ.conf) :=
+      canAccessConf_mono_confDropSingleton p a ℓ.conf h
+    simpa [exchangeDropSingletonIf, avail, hNeed, canAccess] using this
+
+theorem canAccessConf_mono_exchangeSpaceReader (p : Principal) (acting : String)
+    (boundary : IntegLabel) (ℓ : Label)
+    (h : canAccess p ℓ) : canAccess p (exchangeSpaceReader acting boundary ℓ) := by
+  classical
+  unfold canAccess at h ⊢
+  intro c hc
+  rcases List.mem_map.1 hc with ⟨c0, hc0, rfl⟩
+  have hClause : clauseSat p c0 := h c0 hc0
+  cases hRole : clauseHasSpaceReaderB acting (availIntegrity ℓ boundary) c0 with
+  | false =>
+    simpa [exchangeSpaceReader, availIntegrity, hRole] using hClause
+  | true =>
+    have : clauseSat p (clauseInsert (.user acting) c0) :=
+      clauseSat_mono_clauseInsert p (.user acting) c0 hClause
+    simpa [exchangeSpaceReader, availIntegrity, hRole] using this
+
 end Exchange
 end Proofs
 
