@@ -23,7 +23,7 @@ export type StorableDatum =
   | StorableObject;
 
 /** An array of storable data. */
-export interface StorableArray extends Array<StorableDatum> {}
+export interface StorableArray extends ArrayLike<StorableDatum> {}
 
 /** An object/record of storable data. */
 export interface StorableObject extends Record<string, StorableDatum> {}
