@@ -1,6 +1,5 @@
 /// <cts-enable />
 import {
-  action,
   computed,
   equals,
   generateObject,

@@ -31,7 +31,6 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { formatTransactionSummary } from "../storage/transaction-summary.ts";
 import {
   createLLMFriendlyLink,
-  encodeJsonPointer,
   matchLLMFriendlyLink,
   parseLink,
   parseLLMFriendlyLink,

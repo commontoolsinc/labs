@@ -60,7 +60,6 @@ import {
 import { toURI } from "./uri-utils.ts";
 import { createRef } from "./create-ref.ts";
 import {
-  type LegacyJSONCellLink,
   LINK_V1_TAG,
   type SigilLink,
   type SigilWriteRedirectLink,
