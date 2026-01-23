@@ -1,7 +1,7 @@
 import { isRecord } from "@commontools/utils/types";
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { arrayEqual } from "./path-utils.ts";
-import type { JSONValue } from "./builder/types.ts";
+import type { StorableValue } from "./interface.ts";
 import type { Action, SpaceAndURI } from "./scheduler.ts";
 import type {
   IMemorySpaceAddress,
@@ -12,7 +12,7 @@ export type SortedAndCompactPaths = Array<
   readonly MemoryAddressPathComponent[]
 >;
 
-type Keyable = Record<MemoryAddressPathComponent, JSONValue | undefined>;
+type Keyable = Record<MemoryAddressPathComponent, StorableValue>;
 
 /**
  * Sorts and compactifies the paths.
@@ -92,8 +92,8 @@ export function addressesToPathByEntity(
  */
 export function determineTriggeredActions(
   dependencies: Map<Action, SortedAndCompactPaths>,
-  before: JSONValue | undefined,
-  after: JSONValue | undefined,
+  before: StorableValue,
+  after: StorableValue,
   startPath: readonly MemoryAddressPathComponent[] = [],
 ): Action[] {
   const triggeredActions: Action[] = [];
@@ -124,8 +124,8 @@ export function determineTriggeredActions(
   let currentPath: readonly MemoryAddressPathComponent[] = [];
 
   // *Values: An array of data values along currentPath
-  const beforeValues: (JSONValue | undefined)[] = [before];
-  const afterValues: (JSONValue | undefined)[] = [after];
+  const beforeValues: StorableValue[] = [before];
+  const afterValues: StorableValue[] = [after];
 
   // *LastObject: Last key-able object along currentPath
   let beforeLastObject = isRecord(before) ? 0 : -1;
