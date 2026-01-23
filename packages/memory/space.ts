@@ -58,7 +58,7 @@ import { SelectAllString } from "./schema.ts";
 import * as Error from "./error.ts";
 import { selectSchema, type SelectSchemaResult } from "./space-schema.ts";
 export type { SelectSchemaResult } from "./space-schema.ts";
-import { JSONValue } from "@commontools/runner";
+import { JSONValue, StorableValue } from "./interface.ts";
 import { isObject } from "../utils/src/types.ts";
 export type * from "./interface.ts";
 
@@ -735,7 +735,7 @@ export const selectFact = function <Space extends MemorySpace>(
  */
 const importDatum = <Space extends MemorySpace>(
   session: Session<Space>,
-  datum: JSONValue | undefined,
+  datum: StorableValue,
 ): string => {
   if (datum === undefined) {
     return "undefined";
