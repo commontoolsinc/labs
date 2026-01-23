@@ -1313,7 +1313,7 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
                             ),
                           }}
                         >
-                          {flight.status.toUpperCase()}
+                          {(flight.status || "scheduled").toUpperCase()}
                         </span>
                       </div>
                       <span
