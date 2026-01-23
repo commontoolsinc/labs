@@ -693,11 +693,36 @@ const enrichedContext = {
 2. ✅ **Phase 2.3**: Exported `learned` cell from home.tsx
 3. **Test**: Favorite items → facts appear in learned section
 
-### Sprint 4: Integration
+### Sprint 4: Integration ✅ COMPLETE
 
-1. **Phase 4.1**: Pass profile to suggestion.tsx
-2. **Phase 4.2**: Integrate profile into wish fulfillment
-3. **Test**: Suggestions reflect learned preferences
+1. ✅ **Phase 4.1**: Pass profile to suggestion.tsx
+   - Added `wish<LearnedSection>({ query: "#learned" })` to fetch user data
+   - Built `profileContext` computed that formats facts/preferences/personas
+   - Added profile context to LLM system prompt
+2. ✅ **Phase 4.2**: Added `#learned` wish target in `packages/runner/src/builtins/wish.ts`
+3. ✅ **Phase 4.3**: Fixed cross-space reads for journal content
+   - Issue: LLM couldn't read favorited charm content (different space)
+   - Solution: Extended link format to include space DID for cross-space cells
+   - Files modified: `link-types.ts`, `llm-dialog.ts`
+4. **Test**: Suggestions reflect learned preferences (pending manual verification)
+
+### Sprint 4.3: Cross-Space Read Support ✅ COMPLETE
+
+**Problem**: When favoriting charms from user's charm space, the narrative
+generation LLM (running in home space) couldn't read the charm's content because
+the serialized link didn't include the source space DID.
+
+**Solution**: Extended the LLM-friendly link format to support cross-space references:
+- Standard (same space): `/of:bafyabc123/path`
+- Cross-space: `/@did:key:z6Mk.../of:bafyabc123/path`
+
+**Changes**:
+- `packages/runner/src/link-types.ts`:
+  - `parseLLMFriendlyLink`: Extract embedded space DID from `/@did:...` prefix
+  - `createLLMFriendlyLink`: Include space DID when context space differs
+- `packages/runner/src/builtins/llm-dialog.ts`:
+  - `traverseAndSerialize`: Added `contextSpace` parameter
+  - Updated all call sites to pass space context for proper serialization
 
 ---
 
