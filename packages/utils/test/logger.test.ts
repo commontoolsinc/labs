@@ -9,7 +9,6 @@ import {
   LOG_COLORS,
   resetAllLoggerCounts,
   resetAllTimingStats,
-  type TimingStats,
 } from "../src/logger.ts";
 
 describe("logger", () => {
@@ -1616,10 +1615,9 @@ describe("logger", () => {
 
       it("should not include loggers with no timing data", () => {
         const loggerWithTiming = getLogger("timing-breakdown-has-data");
-        const loggerNoTiming = getLogger("timing-breakdown-no-data");
+        getLogger("timing-breakdown-no-data"); // Create logger without timing data
 
         loggerWithTiming.time(0, 10, "op");
-        // loggerNoTiming has no timing data
 
         const breakdown = getTimingStatsBreakdown();
 

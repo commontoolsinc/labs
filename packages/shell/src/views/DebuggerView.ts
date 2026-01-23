@@ -4,6 +4,7 @@ import { ResizableDrawerController } from "../lib/resizable-drawer-controller.ts
 import type {
   LoggerMetadata,
   RuntimeTelemetryMarkerResult,
+  TimingStats,
 } from "@commontools/runtime-client";
 import { isRecord } from "@commontools/utils/types";
 import type { DebuggerController } from "../lib/debugger-controller.ts";
@@ -779,6 +780,92 @@ export class XDebuggerView extends LitElement {
     .delta.negative {
       color: #3b82f6;
     }
+
+    /* Timing histogram styles */
+    .timing-histogram {
+      margin-top: 0.5rem;
+      padding: 0.5rem;
+      background-color: #0f172a;
+      border-radius: 0.25rem;
+    }
+
+    .timing-key-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.25rem 0;
+      font-size: 0.6875rem;
+      font-family: monospace;
+    }
+
+    .timing-key-name {
+      min-width: 8rem;
+      color: #cbd5e1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .histogram-bar-container {
+      flex: 1;
+      position: relative;
+      height: 1.25rem;
+      background-color: #1e293b;
+      border-radius: 0.25rem;
+      overflow: hidden;
+    }
+
+    .histogram-bar {
+      position: absolute;
+      height: 100%;
+      display: flex;
+      align-items: center;
+    }
+
+    .histogram-segment {
+      height: 100%;
+    }
+
+    .histogram-min {
+      background-color: #3b82f6;
+      opacity: 0.3;
+    }
+
+    .histogram-p50 {
+      background-color: #3b82f6;
+      opacity: 0.6;
+    }
+
+    .histogram-p95 {
+      background-color: #3b82f6;
+      opacity: 0.9;
+    }
+
+    .histogram-max {
+      background-color: #ef4444;
+      opacity: 0.7;
+    }
+
+    .timing-stats-text {
+      display: flex;
+      gap: 0.5rem;
+      font-size: 0.625rem;
+      color: #64748b;
+      white-space: nowrap;
+    }
+
+    .stat-item {
+      display: flex;
+      gap: 0.125rem;
+    }
+
+    .stat-label {
+      opacity: 0.7;
+    }
+
+    .stat-value {
+      color: #94a3b8;
+    }
   `;
 
   @property({ type: Boolean })
@@ -806,6 +893,16 @@ export class XDebuggerView extends LitElement {
 
   @state()
   private workerLoggerMetadata: LoggerMetadata | null = null;
+
+  @state()
+  private loggerTimingSample:
+    | Record<string, Record<string, TimingStats>>
+    | null = null;
+
+  @state()
+  private workerLoggerTiming:
+    | Record<string, Record<string, TimingStats>>
+    | null = null;
 
   @state()
   private expandedLoggers = new Set<string>();
@@ -1388,22 +1485,20 @@ export class XDebuggerView extends LitElement {
     return typeof total === "number" ? total : 0;
   }
 
-  private async getWorkerLoggerBreakdown(): Promise<
-    Record<
-      string,
-      LoggerBreakdown | number
-    > | null
-  > {
+  private async getWorkerLoggerBreakdown(): Promise<{
+    counts: Record<string, LoggerBreakdown | number> | null;
+    timing: Record<string, Record<string, TimingStats>> | null;
+  }> {
     const runtime = this.debuggerController?.getRuntime();
-    if (!runtime) return null;
+    if (!runtime) return { counts: null, timing: null };
     const rt = runtime.runtime();
-    if (!rt) return null;
+    if (!rt) return { counts: null, timing: null };
     try {
       const result = await rt.getLoggerCounts();
       this.workerLoggerMetadata = result.metadata;
-      return result.counts;
+      return { counts: result.counts, timing: result.timing };
     } catch {
-      return null;
+      return { counts: null, timing: null };
     }
   }
 
@@ -1473,16 +1568,76 @@ export class XDebuggerView extends LitElement {
     return merged;
   }
 
+  private getLoggerTiming(): Record<string, Record<string, TimingStats>> {
+    const global = globalThis as unknown as {
+      commontools?: {
+        getTimingStatsBreakdown?: () => Record<
+          string,
+          Record<string, TimingStats>
+        >;
+      };
+    };
+    return global.commontools?.getTimingStatsBreakdown?.() ?? {};
+  }
+
+  private mergeLoggerTiming(
+    main: Record<string, Record<string, TimingStats>>,
+    worker: Record<string, Record<string, TimingStats>> | null,
+  ): Record<string, Record<string, TimingStats>> {
+    if (!worker) return main;
+
+    const merged: Record<string, Record<string, TimingStats>> = { ...main };
+
+    for (const [loggerName, workerKeys] of Object.entries(worker)) {
+      if (!merged[loggerName]) {
+        merged[loggerName] = workerKeys;
+      } else {
+        // Merge keys within the same logger
+        merged[loggerName] = { ...merged[loggerName], ...workerKeys };
+      }
+    }
+
+    return merged;
+  }
+
   private async sampleLoggerCounts(): Promise<void> {
     const mainCounts = this.getLoggerBreakdown();
-    const workerCounts = await this.getWorkerLoggerBreakdown();
-    this.loggerSample = this.mergeLoggerBreakdowns(mainCounts, workerCounts);
+    const workerResult = await this.getWorkerLoggerBreakdown();
+    this.loggerSample = this.mergeLoggerBreakdowns(
+      mainCounts,
+      workerResult.counts,
+    );
+
+    // Merge timing data
+    const mainTiming = this.getLoggerTiming();
+    this.loggerTimingSample = this.mergeLoggerTiming(
+      mainTiming,
+      workerResult.timing,
+    );
   }
 
   private async resetBaseline(): Promise<void> {
-    const mainCounts = this.getLoggerBreakdown();
-    const workerCounts = await this.getWorkerLoggerBreakdown();
-    this.loggerBaseline = this.mergeLoggerBreakdowns(mainCounts, workerCounts);
+    // Reset counts baseline
+    const global = globalThis as unknown as {
+      commontools?: {
+        resetAllCountBaselines?: () => void;
+        resetAllTimingBaselines?: () => void;
+      };
+    };
+    global.commontools?.resetAllCountBaselines?.();
+    global.commontools?.resetAllTimingBaselines?.();
+
+    // Reset in worker via IPC
+    const runtime = this.debuggerController?.getRuntime();
+    const rt = runtime?.runtime();
+    if (rt) {
+      await rt.resetLoggerBaselines();
+    }
+
+    // Clear local baseline tracking
+    this.loggerBaseline = null;
+
+    // Sample to get fresh data
     await this.sampleLoggerCounts();
   }
 
@@ -1544,6 +1699,86 @@ export class XDebuggerView extends LitElement {
   private formatDelta(delta: number): string {
     if (delta === 0) return "0";
     return delta > 0 ? `+${delta}` : `${delta}`;
+  }
+
+  private renderTimingHistogram(
+    _loggerName: string,
+    timingData: Record<string, TimingStats>,
+  ): TemplateResult {
+    const keys = Object.keys(timingData).sort((a, b) =>
+      timingData[b].count - timingData[a].count
+    );
+
+    if (keys.length === 0) {
+      return html`
+
+      `;
+    }
+
+    // Find max time across all keys for scaling
+    const maxTime = Math.max(...keys.map((k) => timingData[k].max));
+
+    return html`
+      <div class="timing-histogram">
+        <div
+          style="color: #94a3b8; font-size: 0.625rem; margin-bottom: 0.25rem; font-weight: 600;"
+        >
+          Timing Histograms
+        </div>
+        ${keys.map((key) => {
+          const stats = timingData[key];
+          const scale = (val: number) => (val / maxTime) * 100;
+
+          return html`
+            <div class="timing-key-row">
+              <span class="timing-key-name" title="${key}">${key}</span>
+              <div class="histogram-bar-container">
+                <div class="histogram-bar">
+                  <div
+                    class="histogram-segment histogram-min"
+                    style="width: ${scale(stats.min)}%"
+                  >
+                  </div>
+                  <div
+                    class="histogram-segment histogram-p50"
+                    style="width: ${scale(stats.p50 - stats.min)}%"
+                  >
+                  </div>
+                  <div
+                    class="histogram-segment histogram-p95"
+                    style="width: ${scale(stats.p95 - stats.p50)}%"
+                  >
+                  </div>
+                  <div
+                    class="histogram-segment histogram-max"
+                    style="width: ${scale(stats.max - stats.p95)}%"
+                  >
+                  </div>
+                </div>
+              </div>
+              <div class="timing-stats-text">
+                <span class="stat-item">
+                  <span class="stat-label">n:</span>
+                  <span class="stat-value">${stats.count}</span>
+                </span>
+                <span class="stat-item">
+                  <span class="stat-label">p50:</span>
+                  <span class="stat-value">${stats.p50.toFixed(1)}ms</span>
+                </span>
+                <span class="stat-item">
+                  <span class="stat-label">p95:</span>
+                  <span class="stat-value">${stats.p95.toFixed(1)}ms</span>
+                </span>
+                <span class="stat-item">
+                  <span class="stat-label">max:</span>
+                  <span class="stat-value">${stats.max.toFixed(1)}ms</span>
+                </span>
+              </div>
+            </div>
+          `;
+        })}
+      </div>
+    `;
   }
 
   private renderLoggers(): TemplateResult {
@@ -1716,6 +1951,14 @@ export class XDebuggerView extends LitElement {
                         `;
                       })}
                   </div>
+
+                  ${/* Show timing histogram if available */
+                  this.loggerTimingSample?.[name]
+                    ? this.renderTimingHistogram(
+                      name,
+                      this.loggerTimingSample[name],
+                    )
+                    : ""}
                 `
                 : ""}
             </div>

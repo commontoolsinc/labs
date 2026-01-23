@@ -41,6 +41,7 @@ export enum RequestType {
   SetLoggerLevel = "runtime:setLoggerLevel",
   SetLoggerEnabled = "runtime:setLoggerEnabled",
   SetTelemetryEnabled = "runtime:setTelemetryEnabled",
+  ResetLoggerBaselines = "runtime:resetLoggerBaselines",
 
   // Page operations (main -> worker)
   GetSpaceRootPattern = "pattern:getSpaceRoot",
@@ -191,6 +192,10 @@ export interface SetTelemetryEnabledRequest extends BaseRequest {
   enabled: boolean;
 }
 
+export interface ResetLoggerBaselinesRequest extends BaseRequest {
+  type: RequestType.ResetLoggerBaselines;
+}
+
 // Logger count types for IPC (matches @commontools/utils/logger types)
 export interface LogCounts {
   debug: number;
@@ -216,6 +221,24 @@ export interface LoggerInfo {
 }
 
 export type LoggerMetadata = Record<string, LoggerInfo>;
+
+// Timing stats types for IPC (matches @commontools/utils/logger types)
+export interface TimingStats {
+  count: number; // Total measurements
+  min: number; // Minimum time (ms)
+  max: number; // Maximum time (ms)
+  totalTime: number; // Sum for average calculation
+  average: number; // totalTime / count
+  p50: number; // Median (50th percentile)
+  p95: number; // 95th percentile
+  lastTime: number; // Most recent measurement
+  lastTimestamp: number; // When last recorded
+}
+
+export type LoggerTimingData = Record<
+  string,
+  Record<string, TimingStats>
+>;
 
 export interface PageCreateRequest extends BaseRequest {
   type: RequestType.PageCreate;
@@ -284,6 +307,7 @@ export type IPCClientRequest =
   | SetLoggerLevelRequest
   | SetLoggerEnabledRequest
   | SetTelemetryEnabledRequest
+  | ResetLoggerBaselinesRequest
   | IdleRequest
   | PageCreateRequest
   | PageGetSpaceDefault
@@ -322,6 +346,7 @@ export interface GraphSnapshotResponse {
 export interface LoggerCountsResponse {
   counts: LoggerCountsData;
   metadata: LoggerMetadata;
+  timing: LoggerTimingData;
 }
 
 export interface CellUpdateNotification {
@@ -421,6 +446,10 @@ export type Commands = {
   };
   [RequestType.SetTelemetryEnabled]: {
     request: SetTelemetryEnabledRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.ResetLoggerBaselines]: {
+    request: ResetLoggerBaselinesRequest;
     response: EmptyResponse;
   };
   // Cell requests

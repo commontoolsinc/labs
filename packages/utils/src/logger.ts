@@ -401,6 +401,13 @@ export class Logger {
   private _lastLoggedAt: number;
   private _timingsByKey: Map<string, TimingDataStore> = new Map();
   private _activeTimers: Map<string, number> = new Map();
+  private _countBaseline: {
+    debug: number;
+    info: number;
+    warn: number;
+    error: number;
+  } | null = null;
+  private _timingBaseline: Map<string, TimingStats> | null = null;
 
   constructor(private moduleName?: string, options?: GetLoggerOptions) {
     // Set initial disabled state from options
@@ -735,6 +742,97 @@ export class Logger {
     this._timingsByKey.clear();
     this._activeTimers.clear();
   }
+
+  // ============================================================
+  // Baseline Methods
+  // ============================================================
+
+  /**
+   * Reset the count baseline to current count values.
+   * After calling this, getCountDeltas() will return counts relative to this baseline.
+   */
+  resetCountBaseline(): void {
+    this._countBaseline = { ...this._counts };
+  }
+
+  /**
+   * Reset the timing baseline to current timing values.
+   * After calling this, getTimingDeltas() will return timing relative to this baseline.
+   */
+  resetTimingBaseline(): void {
+    this._timingBaseline = new Map();
+    for (const [key, store] of this._timingsByKey) {
+      this._timingBaseline.set(key, store.getStats());
+    }
+  }
+
+  /**
+   * Get count deltas since the baseline was set.
+   * If no baseline exists, returns the current counts.
+   */
+  getCountDeltas(): {
+    debug: number;
+    info: number;
+    warn: number;
+    error: number;
+    total: number;
+  } {
+    if (!this._countBaseline) {
+      return { ...this._counts, total: this.getTotal() };
+    }
+    return {
+      debug: this._counts.debug - this._countBaseline.debug,
+      info: this._counts.info - this._countBaseline.info,
+      warn: this._counts.warn - this._countBaseline.warn,
+      error: this._counts.error - this._countBaseline.error,
+      total: this.getTotal() - (
+        this._countBaseline.debug + this._countBaseline.info +
+        this._countBaseline.warn + this._countBaseline.error
+      ),
+    };
+  }
+
+  /**
+   * Get timing deltas since the baseline was set.
+   * If no baseline exists, returns null.
+   * For each key, returns the delta in counts and timing metrics.
+   */
+  getTimingDeltas(): Record<string, TimingStats> | null {
+    if (!this._timingBaseline) return null;
+    const deltas: Record<string, TimingStats> = {};
+    for (const [key, store] of this._timingsByKey) {
+      const current = store.getStats();
+      const baseline = this._timingBaseline.get(key);
+      if (baseline) {
+        deltas[key] = {
+          count: current.count - baseline.count,
+          min: current.min,
+          max: current.max,
+          totalTime: current.totalTime - baseline.totalTime,
+          average: (current.count > baseline.count)
+            ? (current.totalTime - baseline.totalTime) /
+              (current.count - baseline.count)
+            : 0,
+          p50: current.p50,
+          p95: current.p95,
+          lastTime: current.lastTime,
+          lastTimestamp: current.lastTimestamp,
+        };
+      } else {
+        // New key since baseline
+        deltas[key] = current;
+      }
+    }
+    return deltas;
+  }
+
+  /**
+   * Get the total count of all log calls (debug + info + warn + error).
+   */
+  private getTotal(): number {
+    return this._counts.debug + this._counts.info + this._counts.warn +
+      this._counts.error;
+  }
 }
 
 /**
@@ -918,6 +1016,36 @@ export function resetAllTimingStats(): void {
   }
 }
 
+/**
+ * Reset count baseline for all registered loggers.
+ * After calling this, each logger's getCountDeltas() will return counts relative to this baseline.
+ */
+export function resetAllCountBaselines(): void {
+  const global = globalThis as unknown as {
+    commontools?: { logger?: Record<string, Logger> };
+  };
+  if (global.commontools?.logger) {
+    Object.values(global.commontools.logger).forEach((logger) =>
+      logger.resetCountBaseline()
+    );
+  }
+}
+
+/**
+ * Reset timing baseline for all registered loggers.
+ * After calling this, each logger's getTimingDeltas() will return timing relative to this baseline.
+ */
+export function resetAllTimingBaselines(): void {
+  const global = globalThis as unknown as {
+    commontools?: { logger?: Record<string, Logger> };
+  };
+  if (global.commontools?.logger) {
+    Object.values(global.commontools.logger).forEach((logger) =>
+      logger.resetTimingBaseline()
+    );
+  }
+}
+
 // Make helper functions available globally for browser console access
 if (typeof globalThis !== "undefined") {
   const global = globalThis as unknown as {
@@ -928,6 +1056,8 @@ if (typeof globalThis !== "undefined") {
       resetAllLoggerCounts?: typeof resetAllLoggerCounts;
       getTimingStatsBreakdown?: typeof getTimingStatsBreakdown;
       resetAllTimingStats?: typeof resetAllTimingStats;
+      resetAllCountBaselines?: typeof resetAllCountBaselines;
+      resetAllTimingBaselines?: typeof resetAllTimingBaselines;
     };
   };
   if (!global.commontools) {
@@ -938,4 +1068,6 @@ if (typeof globalThis !== "undefined") {
   global.commontools.resetAllLoggerCounts = resetAllLoggerCounts;
   global.commontools.getTimingStatsBreakdown = getTimingStatsBreakdown;
   global.commontools.resetAllTimingStats = resetAllTimingStats;
+  global.commontools.resetAllCountBaselines = resetAllCountBaselines;
+  global.commontools.resetAllTimingBaselines = resetAllTimingBaselines;
 }
