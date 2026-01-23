@@ -283,20 +283,23 @@ function traverseAndSerialize(
     });
   } else {
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map((
-        [key, value],
-      ) => [
-        key,
-        traverseAndSerialize(
-          value,
-          schema !== undefined
-            ? cfc.schemaAtPath(schema, [key], rootSchema)
-            : undefined,
-          rootSchema,
-          seen,
-          contextSpace,
-        ),
-      ]),
+      Object.entries(value as Record<string, unknown>)
+        // Skip $-prefixed properties ($UI, $TYPE, etc.) - these are internal/VDOM
+        .filter(([key]) => !key.startsWith("$"))
+        .map((
+          [key, value],
+        ) => [
+          key,
+          traverseAndSerialize(
+            value,
+            schema !== undefined
+              ? cfc.schemaAtPath(schema, [key], rootSchema)
+              : undefined,
+            rootSchema,
+            seen,
+            contextSpace,
+          ),
+        ]),
     );
   }
 }
