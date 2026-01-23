@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -e
-shopt -s extglob
+shopt -s extglob nullglob
 
 DENO_VERSIONS_ALLOWED=("2.5.2" "2.6.4")
 # This is more portable than parsing `deno --version`
@@ -10,21 +10,19 @@ if [[ ! " ${DENO_VERSIONS_ALLOWED[@]} " =~ " ${DENO_VERSION} " ]]; then
   exit 1
 fi
 
-# Function to check a path (handles globs via eval)
-check_path() {
-  echo "Checking: $1"
-  eval "deno check $1"
-}
+# Increase V8 heap limit to handle complex type instantiations across all packages.
+# Without this, checking all packages together causes OOM due to recursive types
+# like StripCell, Opaque, and IKeyable in packages/api.
+export DENO_V8_FLAGS="--max-old-space-size=8192"
 
-# All paths to check
-PATHS=(
-  "tasks/*.ts"
-  "recipes/[!_]*.ts*"
-  "packages/ui/src/v2/components/*[!outliner]/*.ts*"
+# Collect all paths to check. Glob patterns will be expanded by bash.
+FILES_TO_CHECK=()
+
+# Directory paths (no glob expansion needed)
+DIRS=(
   "packages/api"
   "packages/background-charm-service"
   "packages/charm"
-  "packages/cli/*.ts"
   "packages/cli/test"
   "packages/cli/commands"
   "packages/deno-web-test"
@@ -39,13 +37,10 @@ PATHS=(
   "packages/runtime-client"
   "packages/seeder"
   "packages/shell"
-  "packages/static/*.ts"
   "packages/static/scripts"
   "packages/static/test"
   "packages/toolshed"
   "packages/utils"
-  "packages/patterns/*.ts"
-  "packages/patterns/*.tsx"
   "packages/patterns/battleship"
   "packages/patterns/budget-tracker"
   "packages/patterns/contacts"
@@ -62,19 +57,28 @@ PATHS=(
   "packages/patterns/google/core/integration"
 )
 
-# Check each path separately
-for path in "${PATHS[@]}"; do
-  check_path "$path"
-done
+FILES_TO_CHECK+=("${DIRS[@]}")
 
-# Google patterns are checked individually to avoid TypeScript exhaustion
-# due to their large file sizes
-echo "Checking google patterns individually..."
-for file in packages/patterns/google/core/*.ts packages/patterns/google/core/*.tsx \
-            packages/patterns/google/core/experimental/*.ts packages/patterns/google/core/experimental/*.tsx \
-            packages/patterns/google/extractors/*.ts packages/patterns/google/extractors/*.tsx \
-            packages/patterns/google/WIP/*.ts packages/patterns/google/WIP/*.tsx; do
-  if [[ -f "$file" ]]; then
-    check_path "$file"
-  fi
-done
+# Glob patterns - bash expands these with nullglob set
+FILES_TO_CHECK+=(tasks/*.ts)
+FILES_TO_CHECK+=(recipes/[!_]*.ts*)
+FILES_TO_CHECK+=(packages/ui/src/v2/components/*[!outliner]/*.ts*)
+FILES_TO_CHECK+=(packages/cli/*.ts)
+FILES_TO_CHECK+=(packages/static/*.ts)
+FILES_TO_CHECK+=(packages/patterns/*.ts)
+FILES_TO_CHECK+=(packages/patterns/*.tsx)
+
+# Google patterns (previously checked individually to avoid OOM, now included
+# with increased heap limit)
+FILES_TO_CHECK+=(packages/patterns/google/core/*.ts)
+FILES_TO_CHECK+=(packages/patterns/google/core/*.tsx)
+FILES_TO_CHECK+=(packages/patterns/google/core/experimental/*.ts)
+FILES_TO_CHECK+=(packages/patterns/google/core/experimental/*.tsx)
+FILES_TO_CHECK+=(packages/patterns/google/extractors/*.ts)
+FILES_TO_CHECK+=(packages/patterns/google/extractors/*.tsx)
+FILES_TO_CHECK+=(packages/patterns/google/WIP/*.ts)
+FILES_TO_CHECK+=(packages/patterns/google/WIP/*.tsx)
+
+echo "Type checking ${#FILES_TO_CHECK[@]} paths..."
+deno check "${FILES_TO_CHECK[@]}"
+echo "Type check complete."
