@@ -33,7 +33,8 @@ theorem space_reader_exchange_allows (acting space : String) :
       (Exchange.exchangeSpaceReader acting [Atom.hasRole acting space "reader"] (ℓSpace space)) := by
   classical
   -- Unfold to a single clause and witness `User(acting)`.
-  simp [pUser, ℓSpace, Exchange.exchangeSpaceReader, Exchange.availIntegrity, Exchange.clauseInsert,
+  simp [pUser, ℓSpace, Exchange.exchangeSpaceReader, Exchange.availIntegrity,
+    Exchange.clauseHasSpaceReaderB, Exchange.clauseInsert,
     canAccess, canAccessConf, clauseSat, Principal.satisfies]
 
 /-- Without the required role integrity, exchange does not grant access. -/
@@ -43,6 +44,7 @@ theorem space_reader_exchange_denies_without_role (acting space : String) :
   classical
   -- No role fact means the clause stays `Space(space)`, which `pUser` cannot satisfy.
   simp [pUser, ℓSpace, Exchange.exchangeSpaceReader, Exchange.availIntegrity,
+    Exchange.clauseHasSpaceReaderB,
     canAccess, canAccessConf, clauseSat, Principal.satisfies]
 
 /-- Cross-space links are conjunctive: access requires roles in both spaces. -/
@@ -55,10 +57,13 @@ theorem link_requires_both_spaces (acting A B : String) :
   intro hAB ℓ
   unfold canAccess
   intro hAcc
+  have hBA : B ≠ A := by
+    intro h
+    exact hAB h.symm
   have hMem : ([Atom.space B] : Clause) ∈
       (Exchange.exchangeSpaceReader acting [Atom.hasRole acting A "reader"] ℓ).conf := by
     simp [ℓ, ℓSpace, Exchange.exchangeSpaceReader, Exchange.availIntegrity, Exchange.clauseInsert,
-      Label.joinIntegrity, hAB]
+      Exchange.clauseHasSpaceReaderB, Label.joinIntegrity, hBA]
   have hClause : clauseSat (pUser acting) [Atom.space B] := hAcc [Atom.space B] hMem
   rcases hClause with ⟨a, ha, hs⟩
   have : a = Atom.space B := by
@@ -76,6 +81,7 @@ theorem link_allows_with_roles (acting A B : String) :
   classical
   intro ℓ
   simp [ℓ, pUser, ℓSpace, Exchange.exchangeSpaceReader, Exchange.availIntegrity, Exchange.clauseInsert,
+    Exchange.clauseHasSpaceReaderB,
     canAccess, canAccessConf, clauseSat, Principal.satisfies, Label.joinIntegrity]
 
 /-- Default CNF join yields conjunctive multi-user confidentiality: a single user cannot access. -/
@@ -104,35 +110,39 @@ theorem multiparty_consent_compute_collapses (participants : List String) :
       [[Atom.multiPartyResult participants]] := by
   classical
   intro boundary ℓ
-  have hUser : Exchange.hasUserClauses participants ℓ.conf := by
+  have hUser : Exchange.hasUserClausesB participants ℓ.conf = true := by
+    -- `hasUserClausesB` is a `List.all` check over `participants`.
+    simp [Exchange.hasUserClausesB, List.all_eq_true]
     intro p hp
-    -- By construction, each participant contributes a `User(p)` singleton clause.
     have hIn : ([Atom.user p] : Clause) ∈ participants.map (fun p => ([Atom.user p] : Clause)) :=
       List.mem_map.2 ⟨p, hp, rfl⟩
     simpa [ℓ] using hIn
-  have hConsents : Exchange.hasAllMultiPartyConsents participants boundary := by
+  have hConsents : Exchange.hasAllMultiPartyConsentsB participants boundary = true := by
+    simp [Exchange.hasAllMultiPartyConsentsB, List.all_eq_true]
     intro p hp
-    -- Boundary integrity includes all `MultiPartyConsent` facts.
     have hIn : Atom.multiPartyConsent p participants ∈
         participants.map (fun p => Atom.multiPartyConsent p participants) :=
       List.mem_map.2 ⟨p, hp, rfl⟩
     simpa [boundary] using hIn
-  -- The filter removes all participant `User` clauses; only the `MultiPartyResult` remains.
   have hDrop : Exchange.confDropParticipantUserClauses participants ℓ.conf = [] := by
     apply (List.eq_nil_iff_forall_not_mem).2
     intro c hc
     have hc' := (List.mem_filter.1 hc)
     have hcMem : c ∈ ℓ.conf := hc'.1
-    have hcKeep : decide (¬ Exchange.isParticipantUserClause participants c) = true := hc'.2
-    rcases List.mem_map.1 (by simpa [ℓ] using hcMem) with ⟨p, hp, hpEq⟩
-    have hIs : Exchange.isParticipantUserClause participants c := by
+    have hcKeep : (!Exchange.isParticipantUserClauseB participants c) = true := hc'.2
+    rcases List.mem_map.1 (by simpa [ℓ] using hcMem) with ⟨p, hp, rfl⟩
+    have hIs : Exchange.isParticipantUserClauseB participants [Atom.user p] = true := by
+      apply (List.any_eq_true).2
       refine ⟨p, hp, ?_⟩
-      simp [hpEq]
-    have hNot : ¬ Exchange.isParticipantUserClause participants c :=
-      (Eq.mp (decide_eq_true_eq (p := ¬ Exchange.isParticipantUserClause participants c)) hcKeep)
-    exact hNot hIs
-  have hAll : Exchange.hasAllMultiPartyConsents participants (ℓ.integ ++ boundary) := by
-    simpa [ℓ] using hConsents
+      simp
+    have hIs' : Exchange.isParticipantUserClauseB participants [Atom.user p] = false :=
+      Eq.mp (Bool.not_eq_true' _) hcKeep
+    -- Contradiction: a clause cannot be both a participant `User` clause and not such a clause.
+    rw [hIs] at hIs'
+    cases hIs'
+  have hAll : Exchange.hasAllMultiPartyConsentsB participants (ℓ.integ ++ boundary) = true := by
+    -- `ℓ.integ = []`, so this is the same check as `hConsents`.
+    simpa [Exchange.availIntegrity, ℓ] using hConsents
   simp [Exchange.exchangeMultiPartyConsentCompute, Exchange.availIntegrity, hUser, hAll, hDrop]
 
 /-- Participants can view a multi-party result after view-side exchange. -/
@@ -144,12 +154,8 @@ theorem multiparty_result_view_allows_participant (acting : String) (participant
       (Exchange.exchangeMultiPartyResultView acting participants boundary ℓ) := by
   classical
   intro boundary ℓ
-  have hConsents : Exchange.hasAllMultiPartyConsents participants boundary := by
-    intro p hp
-    have hIn : Atom.multiPartyConsent p participants ∈
-        participants.map (fun p => Atom.multiPartyConsent p participants) :=
-      List.mem_map.2 ⟨p, hp, rfl⟩
-    simpa [boundary] using hIn
+  have hConsents : Exchange.hasAllMultiPartyConsentsB participants boundary = true := by
+    simp [Exchange.hasAllMultiPartyConsentsB, boundary, List.all_eq_true]
   simp [pUser, ℓ, Exchange.exchangeMultiPartyResultView, Exchange.availIntegrity,
     Exchange.clauseInsert, hMem, hConsents,
     canAccess, canAccessConf, clauseSat, Principal.satisfies]
@@ -162,14 +168,8 @@ theorem authority_only_drop_requires_guards (acting : String) :
     ¬ canAccess (pUser acting) (Exchange.exchangeDropSingletonIf need googleAuth ([] : IntegLabel) ℓ) := by
   classical
   intro googleAuth need ℓ
-  have hNo : ¬ Exchange.hasAll need ℓ.integ := by
-    intro hAll
-    have hReq : Atom.integrityTok "AuthorizedRequest" ∈ need := by
-      simp [need]
-    have : Atom.integrityTok "AuthorizedRequest" ∈ ℓ.integ := hAll _ hReq
-    simp [ℓ] at this
   have hEq : Exchange.exchangeDropSingletonIf need googleAuth ([] : IntegLabel) ℓ = ℓ := by
-    simp [Exchange.exchangeDropSingletonIf, Exchange.availIntegrity, hNo]
+    simp [Exchange.exchangeDropSingletonIf, Exchange.hasAllB, Exchange.availIntegrity, ℓ, need]
   unfold canAccess
   intro hAcc
   have hMem : ([googleAuth] : Clause) ∈
@@ -191,12 +191,8 @@ theorem authority_only_drop_allows_with_guards (acting : String) :
     canAccess (pUser acting) (Exchange.exchangeDropSingletonIf need googleAuth boundary ℓ) := by
   classical
   intro googleAuth need boundary ℓ
-  have hNeed : Exchange.hasAll need boundary := by
-    intro a ha
-    simpa [boundary] using ha
-  simp [Exchange.exchangeDropSingletonIf, Exchange.availIntegrity, hNeed,
-    Exchange.confDropSingleton,
-    pUser, ℓ, Principal.satisfies,
+  simp [Exchange.exchangeDropSingletonIf, Exchange.hasAllB, Exchange.availIntegrity,
+    Exchange.confDropSingleton, pUser, ℓ, need, boundary, Principal.satisfies,
     canAccess, canAccessConf, clauseSat]
 
 /-- `GoogleAuth`-style exchange can add an alternative principal to a policy clause. -/
@@ -210,12 +206,9 @@ theorem googleauth_adds_userresource_alternative (acting : String) :
       (Exchange.exchangeAddAltIf need googleAuth userRes boundary ℓ) := by
   classical
   intro googleAuth userRes need boundary ℓ
-  have hNeed : Exchange.hasAll need boundary := by
-    intro a ha
-    simpa [boundary] using ha
-  simp [Exchange.exchangeAddAltIf, Exchange.availIntegrity, hNeed,
+  simp [Exchange.exchangeAddAltIf, Exchange.hasAllB, Exchange.availIntegrity,
     Exchange.confAddAltFor, Exchange.clauseInsert,
-    ℓ, Principal.satisfies,
+    ℓ, need, boundary, Principal.satisfies,
     canAccess, canAccessConf, clauseSat]
 
 /-- Expiration is a confidentiality clause: once expired, access fails. -/
@@ -246,12 +239,9 @@ theorem expires_clause_can_be_dropped_with_guard (u : String) (t : Nat) :
     canAccess p (Exchange.exchangeDropSingletonIf need (Atom.expires t) boundary ℓ) := by
   classical
   intro p ℓ need boundary
-  have hNeed : Exchange.hasAll need boundary := by
-    intro a ha
-    simpa [boundary] using ha
-  simp [Exchange.exchangeDropSingletonIf, Exchange.availIntegrity, hNeed,
+  simp [Exchange.exchangeDropSingletonIf, Exchange.hasAllB, Exchange.availIntegrity,
     Exchange.confDropSingleton,
-    p, ℓ, Principal.satisfies,
+    p, ℓ, need, boundary, Principal.satisfies,
     canAccess, canAccessConf, clauseSat]
 
 end Scenarios

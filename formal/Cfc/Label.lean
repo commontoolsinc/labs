@@ -32,6 +32,11 @@ def bot : Label := { conf := [], integ := [] }
 def joinIntegrity (I₁ I₂ : IntegLabel) : IntegLabel :=
   I₁.filter (fun a => decide (a ∈ I₂))
 
+theorem mem_joinIntegrity (a : Atom) (I₁ I₂ : IntegLabel) :
+    a ∈ joinIntegrity I₁ I₂ ↔ a ∈ I₁ ∧ a ∈ I₂ := by
+  classical
+  simp [joinIntegrity]
+
 def join (ℓ₁ ℓ₂ : Label) : Label :=
   { conf := ℓ₁.conf ++ ℓ₂.conf
     integ := joinIntegrity ℓ₁.integ ℓ₂.integ }
