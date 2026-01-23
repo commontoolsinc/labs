@@ -1,4 +1,5 @@
 import { fromString, refer } from "@commontools/memory/reference";
+import type { StorableDatum } from "@commontools/memory/interface";
 import type {
   CauseString,
   Changes as MemoryChanges,
@@ -286,7 +287,7 @@ class Heap implements SyncPush<Revision<State>> {
 type RevisionArchive = {
   the: The;
   of: Entity;
-  is?: JSONValue;
+  is?: StorableDatum;
   cause?: string;
   since: number;
 };
@@ -543,7 +544,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     }
     const traverse = (
       value: Readonly<any>,
-    ): JSONValue => {
+    ): StorableDatum => {
       if (isRecord(value)) {
         if (Array.isArray(value)) {
           return value.map((val) => traverse(val));
