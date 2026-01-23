@@ -118,19 +118,22 @@ const GenerateObjectResultSchema = {
   required: ["pending"],
 } as const satisfies JSONSchema;
 
+/** Batch interval for partial streaming updates (~15fps). */
+const PARTIAL_BATCH_MS = 66;
+
 /**
  * Creates an updatePartial callback that safely updates the partial cell
  * during streaming. Uses batched updates to reduce transaction overhead
  * while maintaining reactive updates.
  *
- * Updates are batched every 66ms (~15fps) to avoid creating many small
+ * Updates are batched every PARTIAL_BATCH_MS to avoid creating many small
  * transactions during rapid streaming. Each batch waits for the scheduler
  * to be idle, then commits the latest partial text.
  *
  * Returns both the callback and a cleanup function that should be called
  * when streaming completes to clear any pending timers.
  */
-function createUpdatePartialCallback<T>(
+function createUpdatePartialCallback(
   resultCell: Cell<any>,
   runtime: Runtime,
   getCurrentRun: () => number,
@@ -177,12 +180,12 @@ function createUpdatePartialCallback<T>(
           }
           return runtime.editWithRetry((tx) => {
             const partialCell = resultCell.key("partial").withTx(tx);
-            partialCell.set(textToWrite as T);
+            partialCell.set(textToWrite);
           });
         }).catch((e) => {
           console.warn("[LLM] Error writing partial update:", e);
         });
-      }, 66); // ~15fps batching
+      }, PARTIAL_BATCH_MS);
     }
   };
 
