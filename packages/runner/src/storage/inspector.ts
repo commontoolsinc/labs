@@ -1,4 +1,4 @@
-import type { JSONValue } from "../builder/types.ts";
+import type { StorableValue } from "../interface.ts";
 import type {
   AuthorizationError,
   ConflictError,
@@ -88,7 +88,7 @@ export interface Model {
     source: Subscribe | SchemaQuery;
     opened: Time;
     updated?: Time;
-    value: JSONValue | undefined;
+    value: StorableValue;
   }>;
 }
 
@@ -100,7 +100,7 @@ export class Model {
     source: Subscribe | SchemaQuery;
     opened: Time;
     updated?: Time;
-    value: JSONValue | undefined;
+    value: StorableValue;
   }>;
   constructor(
     connection: Status<Result<Connect, ConnectionError>>,
@@ -110,7 +110,7 @@ export class Model {
       source: Subscribe | SchemaQuery;
       opened: Time;
       updated?: Time;
-      value: JSONValue | undefined;
+      value: StorableValue;
     }>,
   ) {
     this.connection = connection;
@@ -194,7 +194,7 @@ export type Connect = {
 export type RawCommand = Variant<{
   send: UCAN<ConsumerCommandInvocation<Protocol>>;
   receive: ProviderCommand<Protocol>;
-  integrate: { url: string; value: JSONValue | undefined };
+  integrate: { url: string; value: StorableValue };
   disconnect: Disconnect;
   connect: Connect;
 }>;
@@ -309,7 +309,7 @@ const receive = (
     case "task/effect":
       return integrate(state, time, {
         url: receipt.of,
-        value: receipt.is as unknown as JSONValue,
+        value: receipt.is as unknown as StorableValue,
       });
     case "task/return":
       return complete(state, time, receipt);
@@ -354,7 +354,7 @@ const complete = (
 const integrate = (
   state: Model,
   time: Time,
-  { url, value }: { url: string; value: JSONValue | undefined },
+  { url, value }: { url: string; value: StorableValue },
 ) => {
   const subscription = state.subscriptions[url];
   if (subscription) {
