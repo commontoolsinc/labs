@@ -11,8 +11,9 @@ import {
 } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import type { JSONObject, JSONSchema, JSONValue } from "./builder/types.ts";
+import type { JSONObject, JSONSchema } from "./builder/types.ts";
 import type {
+  JSONValue,
   OptStorableValue,
   SchemaContext,
   SchemaPathSelector,

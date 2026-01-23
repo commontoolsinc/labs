@@ -3,6 +3,7 @@ import { getLogger } from "@commontools/utils/logger";
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import { vdomSchema } from "./schemas.ts";
 import type {
+  JSONValue,
   StorableDatum,
   StorableValue,
 } from "@commontools/memory/interface";
@@ -13,7 +14,6 @@ import {
   isRecipe,
   isStreamValue,
   type JSONSchema,
-  type JSONValue,
   type Module,
   NAME,
   type NodeFactory,
