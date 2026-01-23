@@ -34,7 +34,7 @@ import BillExtractor, {
   getIdentifierColor,
   processBills,
   type TrackedBill,
-} from "../building-blocks/bill-extractor/index.tsx";
+} from "../core/bill-extractor/index.tsx";
 
 const PGE_GMAIL_QUERY = "from:DoNotReply@billpay.pge.com";
 

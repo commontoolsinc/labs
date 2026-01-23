@@ -31,19 +31,17 @@ import {
   wish,
   Writable,
 } from "commontools";
-import GmailExtractor, {
-  type Email,
-} from "../google/building-blocks/gmail-extractor.tsx";
-import type { Auth } from "../google/building-blocks/util/google-auth-manager.tsx";
+import GmailExtractor, { type Email } from "../google/core/gmail-extractor.tsx";
+import type { Auth } from "../google/core/util/google-auth-manager.tsx";
 import {
   type GmailLabel,
   GmailSendClient,
-} from "../google/building-blocks/util/gmail-send-client.ts";
+} from "../google/core/util/gmail-send-client.ts";
 import {
   createGoogleAuth,
   type ScopeKey,
-} from "../google/building-blocks/util/google-auth-manager.tsx";
-import ProcessingStatus from "../google/building-blocks/processing-status.tsx";
+} from "../google/core/util/google-auth-manager.tsx";
+import ProcessingStatus from "../google/core/processing-status.tsx";
 import Note from "../notes/note.tsx";
 
 // Debug flag for development

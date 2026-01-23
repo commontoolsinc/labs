@@ -19,9 +19,9 @@
  */
 import { computed, ifElse, JSONSchema, NAME, pattern, UI } from "commontools";
 import type { Schema } from "commontools/schema";
-import GmailExtractor from "../building-blocks/gmail-extractor.tsx";
-import type { Auth } from "../building-blocks/gmail-extractor.tsx";
-import ProcessingStatus from "../building-blocks/processing-status.tsx";
+import GmailExtractor from "../core/gmail-extractor.tsx";
+import type { Auth } from "../core/gmail-extractor.tsx";
+import ProcessingStatus from "../core/processing-status.tsx";
 
 // Email type imported from GmailExtractor
 

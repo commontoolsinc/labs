@@ -34,7 +34,7 @@ import BillExtractor, {
   getIdentifierColor,
   processBills,
   type TrackedBill,
-} from "../building-blocks/bill-extractor/index.tsx";
+} from "../core/bill-extractor/index.tsx";
 
 const CHASE_GMAIL_QUERY =
   "from:no-reply@alertsp.chase.com OR from:chase@email.chase.com OR from:no.reply.alerts@chase.com";

@@ -9,12 +9,12 @@
  * which eliminates the 3x redundancy of interface + input type + schema.
  */
 import { computed, Default, NAME, pattern, UI } from "commontools";
-import GmailAgenticSearch from "../building-blocks/experimental/gmail-agentic-search.tsx";
+import GmailAgenticSearch from "../core/experimental/gmail-agentic-search.tsx";
 import {
   defineItemSchema,
   InferItem,
   listTool,
-} from "../building-blocks/util/agentic-tools.ts";
+} from "../core/util/agentic-tools.ts";
 
 // ============================================================================
 // SUGGESTED QUERIES

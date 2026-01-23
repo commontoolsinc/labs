@@ -20,12 +20,12 @@ import {
 } from "commontools";
 import GmailAgenticSearch, {
   type SearchProgress,
-} from "../building-blocks/experimental/gmail-agentic-search.tsx";
+} from "../core/experimental/gmail-agentic-search.tsx";
 import {
   defineItemSchema,
   InferItem,
   listTool,
-} from "../building-blocks/util/agentic-tools.ts";
+} from "../core/util/agentic-tools.ts";
 
 // Scan mode: "full" = comprehensive all-time search, "recent" = last 7 days only
 type ScanMode = "full" | "recent";
