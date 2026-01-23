@@ -13,11 +13,7 @@ import {
 } from "commontools";
 import FavoritesManager from "./favorites-manager.tsx";
 import Journal from "./journal.tsx";
-import {
-  EMPTY_LEARNED,
-  type Fact,
-  type LearnedSection,
-} from "../profile.tsx";
+import { EMPTY_LEARNED, type Fact, type LearnedSection } from "../profile.tsx";
 
 // Types from favorites-manager.tsx and journal.tsx
 type Favorite = {
