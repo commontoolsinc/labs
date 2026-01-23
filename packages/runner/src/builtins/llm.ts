@@ -138,8 +138,10 @@ function createUpdatePartialCallback<T>(
 ): { callback: (text: string) => void; cleanup: () => void } {
   let pendingText: string | null = null;
   let batchTimer: ReturnType<typeof setTimeout> | null = null;
+  let completed = false;
 
   const cleanup = () => {
+    completed = true;
     if (batchTimer) {
       clearTimeout(batchTimer);
       batchTimer = null;
@@ -148,7 +150,7 @@ function createUpdatePartialCallback<T>(
   };
 
   const callback = (text: string) => {
-    if (thisRun !== getCurrentRun()) {
+    if (completed || thisRun !== getCurrentRun()) {
       cleanup();
       return;
     }
@@ -164,19 +166,21 @@ function createUpdatePartialCallback<T>(
         pendingText = null;
 
         // Check run is still valid before committing
-        if (textToWrite === null || thisRun !== getCurrentRun()) {
+        if (textToWrite === null || completed || thisRun !== getCurrentRun()) {
           return;
         }
 
         // Wait for scheduler to be idle, then commit the batched update
         runtime.idle().then(() => {
-          if (thisRun !== getCurrentRun()) {
+          if (completed || thisRun !== getCurrentRun()) {
             return;
           }
           return runtime.editWithRetry((tx) => {
             const partialCell = resultCell.key("partial").withTx(tx);
             partialCell.set(textToWrite as T);
           });
+        }).catch((e) => {
+          console.warn("[LLM] Error writing partial update:", e);
         });
       }, 66); // ~15fps batching
     }
