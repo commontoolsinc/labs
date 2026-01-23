@@ -3,7 +3,8 @@ import { getLogger } from "@commontools/utils/logger";
 import { isObject, isRecord } from "@commontools/utils/types";
 import { JSONSchemaMutable } from "@commontools/runner";
 import { ContextualFlowControl } from "./cfc.ts";
-import { type JSONSchema, type JSONValue } from "./builder/types.ts";
+import { type JSONSchema } from "./builder/types.ts";
+import { type StorableDatum } from "@commontools/memory/interface";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
@@ -284,7 +285,7 @@ export function processDefaultValue(
 
 function mergeDefaults(
   schema: JSONSchema | undefined,
-  defaultValue: Readonly<JSONValue>,
+  defaultValue: Readonly<StorableDatum>,
 ): JSONSchema {
   const result: JSONSchemaMutable = {
     ...(isObject(schema) ? structuredClone(schema) as JSONSchemaMutable : {}),
@@ -299,7 +300,7 @@ function mergeDefaults(
     result.default = {
       ...result.default,
       ...defaultValue,
-    } as Readonly<JSONValue>;
+    } as Readonly<StorableDatum>;
   } else result.default = defaultValue;
 
   return result;
