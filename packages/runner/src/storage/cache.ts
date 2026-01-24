@@ -7,7 +7,6 @@ import type {
   Entity,
   Fact,
   FactAddress,
-  JSONValue,
   MemorySpace,
   MIME,
   Protocol,
@@ -1771,7 +1770,7 @@ export class Provider implements IStorageProvider {
   subscription: IStorageSubscription;
   spaceIdentity?: Signer;
 
-  subscribers: Map<string, Set<(value: StorageValue<JSONValue>) => void>> =
+  subscribers: Map<string, Set<(value: StorageValue<StorableDatum>) => void>> =
     new Map();
   // Tracks server-side subscriptions so we can re-establish them after reconnection
   // These promises will sometimes be pending, since we also use this to avoid
