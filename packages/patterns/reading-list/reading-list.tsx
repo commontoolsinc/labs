@@ -123,55 +123,55 @@ export default pattern<Input, Output>(({ items }) => {
         <ct-vscroll flex showScrollbar fadeEdges>
           <ct-vstack gap="2" style="padding: 1rem;">
             {items.map((item) => {
-              // Use computed() to check visibility - callbacks inside .map() are allowed
-              const isVisible = computed(() => {
+              // Use computed() to conditionally render based on filter status
+              return computed(() => {
                 const status = filterStatus.get();
-                return status === "all" || item.status === status;
-              });
+                const isVisible = status === "all" || item.status === status;
 
-              return isVisible
-                ? (
-                  <ct-card>
-                    <ct-hstack gap="2" align="center">
-                      <span style="font-size: 1.5rem;">
-                        {getTypeEmoji(item.type)}
-                      </span>
-                      <ct-vstack gap="0" style="flex: 1;">
-                        <span style="font-weight: 500;">
-                          {item.title || "(untitled)"}
+                return isVisible
+                  ? (
+                    <ct-card>
+                      <ct-hstack gap="2" align="center">
+                        <span style="font-size: 1.5rem;">
+                          {getTypeEmoji(item.type)}
                         </span>
-                        {item.author && (
-                          <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
-                            by {item.author}
+                        <ct-vstack gap="0" style="flex: 1;">
+                          <span style="font-weight: 500;">
+                            {item.title || "(untitled)"}
                           </span>
-                        )}
-                        <ct-hstack gap="2" align="center">
-                          <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
-                            {item.status}
-                          </span>
-                          {renderStars(item.rating) && (
-                            <span style="font-size: 0.75rem; color: var(--ct-color-warning-500);">
-                              {renderStars(item.rating)}
+                          {item.author && (
+                            <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
+                              by {item.author}
                             </span>
                           )}
-                        </ct-hstack>
-                      </ct-vstack>
-                      <ct-button
-                        variant="secondary"
-                        onClick={() => navigateTo(item)}
-                      >
-                        Edit
-                      </ct-button>
-                      <ct-button
-                        variant="ghost"
-                        onClick={() => removeItem.send({ item })}
-                      >
-                        ×
-                      </ct-button>
-                    </ct-hstack>
-                  </ct-card>
-                )
-                : null;
+                          <ct-hstack gap="2" align="center">
+                            <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
+                              {item.status}
+                            </span>
+                            {renderStars(item.rating) && (
+                              <span style="font-size: 0.75rem; color: var(--ct-color-warning-500);">
+                                {renderStars(item.rating)}
+                              </span>
+                            )}
+                          </ct-hstack>
+                        </ct-vstack>
+                        <ct-button
+                          variant="secondary"
+                          onClick={() => navigateTo(item)}
+                        >
+                          Edit
+                        </ct-button>
+                        <ct-button
+                          variant="ghost"
+                          onClick={() => removeItem.send({ item })}
+                        >
+                          ×
+                        </ct-button>
+                      </ct-hstack>
+                    </ct-card>
+                  )
+                  : null;
+              });
             })}
 
             {hasNoFilteredItems
