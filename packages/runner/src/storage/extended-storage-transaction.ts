@@ -1,7 +1,6 @@
 import { isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import type {
-  JSONValue,
   StorableDatum,
   StorableObject,
   StorableValue,
@@ -80,7 +79,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   readOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): JSONValue | undefined {
+  ): StorableValue {
     const readResult = this.tx.read(address, options);
     logResult("readOrThrow, initial", readResult, address, options);
     if (
@@ -100,7 +99,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   readValueOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): JSONValue | undefined {
+  ): StorableValue {
     return this.readOrThrow(
       { ...address, path: ["value", ...address.path] },
       options,
@@ -316,7 +315,7 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   readOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): JSONValue | undefined {
+  ): StorableValue {
     return this.wrapped.readOrThrow(
       address,
       this.transformReadOptions(options),
@@ -326,7 +325,7 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   readValueOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): JSONValue | undefined {
+  ): StorableValue {
     return this.wrapped.readValueOrThrow(
       address,
       this.transformReadOptions(options),

@@ -556,7 +556,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   readOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): JSONValue | undefined;
+  ): StorableValue;
 
   /**
    * Reads a value from a (local) memory address and throws on error, except for
@@ -570,7 +570,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   readValueOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): JSONValue | undefined;
+  ): StorableValue;
 
   /**
    * Writes a value into a storage at a given address, including creating parent
@@ -802,7 +802,7 @@ export interface IMemoryAddress {
    */
   type: MediaType;
   /**
-   * Path to the {@link JSONValue} being reference by this address. It is path
+   * Path to the {@link StorableDatum} being reference by this address. It is path
    * within the `is` field of the fact in memory protocol.
    */
   path: readonly MemoryAddressPathComponent[];
@@ -966,7 +966,7 @@ export interface ITypeMismatchError extends IStorageError {
  */
 export interface IAttestation {
   readonly address: IMemoryAddress;
-  readonly value?: JSONValue;
+  readonly value?: StorableDatum;
 }
 
 // Re-export transaction wrapper utilities from implementation
