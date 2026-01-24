@@ -223,22 +223,9 @@ export interface LoggerInfo {
 export type LoggerMetadata = Record<string, LoggerInfo>;
 
 // Timing stats types for IPC (matches @commontools/utils/logger types)
-export interface TimingHistogramBucket {
-  // Shared bounds (from count-quantiles)
-  lowerBound: number; // Lower bound of bucket (ms)
-  upperBound: number; // Upper bound of bucket (ms)
-
-  // Count-quantile data (buckets by sample percentile)
-  countQuantile: {
-    count: number; // Number of samples (~10% of total)
-    totalTime: number; // Total time for these samples
-  };
-
-  // Time-quantile data (buckets by cumulative time percentile)
-  timeQuantile: {
-    count: number; // Number of samples in this time bucket
-    totalTime: number; // Total time (~10% of total time)
-  };
+export interface CDFPoint {
+  x: number; // Latency in ms
+  y: number; // Cumulative probability (0-1)
 }
 
 export interface TimingStats {
@@ -251,7 +238,8 @@ export interface TimingStats {
   p95: number; // 95th percentile
   lastTime: number; // Most recent measurement
   lastTimestamp: number; // When last recorded
-  histogram: TimingHistogramBucket[]; // 10 buckets, median at boundary 5/6
+  cdf: CDFPoint[]; // CDF of all samples since start
+  cdfSinceBaseline: CDFPoint[] | null; // CDF of samples since baseline reset
 }
 
 export type LoggerTimingData = Record<

@@ -174,25 +174,11 @@ export type LogMessage = unknown | (() => unknown);
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 /**
- * Histogram bucket data for timing visualization.
- * Contains data for both count-quantile and time-quantile bucketing.
+ * Point in a CDF (Cumulative Distribution Function)
  */
-export interface TimingHistogramBucket {
-  // Shared bounds (from count-quantiles)
-  lowerBound: number; // Lower bound of bucket (ms)
-  upperBound: number; // Upper bound of bucket (ms)
-
-  // Count-quantile data (buckets by sample percentile)
-  countQuantile: {
-    count: number; // Number of samples (~10% of total)
-    totalTime: number; // Total time for these samples
-  };
-
-  // Time-quantile data (buckets by cumulative time percentile)
-  timeQuantile: {
-    count: number; // Number of samples in this time bucket
-    totalTime: number; // Total time (~10% of total time)
-  };
+export interface CDFPoint {
+  x: number; // Latency in ms
+  y: number; // Cumulative probability (0-1)
 }
 
 /**
@@ -208,7 +194,8 @@ export interface TimingStats {
   p95: number; // 95th percentile
   lastTime: number; // Most recent measurement
   lastTimestamp: number; // When last recorded
-  histogram: TimingHistogramBucket[]; // 10 buckets, median at boundary 5/6
+  cdf: CDFPoint[]; // CDF of all samples since start
+  cdfSinceBaseline: CDFPoint[] | null; // CDF of samples since baseline reset
 }
 
 /**
@@ -230,6 +217,9 @@ class TimingDataStore {
   private lastTime = 0;
   private lastTimestamp = 0;
   private samples: number[] = [];
+  private baselineCount = 0;
+  private deltaSamples: number[] = []; // Reservoir for samples since baseline
+  private deltaCount = 0; // Count of samples since baseline
 
   /**
    * Record a timing measurement.
@@ -244,7 +234,7 @@ class TimingDataStore {
     if (elapsed < this.min) this.min = elapsed;
     if (elapsed > this.max) this.max = elapsed;
 
-    // Reservoir sampling (Algorithm R)
+    // Reservoir sampling (Algorithm R) for full history
     if (this.samples.length < TIMING_RESERVOIR_SIZE) {
       this.samples.push(elapsed);
     } else {
@@ -253,6 +243,29 @@ class TimingDataStore {
         this.samples[j] = elapsed;
       }
     }
+
+    // Also record to delta reservoir if baseline is set
+    if (this.baselineCount > 0) {
+      this.deltaCount++;
+      if (this.deltaSamples.length < TIMING_RESERVOIR_SIZE) {
+        this.deltaSamples.push(elapsed);
+      } else {
+        const j = Math.floor(Math.random() * this.deltaCount);
+        if (j < TIMING_RESERVOIR_SIZE) {
+          this.deltaSamples[j] = elapsed;
+        }
+      }
+    }
+  }
+
+  /**
+   * Set baseline for delta tracking.
+   * After calling this, new samples will be tracked separately for delta CDF.
+   */
+  setBaseline(): void {
+    this.baselineCount = this.count;
+    this.deltaSamples = [];
+    this.deltaCount = 0;
   }
 
   /**
@@ -270,7 +283,8 @@ class TimingDataStore {
         p95: 0,
         lastTime: 0,
         lastTimestamp: 0,
-        histogram: [],
+        cdf: [],
+        cdfSinceBaseline: null,
       };
     }
 
@@ -280,8 +294,15 @@ class TimingDataStore {
     const p95Index = Math.floor(sorted.length * 0.95);
     const median = sorted[p50Index] ?? 0;
 
-    // Calculate 10 histogram buckets with median at 5/6 boundary
-    const histogram = this.calculateHistogram(sorted, median);
+    // Calculate CDF of all samples
+    const cdf = this.calculateCDF(sorted);
+
+    // Calculate CDF of samples since baseline (if baseline exists and has data)
+    let cdfSinceBaseline: CDFPoint[] | null = null;
+    if (this.deltaCount > 0 && this.deltaSamples.length > 0) {
+      const deltaSorted = [...this.deltaSamples].sort((a, b) => a - b);
+      cdfSinceBaseline = this.calculateCDF(deltaSorted);
+    }
 
     return {
       count: this.count,
@@ -293,77 +314,22 @@ class TimingDataStore {
       p95: sorted[p95Index] ?? sorted[sorted.length - 1] ?? 0,
       lastTime: this.lastTime,
       lastTimestamp: this.lastTimestamp,
-      histogram,
+      cdf,
+      cdfSinceBaseline,
     };
   }
 
   /**
-   * Calculate 10 histogram buckets using dual quantile schemes:
-   * - Count-quantiles: buckets by sample percentile (each ~10% of samples)
-   * - Time-quantiles: buckets by cumulative time percentile (each ~10% of total time)
+   * Calculate CDF (Cumulative Distribution Function) from sorted samples.
+   * Returns array of points where each point (x, y) means "y fraction of samples <= x ms"
    */
-  private calculateHistogram(
-    sorted: number[],
-    _median: number,
-  ): TimingHistogramBucket[] {
+  private calculateCDF(sorted: number[]): CDFPoint[] {
     if (sorted.length === 0) return [];
 
-    const buckets: TimingHistogramBucket[] = [];
-    const totalSamples = sorted.length;
-    const totalTime = sorted.reduce((sum, val) => sum + val, 0);
-    const samplesPerBucket = totalSamples / 10;
-
-    // Calculate count-quantile buckets (by sample percentile)
-    for (let i = 0; i < 10; i++) {
-      const startIdx = Math.floor(i * samplesPerBucket);
-      const endIdx = Math.min(
-        Math.floor((i + 1) * samplesPerBucket),
-        totalSamples,
-      );
-
-      // Handle edge case for last bucket
-      const actualEndIdx = i === 9 ? totalSamples : endIdx;
-
-      const bucketSamples = sorted.slice(startIdx, actualEndIdx);
-      const lowerBound = bucketSamples[0] ?? 0;
-      const upperBound = bucketSamples[bucketSamples.length - 1] ?? 0;
-
-      buckets.push({
-        lowerBound,
-        upperBound,
-        countQuantile: {
-          count: bucketSamples.length,
-          totalTime: bucketSamples.reduce((sum, val) => sum + val, 0),
-        },
-        timeQuantile: {
-          count: 0,
-          totalTime: 0,
-        },
-      });
-    }
-
-    // Calculate time-quantile buckets (by cumulative time percentile)
-    let cumulativeTime = 0;
-    let currentBucket = 0;
-    const timePerBucket = totalTime / 10;
-
-    for (const sample of sorted) {
-      // Find which time-quantile bucket this sample belongs to
-      const targetTime = (currentBucket + 1) * timePerBucket;
-
-      // Add sample to current bucket
-      buckets[currentBucket].timeQuantile.count++;
-      buckets[currentBucket].timeQuantile.totalTime += sample;
-      cumulativeTime += sample;
-
-      // Move to next bucket if we've exceeded the time threshold
-      // (but not on the last bucket)
-      if (cumulativeTime >= targetTime && currentBucket < 9) {
-        currentBucket++;
-      }
-    }
-
-    return buckets;
+    return sorted.map((x, i) => ({
+      x,
+      y: (i + 1) / sorted.length,
+    }));
   }
 
   /**
@@ -505,7 +471,6 @@ export class Logger {
     warn: number;
     error: number;
   } | null = null;
-  private _timingBaseline: Map<string, TimingStats> | null = null;
 
   constructor(private moduleName?: string, options?: GetLoggerOptions) {
     // Set initial disabled state from options
@@ -855,12 +820,11 @@ export class Logger {
 
   /**
    * Reset the timing baseline to current timing values.
-   * After calling this, getTimingDeltas() will return timing relative to this baseline.
+   * After calling this, CDF delta curves will show samples since this baseline.
    */
   resetTimingBaseline(): void {
-    this._timingBaseline = new Map();
-    for (const [key, store] of this._timingsByKey) {
-      this._timingBaseline.set(key, store.getStats());
+    for (const store of this._timingsByKey.values()) {
+      store.setBaseline();
     }
   }
 
@@ -888,41 +852,6 @@ export class Logger {
         this._countBaseline.warn + this._countBaseline.error
       ),
     };
-  }
-
-  /**
-   * Get timing deltas since the baseline was set.
-   * If no baseline exists, returns null.
-   * For each key, returns the delta in counts and timing metrics.
-   */
-  getTimingDeltas(): Record<string, TimingStats> | null {
-    if (!this._timingBaseline) return null;
-    const deltas: Record<string, TimingStats> = {};
-    for (const [key, store] of this._timingsByKey) {
-      const current = store.getStats();
-      const baseline = this._timingBaseline.get(key);
-      if (baseline) {
-        deltas[key] = {
-          count: current.count - baseline.count,
-          min: current.min,
-          max: current.max,
-          totalTime: current.totalTime - baseline.totalTime,
-          average: (current.count > baseline.count)
-            ? (current.totalTime - baseline.totalTime) /
-              (current.count - baseline.count)
-            : 0,
-          p50: current.p50,
-          p95: current.p95,
-          lastTime: current.lastTime,
-          lastTimestamp: current.lastTimestamp,
-          histogram: current.histogram, // Use current histogram
-        };
-      } else {
-        // New key since baseline
-        deltas[key] = current;
-      }
-    }
-    return deltas;
   }
 
   /**

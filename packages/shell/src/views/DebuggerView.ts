@@ -810,99 +810,6 @@ export class XDebuggerView extends LitElement {
       font-size: 0.625rem;
       color: #64748b;
     }
-
-    .histogram-container {
-      position: relative;
-      height: 60px;
-      margin: 0.25rem 0;
-    }
-
-    .histogram-chart {
-      position: relative;
-      height: 100%;
-      display: flex;
-      align-items: flex-end;
-      gap: 1px;
-      padding: 0 20px;
-    }
-
-    .histogram-bucket {
-      flex: 1;
-      position: relative;
-      display: flex;
-      align-items: flex-end;
-      justify-content: center;
-      align-self: stretch;
-    }
-
-    .bucket-bar-count {
-      position: absolute;
-      bottom: 0;
-      width: 100%;
-      background-color: #3b82f6;
-      opacity: 0.4;
-      transition: opacity 0.2s;
-    }
-
-    .bucket-bar-time {
-      position: absolute;
-      bottom: 0;
-      width: 100%;
-      background-color: #10b981;
-      opacity: 0.4;
-      transition: opacity 0.2s;
-    }
-
-    .histogram-bucket:hover .bucket-bar-count,
-    .histogram-bucket:hover .bucket-bar-time {
-      opacity: 0.7;
-    }
-
-    .histogram-median-line {
-      position: absolute;
-      left: calc(50% + 10px);
-      top: 0;
-      bottom: 0;
-      width: 1px;
-      background-color: #64748b;
-      opacity: 0.5;
-    }
-
-    .histogram-axes {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      pointer-events: none;
-    }
-
-    .histogram-y-label-left {
-      position: absolute;
-      left: 2px;
-      top: 0;
-      font-size: 0.5625rem;
-      color: #3b82f6;
-      opacity: 0.7;
-    }
-
-    .histogram-y-label-right {
-      position: absolute;
-      right: 2px;
-      top: 0;
-      font-size: 0.5625rem;
-      color: #10b981;
-      opacity: 0.7;
-    }
-
-    .histogram-x-labels {
-      display: flex;
-      justify-content: space-between;
-      padding: 0 20px;
-      margin-top: 2px;
-      font-size: 0.5625rem;
-      color: #64748b;
-    }
   `;
 
   @property({ type: Boolean })
@@ -1756,33 +1663,30 @@ export class XDebuggerView extends LitElement {
       <div class="timing-histogram">
         ${keys.map((key) => {
           const stats = timingData[key];
-          if (!stats.histogram || stats.histogram.length === 0) {
+          if (!stats.cdf || stats.cdf.length === 0) {
             return html`
 
             `;
           }
 
-          return this.renderHistogramForKey(key, stats);
+          return this.renderCDFForKey(key, stats);
         })}
       </div>
     `;
   }
 
-  private renderHistogramForKey(
+  private renderCDFForKey(
     key: string,
     stats: TimingStats,
   ): TemplateResult {
-    const buckets = stats.histogram;
+    const cdf = stats.cdf;
+    const cdfDelta = stats.cdfSinceBaseline;
 
-    // Find max values for scaling both quantile schemes
-    const maxCountQuantileCount = Math.max(
-      ...buckets.map((b) => b.countQuantile.count),
-      1,
-    );
-    const maxTimeQuantileCount = Math.max(
-      ...buckets.map((b) => b.timeQuantile.count),
-      1,
-    );
+    if (cdf.length === 0) {
+      return html`
+
+      `;
+    }
 
     // Format time for display
     const formatTime = (ms: number) => {
@@ -1790,6 +1694,57 @@ export class XDebuggerView extends LitElement {
       if (ms < 1000) return `${ms.toFixed(1)}ms`;
       return `${(ms / 1000).toFixed(2)}s`;
     };
+
+    // SVG dimensions
+    const width = 600;
+    const height = 200;
+    const margin = { top: 10, right: 50, bottom: 30, left: 50 };
+    const plotWidth = width - margin.left - margin.right;
+    const plotHeight = height - margin.top - margin.bottom;
+
+    // Find x-axis range (log scale)
+    const minX = Math.max(stats.min, 0.001); // Avoid log(0)
+    const maxX = Math.max(stats.max, minX * 1.1); // Ensure maxX > minX
+    const logMinX = Math.log10(minX);
+    const logMaxX = Math.log10(maxX);
+    const logRange = logMaxX - logMinX;
+
+    // Convert x to SVG coordinate (log scale)
+    const xScale = (x: number) => {
+      if (logRange === 0) return margin.left; // All values are the same
+      const logX = Math.log10(Math.max(x, minX));
+      return margin.left + ((logX - logMinX) / logRange) * plotWidth;
+    };
+
+    // Convert y to SVG coordinate (linear 0-1 scale, inverted for SVG)
+    const yScale = (y: number) => {
+      return margin.top + (1 - y) * plotHeight;
+    };
+
+    // Generate SVG path from CDF points
+    const pathFromCDF = (points: Array<{ x: number; y: number }>) => {
+      if (points.length === 0) return "";
+      const pathParts = points.map((p, i) =>
+        `${i === 0 ? "M" : "L"} ${xScale(p.x)} ${yScale(p.y)}`
+      );
+      return pathParts.join(" ");
+    };
+
+    // Generate x-axis tick marks (log scale)
+    const xTicks: number[] = [];
+    const tickCount = 5;
+    if (logRange > 0) {
+      for (let i = 0; i <= tickCount; i++) {
+        const logValue = logMinX + (i / tickCount) * logRange;
+        xTicks.push(Math.pow(10, logValue));
+      }
+    } else {
+      // All values are the same, just show that value
+      xTicks.push(minX);
+    }
+
+    // Generate y-axis tick marks (0%, 25%, 50%, 75%, 100%)
+    const yTicks = [0, 0.25, 0.5, 0.75, 1.0];
 
     return html`
       <div style="margin-bottom: 1rem;">
@@ -1803,63 +1758,123 @@ export class XDebuggerView extends LitElement {
           </div>
         </div>
 
-        <div class="histogram-container">
-          <div class="histogram-axes">
-            <div class="histogram-y-label-left">count-q</div>
-            <div class="histogram-y-label-right">time-q</div>
-          </div>
+        <svg
+          width="${width}"
+          height="${height}"
+          style="background-color: #0f172a; border-radius: 0.25rem;"
+        >
+          <!-- Y-axis grid lines and labels -->
+          ${yTicks.map((y) => {
+            const yPos = yScale(y);
+            return html`
+              <line
+                x1="${margin.left}"
+                y1="${yPos}"
+                x2="${width - margin.right}"
+                y2="${yPos}"
+                stroke="#1e293b"
+                stroke-width="1"
+              />
+              <text
+                x="${margin.left - 5}"
+                y="${yPos}"
+                text-anchor="end"
+                dominant-baseline="middle"
+                fill="#64748b"
+                font-size="10"
+              >
+                ${(y * 100).toFixed(0)}%
+              </text>
+            `;
+          })}
 
-          <div class="histogram-median-line"></div>
+          <!-- X-axis grid lines and labels -->
+          ${xTicks.map((x) => {
+            const xPos = xScale(x);
+            return html`
+              <line
+                x1="${xPos}"
+                y1="${margin.top}"
+                x2="${xPos}"
+                y2="${height - margin.bottom}"
+                stroke="#1e293b"
+                stroke-width="1"
+              />
+              <text
+                x="${xPos}"
+                y="${height - margin.bottom + 15}"
+                text-anchor="middle"
+                fill="#64748b"
+                font-size="10"
+              >
+                ${formatTime(x)}
+              </text>
+            `;
+          })}
 
-          <div class="histogram-chart">
-            ${buckets.map((bucket, idx) => {
-              // Blue bars: count-quantile (each bucket has ~10% of samples)
-              const countQuantileHeight =
-                (bucket.countQuantile.count / maxCountQuantileCount) * 100;
+          <!-- CDF curve (all samples since start) - blue -->
+          <path
+            d="${pathFromCDF(cdf)}"
+            fill="none"
+            stroke="#3b82f6"
+            stroke-width="2"
+            opacity="0.8"
+          />
 
-              // Green bars: time-quantile (each bucket accounts for ~10% of total time)
-              const timeQuantileHeight =
-                (bucket.timeQuantile.count / maxTimeQuantileCount) * 100;
+          <!-- CDF delta curve (since baseline) - green -->
+          ${cdfDelta
+            ? html`
+              <path
+                d="${pathFromCDF(cdfDelta)}"
+                fill="none"
+                stroke="#10b981"
+                stroke-width="2"
+                opacity="0.8"
+              />
+            `
+            : ""}
 
-              const tooltip = `Bucket ${idx + 1} [${
-                formatTime(
-                  bucket.lowerBound,
-                )
-              } - ${formatTime(bucket.upperBound)}]
-Count-quantile: ${bucket.countQuantile.count} samples (${
-                formatTime(
-                  bucket.countQuantile.totalTime,
-                )
-              } total)
-Time-quantile: ${bucket.timeQuantile.count} samples (${
-                formatTime(
-                  bucket.timeQuantile.totalTime,
-                )
-              } total)`;
+          <!-- Axes -->
+          <line
+            x1="${margin.left}"
+            y1="${height - margin.bottom}"
+            x2="${width - margin.right}"
+            y2="${height - margin.bottom}"
+            stroke="#94a3b8"
+            stroke-width="1"
+          />
+          <line
+            x1="${margin.left}"
+            y1="${margin.top}"
+            x2="${margin.left}"
+            y2="${height - margin.bottom}"
+            stroke="#94a3b8"
+            stroke-width="1"
+          />
 
-              return html`
-                <div class="histogram-bucket" title="${tooltip}">
-                  <div
-                    class="bucket-bar-count"
-                    style="height: ${countQuantileHeight}%"
-                  >
-                  </div>
-                  <div
-                    class="bucket-bar-time"
-                    style="height: ${timeQuantileHeight}%"
-                  >
-                  </div>
-                </div>
-              `;
-            })}
-          </div>
-
-          <div class="histogram-x-labels">
-            <span>fast</span>
-            <span>median</span>
-            <span>slow</span>
-          </div>
-        </div>
+          <!-- Legend -->
+          <g transform="translate(${width - margin.right - 100}, ${margin.top +
+            10})">
+            <line x1="0" y1="0" x2="20" y2="0" stroke="#3b82f6" stroke-width="2" />
+            <text
+              x="25"
+              y="0"
+              dominant-baseline="middle"
+              fill="#cbd5e1"
+              font-size="10"
+            >
+              Total
+            </text>
+            ${cdfDelta
+              ? html`
+                <line x1="0" y1="15" x2="20" y2="15" stroke="#10b981" stroke-width="2" />
+                <text x="25" y="15" dominant-baseline="middle" fill="#cbd5e1" font-size="10">
+                  Since baseline
+                </text>
+              `
+              : ""}
+          </g>
+        </svg>
       </div>
     `;
   }
