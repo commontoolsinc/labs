@@ -6,7 +6,7 @@
 
 import { Database } from "@db/sqlite";
 import { refer } from "merkle-reference";
-import type { JSONValue } from "@commontools/runner";
+import type { JSONValue } from "../interface.ts";
 import * as Space from "../space.ts";
 import * as Fact from "../fact.ts";
 import * as Transaction from "../transaction.ts";
