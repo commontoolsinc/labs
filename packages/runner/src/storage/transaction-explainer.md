@@ -147,7 +147,7 @@ The distinction between these errors is important:
 
 **1. Data URIs**: Read-only inline data using `data:` URLs
 
-**2. Path-based Access**: Read/write nested JSON paths:
+**2. Path-based Access**: Read/write nested intra-value paths:
 
 ```typescript
 transaction.read({ ...address, path: ["user", "profile", "name"] });
