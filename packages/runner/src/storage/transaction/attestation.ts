@@ -556,8 +556,8 @@ export const TypeMismatchError = (
 
 export const StateInconsistency = (source: {
   address: IMemoryAddress;
-  expected?: StorableValue;
-  actual?: StorableValue;
+  expected?: StorableDatum;
+  actual?: StorableDatum;
   space?: MemorySpace;
 }): IStorageTransactionInconsistent => {
   const { address, space, expected, actual } = source;

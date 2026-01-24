@@ -124,7 +124,7 @@ export class Chronicle {
    */
   write(
     address: IMemoryAddress,
-    value?: StorableValue,
+    value?: StorableDatum,
   ): Result<
     IAttestation,
     | IStorageTransactionInconsistent
