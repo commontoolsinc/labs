@@ -717,7 +717,8 @@ export type CommitError =
   | StorageTransactionRejected;
 
 /**
- * Error returned when a read or write operation fails because the path does not exist.
+ * Error returned when a read or write operation fails because the intra-value
+ * path does not exist.
  *
  * The `path` property behavior is consistent for both reads and writes:
  *
@@ -800,8 +801,8 @@ export interface IMemoryAddress {
    */
   type: MediaType;
   /**
-   * Path to the {@link StorableDatum} being reference by this address. It is path
-   * within the `is` field of the fact in memory protocol.
+   * Intra-value path to the {@link StorableDatum} being referenced by this
+   * address. It is a path within the `is` field of the fact in memory protocol.
    */
   path: readonly MemoryAddressPathComponent[];
 }
