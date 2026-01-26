@@ -77,6 +77,9 @@ Proofs corresponding to safety invariants:
 - Minimal model of "no-consume-on-failure" + single-use intents:
   - `formal/Cfc/Intent.lean`: `Intent.commitOnce`
   - `formal/Cfc/Proofs/Intent.lean`: `commitOnce_no_consume_on_failure`, `commitOnce_single_use`
+- Minimal commit-point wrapper (ties intent consumption to declassification-at-commit):
+  - `formal/Cfc/CommitPoint.lean`: `CommitPoint.declassifyCommit`
+  - `formal/Cfc/Proofs/CommitPoint.lean`: `declassifyCommit_single_use`
 
 ## What Is Not Yet Modeled (Gaps vs Spec)
 

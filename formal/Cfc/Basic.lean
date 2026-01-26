@@ -3,6 +3,7 @@ import Cfc.Label
 import Cfc.Access
 import Cfc.Link
 import Cfc.Intent
+import Cfc.CommitPoint
 import Cfc.Language
 import Cfc.Language.Declassify
 import Cfc.Exchange
@@ -15,4 +16,5 @@ import Cfc.Proofs.SafetyInvariants
 import Cfc.Proofs.Exchange
 import Cfc.Proofs.Link
 import Cfc.Proofs.Intent
+import Cfc.Proofs.CommitPoint
 import Cfc.Proofs.Scenarios
