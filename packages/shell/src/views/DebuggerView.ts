@@ -1852,8 +1852,63 @@ export class XDebuggerView extends LitElement {
             stroke-width="1"
           />
 
+          <!-- Axis labels -->
+          <text
+            x="${margin.left + plotWidth / 2}"
+            y="${height - 5}"
+            text-anchor="middle"
+            fill="#94a3b8"
+            font-size="11"
+            font-weight="500"
+          >
+            Latency
+          </text>
+          <text
+            x="${margin.left - 35}"
+            y="${margin.top + plotHeight / 2}"
+            text-anchor="middle"
+            fill="#94a3b8"
+            font-size="11"
+            font-weight="500"
+            transform="rotate(-90 ${margin.left - 35} ${margin.top +
+              plotHeight / 2})"
+          >
+            Cumulative Probability
+          </text>
+
+          <!-- Percentile reference lines (p50, p95, avg) -->
+          ${[
+            { value: stats.p50, label: "p50", color: "#f59e0b" },
+            { value: stats.p95, label: "p95", color: "#ef4444" },
+            { value: stats.average, label: "avg", color: "#8b5cf6" },
+          ].map(({ value, label, color }) => {
+            const xPos = xScale(value);
+            return html`
+              <line
+                x1="${xPos}"
+                y1="${margin.top}"
+                x2="${xPos}"
+                y2="${height - margin.bottom}"
+                stroke="${color}"
+                stroke-width="1"
+                stroke-dasharray="3,3"
+                opacity="0.5"
+              />
+              <text
+                x="${xPos}"
+                y="${margin.top - 2}"
+                text-anchor="middle"
+                fill="${color}"
+                font-size="9"
+                font-weight="600"
+              >
+                ${label}
+              </text>
+            `;
+          })}
+
           <!-- Legend -->
-          <g transform="translate(${width - margin.right - 100}, ${margin.top +
+          <g transform="translate(${width - margin.right - 160}, ${margin.top +
             10})">
             <line x1="0" y1="0" x2="20" y2="0" stroke="#3b82f6" stroke-width="2" />
             <text
@@ -1863,7 +1918,7 @@ export class XDebuggerView extends LitElement {
               fill="#cbd5e1"
               font-size="10"
             >
-              Total
+              Total (${formatTime(stats.totalTime)})
             </text>
             ${cdfDelta
               ? html`
