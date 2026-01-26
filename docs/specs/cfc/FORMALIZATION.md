@@ -81,6 +81,13 @@ Proofs corresponding to safety invariants:
   - `formal/Cfc/CommitPoint.lean`: `CommitPoint.declassifyCommit`
   - `formal/Cfc/Proofs/CommitPoint.lean`: `declassifyCommit_single_use`
 
+### Worked Example: Gmail OAuth (Spec Chapter 1)
+
+- `formal/Cfc/Proofs/GmailExample.lean`: small regression suite covering:
+  - authority-only token secrecy dropping with integrity guards (1.2),
+  - query secrecy tainting the response (1.3),
+  - commit-coupled intent consumption (1.4.6).
+
 ## What Is Not Yet Modeled (Gaps vs Spec)
 
 The Lean model does *not* currently include:
