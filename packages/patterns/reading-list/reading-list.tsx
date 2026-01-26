@@ -95,9 +95,12 @@ export default pattern<Input, Output>(({ items }) => {
   // For empty state display
   const hasNoFilteredItems = computed(() => {
     const status = filterStatus.get();
-    return status === "all"
-      ? items.get().length === 0
-      : items.get().filter((item) => item.status === status).length === 0;
+    const allItems = items.get();
+    if (status === "all") {
+      return allItems.length === 0;
+    }
+    return allItems.filter((item) => item && item.status === status).length ===
+      0;
   });
 
   return {
@@ -122,57 +125,59 @@ export default pattern<Input, Output>(({ items }) => {
 
         <ct-vscroll flex showScrollbar fadeEdges>
           <ct-vstack gap="2" style="padding: 1rem;">
-            {items.map((item) => {
-              // Use computed() to conditionally render based on filter status
-              return computed(() => {
-                const status = filterStatus.get();
-                const isVisible = status === "all" || item.status === status;
-
-                return isVisible
-                  ? (
-                    <ct-card>
-                      <ct-hstack gap="2" align="center">
-                        <span style="font-size: 1.5rem;">
-                          {getTypeEmoji(item.type)}
+            {/* Workaround for computed() + onClick bug: use items.map() with computed visibility */}
+            {items.map((item) => (
+              <ct-card
+                style={computed(() => {
+                  const status = filterStatus.get();
+                  const visible = status === "all" || (item && item.status === status);
+                  return visible ? "" : "display: none;";
+                })}
+              >
+                <ct-hstack gap="2" align="center">
+                  <span style="font-size: 1.5rem;">
+                    {getTypeEmoji(item.type)}
+                  </span>
+                  <ct-vstack gap="0" style="flex: 1;">
+                    <span style="font-weight: 500;">
+                      {item.title || "(untitled)"}
+                    </span>
+                    {item.author && (
+                      <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
+                        by {item.author}
+                      </span>
+                    )}
+                    <ct-hstack gap="2" align="center">
+                      <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
+                        {item.status}
+                      </span>
+                      {renderStars(item.rating) && (
+                        <span style="font-size: 0.75rem; color: var(--ct-color-warning-500);">
+                          {renderStars(item.rating)}
                         </span>
-                        <ct-vstack gap="0" style="flex: 1;">
-                          <span style="font-weight: 500;">
-                            {item.title || "(untitled)"}
-                          </span>
-                          {item.author && (
-                            <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
-                              by {item.author}
-                            </span>
-                          )}
-                          <ct-hstack gap="2" align="center">
-                            <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
-                              {item.status}
-                            </span>
-                            {renderStars(item.rating) && (
-                              <span style="font-size: 0.75rem; color: var(--ct-color-warning-500);">
-                                {renderStars(item.rating)}
-                              </span>
-                            )}
-                          </ct-hstack>
-                        </ct-vstack>
-                        <ct-button
-                          variant="secondary"
-                          onClick={() => navigateTo(item)}
-                        >
-                          Edit
-                        </ct-button>
-                        <ct-button
-                          variant="ghost"
-                          onClick={() => removeItem.send({ item })}
-                        >
-                          ×
-                        </ct-button>
-                      </ct-hstack>
-                    </ct-card>
-                  )
-                  : null;
-              });
-            })}
+                      )}
+                    </ct-hstack>
+                    {item.notes && (
+                      <span style="font-size: 0.75rem; color: var(--ct-color-gray-500); font-style: italic; margin-top: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
+                        {item.notes}
+                      </span>
+                    )}
+                  </ct-vstack>
+                  <ct-button
+                    variant="secondary"
+                    onClick={() => navigateTo(item)}
+                  >
+                    Edit
+                  </ct-button>
+                  <ct-button
+                    variant="ghost"
+                    onClick={() => removeItem.send({ item })}
+                  >
+                    ×
+                  </ct-button>
+                </ct-hstack>
+              </ct-card>
+            ))}
 
             {hasNoFilteredItems
               ? (
