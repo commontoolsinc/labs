@@ -88,6 +88,22 @@ Proofs corresponding to safety invariants:
   - query secrecy tainting the response (1.3),
   - commit-coupled intent consumption (1.4.6).
 
+### Label Transition Rules (Spec Chapter 8)
+
+Trusted-runtime label propagation rules (schema-driven transitions):
+
+- Pass-through / reference preservation (8.2), projection scoping (8.3), exact-copy verification (8.4):
+  - `formal/Cfc/LabelTransitions.lean`: `LabelTransition.passThrough`, `LabelTransition.projection`,
+    `LabelTransition.exactCopyOf`
+  - `formal/Cfc/Proofs/LabelTransitions.lean`: core preservation lemmas (e.g. scoped integrity membership,
+    exactCopyOf success/failure characterizations)
+- Collections (8.5):
+  - `formal/Cfc/Collection.lean`: `LabeledCollection` (separates membership label from member labels),
+    `CollectionTransition.subsetOf`, `CollectionTransition.permutationOf`, `CollectionTransition.filteredFrom`
+  - `formal/Cfc/Proofs/Collection.lean`: key container/member preservation lemmas
+  - `formal/Cfc/Proofs/LabelTransitionExamples.lean`: small regressions that exercise projection scoping,
+    exactCopyOf rejection, and membership-vs-member separation
+
 ## What Is Not Yet Modeled (Gaps vs Spec)
 
 The Lean model does *not* currently include:
@@ -95,7 +111,9 @@ The Lean model does *not* currently include:
   with label transitions / side effects (Spec Sections 6/7; invariant 4)
 - Write-authority sets (`writeAuthorizedBy`) and stateful authorization (Spec 8.15)
 - Full policy record architecture (hash binding, fixpoint evaluation, targeting)
-- Schema-driven propagation rules (projection scoping, exactCopyOf checking, collections)
+- Full schema-driven propagation algorithm (Spec 8.9) beyond local transition primitives
+- Transformation integrity / endorsed transformation registries (Spec 8.7)
+- Selection-decision integrity for ranking/recommendation scenarios (Spec 8.5.7)
 - Side effects / egress enforcement beyond the abstract exchange/declassify rules above
 
 These can be added incrementally, but would expand the model beyond the current "core IFC proofs"
