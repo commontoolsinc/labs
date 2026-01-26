@@ -1,5 +1,13 @@
 /// <cts-enable />
-import { computed, Default, NAME, pattern, UI, type VNode, Writable } from "commontools";
+import {
+  computed,
+  Default,
+  NAME,
+  pattern,
+  UI,
+  type VNode,
+  Writable,
+} from "commontools";
 
 export type ItemType = "a" | "b";
 export type ItemStatus = "pending" | "active" | "done";
@@ -41,7 +49,9 @@ export default pattern<ItemInput, ItemOutput>(({
     <div
       style={computed(
         () =>
-          `padding: 0.5rem; background: ${type.get() === "a" ? "#e0f0ff" : "#ffe0e0"}; border-radius: 4px;`,
+          `padding: 0.5rem; background: ${
+            type.get() === "a" ? "#e0f0ff" : "#ffe0e0"
+          }; border-radius: 4px;`,
       )}
     >
       {name} (Type {computed(() => type.get().toUpperCase())}, Status: {status})

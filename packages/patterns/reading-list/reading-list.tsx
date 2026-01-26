@@ -130,7 +130,8 @@ export default pattern<Input, Output>(({ items }) => {
               <ct-card
                 style={computed(() => {
                   const status = filterStatus.get();
-                  const visible = status === "all" || (item && item.status === status);
+                  const visible = status === "all" ||
+                    (item && item.status === status);
                   return visible ? "" : "display: none;";
                 })}
               >
