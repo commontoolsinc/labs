@@ -1706,7 +1706,7 @@ export class XDebuggerView extends LitElement {
       cumulativeTime: number;
       eventIndex: number;
     }>,
-    xScale: (latency: number) => number,
+    xScale: (eventIndex: number) => number,
     yScale: (cumulativeTime: number) => number,
     formatTime: (ms: number) => string,
     margin: { top: number; right: number; bottom: number; left: number },
@@ -1734,7 +1734,7 @@ export class XDebuggerView extends LitElement {
     let minDistance = Infinity;
 
     for (const point of cumulativePoints) {
-      const px = xScale(point.latency);
+      const px = xScale(point.eventIndex - 1);
       const py = yScale(point.cumulativeTime);
       const distance = Math.sqrt((mouseX - px) ** 2 + (mouseY - py) ** 2);
       if (distance < minDistance) {
@@ -1825,13 +1825,11 @@ export class XDebuggerView extends LitElement {
       });
     }
 
-    // X-axis: latency (min to max)
-    const minLatency = sortedSamples[0]?.x ?? 0;
-    const maxLatency = sortedSamples[sortedSamples.length - 1]?.x ?? 0.001;
-    const xScale = (latency: number) => {
-      if (maxLatency === minLatency) return margin.left;
-      return margin.left +
-        ((latency - minLatency) / (maxLatency - minLatency)) * plotWidth;
+    // X-axis: event index (0 to n-1)
+    const maxEventCount = cumulativePoints.length;
+    const xScale = (eventIndex: number) => {
+      if (maxEventCount === 0) return margin.left;
+      return margin.left + (eventIndex / maxEventCount) * plotWidth;
     };
 
     // Y-axis: cumulative time (0 to totalTime)
@@ -1851,19 +1849,19 @@ export class XDebuggerView extends LitElement {
     ) => {
       if (points.length === 0) return "";
       const pathParts = points.map((p, i) =>
-        `${i === 0 ? "M" : "L"} ${xScale(p.latency)} ${
+        `${i === 0 ? "M" : "L"} ${xScale(p.eventIndex - 1)} ${
           yScale(p.cumulativeTime)
         }`
       );
       return pathParts.join(" ");
     };
 
-    // Generate x-axis tick marks (latency values)
+    // Generate x-axis tick marks (event counts)
     const xTicks: number[] = [];
     const xTickCount = 5;
     for (let i = 0; i <= xTickCount; i++) {
-      const latency = minLatency + (i / xTickCount) * (maxLatency - minLatency);
-      xTicks.push(latency);
+      const eventIndex = Math.floor((i / xTickCount) * maxEventCount);
+      xTicks.push(eventIndex);
     }
 
     // Generate y-axis tick marks (cumulative time)
@@ -1873,10 +1871,20 @@ export class XDebuggerView extends LitElement {
       yTicks.push((i / yTickCount) * maxCumulativeTime);
     }
 
-    // Percentile positions (by latency value)
-    const p50Latency = stats.p50;
-    const p95Latency = stats.p95;
-    const avgLatency = stats.average;
+    // Percentile positions (by event index)
+    const p50EventIndex = Math.floor(maxEventCount * 0.5);
+    const p95EventIndex = Math.floor(maxEventCount * 0.95);
+
+    // Find event index closest to average latency
+    let avgEventIndex = 0;
+    let minDiff = Infinity;
+    for (let i = 0; i < cumulativePoints.length; i++) {
+      const diff = Math.abs(cumulativePoints[i].latency - stats.average);
+      if (diff < minDiff) {
+        minDiff = diff;
+        avgEventIndex = i;
+      }
+    }
 
     return html`
       <div style="margin-bottom: 1rem;">
@@ -1956,7 +1964,7 @@ export class XDebuggerView extends LitElement {
                 font-size="10"
                 font-family="monospace"
               >
-                ${formatTime(x)}
+                ${x}
               </text>
             `;
           })}
@@ -2042,9 +2050,9 @@ export class XDebuggerView extends LitElement {
           <!-- Percentile reference lines (p50, p95) - render AFTER curves -->
           <g style="pointer-events: stroke;">
             <line
-              x1="${xScale(p50Latency)}"
+              x1="${xScale(p50EventIndex)}"
               y1="${margin.top}"
-              x2="${xScale(p50Latency)}"
+              x2="${xScale(p50EventIndex)}"
               y2="${height - margin.bottom}"
               stroke="#f59e0b"
               stroke-width="1.5"
@@ -2054,7 +2062,7 @@ export class XDebuggerView extends LitElement {
               <title>p50 (median): ${formatTime(stats.p50)}</title>
             </line>
             <text
-              x="${xScale(p50Latency)}"
+              x="${xScale(p50EventIndex)}"
               y="${margin.top - 4}"
               text-anchor="middle"
               fill="#f59e0b"
@@ -2062,8 +2070,8 @@ export class XDebuggerView extends LitElement {
               font-weight="600"
               style="pointer-events: none;"
             >
-              <tspan x="${xScale(p50Latency)}" dy="0">p50</tspan>
-              <tspan x="${xScale(p50Latency)}" dy="10">${formatTime(
+              <tspan x="${xScale(p50EventIndex)}" dy="0">p50</tspan>
+              <tspan x="${xScale(p50EventIndex)}" dy="10">${formatTime(
                 stats.p50,
               )}</tspan>
             </text>
@@ -2071,9 +2079,9 @@ export class XDebuggerView extends LitElement {
 
           <g style="pointer-events: stroke;">
             <line
-              x1="${xScale(p95Latency)}"
+              x1="${xScale(p95EventIndex)}"
               y1="${margin.top}"
-              x2="${xScale(p95Latency)}"
+              x2="${xScale(p95EventIndex)}"
               y2="${height - margin.bottom}"
               stroke="#ef4444"
               stroke-width="1.5"
@@ -2083,7 +2091,7 @@ export class XDebuggerView extends LitElement {
               <title>p95: ${formatTime(stats.p95)}</title>
             </line>
             <text
-              x="${xScale(p95Latency)}"
+              x="${xScale(p95EventIndex)}"
               y="${margin.top - 4}"
               text-anchor="middle"
               fill="#ef4444"
@@ -2091,8 +2099,8 @@ export class XDebuggerView extends LitElement {
               font-weight="600"
               style="pointer-events: none;"
             >
-              <tspan x="${xScale(p95Latency)}" dy="0">p95</tspan>
-              <tspan x="${xScale(p95Latency)}" dy="10">${formatTime(
+              <tspan x="${xScale(p95EventIndex)}" dy="0">p95</tspan>
+              <tspan x="${xScale(p95EventIndex)}" dy="10">${formatTime(
                 stats.p95,
               )}</tspan>
             </text>
@@ -2101,9 +2109,9 @@ export class XDebuggerView extends LitElement {
           <!-- Average reference line -->
           <g style="pointer-events: stroke;">
             <line
-              x1="${xScale(avgLatency)}"
+              x1="${xScale(avgEventIndex)}"
               y1="${margin.top}"
-              x2="${xScale(avgLatency)}"
+              x2="${xScale(avgEventIndex)}"
               y2="${height - margin.bottom}"
               stroke="#8b5cf6"
               stroke-width="1.5"
@@ -2113,7 +2121,7 @@ export class XDebuggerView extends LitElement {
               <title>avg (mean): ${formatTime(stats.average)}</title>
             </line>
             <text
-              x="${xScale(avgLatency)}"
+              x="${xScale(avgEventIndex)}"
               y="${margin.top - 4}"
               text-anchor="middle"
               fill="#8b5cf6"
@@ -2121,8 +2129,8 @@ export class XDebuggerView extends LitElement {
               font-weight="600"
               style="pointer-events: none;"
             >
-              <tspan x="${xScale(avgLatency)}" dy="0">avg</tspan>
-              <tspan x="${xScale(avgLatency)}" dy="10">${formatTime(
+              <tspan x="${xScale(avgEventIndex)}" dy="0">avg</tspan>
+              <tspan x="${xScale(avgEventIndex)}" dy="10">${formatTime(
                 stats.average,
               )}</tspan>
             </text>
@@ -2137,7 +2145,7 @@ export class XDebuggerView extends LitElement {
             font-size="12"
             font-weight="600"
           >
-            Latency
+            Events
           </text>
           <text
             x="${margin.left - 40}"
