@@ -94,7 +94,7 @@ Trusted-runtime label propagation rules (schema-driven transitions):
 
 - Pass-through / reference preservation (8.2), projection scoping (8.3), exact-copy verification (8.4):
   - `formal/Cfc/LabelTransitions.lean`: `LabelTransition.passThrough`, `LabelTransition.projection`,
-    `LabelTransition.exactCopyOf`
+    `LabelTransition.exactCopyOf`, `LabelTransition.combinedFrom` (8.6)
   - `formal/Cfc/Proofs/LabelTransitions.lean`: core preservation lemmas (e.g. scoped integrity membership,
     exactCopyOf success/failure characterizations)
 - Collections (8.5):
