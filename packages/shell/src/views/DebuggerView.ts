@@ -2178,8 +2178,9 @@ export class XDebuggerView extends LitElement {
               fill="#cbd5e1"
               font-size="10"
             >
-              All time (${stats.count} events, ${(maxCumulativeTime / 1000)
-                .toFixed(2)}s in ${cumulativePoints.length} samples)
+              All time (${(maxCumulativeTime / 1000).toFixed(
+                2,
+              )}s in ${cumulativePoints.length} samples)
             </text>
             ${cdfDelta && cumulativePointsDelta &&
                 cumulativePointsDelta.length > 0

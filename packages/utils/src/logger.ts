@@ -348,9 +348,10 @@ class TimingDataStore {
 
 /**
  * Build all hierarchical key paths from an array of key segments.
- * @example buildKeyPaths(["cell", "get", "user"]) => ["cell", "cell/get", "cell/get/user"]
+ * @example _buildKeyPaths(["cell", "get", "user"]) => ["cell", "cell/get", "cell/get/user"]
+ * Currently unused but kept for potential future hierarchical rollup.
  */
-function buildKeyPaths(keys: string[]): string[] {
+function _buildKeyPaths(keys: string[]): string[] {
   const paths: string[] = [];
   for (let i = 1; i <= keys.length; i++) {
     paths.push(keys.slice(0, i).join("/"));
@@ -758,18 +759,16 @@ export class Logger {
   }
 
   /**
-   * Internal method to record timing to all levels of a key hierarchy.
+   * Internal method to record timing to the full key path only (no hierarchical rollup).
    */
   private _recordTime(elapsed: number, keys: string[]): void {
-    const paths = buildKeyPaths(keys);
-    for (const path of paths) {
-      let store = this._timingsByKey.get(path);
-      if (!store) {
-        store = new TimingDataStore();
-        this._timingsByKey.set(path, store);
-      }
-      store.record(elapsed);
+    const path = keys.join("/");
+    let store = this._timingsByKey.get(path);
+    if (!store) {
+      store = new TimingDataStore();
+      this._timingsByKey.set(path, store);
     }
+    store.record(elapsed);
   }
 
   /**
