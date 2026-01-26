@@ -1,3 +1,15 @@
+/- 
+`Cfc.Basic` is the "everything important" import for this repo.
+
+Lean builds proofs by compiling modules. By importing all core definitions and proof modules here,
+we ensure that:
+- `import Cfc` (see `formal/Cfc.lean`) pulls in the whole development, and
+- `lake build` typechecks the full suite of proofs.
+
+If you are new to Lean, you can think of this file as the project "index" that determines what
+gets compiled as part of the library.
+-/
+
 import Cfc.Atom
 import Cfc.Label
 import Cfc.LabelTransitions

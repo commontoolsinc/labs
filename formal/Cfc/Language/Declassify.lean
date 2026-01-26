@@ -9,6 +9,30 @@ An extension of the tiny expression language with an integrity-guarded declassif
 
 This is a deliberately small model of CFC's "exchange/declassification requires integrity guard"
 story (see `docs/specs/cfc/10-safety-invariants.md` invariants 3, 7, and 9).
+
+Relationship to `Cfc.Language`:
+
+- `Cfc.Language` models flow-path confidentiality (PC confidentiality) but has no declassification
+  or endorsement. It is the setting for the classic non-interference theorem.
+
+- This file adds two new constructs:
+  - `endorseIf` (transparent endorsement)
+  - `declassifyIf` (robust declassification)
+
+and it refines the semantics by threading both:
+- `pc : ConfLabel`  (flow-path confidentiality)
+- `pcI : IntegLabel` (control integrity / trusted-control evidence)
+
+Intuition:
+
+- PC confidentiality (`pc`) says "what secrets influenced the control path?"
+  It must be joined onto downstream values to avoid implicit-flow leaks.
+
+- PC integrity (`pcI`) says "what integrity evidence supports believing this control path happened?"
+  It blocks endorsement/declassification when the control decision is not trusted.
+
+This is a simplified, proof-friendly version of the spec's robust declassification / transparent
+endorsement story.
 -/
 
 inductive ExprD where
@@ -28,6 +52,35 @@ Evaluate an expression under:
 
 This is a tiny model of spec Sections 3.4 (PC integrity), 3.8.6 (robust declassification),
 and 3.8.7 (transparent endorsement).
+-/
+/-
+Semantics overview:
+
+The evaluation function returns an `LVal` (boolean + label).
+
+For most constructs, it behaves like `Cfc.Language.eval`:
+- compute boolean value
+- propagate labels via join, and propagate pc via branching
+
+Two important differences:
+
+1) We thread `pcI : IntegLabel` in addition to `pc : ConfLabel`.
+   - Reading a variable joins the variable's integrity into `pcI`.
+     (If a control decision depends on an input with low integrity, then that control decision is low-integrity.)
+
+2) We model two policy-relevant operations:
+   - `endorseIf tok guard x` can *add* integrity `tok` to the result,
+     but only if the guard is true AND the updated pc-integrity is trusted (`TrustedScope ∈ pcI'`).
+   - `declassifyIf tok guard secret` can *rewrite* confidentiality of the result,
+     but only if the guard carries integrity token `tok` AND the ambient pc-integrity is trusted.
+
+Notice the asymmetry:
+- endorsement checks `TrustedScope ∈ pcI'` (which includes guard integrity),
+  because endorsement depends on the guard decision.
+- declassification checks `TrustedScope ∈ pcI` (pre-guard),
+  because declassification is supposed to be robust to attacker influence on the guard.
+
+The proofs in `Cfc.Proofs.*` connect these checks to the spec's safety invariants.
 -/
 def evalD (env : Env) (pc : ConfLabel) (pcI : IntegLabel) : ExprD → LVal
   | .lit b =>
@@ -81,6 +134,10 @@ def evalD (env : Env) (pc : ConfLabel) (pcI : IntegLabel) : ExprD → LVal
         -- No guard => no rewrite (no silent downgrade).
         vs
 
+/-
+Convenience: evaluate with empty pc and empty pc-integrity.
+This corresponds to "top-level" evaluation with no prior control-flow taint.
+-/
 def evalD0 (env : Env) (e : ExprD) : LVal :=
   evalD env [] [] e
 
