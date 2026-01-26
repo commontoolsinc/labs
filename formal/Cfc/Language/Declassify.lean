@@ -8,7 +8,7 @@ namespace Cfc
 An extension of the tiny expression language with an integrity-guarded declassification.
 
 This is a deliberately small model of CFC's "exchange/declassification requires integrity guard"
-story (see `docs/specs/cfc/10-safety-invariants.md` invariants 3 and 7).
+story (see `docs/specs/cfc/10-safety-invariants.md` invariants 3, 7, and 9).
 -/
 
 inductive ExprD where
@@ -66,13 +66,15 @@ def evalD (env : Env) (pc : ConfLabel) (pcI : IntegLabel) : ExprD → LVal
         vx
   | .declassifyIf tok guard secret =>
       let vg := evalD env pc pcI guard
-      let vs := evalD env pc pcI secret
+      -- The declassification decision is still control-flow; propagate its flow-path confidentiality.
+      let pc' := pc ++ vg.lbl.conf
+      let vs := evalD env pc' pcI secret
       if tok ∈ vg.lbl.integ then
         if trustedScope ∈ pcI then
           -- Declassify the *data* label, but preserve flow-path confidentiality via `pc` (and any
           -- confidentiality on the evidence itself, which would otherwise create a covert channel).
           { val := vs.val
-            lbl := { conf := pc ++ vg.lbl.conf, integ := vs.lbl.integ } }
+            lbl := { conf := pc', integ := vs.lbl.integ } }
         else
           vs
       else

@@ -13,15 +13,15 @@ theorem declassifyIf_guard_absent_preserves_conf
     (env : Env) (pc : ConfLabel) (pcI : IntegLabel) (tok : Atom) (guard secret : ExprD)
     (hTok : tok ∉ (evalD env pc pcI guard).lbl.integ) :
     (evalD env pc pcI (.declassifyIf tok guard secret)).lbl.conf =
-      (evalD env pc pcI secret).lbl.conf := by
-  -- With no guard token, the declassifier returns the secret unchanged.
+      (evalD env (pc ++ (evalD env pc pcI guard).lbl.conf) pcI secret).lbl.conf := by
+  -- With no guard token, the declassifier returns the (flow-tainted) secret unchanged.
   simp [evalD, hTok]
 
 theorem declassifyIf_pc_absent_preserves_conf
     (env : Env) (pc : ConfLabel) (pcI : IntegLabel) (tok : Atom) (guard secret : ExprD)
     (hPc : trustedScope ∉ pcI) :
     (evalD env pc pcI (.declassifyIf tok guard secret)).lbl.conf =
-      (evalD env pc pcI secret).lbl.conf := by
+      (evalD env (pc ++ (evalD env pc pcI guard).lbl.conf) pcI secret).lbl.conf := by
   simp [evalD, hPc]
 
 theorem declassifyIf_fires_conf_eq_pc_join_guard
@@ -36,10 +36,10 @@ theorem declassifyIf_guard_absent_no_observation
     (p : Principal) (env : Env) (pc : ConfLabel) (pcI : IntegLabel) (tok : Atom)
     (guard secret : ExprD)
     (hTok : tok ∉ (evalD env pc pcI guard).lbl.integ)
-    (hNo : ¬ canAccess p (evalD env pc pcI secret).lbl) :
+    (hNo : ¬ canAccess p (evalD env (pc ++ (evalD env pc pcI guard).lbl.conf) pcI secret).lbl) :
     observe p (evalD env pc pcI (.declassifyIf tok guard secret)) = none := by
   classical
-  -- Reduce to observing the unchanged secret.
+  -- Reduce to observing the unchanged (flow-tainted) secret.
   simp [evalD, hTok, observe, hNo]
 
 theorem canAccessConf_guard_of_canAccess_declassifyIf

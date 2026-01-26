@@ -28,7 +28,7 @@ theorem declassifyIf_blocked_by_untrusted_cond
     let pc' := pc ++ (evalD env pc pcI c).lbl.conf
     let pcI' := Label.joinIntegrity pcI (evalD env pc pcI c).lbl.integ
     (evalD env pc' pcI' (.declassifyIf tok guard secret)).lbl.conf =
-      (evalD env pc' pcI' secret).lbl.conf := by
+      (evalD env (pc' ++ (evalD env pc' pcI' guard).lbl.conf) pcI' secret).lbl.conf := by
   intro pc' pcI'
   have hPc : trustedScope ∉ pcI' := by
     -- `pcI' = pcI ∩ condInteg`, and `TrustedScope ∉ condInteg`.
@@ -41,4 +41,3 @@ end PcIntegrity
 end Proofs
 
 end Cfc
-
