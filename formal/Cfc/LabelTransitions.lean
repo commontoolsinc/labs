@@ -59,7 +59,13 @@ def exactCopyOf {Ref : Type} [DecidableEq Ref]
   else
     none
 
+/-- Combine multiple input labels (8.6): CNF concatenation, integrity intersection, plus flow taint. -/
+def combinedFrom (pc : ConfLabel) (inputs : List Label) : Label :=
+  match inputs with
+  | [] => taintPc pc Label.bot
+  | ℓ :: rest =>
+      taintPc pc (rest.foldl (fun acc x => acc + x) ℓ)
+
 end LabelTransition
 
 end Cfc
-

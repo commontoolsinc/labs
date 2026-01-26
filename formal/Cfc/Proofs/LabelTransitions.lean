@@ -33,6 +33,23 @@ theorem exactCopyOf_eq_none_iff {Ref : Type} [DecidableEq Ref]
     simp [LabelTransition.exactCopyOf]
   · simp [LabelTransition.exactCopyOf, h]
 
+@[simp] theorem combinedFrom_nil (pc : ConfLabel) :
+    LabelTransition.combinedFrom pc [] = LabelTransition.taintPc pc Label.bot := rfl
+
+@[simp] theorem combinedFrom_singleton (pc : ConfLabel) (ℓ : Label) :
+    LabelTransition.combinedFrom pc [ℓ] = LabelTransition.taintPc pc ℓ := by
+  simp [LabelTransition.combinedFrom]
+
+theorem pc_subset_combinedFrom_conf (pc : ConfLabel) (inputs : List Label) :
+    pc ⊆ (LabelTransition.combinedFrom pc inputs).conf := by
+  intro c hc
+  cases inputs with
+  | nil =>
+    simpa [LabelTransition.combinedFrom, LabelTransition.taintPc, Label.bot] using hc
+  | cons ℓ rest =>
+    -- `taintPc` prefixes `pc`.
+    exact List.mem_append.2 (Or.inl (by simpa [LabelTransition.combinedFrom, LabelTransition.taintPc] using hc))
+
 end LabelTransitions
 end Proofs
 
