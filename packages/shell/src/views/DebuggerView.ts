@@ -2406,6 +2406,19 @@ export class XDebuggerView extends LitElement {
         </button>
         <button
           type="button"
+          class="action-button ${this.debuggerController?.isTelemetryEnabled()
+            ? "on"
+            : "off"}"
+          @click="${() => this.debuggerController?.toggleTelemetry()}"
+          title="${this.debuggerController?.isTelemetryEnabled()
+            ? "Telemetry ON - click to disable"
+            : "Telemetry OFF - click to enable"}"
+          style="margin-left: auto; margin-right: 0.5rem;"
+        >
+          ${this.debuggerController?.isTelemetryEnabled() ? "●" : "○"} Telemetry
+        </button>
+        <button
+          type="button"
           class="tab-button ${this._activeTab === "scheduler" ? "active" : ""}"
           @click="${() => {
             this._activeTab = "scheduler";
@@ -2731,23 +2744,6 @@ export class XDebuggerView extends LitElement {
                       title="Toggle all topics"
                     >
                       ${this.activeSubtopics.size > 0 ? "☐" : "☑"}
-                    </button>
-
-                    <button
-                      type="button"
-                      class="action-button ${this.debuggerController
-                          ?.isTelemetryEnabled()
-                        ? "on"
-                        : "off"}"
-                      @click="${() =>
-                        this.debuggerController?.toggleTelemetry()}"
-                      title="${this.debuggerController?.isTelemetryEnabled()
-                        ? "Telemetry ON - click to disable"
-                        : "Telemetry OFF - click to enable"}"
-                    >
-                      ${this.debuggerController?.isTelemetryEnabled()
-                        ? "●"
-                        : "○"} Telemetry
                     </button>
 
                     <button
