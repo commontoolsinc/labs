@@ -72,10 +72,17 @@ Proofs corresponding to safety invariants:
     `observe_endorseIf_eq_none_of_hidden_guard`, and a composed regression:
     `observe_declassifyIf_endorseIf_eq_none_of_hidden_guard`
 
+### IntentOnce Consumption (Spec Sections 6/7; invariant 4)
+
+- Minimal model of "no-consume-on-failure" + single-use intents:
+  - `formal/Cfc/Intent.lean`: `Intent.commitOnce`
+  - `formal/Cfc/Proofs/Intent.lean`: `commitOnce_no_consume_on_failure`, `commitOnce_single_use`
+
 ## What Is Not Yet Modeled (Gaps vs Spec)
 
 The Lean model does *not* currently include:
-- Commit points + consumable intents (Spec Sections 6/7; invariant 4)
+- Full commit-point state machine (attempt tracking, deduplication, concurrency) and its integration
+  with label transitions / side effects (Spec Sections 6/7; invariant 4)
 - Write-authority sets (`writeAuthorizedBy`) and stateful authorization (Spec 8.15)
 - Full policy record architecture (hash binding, fixpoint evaluation, targeting)
 - Schema-driven propagation rules (projection scoping, exactCopyOf checking, collections)
@@ -83,4 +90,3 @@ The Lean model does *not* currently include:
 
 These can be added incrementally, but would expand the model beyond the current "core IFC proofs"
 focus.
-
