@@ -9,6 +9,7 @@ import type {
 } from "@commontools/runtime-client";
 
 const STORAGE_KEY = "showDebuggerView";
+const TELEMETRY_ENABLED_KEY = "telemetryEnabled";
 const MAX_TELEMETRY_EVENTS = 1000; // Limit memory usage
 
 /**
@@ -55,6 +56,7 @@ export class DebuggerController implements ReactiveController {
   private host: ReactiveControllerHost & HTMLElement;
   private runtime?: RuntimeInternals;
   private visible = false;
+  private telemetryEnabled = false; // Manual telemetry on/off
   private telemetryMarkers: RuntimeTelemetryMarkerResult[] = [];
   private updateVersion = 0;
   private watchedCells = new Map<string, WatchedCell>();
@@ -83,6 +85,12 @@ export class DebuggerController implements ReactiveController {
     const savedVisible = localStorage.getItem(STORAGE_KEY);
     if (savedVisible !== null) {
       this.visible = savedVisible === "true";
+    }
+
+    // Load telemetry enabled state from localStorage (default to false)
+    const savedTelemetryEnabled = localStorage.getItem(TELEMETRY_ENABLED_KEY);
+    if (savedTelemetryEnabled !== null) {
+      this.telemetryEnabled = savedTelemetryEnabled === "true";
     }
 
     globalThis.addEventListener("storage", this.handleStorageChange);
@@ -121,9 +129,9 @@ export class DebuggerController implements ReactiveController {
         this.handleTelemetryUpdate,
       );
 
-      // Enable/disable telemetry based on current visibility
+      // Set telemetry enabled state based on saved preference
       const rt = this.runtime.runtime();
-      rt.setTelemetryEnabled(this.visible).catch((e) => {
+      rt.setTelemetryEnabled(this.telemetryEnabled).catch((e) => {
         console.error(
           "[DebuggerController] Failed to set telemetry enabled:",
           e,
@@ -175,18 +183,6 @@ export class DebuggerController implements ReactiveController {
 
     this.visible = visible;
     localStorage.setItem(STORAGE_KEY, String(visible));
-
-    // Toggle telemetry in the worker based on visibility
-    const rt = this.runtime?.runtime();
-    if (rt) {
-      rt.setTelemetryEnabled(visible).catch((e) => {
-        console.error(
-          "[DebuggerController] Failed to set telemetry enabled:",
-          e,
-        );
-      });
-    }
-
     this.host.requestUpdate();
   }
 
@@ -196,6 +192,43 @@ export class DebuggerController implements ReactiveController {
   clearTelemetry() {
     this.telemetryMarkers = [];
     this.updateVersion++;
+    this.host.requestUpdate();
+  }
+
+  /**
+   * Check if telemetry is enabled
+   */
+  isTelemetryEnabled(): boolean {
+    return this.telemetryEnabled;
+  }
+
+  /**
+   * Toggle telemetry collection on/off
+   */
+  toggleTelemetry() {
+    this.setTelemetryEnabled(!this.telemetryEnabled);
+  }
+
+  /**
+   * Set telemetry enabled state
+   */
+  setTelemetryEnabled(enabled: boolean) {
+    if (this.telemetryEnabled === enabled) return;
+
+    this.telemetryEnabled = enabled;
+    localStorage.setItem(TELEMETRY_ENABLED_KEY, String(enabled));
+
+    // Update telemetry collection in the worker
+    const rt = this.runtime?.runtime();
+    if (rt) {
+      rt.setTelemetryEnabled(enabled).catch((e) => {
+        console.error(
+          "[DebuggerController] Failed to set telemetry enabled:",
+          e,
+        );
+      });
+    }
+
     this.host.requestUpdate();
   }
 

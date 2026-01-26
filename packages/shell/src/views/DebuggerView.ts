@@ -2735,6 +2735,23 @@ export class XDebuggerView extends LitElement {
 
                     <button
                       type="button"
+                      class="action-button ${this.debuggerController
+                          ?.isTelemetryEnabled()
+                        ? "on"
+                        : "off"}"
+                      @click="${() =>
+                        this.debuggerController?.toggleTelemetry()}"
+                      title="${this.debuggerController?.isTelemetryEnabled()
+                        ? "Telemetry ON - click to disable"
+                        : "Telemetry OFF - click to enable"}"
+                    >
+                      ${this.debuggerController?.isTelemetryEnabled()
+                        ? "●"
+                        : "○"} Telemetry
+                    </button>
+
+                    <button
+                      type="button"
                       class="action-button"
                       @click="${this.togglePause}"
                       title="${this.isPaused ? "Resume" : "Pause"} (Space)"
