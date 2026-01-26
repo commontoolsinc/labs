@@ -19,7 +19,6 @@ import type {
   InferOf,
   Invocation,
   InvocationURL,
-  JSONValue,
   MemorySpace,
   MIME,
   OfTheCause,
@@ -43,6 +42,7 @@ import type {
   Selection,
   Selector,
   Signer,
+  StorableDatum,
   Transaction,
   TransactionResult,
   UCAN,
@@ -670,7 +670,7 @@ class QuerySubscriptionInvocation<
   override perform(commit: EnhancedCommit<Space>) {
     const selection = this.selection[this.space];
     // Here we will collect subset of changes that match the query.
-    const differential: OfTheCause<{ is?: JSONValue; since: number }> = {};
+    const differential: OfTheCause<{ is?: StorableDatum; since: number }> = {};
     const fact = toRevision(commit.commit);
 
     const { the, of, is } = fact;

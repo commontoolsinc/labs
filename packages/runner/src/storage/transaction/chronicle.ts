@@ -13,11 +13,14 @@ import type {
   ITransaction,
   ITypeMismatchError,
   IUnsupportedMediaTypeError,
-  JSONValue,
   MemorySpace,
   Result,
   State,
 } from "../interface.ts";
+import type {
+  StorableDatum,
+  StorableValue,
+} from "@commontools/memory/interface";
 import * as Address from "./address.ts";
 import {
   attest,
@@ -121,7 +124,7 @@ export class Chronicle {
    */
   write(
     address: IMemoryAddress,
-    value?: JSONValue,
+    value?: StorableDatum,
   ): Result<
     IAttestation,
     | IStorageTransactionInconsistent
@@ -282,7 +285,7 @@ export class Chronicle {
 
           edit.assert({
             ...loaded,
-            is: normalizedMerged as JSONValue,
+            is: normalizedMerged as StorableDatum,
             cause: causeRef,
           });
         }
@@ -521,7 +524,7 @@ class Changes {
    */
   applyWrite(
     address: IMemoryAddress,
-    value: JSONValue | undefined,
+    value: StorableValue,
   ): Result<
     IAttestation,
     IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError

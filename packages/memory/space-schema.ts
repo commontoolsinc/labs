@@ -2,9 +2,9 @@ import {
   ContextualFlowControl,
   deepEqual,
   type JSONObject,
-  type JSONValue,
   type SchemaContext,
 } from "@commontools/runner";
+import type { StorableDatum } from "./interface.ts";
 import {
   BaseMemoryAddress,
   BaseObjectManager,
@@ -67,7 +67,7 @@ const logger = getLogger("space-schema", {
 // and another system on the client.
 export class ServerObjectManager extends BaseObjectManager<
   BaseMemoryAddress,
-  Immutable<JSONValue> | undefined
+  Immutable<StorableDatum> | undefined
 > {
   // Cache our read labels, and any docs we can't read
   private readLabels = new Map<Entity, SelectedFact | undefined>();
@@ -169,7 +169,7 @@ export const selectSchema = <Space extends MemorySpace>(
   const manager = new ServerObjectManager(session, providedClassifications);
   // while loading dependent docs, we want to avoid cycles
   const tracker = new CompoundCycleTracker<
-    Immutable<JSONValue>,
+    Immutable<StorableDatum>,
     SchemaContext | undefined
   >();
   const cfc = new ContextualFlowControl();
@@ -294,7 +294,7 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
   const providedClassifications = new Set<string>(classification);
   const manager = new ServerObjectManager(session, providedClassifications);
   const tracker = new CompoundCycleTracker<
-    Immutable<JSONValue>,
+    Immutable<StorableDatum>,
     SchemaContext | undefined
   >();
   const cfc = new ContextualFlowControl();

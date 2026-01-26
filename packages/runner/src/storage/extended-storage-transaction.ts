@@ -1,6 +1,11 @@
 import { isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import type {
+  StorableDatum,
+  StorableObject,
+  StorableValue,
+} from "@commontools/memory/interface";
+import type {
   CommitError,
   IAttestation,
   IExtendedStorageTransaction,
@@ -12,7 +17,6 @@ import type {
   ITransactionJournal,
   ITransactionReader,
   ITransactionWriter,
-  JSONValue,
   MemorySpace,
   ReaderError,
   ReadError,
@@ -75,7 +79,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   readOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): JSONValue | undefined {
+  ): StorableValue {
     const readResult = this.tx.read(address, options);
     logResult("readOrThrow, initial", readResult, address, options);
     if (
@@ -95,7 +99,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   readValueOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): JSONValue | undefined {
+  ): StorableValue {
     return this.readOrThrow(
       { ...address, path: ["value", ...address.path] },
       options,
@@ -117,7 +121,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   writeOrThrow(
     address: IMemorySpaceAddress,
-    value: JSONValue | undefined,
+    value: StorableValue,
   ): void {
     const writeResult = this.tx.write(address, value);
     logResult("writeOrThrow, initial", writeResult, address, value);
@@ -134,7 +138,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // just start with {}. But if errorPath has content (e.g., ["foo"]), the
       // document exists and we need to read from lastExistingPath to preserve
       // existing fields.
-      let valueObj: Record<string, JSONValue>;
+      let valueObj: StorableObject;
       if (errorPath.length === 0) {
         valueObj = {};
       } else {
@@ -148,7 +152,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             `Value at path ${address.path.join("/")} is not an object`,
           );
         }
-        valueObj = currentValue as Record<string, JSONValue>;
+        valueObj = currentValue as StorableObject;
       }
       const remainingPath = address.path.slice(lastExistingPath.length);
       if (remainingPath.length === 0) {
@@ -157,7 +161,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         );
       }
       const lastKey = remainingPath.pop()!;
-      let nextValue: Record<string, JSONValue> = valueObj;
+      let nextValue: StorableObject = valueObj;
       // Create intermediate containers. The container type depends on whether
       // the NEXT key (the one that will access this container) is a valid array
       // index.
@@ -167,9 +171,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         const isNextKeyArrayIndex = isArrayIndexPropertyName(nextKey);
         nextValue =
           nextValue[key] =
-            (isNextKeyArrayIndex ? [] : {}) as Record<string, JSONValue>;
+            (isNextKeyArrayIndex ? [] : {}) as StorableObject;
       }
-      nextValue[lastKey] = value as JSONValue;
+      nextValue[lastKey] = value as StorableDatum;
       const parentAddress = { ...address, path: lastExistingPath };
       const writeResultRetry = this.tx.write(parentAddress, valueObj);
       logResult(
@@ -188,7 +192,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   writeValueOrThrow(
     address: IMemorySpaceAddress,
-    value: JSONValue | undefined,
+    value: StorableValue,
   ): void {
     this.writeOrThrow({ ...address, path: ["value", ...address.path] }, value);
   }
@@ -311,7 +315,7 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   readOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): JSONValue | undefined {
+  ): StorableValue {
     return this.wrapped.readOrThrow(
       address,
       this.transformReadOptions(options),
@@ -321,7 +325,7 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   readValueOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): JSONValue | undefined {
+  ): StorableValue {
     return this.wrapped.readValueOrThrow(
       address,
       this.transformReadOptions(options),
@@ -334,21 +338,21 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   write(
     address: IMemorySpaceAddress,
-    value: JSONValue | undefined,
+    value: StorableValue,
   ): Result<IAttestation, WriteError | WriterError> {
     return this.wrapped.write(address, value);
   }
 
   writeOrThrow(
     address: IMemorySpaceAddress,
-    value: JSONValue | undefined,
+    value: StorableValue,
   ): void {
     return this.wrapped.writeOrThrow(address, value);
   }
 
   writeValueOrThrow(
     address: IMemorySpaceAddress,
-    value: JSONValue | undefined,
+    value: StorableValue,
   ): void {
     return this.wrapped.writeValueOrThrow(address, value);
   }

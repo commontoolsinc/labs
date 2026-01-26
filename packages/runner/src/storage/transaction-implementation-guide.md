@@ -130,7 +130,7 @@ Memory addresses have three components:
 
 - `id`: Entity URI
 - `type`: Media type (e.g., "application/json")
-- `path`: JSON path within the value
+- `path`: Intra-value path
 
 Special handling for data URIs:
 

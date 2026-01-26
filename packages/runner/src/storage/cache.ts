@@ -1,4 +1,5 @@
 import { fromString, refer } from "@commontools/memory/reference";
+import type { StorableDatum } from "@commontools/memory/interface";
 import type {
   CauseString,
   Changes as MemoryChanges,
@@ -6,7 +7,6 @@ import type {
   Entity,
   Fact,
   FactAddress,
-  JSONValue,
   MemorySpace,
   MIME,
   Protocol,
@@ -286,7 +286,7 @@ class Heap implements SyncPush<Revision<State>> {
 type RevisionArchive = {
   the: The;
   of: Entity;
-  is?: JSONValue;
+  is?: StorableDatum;
   cause?: string;
   since: number;
 };
@@ -543,7 +543,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     }
     const traverse = (
       value: Readonly<any>,
-    ): JSONValue => {
+    ): StorableDatum => {
       if (isRecord(value)) {
         if (Array.isArray(value)) {
           return value.map((val) => traverse(val));
@@ -1374,7 +1374,7 @@ export class Replica {
       return;
     }
 
-    const initialACL: JSONValue = {
+    const initialACL: StorableDatum = {
       value: {
         [userIdentity.did()]: "OWNER",
         [ANYONE_USER]: "WRITE",
@@ -1770,7 +1770,7 @@ export class Provider implements IStorageProvider {
   subscription: IStorageSubscription;
   spaceIdentity?: Signer;
 
-  subscribers: Map<string, Set<(value: StorageValue<JSONValue>) => void>> =
+  subscribers: Map<string, Set<(value: StorageValue<StorableDatum>) => void>> =
     new Map();
   // Tracks server-side subscriptions so we can re-establish them after reconnection
   // These promises will sometimes be pending, since we also use this to avoid
@@ -1924,7 +1924,7 @@ export class Provider implements IStorageProvider {
           facts.push(assert({
             the,
             of: uri,
-            is: JSON.parse(content) as JSONValue,
+            is: JSON.parse(content) as StorableDatum,
             // If fact has no `cause` it is unclaimed fact.
             cause: current?.cause ? current : null,
           }));
@@ -1939,7 +1939,7 @@ export class Provider implements IStorageProvider {
             facts.push(assert({
               the: LABEL_TYPE,
               of: uri,
-              is: value.labels as JSONValue,
+              is: value.labels as StorableDatum,
               // If fact has no `cause` it is unclaimed fact.
               cause: currentLabel?.cause ? currentLabel : null,
             }));

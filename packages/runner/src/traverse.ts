@@ -11,8 +11,10 @@ import {
 } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import type { JSONObject, JSONSchema, JSONValue } from "./builder/types.ts";
+import type { JSONObject, JSONSchema } from "./builder/types.ts";
 import type {
+  JSONValue,
+  OptStorableValue,
   SchemaContext,
   SchemaPathSelector,
 } from "@commontools/memory/interface";
@@ -262,16 +264,6 @@ export abstract class BaseObjectManager<
   abstract load(address: BaseMemoryAddress): IAttestation | null;
 }
 
-export type OptJSONValue =
-  | undefined
-  | JSONValue
-  | OptJSONArray
-  | OptJSONObject;
-interface OptJSONArray extends Array<OptJSONValue> {}
-interface OptJSONObject {
-  [key: string]: OptJSONValue;
-}
-
 // Value traversed must be a DAG, though it may have aliases or cell links
 // that make it seem like it has cycles
 export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
@@ -279,7 +271,7 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
     protected manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
     protected cfc: ContextualFlowControl = new ContextualFlowControl(),
   ) {}
-  abstract traverse(doc: IAttestation): Immutable<OptJSONValue>;
+  abstract traverse(doc: IAttestation): Immutable<OptStorableValue>;
 
   /**
    * Attempt to traverse the document as a directed acyclic graph.
@@ -761,7 +753,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
 
   override traverse(
     doc: IAttestation,
-  ): Immutable<OptJSONValue> {
+  ): Immutable<OptStorableValue> {
     this.trackNewLink(this.manager.toKey(doc.address), this.selector);
     return this.traverseWithSelector(doc, this.selector);
   }
@@ -782,7 +774,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
   traverseWithSelector(
     doc: IAttestation,
     selector: SchemaPathSelector,
-  ): Immutable<OptJSONValue> {
+  ): Immutable<OptStorableValue> {
     // Remove the leading "value" from the doc's address for comparison with
     // the schema path (which does not include the "value" portion).
     const valuePath = doc.address.path.slice(1);
@@ -823,7 +815,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
   traverseWithSchemaContext(
     doc: IAttestation,
     schemaContext: Readonly<SchemaContext>,
-  ): Immutable<OptJSONValue> {
+  ): Immutable<OptStorableValue> {
     if (ContextualFlowControl.isTrueSchema(schemaContext.schema)) {
       // A value of true or {} means we match anything
       // Resolve the rest of the doc, and return
@@ -976,7 +968,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
   private traverseArrayWithSchema(
     doc: IAttestation,
     schemaContext: SchemaContext,
-  ): Immutable<OptJSONValue> {
+  ): Immutable<OptStorableValue> {
     const arrayObj = [];
     const schema = schemaContext.schema;
     const prefixItems = isObject(schema) && Array.isArray(schema["prefixItems"])
@@ -1020,8 +1012,8 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
   private traverseObjectWithSchema(
     doc: IAttestation,
     schemaContext: SchemaContext,
-  ): Immutable<OptJSONValue> {
-    const filteredObj: Record<string, Immutable<OptJSONValue>> = {};
+  ): Immutable<OptStorableValue> {
+    const filteredObj: Record<string, Immutable<OptStorableValue>> = {};
     const schema = schemaContext.schema as Immutable<JSONObject>;
     for (const [propKey, propValue] of Object.entries(doc.value!)) {
       const schemaProperties = schema["properties"] as
@@ -1076,7 +1068,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
   private traversePointerWithSchema(
     doc: IAttestation,
     schemaContext: SchemaContext,
-  ): Immutable<OptJSONValue> {
+  ): Immutable<OptStorableValue> {
     const selector = {
       path: [...doc.address.path.slice(1)],
       schemaContext: schemaContext,

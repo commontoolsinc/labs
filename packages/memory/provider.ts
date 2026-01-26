@@ -29,6 +29,7 @@ import {
   Revision,
   SchemaQuery,
   Selection,
+  StorableDatum,
   Subscribe,
   Subscriber,
   Transaction,
@@ -519,7 +520,7 @@ class MemoryProviderSession<
 
   private toSelection(factVersions: Revision<Fact>[]) {
     const selection: Memory.OfTheCause<
-      { is?: Memory.JSONValue; since: number }
+      { is?: StorableDatum; since: number }
     > = {};
     for (const fact of factVersions) {
       setRevision(

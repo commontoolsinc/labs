@@ -58,7 +58,7 @@ import { SelectAllString } from "./schema.ts";
 import * as Error from "./error.ts";
 import { selectSchema, type SelectSchemaResult } from "./space-schema.ts";
 export type { SelectSchemaResult } from "./space-schema.ts";
-import { JSONValue } from "@commontools/runner";
+import { StorableDatum, StorableValue } from "./interface.ts";
 import { isObject } from "../utils/src/types.ts";
 export type * from "./interface.ts";
 
@@ -665,7 +665,7 @@ export type SelectedFact = {
   the: MIME;
   of: URI;
   cause: CauseString;
-  is?: JSONValue;
+  is?: StorableDatum;
   since: number;
 };
 
@@ -676,7 +676,7 @@ const toFact = function (row: StateRow): SelectedFact {
     cause: row.cause
       ? row.cause as CauseString
       : unclaimedRef(row as FactAddress).toString() as CauseString,
-    is: row.is ? JSON.parse(row.is) as JSONValue : undefined,
+    is: row.is ? JSON.parse(row.is) as StorableDatum : undefined,
     since: row.since,
   };
 };
@@ -735,7 +735,7 @@ export const selectFact = function <Space extends MemorySpace>(
  */
 const importDatum = <Space extends MemorySpace>(
   session: Session<Space>,
-  datum: JSONValue | undefined,
+  datum: StorableValue,
 ): string => {
   if (datum === undefined) {
     return "undefined";
@@ -1163,7 +1163,7 @@ export const querySchemaWithTracker = <Space extends MemorySpace>(
 };
 
 export const LABEL_TYPE = "application/label+json" as const;
-export type FactSelectionValue = { is?: JSONValue; since: number };
+export type FactSelectionValue = { is?: StorableDatum; since: number };
 // Get the labels associated with a set of commits.
 // It's possible to get more than one label for a single doc because our
 // includedFacts may include more than one cause for a single doc.

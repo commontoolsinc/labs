@@ -2,6 +2,11 @@ import { deepEqual } from "@commontools/utils/deep-equal";
 import { isRecord } from "@commontools/utils/types";
 import { isArrayIndexPropertyName } from "../../value-codec.ts";
 import type {
+  StorableDatum,
+  StorableObject,
+  StorableValue,
+} from "@commontools/memory/interface";
+import type {
   IAttestation,
   IInvalidDataURIError,
   IMemoryAddress,
@@ -10,7 +15,6 @@ import type {
   IStorageTransactionInconsistent,
   ITypeMismatchError,
   IUnsupportedMediaTypeError,
-  JSONValue,
   MemoryAddressPathComponent,
   MemorySpace,
   Result,
@@ -68,10 +72,10 @@ export const UnsupportedMediaTypeError = (
  * with O(D) structural sharing where D is path depth.
  */
 const setAtPath = (
-  root: JSONValue | undefined,
+  root: StorableValue,
   path: readonly MemoryAddressPathComponent[],
-  value: JSONValue | undefined,
-): { ok: JSONValue | undefined } | {
+  value: StorableValue,
+): { ok: StorableValue } | {
   error: { at: number; type: string; notFound?: boolean };
 } => {
   // Base case: empty path = replace root
@@ -145,12 +149,12 @@ const setAtPath = (
     }
     if (result.ok === nested) return { ok: root }; // noop propagation
     const newArray = [...root];
-    newArray[index] = result.ok as JSONValue;
+    newArray[index] = result.ok as StorableDatum;
     return { ok: newArray };
   }
 
   // Handle objects
-  const obj = root as Record<string, JSONValue>;
+  const obj = root as StorableObject;
 
   // Terminal case
   if (rest.length === 0) {
@@ -158,7 +162,7 @@ const setAtPath = (
     if (value === undefined) {
       if (!(key in obj)) return { ok: root }; // delete non-existent = noop
       const { [key]: _, ...without } = obj;
-      return { ok: without as JSONValue };
+      return { ok: without as StorableDatum };
     }
     return { ok: { ...obj, [key]: value } };
   }
@@ -176,7 +180,7 @@ const setAtPath = (
     };
   }
   if (result.ok === nested) return { ok: root }; // noop propagation
-  return { ok: { ...obj, [key]: result.ok as JSONValue } };
+  return { ok: { ...obj, [key]: result.ok as StorableDatum } };
 };
 
 /**
@@ -192,7 +196,7 @@ const setAtPath = (
 export const write = (
   source: IAttestation,
   address: IMemoryAddress,
-  value: JSONValue | undefined,
+  value: StorableValue,
 ): Result<
   IAttestation,
   IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
@@ -367,7 +371,7 @@ export const resolve = (
   while (++at < path.length) {
     const key = path[at];
     if (isRecord(value)) {
-      value = value[key] as JSONValue;
+      value = value[key] as StorableDatum;
     } else {
       // If the value is undefined, the path doesn't exist, but we can still
       // write onto it. Return error with last valid path component.
@@ -452,7 +456,7 @@ export const load = (
           };
         } else if (mediaType === "application/json") {
           // Handle JSON media type
-          let value: JSONValue;
+          let value: StorableDatum;
           try {
             value = JSON.parse(content);
             result = { ok: { address: { ...address, path: [] }, value } };
@@ -552,8 +556,8 @@ export const TypeMismatchError = (
 
 export const StateInconsistency = (source: {
   address: IMemoryAddress;
-  expected?: JSONValue;
-  actual?: JSONValue;
+  expected?: StorableDatum;
+  actual?: StorableDatum;
   space?: MemorySpace;
 }): IStorageTransactionInconsistent => {
   const { address, space, expected, actual } = source;
