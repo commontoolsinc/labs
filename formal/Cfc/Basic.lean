@@ -1,5 +1,6 @@
 import Cfc.Atom
 import Cfc.Label
+import Cfc.LabelTransitions
 import Cfc.Access
 import Cfc.Link
 import Cfc.Intent
@@ -7,6 +8,7 @@ import Cfc.CommitPoint
 import Cfc.Language
 import Cfc.Language.Declassify
 import Cfc.Exchange
+import Cfc.Collection
 import Cfc.Proofs.Noninterference
 import Cfc.Proofs.RobustDeclassification
 import Cfc.Proofs.TransparentEndorsement
@@ -19,3 +21,5 @@ import Cfc.Proofs.Intent
 import Cfc.Proofs.CommitPoint
 import Cfc.Proofs.Scenarios
 import Cfc.Proofs.GmailExample
+import Cfc.Proofs.LabelTransitions
+import Cfc.Proofs.Collection
