@@ -1900,17 +1900,18 @@ export class XDebuggerView extends LitElement {
                 y1="${yPos}"
                 x2="${width - margin.right}"
                 y2="${yPos}"
-                stroke="#1e293b"
+                stroke="#334155"
                 stroke-width="1"
+                opacity="0.3"
               />
               <text
-                x="${margin.left - 5}"
-                y="${yPos}"
+                x="${margin.left - 8}"
+                y="${yPos + 1}"
                 text-anchor="end"
                 dominant-baseline="middle"
-                fill="#cbd5e1"
-                font-size="11"
-                font-weight="500"
+                fill="#e2e8f0"
+                font-size="10"
+                font-family="monospace"
               >
                 ${formatTime(y)}
               </text>
@@ -1926,16 +1927,17 @@ export class XDebuggerView extends LitElement {
                 y1="${margin.top}"
                 x2="${xPos}"
                 y2="${height - margin.bottom}"
-                stroke="#1e293b"
+                stroke="#334155"
                 stroke-width="1"
+                opacity="0.3"
               />
               <text
                 x="${xPos}"
-                y="${height - margin.bottom + 15}"
+                y="${height - margin.bottom + 18}"
                 text-anchor="middle"
-                fill="#cbd5e1"
-                font-size="11"
-                font-weight="500"
+                fill="#e2e8f0"
+                font-size="10"
+                font-family="monospace"
               >
                 ${x}
               </text>
@@ -1948,16 +1950,16 @@ export class XDebuggerView extends LitElement {
             y1="${height - margin.bottom}"
             x2="${width - margin.right}"
             y2="${height - margin.bottom}"
-            stroke="#94a3b8"
-            stroke-width="1"
+            stroke="#cbd5e1"
+            stroke-width="2"
           />
           <line
             x1="${margin.left}"
             y1="${margin.top}"
             x2="${margin.left}"
             y2="${height - margin.bottom}"
-            stroke="#94a3b8"
-            stroke-width="1"
+            stroke="#cbd5e1"
+            stroke-width="2"
           />
 
           <!-- X-axis ticks -->
@@ -1969,7 +1971,7 @@ export class XDebuggerView extends LitElement {
                 y1="${height - margin.bottom}"
                 x2="${xPos}"
                 y2="${height - margin.bottom + 6}"
-                stroke="#94a3b8"
+                stroke="#e2e8f0"
                 stroke-width="2"
               />
             `;
@@ -1984,7 +1986,7 @@ export class XDebuggerView extends LitElement {
                 y1="${yPos}"
                 x2="${margin.left}"
                 y2="${yPos}"
-                stroke="#94a3b8"
+                stroke="#e2e8f0"
                 stroke-width="2"
               />
             `;
@@ -2119,9 +2121,9 @@ export class XDebuggerView extends LitElement {
             x="${margin.left + plotWidth / 2}"
             y="${height - 5}"
             text-anchor="middle"
-            fill="#94a3b8"
-            font-size="11"
-            font-weight="500"
+            fill="#e2e8f0"
+            font-size="12"
+            font-weight="600"
           >
             Events
           </text>
@@ -2129,9 +2131,9 @@ export class XDebuggerView extends LitElement {
             x="${margin.left - 40}"
             y="${margin.top + plotHeight / 2}"
             text-anchor="middle"
-            fill="#94a3b8"
-            font-size="11"
-            font-weight="500"
+            fill="#e2e8f0"
+            font-size="12"
+            font-weight="600"
             transform="rotate(-90 ${margin.left - 40} ${margin.top +
               plotHeight / 2})"
           >
