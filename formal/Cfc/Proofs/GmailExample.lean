@@ -39,6 +39,9 @@ def networkProvenance : Atom :=
 def pAlice (u : String) : Principal :=
   { now := 0, atoms := [Atom.user u, emailMetadataSecret u] }
 
+def pAliceWithNotes (u : String) : Principal :=
+  { now := 0, atoms := [Atom.user u, emailMetadataSecret u, notesSecret u] }
+
 def tokenLabel (u : String) : Label :=
   { conf := [[Atom.user u], [googleAuth u]]
     integ := [] }
@@ -132,6 +135,16 @@ theorem search_query_taints_response (u : String) :
     simpa using ha
   subst this
   simp [pAlice, Principal.satisfies, notesSecret, emailMetadataSecret] at hs
+
+theorem search_query_allows_with_notesSecret (u : String) :
+    let ℓResp := gmailReadResponseLabel u
+    let ℓQuery : Label := { conf := [[notesSecret u]], integ := [] }
+    canAccess (pAliceWithNotes u) (ℓResp + ℓQuery) := by
+  classical
+  intro ℓResp ℓQuery
+  -- All required confidentiality atoms are present in the principal.
+  simp [ℓResp, ℓQuery, gmailReadResponseLabel, pAliceWithNotes, notesSecret,
+    emailMetadataSecret, canAccess, canAccessConf, clauseSat, Principal.satisfies]
 
 /-!
 Spec 1.4.6 (write): the commit point consumes an `IntentOnce` token only on commit,
