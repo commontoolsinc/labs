@@ -810,6 +810,22 @@ export class XDebuggerView extends LitElement {
       font-size: 0.625rem;
       color: #64748b;
     }
+
+    .timing-tooltip {
+      position: fixed;
+      background-color: #1e293b;
+      color: #e2e8f0;
+      padding: 0.5rem;
+      border-radius: 0.25rem;
+      font-size: 0.75rem;
+      pointer-events: none;
+      z-index: 1000;
+      box-shadow:
+        0 4px 6px -1px rgba(0, 0, 0, 0.1),
+        0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      white-space: pre-line;
+      max-width: 250px;
+    }
   `;
 
   @property({ type: Boolean })
@@ -868,6 +884,14 @@ export class XDebuggerView extends LitElement {
 
   @state()
   private pausedMarkers: RuntimeTelemetryMarkerResult[] = [];
+
+  @state()
+  private tooltipData: {
+    x: number;
+    y: number;
+    content: string;
+    visible: boolean;
+  } | null = null;
 
   private resizeController = new ResizableDrawerController(this, {
     initialHeight: 300,
@@ -1675,6 +1699,65 @@ export class XDebuggerView extends LitElement {
     `;
   }
 
+  private handleChartMouseMove(
+    e: MouseEvent,
+    cumulativePoints: Array<{ eventIndex: number; cumulativeTime: number }>,
+    xScale: (eventIndex: number) => number,
+    yScale: (cumulativeTime: number) => number,
+    formatTime: (ms: number) => string,
+    margin: { top: number; right: number; bottom: number; left: number },
+    _plotWidth: number,
+    _plotHeight: number,
+  ): void {
+    const svg = e.currentTarget as SVGElement;
+    const rect = svg.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // Check if mouse is inside plot area
+    if (
+      mouseX < margin.left ||
+      mouseX > rect.width - margin.right ||
+      mouseY < margin.top ||
+      mouseY > rect.height - margin.bottom
+    ) {
+      this.tooltipData = null;
+      return;
+    }
+
+    // Find closest point on the curve
+    let closestPoint = cumulativePoints[0];
+    let minDistance = Infinity;
+
+    for (const point of cumulativePoints) {
+      const px = xScale(point.eventIndex);
+      const py = yScale(point.cumulativeTime);
+      const distance = Math.sqrt((mouseX - px) ** 2 + (mouseY - py) ** 2);
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestPoint = point;
+      }
+    }
+
+    // Show tooltip if close enough (within 20px)
+    if (minDistance < 20) {
+      this.tooltipData = {
+        x: e.clientX + 10,
+        y: e.clientY - 10,
+        content: `Event #${closestPoint.eventIndex}\nCumulative: ${
+          formatTime(closestPoint.cumulativeTime)
+        }`,
+        visible: true,
+      };
+    } else {
+      this.tooltipData = null;
+    }
+  }
+
+  private handleChartMouseLeave(): void {
+    this.tooltipData = null;
+  }
+
   private renderCDFForKey(
     key: string,
     stats: TimingStats,
@@ -1741,7 +1824,7 @@ export class XDebuggerView extends LitElement {
     };
 
     // Y-axis: cumulative time (0 to totalTime)
-    const maxCumulativeTime = stats.totalTime;
+    const maxCumulativeTime = Math.max(stats.totalTime, 0.001); // Avoid division by zero
     const yScale = (cumulativeTime: number) => {
       return margin.top + plotHeight -
         (cumulativeTime / maxCumulativeTime) * plotHeight;
@@ -1795,6 +1878,18 @@ export class XDebuggerView extends LitElement {
           width="${width}"
           height="${height}"
           style="background-color: #0f172a; border-radius: 0.25rem; cursor: crosshair;"
+          @mousemove="${(e: MouseEvent) =>
+            this.handleChartMouseMove(
+              e,
+              cumulativePoints,
+              xScale,
+              yScale,
+              formatTime,
+              margin,
+              plotWidth,
+              plotHeight,
+            )}"
+          @mouseleave="${() => this.handleChartMouseLeave()}"
         >
           <!-- Y-axis grid lines and labels -->
           ${yTicks.map((y) => {
@@ -1813,8 +1908,9 @@ export class XDebuggerView extends LitElement {
                 y="${yPos}"
                 text-anchor="end"
                 dominant-baseline="middle"
-                fill="#94a3b8"
-                font-size="10"
+                fill="#cbd5e1"
+                font-size="11"
+                font-weight="500"
               >
                 ${formatTime(y)}
               </text>
@@ -1837,8 +1933,9 @@ export class XDebuggerView extends LitElement {
                 x="${xPos}"
                 y="${height - margin.bottom + 15}"
                 text-anchor="middle"
-                fill="#94a3b8"
-                font-size="10"
+                fill="#cbd5e1"
+                font-size="11"
+                font-weight="500"
               >
                 ${x}
               </text>
@@ -2635,6 +2732,19 @@ export class XDebuggerView extends LitElement {
                 </div>
               `}
           </div>
+
+          <!-- Tooltip -->
+          ${this.tooltipData
+            ? html`
+              <div
+                class="timing-tooltip"
+                style="left: ${this.tooltipData.x}px; top: ${this.tooltipData
+                  .y}px;"
+              >
+                ${this.tooltipData.content}
+              </div>
+            `
+            : ""}
         `
         : ""}
     `;
