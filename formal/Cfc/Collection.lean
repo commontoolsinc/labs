@@ -1,6 +1,7 @@
 import Std
 
 import Cfc.Label
+import Cfc.Link
 
 namespace Cfc
 
@@ -18,6 +19,20 @@ structure LabeledCollection (Ref : Type) where
   container : Label
   members : List (Ref × Label)
   deriving Repr
+
+namespace LabeledCollection
+
+variable {Ref : Type}
+
+/-- The label for observing a member value: membership confidentiality is conjunctive (8.5.6.1). -/
+def derefMember (c : LabeledCollection Ref) (member : Label) : Label :=
+  Cfc.Link.deref c.container member
+
+/-- Observing `length` reveals only membership information (8.5.6.1). -/
+def lengthLabel (c : LabeledCollection Ref) : Label :=
+  c.container
+
+end LabeledCollection
 
 namespace Atom
 

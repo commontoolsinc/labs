@@ -1,6 +1,7 @@
 import Std
 
 import Cfc.Collection
+import Cfc.Proofs.Link
 
 namespace Cfc
 
@@ -75,8 +76,11 @@ theorem not_mem_filteredFrom_completeCollection {Ref : Type} (pc : ConfLabel) (s
   classical
   simp [CollectionTransition.filteredFrom, CollectionTransition.stripCollectionIntegrity, Atom.isCollectionIntegrity]
 
+theorem canAccess_derefMember_iff {Ref : Type} (p : Principal) (c : LabeledCollection Ref) (member : Label) :
+    canAccess p (LabeledCollection.derefMember c member) ↔ canAccess p c.container ∧ canAccess p member := by
+  simpa [LabeledCollection.derefMember] using (Proofs.Link.canAccess_deref_iff p c.container member)
+
 end Collection
 end Proofs
 
 end Cfc
-

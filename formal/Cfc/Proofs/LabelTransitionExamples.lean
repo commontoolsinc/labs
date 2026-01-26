@@ -59,6 +59,19 @@ theorem filtered_collection_separates_membership_and_members :
   · simp [out, input, publicLbl, CollectionTransition.filteredFrom]
   · rfl
 
+theorem secret_membership_taints_member_access :
+    let publicLbl : Label := { conf := [], integ := [] }
+    let secret : ConfLabel := [[Atom.user "Alice"]]
+    let c : LabeledCollection Nat := { container := { conf := secret, integ := [] }, members := [] }
+    let pBob : Principal := { now := 0, atoms := [Atom.user "Bob"] }
+    ¬ canAccess pBob (LabeledCollection.derefMember c publicLbl) := by
+  classical
+  intro publicLbl secret c pBob hAcc
+  have h := (Proofs.Collection.canAccess_derefMember_iff (p := pBob) (c := c) (member := publicLbl)).1 hAcc
+  have hNo : ¬ canAccess pBob c.container := by
+    simp [c, pBob, secret, canAccess, canAccessConf, clauseSat, Principal.satisfies]
+  exact hNo h.1
+
 end LabelTransitionExamples
 end Proofs
 
