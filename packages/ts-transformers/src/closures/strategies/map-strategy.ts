@@ -1,10 +1,14 @@
 import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
-import { isOpaqueRefType } from "../../transformers/opaque-ref/opaque-ref.ts";
+import {
+  getCellKind,
+  isOpaqueRefType,
+} from "../../transformers/opaque-ref/opaque-ref.ts";
 import {
   getTypeAtLocationWithFallback,
   isFunctionLikeExpression,
+  isInsideSafeCallbackWrapper,
 } from "../../ast/mod.ts";
 import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
@@ -177,13 +181,12 @@ export function buildCapturePropertyAssignments(
 /**
  * Check if a map call should be transformed to mapWithPattern.
  *
- * Type-based approach with one special case:
+ * Type-based approach with context awareness (CT-1186 fix):
  * 1. derive() calls always return OpaqueRef at runtime -> TRANSFORM
- * 2. Otherwise, transform iff the target has an opaque type -> TRANSFORM
- *
- * The derive special case exists because we register the unwrapped callback
- * return type in the type registry (not OpaqueRef<T>), so type-based detection
- * doesn't work for derive results.
+ * 2. Inside safe wrappers (computed/derive/etc), OpaqueRef gets auto-unwrapped
+ *    to a plain array, so we should NOT transform OpaqueRef .map() calls there.
+ *    However, Cell and Stream do NOT get auto-unwrapped, so we still transform those.
+ * 3. Outside safe wrappers, transform all cell-like types (OpaqueRef, Cell, Stream).
  */
 function shouldTransformMap(
   mapCall: ts.CallExpression,
@@ -208,8 +211,24 @@ function shouldTransformMap(
 
   if (!targetType) return false;
 
-  // Transform iff the target is a cell-like type
-  return isOpaqueRefType(targetType, context.checker);
+  // Check if this is a cell-like type at all
+  if (!isOpaqueRefType(targetType, context.checker)) {
+    return false;
+  }
+
+  // Determine the specific cell kind
+  const cellKind = getCellKind(targetType, context.checker);
+
+  // Inside safe wrappers (computed, derive, action, lift, handler),
+  // OpaqueRef gets auto-unwrapped to plain values, so we should NOT transform.
+  // Cell and Stream do NOT get auto-unwrapped, so we still transform those.
+  if (isInsideSafeCallbackWrapper(mapCall, context.checker)) {
+    // Only transform Cell and Stream (not auto-unwrapped), not OpaqueRef (auto-unwrapped)
+    return cellKind === "cell" || cellKind === "stream";
+  }
+
+  // Outside safe wrappers, transform all cell-like types
+  return true;
 }
 
 /**
