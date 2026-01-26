@@ -49,6 +49,8 @@ import type {
   WriterError,
 } from "./storage/interface.ts";
 import { resolve } from "./storage/transaction/attestation.ts";
+import { isWriteRedirectLink } from "./link-types.ts";
+import { LastNode } from "./link-resolution.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
@@ -554,7 +556,7 @@ export abstract class BaseObjectTraverser<
         // TODO(@ubik2): We follow the first link in array elements so we
         // don't have strangeness with setting item at 0 to item at 1
         if (isPrimitiveCellLink(item)) {
-          const [next, _selector] = getAtPath(
+          const [next, redirDoc, _selector] = getAtPath(
             this.tx,
             docItem,
             [],
@@ -569,12 +571,15 @@ export abstract class BaseObjectTraverser<
               () => ["getAtPath returned undefined value for array entry", doc],
             );
           }
+          // our item link should point to the target of the last redirect
+          itemLink = getNormalizedLink(redirDoc.address, true, true);
         }
         return this.traverseDAG(
           docItem,
           tracker,
           schemaTracker,
           itemDefault,
+          itemLink,
         );
       });
       // We copy the contents of our result into newValue so that if we have a
@@ -592,12 +597,8 @@ export abstract class BaseObjectTraverser<
         // Check if target doc is already tracked BEFORE calling getAtPath,
         // since getAtPath/followPointer will add it to schemaTracker
         let alreadyTracked = false;
-        // If the link didn't have a space, make sure we add one
-        const link = {
-          space: doc.address.space,
-          type: "application/json",
-          ...parseLink(doc.value),
-        };
+        // If the link didn't have a space/type, make sure we add one
+        const link = parseLink(doc.value, doc.address);
         if (link.id !== undefined) {
           const targetKey = `${link.space}/${link.id}/${link.type}`;
           alreadyTracked = schemaTracker.hasValue(targetKey, {
@@ -606,7 +607,7 @@ export abstract class BaseObjectTraverser<
           });
         }
 
-        const [newDoc, _] = getAtPath(
+        const [newDoc, redirDoc, _] = getAtPath(
           this.tx,
           doc,
           [],
@@ -637,6 +638,8 @@ export abstract class BaseObjectTraverser<
         ) {
           return null;
         }
+        // our item link should point to the target of the last redirect
+        itemLink = getNormalizedLink(redirDoc.address, true, true);
         return this.traverseDAG(
           newDoc,
           tracker,
@@ -701,10 +704,12 @@ export abstract class BaseObjectTraverser<
  * @param selector: The selector being used (its path is relative to doc's root)
  * @param includeSource: if true, we will include linked source as well as
  *   spell and $TYPE recursively
+ * @param lastNode: defaults to "value"
  *
- * @returns a tuple containing an IAttestation object with the target doc,
- * docRoot, path, and value and also containing the updated selector that
- * applies to that target doc.
+ * @returns a tuple containing the following:
+ *  - IAttestation object with the target doc, docRoot, path, and value.
+ *  - IAttestation object for the target of the last redirect pointer
+ *  - Updated SchemaPathSelector that applies to the target doc.
  */
 export function getAtPath(
   tx: IExtendedStorageTransaction,
@@ -715,27 +720,61 @@ export function getAtPath(
   schemaTracker: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
   includeSource?: boolean,
-): [IMemorySpaceAttestation, SchemaPathSelector | undefined] {
+  lastNode: LastNode = "value",
+): [
+  IMemorySpaceAttestation,
+  IMemorySpaceAttestation,
+  SchemaPathSelector | undefined,
+] {
   let curDoc = doc;
   let remaining = [...path];
-  while (isPrimitiveCellLink(curDoc.value)) {
-    [curDoc, selector] = followPointer(
-      tx,
-      curDoc,
-      remaining,
-      tracker,
-      cfc,
-      schemaTracker,
-      selector,
-      includeSource,
-    );
-    remaining = [];
-  }
-  for (
-    let part = remaining.shift();
-    part !== undefined;
-    part = remaining.shift()
-  ) {
+
+  while (true) {
+    // capture the curDoc to use as redirDoc if we don't follow redirects
+    // We do need to handle the case where we still have remaining
+    let redirDoc = curDoc;
+    if (isPrimitiveCellLink(curDoc.value)) {
+      const redirect = isWriteRedirectLink(curDoc.value);
+      const trackRedirect = redirect || remaining.length !== 0;
+      let nextRedirDoc;
+      [curDoc, nextRedirDoc, selector] = followPointer(
+        tx,
+        curDoc,
+        remaining,
+        tracker,
+        cfc,
+        schemaTracker,
+        selector,
+        includeSource,
+      );
+      // if this pointer was at the end of the path, and is a redirect, pass
+      // it back up the chain. Othwerwise, pass our own address up.
+      if (trackRedirect) {
+        // Update redirDoc to reflect what we returned
+        redirDoc = nextRedirDoc;
+      } else if (remaining.length !== 0) {
+        // If we don't have any remaining, our redirDoc is fine
+        // If we do, we need to fix redirDoc's address and value
+        const redirAtPath = attestationAtPath(redirDoc, remaining);
+        if (redirAtPath.value !== undefined) {
+          redirDoc = redirAtPath;
+        } else {
+          // We don't have that path in our redir doc, so change our value to the final value
+          redirDoc = { address: redirAtPath.address, value: curDoc.value };
+        }
+      }
+      remaining = [];
+    }
+    // Our return should never be a link
+    if (isPrimitiveCellLink(curDoc.value)) {
+      throw new Error("Violation of expectation");
+    }
+    const part = remaining.shift();
+    if (part === undefined) {
+      return [curDoc, redirDoc, selector];
+    }
+    // curDoc.value is not a pointer, since we either resolved those above
+    // or will at the end of this loop.
     if (Array.isArray(curDoc.value)) {
       if (part === "length") {
         curDoc = {
@@ -761,33 +800,22 @@ export function getAtPath(
       };
     } else {
       // we can only descend into pointers, objects, and arrays
+      // this can happen when things aren't set up yet, so it's just debug.
       logger.debug("traverse", () => [
         "Attempted to traverse into non-object/non-array value",
         curDoc,
         [part, ...remaining],
       ]);
-      return [{
+      curDoc = {
         ...curDoc,
-        address: { ...curDoc.address, path: [] },
+        address: { ...curDoc.address, path: [...curDoc.address.path, part] },
         value: undefined,
-      }, selector];
-    }
-    // If this next value is a pointer, use the pointer resolution code
-    while (isPrimitiveCellLink(curDoc.value)) {
-      [curDoc, selector] = followPointer(
-        tx,
-        curDoc,
-        remaining,
-        tracker,
-        cfc,
-        schemaTracker,
-        selector,
-        includeSource,
-      );
-      remaining = [];
+      };
+      // For this error case, it's ok to return the current address, and not
+      // a redirect target, since we didn't really reach the end of our path.
+      return [curDoc, curDoc, selector];
     }
   }
-  return [curDoc, selector];
 }
 
 function notFound(
@@ -813,6 +841,17 @@ function getTrackerKey(
 /**
  * Resolves a pointer reference to its target value.
  *
+ * This method works with `getAtPath`, with the link management and document
+ * loading being handled in `followPointer`, while `getAtPath` handles the
+ * path traversal.
+ *
+ * We only follow one pointer here, before calling `getAtPath`, but that will
+ * often call back into this method to resolve links (including if the target
+ * of this link is also a link).
+ *
+ * We'll handle tracking of the docs, combining schema, and marking the linked
+ * source docs as read if needed.
+ *
  * @param tx - IStorageTransaction that can be used to read data
  * @param doc - IAttestation for the current document
  * @param path - Property/index path to follow
@@ -823,7 +862,13 @@ function getTrackerKey(
  * @param includeSource: if true, we will include linked source as well as
  *   spell and $TYPE recursively
  *
- * @returns an IAttestation object with the target doc, docRoot, path, and value.
+ * @returns a tuple containing the following:
+ *  - IAttestation object with the target doc, docRoot, path, and value.
+ *  - IAttestation object for the target of the last redirect pointer
+ *  - Updated SchemaPathSelector that applies to the target doc.
+ *    After following a pointer, we generally will still have path segments
+ *    that we haven't handled. These will be included in the selector.path,
+ *    which is relative to doc.address.path.
  */
 function followPointer(
   tx: IExtendedStorageTransaction,
@@ -836,6 +881,7 @@ function followPointer(
   includeSource?: boolean,
 ): [
   IMemorySpaceAttestation,
+  IMemorySpaceAttestation,
   SchemaPathSelector | undefined,
 ] {
   // doc.address's path doesn't have the same value nesting semantics as
@@ -843,14 +889,12 @@ function followPointer(
   const link = parseLink(doc.value, doc.address)!;
   // We may access portions of the doc outside what we have in our doc
   // attestation, so set the target to the top level doc from the manager.
-  const target: IMemorySpaceAddress = (link.id !== undefined)
-    ? {
-      space: link.space,
-      id: link.id,
-      type: "application/json",
-      path: [],
-    }
-    : { ...doc.address, path: [] };
+  const target: IMemorySpaceAddress = {
+    space: link.space,
+    id: link.id,
+    type: "application/json",
+    path: [],
+  };
   // The link.path doesn't include the initial "value", so prepend it
   const targetPath = ["value", ...link.path as string[]];
   if (selector !== undefined) {
@@ -860,7 +904,6 @@ function followPointer(
     // Also insert the portions of cellTarget.path, so selector is relative to
     // new target doc. We do this even if the target doc is the same doc, since
     // we want the selector path to match.
-    // Link paths are relative to value, so prepend value to our target path
     selector = narrowSchema(
       doc.address.path,
       selector,
@@ -880,12 +923,12 @@ function followPointer(
   using t = tracker.include(doc.value!, selector?.schemaContext, null, doc);
   if (t === null) {
     // Cycle detected - treat this as notFound to avoid traversal
-    return [notFound(doc.address), selector];
+    return [notFound(doc.address), notFound(doc.address), selector];
   }
-  // Load the top level doc from the manager.
+  // Load the data from the manager.
   const { ok: valueEntry, error } = tx.read(target);
   if (error) {
-    return [notFound(doc.address), selector];
+    return [notFound(doc.address), notFound(doc.address), selector];
   }
   if (link.id !== undefined) {
     // We have a reference to a different doc, so track the dependency
@@ -913,7 +956,7 @@ function followPointer(
       "traverse",
       () => ["followPointer found missing/retracted fact", valueEntry, target],
     );
-    return [notFound(target), selector];
+    return [notFound(doc.address), notFound(doc.address), selector];
   }
   // We can continue with the target, but provide the top level target doc
   // to getAtPath.
@@ -929,7 +972,7 @@ function followPointer(
   return getAtPath(
     tx,
     targetDoc,
-    [...targetPath, ...path] as string[],
+    [...targetPath, ...path],
     tracker,
     cfc,
     schemaTracker,
@@ -1337,12 +1380,12 @@ function loadLinkedRecipe(
   }
 }
 
-// docPath is where we found the pointer and are doing this work. It does not
+// docPath is where we found the pointer and are doing this work. It should
 // include the initial "value" portion.
 // Selector path and schema used to be relative to the "value" of the doc, but
 // we want them relative to the "value" of the new doc.
 // targetPath is the path in the target doc that the pointer points to -- the
-// targetPath does not include the initial "value"
+// targetPath should include the initial "value"
 function narrowSchema(
   docPath: readonly string[],
   selector: SchemaPathSelector,
@@ -1480,7 +1523,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
       logger.debug("traverse", () => ["path mismatch", docPath, selector.path]);
       return undefined;
     } else { // valuePath length < selector.path.length
-      const [nextDoc, nextSelector] = getAtPath(
+      const [nextDoc, redirDoc, nextSelector] = getAtPath(
         this.tx,
         doc,
         selector.path.slice(docPath.length),
@@ -1501,6 +1544,12 @@ export class SchemaObjectTraverser<V extends JSONValue>
       if (!deepEqual(nextDoc.address.path, nextSelector!.path)) {
         throw new Error("New doc path doesn't match selector path");
       }
+      // our link should point to the target of the last redirect
+      link = getNormalizedLink(
+        redirDoc.address,
+        nextSelector?.schemaContext?.schema,
+        nextSelector?.schemaContext?.rootSchema,
+      );
       return this.traverseWithSchemaContext(
         nextDoc,
         nextSelector!.schemaContext!,
@@ -1768,7 +1817,9 @@ export class SchemaObjectTraverser<V extends JSONValue>
         for (const [k, v] of Object.entries(entries)) {
           newValue[k] = v;
         }
-        return this.objectCreator.createObject(newLink, newValue);
+        const rv = this.objectCreator.createObject(newLink, newValue);
+        //console.log("Created object for", newLink, newValue, rv);
+        return rv;
       }
     }
   }
@@ -1898,7 +1949,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
       // let createdDataURI = false;
       // const maybeLink = parseLink(item, arrayLink);
       if (isPrimitiveCellLink(item)) {
-        const [next, selector] = getAtPath(
+        const [_next, redirDoc, selector] = getAtPath(
           this.tx,
           curDoc,
           [],
@@ -1908,7 +1959,11 @@ export class SchemaObjectTraverser<V extends JSONValue>
           curSelector,
           this.traverseCells,
         );
-        curDoc = next;
+        // Here, next has followed the entire link chain, while redirDoc has
+        // only followed redirects.
+        // If our redirDoc is a link, resovle one step, and use that value instead
+        const oneStepDoc = readLink(redirDoc, this.tx);
+        curDoc = oneStepDoc ?? redirDoc;
         curSelector = selector!;
         if (curDoc.value === undefined) {
           logger.debug(
@@ -1917,9 +1972,11 @@ export class SchemaObjectTraverser<V extends JSONValue>
           );
         }
       } else if (
-        isRecord(curDoc.value) &&
+        isRecord(item) &&
         !SchemaObjectTraverser.asCellOrStream(curSelector.schemaContext!.schema)
       ) {
+        // We create an element link, but this is just to establish the id if we encounter
+        // other links in our data value and we need to construct a relative link.
         const elementLink = getNormalizedLink(
           curDoc.address,
           curSelector.schemaContext!.schema,
@@ -1949,18 +2006,24 @@ export class SchemaObjectTraverser<V extends JSONValue>
         SchemaObjectTraverser.asCellOrStream(itemSchema) &&
         isPrimitiveCellLink(item)
       ) {
-        // This is redundant, since the getAtPath that happened earlier
-        // already did this work, but I don't have easy access here.
-        const itemLink = parseLink(item, doc.address); // should trim path, but it doesn't matter
-        // The link may not have the asCell flags, so pull that from itemSchema
-        const elementLink = {
-          ...itemLink,
-          schema: mergeSchemaFlags(itemSchema, itemLink.schema ?? {}),
-        };
-        const val = this.objectCreator.createObject(elementLink, undefined);
+        // For my cell link, lastRedirDoc currently points to the last redirect
+        // target, but we want cell properties to be based on the link value at
+        // that location, so we effectively follow one more link if available.
+        // FIXME: Re-order?
+        // Also, since we're in an array, we want to go two steps instead of one, so
+        // first take the array step.
+        // FIXME: Verify that this is what main does -- resolving two steps
+        // when we have an array of cells.
+        const nextDoc = readLink(curDoc, this.tx) ?? curDoc;
+        //getNextCellLink needs to incorporate our remaining
+        const cellLink = getNextCellLink(
+          nextDoc,
+          itemSchema,
+          curSelector.schemaContext!.rootSchema,
+        );
+        const val = this.objectCreator.createObject(cellLink, undefined);
         arrayObj.push(val);
       } else {
-        // FIXME: If we have an asCell in our schema,
         // We want those links to point directly at the linked cells, instead of
         // using our path (e.g. ["items", "0"]), so don't pass in a modified link.
         const val = this.traverseWithSelector(curDoc, curSelector);
@@ -2123,44 +2186,17 @@ export class SchemaObjectTraverser<V extends JSONValue>
 
   // This just has a schemaContext, since the doc.address.path should match
   // the selector.path.
+  // The doc.value should be a primitive cell link.
   private traversePointerWithSchema(
     doc: IMemorySpaceAttestation,
     schemaContext: SchemaContext,
     link?: NormalizedFullLink,
   ): JSONValue | V | undefined {
-    // We need to combine the information in the link's value with the
-    // information we have from the doc we're traversing.
-    const baseLink = getNormalizedLink(
-      doc.address,
-      schemaContext.schema,
-      schemaContext.rootSchema,
-    );
-    const normalizedLink = parseLink(doc.value, baseLink) ?? baseLink;
-    normalizedLink.schema = normalizedLink.schema !== undefined
-      ? combineSchema(schemaContext.schema, normalizedLink.schema)
-      : schemaContext.schema;
-    normalizedLink.rootSchema = normalizedLink.rootSchema !== undefined
-      ? combineSchema(schemaContext.rootSchema, normalizedLink.rootSchema)
-      : schemaContext.rootSchema;
-    // For the runtime, where we don't traverse cells, we just want
-    // to create a cell object and don't walk into the object.
-    // For the memory system, where we do traverse cells, we will
-    // still walk into these objects regardless of the schema flag,
-    // since we still need to get the connected objects.
-    if (
-      !this.traverseCells &&
-      SchemaObjectTraverser.asCellOrStream(normalizedLink.schema)
-    ) {
-      return this.objectCreator.createObject(normalizedLink, undefined);
-    }
     const selector = {
       path: doc.address.path,
-      schemaContext: {
-        schema: normalizedLink.schema,
-        rootSchema: normalizedLink.rootSchema,
-      },
+      schemaContext: schemaContext,
     };
-    const [newDoc, newSelector] = getAtPath(
+    const [newDoc, redirDoc, newSelector] = getAtPath(
       this.tx,
       doc,
       [],
@@ -2177,11 +2213,40 @@ export class SchemaObjectTraverser<V extends JSONValue>
           "Encountered link to undefined value",
           doc,
           newDoc,
-          normalizedLink,
         ],
       );
       return undefined;
     }
+    // For the runtime, where we don't traverse cells, we just want
+    // to create a cell object and don't walk into the object beyond
+    // what we need to resolve the pointers.
+    // For the memory system, where we do traverse cells, we will
+    // still walk into these objects regardless of the schema flag,
+    // since we still need to get the connected objects.
+    if (
+      !this.traverseCells &&
+      SchemaObjectTraverser.asCellOrStream(schemaContext.schema)
+    ) {
+      // For my cell link, redirDoc currently points to the last redirect
+      // target, but we want cell properties to be based on the link value at
+      // that location, so we effectively follow one more link if available.
+      const cellLink = getNextCellLink(
+        redirDoc,
+        schemaContext!.schema,
+        schemaContext!.rootSchema,
+      );
+      logger.debug(
+        "traverse",
+        () => ["Next cell link:", {
+          cellLink,
+          newDoc,
+          redirDoc,
+          schemaContext,
+        }],
+      );
+      return this.objectCreator.createObject(cellLink, undefined);
+    }
+
     // The call to getAtPath above will track entry into the pointer,
     // but we may have a pointer cycle of docs, and we've finished resolving
     // the pointer now. To avoid descending into a cycle, track entry to the
@@ -2190,10 +2255,16 @@ export class SchemaObjectTraverser<V extends JSONValue>
     if (t === null) {
       logger.debug(
         "traversePointerWithSchema",
-        () => ["Encountered cycle", doc, normalizedLink],
+        () => ["Encountered cycle", doc, schemaContext],
       );
       return undefined;
     }
+    // our link should point to the target of the last redirect
+    link = getNormalizedLink(
+      redirDoc.address,
+      schemaContext?.schema,
+      schemaContext?.rootSchema,
+    );
     return this.traverseWithSelector(newDoc, newSelector!, link);
   }
 
@@ -2340,4 +2411,108 @@ function getCircularReplacer() {
     ancestors.push(value);
     return value;
   };
+}
+
+/**
+ * Get the link for a cell reached by following one link if available.
+ * If doc.value does not contain a link, the cell will point to doc.address.
+ *
+ * @param doc - IAttestation for the location of the link
+ * @param schema - JSONSchema for the item
+ * @param rootSchema - JSONSchema with any $defs needed for schema
+ *
+ * @returns a normalized full link which will have the address and schema
+ *   information that we should use for the cell.
+ */
+function getNextCellLink(
+  doc: IMemorySpaceAttestation,
+  schema: JSONSchema,
+  rootSchema: JSONSchema,
+): NormalizedFullLink {
+  // For my cell link, itemLink currently points to the last redirect
+  // target, but we want cell properties to be based on the link value at
+  // that location, so we effectively follow one more link if available.
+  const lastLink = parseLink(doc.value, doc.address);
+  if (lastLink !== undefined) {
+    // The link may not have the asCell flags, so pull that from itemSchema
+    return {
+      ...lastLink,
+      schema: combineSchema(schema, lastLink.schema ?? true),
+      rootSchema: combineSchema(rootSchema, lastLink.rootSchema ?? true),
+    };
+  }
+  // It's fine if we don't have a pointer. In that case, just use the doc
+  // address. If I have asCell in the schema, but a plain value, we want
+  // the cell to wrap that value at its current location.
+  logger.debug("traverse", [
+    "getNextCellLink with non-link doc value",
+    doc.value,
+  ]);
+  return getNormalizedLink(doc.address, schema, rootSchema);
+}
+
+// TODO: may still have path items that need to be added to this one
+// TODO: I'm not including the source links for the linked docs here.
+// To do so, I should pass a flag, and if that's set, do that logic.
+function readLink(
+  doc: IMemorySpaceAttestation,
+  tx: IExtendedStorageTransaction,
+): IMemorySpaceAttestation | undefined {
+  // If the link didn't have a space/type, make sure we add one
+  const link = parseLink(doc.value, doc.address);
+  if (link === undefined) {
+    return undefined;
+  }
+  // Link paths point to the portion in value, so prepend that
+  const target: IMemorySpaceAddress = {
+    space: link.space,
+    id: link.id,
+    type: "application/json",
+    path: ["value", ...link.path],
+  };
+  // Load the data from the manager.
+  const { ok: value, error } = tx.read(target);
+  if (error) {
+    return undefined;
+  }
+  // Make sure we include the space in the returned attestation's address
+  return {
+    address: { ...value.address, space: link.space },
+    value: value.value,
+  };
+}
+
+/**
+ * This sort of gets the value of an attestation at a specific path.
+ *
+ * It's possible that we would need to traverse a link in order to get to the
+ * value, and in that case, we will return a attestation value of undefined.
+ *
+ * @param doc
+ * @param path
+ * @returns
+ */
+function attestationAtPath(
+  doc: IMemorySpaceAttestation,
+  path: readonly string[],
+): IMemorySpaceAttestation {
+  const address = { ...doc.address, path: [...doc.address.path, ...path] };
+  let curObj: JSONValue | undefined = doc.value;
+  for (let i = 0; i < path.length && curObj !== undefined; i++) {
+    if (isPrimitiveCellLink(curObj)) {
+      // we don't walk down into links in this method
+      return { address, value: undefined };
+    } else if (Array.isArray(curObj)) {
+      if (path[i] === "length") {
+        curObj = curObj.length;
+      } else {
+        curObj = elementAt(curObj, path[i]);
+      }
+    } else if (isRecord(curObj)) {
+      curObj = curObj[path[i]] as (JSONValue | undefined);
+    } else {
+      curObj = undefined;
+    }
+  }
+  return { address, value: curObj };
 }

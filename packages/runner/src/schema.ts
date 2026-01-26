@@ -5,7 +5,7 @@ import { JSONSchemaMutable } from "@commontools/runner";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema, type JSONValue } from "./builder/types.ts";
 import { createCell, isCell } from "./cell.ts";
-import { resolveLink } from "./link-resolution.ts";
+import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type Runtime } from "./runtime.ts";
@@ -410,21 +410,40 @@ export function validateAndTransform(
     : schema;
 
   // Now resolve further links until we get the actual value.
+  // We'll use this for the value, and potentially merge the schema
+  // This gets me the result of following all the links, so I can get the value
   const ref = resolveLink(runtime, tx, link);
   const objectCreator = new TransformObjectCreator(runtime, tx!);
 
   // If our link is asCell/asStream, and we don't have any path portions, we
-  // can just create the cell and skip reading the value and traversal.
+  // can just create the cell and mostly skip reading the value and traversal.
   if (SchemaObjectTraverser.asCellOrStream(schema)) {
+    // We check for a link value, since we will follow links one step in get
+    // We've already followed all the writeRedirect links above.
+    const next = readMaybeLink(tx, link);
+    // FIXME(@ubik2): this is a simple approach, but we should really
+    // resolve the path. For example, if we have link to x.foo.bar,
+    // but x.foo is link to y.baz, we really want y.baz.bar.
+    // I'm not currently handling this, because it doesn't come up.
+    if (next !== undefined) {
+      // We leave the asCell/asStream in the schema, so that createObject
+      // knows to create a cell
+      const mergedSchema = (next.schema !== undefined)
+        ? combineSchema(schema!, next.schema)
+        : schema!;
+      const mergedRootSchema = (next.rootSchema !== undefined)
+        ? combineSchema(rootSchema ?? true, next.rootSchema)
+        : rootSchema ?? true;
+      link = { ...next, schema: mergedSchema, rootSchema: mergedRootSchema };
+    }
     // If our ref has a schema, merge our schema flags into that schema
+    // This will overwrite any schema that we got from the first non-redirect
+    // link, but this one should be more accurate
     // Otherwise, we won't return a cell like we are supposed to.
-    const mergedRef = ref.schema !== undefined
-      ? {
-        ...ref,
-        schema: mergeSchemaFlags(schema!, ref.schema),
-      }
-      : ref;
-    return objectCreator.createObject(mergedRef, undefined);
+    if (ref.schema !== undefined) {
+      link.schema = mergeSchemaFlags(schema!, ref.schema);
+    }
+    return objectCreator.createObject(link, undefined);
   }
 
   // Link paths don't include value, but doc address should

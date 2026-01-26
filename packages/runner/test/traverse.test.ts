@@ -3,17 +3,26 @@ import { expect } from "@std/expect";
 import { refer } from "merkle-reference/json";
 import type {
   Entity,
+  JSONValue,
   Revision,
+  SchemaContext,
+  SchemaPathSelector,
   State,
   URI,
 } from "@commontools/memory/interface";
 import {
+  CompoundCycleTracker,
+  getAtPath,
   ManagedStorageTransaction,
+  MapSet,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
 import { StoreObjectManager } from "../src/storage/query.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import { Immutable } from "@commontools/utils/types";
+import { ContextualFlowControl } from "@commontools/runner";
+import { IMemorySpaceAddress } from "../src/storage/interface.ts";
 
 describe("SchemaObjectTraverser.traverseDAG", () => {
   it("follows legacy cell links when traversing", () => {
@@ -200,5 +209,219 @@ describe("SchemaObjectTraverser array traversal", () => {
     });
 
     expect(result).toBeUndefined();
+  });
+
+  describe("SchemaObjectTraverser getAtPath", () => {
+    // Some helper functions
+    function makeLink(id: URI, path: string[], redirect: boolean) {
+      return {
+        "/": {
+          "link@1": {
+            path: path,
+            id: id,
+            space: "did:null:null",
+            ...(redirect && { overwrite: "redirect" }),
+          },
+        },
+      };
+    }
+    function makeRevision(id: URI, value: JSONValue): Revision<State> {
+      return {
+        the: "application/json",
+        of: id,
+        is: { value: value },
+        cause: refer({ the: "applicaton/json", of: id }),
+        since: 1,
+      };
+    }
+
+    it("returns proper redirect data", () => {
+      // A[foo] => B[foo] -> C[foo] => D[foo]
+      // Some helper functions
+      function makeLink(id: URI, path: string[], redirect: boolean) {
+        return {
+          "/": {
+            "link@1": {
+              path: path,
+              id: id,
+              space: "did:null:null",
+              ...(redirect && { overwrite: "redirect" }),
+            },
+          },
+        };
+      }
+      function makeRevision(id: URI, value: JSONValue): Revision<State> {
+        return {
+          the: "application/json",
+          of: id,
+          is: { value: value },
+          cause: refer({ the: "applicaton/json", of: id }),
+          since: 1,
+        };
+      }
+
+      const store = new Map<string, Revision<State>>();
+      const revD = makeRevision("of:doc-item-d", { foo: { text: "hello" } });
+      const revC = makeRevision("of:doc-item-c", {
+        foo: makeLink("of:doc-item-d", ["foo"], true),
+      });
+      const revB = makeRevision("of:doc-item-b", {
+        foo: makeLink("of:doc-item-c", ["foo"], false),
+      });
+      const revA = makeRevision("of:doc-item-a", {
+        foo: makeLink("of:doc-item-b", ["foo"], true),
+      });
+      for (const docRevision of [revA, revB, revC, revD]) {
+        store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+      }
+
+      const manager = new StoreObjectManager(store);
+      const managedTx = new ManagedStorageTransaction(manager);
+      const tx = new ExtendedStorageTransaction(managedTx);
+      const tracker = new CompoundCycleTracker<
+        Immutable<JSONValue>,
+        SchemaContext | undefined
+      >();
+      const cfc = new ContextualFlowControl();
+      const schemaTracker = new MapSet<string, SchemaPathSelector>();
+      const docAFoo = {
+        address: {
+          id: revA.of,
+          type: revA.the,
+          path: ["value", "foo"],
+          space: "did:null:null",
+        } as IMemorySpaceAddress,
+        value: (revA.is as any).value.foo as JSONValue,
+      };
+      const docASelector = {
+        path: ["value", "foo"],
+        schemaContext: { schema: true, rootSchema: true },
+      };
+      const [curDoc, redirDoc, _selector] = getAtPath(
+        tx,
+        docAFoo,
+        [],
+        tracker,
+        cfc,
+        schemaTracker,
+        docASelector,
+      );
+      expect(curDoc.address.id).toBe(revD.of);
+      expect(curDoc.address.path).toEqual(["value", "foo"]);
+      expect(redirDoc.address.id).toBe(revB.of);
+      expect(redirDoc.address.path).toEqual(["value", "foo"]);
+    });
+
+    it("returns proper redirect data when redirect is outside of link", () => {
+      // A[current] => B[foo]
+      // B -> C
+      // we return C[foo] here, because there is no B[foo].
+      const store = new Map<string, Revision<State>>();
+      const revC = makeRevision("of:doc-item-c", { foo: { label: "first" } });
+      const revB = makeRevision(
+        "of:doc-item-b",
+        makeLink("of:doc-item-c", [], false),
+      );
+      const revA = makeRevision("of:doc-item-a", {
+        current: makeLink("of:doc-item-b", ["foo"], true),
+      });
+      for (const docRevision of [revA, revB, revC]) {
+        store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+      }
+
+      const manager = new StoreObjectManager(store);
+      const managedTx = new ManagedStorageTransaction(manager);
+      const tx = new ExtendedStorageTransaction(managedTx);
+      const tracker = new CompoundCycleTracker<
+        Immutable<JSONValue>,
+        SchemaContext | undefined
+      >();
+      const cfc = new ContextualFlowControl();
+      const schemaTracker = new MapSet<string, SchemaPathSelector>();
+      const docACurrent = {
+        address: {
+          id: revA.of,
+          type: revA.the,
+          path: ["value", "current"],
+          space: "did:null:null",
+        } as IMemorySpaceAddress,
+        value: (revA.is as any).value.current as JSONValue,
+      };
+      const docASelector = {
+        path: ["value", "current"],
+        schemaContext: { schema: true, rootSchema: true },
+      };
+      const [curDoc, redirDoc, _selector] = getAtPath(
+        tx,
+        docACurrent,
+        [],
+        tracker,
+        cfc,
+        schemaTracker,
+        docASelector,
+      );
+      expect(curDoc.address.id).toBe(revC.of);
+      expect(curDoc.address.path).toEqual(["value", "foo"]);
+      expect(redirDoc.address.id).toBe(revC.of);
+      expect(redirDoc.address.path).toEqual(["value", "foo"]);
+    });
+
+    it("returns proper redirect data when redirect is outside of link but then there's another redir", () => {
+      // A[current] => B[foo]
+      // B -> C
+      // C[foo] => D[foo]
+      // Redirect should be D[foo]
+      const store = new Map<string, Revision<State>>();
+      const revD = makeRevision("of:doc-item-d", { foo: { label: "first" } });
+      const revC = makeRevision("of:doc-item-c", {
+        foo: makeLink("of:doc-item-d", ["foo"], true),
+      });
+      const revB = makeRevision(
+        "of:doc-item-b",
+        makeLink("of:doc-item-c", [], false),
+      );
+      const revA = makeRevision("of:doc-item-a", {
+        current: makeLink("of:doc-item-b", ["foo"], true),
+      });
+      for (const docRevision of [revA, revB, revC, revD]) {
+        store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+      }
+
+      const manager = new StoreObjectManager(store);
+      const managedTx = new ManagedStorageTransaction(manager);
+      const tx = new ExtendedStorageTransaction(managedTx);
+      const tracker = new CompoundCycleTracker<
+        Immutable<JSONValue>,
+        SchemaContext | undefined
+      >();
+      const cfc = new ContextualFlowControl();
+      const schemaTracker = new MapSet<string, SchemaPathSelector>();
+      const docACurrent = {
+        address: {
+          id: revA.of,
+          type: revA.the,
+          path: ["value", "current"],
+          space: "did:null:null",
+        } as IMemorySpaceAddress,
+        value: (revA.is as any).value.current as JSONValue,
+      };
+      const docASelector = {
+        path: ["value", "current"],
+        schemaContext: { schema: true, rootSchema: true },
+      };
+      const [curDoc, redirDoc, _selector] = getAtPath(
+        tx,
+        docACurrent,
+        [],
+        tracker,
+        cfc,
+        schemaTracker,
+        docASelector,
+      );
+      expect(curDoc.address.id).toBe(revD.of);
+      expect(curDoc.address.path).toEqual(["value", "foo"]);
+      expect(redirDoc.address.id).toBe(revD.of);
+      expect(redirDoc.address.path).toEqual(["value", "foo"]);
+    });
   });
 });

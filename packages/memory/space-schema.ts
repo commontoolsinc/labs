@@ -371,7 +371,7 @@ function loadFactsForDoc(
       if (fact.address.path.length > 0) {
         throw new Error("Invalid fact.address.path (must be empty)");
       }
-      const [newDoc, newSelector] = getAtPath(
+      const [newDoc, _nextAddr, newSelector] = getAtPath(
         tx,
         factValue,
         selector.path,
