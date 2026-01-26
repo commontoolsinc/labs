@@ -50,20 +50,24 @@ theorem tok_not_mem_of_consumeOnce_some {tok : Atom} {s s' : IntentStore}
     have : Cfc.Intent.consumeOnce tok s = none := (consumeOnce_eq_none_iff (tok := tok) (s := s)).2 hmem
     simp [this] at h
 
-theorem commitOnce_no_consume_on_failure (tok : Atom) (s : IntentStore) :
+theorem commitOnce_no_consume_on_failure (tok : Atom) (s : IntentStore)
+    (h : tok ∈ s) :
     Cfc.Intent.commitOnce tok s false = some s := by
-  simp [Cfc.Intent.commitOnce]
+  simp [Cfc.Intent.commitOnce, h]
+
+theorem commitOnce_eq_none_of_not_mem (tok : Atom) (s : IntentStore) (committed : Bool)
+    (h : tok ∉ s) :
+    Cfc.Intent.commitOnce tok s committed = none := by
+  simp [Cfc.Intent.commitOnce, h]
 
 theorem commitOnce_single_use {tok : Atom} {s s' : IntentStore}
     (hs : s.Nodup)
     (hCommit : Cfc.Intent.commitOnce tok s true = some s') :
     Cfc.Intent.commitOnce tok s' true = none := by
   have hConsumed : Cfc.Intent.consumeOnce tok s = some s' := by
-    simpa [Cfc.Intent.commitOnce] using hCommit
+    simpa [Cfc.Intent.commitOnce, Cfc.Intent.consumeOnce] using hCommit
   have hNotMem : tok ∉ s' := tok_not_mem_of_consumeOnce_some (tok := tok) (s := s) (s' := s') hs hConsumed
-  have : Cfc.Intent.consumeOnce tok s' = none :=
-    (consumeOnce_eq_none_iff (tok := tok) (s := s')).2 hNotMem
-  simp [Cfc.Intent.commitOnce, this]
+  exact commitOnce_eq_none_of_not_mem (tok := tok) (s := s') (committed := true) hNotMem
 
 end Intent
 end Proofs

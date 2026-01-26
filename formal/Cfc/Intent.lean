@@ -39,9 +39,11 @@ This corresponds to the "no-consume-on-failure" model in the spec:
 failures leave the intent unconsumed so retries remain possible.
 -/
 def commitOnce (tok : Atom) (s : IntentStore) (committed : Bool) : Option IntentStore :=
-  if committed then consumeOnce tok s else some s
+  if tok ∈ s then
+    if committed then some (eraseOnce tok s) else some s
+  else
+    none
 
 end Intent
 
 end Cfc
-
