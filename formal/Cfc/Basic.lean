@@ -23,3 +23,4 @@ import Cfc.Proofs.Scenarios
 import Cfc.Proofs.GmailExample
 import Cfc.Proofs.LabelTransitions
 import Cfc.Proofs.Collection
+import Cfc.Proofs.LabelTransitionExamples
