@@ -1,9 +1,11 @@
 import Std
 
 import Cfc.Exchange
+import Cfc.Intent
 import Cfc.Language.Declassify
 import Cfc.Proofs.Exchange
 import Cfc.Proofs.FlowPathConfidentiality
+import Cfc.Proofs.Intent
 import Cfc.Proofs.PcIntegrity
 import Cfc.Proofs.RobustDeclassification
 import Cfc.Proofs.TransparentEndorsement
@@ -146,6 +148,21 @@ theorem composed_endorse_then_declassify_hidden_guard
     observe p (evalD env pc pcI (.declassifyIf tok (.endorseIf tok g x) secret)) = none :=
   Proofs.FlowPathConfidentiality.observe_declassifyIf_endorseIf_eq_none_of_hidden_guard
     (p := p) (env := env) (pc := pc) (pcI := pcI) (tok := tok) (g := g) (x := x) (secret := secret) hHide
+
+/-!
+Invariant 4 (commit-coupled consumption for side effects):
+modeled here only as a minimal "IntentOnce token store" with consume-on-success semantics.
+-/
+theorem inv4_commitOnce_no_consume_on_failure
+    (tok : Atom) (s : IntentStore) (h : tok ∈ s) :
+    Cfc.Intent.commitOnce tok s false = some s :=
+  Proofs.Intent.commitOnce_no_consume_on_failure (tok := tok) (s := s) h
+
+theorem inv4_commitOnce_single_use {tok : Atom} {s s' : IntentStore}
+    (hs : s.Nodup)
+    (hCommit : Cfc.Intent.commitOnce tok s true = some s') :
+    Cfc.Intent.commitOnce tok s' true = none :=
+  Proofs.Intent.commitOnce_single_use (tok := tok) (s := s) (s' := s') hs hCommit
 
 end SafetyInvariants
 end Proofs
