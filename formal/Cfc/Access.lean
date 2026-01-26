@@ -4,6 +4,24 @@ import Cfc.Label
 
 namespace Cfc
 
+/-
+This file defines the "who can read what?" notion used throughout the repo.
+
+We keep it intentionally simple:
+- A `Principal` is an abstract viewer, with:
+  - `now : Nat` (for expiration checks)
+  - `atoms : List Atom` (the facts/roles/authorities they hold)
+- A principal can "satisfy" most atoms just by possessing them (`a ∈ p.atoms`).
+- The special case is `Atom.expires t`, which is satisfied when `p.now ≤ t`.
+
+Confidentiality labels are CNF (see `Cfc.Label`), so `canAccessConf` says:
+"for every clause in the CNF, the principal can satisfy the clause".
+
+This is the standard AND-of-ORs reading:
+- each clause is an OR (pick some atom in it that you satisfy),
+- the label is an AND (you must satisfy every clause).
+-/
+
 structure Principal where
   now : Nat
   atoms : List Atom
@@ -16,6 +34,25 @@ def satisfies (p : Principal) (a : Atom) : Prop :=
   | .expires t => p.now ≤ t
   | _ => a ∈ p.atoms
 
+/-
+Monotonicity of satisfaction under "adding more atoms":
+
+If two principals have the same time (`now`) and `p₂` has *at least* the atoms of `p₁`,
+then anything satisfied by `p₁` is also satisfied by `p₂`.
+
+This is used all over the place when we show that certain rewrites/exchanges cannot
+make something *less* accessible.
+
+Proof sketch:
+- Case split on the atom `a`.
+- If it's `expires t`, satisfaction depends only on `now`, so `hNow` suffices.
+- Otherwise it's a membership fact, and we use `hAtoms : p₁.atoms ⊆ p₂.atoms`.
+
+Lean details:
+- `cases a` does the case split on constructors of `Atom`.
+- `simp [Principal.satisfies]` unfolds satisfaction and simplifies the goal.
+- The `first | ... | ...` block tries the membership case first, then the expiration case.
+-/
 theorem satisfies_mono_atoms {p₁ p₂ : Principal} {a : Atom}
     (hNow : p₁.now = p₂.now) (hAtoms : p₁.atoms ⊆ p₂.atoms)
     (h : p₁.satisfies a) : p₂.satisfies a := by

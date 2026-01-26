@@ -12,7 +12,25 @@ The spec distinguishes:
 - *member* labels (each element's own confidentiality/integrity)
 - *membership* label (the container's label, tracking which members are present)
 
-We model this explicitly as a container label plus a list of labeled members.
+We model this explicitly as:
+
+  container : Label
+  members   : List (Ref × Label)
+
+where `Ref` is an abstract reference/id for an element (standing in for the spec's
+content-addressed references).
+
+Intuition for the split (spec 8.5.6.1):
+
+- Even if each element is public, the *fact that a particular element is included*
+  can be confidential. Example: "search results" where the catalog items are public
+  but the query is private; inclusion leaks the query.
+
+So we treat the collection container label as "membership confidentiality",
+and we treat each element label as "member confidentiality".
+
+This is also consistent with the spec's "per-path labeling" idea:
+the label at `/items` (the array container) can differ from the labels at `/items/*`.
 -/
 
 structure LabeledCollection (Ref : Type) where
@@ -24,11 +42,28 @@ namespace LabeledCollection
 
 variable {Ref : Type}
 
-/-- The label for observing a member value: membership confidentiality is conjunctive (8.5.6.1). -/
+/-
+When you "observe a member" (i.e. read the element's value), you learn:
+1) the element's own contents, and
+2) that this element is present in this particular collection.
+
+The spec models that as conjunctive confidentiality between:
+- the member label, and
+- the container label.
+
+We already have a label operation with exactly those semantics: `Link.deref` (spec 3.7.1),
+which says "to view the target through a link, you must be allowed to see both".
+
+So we reuse it here as a convenient way to express the idea:
+  derefMember c member = deref (containerLabel) (memberLabel)
+-/
 def derefMember (c : LabeledCollection Ref) (member : Label) : Label :=
   Cfc.Link.deref c.container member
 
-/-- Observing `length` reveals only membership information (8.5.6.1). -/
+/-
+Observing `length` does not reveal any member contents, only membership/selection information.
+So its label is just the container label.
+-/
 def lengthLabel (c : LabeledCollection Ref) : Label :=
   c.container
 
@@ -36,7 +71,17 @@ end LabeledCollection
 
 namespace Atom
 
-/-- Collection-level integrity atoms (8.5.6). -/
+/-
+Collection-level integrity atoms (spec 8.5.6).
+
+The spec distinguishes integrity facts about the *collection as a whole*, for example:
+- "this is the complete collection from source X"
+- "this is a filtered subset of source X with predicate P"
+- "this is a permutation of source X"
+
+We represent those as regular integrity atoms (see `Cfc.Atom`) and provide a Boolean
+classifier so we can strip/preserve them depending on which transition we apply.
+-/
 def isCollectionIntegrity : Atom → Bool
   | .completeCollection _ => true
   | .filteredFrom _ _ => true
@@ -47,10 +92,25 @@ end Atom
 
 namespace CollectionTransition
 
-/-- Drop collection-level integrity claims (used by `subsetOf` and `filteredFrom`). -/
+/-
+Drop collection-level integrity claims.
+
+Operationally this is just a `List.filter`: keep atoms that are *not* collection-level claims.
+
+We use this for transitions that produce a subset: once you drop elements, you cannot keep
+claims like "completeCollection source".
+-/
 def stripCollectionIntegrity (I : IntegLabel) : IntegLabel :=
   I.filter (fun a => ! Atom.isCollectionIntegrity a)
 
+/-
+Membership characterization for `stripCollectionIntegrity`:
+
+  a is in stripCollectionIntegrity I
+    iff (a is in I) AND (a is not a collection-integrity atom).
+
+This is a standard property of `List.filter`.
+-/
 theorem mem_stripCollectionIntegrity (a : Atom) (I : IntegLabel) :
     a ∈ stripCollectionIntegrity I ↔ a ∈ I ∧ Atom.isCollectionIntegrity a = false := by
   classical
