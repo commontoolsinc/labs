@@ -18,3 +18,4 @@ import Cfc.Proofs.Link
 import Cfc.Proofs.Intent
 import Cfc.Proofs.CommitPoint
 import Cfc.Proofs.Scenarios
+import Cfc.Proofs.GmailExample
