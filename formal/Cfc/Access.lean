@@ -19,25 +19,11 @@ def satisfies (p : Principal) (a : Atom) : Prop :=
 theorem satisfies_mono_atoms {p₁ p₂ : Principal} {a : Atom}
     (hNow : p₁.now = p₂.now) (hAtoms : p₁.atoms ⊆ p₂.atoms)
     (h : p₁.satisfies a) : p₂.satisfies a := by
-  cases a with
-  | expires t =>
-    simpa [Principal.satisfies, hNow] using h
-  | user did =>
-    exact hAtoms h
-  | space id =>
-    exact hAtoms h
-  | policy name subject hash =>
-    exact hAtoms h
-  | hasRole principal space role =>
-    exact hAtoms h
-  | multiPartyResult participants =>
-    exact hAtoms h
-  | multiPartyConsent participant participants =>
-    exact hAtoms h
-  | integrityTok name =>
-    exact hAtoms h
-  | other name =>
-    exact hAtoms h
+  cases a <;> simp [Principal.satisfies] at h ⊢
+  all_goals
+    first
+    | exact hAtoms h
+    | simpa [hNow] using h
 
 end Principal
 

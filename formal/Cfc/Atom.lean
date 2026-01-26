@@ -16,6 +16,12 @@ inductive Atom where
   | multiPartyResult (participants : List String)
   | multiPartyConsent (participant : String) (participants : List String)
   | integrityTok (name : String)
+  /-- Scoped integrity for projections (spec 8.3.2). -/
+  | scoped (path : List String) (atom : Atom)
+  /-- Collection-level integrity atoms (spec 8.5.6). -/
+  | completeCollection (source : Nat)
+  | filteredFrom (source : Nat) (predicate : String)
+  | permutationOf (source : Nat)
   | expires (t : Nat)
   | other (name : String)
   deriving DecidableEq, Repr
