@@ -1832,8 +1832,15 @@ export class XDebuggerView extends LitElement {
       return margin.left + (eventIndex / maxEventCount) * plotWidth;
     };
 
-    // Y-axis: cumulative time (0 to totalTime)
-    const maxCumulativeTime = Math.max(stats.totalTime, 0.001); // Avoid division by zero
+    // Y-axis: cumulative time (0 to max cumulative from reservoir samples)
+    // Note: We use the actual cumulative time from reservoir samples, not stats.totalTime
+    // because reservoir sampling means we're only plotting a subset of samples
+    const maxCumulativeTime = Math.max(
+      cumulativePoints[cumulativePoints.length - 1]?.cumulativeTime ?? 0,
+      cumulativePointsDelta?.[cumulativePointsDelta.length - 1]
+        ?.cumulativeTime ?? 0,
+      0.001, // Avoid division by zero
+    );
     const yScale = (cumulativeTime: number) => {
       return margin.top + plotHeight -
         (cumulativeTime / maxCumulativeTime) * plotHeight;
@@ -2171,13 +2178,18 @@ export class XDebuggerView extends LitElement {
               fill="#cbd5e1"
               font-size="10"
             >
-              Total (${(stats.totalTime / 1000).toFixed(2)}s, #${stats.count})
+              All time (${stats.count} events, ${(maxCumulativeTime / 1000)
+                .toFixed(2)}s in ${cumulativePoints.length} samples)
             </text>
-            ${cdfDelta
+            ${cdfDelta && cumulativePointsDelta &&
+                cumulativePointsDelta.length > 0
               ? html`
                 <line x1="0" y1="15" x2="20" y2="15" stroke="#10b981" stroke-width="2" />
                 <text x="25" y="15" dominant-baseline="middle" fill="#cbd5e1" font-size="10">
-                  Since baseline
+                  Since baseline (${(
+                    cumulativePointsDelta[cumulativePointsDelta.length - 1]
+                      .cumulativeTime / 1000
+                  ).toFixed(2)}s in ${cumulativePointsDelta.length} samples)
                 </text>
               `
               : ""}
