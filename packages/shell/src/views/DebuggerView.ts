@@ -1695,56 +1695,88 @@ export class XDebuggerView extends LitElement {
       return `${(ms / 1000).toFixed(2)}s`;
     };
 
+    // Create unique ID for this chart
+    const chartId = `cdf-${key.replace(/\//g, "-")}`;
+
     // SVG dimensions
     const width = 600;
     const height = 200;
-    const margin = { top: 10, right: 50, bottom: 30, left: 50 };
+    const margin = { top: 25, right: 50, bottom: 40, left: 60 };
     const plotWidth = width - margin.left - margin.right;
     const plotHeight = height - margin.top - margin.bottom;
 
-    // Find x-axis range (log scale)
-    const minX = Math.max(stats.min, 0.001); // Avoid log(0)
-    const maxX = Math.max(stats.max, minX * 1.1); // Ensure maxX > minX
-    const logMinX = Math.log10(minX);
-    const logMaxX = Math.log10(maxX);
-    const logRange = logMaxX - logMinX;
+    // Sort samples and compute cumulative time
+    const sortedSamples = [...cdf].sort((a, b) => a.x - b.x);
+    const n = sortedSamples.length;
+    const cumulativePoints: Array<
+      { eventIndex: number; cumulativeTime: number }
+    > = [];
+    let cumTime = 0;
+    sortedSamples.forEach((sample, i) => {
+      cumTime += sample.x;
+      cumulativePoints.push({ eventIndex: i + 1, cumulativeTime: cumTime });
+    });
 
-    // Convert x to SVG coordinate (log scale)
-    const xScale = (x: number) => {
-      if (logRange === 0) return margin.left; // All values are the same
-      const logX = Math.log10(Math.max(x, minX));
-      return margin.left + ((logX - logMinX) / logRange) * plotWidth;
+    // Do the same for delta if it exists
+    let cumulativePointsDelta:
+      | Array<{ eventIndex: number; cumulativeTime: number }>
+      | null = null;
+    if (cdfDelta) {
+      const sortedDelta = [...cdfDelta].sort((a, b) => a.x - b.x);
+      cumulativePointsDelta = [];
+      let cumTimeDelta = 0;
+      sortedDelta.forEach((sample, i) => {
+        cumTimeDelta += sample.x;
+        cumulativePointsDelta!.push({
+          eventIndex: i + 1,
+          cumulativeTime: cumTimeDelta,
+        });
+      });
+    }
+
+    // X-axis: event count (0 to n)
+    const maxEventCount = n;
+    const xScale = (eventIndex: number) => {
+      return margin.left + (eventIndex / maxEventCount) * plotWidth;
     };
 
-    // Convert y to SVG coordinate (linear 0-1 scale, inverted for SVG)
-    const yScale = (y: number) => {
-      return margin.top + (1 - y) * plotHeight;
+    // Y-axis: cumulative time (0 to totalTime)
+    const maxCumulativeTime = stats.totalTime;
+    const yScale = (cumulativeTime: number) => {
+      return margin.top + plotHeight -
+        (cumulativeTime / maxCumulativeTime) * plotHeight;
     };
 
-    // Generate SVG path from CDF points
-    const pathFromCDF = (points: Array<{ x: number; y: number }>) => {
+    // Generate SVG path from cumulative points
+    const pathFromCumulative = (
+      points: Array<{ eventIndex: number; cumulativeTime: number }>,
+    ) => {
       if (points.length === 0) return "";
       const pathParts = points.map((p, i) =>
-        `${i === 0 ? "M" : "L"} ${xScale(p.x)} ${yScale(p.y)}`
+        `${i === 0 ? "M" : "L"} ${xScale(p.eventIndex)} ${
+          yScale(p.cumulativeTime)
+        }`
       );
       return pathParts.join(" ");
     };
 
-    // Generate x-axis tick marks (log scale)
+    // Generate x-axis tick marks (event count)
     const xTicks: number[] = [];
-    const tickCount = 5;
-    if (logRange > 0) {
-      for (let i = 0; i <= tickCount; i++) {
-        const logValue = logMinX + (i / tickCount) * logRange;
-        xTicks.push(Math.pow(10, logValue));
-      }
-    } else {
-      // All values are the same, just show that value
-      xTicks.push(minX);
+    const xTickCount = 5;
+    for (let i = 0; i <= xTickCount; i++) {
+      xTicks.push(Math.floor((i / xTickCount) * maxEventCount));
     }
 
-    // Generate y-axis tick marks (0%, 25%, 50%, 75%, 100%)
-    const yTicks = [0, 0.25, 0.5, 0.75, 1.0];
+    // Generate y-axis tick marks (cumulative time)
+    const yTicks: number[] = [];
+    const yTickCount = 5;
+    for (let i = 0; i <= yTickCount; i++) {
+      yTicks.push((i / yTickCount) * maxCumulativeTime);
+    }
+
+    // Percentile positions (by event index)
+    const p50Index = Math.floor(n * 0.5);
+    const p95Index = Math.floor(n * 0.95);
 
     return html`
       <div style="margin-bottom: 1rem;">
@@ -1759,9 +1791,10 @@ export class XDebuggerView extends LitElement {
         </div>
 
         <svg
+          id="${chartId}"
           width="${width}"
           height="${height}"
-          style="background-color: #0f172a; border-radius: 0.25rem;"
+          style="background-color: #0f172a; border-radius: 0.25rem; cursor: crosshair;"
         >
           <!-- Y-axis grid lines and labels -->
           ${yTicks.map((y) => {
@@ -1780,10 +1813,10 @@ export class XDebuggerView extends LitElement {
                 y="${yPos}"
                 text-anchor="end"
                 dominant-baseline="middle"
-                fill="#64748b"
+                fill="#94a3b8"
                 font-size="10"
               >
-                ${(y * 100).toFixed(0)}%
+                ${formatTime(y)}
               </text>
             `;
           })}
@@ -1804,37 +1837,15 @@ export class XDebuggerView extends LitElement {
                 x="${xPos}"
                 y="${height - margin.bottom + 15}"
                 text-anchor="middle"
-                fill="#64748b"
+                fill="#94a3b8"
                 font-size="10"
               >
-                ${formatTime(x)}
+                ${x}
               </text>
             `;
           })}
 
-          <!-- CDF curve (all samples since start) - blue -->
-          <path
-            d="${pathFromCDF(cdf)}"
-            fill="none"
-            stroke="#3b82f6"
-            stroke-width="2"
-            opacity="0.8"
-          />
-
-          <!-- CDF delta curve (since baseline) - green -->
-          ${cdfDelta
-            ? html`
-              <path
-                d="${pathFromCDF(cdfDelta)}"
-                fill="none"
-                stroke="#10b981"
-                stroke-width="2"
-                opacity="0.8"
-              />
-            `
-            : ""}
-
-          <!-- Axes -->
+          <!-- Axes with tick marks -->
           <line
             x1="${margin.left}"
             y1="${height - margin.bottom}"
@@ -1852,6 +1863,160 @@ export class XDebuggerView extends LitElement {
             stroke-width="1"
           />
 
+          <!-- X-axis ticks -->
+          ${xTicks.map((x) => {
+            const xPos = xScale(x);
+            return html`
+              <line
+                x1="${xPos}"
+                y1="${height - margin.bottom}"
+                x2="${xPos}"
+                y2="${height - margin.bottom + 6}"
+                stroke="#94a3b8"
+                stroke-width="2"
+              />
+            `;
+          })}
+
+          <!-- Y-axis ticks -->
+          ${yTicks.map((y) => {
+            const yPos = yScale(y);
+            return html`
+              <line
+                x1="${margin.left - 6}"
+                y1="${yPos}"
+                x2="${margin.left}"
+                y2="${yPos}"
+                stroke="#94a3b8"
+                stroke-width="2"
+              />
+            `;
+          })}
+
+          <!-- Cumulative time curve (all samples since start) - blue -->
+          <path
+            d="${pathFromCumulative(cumulativePoints)}"
+            fill="none"
+            stroke="#3b82f6"
+            stroke-width="2"
+            opacity="0.8"
+            style="pointer-events: stroke;"
+          >
+            <title>Total: ${stats.count} samples, ${formatTime(
+              stats.totalTime,
+            )} cumulative</title>
+          </path>
+
+          <!-- Cumulative time delta curve (since baseline) - green -->
+          ${cumulativePointsDelta
+            ? html`
+              <path
+                d="${pathFromCumulative(cumulativePointsDelta)}"
+                fill="none"
+                stroke="#10b981"
+                stroke-width="2"
+                opacity="0.8"
+                style="pointer-events: stroke;"
+              >
+                <title>Since baseline</title>
+              </path>
+            `
+            : ""}
+
+          <!-- Percentile reference lines (p50, p95) - render AFTER curves -->
+          <g style="pointer-events: stroke;">
+            <line
+              x1="${xScale(p50Index)}"
+              y1="${margin.top}"
+              x2="${xScale(p50Index)}"
+              y2="${height - margin.bottom}"
+              stroke="#f59e0b"
+              stroke-width="1.5"
+              stroke-dasharray="4,2"
+              opacity="0.7"
+            >
+              <title>p50 (median): ${formatTime(stats.p50)}</title>
+            </line>
+            <text
+              x="${xScale(p50Index)}"
+              y="${margin.top - 4}"
+              text-anchor="middle"
+              fill="#f59e0b"
+              font-size="8"
+              font-weight="600"
+              style="pointer-events: none;"
+            >
+              <tspan x="${xScale(p50Index)}" dy="0">p50</tspan>
+              <tspan x="${xScale(p50Index)}" dy="10">${formatTime(
+                stats.p50,
+              )}</tspan>
+            </text>
+          </g>
+
+          <g style="pointer-events: stroke;">
+            <line
+              x1="${xScale(p95Index)}"
+              y1="${margin.top}"
+              x2="${xScale(p95Index)}"
+              y2="${height - margin.bottom}"
+              stroke="#ef4444"
+              stroke-width="1.5"
+              stroke-dasharray="4,2"
+              opacity="0.7"
+            >
+              <title>p95: ${formatTime(stats.p95)}</title>
+            </line>
+            <text
+              x="${xScale(p95Index)}"
+              y="${margin.top - 4}"
+              text-anchor="middle"
+              fill="#ef4444"
+              font-size="8"
+              font-weight="600"
+              style="pointer-events: none;"
+            >
+              <tspan x="${xScale(p95Index)}" dy="0">p95</tspan>
+              <tspan x="${xScale(p95Index)}" dy="10">${formatTime(
+                stats.p95,
+              )}</tspan>
+            </text>
+          </g>
+
+          <!-- Average reference line -->
+          ${(() => {
+            const avgIndex = Math.floor(n * 0.5);
+            return html`
+              <g style="pointer-events: stroke;">
+                <line
+                  x1="${xScale(avgIndex)}"
+                  y1="${margin.top}"
+                  x2="${xScale(avgIndex)}"
+                  y2="${height - margin.bottom}"
+                  stroke="#8b5cf6"
+                  stroke-width="1.5"
+                  stroke-dasharray="4,2"
+                  opacity="0.5"
+                >
+                  <title>avg (mean): ${formatTime(stats.average)}</title>
+                </line>
+                <text
+                  x="${xScale(avgIndex)}"
+                  y="${margin.top - 4}"
+                  text-anchor="middle"
+                  fill="#8b5cf6"
+                  font-size="8"
+                  font-weight="600"
+                  style="pointer-events: none;"
+                >
+                  <tspan x="${xScale(avgIndex)}" dy="0">avg</tspan>
+                  <tspan x="${xScale(avgIndex)}" dy="10">${formatTime(
+                    stats.average,
+                  )}</tspan>
+                </text>
+              </g>
+            `;
+          })()}
+
           <!-- Axis labels -->
           <text
             x="${margin.left + plotWidth / 2}"
@@ -1861,51 +2026,20 @@ export class XDebuggerView extends LitElement {
             font-size="11"
             font-weight="500"
           >
-            Latency
+            Events
           </text>
           <text
-            x="${margin.left - 35}"
+            x="${margin.left - 40}"
             y="${margin.top + plotHeight / 2}"
             text-anchor="middle"
             fill="#94a3b8"
             font-size="11"
             font-weight="500"
-            transform="rotate(-90 ${margin.left - 35} ${margin.top +
+            transform="rotate(-90 ${margin.left - 40} ${margin.top +
               plotHeight / 2})"
           >
-            Cumulative Probability
+            Cumulative Time
           </text>
-
-          <!-- Percentile reference lines (p50, p95, avg) -->
-          ${[
-            { value: stats.p50, label: "p50", color: "#f59e0b" },
-            { value: stats.p95, label: "p95", color: "#ef4444" },
-            { value: stats.average, label: "avg", color: "#8b5cf6" },
-          ].map(({ value, label, color }) => {
-            const xPos = xScale(value);
-            return html`
-              <line
-                x1="${xPos}"
-                y1="${margin.top}"
-                x2="${xPos}"
-                y2="${height - margin.bottom}"
-                stroke="${color}"
-                stroke-width="1"
-                stroke-dasharray="3,3"
-                opacity="0.5"
-              />
-              <text
-                x="${xPos}"
-                y="${margin.top - 2}"
-                text-anchor="middle"
-                fill="${color}"
-                font-size="9"
-                font-weight="600"
-              >
-                ${label}
-              </text>
-            `;
-          })}
 
           <!-- Legend -->
           <g transform="translate(${width - margin.right - 160}, ${margin.top +
