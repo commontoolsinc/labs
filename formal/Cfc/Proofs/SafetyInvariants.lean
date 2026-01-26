@@ -39,6 +39,22 @@ theorem inv9_observe_eq_none_of_hidden_pc
     observe p (evalD env pc pcI e) = none :=
   Proofs.FlowPathConfidentiality.observe_evalD_eq_none_of_not_canAccessConf_pc p env pc pcI e hpc
 
+theorem inv9_canAccessConf_cond_of_canAccess_ite
+    (p : Principal) (env : Env) (pc : ConfLabel) (pcI : IntegLabel)
+    (c t e : ExprD)
+    (hAcc : canAccess p (evalD env pc pcI (.ite c t e)).lbl) :
+    canAccessConf p (evalD env pc pcI c).lbl.conf :=
+  Proofs.FlowPathConfidentiality.canAccessConf_cond_of_canAccess_ite
+    (p := p) (env := env) (pc := pc) (pcI := pcI) (c := c) (t := t) (e := e) hAcc
+
+theorem inv9_observe_ite_eq_none_of_hidden_cond
+    (p : Principal) (env : Env) (pc : ConfLabel) (pcI : IntegLabel)
+    (c t e : ExprD)
+    (hHide : ¬ canAccessConf p (evalD env pc pcI c).lbl.conf) :
+    observe p (evalD env pc pcI (.ite c t e)) = none :=
+  Proofs.FlowPathConfidentiality.observe_ite_eq_none_of_hidden_cond
+    (p := p) (env := env) (pc := pc) (pcI := pcI) (c := c) (t := t) (e := e) hHide
+
 /-!
 Invariant 3 (Confidentiality exchange requires explicit integrity guards) and
 Invariant 6 (violating policy never silently downgrades confidentiality; exchange is disabled).

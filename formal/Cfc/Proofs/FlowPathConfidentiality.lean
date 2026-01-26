@@ -139,6 +139,46 @@ theorem observe_endorseIf_eq_none_of_hidden_guard
     exact hHide (canAccessConf_guard_of_canAccess_endorseIf p env pc pcI tok guard x hAcc)
   simp [observe, hNo]
 
+theorem canAccessConf_cond_of_canAccess_ite
+    (p : Principal) (env : Env) (pc : ConfLabel) (pcI : IntegLabel)
+    (c t e : ExprD)
+    (hAcc : canAccess p (evalD env pc pcI (.ite c t e)).lbl) :
+    canAccessConf p (evalD env pc pcI c).lbl.conf := by
+  have hAccOut : canAccessConf p (evalD env pc pcI (.ite c t e)).lbl.conf := by
+    simpa [canAccess] using hAcc
+  by_cases hcond : (evalD env pc pcI c).val
+  ·
+    let pc' : ConfLabel := pc ++ (evalD env pc pcI c).lbl.conf
+    let pcI' : IntegLabel := Label.joinIntegrity pcI (evalD env pc pcI c).lbl.integ
+    have hAccBranch : canAccessConf p (evalD env pc' pcI' t).lbl.conf := by
+      simpa [evalD, hcond, pc', pcI'] using hAccOut
+    have hSub : pc' ⊆ (evalD env pc' pcI' t).lbl.conf :=
+      pc_subset_evalD_conf env pc' pcI' t
+    have hAccPc' : canAccessConf p pc' :=
+      canAccessConf_of_subset hSub hAccBranch
+    exact (canAccessConf_append_iff p pc (evalD env pc pcI c).lbl.conf).1 (by simpa [pc'] using hAccPc') |>.2
+  ·
+    let pc' : ConfLabel := pc ++ (evalD env pc pcI c).lbl.conf
+    let pcI' : IntegLabel := Label.joinIntegrity pcI (evalD env pc pcI c).lbl.integ
+    have hAccBranch : canAccessConf p (evalD env pc' pcI' e).lbl.conf := by
+      simpa [evalD, hcond, pc', pcI'] using hAccOut
+    have hSub : pc' ⊆ (evalD env pc' pcI' e).lbl.conf :=
+      pc_subset_evalD_conf env pc' pcI' e
+    have hAccPc' : canAccessConf p pc' :=
+      canAccessConf_of_subset hSub hAccBranch
+    exact (canAccessConf_append_iff p pc (evalD env pc pcI c).lbl.conf).1 (by simpa [pc'] using hAccPc') |>.2
+
+theorem observe_ite_eq_none_of_hidden_cond
+    (p : Principal) (env : Env) (pc : ConfLabel) (pcI : IntegLabel)
+    (c t e : ExprD)
+    (hHide : ¬ canAccessConf p (evalD env pc pcI c).lbl.conf) :
+    observe p (evalD env pc pcI (.ite c t e)) = none := by
+  classical
+  have hNo : ¬ canAccess p (evalD env pc pcI (.ite c t e)).lbl := by
+    intro hAcc
+    exact hHide (canAccessConf_cond_of_canAccess_ite p env pc pcI c t e hAcc)
+  simp [observe, hNo]
+
 theorem canAccessConf_guard_of_canAccess_declassifyIf
     (p : Principal) (env : Env) (pc : ConfLabel) (pcI : IntegLabel) (tok : Atom)
     (guard secret : ExprD)
@@ -194,4 +234,3 @@ end FlowPathConfidentiality
 end Proofs
 
 end Cfc
-
