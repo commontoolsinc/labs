@@ -248,15 +248,10 @@ describe("Schema Support", () => {
       expect(currentValues).toEqualIgnoringSymbols([
         "first",
         "first - update",
-        "first - update", // not clear why this is happening twice
         "second",
         "second - update",
       ]);
       expect(rootValues).toEqualIgnoringSymbols([
-        "root",
-        "cancelled", // also unclear why there's extra pairs of these
-        "root",
-        "cancelled",
         "root",
         "cancelled",
         "root",
@@ -265,10 +260,6 @@ describe("Schema Support", () => {
       cancel();
 
       expect(rootValues).toEqualIgnoringSymbols([
-        "root",
-        "cancelled",
-        "root",
-        "cancelled",
         "root",
         "cancelled",
         "root",
@@ -384,8 +375,6 @@ describe("Schema Support", () => {
       expect(first.getAsNormalizedFullLink().id).toEqual(
         initial.getAsNormalizedFullLink().id,
       );
-
-      console.log("here2");
       expect(first.getAsNormalizedFullLink().path).toEqual(["foo"]);
       expect(isCell(first)).toBe(true);
       expect(first.get()).toEqualIgnoringSymbols({ label: "first" });
@@ -3345,13 +3334,11 @@ describe("Schema Support", () => {
       }).get();
       expect(isCell(resultCell)).toBe(true);
 
-      console.log("Getting result inner cell");
       const resultInnerCell = outer.asSchema({
         type: "object",
         properties: { inner: asCellSchema },
       }).key("inner").get();
       expect(isCell(resultInnerCell)).toBe(true);
-      console.log("Got result inner cell");
 
       const resultInnerCell2 = outer.asSchema({
         type: "object",

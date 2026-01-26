@@ -17,7 +17,10 @@ import {
 } from "./query-result-proxy.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { resolveLink } from "./link-resolution.ts";
-import { IExtendedStorageTransaction } from "./storage/interface.ts";
+import {
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+} from "./storage/interface.ts";
 import type { Runtime } from "./runtime.ts";
 import {
   isNormalizedLink,
@@ -81,23 +84,23 @@ export function parseLink(
 ): NormalizedFullLink;
 export function parseLink(
   value: CellLink,
-  base: AnyCell<any> | NormalizedFullLink,
+  base: AnyCell<any> | NormalizedFullLink | IMemorySpaceAddress,
 ): NormalizedFullLink;
 export function parseLink(
   value: CellLink,
-  base?: AnyCell<any> | NormalizedLink,
+  base?: AnyCell<any> | NormalizedLink | IMemorySpaceAddress,
 ): NormalizedLink;
 export function parseLink(
   value: any,
-  base: AnyCell<any> | NormalizedFullLink,
+  base: AnyCell<any> | NormalizedFullLink | IMemorySpaceAddress,
 ): NormalizedFullLink | undefined;
 export function parseLink(
   value: any,
-  base?: AnyCell<any> | NormalizedLink,
+  base?: AnyCell<any> | NormalizedLink | IMemorySpaceAddress,
 ): NormalizedLink | undefined;
 export function parseLink(
   value: any,
-  base?: AnyCell<any> | NormalizedLink,
+  base?: AnyCell<any> | NormalizedLink | IMemorySpaceAddress,
 ): NormalizedLink | undefined {
   // Has to be first, since below we check for "/" in value and we don't want to
   // see userland "/".

@@ -297,7 +297,7 @@ describe("SchemaObjectTraverser array traversal", () => {
         path: ["value", "foo"],
         schemaContext: { schema: true, rootSchema: true },
       };
-      const [curDoc, redirDoc, _selector] = getAtPath(
+      const [curDoc, _selector1] = getAtPath(
         tx,
         docAFoo,
         [],
@@ -305,6 +305,17 @@ describe("SchemaObjectTraverser array traversal", () => {
         cfc,
         schemaTracker,
         docASelector,
+      );
+      const [redirDoc, _selector2] = getAtPath(
+        tx,
+        docAFoo,
+        [],
+        tracker,
+        cfc,
+        schemaTracker,
+        docASelector,
+        false,
+        "writeRedirect",
       );
       expect(curDoc.address.id).toBe(revD.of);
       expect(curDoc.address.path).toEqual(["value", "foo"]);
@@ -351,7 +362,7 @@ describe("SchemaObjectTraverser array traversal", () => {
         path: ["value", "current"],
         schemaContext: { schema: true, rootSchema: true },
       };
-      const [curDoc, redirDoc, _selector] = getAtPath(
+      const [curDoc, _selector1] = getAtPath(
         tx,
         docACurrent,
         [],
@@ -359,6 +370,17 @@ describe("SchemaObjectTraverser array traversal", () => {
         cfc,
         schemaTracker,
         docASelector,
+      );
+      const [redirDoc, _selector2] = getAtPath(
+        tx,
+        docACurrent,
+        [],
+        tracker,
+        cfc,
+        schemaTracker,
+        docASelector,
+        false,
+        "writeRedirect",
       );
       expect(curDoc.address.id).toBe(revC.of);
       expect(curDoc.address.path).toEqual(["value", "foo"]);
@@ -409,7 +431,7 @@ describe("SchemaObjectTraverser array traversal", () => {
         path: ["value", "current"],
         schemaContext: { schema: true, rootSchema: true },
       };
-      const [curDoc, redirDoc, _selector] = getAtPath(
+      const [curDoc, _selector1] = getAtPath(
         tx,
         docACurrent,
         [],
@@ -418,10 +440,33 @@ describe("SchemaObjectTraverser array traversal", () => {
         schemaTracker,
         docASelector,
       );
+      const [redirDoc, redirDocSelector] = getAtPath(
+        tx,
+        docACurrent,
+        [],
+        tracker,
+        cfc,
+        schemaTracker,
+        docASelector,
+        false,
+        "writeRedirect",
+      );
+      // we should also be able to get the value starting at the redir doc
+      const [curDoc2, _selector3] = getAtPath(
+        tx,
+        redirDoc,
+        [],
+        tracker,
+        cfc,
+        schemaTracker,
+        redirDocSelector,
+      );
       expect(curDoc.address.id).toBe(revD.of);
       expect(curDoc.address.path).toEqual(["value", "foo"]);
       expect(redirDoc.address.id).toBe(revD.of);
       expect(redirDoc.address.path).toEqual(["value", "foo"]);
+      expect(curDoc2.address.id).toBe(revD.of);
+      expect(curDoc2.address.path).toEqual(["value", "foo"]);
     });
   });
 });

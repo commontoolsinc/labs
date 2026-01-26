@@ -465,6 +465,7 @@ export function validateAndTransform(
     selector,
     undefined,
     undefined,
+    undefined,
     objectCreator,
     options?.traverseCells ?? false,
   );

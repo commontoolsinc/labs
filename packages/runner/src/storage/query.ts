@@ -31,7 +31,7 @@ export class StoreObjectManager implements ObjectStorageManager {
     // we should only have one match
     if (this.store.has(key)) {
       const storeValue = this.store.get(key);
-      const rv = { address: { path: [], ...address }, value: storeValue?.is };
+      const rv = { address: { ...address, path: [] }, value: storeValue?.is };
       this.readValues.set(key, rv);
       return rv;
     } else {
