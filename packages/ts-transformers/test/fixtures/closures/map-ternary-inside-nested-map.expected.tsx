@@ -577,142 +577,7 @@ export default pattern(({ items, showInactive }) => {
                 }
             } }, ({ item }) => item.tags.length > 0), item.label, "No tags")}</strong>
               <ul>
-                {item.tags.mapWithPattern(__ctHelpers.recipe({
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Tag"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            showInactive: {
-                                type: "boolean",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["showInactive"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    Tag: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            },
-                            active: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["name", "active"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "#/$defs/VNode"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "#/$defs/VNode"
-                            }
-                        },
-                        required: ["$UI"]
-                    },
-                    VNode: {
-                        type: "object",
-                        properties: {
-                            type: {
-                                type: "string",
-                                "enum": ["vnode"]
-                            },
-                            name: {
-                                type: "string"
-                            },
-                            props: {
-                                $ref: "#/$defs/Props"
-                            },
-                            children: {
-                                $ref: "#/$defs/RenderNode"
-                            },
-                            $UI: {
-                                $ref: "#/$defs/VNode"
-                            }
-                        },
-                        required: ["type", "name", "props"]
-                    },
-                    RenderNode: {
-                        anyOf: [{
-                                type: "string"
-                            }, {
-                                type: "number"
-                            }, {
-                                type: "boolean",
-                                "enum": [false]
-                            }, {
-                                type: "boolean",
-                                "enum": [true]
-                            }, {
-                                $ref: "#/$defs/VNode"
-                            }, {
-                                type: "object",
-                                properties: {}
-                            }, {
-                                $ref: "#/$defs/UIRenderable",
-                                asOpaque: true
-                            }, {
-                                type: "object",
-                                properties: {}
-                            }, {
-                                type: "array",
-                                items: {
-                                    $ref: "#/$defs/RenderNode"
-                                }
-                            }, {
-                                type: "null"
-                            }]
-                    },
-                    Props: {
-                        type: "object",
-                        properties: {},
-                        additionalProperties: {
-                            anyOf: [{
-                                    type: "string"
-                                }, {
-                                    type: "number"
-                                }, {
-                                    type: "boolean",
-                                    "enum": [false]
-                                }, {
-                                    type: "boolean",
-                                    "enum": [true]
-                                }, {
-                                    type: "object",
-                                    additionalProperties: true
-                                }, {
-                                    type: "array",
-                                    items: true
-                                }, {
-                                    asCell: true
-                                }, {
-                                    asStream: true
-                                }, {
-                                    type: "null"
-                                }]
-                        }
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: tag, params: { showInactive } }) => (<li>
+                {item.tags.map((tag) => (<li>
                     {/* This ternary should be transformed to ifElse */}
                     {__ctHelpers.ifElse({
                 type: "boolean",
@@ -751,9 +616,7 @@ export default pattern(({ items, showInactive }) => {
                     name: tag.name
                 }
             }, ({ showInactive, tag }) => showInactive ? `(${tag.name})` : ""))}
-                  </li>)), {
-                showInactive: showInactive
-            })}
+                  </li>))}
               </ul>
             </div>)), {
             showInactive: showInactive
