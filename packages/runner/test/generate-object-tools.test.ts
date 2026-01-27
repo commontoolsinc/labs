@@ -456,7 +456,7 @@ describe("generateObject with tools", () => {
       { role: "user", content: `Second message ${uniqueMarker}` },
     ];
 
-    let capturedMessages: BuiltInLLMMessage[] | undefined;
+    let capturedMessages: readonly BuiltInLLMMessage[] | undefined;
 
     addMockResponse(
       (req) => {

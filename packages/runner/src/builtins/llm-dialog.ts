@@ -2048,7 +2048,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
 
   const llmParams: LLMRequest = {
     system: augmentedSystem,
-    messages: messagesCell.get() as BuiltInLLMMessage[],
+    messages: messagesCell.get() as readonly BuiltInLLMMessage[],
     maxTokens: maxTokens,
     stream: true,
     model: model ?? DEFAULT_MODEL_NAME,
