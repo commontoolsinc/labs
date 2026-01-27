@@ -1,7 +1,7 @@
 # Canonical Base Patterns Design - person.tsx
 
 **Status:** Ready for Architect Review
-**Date:** 2026-01-26
+**Date:** 2026-01-27 (Updated)
 **Author:** Claude (with Alex & Berni)
 
 ---
@@ -13,6 +13,7 @@ Design a set of ~8 canonical base patterns (person, project, task, family, event
 - **Extensible**: Via an `[ANNOTATIONS]` system for arbitrary extensions
 - **Pragmatic**: Usable immediately, not a research project
 - **Late-bindable**: Sub-patterns (annotations) use `compileAndRun`, not static imports
+- **Computed-friendly**: Support speculative/computed annotations, not just explicit ones
 
 This replaces the heavyweight "record.tsx" approach with something simpler and more composable.
 
@@ -28,6 +29,68 @@ This replaces the heavyweight "record.tsx" approach with something simpler and m
 | **Annotation Discovery** | Static index file | Lists annotation patterns per base type |
 | **record.tsx Relationship** | person.tsx replaces it | Simpler, more pragmatic approach |
 | **Annotation Storage** | Cells with `[UI]` (optionally `[NAME]`) | `[NAME]` = mentionable/navigable; `[UI]` only = renderable |
+| **Computed Annotations** | Supported via adapter patterns | Three classes unified for consumers |
+
+---
+
+## Three Classes of Annotations
+
+A key insight from architect review: annotations aren't just explicit user additions. There are three classes that consumers should treat uniformly:
+
+| Class | Description | Example |
+|-------|-------------|---------|
+| **Built-in** | Original data structures with all fields already | A contact record that already has `dietaryRestrictions: string[]` |
+| **Explicit Link** | Base data + annotation sub-pattern linked via `[ANNOTATIONS]` | User adds SSN annotation to a person |
+| **Computed** | Pattern computes annotations speculatively (no explicit link yet) | LLM scans emails to infer dietary restrictions for all contacts |
+
+### Why This Matters
+
+Consider a `DietaryRestrictionsScanner` pattern that uses LLM/email-scanning to compute dietary restrictions for all contacts. Another pattern wants to query "persons with their dietary restrictions":
+
+- **With only explicit annotations**: Query fails - computed results aren't in `[ANNOTATIONS]`
+- **With computed annotation support**: Query succeeds - adapter merges explicit + computed
+
+### Consumer Transparency
+
+To something consuming this data, there should be **little to no difference** between the three classes. A "person with dietary restrictions" view shouldn't care whether:
+- The person record always had a `dietaryRestrictions` field
+- A user explicitly added a dietary restrictions annotation
+- A pattern computed it from email analysis
+
+### Confirmation Flow
+
+Users should be able to:
+1. **Control sources**: Mark a computed source as trusted/untrusted
+2. **Confirm annotations**: Confirming a computed annotation adds an explicit `[ANNOTATES]` link (= approval)
+3. **Override**: Explicit annotations take precedence over computed ones
+
+### New Symbol: `[ANNOTATION_SOURCE]`
+
+To support provenance tracking:
+
+```typescript
+// packages/api/index.ts additions
+export const ANNOTATION_SOURCE = "$ANNOTATION_SOURCE";
+
+interface AnnotationSource {
+  type: 'explicit' | 'computed' | 'imported';
+  pattern?: CellRef;      // Which pattern computed this
+  confirmed: boolean;     // User has approved
+  confidence?: number;    // For LLM-computed annotations (0-1)
+  createdAt: number;
+}
+
+interface AnnotationWithSource extends Annotation {
+  [ANNOTATION_SOURCE]?: AnnotationSource;
+}
+```
+
+### Pragmatic Approach
+
+Per architect guidance: "Don't need all of this immediately - build interim patterns that convert, then later optimize with runtime features (backlinks/joins)."
+
+**Phase 1 (Now)**: Adapter patterns that manually merge sources
+**Phase 2 (Later)**: Runtime backlink queries via `wish`
 
 ---
 
@@ -65,8 +128,9 @@ Key properties:
 
 ```typescript
 // packages/api/index.ts additions
-export const ANNOTATIONS = "$ANNOTATIONS";  // Array of annotations on an entity
-export const ANNOTATES = "$ANNOTATES";      // Back-reference from annotation to parent(s)
+export const ANNOTATIONS = "$ANNOTATIONS";        // Array of explicit annotations on an entity
+export const ANNOTATES = "$ANNOTATES";            // Back-reference from annotation to parent(s)
+export const ANNOTATION_SOURCE = "$ANNOTATION_SOURCE";  // Provenance metadata for annotations
 ```
 
 ---
@@ -228,7 +292,123 @@ Available annotation patterns for the `person` base type:
 
 ---
 
-## Computed Projection Pattern: person-with-hobbies.tsx
+## Computed Annotations: Adapter Patterns
+
+### The Problem
+
+A `DietaryRestrictionsScanner` pattern computes dietary restrictions for all contacts:
+
+```typescript
+// Output: Array of { person: PersonRef, restrictions: string[] }
+// These are NOT in each person's [ANNOTATIONS] array
+```
+
+How do consumers query "persons with their dietary restrictions"?
+
+### Solution: Adapter Pattern (v1)
+
+Create adapter patterns that merge explicit + computed annotations:
+
+```typescript
+/// <cts-enable />
+import { pattern, computed, ANNOTATIONS, ANNOTATION_SOURCE } from "commontools";
+import type { Person, Annotation } from "./person.tsx";
+
+interface ComputedAnnotationSource {
+  sourcePattern: CellRef;
+  annotationsForPerson: (person: Person) => Annotation[];
+}
+
+interface PersonWithAllAnnotations {
+  person: Person;
+  annotations: Annotation[];  // Combined: explicit + computed
+}
+
+// Adapter that merges explicit + computed annotations
+export default pattern<{
+  person: Person & { [ANNOTATIONS]?: Annotation[] };
+  computedSources?: ComputedAnnotationSource[];
+}, { result: PersonWithAllAnnotations }>(
+  ({ person, computedSources }) => {
+    const annotations = computed(() => {
+      // Start with explicit annotations
+      const explicit = person[ANNOTATIONS] ?? [];
+
+      // Merge in computed annotations (if sources provided)
+      const computed = (computedSources ?? []).flatMap(source => {
+        const anns = source.annotationsForPerson(person);
+        // Tag computed annotations with source metadata
+        return anns.map(ann => ({
+          ...ann,
+          [ANNOTATION_SOURCE]: {
+            type: 'computed' as const,
+            pattern: source.sourcePattern,
+            confirmed: false,
+            createdAt: Date.now(),
+          },
+        }));
+      });
+
+      return [...explicit, ...computed];
+    });
+
+    return {
+      result: computed(() => ({
+        person,
+        annotations: annotations.get(),
+      })),
+    };
+  }
+);
+```
+
+### Solution: Runtime Backlinks (v2 - Future)
+
+Once the runtime supports backlink queries:
+
+```typescript
+// Query all annotations that [ANNOTATES] this person
+const computedAnnotations = wish({
+  query: "#backlinks",
+  target: person,
+  schema: {
+    type: "object",
+    properties: {
+      [ANNOTATES]: { contains: { $ref: person } },
+      type: { const: "dietary-restrictions" }
+    }
+  }
+});
+```
+
+### Confirmation Handler
+
+When a user confirms a computed annotation:
+
+```typescript
+const confirmAnnotation = handler<{ annotation: Annotation }>(
+  async (event, { person }) => {
+    const ann = event.annotation;
+
+    // 1. Add explicit [ANNOTATES] link
+    ann[ANNOTATES] = [...(ann[ANNOTATES] ?? []), person];
+
+    // 2. Add to person's [ANNOTATIONS] array
+    person[ANNOTATIONS] = [...(person[ANNOTATIONS] ?? []), ann];
+
+    // 3. Mark as confirmed
+    ann[ANNOTATION_SOURCE] = {
+      ...ann[ANNOTATION_SOURCE],
+      confirmed: true,
+      type: 'explicit',
+    };
+  }
+);
+```
+
+---
+
+## Projection Pattern: person-with-hobbies.tsx
 
 For patterns that need specific annotation data materialized as fields:
 
@@ -328,8 +508,9 @@ All share:
 
 | File | Change |
 |------|--------|
-| `packages/api/index.ts` | Add `ANNOTATIONS`, `ANNOTATES` symbols |
+| `packages/api/index.ts` | Add `ANNOTATIONS`, `ANNOTATES`, `ANNOTATION_SOURCE` symbols |
 | `packages/patterns/base/person.tsx` | New canonical person pattern |
+| `packages/patterns/base/person-with-annotations.tsx` | Adapter pattern merging explicit + computed |
 | `packages/patterns/annotations/` | New directory for annotation patterns |
 | `packages/patterns/annotations/person/index.md` | Annotation discovery index |
 
@@ -338,9 +519,9 @@ All share:
 ## Implementation Phases
 
 ### Phase 1: Core Infrastructure
-- [ ] Define `ANNOTATIONS` and `ANNOTATES` symbols in `packages/api/index.ts`
+- [ ] Define `ANNOTATIONS`, `ANNOTATES`, `ANNOTATION_SOURCE` symbols in `packages/api/index.ts`
 - [ ] Export from "commontools" entrypoint
-- [ ] Create annotation type interfaces
+- [ ] Create annotation type interfaces (including `AnnotationSource`)
 
 ### Phase 2: person.tsx
 - [ ] Create `packages/patterns/base/person.tsx` with minimal schema
@@ -352,36 +533,69 @@ All share:
 - [ ] `address.tsx` - Multi-field annotation
 - [ ] `hobbies.tsx` - Array-based annotation
 
-### Phase 4: Computed Projections
+### Phase 4: Computed Annotation Support
+- [ ] `person-with-annotations.tsx` adapter pattern (merges explicit + computed)
+- [ ] Confirmation handler for promoting computed -> explicit
+- [ ] Example computed annotation source (e.g., dietary restrictions scanner)
+
+### Phase 5: Projections & Views
 - [ ] `person-with-hobbies.tsx` example
 - [ ] Document projection pattern for others
 
-### Phase 5: Additional Base Types
+### Phase 6: Additional Base Types
 - [ ] Implement remaining ~7 base types following person.tsx idiom
+
+### Phase 7 (Future): Runtime Optimizations
+- [ ] Backlink index for `[ANNOTATES]` links
+- [ ] `wish` support for backlink queries
+- [ ] Automatic annotation merging in runtime (remove need for adapter patterns)
 
 ---
 
 ## Verification Plan
 
+### Explicit Annotations
 1. **Unit test person.tsx**: Create person, add annotations, verify rendering
 2. **Test compileAndRun integration**: Add SSN annotation dynamically, verify it compiles and renders
 3. **Test queries**: Create multiple persons, query by `baseType: "person"`, verify all returned
-4. **Test projection**: Create person with hobbies annotation, use person-with-hobbies.tsx, verify hobbies materialized
-5. **Manual test**: Deploy to local toolshed, create person via UI, add annotations interactively
+
+### Computed Annotations
+4. **Test adapter pattern**: Create person + computed source, verify merged annotations
+5. **Test confirmation flow**: Confirm a computed annotation, verify it becomes explicit
+6. **Test provenance**: Verify `[ANNOTATION_SOURCE]` metadata is preserved and queryable
+
+### Projections
+7. **Test projection**: Create person with hobbies annotation, use person-with-hobbies.tsx, verify hobbies materialized
+
+### Integration
+8. **Manual test**: Deploy to local toolshed, create person via UI, add annotations interactively
+9. **Computed source test**: Run dietary restrictions scanner, verify results appear in person-with-annotations adapter
 
 ---
 
 ## Questions for Architect (Berni)
 
-1. **Symbol naming**: Is `$ANNOTATIONS` / `$ANNOTATES` the right convention? Or should these be true Symbols like `SELF`?
+### Previously Discussed (Incorporated)
 
-2. **Annotation storage**: Should annotations be stored inline in the parent's `[ANNOTATIONS]` array, or as separate cells with `[ANNOTATES]` pointing back? (Affects whether they appear in sidebar/mentions.)
+1. ~~**Annotation storage**: Should annotations be stored inline or as separate cells?~~
+   - **Answer**: Support both explicit (inline) AND computed (separate cells). Adapter patterns merge them.
 
-3. **Discovery mechanism**: Static index.md vs. dynamic registry query - is static sufficient for v1?
+2. ~~**Computed annotations**: How do we handle speculative/computed annotations?~~
+   - **Answer**: Three classes (built-in, explicit, computed) unified via adapter patterns now, runtime backlinks later.
 
-4. **Schema description timeline**: When should we prioritize migrating from `baseType` field to schema `description` for type identity?
+### Still Open
 
-5. **compileAndRun caching**: Are compiled annotation patterns cached appropriately, or do we need additional caching layer?
+1. **Symbol naming**: Is `$ANNOTATIONS` / `$ANNOTATES` / `$ANNOTATION_SOURCE` the right convention? Or should these be true Symbols like `SELF`?
+
+2. **Discovery mechanism**: Static index.md vs. dynamic registry query - is static sufficient for v1?
+
+3. **Schema description timeline**: When should we prioritize migrating from `baseType` field to schema `description` for type identity?
+
+4. **compileAndRun caching**: Are compiled annotation patterns cached appropriately, or do we need additional caching layer?
+
+5. **Backlink query priority**: When should we invest in runtime backlink queries (`wish` with `#backlinks`) to replace adapter patterns?
+
+6. **Confidence thresholds**: For computed annotations with confidence scores, should there be a system-wide threshold for display, or per-source configuration?
 
 ---
 
