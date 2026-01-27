@@ -82,7 +82,13 @@ export class PatternContextValidationTransformer extends Transformer {
         this.validateBuilderPlacement(node, context, checker);
 
         // Check for .map() on fallback expressions (x ?? [] or x || [])
-        this.validateMapOnFallbackExpression(node, context, checker);
+        // Only in restricted context (pattern/recipe body) where this pattern causes runtime failures.
+        // Note: We use isInsideRestrictedContext, not isInRestrictedReactiveContext, because
+        // the map-on-fallback pattern fails even inside JSX expressions (which are "safe" for
+        // other validations but still need this check).
+        if (isInsideRestrictedContext(node, checker)) {
+          this.validateMapOnFallbackExpression(node, context, checker);
+        }
 
         // Check for .get() calls
         if (
