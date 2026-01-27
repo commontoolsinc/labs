@@ -563,47 +563,89 @@ The architect clarified Tony's actual pattern needs:
 
 ---
 
-## Annotations Reframed: Identity Pointers
+## Annotations Reframed: Just More Records
 
-The original annotation design makes sense when viewed from a different angle: **identity linking**, not extensibility.
+The original annotation design makes sense when viewed from a different angle: **it's the same schema, just approached differently.**
 
-### The Insight
+### The Key Insight
 
-Consider `SSNPerson.tsx`:
-- Old view: "A person annotation that adds SSN"
-- New view: "A record with name + SSN + **pointer to the entity it identifies**"
+`SSNPerson.tsx` isn't "an annotation that attaches TO a person." It IS a person record:
 
-This is the same pattern as reconciliation! Multiple records with complementary data, linked by identity.
+| Old Framing | New Framing |
+|-------------|-------------|
+| SSNPerson is an annotation | SSNPerson is a PersonLike record |
+| It attaches TO the "real" person | It IS a person, just minimal |
+| Special annotation system needed | Just records + reconciliation |
 
-### When Annotations Make Sense
+Both `FamilyMember` and `SSNPerson` satisfy `PersonLike { name }`:
 
-```typescript
-// SSNPerson - an identity record
-interface SSNPerson {
-  name: string;
-  ssn: string;
+```
+┌─────────────────────┐         ┌─────────────────────┐
+│ FamilyMember        │         │ SSNPerson           │
+│ (PersonLike)        │         │ (PersonLike)        │
+│                     │         │                     │
+│ name: "John Smith"  │   ←─→   │ name: "John Smith"  │
+│ birthday: "1985-03" │ reconcile│ ssn: "123-45-6789" │
+│ dietary: ["vegan"]  │         │                     │
+│ gifts: ["books"]    │         │ (that's it - just   │
+│ notes: "..."        │         │  name and SSN)      │
+└─────────────────────┘         └─────────────────────┘
 
-  // The key insight: this is an identity pointer
-  sameAs: CellRef;  // Points to the "real" person record
-}
+Both are just PersonLike records with different fields.
+They get RECONCILED as the same entity, not annotated.
 ```
 
-**Use cases:**
-- Sensitive data separation: SSN lives in its own record, linked to person
-- Import reconciliation: Imported contact linked to existing person
-- Cross-context linking: Work contractor linked to personal friend
+### Why This Matters
+
+**No special annotation system needed.** Everything is just:
+1. Records that satisfy a minimal interface
+2. Some records have many fields, some have few
+3. Records about the same entity get linked via reconciliation
+
+The SSNPerson pattern exists because:
+- Maybe SSN data lives in a separate security context
+- Maybe it was imported from a different system
+- Maybe someone created it before you had the full person record
+
+It's not subordinate to a "real" person - it IS a person record, just a sparse one.
+
+### When You'd Have Sparse Records
+
+```typescript
+// SSNPerson - a minimal person record with just identity info
+interface SSNPerson extends PersonLike {
+  name: string;       // satisfies PersonLike
+  ssn: string;        // the only extra field
+}
+
+// ImportedContact - from an email import, sparse data
+interface ImportedContact extends PersonLike {
+  name: string;       // satisfies PersonLike
+  email: string;      // all we got from the import
+  importSource: string;
+}
+
+// These reconcile with your rich FamilyMember record
+// No annotation system - just records + identity linking
+```
+
+**Use cases for sparse records:**
+- Sensitive data separation (SSN in its own record)
+- Import reconciliation (imported contact with minimal data)
+- Cross-context linking (work contractor, personal friend)
+- Incremental data collection (start sparse, add fields over time)
 
 ### Not the Primary Model
 
-Most cases are better served by:
-1. **Creating a variant pattern** - fork and add the fields you need
-2. **Using collection projections** - project data as needed
-3. **Designing upfront** - include fields in the original pattern
+For most cases, prefer:
+1. **Forking a variant pattern** - add the fields you need upfront
+2. **Using collection projections** - transform data as needed
+3. **Rich records** - include fields in the original pattern
 
-Annotations/identity-links are for:
-- Same entity, different contexts
-- Sensitive data separation
-- Post-hoc reconciliation of imports
+Sparse records + reconciliation are for:
+- Same entity appearing in different contexts
+- Data from different sources/imports
+- Security separation of sensitive fields
 
 ---
 
