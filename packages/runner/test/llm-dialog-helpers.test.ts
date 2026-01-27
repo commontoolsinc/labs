@@ -11,6 +11,7 @@ const {
   buildAssistantMessage,
   createToolResultMessages,
   hasValidContent,
+  simplifySchemaForContext,
 } = llmDialogTestHelpers;
 
 Deno.test("parseTargetString recognizes handle format", () => {
@@ -254,4 +255,198 @@ Deno.test("createToolResultMessages handles null result with explicit null", () 
   assertEquals(messages.length, 1);
   const outputPart = messages[0].content?.[0] as any;
   assertEquals(outputPart.output, { type: "json", value: null });
+});
+
+// Tests for simplifySchemaForContext
+// Note: We cast schemas to `any` to avoid strict type checking on `type` field literals
+
+Deno.test("simplifySchemaForContext preserves asStream marker", () => {
+  const schema: any = {
+    type: "object",
+    properties: {
+      events: { asStream: true, type: "string" },
+    },
+  };
+  const result = simplifySchemaForContext(schema) as any;
+  assertEquals(result.properties?.events?.asStream, true);
+  assertEquals(result.properties?.events?.type, "string");
+});
+
+Deno.test("simplifySchemaForContext preserves asCell marker with nested properties", () => {
+  const schema: any = {
+    type: "object",
+    properties: {
+      user: {
+        asCell: true,
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          age: { type: "number" },
+        },
+        required: ["name", "age"],
+      },
+    },
+  };
+  const result = simplifySchemaForContext(schema) as any;
+  assertEquals(result.properties?.user?.asCell, true);
+  assertEquals(result.properties?.user?.properties?.name?.type, "string");
+  assertEquals(result.properties?.user?.properties?.age?.type, "number");
+  assertEquals(result.properties?.user?.required, ["name", "age"]);
+});
+
+Deno.test("simplifySchemaForContext preserves asOpaque marker", () => {
+  const schema: any = {
+    type: "object",
+    properties: {
+      state: { asOpaque: true, type: "object" },
+    },
+  };
+  const result = simplifySchemaForContext(schema) as any;
+  assertEquals(result.properties?.state?.asOpaque, true);
+});
+
+Deno.test("simplifySchemaForContext preserves small enums", () => {
+  const schema: any = {
+    type: "object",
+    properties: {
+      status: { type: "string", enum: ["open", "closed", "pending"] },
+    },
+  };
+  const result = simplifySchemaForContext(schema) as any;
+  assertEquals(result.properties?.status?.enum, ["open", "closed", "pending"]);
+});
+
+Deno.test("simplifySchemaForContext truncates large enums", () => {
+  const schema: any = {
+    type: "object",
+    properties: {
+      country: {
+        type: "string",
+        enum: Array.from({ length: 20 }, (_, i) => `country${i}`),
+      },
+    },
+  };
+  const result = simplifySchemaForContext(schema) as any;
+  assertEquals(result.properties?.country?.enum?.length, 11); // 10 + "..."
+  assertEquals(result.properties?.country?.enum?.[10], "...");
+});
+
+Deno.test("simplifySchemaForContext removes $defs and $ref", () => {
+  const schema: any = {
+    $defs: { Foo: { type: "string" } },
+    type: "object",
+    properties: {
+      foo: { $ref: "#/$defs/Foo" },
+    },
+  };
+  const result = simplifySchemaForContext(schema) as any;
+  assertEquals(result.$defs, undefined);
+  assertEquals(result.properties?.foo?.$ref, undefined);
+});
+
+Deno.test("simplifySchemaForContext skips $-prefixed properties", () => {
+  const schema: any = {
+    type: "object",
+    properties: {
+      $UI: { type: "object" },
+      $TYPE: { type: "string" },
+      name: { type: "string" },
+    },
+  };
+  const result = simplifySchemaForContext(schema) as any;
+  assertEquals(result.properties?.$UI, undefined);
+  assertEquals(result.properties?.$TYPE, undefined);
+  assertEquals(result.properties?.name?.type, "string");
+});
+
+Deno.test("simplifySchemaForContext limits recursion depth", () => {
+  const deepSchema: any = {
+    type: "object",
+    properties: {
+      a: {
+        type: "object",
+        properties: {
+          b: {
+            type: "object",
+            properties: {
+              c: {
+                type: "object",
+                asStream: true, // wrapper marker to verify it's preserved at depth limit
+                properties: {
+                  d: { type: "string", description: "deep field" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+  const result = simplifySchemaForContext(deepSchema) as any;
+  // At depth 3, we should get minimal schema (just type and wrapper markers)
+  // depth 0: root -> depth 1: a -> depth 2: b -> depth 3: c (hits maxDepth)
+  const deep = result.properties?.a?.properties?.b?.properties?.c;
+  // At max depth, only type and wrapper markers are preserved, properties are dropped
+  assertEquals(deep?.type, "object");
+  assertEquals(deep?.asStream, true);
+  assertEquals(deep?.properties, undefined); // nested properties dropped at max depth
+});
+
+Deno.test("simplifySchemaForContext preserves required array", () => {
+  const schema: any = {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      age: { type: "number" },
+    },
+    required: ["name"],
+  };
+  const result = simplifySchemaForContext(schema) as any;
+  assertEquals(result.required, ["name"]);
+});
+
+Deno.test("simplifySchemaForContext preserves items schema for arrays", () => {
+  const schema: any = {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        id: { type: "number" },
+        name: { type: "string" },
+      },
+      required: ["id"],
+    },
+  };
+  const result = simplifySchemaForContext(schema) as any;
+  assertEquals(result.items?.type, "object");
+  assertEquals(result.items?.properties?.id?.type, "number");
+  assertEquals(result.items?.required, ["id"]);
+});
+
+Deno.test("simplifySchemaForContext handles Stream with nested detail structure", () => {
+  // This is the exact case from the bug report: Stream<{ detail: { value: string }}>
+  const schema: any = {
+    type: "object",
+    properties: {
+      editContent: {
+        asStream: true,
+        type: "object",
+        properties: {
+          detail: {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+  };
+  const result = simplifySchemaForContext(schema) as any;
+  assertEquals(result.properties?.editContent?.asStream, true);
+  assertEquals(result.properties?.editContent?.type, "object");
+  assertEquals(
+    result.properties?.editContent?.properties?.detail?.properties?.value?.type,
+    "string",
+  );
 });
