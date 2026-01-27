@@ -1426,36 +1426,42 @@ export class Runner {
                   tx,
                 );
 
-              // If nothing changed, don't rerun the recipe
+              // If nothing changed, don't rerun the recipe, but still ensure
+              // the output binding points to the result cell (it may have been
+              // overwritten by a plain value in a previous run)
               const resultRecipeAsString = JSON.stringify(resultRecipe);
               const previousResultRecipeAsString = this.resultRecipeCache.get(
                 `${resultCell.space}/${resultCell.sourceURI}`,
               );
-              if (previousResultRecipeAsString === resultRecipeAsString) {
-                return;
-              }
-              this.resultRecipeCache.set(
-                `${resultCell.space}/${resultCell.sourceURI}`,
-                resultRecipeAsString,
-              );
+              const recipeUnchanged =
+                previousResultRecipeAsString === resultRecipeAsString;
 
-              this.run(
-                tx,
-                resultRecipe,
-                undefined,
-                resultCell,
-              );
-              addCancel(() => this.stop(resultCell));
+              if (!recipeUnchanged) {
+                this.resultRecipeCache.set(
+                  `${resultCell.space}/${resultCell.sourceURI}`,
+                  resultRecipeAsString,
+                );
+
+                this.run(
+                  tx,
+                  resultRecipe,
+                  undefined,
+                  resultCell,
+                );
+                addCancel(() => this.stop(resultCell));
+              }
 
               if (!previousResultCell) {
                 previousResultCell = resultCell;
-                sendValueToBinding(
-                  tx,
-                  processCell,
-                  outputs,
-                  resultCell.getAsLink({ base: processCell }),
-                );
               }
+              // Always write the link - a previous run may have overwritten
+              // the output with a plain value (e.g., empty array)
+              sendValueToBinding(
+                tx,
+                processCell,
+                outputs,
+                resultCell.getAsLink({ base: processCell }),
+              );
             } else {
               sendValueToBinding(
                 tx,
