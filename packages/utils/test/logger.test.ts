@@ -1406,7 +1406,7 @@ describe("logger", () => {
 
         expect(elapsed).toBeDefined();
 
-        // Stats should be recorded at all levels
+        // Stats are only recorded at the leaf level (no hierarchical rollup)
         const cellStats = logger.getTimeStats("cell");
         const cellGetStats = logger.getTimeStats("cell", "get");
         const cellGetUserStats = logger.getTimeStats(
@@ -1415,13 +1415,11 @@ describe("logger", () => {
           "user-data",
         );
 
-        expect(cellStats).toBeDefined();
-        expect(cellGetStats).toBeDefined();
+        expect(cellStats).toBeUndefined();
+        expect(cellGetStats).toBeUndefined();
         expect(cellGetUserStats).toBeDefined();
 
-        // All should have count of 1
-        expect(cellStats?.count).toBe(1);
-        expect(cellGetStats?.count).toBe(1);
+        // Only leaf level has count of 1
         expect(cellGetUserStats?.count).toBe(1);
       });
 
@@ -1482,9 +1480,9 @@ describe("logger", () => {
 
         logger.time(100, 120, "ipc", "CellGet");
 
-        expect(logger.getTimeStats("ipc")?.count).toBe(1);
+        // Only leaf level is recorded (no hierarchical rollup)
+        expect(logger.getTimeStats("ipc")?.count).toBeUndefined();
         expect(logger.getTimeStats("ipc", "CellGet")?.count).toBe(1);
-        expect(logger.getTimeStats("ipc")?.min).toBe(20);
         expect(logger.getTimeStats("ipc", "CellGet")?.min).toBe(20);
       });
     });
@@ -1559,11 +1557,9 @@ describe("logger", () => {
 
         const allStats = logger.timeStats;
 
-        expect(Object.keys(allStats)).toContain("a");
+        // Only leaf level keys are stored (no hierarchical rollup)
         expect(Object.keys(allStats)).toContain("a/b");
         expect(Object.keys(allStats)).toContain("c");
-        expect(Object.keys(allStats)).toContain("d");
-        expect(Object.keys(allStats)).toContain("d/e");
         expect(Object.keys(allStats)).toContain("d/e/f");
       });
 
