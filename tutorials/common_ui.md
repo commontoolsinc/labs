@@ -340,19 +340,9 @@ You can mix-and-match the above components to achieve practically any (standard)
 
 # Interactive / Complex Components
 
-- interactive: `ct-collapsible`, `ct-list-item`, `ct-tab-list`, `ct-canvas`
-    - `type ListItem = { title: string }`
-    - `const items: ListItem[]`
-    - Consider using `[NAME]`?
-	- gap: re-orderable list
-      - ```{code-block} html
-        <ct-list editable reorderable onDelete={}>
-            {items.map((i: Opaque<{ name: string }>) => <ct-list-item>{i.name}</ct-list-item>)}
-        </ct-list>
-        ```
-    - `editable` only applies to the `title` property of each list item
+- interactive: `ct-collapsible`, `ct-tab-list`, `ct-canvas`
 
-- complex/integrated (cell interop): `ct-code-editor`, `ct-outliner`, `ct-list`
+- complex/integrated (cell interop): `ct-code-editor`, `ct-outliner`
 	- gap: editable table rows
 
 ## Chat Components
