@@ -22,7 +22,7 @@ export const counterComputedDefaultStringsScenario: PatternIntegrationScenario<
         { path: "fallbackLabel", value: "Total 3" },
         { path: "label", value: "Total 3" },
         { path: "summary", value: "Total 3 (current: 3)" },
-        { path: "overrides.label", value: undefined },
+        { path: "overrides.label", value: null },
       ],
     },
     {
@@ -63,7 +63,7 @@ export const counterComputedDefaultStringsScenario: PatternIntegrationScenario<
         { path: "fallbackLabel", value: "Total 2" },
         { path: "label", value: "Total 2" },
         { path: "summary", value: "Total 2 (current: 2)" },
-        { path: "overrides.label", value: undefined },
+        { path: "overrides.label", value: null },
       ],
     },
   ],

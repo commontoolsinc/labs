@@ -30,11 +30,11 @@ const adjustValue = handler(
 const setOverrideLabel = handler(
   (
     event: { text?: string } | undefined,
-    context: { label: Cell<string | undefined> },
+    context: { label: Cell<string | null> },
   ) => {
     const next = typeof event?.text === "string" && event.text.length > 0
       ? event.text
-      : undefined;
+      : null;
     context.label.set(next);
   },
 );
@@ -44,7 +44,7 @@ export const counterWithComputedDefaultStrings = recipe<
 >(
   "Counter With Computed Default Strings",
   ({ value, prefix }) => {
-    const override = cell<string | undefined>();
+    const override = cell<string | null>(null);
     const normalizedValue = derive(
       value,
       (count) => (typeof count === "number" ? count : 0),
