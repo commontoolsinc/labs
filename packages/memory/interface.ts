@@ -42,6 +42,17 @@ export interface StorableArray extends ArrayLike<StorableDatum> {}
 export interface StorableObject extends Record<string, StorableDatum> {}
 
 /**
+ * A value with storable structure at the top level, but potentially unconverted
+ * nested values. This is the result of shallow conversion via `toStorableValue()`
+ * - arrays and objects have the right shape but their contents may still contain
+ * values requiring further conversion (e.g., Error instances in a `cause` chain).
+ */
+export type StorableValueLayer =
+  | StorableValue
+  | unknown[]
+  | Record<string, unknown>;
+
+/**
  * A storable value that allows `undefined` at any nesting level.
  * This is used during traversal/processing where intermediate values
  * may not yet be resolved.

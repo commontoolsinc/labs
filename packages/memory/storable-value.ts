@@ -1,4 +1,5 @@
 import { isInstance, isRecord } from "@commontools/utils/types";
+import type { StorableValueLayer } from "./interface.ts";
 
 /**
  * Character code for digit `0`.
@@ -129,7 +130,7 @@ function hasToJSONMethod(
  * @param value - The value to check.
  * @returns `true` if the value is storable per se, `false` otherwise.
  */
-export function isStorableValue(value: unknown): boolean {
+export function isStorableValue(value: unknown): value is StorableValueLayer {
   switch (typeof value) {
     case "boolean":
     case "string":
@@ -176,10 +177,8 @@ export function isStorableValue(value: unknown): boolean {
  * @returns The storable value (original or converted).
  * @throws Error if the value can't be converted to a JSON-encodable form.
  */
-export function toStorableValue(value: unknown): unknown {
-  const typeName = typeof value;
-
-  switch (typeName) {
+export function toStorableValue(value: unknown): StorableValueLayer {
+  switch (typeof value) {
     case "boolean":
     case "string":
     case "undefined": {
@@ -201,56 +200,54 @@ export function toStorableValue(value: unknown): unknown {
         return null;
       }
 
-      const valueObj = value as object;
-
-      if (hasToJSONMethod(valueObj)) {
-        const converted = valueObj.toJSON();
+      if (hasToJSONMethod(value)) {
+        const converted = value.toJSON();
 
         if (!isStorableValue(converted)) {
           throw new Error(
-            `\`toJSON()\` on ${typeName} returned something other than a storable value`,
+            `\`toJSON()\` on ${typeof value} returned something other than a storable value`,
           );
         }
 
         return converted;
-      } else if (typeof valueObj === "function") {
+      } else if (typeof value === "function") {
         throw new Error(
           "Cannot store function per se (needs to have a `toJSON()` method)",
         );
-      } else if (isInstance(valueObj)) {
-        const special = specialInstanceToStorableValue(valueObj);
+      } else if (isInstance(value)) {
+        const special = specialInstanceToStorableValue(value);
         if (special !== null) {
           return special;
         }
         throw new Error(
           "Cannot store instance per se (needs to have a `toJSON()` method)",
         );
-      } else if (Array.isArray(valueObj)) {
+      } else if (Array.isArray(value)) {
         // Note that if the original `value` had a `toJSON()` method, that would
         // have triggered the `toJSON` clause above and so we won't end up here.
-        if (!isArrayWithOnlyIndexProperties(valueObj)) {
+        if (!isArrayWithOnlyIndexProperties(value)) {
           throw new Error(
             "Cannot store array with enumerable named properties.",
           );
-        } else if (isStorableArray(valueObj)) {
-          return valueObj;
+        } else if (isStorableArray(value)) {
+          return value;
         } else {
           // Array has holes or `undefined` elements. Densify and convert
           // `undefined` to `null`.
-          return [...valueObj].map((v) => (v === undefined ? null : v));
+          return [...value].map((v) => (v === undefined ? null : v));
         }
       } else {
-        return valueObj;
+        return value;
       }
     }
 
     case "bigint":
     case "symbol": {
-      throw new Error(`Cannot store ${typeName}`);
+      throw new Error(`Cannot store ${typeof value}`);
     }
 
     default: {
-      throw new Error(`Shouldn't happen: Unrecognized type ${typeName}`);
+      throw new Error(`Shouldn't happen: Unrecognized type ${typeof value}`);
     }
   }
 }
