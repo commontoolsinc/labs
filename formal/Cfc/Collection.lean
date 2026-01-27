@@ -161,6 +161,42 @@ def filteredFrom {Ref : Type} (pc : ConfLabel) (source : Nat) (predicate : Strin
           [Atom.filteredFrom source predicate] }
     members := outputMembers }
 
+/-
+Selection-decision declassification (spec 8.5.7):
+
+The spec introduces the idea that a collection's membership/order can be confidential because it
+leaks something about the selection criteria (e.g. a private search query).
+
+It also introduces a *checked declassification rule*:
+if the selection criteria are user-aligned or properly disclosed/acknowledged, then the runtime
+may clear the selection-decision confidentiality taint.
+
+We model a very small version of that idea:
+
+- The confidentiality taint is represented by a clause containing `Atom.selectionDecisionConf source`.
+  (A clause is a disjunction; in most examples this will be a singleton clause.)
+- The integrity justification is represented by required integrity atoms on the *container* label,
+  e.g. `selectionDecisionUserSpecified source`.
+- Finally, declassification is only allowed if the ambient control integrity contains `trustedScope`
+  (the same "trusted control-flow" token used elsewhere in the repo).
+
+This keeps the key shape of robust declassification:
+declassify only with both (a) integrity justification and (b) trusted control.
+-/
+
+def clearSelectionDecisionConf (source : Nat) (conf : ConfLabel) : ConfLabel :=
+  conf.filter (fun cl => ! decide (Atom.selectionDecisionConf source ∈ cl))
+
+def requiresAll (required : List Atom) (I : IntegLabel) : Bool :=
+  required.all (fun a => decide (a ∈ I))
+
+def declassifySelectionDecisionIf {Ref : Type}
+    (pcI : IntegLabel) (source : Nat) (required : List Atom) (c : LabeledCollection Ref) : LabeledCollection Ref :=
+  if requiresAll required c.container.integ && decide (trustedScope ∈ pcI) then
+    { c with container := { c.container with conf := clearSelectionDecisionConf source c.container.conf } }
+  else
+    c
+
 /--
 Length-preserved transition (8.5.4):
 

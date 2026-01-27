@@ -624,7 +624,12 @@ function propagateCollectionConstraint(
   inputMembers: unknown[],
   inputMemberLabels: Label[],
   outputMembers: unknown[],
-  opts: { sourceRef: Reference; predicate?: string }
+  opts: {
+    sourceRef: Reference;
+    predicate?: string;
+    selectionIntegrity?: SelectionDecisionIntegrity;
+    addedCollectionIntegrity?: IntegrityAtom[];
+  }
 ): { outputContainerLabel: Label; outputMemberLabels: Label[] } {
   // Build membership lookup for label reuse.
   const inputByRef = indexMemberLabels(inputMembers, inputMemberLabels);
@@ -663,6 +668,14 @@ function propagateCollectionConstraint(
     ];
   }
 
+  // Attach optional selection-decision integrity and other container integrity atoms.
+  if (opts.selectionIntegrity) {
+    outContainer.integrity = [...outContainer.integrity, opts.selectionIntegrity];
+  }
+  if (opts.addedCollectionIntegrity?.length) {
+    outContainer.integrity = [...outContainer.integrity, ...opts.addedCollectionIntegrity];
+  }
+
   // Member labels: preserved by reference.
   const outMemberLabels = outputMembers.map(v => {
     const lbl = inputByRef.get(refer(v).toString());
@@ -683,11 +696,19 @@ function propagateLengthPreserved(
   inputMembers: unknown[],
   outputMembers: unknown[],
   outputMemberLabels: Label[],
-  sourceRef: Reference
+  sourceRef: Reference,
+  opts?: {
+    selectionIntegrity?: SelectionDecisionIntegrity;
+    addedCollectionIntegrity?: IntegrityAtom[];
+  }
 ): { outputContainerLabel: Label; outputMemberLabels: Label[] } {
   if (inputMembers.length !== outputMembers.length) {
     throw new Error("IFC lengthPreserved violation");
   }
+
+  const extra: IntegrityAtom[] = [];
+  if (opts?.selectionIntegrity) extra.push(opts.selectionIntegrity);
+  if (opts?.addedCollectionIntegrity?.length) extra.push(...opts.addedCollectionIntegrity);
 
   return {
     outputContainerLabel: {
@@ -695,6 +716,7 @@ function propagateLengthPreserved(
       integrity: [
         ...stripCollectionIntegrity(inputContainerLabel.integrity),
         { type: "LengthPreserved", source: sourceRef }
+        , ...extra
       ]
     },
     outputMemberLabels
@@ -755,6 +777,78 @@ interface SelectionDeclassificationRule {
 
   // Effect: selection decision taint can be cleared
   clears: "selection-decision-confidentiality";
+}
+```
+
+Runtime minting + declassification pseudocode:
+
+```typescript
+// Represent the *confidentiality taint* of selection decisions as a dedicated confidentiality atom.
+//
+// Intuition: even if individual members are public, the membership/order can leak something
+// about the ranking/selection criteria (e.g. a private query).
+//
+// In the unified label representation, this is simply another confidentiality clause.
+type SelectionDecisionConf = { type: "SelectionDecisionConf"; source: Reference };
+
+// Add selection-decision confidentiality taint to a collection container label.
+function taintSelectionDecisionConf(
+  container: Label,
+  source: Reference
+): Label {
+  return {
+    ...container,
+    confidentiality: [
+      ...container.confidentiality,
+      [{ type: "SelectionDecisionConf", source } as any] // as any: atom union elided in pseudocode
+    ]
+  };
+}
+
+// Decide whether selection-decision taint may be cleared.
+//
+// This is intentionally shaped like robust declassification:
+// - it requires integrity evidence (selection decision integrity),
+// - and it requires being in a trusted runtime/control scope (Section 3.4 / 3.8.6).
+function canClearSelectionDecisionConf(
+  pcIntegrity: IntegrityAtom[],
+  containerIntegrity: IntegrityAtom[],
+  rule: SelectionDeclassificationRule
+): boolean {
+  const trusted = pcIntegrity.some(a => a.type === "TrustedScope");
+  if (!trusted) return false;
+
+  // Case 1: user-specified criteria.
+  const userSpecified = containerIntegrity.some(a =>
+    a.type === "SelectionDecision" &&
+    a.criteria?.some((c: any) => c.kind === "user-specified")
+  );
+  if (userSpecified) return true;
+
+  // Case 2: disclosed + acknowledged.
+  const disclosed = containerIntegrity.some(a =>
+    a.type === "SelectionDecision" && a.disclosed === true
+  );
+  const acknowledged = containerIntegrity.some(a =>
+    a.type === "UserAcknowledged" && a.scope === "selection-criteria"
+  );
+  return disclosed && acknowledged;
+}
+
+// Clear selection-decision confidentiality by *removing* the corresponding clause.
+//
+// This clears only the selection-decision taint; other confidentiality clauses (including PC)
+// remain in place.
+function clearSelectionDecisionConf(
+  container: Label,
+  source: Reference
+): Label {
+  return {
+    ...container,
+    confidentiality: container.confidentiality.filter(clause =>
+      !clause.some((a: any) => a.type === "SelectionDecisionConf" && a.source.equals(source))
+    )
+  };
 }
 ```
 
@@ -1122,6 +1216,10 @@ interface IFCTransitionAnnotations {
     predicate?: string;       // Predicate name (runtime generally cannot verify semantics)
     sourceCollection?: string;  // JSON Pointer to source collection (for lengthPreserved)
     lengthPreserved?: boolean;
+    // Optional selection-decision integrity to attach to the *container* label (8.5.7).
+    selectionIntegrity?: SelectionDecisionIntegrity;
+    // Extra integrity atoms to attach to the *container* label (8.5.8).
+    addedCollectionIntegrity?: IntegrityAtom[];
   };
 
   // Added integrity: new integrity atoms for this output

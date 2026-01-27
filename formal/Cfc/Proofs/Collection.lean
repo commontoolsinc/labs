@@ -212,6 +212,57 @@ theorem canAccess_derefMember_iff {Ref : Type} (p : Principal) (c : LabeledColle
     canAccess p (LabeledCollection.derefMember c member) ↔ canAccess p c.container ∧ canAccess p member := by
   simpa [LabeledCollection.derefMember] using (Proofs.Link.canAccess_deref_iff p c.container member)
 
+/-!
+Selection-decision integrity / declassification (spec 8.5.7).
+
+The spec claims that some selection/membership confidentiality taint can be cleared if the runtime
+has integrity evidence that the selection criteria were user-aligned or properly disclosed.
+
+Our Lean model represents this with:
+- a confidentiality atom `Atom.selectionDecisionConf source`, and
+- integrity atoms like `Atom.selectionDecisionUserSpecified source`.
+
+The runtime-only declassification rule is `CollectionTransition.declassifySelectionDecisionIf`,
+which is guarded by:
+- required integrity atoms on the *container* label, and
+- `trustedScope ∈ pcI` (trusted control-flow evidence).
+-/
+
+theorem mem_clearSelectionDecisionConf (source : Nat) (cl : Clause) (conf : ConfLabel) :
+    cl ∈ CollectionTransition.clearSelectionDecisionConf source conf ↔
+      cl ∈ conf ∧ Atom.selectionDecisionConf source ∉ cl := by
+  classical
+  simp [CollectionTransition.clearSelectionDecisionConf]
+
+theorem requiresAll_eq_true_iff (required : List Atom) (I : IntegLabel) :
+    CollectionTransition.requiresAll required I = true ↔ ∀ a, a ∈ required → a ∈ I := by
+  classical
+  simp [CollectionTransition.requiresAll, List.all_eq_true]
+
+theorem conf_declassifySelectionDecisionIf_eq_of_not_trusted {Ref : Type}
+    (pcI : IntegLabel) (source : Nat) (required : List Atom) (c : LabeledCollection Ref)
+    (hNo : trustedScope ∉ pcI) :
+    (CollectionTransition.declassifySelectionDecisionIf pcI source required c).container.conf =
+      c.container.conf := by
+  classical
+  -- Case split on the `decide` of the trust predicate.
+  cases ht : decide (trustedScope ∈ pcI) with
+  | false =>
+      simp [CollectionTransition.declassifySelectionDecisionIf, ht]
+  | true =>
+      have : trustedScope ∈ pcI := of_decide_eq_true ht
+      exact (hNo this).elim
+
+theorem conf_declassifySelectionDecisionIf_eq_clear_of_success {Ref : Type}
+    (pcI : IntegLabel) (source : Nat) (required : List Atom) (c : LabeledCollection Ref)
+    (hReq : CollectionTransition.requiresAll required c.container.integ = true)
+    (hTrust : trustedScope ∈ pcI) :
+    (CollectionTransition.declassifySelectionDecisionIf pcI source required c).container.conf =
+      CollectionTransition.clearSelectionDecisionConf source c.container.conf := by
+  classical
+  have ht : decide (trustedScope ∈ pcI) = true := (decide_eq_true_iff).2 hTrust
+  simp [CollectionTransition.declassifySelectionDecisionIf, hReq, ht]
+
 /-
 Soundness lemmas for the executable verification checks in `CollectionTransition.Verify`.
 

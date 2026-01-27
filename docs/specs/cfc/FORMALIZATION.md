@@ -112,6 +112,9 @@ Trusted-runtime label propagation rules (schema-driven transitions):
   - `formal/Cfc/Collection.lean`: `LabeledCollection` (separates membership label from member labels),
     `CollectionTransition.subsetOf`, `CollectionTransition.permutationOf`, `CollectionTransition.filteredFrom`,
     `CollectionTransition.lengthPreserved`
+  - `formal/Cfc/Collection.lean`: selection-decision declassification primitive
+    - `CollectionTransition.declassifySelectionDecisionIf` clears `selectionDecisionConf` taint when
+      integrity evidence is present and `trustedScope` is in the ambient control-integrity (`pcI`)
   - `formal/Cfc/Collection.lean`: executable checks `CollectionTransition.Verify.*` and checked transitions
     returning `Option` (reject on verification failure)
   - `formal/Cfc/Proofs/Collection.lean`: key container/member preservation lemmas

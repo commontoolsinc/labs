@@ -392,6 +392,68 @@ theorem secret_membership_taints_member_access :
     simp [c, pBob, secret, canAccess, canAccessConf, clauseSat, Principal.satisfies]
   exact hNo h.1
 
+/-
+Spec 8.5.7 (selection-decision integrity) sketches a declassification rule:
+
+If the runtime has integrity evidence that the selection criteria are user-aligned (or properly disclosed),
+it may clear some "selection decision" confidentiality taint on the collection container.
+
+In our Lean model:
+- the taint is `Atom.selectionDecisionConf source` in the container confidentiality
+- the justification is `Atom.selectionDecisionUserSpecified source` in the container integrity
+- and the runtime must also be in a trusted control scope (`trustedScope ∈ pcI`)
+
+This example shows the effect on access:
+- before declassification, Bob cannot access the member through the collection (membership is tainted)
+- after declassification, the taint is cleared and Bob can access the member (since it is otherwise public)
+-/
+theorem selectionDecision_declassification_allows_member_access :
+    let publicLbl : Label := Label.bot
+    let source : Nat := 0
+    let c : LabeledCollection Nat :=
+      { container :=
+          { conf := [[Atom.selectionDecisionConf source]]
+            integ := [Atom.selectionDecisionUserSpecified source] }
+        members := [] }
+    let pcI : IntegLabel := [trustedScope]
+    let c' := CollectionTransition.declassifySelectionDecisionIf pcI source
+      [Atom.selectionDecisionUserSpecified source] c
+    let pBob : Principal := { now := 0, atoms := [Atom.user "Bob"] }
+    ¬ canAccess pBob (LabeledCollection.derefMember c publicLbl) ∧
+      canAccess pBob (LabeledCollection.derefMember c' publicLbl) := by
+  classical
+  intro publicLbl source c pcI c' pBob
+  constructor
+  ·
+    intro hAcc
+    have h := (Proofs.Collection.canAccess_derefMember_iff (p := pBob) (c := c) (member := publicLbl)).1 hAcc
+    -- `publicLbl` is accessible, so the failure must come from the container confidentiality.
+    have hNo : ¬ canAccess pBob c.container := by
+      simp [c, pBob, canAccess, canAccessConf, clauseSat, Principal.satisfies]
+    exact hNo h.1
+  ·
+    -- Compute the declassified container label: the selection-decision clause is filtered away.
+    have hConf :
+        c'.container.conf = [] := by
+      -- The check succeeds: required integrity is present, and `trustedScope ∈ pcI`.
+      simp [c', CollectionTransition.declassifySelectionDecisionIf, CollectionTransition.requiresAll,
+        CollectionTransition.clearSelectionDecisionConf, c, pcI]
+    -- With `conf = []`, the container is accessible to any principal.
+    have hCanContainer : canAccess pBob c'.container := by
+      -- `canAccess` is a `∀` over clauses. With `conf = []`, there are no clauses to satisfy.
+      unfold canAccess canAccessConf
+      intro cl hcl
+      -- Membership in `[]` is impossible.
+      simp [hConf] at hcl
+    -- And the member label is public.
+    have hCanMember : canAccess pBob publicLbl := by
+      unfold canAccess canAccessConf
+      intro cl hcl
+      simp [publicLbl, Label.bot] at hcl
+    -- Use the derefMember access characterization.
+    exact (Proofs.Collection.canAccess_derefMember_iff (p := pBob) (c := c') (member := publicLbl)).2
+      ⟨hCanContainer, hCanMember⟩
+
 end LabelTransitionExamples
 end Proofs
 

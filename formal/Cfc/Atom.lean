@@ -43,6 +43,29 @@ inductive Atom where
   -/
   | transformedBy (codeHash : String) (inputs : List Nat)
   /-
+  Selection-decision confidentiality and integrity (spec 8.5.7).
+
+  The spec distinguishes:
+  - *member confidentiality*: secrecy of the individual elements
+  - *membership/selection confidentiality*: secrecy of which elements are included / in what order
+
+  In the spec, "selection-decision integrity" is represented as integrity atoms that explain
+  why a particular selection/order is user-aligned or properly disclosed.
+
+  We model just enough structure to write and prove "checked declassification" rules:
+  - `selectionDecisionConf source` is a *confidentiality* atom that can taint a collection container
+    when membership/order decisions are influenced by sensitive criteria.
+  - `selectionDecisionUserSpecified source` is an *integrity* atom meaning the user chose the criteria.
+  - `selectionDecisionDisclosed source` and `userAcknowledgedSelection source` model the alternative
+    "disclosed + acknowledged" justification path from the spec.
+
+  As elsewhere, `source : Nat` is a stand-in for the spec's content-addressed `Reference`.
+  -/
+  | selectionDecisionConf (source : Nat)
+  | selectionDecisionUserSpecified (source : Nat)
+  | selectionDecisionDisclosed (source : Nat)
+  | userAcknowledgedSelection (source : Nat)
+  /-
   Scoped integrity for projections (spec 8.3.2).
 
   This atom is mainly used in *integrity labels*.
