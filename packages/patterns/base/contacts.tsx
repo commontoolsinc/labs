@@ -12,11 +12,13 @@ import {
   handler,
   NAME,
   pattern,
-  type PersonLike,
   UI,
   type VNode,
   Writable,
 } from "commontools";
+
+// Import PersonLike from the canonical person pattern
+import type { PersonLike } from "./person.tsx";
 
 // ============================================================================
 // Input/Output Schemas

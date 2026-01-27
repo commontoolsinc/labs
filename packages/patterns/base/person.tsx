@@ -16,11 +16,24 @@ import {
   type Default,
   NAME,
   pattern,
-  type PersonLike,
   UI,
   type VNode,
   Writable,
 } from "commontools";
+
+// ============================================================================
+// PersonLike - Schelling point for person data (structural type)
+// ============================================================================
+
+/**
+ * Minimal interface for person-like items.
+ * Defined locally in patterns, not in core API - works via duck typing.
+ * Any object with { firstName, lastName } satisfies PersonLike.
+ */
+export interface PersonLike {
+  firstName: string;
+  lastName: string;
+}
 
 // ============================================================================
 // Person Type - Extends PersonLike with optional contact fields
