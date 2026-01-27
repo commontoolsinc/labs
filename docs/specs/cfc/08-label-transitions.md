@@ -120,6 +120,24 @@ The scoped integrity indicates:
 - It is specifically the `/lat` component
 - It cannot be combined with `/long` from a different measurement and claim full GPS integrity
 
+Runtime helper (used by propagation):
+
+```typescript
+// Scope integrity atoms to a particular projection path.
+//
+// This preserves all other atom fields (including any existing `valueRef` binding) and
+// only adds/overrides the `projection` field.
+function scopeIntegrity(
+  integrity: IntegrityAtom[],
+  projectionPath: string
+): IntegrityAtom[] {
+  return integrity.map(atom => ({
+    ...atom,
+    scope: { ...atom.scope, projection: projectionPath }
+  }));
+}
+```
+
 ### 8.3.3 Schema Annotation for Projections
 
 ```json
@@ -137,6 +155,106 @@ The scoped integrity indicates:
       }
     }
   }
+}
+```
+
+### 8.3.4 Safe Recomposition of Projections (Same Source)
+
+Scoped projection integrity is designed to achieve two goals:
+
+1. **Prevent unsafe recomposition**: a handler must not be able to mix `/lat` from one GPS
+   measurement with `/long` from a different measurement and still claim “valid GPS
+   measurement”.
+2. **Allow safe recomposition**: if `/lat` and `/long` both come from the **same** source
+   measurement, the runtime SHOULD be able to restore the integrity of the whole measurement
+   (e.g. for an output object `{ lat, long }`).
+
+To support this, treat `valueRef` as a binding to the original structured value (the source
+measurement) and treat `projection` as a binding to a specific field.
+
+The runtime can implement safe recomposition as a *checked* transition:
+
+```typescript
+// Helper: scope each integrity atom to a (sourceRef, path) pair.
+function scopeIntegrityFrom(
+  integrity: IntegrityAtom[],
+  sourceRef: Reference,
+  projectionPath: string
+): IntegrityAtom[] {
+  return integrity.map(atom => ({
+    ...atom,
+    scope: { ...atom.scope, valueRef: sourceRef, projection: projectionPath }
+  }));
+}
+
+// Helper: does `integrity` contain "baseAtom scoped to (sourceRef, projectionPath)"?
+function hasScopedIntegrity(
+  integrity: IntegrityAtom[],
+  baseType: string,
+  sourceRef: Reference,
+  projectionPath: string
+): boolean {
+  return integrity.some(a =>
+    a.type === baseType &&
+    a.scope?.valueRef?.equals(sourceRef) &&
+    a.scope?.projection === projectionPath
+  );
+}
+
+// Runtime verification for a recomposed object built from multiple projections.
+//
+// - `sourcePath` points to the input structured value.
+// - `parts` enumerates which output paths claim to be projections of which source paths.
+//
+// This checks two things:
+// (A) each output part value is an exact copy of the corresponding source field, and
+// (B) each output part label contains the expected scoped integrity evidence.
+function verifyRecomposeProjections(
+  handler: Handler,
+  inputLabels: Map<string, Label>,
+  outputLabels: Map<string, Label>,
+  outputValue: unknown,
+  sourcePath: string,
+  baseIntegrityType: string,
+  parts: Array<{ outputPath: string; projectionPath: string }>
+): boolean {
+  const sourceValue = getValueAtPath(handler.input, sourcePath);
+  const sourceRef = refer(sourceValue);
+
+  for (const part of parts) {
+    const expectedFieldValue = getValueAtPath(sourceValue, part.projectionPath);
+    const outPartValue = getValueAtPath(outputValue, part.outputPath);
+
+    // (A) Ensure the handler really output the source field value.
+    if (!refer(expectedFieldValue).equals(refer(outPartValue))) return false;
+
+    // (B) Ensure the output part label carries the correct scoped integrity.
+    const partLabel = outputLabels.get(part.outputPath)!;
+    if (!hasScopedIntegrity(partLabel.integrity, baseIntegrityType, sourceRef, part.projectionPath)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+// Checked recomposition transition:
+// - reject if verification fails,
+// - otherwise: join confidentiality (and PC), meet integrity across the parts,
+//   then *add back* the whole-object integrity scoped to the common source.
+function recomposeFromProjections(
+  pcConfidentiality: Clause[],
+  partLabels: Label[],
+  sourceRef: Reference,
+  baseIntegrityType: string
+): Label {
+  const out: Label = combineLabels(partLabels);
+  out.confidentiality = [...out.confidentiality, ...pcConfidentiality];
+  out.integrity = [
+    ...out.integrity,
+    { type: baseIntegrityType, scope: { valueRef: sourceRef, projection: "/" } }
+  ];
+  return out;
 }
 ```
 
@@ -328,6 +446,22 @@ Output has same length as input:
 
 This is weaker than permutation—items may be transformed, but count is preserved. Useful for map operations.
 
+Runtime verification:
+
+```typescript
+function verifyLengthPreserved(
+  inputPath: string,
+  outputPath: string,
+  handler: Handler
+): boolean {
+  const inputArray = getValueAtPath(handler.input, inputPath);
+  const outputArray = getValueAtPath(handler.output, outputPath);
+
+  if (!Array.isArray(inputArray) || !Array.isArray(outputArray)) return false;
+  return inputArray.length === outputArray.length;
+}
+```
+
 ### 8.5.5 Filtered Subset
 
 Output is a subset determined by a predicate:
@@ -354,6 +488,21 @@ Integrity implications:
 - Each member preserves its individual integrity
 - Collection loses "completeness" integrity (it's no longer "all users")
 - Gains filter integrity: `FilteredBy({ predicate: "isActive", source: refer(input.users) })`
+
+Runtime verification:
+
+```typescript
+// Filtered-from is a particular kind of subset: the runtime can verify it with the same
+// membership check as `subsetOf`. The runtime generally cannot verify the *semantics* of
+// the predicate (it is just a name), only the membership relationship.
+function verifyFilteredFrom(
+  inputPath: string,
+  outputPath: string,
+  handler: Handler
+): boolean {
+  return verifySubset(inputPath, outputPath, handler);
+}
+```
 
 ### 8.5.6 Collection Integrity Atoms
 
@@ -589,6 +738,23 @@ const combined = averageCoords(input1.value, input2.value);
 // No common integrity - the combination is not a valid GPS measurement from any single device
 ```
 
+Runtime helper (used by propagation and by checked recomposition):
+
+```typescript
+// Combine multiple labels when an output depends on multiple inputs.
+//
+// - confidentiality is CNF-join (concatenate clauses)
+// - integrity is meet (intersection)
+//
+// Helper implementations of `concatClauses(...)` and `intersectAtoms(...)` appear in 8.9.2.
+function combineLabels(labels: Label[]): Label {
+  return {
+    confidentiality: concatClauses(labels.map(l => l.confidentiality)),
+    integrity: intersectAtoms(labels.map(l => l.integrity))
+  };
+}
+```
+
 ### 8.6.3 Schema Annotation for Combinations
 
 ```json
@@ -714,12 +880,35 @@ interface IFCTransitionAnnotations {
     path: string;  // JSON Pointer within that object
   };
 
+  // Safe recomposition of multiple projections into a single structured output (8.3.4).
+  //
+  // This is typically attached to the *output object* that is being recomposed.
+  // The runtime verifies that each `outputPath` is an exact copy of the corresponding
+  // projection of the input at `from`, and then it may restore whole-object integrity.
+  recomposeProjections?: {
+    from: string;  // JSON Pointer to input object
+    baseIntegrityType: string;
+    parts: Array<{ outputPath: string; projectionPath: string }>;
+  };
+
   // Exact copy: output must equal input (verified at runtime)
   exactCopyOf?: string;  // JSON Pointer to input path
 
   // Combination: output derived from multiple inputs
   combinedFrom?: string[];  // JSON Pointers to input paths
   combinationType?: "join" | "transformation";
+
+  // Collection constraints (8.5).
+  //
+  // These are checked constraints: violations reject handler output.
+  collection?: {
+    subsetOf?: string;        // JSON Pointer to input collection
+    permutationOf?: string;   // JSON Pointer to input collection
+    filteredFrom?: string;    // JSON Pointer to input collection
+    predicate?: string;       // Predicate name (runtime generally cannot verify semantics)
+    sourceCollection?: string;  // JSON Pointer to source collection (for lengthPreserved)
+    lengthPreserved?: boolean;
+  };
 
   // Added integrity: new integrity atoms for this output
   addedIntegrity?: IntegrityAtom[];
@@ -813,12 +1002,30 @@ function propagateLabels(
       }
 
     } else if (ifc?.combinedFrom) {
-      // Combination - concatenate confidentiality clauses (CNF), meet integrity
-      const sourceLabels = ifc.combinedFrom.map(p => inputLabels.get(p)!);
-      outputLabels.set(path, {
-        confidentiality: concatClauses(sourceLabels.map(l => l.confidentiality)),
-        integrity: intersectAtoms(sourceLabels.map(l => l.integrity))
-      });
+      // Combination:
+      // - confidentiality is always CNF-join across the declared inputs
+      // - integrity depends on combination type:
+      //   - "join": meet/intersection (8.6)
+      //   - "transformation": mint transformation integrity (8.7)
+      const sourcePaths = ifc.combinedFrom;
+      const sourceLabels = sourcePaths.map(p => inputLabels.get(p)!);
+
+      if (ifc.combinationType === "transformation") {
+        outputLabels.set(path, {
+          confidentiality: concatClauses(sourceLabels.map(l => l.confidentiality)),
+          integrity: [{
+            type: "TransformedBy",
+            codeHash: refer(handler.code).toString(),
+            inputs: sourcePaths.map(p => refer(getValueAtPath(handler.input, p)))
+          }]
+        });
+      } else {
+        // Default combination type: "join"
+        outputLabels.set(path, {
+          confidentiality: concatClauses(sourceLabels.map(l => l.confidentiality)),
+          integrity: intersectAtoms(sourceLabels.map(l => l.integrity))
+        });
+      }
 
     } else {
       // Default: inherit all input confidentiality, transformation integrity
@@ -867,6 +1074,18 @@ function deriveTransformedLabel(
 function concatClauses(clauseArrays: Clause[][]): Clause[] {
   return clauseArrays.flat();
 }
+
+// Helper: intersect integrity atoms (meet).
+//
+// This keeps only atoms that appear in *every* input integrity list.
+// Atom equality is structural equality over canonicalized JSON (Section 4.1.3).
+function intersectAtoms(atomArrays: IntegrityAtom[][]): IntegrityAtom[] {
+  if (atomArrays.length === 0) return [];
+  const [first, ...rest] = atomArrays;
+  return first.filter(a =>
+    rest.every(arr => arr.some(b => canonicalize(b) === canonicalize(a)))
+  );
+}
 ```
 
 ---
@@ -901,6 +1120,44 @@ function verifyTransition(
       const outputVal = getValueAtPath(outputValue, path);
       if (!refer(inputValue).equals(refer(outputVal))) return false;
     }
+
+    if (ifc?.projection) {
+      // Projection claims can be verified as an "exact copy of the source field".
+      const sourceValue = getValueAtPath(handler.input, ifc.projection.from);
+      const expectedFieldValue = getValueAtPath(sourceValue, ifc.projection.path);
+      const outputVal = getValueAtPath(outputValue, path);
+      if (!refer(expectedFieldValue).equals(refer(outputVal))) return false;
+    }
+
+    // Collection constraints (8.5): handler claims are verified and violations reject output.
+    if (ifc?.collection?.subsetOf) {
+      if (!verifySubset(ifc.collection.subsetOf, path, handler)) return false;
+    }
+    if (ifc?.collection?.permutationOf) {
+      if (!verifyPermutation(ifc.collection.permutationOf, path, handler)) return false;
+    }
+    if (ifc?.collection?.filteredFrom) {
+      if (!verifyFilteredFrom(ifc.collection.filteredFrom, path, handler)) return false;
+    }
+    if (ifc?.collection?.lengthPreserved) {
+      const src = ifc.collection.sourceCollection;
+      if (!src) return false;
+      if (!verifyLengthPreserved(src, path, handler)) return false;
+    }
+
+    // Safe recomposition of projections (8.3.4): checked transition.
+    if (ifc?.recomposeProjections) {
+      const { from, baseIntegrityType, parts } = ifc.recomposeProjections;
+      if (!verifyRecomposeProjections(
+        handler,
+        inputLabels,
+        outputLabels,
+        outputValue,
+        from,
+        baseIntegrityType,
+        parts
+      )) return false;
+    }
   }
   return true;
 }
@@ -913,13 +1170,20 @@ For instance-bound integrity, verify the scope binding:
 ```typescript
 function verifyIntegrityBinding(
   integrity: IntegrityAtom[],
-  value: unknown
+  value: unknown,
+  resolveByRef: (ref: Reference) => unknown
 ): boolean {
   for (const atom of integrity) {
     if (atom.scope?.valueRef) {
-      // Integrity claims to be about a specific value
-      if (!refer(value).equals(atom.scope.valueRef)) {
-        return false;  // Value doesn't match integrity claim
+      // Integrity claims to be about a specific value OR about a specific projection of a value.
+      if (atom.scope?.projection) {
+        // Scoped projection: check that the value matches the referenced source field.
+        const sourceVal = resolveByRef(atom.scope.valueRef);
+        const expected = getValueAtPath(sourceVal, atom.scope.projection);
+        if (!refer(value).equals(refer(expected))) return false;
+      } else {
+        // Direct binding: valueRef refers to the value itself.
+        if (!refer(value).equals(atom.scope.valueRef)) return false;
       }
     }
   }
