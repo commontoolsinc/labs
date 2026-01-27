@@ -78,7 +78,7 @@ export function isArrayIndexPropertyName(name: string): boolean {
  */
 function specialInstanceToStorableValue(
   value: unknown,
-): Record<string, unknown> | null {
+): StorableValueLayer | null {
   if (Error.isError(value)) {
     const error = value as Error;
     // Return a single-key object using the `@` prefix convention established
