@@ -14,6 +14,30 @@ namespace Scenarios
 open Cfc
 open Cfc.Exchange
 
+/-
+Scenario-style regression tests for the exchange + access-control model.
+
+Unlike the core proof modules (non-interference, robust declassification, etc.),
+this file is a collection of small "worked examples" that mirror concrete spec stories:
+
+- Space reader access (role-based exchange)
+- Conjunctive link confidentiality
+- Multi-party consent collapse and view-side opening
+- Authority-only secrecy drop (guarded by integrity)
+- Expiration clauses and guarded retention relaxation
+
+These theorems are valuable for two reasons:
+1) They act as unit tests: if a refactor breaks one of these, it likely broke intended behavior.
+2) They serve as documentation: each proof shows how to use the core definitions in practice.
+
+Most proofs are `simp`-heavy: they unfold definitions and let Lean discharge routine logic
+about list membership and CNF satisfaction.
+-/
+
+/- -------------------------------------------------------------------------- -/
+/- Space Reader Access (spec 3.6.3 / 4.3.3)                                   -/
+/- -------------------------------------------------------------------------- -/
+
 /-- A principal representing an acting user context. -/
 def pUser (u : String) : Principal :=
   { now := 0
@@ -115,6 +139,10 @@ theorem link_deref_adds_integrity_example :
   intro link target
   simp [link, target, Cfc.Link.deref, Label.endorseIntegrity, Label.joinIntegrity]
 
+/-
+The next group of theorems corresponds to the multi-party consent story (spec 3.9).
+-/
+
 /-- Default CNF join yields conjunctive multi-user confidentiality: a single user cannot access. -/
 theorem multiparty_default_join_denies_single (alice bob carol : String) :
     bob ≠ alice →
@@ -132,6 +160,12 @@ theorem multiparty_default_join_denies_single (alice bob carol : String) :
     simpa using ha
   subst this
   simp [pUser, Principal.satisfies, hBob] at hs
+
+/-
+Now we exercise the two multi-party exchange rules:
+- compute-side collapse (`exchangeMultiPartyConsentCompute`)
+- view-side opening (`exchangeMultiPartyResultView`)
+-/
 
 /-- With multi-party consent, the conjunctive user clauses collapse to a `MultiPartyResult` clause. -/
 theorem multiparty_consent_compute_collapses (participants : List String) :
@@ -191,6 +225,12 @@ theorem multiparty_result_view_allows_participant (acting : String) (participant
     Exchange.clauseInsert, hMem, hConsents,
     canAccess, canAccessConf, clauseSat, Principal.satisfies]
 
+/-
+Authority-only secrecy: an extra singleton clause can be dropped only when integrity guards are present.
+
+This mirrors the "GoogleAuth token" story used later in the Gmail example.
+-/
+
 /-- Authority-only secrecy can be dropped only when integrity guards are present. -/
 theorem authority_only_drop_requires_guards (acting : String) :
     let googleAuth : Atom := Atom.policy "GoogleAuth" acting "h"
@@ -241,6 +281,17 @@ theorem googleauth_adds_userresource_alternative (acting : String) :
     Exchange.confAddAltFor, Exchange.clauseInsert,
     ℓ, need, boundary, Principal.satisfies,
     canAccess, canAccessConf, clauseSat]
+
+/-
+Expiration and retention relaxation:
+
+`Atom.expires t` is a special atom satisfied by time comparison (`p.now ≤ t`).
+This gives us an easy way to model time-based access restrictions.
+
+We show both:
+- the basic "expired => no access" fact, and
+- that policies can explicitly drop an expiration clause when integrity guards allow it.
+-/
 
 /-- Expiration is a confidentiality clause: once expired, access fails. -/
 theorem expires_clause_denies_after_deadline (u : String) (t : Nat) :

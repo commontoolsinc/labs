@@ -19,6 +19,21 @@ A small Lean "Gmail OAuth" regression suite aligned with `docs/specs/cfc/01-gmai
 
 This is intentionally abstract: values are booleans, and we model only the label- and
 intent-consumption aspects needed to exercise the core building blocks.
+
+How to read this file:
+
+- Each theorem corresponds to a narrative claim in the spec's Gmail example chapter.
+- We do not model Gmail data structures; we only model the *labels* that would be attached to them.
+- A proof typically has the shape:
+  1) unfold the label definitions,
+  2) show a particular confidentiality clause is present (or has been removed),
+  3) use `canAccess` / `clauseSat` to conclude access is allowed or denied.
+
+So this file is a good place to see "end-to-end" use of:
+- CNF confidentiality (`Cfc.Label`)
+- access control (`Cfc.Access`)
+- exchange rewrites (`Cfc.Exchange`)
+- intent consumption at commit (`Cfc.CommitPoint`)
 -/
 
 def googleAuth (u : String) : Atom :=
@@ -55,6 +70,23 @@ Spec 1.2 (read): token secrecy is authority-only and should not taint responses.
 
 We model the "fix" as dropping the singleton `GoogleAuth(u)` clause when the appropriate
 integrity guards are present.
+-/
+/-
+Modeling choices for 1.2:
+
+- The OAuth token is labeled with two clauses:
+    [[User u], [GoogleAuth u]]
+  meaning: to see the token you need BOTH "User u" and "GoogleAuth u" authority.
+
+- The Gmail read response is labeled:
+    [[User u], [EmailMetadataSecret u]]
+  meaning: the response reveals user data and email metadata.
+
+- If we naïvely join them, the result contains the `[GoogleAuth u]` clause, which would
+  incorrectly taint the response with token secrecy.
+
+The spec's fix is an authority-only exchange: at a trusted boundary, if we have integrity evidence
+that the request was authorized, we drop the `[GoogleAuth u]` clause from the token label.
 -/
 theorem read_requires_googleAuth_without_guards (u : String) :
     ¬ canAccess (pAlice u) (tokenLabel u + gmailReadResponseLabel u) := by
@@ -120,6 +152,15 @@ theorem read_allows_after_authority_only_drop (u : String) :
 /-!
 Spec 1.3 (read): secret query input taints the response.
 -/
+/-
+This section exercises basic label join:
+
+If a query value is secret (here: `notesSecret u`), and the response depends on the query,
+then joining the response label with the query label makes the result inaccessible to a principal
+who lacks the query authority.
+
+This is exactly the intended "query secrecy taints response" behavior.
+-/
 theorem search_query_taints_response (u : String) :
     let ℓResp := gmailReadResponseLabel u
     let ℓQuery : Label := { conf := [[notesSecret u]], integ := [] }
@@ -149,6 +190,19 @@ theorem search_query_allows_with_notesSecret (u : String) :
 /-!
 Spec 1.4.6 (write): the commit point consumes an `IntentOnce` token only on commit,
 and the token is single-use.
+-/
+/-
+This section exercises the commit-point model:
+
+- We represent the user's explicit approval as an intent token `tok`.
+- `CommitPoint.declassifyCommit tok committed store ...` consumes the token iff `committed = true`.
+
+We prove three behaviors:
+1) If committed = false, store is unchanged (no-consume-on-failure).
+2) If committed = true, the token is consumed.
+3) After a successful commit, a second commit with the resulting store fails (single-use).
+
+These are the minimal logical core of safety invariant 4.
 -/
 theorem forward_commit_no_consume_on_failure (u : String) :
     let tok : Atom := Atom.integrityTok "IntentOnceForward"
