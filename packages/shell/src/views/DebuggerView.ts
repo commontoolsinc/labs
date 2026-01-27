@@ -1582,6 +1582,13 @@ export class XDebuggerView extends LitElement {
       mainTiming,
       workerResult.timing,
     );
+
+    // Debug logging
+    console.log("[sampleLoggerCounts] Timing data:", {
+      mainTiming,
+      workerTiming: workerResult.timing,
+      merged: this.loggerTimingSample,
+    });
   }
 
   private async resetBaseline(): Promise<void> {
@@ -1768,6 +1775,14 @@ export class XDebuggerView extends LitElement {
   ): TemplateResult {
     const cdf = stats.cdf;
     const cdfDelta = stats.cdfSinceBaseline;
+
+    // Debug logging
+    console.log(`[renderCDFForKey] ${key}:`, {
+      cdfLength: cdf.length,
+      cdfDeltaExists: !!cdfDelta,
+      cdfDeltaLength: cdfDelta?.length ?? 0,
+      stats,
+    });
 
     if (cdf.length === 0) {
       return html`
