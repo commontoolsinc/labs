@@ -118,9 +118,6 @@ describe.skip("Push conflict", () => {
     //expect(retryCalled).toEqual(true);
     //expect(list.get()).toEqual([1, 2, 3, 4]);
     expect(list.get()).toEqual([1, 2, 3]);
-
-    // Retry list should be empty now, since the change was applied.
-    //expect(!!listDoc.retry?.length).toBe(false);
   });
 
   it("should resolve push conflicts among other conflicts", async () => {
@@ -177,10 +174,6 @@ describe.skip("Push conflict", () => {
     // value here. Previous code looks like it would have appended.
     //expect(list.get()).toEqual([1, 2, 3, 4]);
     expect(list.get()).toEqual([1, 2, 3]);
-    //expect(retryCalled).toEqual(1);
-
-    // Retry list should be empty now, since the change was applied.
-    //expect(!!listDoc.retry?.length).toBe(false);
   });
 
   it("should resolve push conflicts with ID among other conflicts", async () => {
@@ -243,8 +236,6 @@ describe.skip("Push conflict", () => {
         items: { type: "object", properties: { n: { type: "number" } } },
       }).get(),
     ).toEqual([{ n: 1 }, { n: 2 }, { n: 3 }]);
-    //expect(retryCalled).toEqual(1);
-    //expect(!!listDoc.retry?.length).toBe(false);
 
     // Check that the ID is still there
     // TODO(@ubik2): this is an important test to have, so re-add soon
