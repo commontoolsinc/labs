@@ -28,6 +28,211 @@ This is simpler than the annotation-based approach and directly addresses Tony's
 | **Type Identity** | Minimal interface conformance | TaskLike, PersonLike, EventLike |
 | **Collections** | Projection-based | Add entire projections to containers, not individual items |
 | **Annotations** | Demoted to edge case | Optional linked records if needed, not the primary model |
+| **Customization** | Fork-and-pull model | Users fork patterns, LLM helps merge features |
+| **Identity** | Reconciliation over annotation | Same entity in different contexts = linking problem |
+
+---
+
+## Governing Principles
+
+These principles guide how the pattern ecosystem evolves and how users customize their experience.
+
+### 1. Schelling Points for Interoperability
+
+A **schelling point** is something people converge on naturally without explicit agreement.
+
+**Principle:** The ecosystem needs common reference points that everyone uses, enabling patterns to interoperate without central coordination.
+
+```typescript
+// The schelling point - minimal, stable, universal
+export interface PersonLike {
+  name: string;  // Just this. Everyone can agree on this.
+}
+
+// Everything else is optional variance
+interface FamilyMember extends PersonLike {
+  name: string;              // core preserved
+  relationship: string;      // added
+  birthday?: string;         // added
+  dietaryRestrictions?: string[];  // added
+}
+```
+
+**Key insight:** The schelling point must be **minimal enough that everyone can adopt it** but **meaningful enough to enable interoperability**. A single field (`name`) is often sufficient.
+
+### 2. Fork-and-Pull for Customization
+
+**Principle:** Users customize by forking patterns, not by annotating a single canonical pattern.
+
+**The tension:**
+- Super-organizer wants: comprehensive `friend.tsx` with dietary preferences, alma mater, gift ideas
+- Anti-organizer wants: minimal `friend.tsx` with just name
+- Both are valid - no single pattern serves both
+
+**The solution:** Users fork the base pattern to create their own variants:
+
+```
+┌────────────┐
+│ base/      │  Schelling point (minimal, stable)
+│ person.tsx │
+└────────────┘
+      │
+ ┌────┴────┬────────────┬────────────┐
+ ▼         ▼            ▼            ▼
+┌──────┐ ┌──────┐  ┌──────────┐  ┌──────────┐
+│alice/│ │bob/  │  │claire/   │  │diane/    │
+│friend│ │friend│  │colleague │  │contact   │
+│(rich)│ │(min) │  │(work)    │  │(basic)   │
+└──────┘ └──────┘  └──────────┘  └──────────┘
+```
+
+**Feature adoption via LLM:**
+> "I like how Claire's colleague pattern has the 'project history' field. Add that to my friend pattern."
+
+The LLM analyzes both patterns, extracts the feature, and merges it while preserving core schema.
+
+### 3. Core Schema Preservation
+
+**Principle:** Variants can add anything, but must preserve the core schema fields.
+
+This is the contract that enables the ecosystem:
+- A `friend.tsx` with `{ name, birthday, dietary }` still satisfies `PersonLike`
+- Containers aggregating `PersonLike` items work with ALL variants
+- Breaking the core schema breaks interoperability
+
+```typescript
+// VALID: extends core
+interface DetailedFriend extends PersonLike {
+  name: string;        // ✓ core preserved
+  birthday: string;    // added
+  interests: string[]; // added
+}
+
+// INVALID: breaks core
+interface BrokenFriend {
+  nickname: string;    // ✗ renamed 'name' - breaks contract
+}
+```
+
+### 4. Reconciliation Over Annotation
+
+**Principle:** When the same entity exists in multiple contexts, the problem is **reconciliation** (identity linking), not annotation.
+
+**Scenario:**
+- `contractor.tsx` (work): `{ name: "John Smith", rate: 150, company: "Acme" }`
+- `friend.tsx` (personal): `{ name: "John Smith", birthday: "1985-03-15" }`
+
+These are the **same person** in two different views. The challenge is linking them.
+
+**Reframe:** From this angle, annotations are actually **identity pointers**:
+- `SSNPerson.tsx` = name + SSN + **pointer to the entity it identifies**
+- It's not about extensibility, it's about identity linking
+- Multiple records with complementary data, linked by identity
+
+---
+
+## The Reconciliation Problem
+
+### Why It Matters
+
+Without reconciliation:
+- Calendar shows "meeting with John Smith" but doesn't know his birthday is tomorrow
+- Contact search returns two "John Smith" entries
+- Gift preferences live in one place, work availability in another
+
+With reconciliation:
+- System knows these are the same entity
+- Can combine information across contexts
+- Can present unified view when needed
+
+### Identity Linking Mechanism
+
+```typescript
+// Identity link - connects two entities as "the same thing"
+interface IdentityLink {
+  entity1: CellRef;
+  entity2: CellRef;
+
+  // How we know they're the same
+  evidence: {
+    type: 'user-asserted' | 'email-match' | 'phone-match' | 'llm-inferred';
+    confidence: number;  // 0-1
+    details?: string;
+  };
+}
+```
+
+**Example:**
+```typescript
+// User explicitly links contractor and friend records
+createIdentityLink({
+  entity1: contractorJohn,
+  entity2: friendJohn,
+  evidence: {
+    type: 'user-asserted',
+    confidence: 1.0,
+    details: "Same person - John from Acme is also my friend John"
+  }
+});
+```
+
+### Open Questions
+
+1. **Storage**: Where do identity links live? Separate entities? Fields on both?
+2. **Merged views**: How do we present a unified view of linked entities?
+3. **Conflicts**: What if `contractor.phone !== friend.phone`?
+4. **Transitivity**: If A=B and B=C, does A=C automatically?
+
+---
+
+## Folksonomy Growth
+
+The ecosystem evolves organically through usage, not top-down design.
+
+### How It Works
+
+```
+Time 0: Base patterns exist
+┌──────────┐ ┌──────────┐ ┌──────────┐
+│PersonLike│ │ TaskLike │ │EventLike │
+└──────────┘ └──────────┘ └──────────┘
+
+Time 1: Early adopters fork
+┌──────────┐ ┌──────────┐ ┌──────────┐
+│friend    │ │colleague │ │shopping  │
+│(5 users) │ │(3 users) │ │(8 users) │
+└──────────┘ └──────────┘ └──────────┘
+
+Time 2: Features spread through adoption
+friend gains "birthday" from 40% of forks
+shopping gains "aisle" from 60% of forks
+
+Time 3: De facto standards emerge
+"friend with birthday" becomes common expectation
+This is now a new schelling point
+```
+
+### Emergent Schelling Points
+
+Initial: `PersonLike { name: string }`
+
+Emergent (from usage):
+```typescript
+// Most friend patterns have birthday - it becomes expected
+interface FriendLike extends PersonLike {
+  name: string;
+  birthday?: string;  // emerged from usage
+}
+```
+
+The system doesn't mandate this - it emerges from what people actually do.
+
+### Discovery & Adoption
+
+For folksonomy to work, users need to discover what others have done:
+- Browse popular forks
+- See common fields across variants
+- LLM suggests: "80% of friend patterns have birthday, want to add it?"
 
 ---
 
@@ -358,29 +563,47 @@ The architect clarified Tony's actual pattern needs:
 
 ---
 
-## Annotations (Demoted)
+## Annotations Reframed: Identity Pointers
 
-The annotation system is demoted to an **optional edge case mechanism**:
+The original annotation design makes sense when viewed from a different angle: **identity linking**, not extensibility.
 
-**When you might need it:**
-- Started with an entity one way, later decided it's also another kind
-- Entity reconciliation: multiple instances that should be the same entity
-- Complementary data from different sources
+### The Insight
 
-**If needed, use simple linked records:**
+Consider `SSNPerson.tsx`:
+- Old view: "A person annotation that adds SSN"
+- New view: "A record with name + SSN + **pointer to the entity it identifies**"
+
+This is the same pattern as reconciliation! Multiple records with complementary data, linked by identity.
+
+### When Annotations Make Sense
 
 ```typescript
-interface LinkedRecord<T> {
-  primary: CellRef;        // The main record this augments
-  data: T;                 // Complementary data
-  relationship: string;    // e.g., "augments", "extends"
+// SSNPerson - an identity record
+interface SSNPerson {
+  name: string;
+  ssn: string;
+
+  // The key insight: this is an identity pointer
+  sameAs: CellRef;  // Points to the "real" person record
 }
 ```
 
-This is NOT the primary model. Most cases are better served by:
-- Creating a new variant pattern
-- Using collection projections
-- Designing the original pattern to include the fields
+**Use cases:**
+- Sensitive data separation: SSN lives in its own record, linked to person
+- Import reconciliation: Imported contact linked to existing person
+- Cross-context linking: Work contractor linked to personal friend
+
+### Not the Primary Model
+
+Most cases are better served by:
+1. **Creating a variant pattern** - fork and add the fields you need
+2. **Using collection projections** - project data as needed
+3. **Designing upfront** - include fields in the original pattern
+
+Annotations/identity-links are for:
+- Same entity, different contexts
+- Sensitive data separation
+- Post-hoc reconciliation of imports
 
 ---
 
@@ -422,9 +645,16 @@ This is NOT the primary model. Most cases are better served by:
 - [ ] Container `addCollection` handler
 - [ ] Calendar integration with event projections
 
-### Phase 6 (If Needed): Linked Records
-- [ ] Simple linked record mechanism for edge cases
-- [ ] Entity reconciliation patterns
+### Phase 6: Fork-and-Pull Infrastructure
+- [ ] Pattern forking capability
+- [ ] Schema comparison (does fork satisfy base?)
+- [ ] LLM-assisted feature merging between forks
+
+### Phase 7: Identity & Reconciliation
+- [ ] Identity link pattern
+- [ ] Reconciliation UI (link two entities as same)
+- [ ] Unified view generation for linked entities
+- [ ] Conflict detection and resolution
 
 ---
 
@@ -454,8 +684,9 @@ This is NOT the primary model. Most cases are better served by:
 ### Addressed by Revision
 
 1. ~~Over-engineering~~ → Simplified to Container + Minimal Interfaces
-2. ~~Annotation complexity~~ → Demoted to optional edge case
+2. ~~Annotation complexity~~ → Reframed as identity linking
 3. ~~Tony's needs~~ → Directly addressed with container protocol
+4. ~~Customization tension~~ → Fork-and-pull model
 
 ### Still Open
 
@@ -465,7 +696,13 @@ This is NOT the primary model. Most cases are better served by:
 
 3. **Projection mechanics**: Pull vs push? Who creates projections? Should they point back to original?
 
-4. **Entity reconciliation**: When multiple instances should be the same entity, what's the resolution pattern?
+4. **Identity link storage**: Where do identity links live? Separate entities? Bidirectional fields?
+
+5. **Fork mechanics**: How do users actually fork a pattern? UI? CLI? LLM-generated?
+
+6. **Schema validation**: How do we verify a fork still satisfies the base interface?
+
+7. **Conflict resolution**: When linked entities have conflicting values, what's the UX?
 
 ---
 
@@ -473,17 +710,24 @@ This is NOT the primary model. Most cases are better served by:
 
 | Original Design | Revised Design | Rationale |
 |----------------|----------------|-----------|
-| `[ANNOTATIONS]` array | Demoted to edge case | Over-engineering |
-| `[ANNOTATES]` back-reference | Removed | Not needed |
+| `[ANNOTATIONS]` array | Reframed as identity pointers | Not extensibility, it's reconciliation |
+| `[ANNOTATES]` back-reference | Identity links | Clearer mental model |
 | `[ANNOTATION_SOURCE]` provenance | Removed | Over-engineering |
 | Computed annotation adapters | Removed | Collection projections are simpler |
 | Three-class annotation model | Removed | Too complex |
-| Single "person" + annotations | N variant patterns | Coherent UX per variant |
+| Single "person" + annotations | N variant patterns via fork | Coherent UX per variant |
+| Central pattern definition | Fork-and-pull model | Organic ecosystem growth |
+| — | Schelling points | Interoperability without coordination |
+| — | Reconciliation problem | Same entity, different contexts |
+| — | Folksonomy growth | Features spread through adoption |
 
 ---
 
 ## Appendix: Research Sources
 
-- **Architect feedback**: Discord messages (2026-01-27)
+- **Architect feedback (v1)**: Discord messages (2026-01-27, morning)
+- **Architect feedback (v2)**: Live conversation (2026-01-27, afternoon) - fork-and-pull, reconciliation
 - **Container protocol**: `packages/patterns/container-protocol.ts`
 - **Existing patterns**: `packages/patterns/contacts/`, `packages/patterns/todo-list/`
+- **Template registry**: `packages/patterns/record/template-registry.ts` - existing fork model
+- **Module registry**: `packages/patterns/record/registry.ts` - composable modules
