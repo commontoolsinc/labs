@@ -67,8 +67,7 @@ export const render = (
   options: RenderOptions = {},
 ): Cancel => {
   // Use worker-side rendering for CellHandle inputs (unless legacy mode requested)
-  // Also skip worker-side rendering if custom setProp is provided (not supported yet)
-  if (isCellHandle(view) && !options.useLegacyRenderer && !options.setProp) {
+  if (isCellHandle(view) && !options.useLegacyRenderer) {
     return renderViaWorker(parent, view as CellHandle<VNode>, options);
   }
 
@@ -94,6 +93,7 @@ function renderViaWorker(
     connection,
     document: options.document,
     onError: options.onError,
+    setProp: options.setProp,
   });
 
   // Start rendering asynchronously

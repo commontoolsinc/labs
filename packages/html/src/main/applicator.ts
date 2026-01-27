@@ -15,6 +15,7 @@ import type {
 } from "@commontools/runtime-client";
 import { serializeEvent } from "@commontools/runtime-client/vdom-worker/events";
 import { CellHandle } from "@commontools/runtime-client";
+import { setPropDefault, type SetPropHandler } from "../render-utils.ts";
 
 /**
  * Options for creating a DOM applicator.
@@ -31,6 +32,9 @@ export interface DomApplicatorOptions {
 
   /** Optional callback for errors */
   onError?: (error: Error) => void;
+
+  /** Optional custom property setter */
+  setProp?: SetPropHandler;
 }
 
 /**
@@ -46,6 +50,7 @@ export class DomApplicator {
   private readonly onEvent: (message: DomEventMessage) => void;
   private readonly runtimeClient: RuntimeClient;
   private readonly onError?: (error: Error) => void;
+  private readonly setPropHandler: SetPropHandler;
 
   private rootNodeId: number | null = null;
 
@@ -54,6 +59,7 @@ export class DomApplicator {
     this.onEvent = options.onEvent;
     this.runtimeClient = options.runtimeClient;
     this.onError = options.onError;
+    this.setPropHandler = options.setProp ?? setPropDefault;
   }
 
   /**
@@ -204,34 +210,8 @@ export class DomApplicator {
     const node = this.nodes.get(nodeId);
     if (!(node instanceof HTMLElement)) return;
 
-    // Handle style as attribute
-    if (key === "style" && typeof value === "string") {
-      if (node.getAttribute("style") !== value) {
-        node.setAttribute("style", value);
-      }
-      return;
-    }
-
-    // Handle data-* attributes
-    if (key.startsWith("data-")) {
-      if (value == null) {
-        if (node.hasAttribute(key)) {
-          node.removeAttribute(key);
-        }
-      } else {
-        const currentValue = node.getAttribute(key);
-        const newValue = String(value);
-        if (currentValue !== newValue) {
-          node.setAttribute(key, newValue);
-        }
-      }
-      return;
-    }
-
-    // Set as property
-    if ((node as any)[key] !== value) {
-      (node as any)[key] = value;
-    }
+    // Use the configured property setter (defaults to setPropDefault)
+    this.setPropHandler(node, key, value);
   }
 
   private removeProp(nodeId: number, key: string): void {

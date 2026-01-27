@@ -18,6 +18,8 @@ import { DomApplicator } from "./applicator.ts";
 // Global mount ID counter
 let nextMountId = 1;
 
+import type { SetPropHandler } from "../render-utils.ts";
+
 /**
  * Options for creating a VDomRenderer.
  */
@@ -33,6 +35,9 @@ export interface VDomRendererOptions {
 
   /** Optional error handler */
   onError?: (error: Error) => void;
+
+  /** Optional custom property setter */
+  setProp?: SetPropHandler;
 }
 
 /**
@@ -72,6 +77,7 @@ export class VDomRenderer {
       runtimeClient: options.runtimeClient,
       onEvent: (message) => this.handleDomEvent(message),
       onError: options.onError,
+      setProp: options.setProp,
     });
 
     // Subscribe to VDomBatch notifications
