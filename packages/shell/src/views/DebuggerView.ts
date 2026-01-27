@@ -2130,20 +2130,18 @@ export class XDebuggerView extends LitElement {
           </path>
 
           <!-- Cumulative time delta curve (since baseline) - green -->
-          ${greenPathData
-            ? html`
-              <path
-                d="${greenPathData}"
-                fill="none"
-                stroke="#10b981"
-                stroke-width="2"
-                opacity="0.8"
-                style="pointer-events: stroke;"
-              >
-                <title>Since baseline</title>
-              </path>
-            `
-            : ""}
+          <path
+            d="${greenPathData || ""}"
+            fill="none"
+            stroke="#10b981"
+            stroke-width="2"
+            opacity="0.8"
+            style="pointer-events: stroke; ${greenPathData
+              ? ""
+              : "display: none;"}"
+          >
+            <title>Since baseline</title>
+          </path>
 
           <!-- Percentile reference lines (p50, p95) - render AFTER curves -->
           <g style="pointer-events: stroke;">
@@ -2273,29 +2271,31 @@ export class XDebuggerView extends LitElement {
                 2,
               )}s in ${cumulativePoints.length} samples)
             </text>
-            ${showGreenLegend
-              ? html`
-                <line
-                  x1="0"
-                  y1="15"
-                  x2="20"
-                  y2="15"
-                  stroke="#10b981"
-                  stroke-width="2"
-                />
-                <text
-                  x="25"
-                  y="15"
-                  dominant-baseline="middle"
-                  fill="#cbd5e1"
-                  font-size="10"
-                >
-                  Since baseline (${(maxCumulativeTimeGreen / 1000).toFixed(
+            <line
+              x1="0"
+              y1="15"
+              x2="20"
+              y2="15"
+              stroke="#10b981"
+              stroke-width="2"
+              style="${showGreenLegend ? "" : "display: none;"}"
+            />
+            <text
+              x="25"
+              y="15"
+              dominant-baseline="middle"
+              fill="#cbd5e1"
+              font-size="10"
+              style="${showGreenLegend ? "" : "display: none;"}"
+            >
+              Since baseline (${showGreenLegend
+                ? `${
+                  (maxCumulativeTimeGreen / 1000).toFixed(
                     2,
-                  )}s in ${cumulativePointsDelta!.length} samples)
-                </text>
-              `
-              : ""}
+                  )
+                }s in ${cumulativePointsDelta!.length} samples`
+                : ""})
+            </text>
           </g>
         </svg>
       </div>
