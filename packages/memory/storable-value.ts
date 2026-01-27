@@ -1,5 +1,5 @@
 import { isInstance, isRecord } from "@commontools/utils/types";
-import type { StorableValueLayer } from "./interface.ts";
+import type { StorableValue, StorableValueLayer } from "./interface.ts";
 
 /**
  * Character code for digit `0`.
@@ -267,21 +267,29 @@ const PROCESSING = Symbol("PROCESSING");
  * properties.
  *
  * @param value - The value to convert.
- * @param converted - Map of original→result for caching and cycle detection.
- * @param inArray - Whether we're processing an array element (internal use).
  * @returns The storable value (original or converted).
  * @throws Error if the value (or any nested value) can't be converted.
  */
-export function toDeepStorableValue(
-  value: unknown,
-  converted: Map<object, unknown> = new Map(),
-  inArray: boolean = false,
-): unknown {
+export function toDeepStorableValue(value: unknown): StorableValue {
+  // The internal helper can return OMIT for nested values that should be
+  // omitted, but at the top level this never happens (OMIT is only returned
+  // when converted.size > 0, i.e., in nested calls).
+  return toDeepStorableValueInternal(value, new Map(), false) as StorableValue;
+}
+
+/**
+ * Internal recursive implementation. Can return `OMIT` for nested values that
+ * should be omitted from objects (functions without toJSON, undefined).
+ */
+function toDeepStorableValueInternal(
+  original: unknown,
+  converted: Map<object, unknown>,
+  inArray: boolean,
+): StorableValue | typeof OMIT {
   // Track the original value for cycle detection and caching. This is important
   // because `toStorableValue()` may return a different object (e.g., for sparse
   // arrays or values with `toJSON()`), but circular references and shared
   // references point to the original.
-  const original = value;
   const isOriginalRecord = isRecord(original);
 
   if (isOriginalRecord) {
@@ -293,7 +301,7 @@ export function toDeepStorableValue(
       // Already converted this object; return cached result. This handles
       // shared references efficiently and ensures consistent results since
       // `toJSON()` could return different values on repeated calls.
-      return cached;
+      return cached as StorableValue;
     }
     // Mark as currently processing (ancestor) before converting.
     converted.set(original, PROCESSING);
@@ -302,7 +310,7 @@ export function toDeepStorableValue(
   // Handle functions without `toJSON()`: At top level, throw. In arrays,
   // convert to `null`. In objects, omit the property. This matches
   // `JSON.stringify()` behavior.
-  if (typeof value === "function" && !hasToJSONMethod(value)) {
+  if (typeof original === "function" && !hasToJSONMethod(original)) {
     if (inArray) {
       return null;
     } else if (converted.size > 0) {
@@ -315,8 +323,9 @@ export function toDeepStorableValue(
   }
 
   // Try to convert the top level to storable form.
+  let value: StorableValueLayer;
   try {
-    value = toStorableValue(value);
+    value = toStorableValue(original);
   } catch (e) {
     // Clean up converted map before propagating error.
     if (isOriginalRecord) {
@@ -335,25 +344,27 @@ export function toDeepStorableValue(
     if (value === undefined && converted.size > 0) {
       return OMIT;
     }
-    return value;
+    // At this point, value is a primitive (null, boolean, number, string) or
+    // undefined - all valid StorableValue types.
+    return value as StorableValue;
   }
 
-  let result: unknown;
+  let result: StorableValue;
 
   // Recursively process arrays and objects.
   if (Array.isArray(value)) {
     result = value.map((element) =>
-      toDeepStorableValue(element, converted, true)
-    );
+      toDeepStorableValueInternal(element, converted, true)
+    ) as StorableValue;
   } else {
-    const entries: [string, unknown][] = [];
+    const entries: [string, StorableValue][] = [];
     for (const [key, val] of Object.entries(value)) {
-      const convertedVal = toDeepStorableValue(val, converted, false);
+      const convertedVal = toDeepStorableValueInternal(val, converted, false);
       if (convertedVal !== OMIT) {
         entries.push([key, convertedVal]);
       }
     }
-    result = Object.fromEntries(entries);
+    result = Object.fromEntries(entries) as StorableValue;
   }
 
   // Cache the result for the original object.
