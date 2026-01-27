@@ -6,11 +6,14 @@
  * back to the worker.
  */
 
-import type { RuntimeConnection } from "../client/connection.ts";
-import type { RuntimeClient } from "../runtime-client.ts";
-import type { CellRef, VDomBatchNotification } from "../protocol/mod.ts";
+import type {
+  CellRef,
+  DomEventMessage,
+  RuntimeClient,
+  RuntimeConnection,
+  VDomBatchNotification,
+} from "@commontools/runtime-client";
 import { DomApplicator } from "./applicator.ts";
-import type { DomEventMessage } from "../vdom-worker/events.ts";
 
 // Global mount ID counter
 let nextMountId = 1;

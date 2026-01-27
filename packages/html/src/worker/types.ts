@@ -6,7 +6,7 @@
  */
 
 import type { Cancel, Cell, JSONSchema } from "@commontools/runner";
-import type { CellRef, JSONValue } from "../protocol/mod.ts";
+import type { CellRef, JSONValue } from "@commontools/runtime-client";
 
 /**
  * A render node in the worker VDOM tree.
@@ -108,7 +108,9 @@ export interface ChildNodeState {
  */
 export interface ReconcileContext {
   /** Function to emit VDOM operations */
-  emit: (ops: import("./operations.ts").VDomOp[]) => void;
+  emit: (
+    ops: import("@commontools/runtime-client/vdom-worker/operations").VDomOp[],
+  ) => void;
 
   /** Generate a new unique node ID */
   nextNodeId: () => number;
@@ -128,7 +130,9 @@ export interface ReconcileContext {
  */
 export interface WorkerReconcilerOptions {
   /** Callback when operations are ready to send to main thread */
-  onOps: (ops: import("./operations.ts").VDomOp[]) => void;
+  onOps: (
+    ops: import("@commontools/runtime-client/vdom-worker/operations").VDomOp[],
+  ) => void;
 
   /** Optional: callback when an error occurs */
   onError?: (error: Error) => void;

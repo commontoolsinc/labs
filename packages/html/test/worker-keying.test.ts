@@ -3,7 +3,11 @@
  */
 
 import { assertEquals, assertNotEquals } from "@std/assert";
-import { generateChildKeys, generateKey, keysMatch } from "./keying.ts";
+import {
+  generateChildKeys,
+  generateKey,
+  keysMatch,
+} from "../src/worker/keying.ts";
 
 Deno.test("keying - generateKey", async (t) => {
   await t.step("generates stable keys for strings", () => {

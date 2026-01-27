@@ -29,7 +29,7 @@ import type {
   WorkerVNode,
 } from "./types.ts";
 import { isWorkerVNode } from "./types.ts";
-import type { VDomOp } from "./operations.ts";
+import type { VDomOp } from "@commontools/runtime-client/vdom-worker/operations";
 import { generateChildKeys } from "./keying.ts";
 import {
   getBindingPropName,
@@ -37,7 +37,7 @@ import {
   isBindingProp,
   isEventHandler,
   isEventProp,
-} from "./h.ts";
+} from "../render-utils.ts";
 
 /**
  * Main reconciler class for worker-side VDOM rendering.

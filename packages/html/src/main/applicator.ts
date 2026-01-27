@@ -6,12 +6,15 @@
  * and handles bidirectional bindings and event dispatch.
  */
 
-import type { CellRef } from "../protocol/mod.ts";
-import type { VDomBatch, VDomOp } from "../vdom-worker/operations.ts";
-import type { DomEventMessage } from "../vdom-worker/events.ts";
-import { serializeEvent } from "../vdom-worker/events.ts";
-import { CellHandle } from "../cell-handle.ts";
-import type { RuntimeClient } from "../runtime-client.ts";
+import type {
+  CellRef,
+  DomEventMessage,
+  RuntimeClient,
+  VDomBatch,
+  VDomOp,
+} from "@commontools/runtime-client";
+import { serializeEvent } from "@commontools/runtime-client/vdom-worker/events";
+import { CellHandle } from "@commontools/runtime-client";
 
 /**
  * Options for creating a DOM applicator.

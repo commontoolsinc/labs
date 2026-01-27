@@ -1,24 +1,9 @@
 /**
- * Worker-side VDOM module.
+ * VDOM protocol types for IPC between worker and main thread.
  *
- * This module provides the worker-thread implementation of the VDOM system,
- * where Cell values are accessed synchronously and VDOM operations are
- * emitted for the main thread to apply.
+ * This module exports the message types and utilities for VDOM IPC.
+ * The reconciler and rendering logic have moved to @commontools/html.
  */
-
-// Types
-export type {
-  BindingCellRef,
-  ChildNodeState,
-  NodeState,
-  ReconcileContext,
-  WorkerJSXElement,
-  WorkerProps,
-  WorkerReconcilerOptions,
-  WorkerRenderNode,
-  WorkerVNode,
-} from "./types.ts";
-export { isWorkerVNode } from "./types.ts";
 
 // Operations
 export type {
@@ -51,22 +36,3 @@ export {
   isDomEventMessage,
   serializeEvent,
 } from "./events.ts";
-
-// Keying
-export { generateChildKeys, generateKey, keysMatch } from "./keying.ts";
-
-// JSX factory
-export type { WorkerComponent, WorkerHFunction } from "./h.ts";
-export {
-  FRAGMENT_ELEMENT,
-  getBindingPropName,
-  getEventType,
-  h,
-  isBindingProp,
-  isEventHandler,
-  isEventProp,
-} from "./h.ts";
-export default "./h.ts";
-
-// Reconciler
-export { createReconciler, WorkerReconciler } from "./reconciler.ts";

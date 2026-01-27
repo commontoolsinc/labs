@@ -72,7 +72,7 @@ import {
 } from "./utils.ts";
 import { cellRefToKey } from "../shared/utils.ts";
 import { RemoteResponse } from "@commontools/runtime-client";
-import { WorkerReconciler } from "../vdom-worker/reconciler.ts";
+import { WorkerReconciler } from "@commontools/html/worker";
 import type { VDomOp } from "../vdom-worker/operations.ts";
 
 export class RuntimeProcessor {
