@@ -24,11 +24,27 @@ Index of theorems corresponding to the CFC Safety Invariants
 This file mostly re-exports/aliases theorems from more focused proof modules so that:
 - spec readers can find the Lean statement quickly, and
 - scenario proofs can depend on a stable "invariant API".
+
+If you are reading the spec and want to ask "where is invariant X proved?",
+this is the first file to open.
+
+Naming convention:
+- `inv9_...` are lemmas supporting Safety invariant 9, etc.
+- Many proofs live in their own modules (`Proofs.FlowPathConfidentiality`, etc.);
+  here we mostly just give them invariant-shaped names.
+
+This is also where we explicitly acknowledge the limits of the current Lean model:
+we only cover a subset of the invariants, focused on IFC + declassification/endorsement and
+minimal intent consumption.
 -/
 
 /-!
 Invariant 9 (Flow-path confidentiality):
 "PC confidentiality must be joined into downstream outputs".
+-/
+/-
+These are direct re-exports of the core lemmas in `Proofs.FlowPathConfidentiality`.
+They are used as "standard library" facts in later scenario proofs.
 -/
 theorem inv9_pc_subset_evalD_conf
     (env : Env) (pc : ConfLabel) (pcI : IntegLabel) (e : ExprD) :
@@ -64,6 +80,12 @@ Invariant 6 (violating policy never silently downgrades confidentiality; exchang
 For exchange rules, the "disable on failure" story is definitional: if the guard check is false,
 the exchange returns the original label.
 -/
+/-
+These two lemmas are tiny but important: they formalize "no silent downgrade" for exchanges.
+
+Because our exchange combinators are defined as `if hasAllB ... then rewrite else identity`,
+proving "disabled when guard fails" is just unfolding and simplifying.
+-/
 theorem exchangeAddAltIf_eq_of_hasAllB_false
     (needInteg : List Atom) (target alt : Atom) (boundary : IntegLabel) (ℓ : Label)
     (h : Exchange.hasAllB needInteg (Exchange.availIntegrity ℓ boundary) = false) :
@@ -80,6 +102,12 @@ theorem exchangeDropSingletonIf_eq_of_hasAllB_false
 Invariant 6 / 3 for the tiny declassifier:
 if the integrity gate is missing (either evidence token or trusted PC-integrity),
 the declassifier does not rewrite confidentiality.
+-/
+/-
+These are the core "robustness" facts about `declassifyIf`:
+missing evidence -> no declassification rewrite.
+
+They come directly from `Proofs.RobustDeclassification`.
 -/
 theorem inv6_declassifyIf_guard_absent_preserves_conf
     (env : Env) (pc : ConfLabel) (pcI : IntegLabel) (tok : Atom) (guard secret : ExprD)
@@ -101,6 +129,9 @@ theorem inv6_declassifyIf_pc_absent_preserves_conf
 Invariant 7 (Robust declassification):
 untrusted control-flow cannot enable declassification.
 -/
+/-
+This re-exports the "pc-integrity blocks declassification in untrusted branches" lemma.
+-/
 theorem inv7_declassifyIf_blocked_by_untrusted_cond
     (env : Env) (pc : ConfLabel) (pcI : IntegLabel) (c : ExprD)
     (tok : Atom) (guard secret : ExprD)
@@ -116,6 +147,11 @@ theorem inv7_declassifyIf_blocked_by_untrusted_cond
 Invariant 8 (Transparent endorsement):
 secret-dependent endorsement decisions are not observable, and untrusted control-flow cannot
 mint new endorsement facts.
+-/
+/-
+We split invariant 8 into two pieces:
+- "hidden guard -> endorsed result hidden" (a PC-confidentiality consequence)
+- "untrusted control -> endorsement cannot add tokens" (a PC-integrity consequence)
 -/
 theorem inv8_observe_endorseIf_eq_none_of_hidden_guard
     (p : Principal) (env : Env) (pc : ConfLabel) (pcI : IntegLabel)
@@ -141,6 +177,10 @@ theorem inv8_endorseIf_blocked_by_untrusted_cond
 Composed regression: endorsement feeding declassification stays secret if the endorsement guard is
 secret.
 -/
+/-
+This is a small "integration test" for invariants 7/8/9:
+compose endorsement and declassification and show the hidden-guard property still holds.
+-/
 theorem composed_endorse_then_declassify_hidden_guard
     (p : Principal) (env : Env) (pc : ConfLabel) (pcI : IntegLabel) (tok : Atom)
     (g x secret : ExprD)
@@ -152,6 +192,13 @@ theorem composed_endorse_then_declassify_hidden_guard
 /-!
 Invariant 4 (commit-coupled consumption for side effects):
 modeled here only as a minimal "IntentOnce token store" with consume-on-success semantics.
+-/
+/-
+The full spec's commit-point machinery is richer than this Lean model.
+
+Here we prove the essence of invariant 4:
+- no-consume-on-failure (retry is possible)
+- single-use (once consumed, further commits fail)
 -/
 theorem inv4_commitOnce_no_consume_on_failure
     (tok : Atom) (s : IntentStore) (h : tok ∈ s) :

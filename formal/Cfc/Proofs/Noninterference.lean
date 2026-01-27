@@ -9,6 +9,36 @@ namespace Noninterference
 
 open Cfc
 
+/-
+This file proves a classic IFC theorem (non-interference) for the tiny language in `Cfc.Language`.
+
+Statement (informal):
+If two environments are indistinguishable to a principal `p` (low-equivalent),
+then evaluating the same program in those environments yields results that are also
+indistinguishable to `p`.
+
+Why this matters in the repo:
+- It is a minimal "unit test" that our label semantics behave like an IFC system should.
+- It is also a playground for reasoning about PC confidentiality (implicit flows) without
+  bringing in the full CFC runtime model.
+
+How to read the proofs (new Lean reader tips):
+- Many theorems do explicit case splits on whether `observe p ...` is `none` or `some b`.
+  This mirrors the definition of `observe`: if you can't access the label, you see nothing.
+- `simp` is used heavily to unfold definitions and solve routine goals.
+- The main proof `noninterference_eval` is by structural induction on the expression.
+-/
+
+/-
+Lemma: tainting preserves low-equivalence.
+
+`taint pc v` appends `pc` to the confidentiality of `v`.
+Intuitively:
+- If `p` can read `pc`, then tainting does not change what `p` observes (it might still be `some b`).
+- If `p` cannot read `pc`, then tainting makes the value unobservable (`none`), regardless of `v.val`.
+
+So if `v₁` and `v₂` were already indistinguishable to `p`, then after tainting they remain so.
+-/
 theorem observe_taint_eq (p : Principal) (pc : ConfLabel) {v₁ v₂ : LVal}
     (h : observe p v₁ = observe p v₂) :
     observe p (taint pc v₁) = observe p (taint pc v₂) := by
@@ -48,6 +78,18 @@ theorem observe_taint_eq (p : Principal) (pc : ConfLabel) {v₁ v₂ : LVal}
       simp [observe, hta', taint, taintConf]
     simp [ht v₁, ht v₂]
 
+/-
+Lemma: `pc` is always a subset of the evaluated confidentiality.
+
+This is the "PC confidentiality propagates" property:
+whatever secrecy is in `pc` must appear in the final label.conf.
+
+Proof is by induction on the expression, mirroring the evaluator:
+- literals: label.conf = pc
+- variables: label.conf contains pc because taint appends pc
+- connectives: use the induction hypothesis and the fact that conf joins by append
+- ite: branch pc' := pc ++ cond.conf, and branch results contain pc' hence contain pc
+-/
 theorem pc_subset_eval_conf (env : Env) (pc : ConfLabel) (e : Expr) :
     pc ⊆ (eval env pc e).lbl.conf := by
   induction e generalizing pc with
@@ -90,6 +132,14 @@ theorem pc_subset_eval_conf (env : Env) (pc : ConfLabel) (e : Expr) :
       have : clause ∈ (eval env (pc ++ (eval env pc c).lbl.conf) e).lbl.conf := hsub this
       simpa [eval, hcond] using this
 
+/-
+Lemma: if `p` cannot access the current pc, then the whole evaluation is unobservable.
+
+Reason:
+- By `pc_subset_eval_conf`, the output confidentiality contains pc as a subset.
+- If `p` cannot access pc, then `p` cannot access the output label either.
+- Therefore `observe` returns `none`.
+-/
 theorem observe_eval_eq_none_of_not_canAccessConf_pc
     (p : Principal) (env : Env) (pc : ConfLabel) (e : Expr)
     (hpc : ¬ canAccessConf p pc) :
@@ -105,6 +155,22 @@ theorem observe_eval_eq_none_of_not_canAccessConf_pc
 /-!
 If the attacker principal can satisfy *both* PC labels, then PC choice does not affect
 the attacker's observation of evaluation.
+-/
+/-
+Lemma: if `p` can access both pcs, then changing pc does not change the observation.
+
+This is an important "robustness" fact that we later use in the main non-interference proof
+for `ite`:
+
+- When the condition is observable to `p`, both runs take the same branch and both branch pcs are
+  accessible, so we can use this lemma to normalize both runs back to a common pc.
+
+Proof structure:
+- Induction on the expression.
+- The interesting cases are `and` and `ite`, where we do sub-case splits based on whether
+  subexpressions are observable (`observe = none` vs `some`).
+
+These explicit splits mirror the definition of `observe` and are a common proof pattern in IFC.
 -/
 theorem observe_eval_eq_of_accessible_pc
     (p : Principal) (env : Env) (pc₁ pc₂ : ConfLabel) (e : Expr)
@@ -262,6 +328,26 @@ theorem observe_eval_eq_of_accessible_pc
           iht (pc₁ := pc₁ ++ (eval env pc₁ c).lbl.conf) (pc₂ := pc₂ ++ (eval env pc₂ c).lbl.conf) hPc1 hPc2
         simp [eval, hb1, hb2, hB]
 
+/-
+Main theorem (parameterized by pc):
+
+If two environments are low-equivalent for `p`, then evaluating the same expression under the
+same pc yields the same observation.
+
+This is the standard non-interference statement for a big-step semantics with an explicit pc.
+
+Proof strategy:
+- Induction on the syntax of `e`.
+- Most cases are straightforward:
+  - `lit`: identical by definition
+  - `var`: reduce to `observe_taint_eq` and the hypothesis about environments
+  - `not`, `and`: do case splits on whether subexpressions are observable and use IH
+  - `ite`: the big case:
+      * If the condition is unobservable, then the branch pc becomes unobservable too,
+        so both runs produce `none`.
+      * If the condition is observable, then both runs agree on the condition value and
+        we can normalize the branch pcs using `observe_eval_eq_of_accessible_pc`, then apply IH.
+-/
 theorem noninterference_eval (p : Principal) (ρ₁ ρ₂ : Env) (pc : ConfLabel) (e : Expr)
     (hEnv : LowEqEnv p ρ₁ ρ₂) :
     observe p (eval ρ₁ pc e) = observe p (eval ρ₂ pc e) := by
@@ -396,6 +482,9 @@ theorem noninterference_eval (p : Principal) (ρ₁ ρ₂ : Env) (pc : ConfLabel
         have hBranch := iht (pc := pc)
         simp [eval, hb1, hb2, hStrip1, hStrip2, hBranch]
 
+/-
+Convenience corollary: non-interference at top level (empty pc).
+-/
 theorem noninterference (p : Principal) (ρ₁ ρ₂ : Env) (e : Expr)
     (hEnv : LowEqEnv p ρ₁ ρ₂) :
     observe p (eval0 ρ₁ e) = observe p (eval0 ρ₂ e) := by
