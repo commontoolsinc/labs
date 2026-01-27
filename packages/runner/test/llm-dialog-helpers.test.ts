@@ -2,6 +2,7 @@ import { assert, assertEquals, assertThrows } from "@std/assert";
 import { expect } from "@std/expect";
 import type { BuiltInLLMMessage, BuiltInLLMToolCallPart } from "commontools";
 import { llmDialogTestHelpers } from "../src/builtins/llm-dialog.ts";
+import { schemaToTypeString } from "../src/schema-format.ts";
 
 const {
   parseLLMFriendlyLink,
@@ -12,7 +13,6 @@ const {
   createToolResultMessages,
   hasValidContent,
   simplifySchemaForContext,
-  schemaToTypeString,
 } = llmDialogTestHelpers;
 
 Deno.test("parseTargetString recognizes handle format", () => {
