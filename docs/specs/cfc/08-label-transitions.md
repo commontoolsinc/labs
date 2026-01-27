@@ -570,6 +570,138 @@ const matchingProducts = allProducts.filter(p => matches(p, secretQuery));
 // the container path label and item path labels are distinct.
 ```
 
+### 8.5.6.2 Runtime Label Propagation for Collections
+
+The per-path labeling model implies the runtime must propagate **two** kinds of labels for an array:
+
+- the **container label** (membership confidentiality) at the array path (e.g. `/items`)
+- the **member labels** (content + integrity) at element paths (conceptually `/items/*`)
+
+The following pseudocode shows a concrete, schema-driven approach for the main collection constraints.
+
+```typescript
+// Helper: remove collection-level integrity claims that are no longer justified after selection/filtering.
+function stripCollectionIntegrity(integ: IntegrityAtom[]): IntegrityAtom[] {
+  return integ.filter(a =>
+    a.type !== "CompleteCollection" &&
+    a.type !== "FilteredFrom" &&
+    a.type !== "PermutationOf" &&
+    a.type !== "LengthPreserved"
+  );
+}
+
+// Helper: build a lookup table from element reference -> element label for an input collection.
+function indexMemberLabels(
+  members: unknown[],
+  memberLabels: Label[]
+): Map<string, Label> {
+  const m = new Map<string, Label>();
+  members.forEach((v, i) => m.set(refer(v).toString(), memberLabels[i]));
+  return m;
+}
+
+function verifySubsetByRefs(inputMembers: unknown[], outputMembers: unknown[]): boolean {
+  const inputSet = new Set(inputMembers.map(v => refer(v).toString()));
+  return outputMembers.every(v => inputSet.has(refer(v).toString()));
+}
+
+function verifyPermutationByRefs(inputMembers: unknown[], outputMembers: unknown[]): boolean {
+  const inRefs = inputMembers.map(v => refer(v).toString()).sort();
+  const outRefs = outputMembers.map(v => refer(v).toString()).sort();
+  if (inRefs.length !== outRefs.length) return false;
+  return inRefs.every((r, i) => r === outRefs[i]);
+}
+
+// Subset/filtered/permutation propagate by *preserving member labels*:
+// the output elements are references to input elements, so their labels are re-used.
+//
+// The container label is separately tainted by `pcConfidentiality` because the *membership decision*
+// (which elements were chosen / in what order) can be confidential.
+function propagateCollectionConstraint(
+  kind: "subset" | "filtered" | "permutation",
+  pcConfidentiality: Clause[],
+  inputContainerLabel: Label,
+  inputMembers: unknown[],
+  inputMemberLabels: Label[],
+  outputMembers: unknown[],
+  opts: { sourceRef: Reference; predicate?: string }
+): { outputContainerLabel: Label; outputMemberLabels: Label[] } {
+  // Build membership lookup for label reuse.
+  const inputByRef = indexMemberLabels(inputMembers, inputMemberLabels);
+
+  // Checked constraints: violations reject handler output.
+  if (kind === "subset" || kind === "filtered") {
+    // filteredFrom is verified as subset-of; predicate semantics are not verified here.
+    if (!verifySubsetByRefs(inputMembers, outputMembers)) {
+      throw new Error("IFC collection subset/filtered violation");
+    }
+  }
+  if (kind === "permutation") {
+    if (!verifyPermutationByRefs(inputMembers, outputMembers)) {
+      throw new Error("IFC collection permutation violation");
+    }
+  }
+
+  // Container label: membership confidentiality is tainted by PC.
+  const outContainer: Label = {
+    confidentiality: [...inputContainerLabel.confidentiality, ...pcConfidentiality],
+    integrity: inputContainerLabel.integrity
+  };
+
+  // Constraint-specific container integrity updates.
+  if (kind === "subset") {
+    outContainer.integrity = stripCollectionIntegrity(outContainer.integrity);
+  } else if (kind === "filtered") {
+    outContainer.integrity = [
+      ...stripCollectionIntegrity(outContainer.integrity),
+      { type: "FilteredFrom", source: opts.sourceRef, predicate: opts.predicate! }
+    ];
+  } else if (kind === "permutation") {
+    outContainer.integrity = [
+      ...outContainer.integrity,
+      { type: "PermutationOf", source: opts.sourceRef }
+    ];
+  }
+
+  // Member labels: preserved by reference.
+  const outMemberLabels = outputMembers.map(v => {
+    const lbl = inputByRef.get(refer(v).toString());
+    if (!lbl) throw new Error("IFC member label lookup failed (bad subset/permutation)");
+    return lbl;
+  });
+
+  return { outputContainerLabel: outContainer, outputMemberLabels: outMemberLabels };
+}
+
+// Length-preserved (map-like) differs: members may be transformed, so member labels are derived
+// by the per-element transition rules (e.g. `deriveTransformationLabel`).
+//
+// The checked property is only: output length equals input length.
+function propagateLengthPreserved(
+  pcConfidentiality: Clause[],
+  inputContainerLabel: Label,
+  inputMembers: unknown[],
+  outputMembers: unknown[],
+  outputMemberLabels: Label[],
+  sourceRef: Reference
+): { outputContainerLabel: Label; outputMemberLabels: Label[] } {
+  if (inputMembers.length !== outputMembers.length) {
+    throw new Error("IFC lengthPreserved violation");
+  }
+
+  return {
+    outputContainerLabel: {
+      confidentiality: [...inputContainerLabel.confidentiality, ...pcConfidentiality],
+      integrity: [
+        ...stripCollectionIntegrity(inputContainerLabel.integrity),
+        { type: "LengthPreserved", source: sourceRef }
+      ]
+    },
+    outputMemberLabels
+  };
+}
+```
+
 **Implications**:
 - `collection.length` inherits `membershipConfidentiality`
 - Iterating over members exposes membership (iteration order is tainted)

@@ -227,6 +227,74 @@ theorem filtered_collection_separates_membership_and_members :
   · simp [out, input, publicLbl, CollectionTransition.filteredFrom]
   · rfl
 
+/-!
+More collection regressions (spec 8.5 + 8.9.1).
+
+These examples are meant to exercise the *checked* versions of the collection transitions:
+- the runtime computes a boolean verifier (subset/permutation/length)
+- if it returns `false`, the transition rejects (`none`)
+
+This matches the spec's story that handlers are not trusted to keep their schema promises.
+-/
+
+/-
+Spec 8.5.2 (subsetOf) is a checked claim:
+if the handler outputs an element that was not present in the input, the runtime rejects.
+
+In our Lean model, the boolean check is over `(Ref × Label)` pairs, which is a conservative way
+to enforce "member labels are preserved".
+-/
+theorem subsetOfChecked_rejects_new_member :
+    let publicLbl : Label := Label.bot
+    let input : LabeledCollection Nat :=
+      { container := publicLbl
+        members := [(1, publicLbl)] }
+    let outMembers : List (Nat × Label) := [(2, publicLbl)]
+    CollectionTransition.Verify.subsetOfChecked (pc := []) input outMembers = none := by
+  classical
+  intro publicLbl input outMembers
+  simp [CollectionTransition.Verify.subsetOfChecked, CollectionTransition.Verify.subsetOfB, input, outMembers]
+
+/-
+Spec 8.5.3 (permutationOf) preserves collection-level integrity.
+
+This example:
+- starts from an input container with a `completeCollection` claim,
+- reorders the members (a swap),
+- and checks that the runtime accepts the permutation and *adds* a `permutationOf` witness,
+  while keeping the original `completeCollection` atom.
+-/
+theorem permutationOfChecked_accepts_swap_preserves_completeness :
+    let base : Atom := Atom.integrityTok "X"
+    let input : LabeledCollection Nat :=
+      { container := { conf := [], integ := [Atom.completeCollection 0, base] }
+        members := [(1, Label.bot), (2, Label.bot)] }
+    let outMembers : List (Nat × Label) := [(2, Label.bot), (1, Label.bot)]
+    ∃ out,
+      CollectionTransition.Verify.permutationOfChecked (pc := []) 99 input outMembers = some out ∧
+      Atom.permutationOf 99 ∈ out.container.integ ∧
+      Atom.completeCollection 0 ∈ out.container.integ := by
+  classical
+  intro base input outMembers
+  let out : LabeledCollection Nat :=
+    { container := { conf := input.container.conf, integ := input.container.integ ++ [Atom.permutationOf 99] }
+      members := outMembers }
+  refine ⟨out, ?_, ?_, ?_⟩
+  ·
+    -- Prove the permutation fact, then discharge the boolean `decide` check via rewriting.
+    have hPerm : outMembers.Perm input.members := by
+      -- Swap the two elements.
+      simpa [outMembers, input] using (List.Perm.swap (1, Label.bot) (2, Label.bot) [])
+    have hB : CollectionTransition.Verify.permutationOfB input outMembers = true := by
+      -- `permutationOfB = true` iff `Perm`, proved in `Cfc.Proofs.Collection`.
+      exact (Proofs.Collection.permutationOfB_eq_true_iff (input := input) (outputMembers := outMembers)).2 hPerm
+    -- Now the checked transition reduces definitionally.
+    simp [out, CollectionTransition.Verify.permutationOfChecked, hB, input]
+  ·
+    simp [out]
+  ·
+    simp [out, input]
+
 /-
 Length preservation (spec 8.5.4):
 
