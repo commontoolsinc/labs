@@ -1,6 +1,6 @@
 # Canonical Base Patterns Design
 
-**Status:** Revised per Architect Feedback
+**Status:** Revised per Architect Feedback (v4 - Record-Level Upgrade)
 **Date:** 2026-01-27
 **Author:** Claude (with Alex & Berni)
 
@@ -8,14 +8,16 @@
 
 ## Executive Summary
 
-Design a set of canonical base patterns using a **Container + Minimal Interface Types** approach:
+Design a set of canonical base patterns using a **Container + Minimal Interface Types + Record-Level Upgrade** approach:
 
 - **Minimal Interface Types**: Simple TypeScript interfaces (`TaskLike`, `PersonLike`, `EventLike`)
-- **N Variant Patterns**: Coherent, complete patterns that implement these interfaces (`family-member.tsx`, `potluck.tsx`)
-- **Container Patterns**: Aggregate items matching a minimal interface, expose `addItem` handler
-- **Collection Projections**: Add/remove entire collections to containers (e.g., "notebooks projected to tasks")
+- **Container Patterns**: Manage items and list available patterns in "Add" menu (no forking)
+- **Record-Level Upgrade**: Fork happens when viewing an individual record and needing more fields
+- **compileAndRun Integration**: Use existing builtin to dynamically compile forked patterns
+- **Lists of Lists**: Containers can include other containers (e.g., Contacts includes AutoImportedGoogleContacts)
+- **Duplication as Edge Case**: Handle same-person-different-context with simple `sameAs`, not complex reconciliation
 
-This is simpler than the annotation-based approach and directly addresses Tony's actual needs.
+The core insight: **fork-on-demand happens on individual records, not from the container's add dropdown**. Container lists patterns; records offer upgrade options.
 
 ---
 
@@ -23,13 +25,14 @@ This is simpler than the annotation-based approach and directly addresses Tony's
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| **Core Model** | Container + Minimal Interfaces | Simple, addresses actual needs |
-| **Pattern Variants** | N coherent variants per type | "family-member", "employee" not "person + annotations" |
+| **Core Model** | Container + Minimal Interfaces + Record-Level Upgrade | Simple, emergent, addresses actual needs |
+| **Container Role** | Manager + Pattern Listing | Container lists PersonLike patterns in "Add" menu (no forking) |
+| **Fork Location** | Individual record "Upgrade" menu | Fork when viewing a record and needing more fields |
+| **Fork Mechanism** | compileAndRun builtin | Dynamically compile forked pattern, replace record in-place |
 | **Type Identity** | Minimal interface conformance | TaskLike, PersonLike, EventLike |
-| **Collections** | Projection-based | Add entire projections to containers, not individual items |
-| **Annotations** | Demoted to edge case | Optional linked records if needed, not the primary model |
-| **Customization** | Fork-and-pull model | Users fork patterns, LLM helps merge features |
-| **Identity** | Reconciliation over annotation | Same entity in different contexts = linking problem |
+| **Nesting** | Lists of lists | Contacts can include AutoImportedGoogleContacts as a sub-list |
+| **Duplication** | Simple `sameAs` field | Treat duplicates as edge case, not core concern |
+| **Customization** | Record upgrade + fork | When you need "contractor with billing fields", upgrade the record |
 
 ---
 
@@ -60,52 +63,75 @@ interface FamilyMember extends PersonLike {
 
 **Key insight:** The schelling point must be **minimal enough that everyone can adopt it** but **meaningful enough to enable interoperability**. A single field (`name`) is often sufficient.
 
-### 2. Fork-and-Pull for Customization
+### 2. Fork-on-Demand (Not Pre-Designed Variants)
 
-**Principle:** Users customize by forking patterns, not by annotating a single canonical pattern.
+**Principle:** Don't pre-design N variant patterns. Fork and modify when you actually need a new type.
 
-**The tension:**
-- Super-organizer wants: comprehensive `friend.tsx` with dietary preferences, alma mater, gift ideas
-- Anti-organizer wants: minimal `friend.tsx` with just name
-- Both are valid - no single pattern serves both
-
-**The solution:** Users fork the base pattern to create their own variants:
-
+**The old approach (too prescriptive):**
 ```
-┌────────────┐
-│ base/      │  Schelling point (minimal, stable)
-│ person.tsx │
-└────────────┘
-      │
- ┌────┴────┬────────────┬────────────┐
- ▼         ▼            ▼            ▼
-┌──────┐ ┌──────┐  ┌──────────┐  ┌──────────┐
-│alice/│ │bob/  │  │claire/   │  │diane/    │
-│friend│ │friend│  │colleague │  │contact   │
-│(rich)│ │(min) │  │(work)    │  │(basic)   │
-└──────┘ └──────┘  └──────────┘  └──────────┘
+Pre-define: family-member.tsx, employee.tsx, contact.tsx, friend.tsx
+User picks from catalog
 ```
 
-**Feature adoption via LLM:**
-> "I like how Claire's colleague pattern has the 'project history' field. Add that to my friend pattern."
+**The new approach (emergent):**
+```
+1. User has a Contacts container
+2. User needs to track a contractor with billing fields
+3. User forks an existing PersonLike pattern
+4. User (or LLM) adds the fields they need right then
+5. New "contractor" pattern is created just-in-time
+```
 
-The LLM analyzes both patterns, extracts the feature, and merges it while preserving core schema.
+**Container lists available patterns (no forking here):**
+```
+┌─────────────────────────────────────────────────┐
+│ Contacts (container)                             │
+│                                                  │
+│  items: [Person, Person, FamilyMember, ...]     │
+│                                                  │
+│  [+ Add Contact ▼]  ← just picks existing types │
+│  ├─ Contact                                      │
+│  ├─ FamilyMember                                 │
+│  ├─ Contractor                                   │
+│  └─ ...other PersonLike patterns                 │
+└─────────────────────────────────────────────────┘
+```
+
+**Fork happens on individual records:**
+```
+┌─────────────────────────────────────────────────┐
+│ John Smith (Contact)                             │
+│                                                  │
+│  name: "John Smith"                              │
+│  email: "john@example.com"                       │
+│                                                  │
+│  [Upgrade ▼]                                     │
+│  ├─ "Add birthday → FamilyMember"                │
+│  ├─ "Add hourlyRate → Contractor"                │
+│  └─ "Fork and customize..."                      │
+└─────────────────────────────────────────────────┘
+```
+
+**When you need a new type:**
+> While viewing John Smith: "I need to track him as a contractor with hourly rate."
+
+The LLM forks Contact, adds the fields, uses `compileAndRun` to compile it, and replaces John's record in-place with the new Contractor type. His existing data (name, email) is preserved.
 
 ### 3. Core Schema Preservation
 
 **Principle:** Variants can add anything, but must preserve the core schema fields.
 
 This is the contract that enables the ecosystem:
-- A `friend.tsx` with `{ name, birthday, dietary }` still satisfies `PersonLike`
+- A forked pattern with `{ name, birthday, hourlyRate }` still satisfies `PersonLike`
 - Containers aggregating `PersonLike` items work with ALL variants
 - Breaking the core schema breaks interoperability
 
 ```typescript
 // VALID: extends core
-interface DetailedFriend extends PersonLike {
+interface Contractor extends PersonLike {
   name: string;        // ✓ core preserved
-  birthday: string;    // added
-  interests: string[]; // added
+  hourlyRate: number;  // added when forked
+  billingAddress: string; // added when forked
 }
 
 // INVALID: breaks core
@@ -114,74 +140,78 @@ interface BrokenFriend {
 }
 ```
 
-### 4. Reconciliation Over Annotation
+### 4. Duplication as Edge Case (Simple `sameAs`)
 
-**Principle:** When the same entity exists in multiple contexts, the problem is **reconciliation** (identity linking), not annotation.
+**Principle:** Treat duplicate entities (same person in different contexts) as an edge case, not a core architectural concern.
 
 **Scenario:**
 - `contractor.tsx` (work): `{ name: "John Smith", rate: 150, company: "Acme" }`
 - `friend.tsx` (personal): `{ name: "John Smith", birthday: "1985-03-15" }`
 
-These are the **same person** in two different views. The challenge is linking them.
+These might be the **same person** in two different contexts. But this is unusual, not common.
 
-**Reframe:** From this angle, annotations are actually **identity pointers**:
-- `SSNPerson.tsx` = name + SSN + **pointer to the entity it identifies**
-- It's not about extensibility, it's about identity linking
-- Multiple records with complementary data, linked by identity
+**Simple solution:** Add a `sameAs` field when needed:
+
+```typescript
+// When you discover two records are the same person
+contractor.sameAs = friendJohn;  // Simple reference
+```
+
+**Why not complex reconciliation?**
+- Most people don't have massive duplicate problems
+- When duplicates occur, it's easy to link them
+- Over-engineering identity management adds complexity without proportional benefit
+
+**The 80% case:** Most contacts are distinct. Handle duplicates when they arise, not as core infrastructure.
 
 ---
 
-## The Reconciliation Problem
+### 5. Lists of Lists
 
-### Why It Matters
+**Principle:** Containers can include other containers as sub-lists, not by copying entries but by including the whole list.
 
-Without reconciliation:
-- Calendar shows "meeting with John Smith" but doesn't know his birthday is tomorrow
-- Contact search returns two "John Smith" entries
-- Gift preferences live in one place, work availability in another
+**Example:** Contacts contains AutoImportedGoogleContacts
 
-With reconciliation:
-- System knows these are the same entity
-- Can combine information across contexts
-- Can present unified view when needed
+```
+┌─────────────────────────────────────────────────────────┐
+│ Contacts                                                 │
+│                                                          │
+│  items: [                                                │
+│    Person("Alice"),                                      │
+│    Person("Bob"),                                        │
+│    FamilyMember("Mom"),                                  │
+│  ]                                                       │
+│                                                          │
+│  sub-lists: [                                            │
+│    ┌─────────────────────────────────────────────┐      │
+│    │ AutoImportedGoogleContacts (sub-container)  │      │
+│    │  items: [                                    │      │
+│    │    GoogleContact("Carol"),                   │      │
+│    │    GoogleContact("Dave"),                    │      │
+│    │    GoogleContact("Eve"),                     │      │
+│    │  ]                                           │      │
+│    └─────────────────────────────────────────────┘      │
+│  ]                                                       │
+└─────────────────────────────────────────────────────────┘
+```
 
-### Identity Linking Mechanism
+**Why this matters:**
+- Don't flatten everything into one list
+- Keep provenance clear (Carol is from Google import)
+- Can remove entire import source at once
+- Can have multiple import sources as separate sub-lists
+- Container shows combined view but maintains structure
 
+**Implementation:**
 ```typescript
-// Identity link - connects two entities as "the same thing"
-interface IdentityLink {
-  entity1: CellRef;
-  entity2: CellRef;
+interface ContactsContainer {
+  items: PersonLike[];           // Directly managed contacts
+  subLists: ContactsContainer[]; // Nested containers (imports, groups, etc.)
 
-  // How we know they're the same
-  evidence: {
-    type: 'user-asserted' | 'email-match' | 'phone-match' | 'llm-inferred';
-    confidence: number;  // 0-1
-    details?: string;
-  };
+  // Computed: all contacts including from sub-lists
+  allItems: PersonLike[];
 }
 ```
-
-**Example:**
-```typescript
-// User explicitly links contractor and friend records
-createIdentityLink({
-  entity1: contractorJohn,
-  entity2: friendJohn,
-  evidence: {
-    type: 'user-asserted',
-    confidence: 1.0,
-    details: "Same person - John from Acme is also my friend John"
-  }
-});
-```
-
-### Open Questions
-
-1. **Storage**: Where do identity links live? Separate entities? Fields on both?
-2. **Merged views**: How do we present a unified view of linked entities?
-3. **Conflicts**: What if `contractor.phone !== friend.phone`?
-4. **Transitivity**: If A=B and B=C, does A=C automatically?
 
 ---
 
@@ -197,20 +227,99 @@ Time 0: Base patterns exist
 │PersonLike│ │ TaskLike │ │EventLike │
 └──────────┘ └──────────┘ └──────────┘
 
-Time 1: Early adopters fork
-┌──────────┐ ┌──────────┐ ┌──────────┐
-│friend    │ │colleague │ │shopping  │
-│(5 users) │ │(3 users) │ │(8 users) │
-└──────────┘ └──────────┘ └──────────┘
+Time 1: Users fork when they need new types
+User A needs contractor → forks Contact, adds hourlyRate
+User B needs family member → forks Contact, adds birthday
 
-Time 2: Features spread through adoption
-friend gains "birthday" from 40% of forks
-shopping gains "aisle" from 60% of forks
+Time 2: Features spread through discovery
+User C sees User A's contractor pattern, forks it
+User D merges birthday field from User B's pattern
 
 Time 3: De facto standards emerge
-"friend with birthday" becomes common expectation
-This is now a new schelling point
+"contractor with hourlyRate" becomes common
+This is now a discoverable pattern
 ```
+
+### Container as Pattern Selector
+
+The container's "Add" dropdown **lists all patterns that satisfy the interface**. No forking happens here - it's just selection.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ Contacts                                                 │
+│                                                          │
+│  [+ Add Contact ▼]                                      │
+│  ├─ Contact ─────────────────> creates new Contact      │
+│  ├─ FamilyMember ────────────> creates new FamilyMember │
+│  ├─ Contractor ──────────────> creates new Contractor   │
+│  └─ ...other PersonLike patterns                        │
+└─────────────────────────────────────────────────────────┘
+```
+
+**The container knows:**
+- What patterns satisfy its interface (PersonLike)
+- What variants users have created (appear in the list)
+
+**Note:** Fork-on-demand happens at the **record level**, not here. See "Upgrading Records via Fork" below.
+
+### Upgrading Records via Fork
+
+The key UX insight: **fork-on-demand happens when viewing an individual record**, not from the container's add menu.
+
+When you're viewing a record (e.g., a Contact named "John Smith"), the system can suggest upgrades to more specific types:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ John Smith (Contact)                                     │
+│                                                          │
+│  name: "John Smith"                                     │
+│  email: "john@example.com"                              │
+│  phone: "555-1234"                                      │
+│                                                          │
+│  [Upgrade ▼]                                            │
+│  ├─ "Add birthday → FamilyMember"                       │
+│  ├─ "Add hourlyRate → Contractor"                       │
+│  ├─ "Add company → Employee"                            │
+│  └─ "Fork and customize..." ────> LLM adds fields,      │
+│                                   compileAndRun creates │
+│                                   new pattern, record   │
+│                                   is replaced in-place  │
+└─────────────────────────────────────────────────────────┘
+```
+
+**How upgrades work:**
+
+1. **Known type upgrades**: The system knows FamilyMember extends Contact with `birthday`. If user adds birthday, offer to upgrade the record to FamilyMember type.
+
+2. **Custom fork**: User says "I need to track this person's billing address and hourly rate." The LLM:
+   - Forks the Contact pattern
+   - Adds the requested fields
+   - Uses `compileAndRun` to compile the new pattern
+   - Replaces the record in-place with the new type (preserving existing data)
+
+**The `compileAndRun` builtin enables this:**
+
+```typescript
+// packages/runner/src/builtins/compile-and-run.ts
+// Takes: { files: [{name, contents}], main, input }
+// Returns: { result, error, errors, pending }
+
+// 1. LLM generates forked pattern source
+const forkedPattern = {
+  files: [{ name: "contractor.tsx", contents: generatedSource }],
+  main: "contractor.tsx",
+  input: existingRecordData  // Preserves John's name, email, phone
+};
+
+// 2. compileAndRun compiles and instantiates it
+// 3. The result replaces the original record in the container
+```
+
+**Upgrade discovery logic:**
+- Find patterns that extend the current type
+- Show which fields would need to be added
+- Offer to add those fields and upgrade the record type
+- All existing data is preserved during upgrade
 
 ### Emergent Schelling Points
 
@@ -230,41 +339,63 @@ The system doesn't mandate this - it emerges from what people actually do.
 ### Discovery & Adoption
 
 For folksonomy to work, users need to discover what others have done:
-- Browse popular forks
-- See common fields across variants
-- LLM suggests: "80% of friend patterns have birthday, want to add it?"
+- Browse existing patterns that satisfy the interface
+- See popular fields across variants
+- Fork and modify rather than starting from scratch
+- LLM suggests: "This looks like a contractor. Want to use the Contractor pattern?"
 
 ---
 
 ## Architecture Overview
 
-### Core Concept: Container + Minimal Interface Types
+### Core Concept: Container + Record-Level Upgrade
+
+The container lists available patterns; fork-on-demand happens on individual records.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                      CONTAINER PATTERN                               │
 │  ┌─────────────────────────────────────────────────────────────────┐│
-│  │ Minimal Interface Type: TaskLike { title: string, done: boolean }│
+│  │ Minimal Interface Type: PersonLike { name: string }              │
 │  └─────────────────────────────────────────────────────────────────┘│
 │                                                                      │
 │  items: [                                                            │
 │    ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐   │
-│    │ TodoItem        │  │ ShoppingItem    │  │ ProjectTask     │   │
-│    │ title: "..."    │  │ title: "..."    │  │ title: "..."    │   │
-│    │ done: false     │  │ done: true      │  │ done: false     │   │
-│    │ + priority      │  │ + quantity      │  │ + assignee      │   │
-│    │ + notes         │  │ + aisle         │  │ + dueDate       │   │
-│    └─────────────────┘  └─────────────────┘  └─────────────────┘   │
-│  ]                                                                   │
+│    │ Contact         │  │ FamilyMember    │  │ Contractor      │   │
+│    │ name: "Alice"   │  │ name: "Mom"     │  │ name: "John"    │   │
+│    │ + email         │  │ + birthday      │  │ + hourlyRate    │   │
+│    │ + phone         │  │ + relationship  │  │ + company       │   │
+│    └────────┬────────┘  └─────────────────┘  └─────────────────┘   │
+│             │                                                        │
+│             ▼ click to view individual record                       │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │ Alice (Contact)                                                │  │
+│  │  name: "Alice"   email: "alice@..."   phone: "555-..."       │  │
+│  │                                                                │  │
+│  │  [Upgrade ▼]  ← fork-on-demand happens HERE on records       │  │
+│  │  ├─ "Add birthday → FamilyMember"                             │  │
+│  │  ├─ "Add hourlyRate → Contractor"                             │  │
+│  │  └─ "Fork and customize..."                                    │  │
+│  └──────────────────────────────────────────────────────────────┘  │
 │                                                                      │
-│  addItem: Stream<{ item: TaskLike }>                                │
-│  mentionable: [non-archived items...]                               │
+│  subLists: [AutoImportedGoogleContacts, WorkContacts, ...]          │
+│                                                                      │
+│  [+ Add Contact ▼]  ← just lists existing patterns, no forking     │
+│  ├─ Contact                                                          │
+│  ├─ FamilyMember                                                     │
+│  └─ Contractor                                                       │
+│                                                                      │
+│  addItem: Stream<{ item: PersonLike }>                              │
+│  mentionable: [all items from items + subLists]                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 Key properties:
-- **Containers aggregate items matching a minimal interface**
-- **Each variant is a coherent, complete UX** that can evolve independently
+- **Container "Add" menu lists existing patterns** - just picks a type, no forking
+- **Fork-on-demand happens on records** - upgrade Alice from Contact to Contractor
+- **compileAndRun enables dynamic fork** - LLM generates pattern, compile it, replace record
+- **Data preserved during upgrade** - existing fields carry over to new type
+- **Lists of lists**: Containers can include other containers (subLists)
 - **Containers expose `addItem` handler** for adding new items
 - **Mentionable items** can be @-mentioned from container
 
@@ -306,47 +437,82 @@ export interface CalendarItem {
 
 ---
 
-## N Variant Patterns
+## Pattern Variants: Fork-on-Demand, Not Pre-Designed Catalogs
 
-Instead of one "person" pattern with annotations, create N coherent variants:
+**Key insight:** Don't pre-design a catalog of variants. Start with minimal base patterns and fork when needed.
 
-### Person Variants
+### Base Patterns (Ship These)
 
-| Pattern | Extra Fields | Use Case |
-|---------|--------------|----------|
-| `family-member.tsx` | birthday, dietary, gift preferences | Personal contacts |
-| `employee.tsx` | department, role, start date, manager | Work contacts |
-| `contact.tsx` | phone, email, address | Lightweight CRM |
-| `friend.tsx` | interests, how we met, relationship notes | Social |
+We provide minimal base patterns that users fork:
 
-### Event Variants
+| Base Pattern | Interface | Fields |
+|--------------|-----------|--------|
+| `contact.tsx` | PersonLike | name, email?, phone? |
+| `task.tsx` | TaskLike | title, done |
+| `event.tsx` | EventLike | title, date, time? |
 
-| Pattern | Extra Fields | Use Case |
-|---------|--------------|----------|
-| `staff-meeting.tsx` | agenda, attendees, action items | Work |
-| `potluck.tsx` | dishes, dietary needs, who's bringing what | Social |
-| `kids-birthday.tsx` | theme, guest list, gifts, activities | Family |
-| `appointment.tsx` | location, provider, confirmation | Personal |
+### Example Variants (Emerge from Usage)
 
-### Task Variants
+These are examples of what users might create by forking, not patterns we pre-build:
 
-| Pattern | Extra Fields | Use Case |
-|---------|--------------|----------|
-| `todo-item.tsx` | priority, notes | General |
-| `shopping-item.tsx` | quantity, aisle, store | Shopping |
-| `project-task.tsx` | assignee, dueDate, project | Work |
+| Forked From | User's Variant | Added Fields | Why They Forked |
+|-------------|----------------|--------------|-----------------|
+| contact.tsx | contractor.tsx | hourlyRate, company, billingAddress | Needed to track freelancers |
+| contact.tsx | family-member.tsx | birthday, relationship, dietary | Planning family events |
+| task.tsx | shopping-item.tsx | quantity, aisle, store | Grocery shopping workflow |
+| event.tsx | potluck.tsx | dishes[], attendees[], whoBringsWhat | Organizing potlucks |
 
-Each variant:
+### How Forking Works (Record-Level Upgrade)
+
+Forking happens when viewing an individual record, not from the container's add menu.
+
+```
+User (viewing "John Smith" as Contact): "I need to track him as a contractor"
+
+System:
+1. LLM forks contact.tsx as the base
+2. LLM adds: hourlyRate, company, billingAddress fields
+3. compileAndRun compiles the new "contractor.tsx" pattern
+4. John's record is replaced in-place with Contractor type
+5. Existing data (name, email, phone) is preserved
+6. Contractor now appears in container's add menu for future contacts
+```
+
+**Using `compileAndRun` for dynamic pattern compilation:**
+
+```typescript
+// The LLM generates the forked pattern source
+const forkedSource = `
+  /// <cts-enable />
+  export interface Contractor extends PersonLike {
+    name: string;
+    hourlyRate: number;
+    company: string;
+  }
+  // ... pattern implementation
+`;
+
+// compileAndRun compiles and instantiates it
+const result = compileAndRun({
+  files: [{ name: "contractor.tsx", contents: forkedSource }],
+  main: "contractor.tsx",
+  input: { name: "John Smith", email: "john@example.com" }  // existing data
+});
+
+// result.result is the running charm - replaces the original record
+```
+
+### Each Forked Pattern:
 1. **Is a complete, coherent UX** - not fragmented pieces
 2. **Exports `NAME` and `[UI]`** - can be rendered standalone
-3. **Implements relevant minimal interfaces** - can be used in containers
-4. **Can evolve independently** - add features without affecting others
+3. **Satisfies the base interface** - can be used in containers
+4. **Lives in user's space** - they own it, can modify it
 
 ---
 
 ## Container Pattern Protocol
 
-Containers aggregate items that match a minimal interface:
+Containers manage items, discover patterns, and support nested lists:
 
 ```typescript
 // packages/patterns/container-protocol.ts
@@ -360,114 +526,208 @@ export interface ContainerItem<T> {
   item: T;           // The actual item (matches minimal interface)
   name: string;      // Display name
   ui?: VNode;        // Optional inline UI
+  sameAs?: T;        // Optional: link to same entity in another context
 }
 
 /**
  * What containers expose
  */
 export interface ContainerProtocol<T> {
+  // Direct items managed by this container
   items: Writable<ContainerItem<T>[]>;
+
+  // Nested containers (lists of lists)
+  subLists: Writable<ContainerProtocol<T>[]>;
+
+  // All items including from subLists (computed)
+  allItems: ContainerItem<T>[];
+
+  // Handlers
   addItem: Stream<{ item: T }>;
   removeItem: Stream<{ item: T }>;
-  mentionable: unknown[];  // Items that can be @-mentioned
+  addSubList: Stream<{ list: ContainerProtocol<T> }>;
+  removeSubList: Stream<{ list: ContainerProtocol<T> }>;
+
+  // For @-mentions
+  mentionable: unknown[];
+
+  // Pattern discovery: find patterns that satisfy interface T
+  // (used for the "Add" dropdown - just lists existing patterns, no forking)
+  availablePatterns: PatternRef[];
+}
+
+/**
+ * Reference to a pattern that can be instantiated
+ */
+export interface PatternRef {
+  name: string;
+  schema: unknown;  // The pattern's type
+  create: () => ContainerItem<unknown>;
+}
+
+/**
+ * Record upgrade protocol - for individual records, not containers
+ * This is how fork-on-demand works at the record level.
+ */
+export interface RecordUpgradeProtocol<T> {
+  // Current record data
+  currentData: T;
+  currentType: PatternRef;
+
+  // Available upgrades (patterns that extend current type)
+  availableUpgrades: UpgradeOption[];
+
+  // Upgrade the record to a new type (uses compileAndRun internally)
+  upgradeRecord: Stream<{ newType: PatternRef | string }>;  // string = custom fork request
+}
+
+export interface UpgradeOption {
+  targetType: PatternRef;
+  requiredFields: string[];  // Fields that need to be added
+  description: string;       // e.g., "Add birthday to make this a FamilyMember"
 }
 ```
 
 ---
 
-## Example: Task Container
+## Example: Contacts Container (with Lists of Lists)
 
 ```typescript
 /// <cts-enable />
 import { pattern, NAME, UI, Writable, action, computed } from "commontools";
-import type { TaskLike, ContainerItem } from "commontools";
+import type { PersonLike, ContainerItem, ContainerProtocol } from "commontools";
 
 interface Input {
   title?: string;
-  items?: Writable<ContainerItem<TaskLike>[]>;
+  items?: Writable<ContainerItem<PersonLike>[]>;
+  subLists?: Writable<ContainerProtocol<PersonLike>[]>;
 }
 
 interface Output {
   [NAME]: string;
   [UI]: VNode;
-  items: ContainerItem<TaskLike>[];
-  addItem: Stream<{ item: TaskLike }>;
+  items: ContainerItem<PersonLike>[];
+  subLists: ContainerProtocol<PersonLike>[];
+  allItems: ContainerItem<PersonLike>[];  // items + all subList items
+  addItem: Stream<{ item: PersonLike }>;
+  addSubList: Stream<{ list: ContainerProtocol<PersonLike> }>;
   mentionable: unknown[];
 }
 
-export default pattern<Input, Output>(({ title, items }) => {
-  const data = items ?? Writable.of<ContainerItem<TaskLike>[]>([]);
+export default pattern<Input, Output>(({ title, items, subLists }) => {
+  const data = items ?? Writable.of<ContainerItem<PersonLike>[]>([]);
+  const lists = subLists ?? Writable.of<ContainerProtocol<PersonLike>[]>([]);
 
-  const addItem = action(({ item }: { item: TaskLike }) => {
-    data.push({
-      item,
-      name: item.title,
-    });
+  const addItem = action(({ item }: { item: PersonLike }) => {
+    data.push({ item, name: item.name });
+  });
+
+  const addSubList = action(({ list }: { list: ContainerProtocol<PersonLike> }) => {
+    lists.push(list);
+  });
+
+  // Combine direct items + items from all sub-lists
+  const allItems = computed(() => {
+    const direct = data.get();
+    const fromSubLists = lists.get().flatMap(sub => sub.allItems);
+    return [...direct, ...fromSubLists];
   });
 
   return {
-    [NAME]: computed(() => title ?? "Tasks"),
+    [NAME]: computed(() => title ?? "Contacts"),
     [UI]: (
       <ct-screen>
         <ct-vstack gap="sm">
+          {/* Direct items */}
           {data.map(entry => (
             <ct-card>
-              <ct-hstack gap="sm" align="center">
-                <ct-checkbox $checked={entry.item.done} />
-                <span>{entry.name}</span>
-              </ct-hstack>
+              <span>{entry.name}</span>
+            </ct-card>
+          ))}
+
+          {/* Sub-lists (e.g., AutoImportedGoogleContacts) */}
+          {lists.map(subList => (
+            <ct-card>
+              <ct-vstack gap="xs">
+                <strong>{subList[NAME]}</strong>
+                {subList.allItems.map(entry => (
+                  <span style="margin-left: 1em">{entry.name}</span>
+                ))}
+              </ct-vstack>
             </ct-card>
           ))}
         </ct-vstack>
       </ct-screen>
     ),
     items: data,
+    subLists: lists,
+    allItems,
     addItem,
-    mentionable: computed(() =>
-      data.get().filter(e => !e.item.done).map(e => e.item)
-    ),
+    addSubList,
+    mentionable: allItems,
   };
 });
 ```
 
 ---
 
-## Example: Family Member Variant
+## Example: Forking Contact to Create FamilyMember
 
-A complete, coherent person variant:
+This shows how a user might fork the base Contact pattern to create a FamilyMember variant.
+
+### Base: contact.tsx (provided)
+```typescript
+/// <cts-enable />
+import { pattern, NAME, UI, Writable, computed } from "commontools";
+import type { PersonLike } from "commontools";
+
+export interface Contact extends PersonLike {
+  name: string;
+  email?: string;
+  phone?: string;
+}
+
+export default pattern<{ contact?: Writable<Contact> }, { contact: Contact }>(({ contact }) => {
+  const data = contact ?? Writable.of<Contact>({ name: "" });
+  return {
+    [NAME]: computed(() => data.name || "Contact"),
+    [UI]: (
+      <ct-screen>
+        <ct-vstack gap="md">
+          <ct-input $value={data.key("name")} placeholder="Name" />
+          <ct-input $value={data.key("email")} placeholder="Email" />
+          <ct-input $value={data.key("phone")} placeholder="Phone" />
+        </ct-vstack>
+      </ct-screen>
+    ),
+    contact: data,
+  };
+});
+```
+
+### Forked: family-member.tsx (user creates when needed)
+
+User says: "I need to track family members with birthdays and dietary restrictions."
+LLM forks contact.tsx and adds the requested fields:
 
 ```typescript
 /// <cts-enable />
-import { pattern, NAME, UI, Writable, Default, computed } from "commontools";
+import { pattern, NAME, UI, Writable, computed } from "commontools";
 import type { PersonLike } from "commontools";
 
+// Forked from Contact, added: relationship, birthday, dietary, gifts
 export interface FamilyMember extends PersonLike {
   name: string;
-  relationship: string;           // "spouse", "child", "parent", etc.
-  birthday?: string;              // ISO date
-  dietaryRestrictions?: string[];
-  giftPreferences?: string[];
-  notes?: string;
+  relationship: string;           // Added: "spouse", "child", "parent", etc.
+  birthday?: string;              // Added: ISO date
+  dietaryRestrictions?: string[]; // Added: for meal planning
+  giftPreferences?: string[];     // Added: for gift giving
 }
 
-interface Input {
-  member?: Writable<FamilyMember>;
-}
-
-interface Output {
-  [NAME]: string;
-  [UI]: VNode;
-  member: FamilyMember;
-}
-
-export default pattern<Input, Output>(({ member }) => {
-  const data = member ?? Writable.of<FamilyMember>({
-    name: "",
-    relationship: "",
-  });
-
+export default pattern<{ member?: Writable<FamilyMember> }, { member: FamilyMember }>(({ member }) => {
+  const data = member ?? Writable.of<FamilyMember>({ name: "", relationship: "" });
   return {
-    [NAME]: computed(() => `👨‍👩‍👧 ${data.name || "Family Member"}`),
+    [NAME]: computed(() => data.name || "Family Member"),
     [UI]: (
       <ct-screen>
         <ct-vstack gap="md">
@@ -479,7 +739,6 @@ export default pattern<Input, Output>(({ member }) => {
           <ct-input $value={data.key("birthday")} type="date" placeholder="Birthday" />
           <ct-tags tags={data.key("dietaryRestrictions")} placeholder="Dietary restrictions" />
           <ct-tags tags={data.key("giftPreferences")} placeholder="Gift ideas" />
-          <ct-textarea $value={data.key("notes")} placeholder="Notes..." />
         </ct-vstack>
       </ct-screen>
     ),
@@ -488,57 +747,56 @@ export default pattern<Input, Output>(({ member }) => {
 });
 ```
 
+**Key point:** FamilyMember wasn't pre-designed. It was created just-in-time when the user needed it.
+
 ---
 
-## Collection Projections
+## Lists of Lists in Practice
 
-For "show me all X in space" queries, create **collection projections**:
+### Example: Contacts with Google Import Sub-List
 
 ```typescript
 /// <cts-enable />
-import { pattern, computed } from "commontools";
-import type { TaskLike } from "commontools";
+import { pattern, NAME, UI, Writable, computed } from "commontools";
+import type { PersonLike, ContainerProtocol } from "commontools";
 
-interface Notebook {
-  title: string;
-  items: Array<{ title: string; completed?: boolean }>;
+// A sub-list that imports from Google Contacts
+interface GoogleContactsImport extends ContainerProtocol<PersonLike> {
+  syncStatus: 'synced' | 'syncing' | 'error';
+  lastSync: string;
 }
 
-interface Input {
-  notebooks: Notebook[];
-}
-
-interface Output {
-  tasks: TaskLike[];  // Notebooks projected as tasks
-}
-
-// Project notebook items to TaskLike interface
-export default pattern<Input, Output>(({ notebooks }) => {
-  const tasks = computed(() => {
-    return notebooks.flatMap(nb =>
-      nb.items.map(item => ({
-        title: `${nb.title}: ${item.title}`,
-        done: item.completed ?? false,
-      }))
-    );
-  });
-
-  return { tasks };
+// Main Contacts container can include this as a sub-list
+const contacts = ContactsContainer({
+  items: [
+    { item: { name: "Alice" }, name: "Alice" },
+    { item: { name: "Bob" }, name: "Bob" },
+  ],
+  subLists: [
+    googleContactsImport,  // Includes all Google contacts as a sub-list
+    workContactsImport,    // Could have multiple sub-lists
+  ],
 });
+
+// contacts.allItems now includes Alice, Bob, AND all items from sub-lists
 ```
 
-**Containers can add entire projections:**
+### Why Lists of Lists?
 
-```typescript
-// In a task container, add "notebooks projected as tasks"
-const notebookTasks = NotebooksAsTasks({ notebooks });
-taskContainer.addCollection.send({ projection: notebookTasks });
-```
+1. **Keep provenance**: You know Carol came from Google import, not manually added
+2. **Bulk operations**: Remove entire import source at once
+3. **Avoid duplication**: Don't copy 500 Google contacts into main list
+4. **Structure preservation**: Main list + organized sub-groups
+5. **Easy cleanup**: If Google sync breaks, just remove that sub-list
 
-This enables:
-- Add/remove **entire collections** to containers
-- Higher quality because the process is aware of what it processes
-- Works for birthdays → calendar, notebook checkboxes → tasks, etc.
+### When to Use Sub-Lists vs Projection
+
+| Use Sub-Lists | Use Projections |
+|---------------|-----------------|
+| Same interface type | Different interface types |
+| Imported contacts → Contacts | Notebook checkboxes → Tasks |
+| Work contacts → Contacts | Birthdays → Calendar events |
+| Structure matters | Shape transformation needed |
 
 ---
 
@@ -548,104 +806,72 @@ The architect clarified Tony's actual pattern needs:
 
 | Need | Solution |
 |------|----------|
-| Task list with tasks | Container pattern for `TaskLike` |
+| Task list with tasks | Container pattern for `TaskLike` with subLists |
 | Calendar with events | Container pattern for `EventLike`/`CalendarItem` |
-| Tasks/events can be different shapes | N variant patterns that implement the interface |
+| Tasks/events can be different shapes | Fork base patterns when needed, add fields |
 | Create new items | `addItem` handler on container |
-| Mentionable items | `mentionable` output on container |
+| Create new types | Container helps discover/fork patterns |
+| Import contacts from Google | Add GoogleContacts as subList, don't flatten |
+| Mentionable items | `mentionable` = all items from items + subLists |
 
 **Implementation recipe:**
 1. Define TypeScript type for minimal interface: `{ done: boolean, title: string }`
-2. Define N patterns that have at least that, but expand into other shapes
-3. Patterns output `NAME` and `[UI]`
-4. Container pattern lists them, exposes `addItem` handler
-5. Add mentionable items to container's `mentionable` output
+2. Provide base patterns: `task.tsx`, `contact.tsx`, `event.tsx`
+3. Container helps users fork base patterns to create new types
+4. Container supports subLists for imports and grouping
+5. Simple `sameAs` for occasional duplicates
 
 ---
 
-## Annotations Reframed: Just More Records
+## Handling Duplicates: Simple `sameAs`
 
-The original annotation design makes sense when viewed from a different angle: **it's the same schema, just approached differently.**
+### The Scenario
 
-### The Key Insight
+You have:
+- `contractor`: `{ name: "John Smith", hourlyRate: 150, company: "Acme" }`
+- `friend`: `{ name: "John Smith", birthday: "1985-03-15" }`
 
-`SSNPerson.tsx` isn't "an annotation that attaches TO a person." It IS a person record:
+These might be the same person. What do you do?
 
-| Old Framing | New Framing |
-|-------------|-------------|
-| SSNPerson is an annotation | SSNPerson is a PersonLike record |
-| It attaches TO the "real" person | It IS a person, just minimal |
-| Special annotation system needed | Just records + reconciliation |
-
-Both `FamilyMember` and `SSNPerson` satisfy `PersonLike { name }`:
-
-```
-┌─────────────────────┐         ┌─────────────────────┐
-│ FamilyMember        │         │ SSNPerson           │
-│ (PersonLike)        │         │ (PersonLike)        │
-│                     │         │                     │
-│ name: "John Smith"  │   ←─→   │ name: "John Smith"  │
-│ birthday: "1985-03" │ reconcile│ ssn: "123-45-6789" │
-│ dietary: ["vegan"]  │         │                     │
-│ gifts: ["books"]    │         │ (that's it - just   │
-│ notes: "..."        │         │  name and SSN)      │
-└─────────────────────┘         └─────────────────────┘
-
-Both are just PersonLike records with different fields.
-They get RECONCILED as the same entity, not annotated.
-```
-
-### Why This Matters
-
-**No special annotation system needed.** Everything is just:
-1. Records that satisfy a minimal interface
-2. Some records have many fields, some have few
-3. Records about the same entity get linked via reconciliation
-
-The SSNPerson pattern exists because:
-- Maybe SSN data lives in a separate security context
-- Maybe it was imported from a different system
-- Maybe someone created it before you had the full person record
-
-It's not subordinate to a "real" person - it IS a person record, just a sparse one.
-
-### When You'd Have Sparse Records
+### Simple Solution: `sameAs` Field
 
 ```typescript
-// SSNPerson - a minimal person record with just identity info
-interface SSNPerson extends PersonLike {
-  name: string;       // satisfies PersonLike
-  ssn: string;        // the only extra field
-}
+// When you realize they're the same person, just link them
+contractor.sameAs = friend;
 
-// ImportedContact - from an email import, sparse data
-interface ImportedContact extends PersonLike {
-  name: string;       // satisfies PersonLike
-  email: string;      // all we got from the import
-  importSource: string;
-}
-
-// These reconcile with your rich FamilyMember record
-// No annotation system - just records + identity linking
+// Or bidirectional
+contractor.sameAs = friend;
+friend.sameAs = contractor;
 ```
 
-**Use cases for sparse records:**
-- Sensitive data separation (SSN in its own record)
-- Import reconciliation (imported contact with minimal data)
-- Cross-context linking (work contractor, personal friend)
-- Incremental data collection (start sparse, add fields over time)
+That's it. No complex reconciliation infrastructure.
 
-### Not the Primary Model
+### Why This Is Enough
 
-For most cases, prefer:
-1. **Forking a variant pattern** - add the fields you need upfront
-2. **Using collection projections** - transform data as needed
-3. **Rich records** - include fields in the original pattern
+1. **Duplicates are rare**: Most people in your contacts are distinct
+2. **When they happen, they're obvious**: User notices "wait, I have two John Smiths"
+3. **Simple fix**: Link them with sameAs, move on
+4. **No merged views needed**: Just navigate from one to the other
 
-Sparse records + reconciliation are for:
-- Same entity appearing in different contexts
-- Data from different sources/imports
-- Security separation of sensitive fields
+### What NOT to Build
+
+Don't build:
+- Complex identity resolution algorithms
+- Confidence scoring on matches
+- Automatic deduplication systems
+- Merged view generation
+- Conflict resolution UX
+
+These are over-engineering for an edge case. If someone really needs sophisticated deduplication, they can build a specialized tool for it.
+
+### When Duplicates Arise
+
+| Situation | Solution |
+|-----------|----------|
+| Imported contacts overlap with manual | User links them with sameAs |
+| Same person in work and personal lists | Lives in both, linked with sameAs |
+| Typo creates duplicate | Delete the duplicate |
+| Actually two different people | Leave them separate (no sameAs) |
 
 ---
 
@@ -665,103 +891,149 @@ Sparse records + reconciliation are for:
 ### Phase 1: Core Infrastructure
 - [ ] Define minimal interface types (`TaskLike`, `PersonLike`, `EventLike`)
 - [ ] Export from "commontools" entrypoint
-- [ ] Revise container-protocol.ts
+- [ ] Revise container-protocol.ts with subLists support
 
-### Phase 2: First Container + Variants
-- [ ] `task-container.tsx` - Container for TaskLike
-- [ ] `todo-item.tsx` - Basic task variant
-- [ ] `shopping-item.tsx` - Shopping task variant
+### Phase 2: Base Patterns + First Container
+- [ ] `contact.tsx` - Base PersonLike pattern (minimal: name, email?, phone?)
+- [ ] `task.tsx` - Base TaskLike pattern (minimal: title, done)
+- [ ] `event.tsx` - Base EventLike pattern (minimal: title, date)
+- [ ] `contacts-container.tsx` - Container with subLists support
 
-### Phase 3: Person Variants
-- [ ] `family-member.tsx` - With birthday, dietary, gifts
-- [ ] `contact.tsx` - Lightweight CRM
-- [ ] `employee.tsx` - Work contacts
+### Phase 3: Record-Level Upgrade Infrastructure
+- [ ] Pattern discovery: find patterns satisfying an interface (for container "Add" menu)
+- [ ] Upgrade discovery: find patterns that extend current record's type
+- [ ] `RecordUpgradeProtocol` implementation for individual records
+- [ ] LLM-assisted fork: generate new pattern source with requested fields
+- [ ] Integration with `compileAndRun`: compile forked pattern dynamically
+- [ ] Record replacement: replace record in-place with upgraded type (preserve data)
+- [ ] Schema validation: verify fork still satisfies base interface
 
-### Phase 4: Event Variants
-- [ ] `potluck.tsx` - Social event with dishes
-- [ ] `staff-meeting.tsx` - Work event with agenda
-- [ ] `kids-birthday.tsx` - Family event with guests
+### Phase 4: Lists of Lists
+- [ ] `addSubList` handler on containers
+- [ ] Combined `allItems` computed property
+- [ ] Example: GoogleContactsImport as sub-list of Contacts
 
-### Phase 5: Collection Projections
-- [ ] `notebooks-as-tasks.tsx` - Example projection
-- [ ] Container `addCollection` handler
-- [ ] Calendar integration with event projections
+### Phase 5: Simple Duplication Handling
+- [ ] Add optional `sameAs` field to ContainerItem
+- [ ] UI to link two items as same entity
+- [ ] Navigation between linked items
 
-### Phase 6: Fork-and-Pull Infrastructure
-- [ ] Pattern forking capability
-- [ ] Schema comparison (does fork satisfy base?)
-- [ ] LLM-assisted feature merging between forks
-
-### Phase 7: Identity & Reconciliation
-- [ ] Identity link pattern
-- [ ] Reconciliation UI (link two entities as same)
-- [ ] Unified view generation for linked entities
-- [ ] Conflict detection and resolution
+### Phase 6: UX for Container + Record Upgrade
+- [ ] Container "Add" menu shows available patterns (just selection, no forking)
+- [ ] Record view shows "Upgrade" menu with available type upgrades
+- [ ] "Fork and customize..." option in record upgrade menu triggers LLM flow
+- [ ] compileAndRun integration for dynamic pattern compilation
+- [ ] Record replacement UI (preserves data, changes type)
+- [ ] Browse patterns others have created (optional)
 
 ---
 
 ## Verification Plan
 
 ### Container Protocol
-1. **Test addItem**: Add task to container, verify it appears
-2. **Test variant compatibility**: Add different TaskLike variants to same container
-3. **Test mentionable**: Verify non-archived items appear in mentionable
+1. **Test addItem**: Add contact to container, verify it appears
+2. **Test addSubList**: Add GoogleContacts import, verify items appear in allItems
+3. **Test mentionable**: Verify all items (direct + from subLists) appear in mentionable
 
-### Variant Patterns
-4. **Test family-member.tsx**: Create, edit, verify all fields work
-5. **Test interface conformance**: Verify variant can be added to container
+### Record-Level Upgrade
+4. **Test pattern discovery**: Container finds patterns satisfying PersonLike for "Add" menu
+5. **Test upgrade discovery**: Record shows available type upgrades (Contact → FamilyMember)
+6. **Test fork + compileAndRun**: Fork contact.tsx, add birthday field, compile dynamically
+7. **Test record replacement**: Upgrade Alice from Contact to FamilyMember, verify data preserved
+8. **Test schema validation**: Upgraded pattern still satisfies PersonLike interface
 
-### Collection Projections
-6. **Test notebook → tasks**: Project notebooks, verify TaskLike output
-7. **Test add projection to container**: Add entire projection, verify items appear
+### Lists of Lists
+9. **Test nested structure**: Contacts with 2 subLists, verify allItems combines correctly
+10. **Test provenance**: Items from subLists show their source
+11. **Test bulk removal**: Remove subList, verify its items disappear from allItems
+
+### Simple Duplicates
+12. **Test sameAs**: Link two contacts, verify navigation between them works
 
 ### Integration
-8. **Manual test**: Create task container, add various task variants
-9. **Manual test**: Create calendar, add event variants and projections
+13. **Manual test**: Create Contacts, add direct contacts, add GoogleContacts subList
+14. **Manual test**: View Alice (Contact), use Upgrade menu to make her a Contractor
+15. **Verify**: After upgrade, Alice appears as Contractor in container, original data preserved
 
 ---
 
 ## Questions for Architect (Berni)
 
-### Addressed by Revision
+### Addressed by This Revision (v3)
 
-1. ~~Over-engineering~~ → Simplified to Container + Minimal Interfaces
-2. ~~Annotation complexity~~ → Reframed as identity linking
-3. ~~Tony's needs~~ → Directly addressed with container protocol
-4. ~~Customization tension~~ → Fork-and-pull model
+1. ~~Over-engineering reconciliation~~ → Simple `sameAs` field
+2. ~~Pre-designed variant catalogs~~ → Fork-on-demand
+3. ~~Complex identity infrastructure~~ → Treat duplicates as edge case
+4. ~~Flat container model~~ → Lists of lists (subLists)
 
 ### Still Open
 
 1. **Interface location**: Should minimal interfaces live in `packages/api/types/` or elsewhere?
 
-2. **Container registration**: How do containers discover available variant patterns?
+2. **Pattern discovery mechanism**: How does a container find all patterns that satisfy its interface?
+   - Query by interface type?
+   - Registry of patterns with their interfaces?
+   - Static analysis of pattern schemas?
 
-3. **Projection mechanics**: Pull vs push? Who creates projections? Should they point back to original?
+3. **Record upgrade discovery**: How does a record know what types it can upgrade to?
+   - Find patterns where current type is a subset of target type?
+   - Registry of "extends" relationships between patterns?
+   - LLM analysis of schema compatibility?
 
-4. **Identity link storage**: Where do identity links live? Separate entities? Bidirectional fields?
+4. **compileAndRun integration for upgrades**: How exactly does the upgrade flow work?
+   - LLM generates forked pattern source
+   - `compileAndRun` compiles it dynamically
+   - How is the record "replaced in-place" in the container?
+   - Does the new pattern get saved to user's space for reuse?
 
-5. **Fork mechanics**: How do users actually fork a pattern? UI? CLI? LLM-generated?
+5. **SubList identity**: How do we track where a sub-list came from?
+   - Reference to original container?
+   - Import source metadata?
+   - Live sync vs snapshot?
 
 6. **Schema validation**: How do we verify a fork still satisfies the base interface?
-
-7. **Conflict resolution**: When linked entities have conflicting values, what's the UX?
+   - TypeScript compiler check?
+   - Runtime validation?
+   - Warning vs error on violation?
 
 ---
 
-## Appendix: What Changed from v1
+## Appendix: What Changed
 
-| Original Design | Revised Design | Rationale |
-|----------------|----------------|-----------|
-| `[ANNOTATIONS]` array | Reframed as identity pointers | Not extensibility, it's reconciliation |
-| `[ANNOTATES]` back-reference | Identity links | Clearer mental model |
-| `[ANNOTATION_SOURCE]` provenance | Removed | Over-engineering |
-| Computed annotation adapters | Removed | Collection projections are simpler |
-| Three-class annotation model | Removed | Too complex |
-| Single "person" + annotations | N variant patterns via fork | Coherent UX per variant |
-| Central pattern definition | Fork-and-pull model | Organic ecosystem growth |
-| — | Schelling points | Interoperability without coordination |
-| — | Reconciliation problem | Same entity, different contexts |
-| — | Folksonomy growth | Features spread through adoption |
+### v1 → v2 (Annotation → Reconciliation)
+
+| v1 Design | v2 Design | Rationale |
+|-----------|-----------|-----------|
+| `[ANNOTATIONS]` array | Identity linking | Not extensibility, it's reconciliation |
+| Annotation system | Records + reconciliation | Simpler mental model |
+| Single "person" + annotations | N variant patterns | Coherent UX per variant |
+
+### v2 → v3 (Pre-Designed → Fork-on-Demand)
+
+| v2 Design | v3 Design | Rationale |
+|-----------|-----------|-----------|
+| Pre-designed N variants | Fork-on-demand | Create types when you need them |
+| Complex reconciliation | Simple `sameAs` field | Duplicates are edge case |
+| Flat container items | Lists of lists (subLists) | Contacts includes GoogleContacts |
+| Catalog of variants | Container discovers patterns | Container is the entry point |
+| Identity linking infrastructure | Simple field reference | Don't over-engineer edge cases |
+
+### v3 → v4 (Container Fork → Record-Level Upgrade)
+
+| v3 Design | v4 Design | Rationale |
+|-----------|-----------|-----------|
+| Fork from container "Add" menu | Fork from individual record "Upgrade" menu | Fork happens on records, not containers |
+| Container has forkPattern handler | Container just lists patterns | Simpler container responsibility |
+| Unclear when fork happens | Fork when viewing a record and needing more fields | Clearer mental model |
+| No record replacement model | Record upgraded in-place, data preserved | Upgrade = replace with richer type |
+| N/A | compileAndRun enables dynamic compilation | Leverage existing builtin for fork flow |
+
+### Key Insight (v4)
+
+> "Fork-on-demand happens on **individual records**, not from the container's add dropdown. When viewing John Smith (Contact), you can upgrade him to a Contractor by adding hourlyRate. The LLM forks the pattern, compileAndRun compiles it, and the record is replaced in-place."
+
+**Container responsibility:** List available patterns in "Add" menu (no forking)
+**Record responsibility:** Show upgrade options, enable fork-and-upgrade via compileAndRun
 
 ---
 
@@ -769,7 +1041,9 @@ Sparse records + reconciliation are for:
 
 - **Architect feedback (v1)**: Discord messages (2026-01-27, morning)
 - **Architect feedback (v2)**: Live conversation (2026-01-27, afternoon) - fork-and-pull, reconciliation
+- **Architect feedback (v4)**: Clarification that fork happens on records, not container add menu
 - **Container protocol**: `packages/patterns/container-protocol.ts`
 - **Existing patterns**: `packages/patterns/contacts/`, `packages/patterns/todo-list/`
 - **Template registry**: `packages/patterns/record/template-registry.ts` - existing fork model
 - **Module registry**: `packages/patterns/record/registry.ts` - composable modules
+- **compileAndRun builtin**: `packages/runner/src/builtins/compile-and-run.ts` - dynamic pattern compilation
