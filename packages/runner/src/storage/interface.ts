@@ -1,3 +1,4 @@
+import type { Immutable } from "@commontools/utils/types";
 import type { EntityId } from "../create-ref.ts";
 import type { Cancel } from "../cancel.ts";
 import type {
@@ -189,7 +190,7 @@ export interface IStorageProvider {
    * @param uri - uri of the entity to get the value for.
    * @returns Value or undefined if the value is not in storage.
    */
-  get<T = any>(uri: URI): StorageValue<T> | undefined;
+  get<T = any>(uri: URI): Immutable<StorageValue<T>> | undefined;
 
   /**
    * Subscribe to storage updates.
@@ -198,7 +199,10 @@ export interface IStorageProvider {
    * @param callback - Callback function.
    * @returns Cancel function to stop the subscription.
    */
-  sink<T = any>(uri: URI, callback: (value: StorageValue<T>) => void): Cancel;
+  sink<T = any>(
+    uri: URI,
+    callback: (value: Immutable<StorageValue<T>>) => void,
+  ): Cancel;
 
   /**
    * Destroy the storage provider. Used for tests only.

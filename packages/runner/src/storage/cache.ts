@@ -1733,7 +1733,7 @@ class ProviderConnection implements IStorageProvider {
 
   sink<T = any>(
     uri: URI,
-    callback: (value: StorageValue<T>) => void,
+    callback: (value: Immutable<StorageValue<T>>) => void,
   ) {
     return this.provider.sink(uri, callback);
   }
@@ -1746,7 +1746,7 @@ class ProviderConnection implements IStorageProvider {
     return this.provider.synced();
   }
 
-  get<T = any>(uri: URI): StorageValue<T> | undefined {
+  get<T = any>(uri: URI): Immutable<StorageValue<T>> | undefined {
     return this.provider.get(uri);
   }
 
@@ -1770,8 +1770,10 @@ export class Provider implements IStorageProvider {
   subscription: IStorageSubscription;
   spaceIdentity?: Signer;
 
-  subscribers: Map<string, Set<(value: StorageValue<StorableDatum>) => void>> =
-    new Map();
+  subscribers: Map<
+    string,
+    Set<(value: Immutable<StorageValue<StorableDatum>>) => void>
+  > = new Map();
   // Tracks server-side subscriptions so we can re-establish them after reconnection
   // These promises will sometimes be pending, since we also use this to avoid
   // sending a duplicate subscription.
@@ -1837,7 +1839,7 @@ export class Provider implements IStorageProvider {
 
   sink<T = any>(
     uri: URI,
-    callback: (value: StorageValue<T>) => void,
+    callback: (value: Immutable<StorageValue<T>>) => void,
   ): Cancel {
     // Capture workspace locally, so that if it changes later, our cancel
     // will unsubscribe with the same object.
@@ -1851,7 +1853,7 @@ export class Provider implements IStorageProvider {
         // but we do this with the empty object per
         // @see https://github.com/commontoolsinc/labs/pull/989#discussion_r2033651935
         // TODO(@seefeldb): Make compatible `sink` API change
-        callback((revision?.is ?? {}) as unknown as StorageValue<T>);
+        callback((revision?.is ?? {}) as unknown as Immutable<StorageValue<T>>);
       }
     };
 
@@ -1892,10 +1894,10 @@ export class Provider implements IStorageProvider {
     ]) as unknown as Promise<void>;
   }
 
-  get<T = any>(uri: URI): StorageValue<T> | undefined {
+  get<T = any>(uri: URI): Immutable<StorageValue<T>> | undefined {
     const entity = this.workspace.get({ id: uri, type: this.the });
 
-    return entity?.is as StorageValue<T> | undefined;
+    return entity?.is as Immutable<StorageValue<T>> | undefined;
   }
 
   // This is mostly just used by tests and tools, since the transactions will
