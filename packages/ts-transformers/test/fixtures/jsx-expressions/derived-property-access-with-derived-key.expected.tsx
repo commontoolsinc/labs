@@ -209,67 +209,10 @@ export default recipe({
                 required: ["name", "done"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema, { items }, ({ items }) => items.mapWithPattern(__ctHelpers.recipe({
-        type: "object",
-        properties: {
-            element: {
-                $ref: "#/$defs/Item"
-            },
-            index: {
-                type: "number"
-            },
-            params: {
-                type: "object",
-                properties: {}
-            }
-        },
-        required: ["element", "params"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean",
-                        asCell: true
-                    }
-                },
-                required: ["name", "done"]
-            }
-        }
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            aisle: {
-                type: "string"
-            },
-            item: {
-                $ref: "#/$defs/Item",
-                asOpaque: true
-            }
-        },
-        required: ["aisle", "item"],
-        $defs: {
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean",
-                        asCell: true
-                    }
-                },
-                required: ["name", "done"]
-            }
-        }
-    } as const satisfies __ctHelpers.JSONSchema, ({ element: item, index: idx, params: {} }) => ({
+    } as const satisfies __ctHelpers.JSONSchema, { items }, ({ items }) => items.map((item, idx) => ({
         aisle: `Aisle ${(idx % 3) + 1}`,
         item: item,
-    })), {}));
+    })));
     // Group by aisle - returns Record<string, Assignment[]>
     const groupedByAisle = derive({
         type: "object",
