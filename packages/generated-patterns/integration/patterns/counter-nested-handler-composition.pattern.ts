@@ -34,7 +34,7 @@ type PipelineHistoryEntry = {
 };
 
 interface StageContext {
-  stage: Cell<StageEntry | undefined>;
+  stage: Cell<StageEntry | null>;
   preparedCount: Cell<number>;
   lastPrepared: Cell<PreparedSnapshot>;
 }
@@ -73,7 +73,7 @@ const applyStagedAdjustment = handler(
     context: {
       value: Cell<number>;
       history: Cell<PipelineHistoryEntry[]>;
-      stage: Cell<StageEntry | undefined>;
+      stage: Cell<StageEntry | null>;
       appliedCount: Cell<number>;
     },
   ) => {
@@ -85,7 +85,7 @@ const applyStageEntry = (
   context: {
     value: Cell<number>;
     history: Cell<PipelineHistoryEntry[]>;
-    stage: Cell<StageEntry | undefined>;
+    stage: Cell<StageEntry | null>;
     appliedCount: Cell<number>;
   },
 ) => {
@@ -108,7 +108,7 @@ const applyStageEntry = (
   const appliedSoFar = context.appliedCount.get() ?? 0;
   context.appliedCount.set(appliedSoFar + 1);
 
-  context.stage.set(undefined);
+  context.stage.set(null);
 };
 
 const stageOnly = handler(
@@ -126,7 +126,7 @@ const composeAndApply = handler(
     context: StageContext & {
       value: Cell<number>;
       history: Cell<PipelineHistoryEntry[]>;
-      stage: Cell<StageEntry | undefined>;
+      stage: Cell<StageEntry | null>;
       appliedCount: Cell<number>;
     },
   ) => {
@@ -152,7 +152,7 @@ const liftLastPreparedView = lift(
 export const counterWithNestedHandlerComposition = recipe<NestedHandlerArgs>(
   "Counter With Nested Handler Composition",
   ({ value, history }) => {
-    const stage = cell<StageEntry | undefined>(undefined);
+    const stage = cell<StageEntry | null>(null);
     const preparedCount = cell(0);
     const appliedCount = cell(0);
     const lastPrepared = cell<PreparedSnapshot>({
