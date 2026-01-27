@@ -5,9 +5,9 @@ import {
   isStorableValue,
   toDeepStorableValue,
   toStorableValue,
-} from "../src/value-codec.ts";
+} from "../storable-value.ts";
 
-describe("value-codec", () => {
+describe("storable-value", () => {
   describe("isArrayIndexPropertyName", () => {
     describe("returns true for valid array indices", () => {
       it("accepts '0'", () => {
