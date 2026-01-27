@@ -16,23 +16,23 @@ import {
 import ReadingItemDetail, {
   type ItemStatus,
   type ItemType,
-  type ReadingItemCharm,
+  type ReadingItemPiece,
 } from "./reading-item-detail.tsx";
 
 // Re-export types for consumers and tests
-export type { ItemStatus, ItemType, ReadingItemCharm };
+export type { ItemStatus, ItemType, ReadingItemPiece };
 
-interface Input {
-  items?: Writable<Default<ReadingItemCharm[], []>>;
+interface ReadingListInput {
+  items?: Writable<Default<ReadingItemPiece[], []>>;
 }
 
-interface Output {
+interface ReadingListOutput {
   [NAME]: string;
   [UI]: VNode;
-  items: ReadingItemCharm[];
+  items: ReadingItemPiece[];
   totalCount: number;
   addItem: Stream<{ title: string; author: string; type: ItemType }>;
-  removeItem: Stream<{ item: ReadingItemCharm }>;
+  removeItem: Stream<{ item: ReadingItemPiece }>;
 }
 
 const TYPE_EMOJI: Record<ItemType, string> = {
@@ -50,7 +50,7 @@ const renderStars = (rating: number | null): string => {
   return "★".repeat(rating) + "☆".repeat(5 - rating);
 };
 
-export default pattern<Input, Output>(({ items }) => {
+export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
   const filterStatus = Writable.of<ItemStatus | "all">("all");
   const newTitle = Writable.of("");
   const newAuthor = Writable.of("");
@@ -67,21 +67,21 @@ export default pattern<Input, Output>(({ items }) => {
     ) => {
       const trimmedTitle = title.trim();
       if (trimmedTitle) {
-        // Create a new ReadingItemDetail charm and store its reference
-        const newItemCharm = ReadingItemDetail({
+        // Create a new ReadingItemDetail piece and store its reference
+        const newItemPiece = ReadingItemDetail({
           title: trimmedTitle,
           author: author.trim(),
           type,
           addedAt: Date.now(),
         });
-        items.push(newItemCharm);
+        items.push(newItemPiece);
         newTitle.set("");
         newAuthor.set("");
       }
     },
   );
 
-  const removeItem = action(({ item }: { item: ReadingItemCharm }) => {
+  const removeItem = action(({ item }: { item: ReadingItemPiece }) => {
     const current = items.get();
     const index = current.findIndex((el) => equals(item, el));
     if (index >= 0) {
@@ -125,60 +125,60 @@ export default pattern<Input, Output>(({ items }) => {
 
         <ct-vscroll flex showScrollbar fadeEdges>
           <ct-vstack gap="2" style="padding: 1rem;">
-            {/* Workaround for computed() + onClick bug: use items.map() with computed visibility */}
-            {items.map((item) => (
-              <ct-card
-                style={computed(() => {
-                  const status = filterStatus.get();
-                  const visible = status === "all" ||
-                    (item && item.status === status);
-                  return visible ? "" : "display: none;";
-                })}
-              >
-                <ct-hstack gap="2" align="center">
-                  <span style="font-size: 1.5rem;">
-                    {getTypeEmoji(item.type)}
-                  </span>
-                  <ct-vstack gap="0" style="flex: 1;">
-                    <span style="font-weight: 500;">
-                      {item.title || "(untitled)"}
+            {computed(() => {
+              const status = filterStatus.get();
+              const allItems = items.get();
+              const filtered = status === "all"
+                ? allItems
+                : allItems.filter((item) => item && item.status === status);
+
+              return filtered.map((item) => (
+                <ct-card>
+                  <ct-hstack gap="2" align="center">
+                    <span style="font-size: 1.5rem;">
+                      {getTypeEmoji(item.type)}
                     </span>
-                    {item.author && (
-                      <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
-                        by {item.author}
+                    <ct-vstack gap="0" style="flex: 1;">
+                      <span style="font-weight: 500;">
+                        {item.title || "(untitled)"}
                       </span>
-                    )}
-                    <ct-hstack gap="2" align="center">
-                      <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
-                        {item.status}
-                      </span>
-                      {renderStars(item.rating) && (
-                        <span style="font-size: 0.75rem; color: var(--ct-color-warning-500);">
-                          {renderStars(item.rating)}
+                      {item.author && (
+                        <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
+                          by {item.author}
                         </span>
                       )}
-                    </ct-hstack>
-                    {item.notes && (
-                      <span style="font-size: 0.75rem; color: var(--ct-color-gray-500); font-style: italic; margin-top: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
-                        {item.notes}
-                      </span>
-                    )}
-                  </ct-vstack>
-                  <ct-button
-                    variant="secondary"
-                    onClick={() => navigateTo(item)}
-                  >
-                    Edit
-                  </ct-button>
-                  <ct-button
-                    variant="ghost"
-                    onClick={() => removeItem.send({ item })}
-                  >
-                    ×
-                  </ct-button>
-                </ct-hstack>
-              </ct-card>
-            ))}
+                      <ct-hstack gap="2" align="center">
+                        <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
+                          {item.status}
+                        </span>
+                        {renderStars(item.rating) && (
+                          <span style="font-size: 0.75rem; color: var(--ct-color-warning-500);">
+                            {renderStars(item.rating)}
+                          </span>
+                        )}
+                      </ct-hstack>
+                      {item.notes && (
+                        <span style="font-size: 0.75rem; color: var(--ct-color-gray-500); font-style: italic; margin-top: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
+                          {item.notes}
+                        </span>
+                      )}
+                    </ct-vstack>
+                    <ct-button
+                      variant="secondary"
+                      onClick={() => navigateTo(item)}
+                    >
+                      Edit
+                    </ct-button>
+                    <ct-button
+                      variant="ghost"
+                      onClick={() => removeItem.send({ item })}
+                    >
+                      ×
+                    </ct-button>
+                  </ct-hstack>
+                </ct-card>
+              ));
+            })}
 
             {hasNoFilteredItems
               ? (

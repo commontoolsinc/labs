@@ -12,8 +12,8 @@ import {
 export type ItemType = "book" | "article" | "paper" | "video";
 export type ItemStatus = "want" | "reading" | "finished" | "abandoned";
 
-/** Input for creating a new reading item detail charm */
-interface Input {
+/** Input for creating a new reading item detail piece */
+interface ReadingItemDetailInput {
   title?: Writable<Default<string, "">>;
   author?: Writable<Default<string, "">>;
   url?: Writable<Default<string, "">>;
@@ -25,10 +25,10 @@ interface Input {
   finishedAt?: Default<number | null, null>;
 }
 
-/** Output shape of the reading item charm - this is what gets stored in lists
+/** Output shape of the reading item piece - this is what gets stored in lists
  * #book #article #reading
  */
-interface Output {
+interface ReadingItemDetailOutput {
   [NAME]: string;
   [UI]: VNode;
   title: string;
@@ -42,10 +42,10 @@ interface Output {
   finishedAt: number | null;
 }
 
-// Re-export the Output type as ReadingItemCharm for use in collections
-export type ReadingItemCharm = Output;
+// Re-export the Output type as ReadingItemPiece for use in collections
+export type ReadingItemPiece = ReadingItemDetailOutput;
 
-export default pattern<Input, Output>(
+export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
   (
     { title, author, url, type, status, rating, notes, addedAt, finishedAt },
   ) => {
