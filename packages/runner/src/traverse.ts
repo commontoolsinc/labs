@@ -21,7 +21,7 @@ import type {
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { isPrimitiveCellLink, parseLink } from "./link-utils.ts";
 import { fromURI } from "./uri-utils.ts";
-import { isArrayIndexPropertyName } from "./value-codec.ts";
+import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });

@@ -4,7 +4,10 @@ import {
   isObject,
   isRecord,
 } from "@commontools/utils/types";
-import { toDeepStorableValue, toStorableValue } from "./value-codec.ts";
+import {
+  toDeepStorableValue,
+  toStorableValue,
+} from "@commontools/memory/storable-value";
 import type { MemorySpace } from "@commontools/memory/interface";
 import { getTopFrame, recipe } from "./builder/recipe.ts";
 import { createNodeFactory } from "./builder/module.ts";

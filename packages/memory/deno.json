@@ -41,7 +41,8 @@
     "./commit": "./commit.ts",
     "./codec": "./codec.ts",
     "./reference": "./reference.ts",
-    "./schema": "./schema.ts"
+    "./schema": "./schema.ts",
+    "./storable-value": "./storable-value.ts"
   },
   "imports": {
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",

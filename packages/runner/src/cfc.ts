@@ -3,7 +3,7 @@ import { isObject, isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import type { JSONSchema } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
-import { isArrayIndexPropertyName } from "./value-codec.ts";
+import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
 
 const logger = getLogger("cfc");
 
