@@ -1,4 +1,4 @@
-import { css, html, LitElement, svg, TemplateResult } from "lit";
+import { css, html, LitElement, TemplateResult } from "lit";
 import { property, state } from "lit/decorators.js";
 import { ResizableDrawerController } from "../lib/resizable-drawer-controller.ts";
 import type {
@@ -1708,14 +1708,23 @@ export class XDebuggerView extends LitElement {
 
   private handleChartMouseMove(
     e: MouseEvent,
-    cumulativePoints: Array<{
+    cumulativePointsBlue: Array<{
       latency: number;
       cumulativeTime: number;
       eventIndex: number;
       normalizedPosition: number;
     }>,
+    cumulativePointsGreen:
+      | Array<{
+        latency: number;
+        cumulativeTime: number;
+        eventIndex: number;
+        normalizedPosition: number;
+      }>
+      | null,
     xScale: (normalizedPosition: number) => number,
-    yScale: (cumulativeTime: number) => number,
+    yScaleBlue: (cumulativeTime: number) => number,
+    yScaleGreen: (cumulativeTime: number) => number,
     formatTime: (ms: number) => string,
     margin: { top: number; right: number; bottom: number; left: number },
     _plotWidth: number,
@@ -1737,28 +1746,64 @@ export class XDebuggerView extends LitElement {
       return;
     }
 
-    // Find closest point on the curve
-    let closestPoint = cumulativePoints[0];
-    let minDistance = Infinity;
+    // Find closest point on blue curve
+    let closestPointBlue = cumulativePointsBlue[0];
+    let minDistanceBlue = Infinity;
 
-    for (const point of cumulativePoints) {
+    for (const point of cumulativePointsBlue) {
       const px = xScale(point.normalizedPosition);
-      const py = yScale(point.cumulativeTime);
+      const py = yScaleBlue(point.cumulativeTime);
       const distance = Math.sqrt((mouseX - px) ** 2 + (mouseY - py) ** 2);
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestPoint = point;
+      if (distance < minDistanceBlue) {
+        minDistanceBlue = distance;
+        closestPointBlue = point;
       }
     }
 
-    // Show tooltip if close enough (within 20px)
-    if (minDistance < 20) {
+    // Find closest point on green curve if it exists
+    let closestPointGreen: typeof closestPointBlue | null = null;
+    let minDistanceGreen = Infinity;
+
+    if (cumulativePointsGreen) {
+      for (const point of cumulativePointsGreen) {
+        const px = xScale(point.normalizedPosition);
+        const py = yScaleGreen(point.cumulativeTime);
+        const distance = Math.sqrt((mouseX - px) ** 2 + (mouseY - py) ** 2);
+        if (distance < minDistanceGreen) {
+          minDistanceGreen = distance;
+          closestPointGreen = point;
+        }
+      }
+    }
+
+    // Show tooltip if close enough to either curve (within 30px)
+    const isCloseToBlue = minDistanceBlue < 30;
+    const isCloseToGreen = minDistanceGreen < 30;
+
+    if (isCloseToBlue || isCloseToGreen) {
+      const lines: string[] = [];
+
+      if (isCloseToBlue) {
+        lines.push(
+          `All time: ${formatTime(closestPointBlue.latency)}`,
+          `  Cumulative: ${formatTime(closestPointBlue.cumulativeTime)}`,
+          `  Event #${closestPointBlue.eventIndex}`,
+        );
+      }
+
+      if (isCloseToGreen && closestPointGreen) {
+        if (lines.length > 0) lines.push(""); // Add blank line between sections
+        lines.push(
+          `Since baseline: ${formatTime(closestPointGreen.latency)}`,
+          `  Cumulative: ${formatTime(closestPointGreen.cumulativeTime)}`,
+          `  Event #${closestPointGreen.eventIndex}`,
+        );
+      }
+
       this.tooltipData = {
         x: e.clientX + 10,
         y: e.clientY - 10,
-        content: `Latency: ${formatTime(closestPoint.latency)}\nCumulative: ${
-          formatTime(closestPoint.cumulativeTime)
-        }\nEvent #${closestPoint.eventIndex}`,
+        content: lines.join("\n"),
         visible: true,
       };
     } else {
@@ -1929,6 +1974,14 @@ export class XDebuggerView extends LitElement {
       }
     }
 
+    // Pre-render SVG path data
+    const greenPathData = cumulativePointsDelta
+      ? pathFromCumulative(cumulativePointsDelta, yScaleGreen)
+      : null;
+
+    const showGreenLegend = cdfDelta && cumulativePointsDelta &&
+      cumulativePointsDelta.length > 0;
+
     return html`
       <div style="margin-bottom: 1rem;">
         <div class="timing-key-header">
@@ -1950,8 +2003,10 @@ export class XDebuggerView extends LitElement {
             this.handleChartMouseMove(
               e,
               cumulativePoints,
+              cumulativePointsDelta,
               xScale,
-              yScale,
+              yScaleBlue,
+              yScaleGreen,
               formatTime,
               margin,
               plotWidth,
@@ -2075,10 +2130,10 @@ export class XDebuggerView extends LitElement {
           </path>
 
           <!-- Cumulative time delta curve (since baseline) - green -->
-          ${cumulativePointsDelta
-            ? svg`
+          ${greenPathData
+            ? html`
               <path
-                d="${pathFromCumulative(cumulativePointsDelta, yScaleGreen)}"
+                d="${greenPathData}"
                 fill="none"
                 stroke="#10b981"
                 stroke-width="2"
@@ -2218,14 +2273,26 @@ export class XDebuggerView extends LitElement {
                 2,
               )}s in ${cumulativePoints.length} samples)
             </text>
-            ${cdfDelta && cumulativePointsDelta &&
-                cumulativePointsDelta.length > 0
+            ${showGreenLegend
               ? html`
-                <line x1="0" y1="15" x2="20" y2="15" stroke="#10b981" stroke-width="2" />
-                <text x="25" y="15" dominant-baseline="middle" fill="#cbd5e1" font-size="10">
+                <line
+                  x1="0"
+                  y1="15"
+                  x2="20"
+                  y2="15"
+                  stroke="#10b981"
+                  stroke-width="2"
+                />
+                <text
+                  x="25"
+                  y="15"
+                  dominant-baseline="middle"
+                  fill="#cbd5e1"
+                  font-size="10"
+                >
                   Since baseline (${(maxCumulativeTimeGreen / 1000).toFixed(
                     2,
-                  )}s in ${cumulativePointsDelta.length} samples)
+                  )}s in ${cumulativePointsDelta!.length} samples)
                 </text>
               `
               : ""}
