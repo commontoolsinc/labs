@@ -32,3 +32,5 @@ tools/ralph/smoketest/
 .agent
 PROMPT.md
 ralph.yml
+.claude/blackboard.db-shm
+.claude/blackboard.db-wal

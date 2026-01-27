@@ -140,7 +140,7 @@ export class CTButton extends BaseElement {
 
 Components that deeply integrate with the runtime and Cell abstractions.
 
-**Examples:** `ct-render`, `ct-list`, `ct-code-editor`, `ct-outliner`
+**Examples:** `ct-render`, `ct-code-editor`, `ct-outliner`
 
 **Characteristics:**
 - Work with Cell properties

@@ -112,33 +112,6 @@ Uses `items` attribute with `{ label, value }` objects. **Do not use `<option>` 
 
 ---
 
-## ct-list
-
-Pre-styled list component. **Requires `title` property, optional `done`.**
-
-```tsx
-interface CtListItem {
-  title: string;
-  done?: boolean;
-}
-
-<ct-list $value={items} editable={false} />
-```
-
-**Don't use ct-list** if you have custom fields. Use manual rendering instead:
-
-```tsx
-// Custom fields require manual rendering
-{items.map((item) => (
-  <div>
-    <ct-checkbox $checked={item.done}>{item.title}</ct-checkbox>
-    <ct-input $value={item.category} />
-  </div>
-))}
-```
-
----
-
 ## ct-message-input
 
 Input + button combo for adding items.
