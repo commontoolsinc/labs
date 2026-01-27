@@ -959,6 +959,26 @@ export class WorkerReconciler {
       };
     }
 
+    // Handle objects with [UI] property (pattern outputs)
+    // deno-lint-ignore no-explicit-any
+    if (
+      child && typeof child === "object" && UI in child && (child as any)[UI]
+    ) {
+      const state = this.renderNode(
+        ctx,
+        child as WorkerRenderNode,
+        new Set(visited),
+      );
+      if (!state) return null;
+
+      return {
+        nodeId: state.nodeId,
+        isText: false,
+        cancel: state.cancel,
+        elementState: state,
+      };
+    }
+
     // Handle primitive values (text nodes)
     const text = this.stringifyText(child);
     const nodeId = ctx.nextNodeId();
