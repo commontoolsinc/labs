@@ -132,6 +132,63 @@ theorem exactCopyOf_rejects_mismatch (input : Label) :
     (input := input)).2 h
 
 /-
+Spec 8.7.2 (endorsed transformations):
+
+Most computations should *not* preserve input integrity, because arbitrary code can tamper with data.
+So the default transformation rule mints a `TransformedBy(...)` provenance atom.
+
+However, if a transformer is in a trusted registry, the runtime may preserve certain integrity atoms.
+
+In Lean we model this as a checked transition:
+  `endorsedTransformedFromChecked reg pc codeHash inputRefs inputs claimedPreserve`
+
+The registry `reg` lists which (codeHash, preserves) pairs are endorsed, and the schema claims which
+atoms it wants preserved (`claimedPreserve`).
+
+This example checks the happy path:
+- the transformer is endorsed,
+- the input actually has the atom,
+- so the output includes both `TransformedBy(...)` and the preserved atom.
+-/
+theorem endorsedTransformedFromChecked_preserves_allowed_atom :
+    let base : Atom := Atom.integrityTok "LengthMeasurement"
+    let input : Label := { conf := [], integ := [base] }
+    let reg : List LabelTransition.TransformRule :=
+      [{ codeHash := "abc123", preserves := [base] }]
+    ∃ out,
+      LabelTransition.endorsedTransformedFromChecked reg [] "abc123" [10] [input] [base] = some out ∧
+      base ∈ out.integ := by
+  classical
+  intro base input reg
+  -- Spell out the expected output label explicitly.
+  let out : Label :=
+    LabelTransition.taintPc []
+      { conf := input.conf
+        integ := [Atom.transformedBy "abc123" [10]] ++ [base] }
+  refine ⟨out, ?_, ?_⟩
+  ·
+    -- The registry check succeeds and `preservedFromInputs` keeps `base` (it is common to all inputs).
+    simp [out, LabelTransition.endorsedTransformedFromChecked, LabelTransition.verifyEndorsedTransform,
+      LabelTransition.preservedFromInputs, LabelTransition.commonIntegrity, input, reg,
+      LabelTransition.taintPc]
+  ·
+    -- The preserved atom is appended by construction.
+    simp [out]
+
+/-
+If the transformer is *not* in the registry (or the schema claims atoms not allowed by the registry),
+the runtime rejects the "endorsed transformation" claim.
+-/
+theorem endorsedTransformedFromChecked_rejects_unendorsed_code :
+    let base : Atom := Atom.integrityTok "LengthMeasurement"
+    let input : Label := { conf := [], integ := [base] }
+    let reg : List LabelTransition.TransformRule := []
+    LabelTransition.endorsedTransformedFromChecked reg [] "abc123" [10] [input] [base] = none := by
+  classical
+  intro base input reg
+  simp [LabelTransition.endorsedTransformedFromChecked, LabelTransition.verifyEndorsedTransform, reg]
+
+/-
 Spec 8.5.6.1 (membership confidentiality vs member confidentiality) is the key subtlety for arrays.
 
 This theorem is a lightweight check that our collection transition returns:

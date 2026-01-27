@@ -160,6 +160,168 @@ theorem mem_transformedFrom_transformedBy (pc : ConfLabel) (codeHash : String) (
     Atom.transformedBy codeHash inputRefs ∈ (LabelTransition.transformedFrom pc codeHash inputRefs inputs).integ := by
   simp [LabelTransition.transformedFrom]
 
+/-!
+Endorsed transformation lemmas (spec 8.7.2).
+
+The key properties are:
+- the registry check is sound: when it says "true", there really is a rule that allows the claim
+- preserved integrity atoms come only from (a) the schema-declared list and (b) the common integrity of the inputs
+-/
+
+/-
+Soundness of the boolean registry check.
+
+If the runtime verification returns `true`, then we can extract a concrete registry rule `r`
+such that:
+1) `r` is actually in the registry list
+2) `r.codeHash` matches the requested `codeHash`
+3) every claimed-preserve atom is allowed by `r.preserves`
+
+This is exactly what `reg.any (...) = true` means, unpacked.
+-/
+theorem verifyEndorsedTransform_of_eq_true
+    (reg : List LabelTransition.TransformRule) (codeHash : String) (claimedPreserve : List Atom)
+    (h : LabelTransition.verifyEndorsedTransform reg codeHash claimedPreserve = true) :
+    ∃ r, r ∈ reg ∧ r.codeHash = codeHash ∧ ∀ a, a ∈ claimedPreserve → a ∈ r.preserves := by
+  classical
+  -- Unfold the definition and use the standard characterization of `List.any`.
+  have hAny :
+      reg.any (fun r =>
+        decide (r.codeHash = codeHash) &&
+        claimedPreserve.all (fun a => decide (a ∈ r.preserves))) = true := by
+    simpa [LabelTransition.verifyEndorsedTransform] using h
+  rcases (List.any_eq_true).1 hAny with ⟨r, hrMem, hrPred⟩
+  -- Split the `&&` predicate into its two components.
+  have hAnd :
+      decide (r.codeHash = codeHash) = true ∧
+      claimedPreserve.all (fun a => decide (a ∈ r.preserves)) = true := by
+    exact (Eq.mp (Bool.and_eq_true _ _) hrPred)
+  have hEq : r.codeHash = codeHash := of_decide_eq_true hAnd.1
+  -- And unpack the inner `all` check.
+  have hAll :
+      ∀ a, a ∈ claimedPreserve → decide (a ∈ r.preserves) = true := by
+    simpa [List.all_eq_true] using hAnd.2
+  refine ⟨r, hrMem, hEq, ?_⟩
+  intro a ha
+  exact of_decide_eq_true (hAll a ha)
+
+/-
+Lemma about `commonIntegrity`:
+
+If an atom `a` appears in `commonIntegrity inputs`, then it appears in the integrity label of
+*every* input.
+
+We prove this by induction over the fold that computes the repeated intersection.
+-/
+theorem mem_commonIntegrity_of_mem (a : Atom) (inputs : List Label)
+    (h : a ∈ LabelTransition.commonIntegrity inputs) :
+    ∀ ℓ, ℓ ∈ inputs → a ∈ ℓ.integ := by
+  classical
+  -- Helper: membership in a fold of intersections implies membership in the accumulator
+  -- and in every list we intersected with.
+  have fold_helper :
+      ∀ (acc : IntegLabel) (rest : List Label),
+        a ∈ rest.foldl (fun acc x => Label.joinIntegrity acc x.integ) acc →
+          a ∈ acc ∧ ∀ x, x ∈ rest → a ∈ x.integ := by
+    intro acc rest
+    induction rest generalizing acc with
+    | nil =>
+        intro hmem
+        refine ⟨hmem, ?_⟩
+        intro x hx
+        cases hx
+    | cons x xs ih =>
+        intro hmem
+        -- One `foldl` step: intersect with `x.integ`, then continue.
+        have hmem' :
+            a ∈ xs.foldl (fun acc y => Label.joinIntegrity acc y.integ) (Label.joinIntegrity acc x.integ) := by
+          simpa [List.foldl] using hmem
+        have ⟨hAcc', hAll⟩ := ih (acc := Label.joinIntegrity acc x.integ) hmem'
+        have hBoth : a ∈ acc ∧ a ∈ x.integ :=
+          (Label.mem_joinIntegrity a acc x.integ).1 hAcc'
+        refine ⟨hBoth.1, ?_⟩
+        intro y hy
+        cases hy with
+        | head =>
+            -- In the `head` case, `y` is definitional equal to `x`.
+            simpa using hBoth.2
+        | tail _ hyTail =>
+            exact hAll y hyTail
+  cases inputs with
+  | nil =>
+      -- `commonIntegrity [] = []`, so the membership premise is impossible.
+      cases h
+  | cons ℓ0 rest =>
+      have hFold :
+          a ∈ rest.foldl (fun acc x => Label.joinIntegrity acc x.integ) ℓ0.integ := by
+        simpa [LabelTransition.commonIntegrity] using h
+      have ⟨h0, hRest⟩ := fold_helper (acc := ℓ0.integ) (rest := rest) hFold
+      intro ℓ hℓ
+      cases hℓ with
+      | head =>
+          -- `ℓ` is the head element `ℓ0`.
+          simpa using h0
+      | tail _ hTail =>
+          exact hRest ℓ hTail
+
+/-
+Membership characterization for `preservedFromInputs`.
+
+This is a standard `List.filter` lemma: membership in the filtered list means membership in the
+original list *and* that the predicate evaluates to `true`.
+-/
+theorem mem_preservedFromInputs (a : Atom) (claimedPreserve : List Atom) (inputs : List Label) :
+    a ∈ LabelTransition.preservedFromInputs claimedPreserve inputs ↔
+      a ∈ claimedPreserve ∧ a ∈ LabelTransition.commonIntegrity inputs := by
+  classical
+  simp [LabelTransition.preservedFromInputs]
+
+/-
+If `a` is preserved by `preservedFromInputs`, then:
+- `a` was requested by the schema (`a ∈ claimedPreserve`), and
+- `a` is present in every input's integrity label.
+-/
+theorem mem_preservedFromInputs_of_mem (a : Atom) (claimedPreserve : List Atom) (inputs : List Label)
+    (h : a ∈ LabelTransition.preservedFromInputs claimedPreserve inputs) :
+    a ∈ claimedPreserve ∧ ∀ ℓ, ℓ ∈ inputs → a ∈ ℓ.integ := by
+  classical
+  have h' : a ∈ claimedPreserve ∧ a ∈ LabelTransition.commonIntegrity inputs :=
+    (mem_preservedFromInputs a claimedPreserve inputs).1 h
+  refine ⟨h'.1, ?_⟩
+  exact mem_commonIntegrity_of_mem a inputs h'.2
+
+/-
+If the endorsed transformation transition returns `some out`, then the output integrity contains:
+- the `TransformedBy` provenance atom, and
+- only preserved atoms justified by the `commonIntegrity` of the inputs.
+
+This lemma records the first (simplest) part: the provenance atom is always present.
+-/
+theorem mem_endorsedTransformedFromChecked_transformedBy_of_eq_some
+    (reg : List LabelTransition.TransformRule) (pc : ConfLabel) (codeHash : String) (inputRefs : List Nat)
+    (inputs : List Label) (claimedPreserve : List Atom) (out : Label)
+    (h : LabelTransition.endorsedTransformedFromChecked reg pc codeHash inputRefs inputs claimedPreserve = some out) :
+    Atom.transformedBy codeHash inputRefs ∈ out.integ := by
+  classical
+  -- If the option is `some`, the check must have evaluated to `true`.
+  cases hv : LabelTransition.verifyEndorsedTransform reg codeHash claimedPreserve with
+  | false =>
+      -- Contradiction: the definition would return `none`.
+      have h' := h
+      simp [LabelTransition.endorsedTransformedFromChecked, hv] at h'
+  | true =>
+      -- In the success branch, `out` is definitionally the constructed label.
+      let constructed : Label :=
+        LabelTransition.taintPc pc
+          { conf := inputs.foldl (fun acc ℓ => acc ++ ℓ.conf) []
+            integ := [Atom.transformedBy codeHash inputRefs] ++
+              LabelTransition.preservedFromInputs claimedPreserve inputs }
+      have hSome : some constructed = some out := by
+        simpa [LabelTransition.endorsedTransformedFromChecked, hv, constructed] using h
+      have hout : constructed = out := Option.some.inj hSome
+      subst hout
+      simp [constructed]
+
 /-
 If `verifyRecomposeProjections` succeeds (`= true`), then each part really contains the required
 scoped integrity atom, *and* the abstract reference check succeeded for that part.

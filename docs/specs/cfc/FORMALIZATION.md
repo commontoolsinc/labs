@@ -98,6 +98,11 @@ Trusted-runtime label propagation rules (schema-driven transitions):
     `LabelTransition.transformedFrom` (default transition / transformation integrity)
   - `formal/Cfc/Proofs/LabelTransitions.lean`: core preservation lemmas (e.g. scoped integrity membership,
     exactCopyOf success/failure characterizations, `transformedFrom` adds `TransformedBy`)
+- Endorsed transformations (8.7.2):
+  - `formal/Cfc/LabelTransitions.lean`: `LabelTransition.TransformRule`, `LabelTransition.verifyEndorsedTransform`,
+    `LabelTransition.endorsedTransformedFromChecked`
+    - checked registry-based transition: preserves only allowed integrity atoms that are common to all inputs
+  - `formal/Cfc/Proofs/LabelTransitions.lean`: soundness lemmas for the registry check and preserved-atom behavior
 - Safe recomposition of projections (motivated by 8.3.2 / 8.3.4):
   - `formal/Cfc/LabelTransitions.lean`: `LabelTransition.recomposeFromProjections`
     - checked transition that (a) validates each part via an abstract reference-equality check,

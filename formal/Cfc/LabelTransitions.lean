@@ -208,6 +208,93 @@ def transformedFrom (pc : ConfLabel) (codeHash : String) (inputRefs : List Nat) 
     (transformedFrom pc codeHash inputRefs inputs).integ = [Atom.transformedBy codeHash inputRefs] := rfl
 
 /-
+Endorsed transformations (spec 8.7.2):
+
+The default transformation rule (`transformedFrom`) *always* discards input integrity and replaces it
+with a provenance record `TransformedBy(codeHash, inputs)`.
+
+Sometimes the runtime can do better: if a transformation is on a trusted allowlist ("registry"),
+it may preserve or upgrade certain integrity claims.
+
+Example from the spec:
+- a unit converter `metersToFeet` is endorsed
+- input has integrity `LengthMeasurement(unit="m")`
+- output may claim `LengthMeasurement(unit="ft")`
+
+We do not model structured parameters like units, so the mechanism here is:
+- the schema claims a list of integrity atoms it wants preserved (`claimedPreserve`)
+- the runtime checks that the code hash is endorsed *and* those atoms are allowed for this transformer
+- the runtime re-attaches only those atoms that were common to all inputs (intersection semantics)
+
+This is still conservative:
+- we never synthesize *new* integrity atoms from nothing
+- we only preserve atoms already present on the inputs
+-/
+
+structure TransformRule where
+  /-- Code hash identifying the trusted transformer. -/
+  codeHash : String
+  /-- Integrity atoms this transformer is allowed to preserve/upgrade. -/
+  preserves : List Atom
+  deriving Repr, DecidableEq
+
+/--
+Executable registry check:
+
+`verifyEndorsedTransform reg codeHash claimedPreserve = true` means:
+there exists a rule in `reg` whose `codeHash` matches, and every atom in `claimedPreserve`
+is listed in that rule's allowlist.
+-/
+def verifyEndorsedTransform (reg : List TransformRule) (codeHash : String) (claimedPreserve : List Atom) : Bool :=
+  reg.any (fun r =>
+    decide (r.codeHash = codeHash) &&
+    claimedPreserve.all (fun a => decide (a ∈ r.preserves)))
+
+/-
+Helper: compute the integrity atoms common to all inputs.
+
+This is just repeated intersection:
+  I1 ∩ I2 ∩ ... ∩ In
+
+We keep the list order from the first input's integrity list (because our intersection is a `filter`).
+For our purposes we mostly reason about membership, so order does not matter.
+-/
+def commonIntegrity (inputs : List Label) : IntegLabel :=
+  match inputs with
+  | [] => []
+  | ℓ :: rest =>
+      rest.foldl (fun acc x => Label.joinIntegrity acc x.integ) ℓ.integ
+
+/-
+Given a schema-declared list of atoms to preserve, compute which of them are actually justified:
+we keep only those atoms that appear in `commonIntegrity inputs`.
+
+We preserve the order from the schema list (`claimedPreserve`), since this makes the output label
+more "predictable" (though correctness does not depend on order).
+-/
+def preservedFromInputs (claimedPreserve : List Atom) (inputs : List Label) : IntegLabel :=
+  claimedPreserve.filter (fun a => decide (a ∈ commonIntegrity inputs))
+
+/--
+Checked endorsed transformation transition.
+
+- If `verifyEndorsedTransform` fails, reject (`none`).
+- If it succeeds, produce a transformed label and append the preserved integrity atoms.
+
+This mirrors the style of `exactCopyOf` and `recomposeFromProjections`: schema claims are checked
+at runtime, and violations are fatal.
+-/
+def endorsedTransformedFromChecked (reg : List TransformRule) (pc : ConfLabel)
+    (codeHash : String) (inputRefs : List Nat) (inputs : List Label) (claimedPreserve : List Atom) : Option Label :=
+  if verifyEndorsedTransform reg codeHash claimedPreserve then
+    some <|
+      taintPc pc
+        { conf := inputs.foldl (fun acc ℓ => acc ++ ℓ.conf) []
+          integ := [Atom.transformedBy codeHash inputRefs] ++ preservedFromInputs claimedPreserve inputs }
+  else
+    none
+
+/-
 "Safe recomposition" of projections (not explicitly named in the spec, but motivated by 8.3.2).
 
 The spec motivation for scoped integrity has two halves:

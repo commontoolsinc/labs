@@ -819,6 +819,88 @@ This requires the transformer to be in a trusted registry:
 }
 ```
 
+Runtime verification + label derivation:
+
+```typescript
+// A trusted registry of endorsed transformers.
+//
+// In a production runtime this is typically:
+// - compiled into the runtime binary, or
+// - attested configuration loaded at startup.
+interface EndorsedTransformerRule {
+  codeHash: string;
+  // Which integrity atom types this transformer is allowed to preserve/upgrade.
+  preservesIntegrityTypes: string[];
+  // Optional additional metadata (example): unit conversion semantics.
+  // (The runtime trusts this only because `codeHash` is trusted.)
+  transformsUnit?: { from: string; to: string };
+}
+
+function lookupEndorsedTransformer(
+  registry: EndorsedTransformerRule[],
+  codeHash: string
+): EndorsedTransformerRule | undefined {
+  return registry.find(r => r.codeHash === codeHash);
+}
+
+// Verify that the schema's "preservesIntegrity" claim is allowed for this transformer.
+//
+// This is a *checked* schema claim:
+// if a handler/output schema claims preserved integrity but the transformer is not endorsed,
+// the runtime rejects the handler output.
+function verifyEndorsedTransformation(
+  registry: EndorsedTransformerRule[],
+  measuredCodeHash: string,
+  declared: { codeHash: string; preservesIntegrity?: string[] }
+): { valid: boolean; rule?: EndorsedTransformerRule } {
+  // Ensure schema is bound to the actual code that ran.
+  if (declared.codeHash !== measuredCodeHash) return { valid: false };
+
+  const rule = lookupEndorsedTransformer(registry, measuredCodeHash);
+  if (!rule) return { valid: false };
+
+  const preserves = declared.preservesIntegrity ?? [];
+  const ok = preserves.every(t => rule.preservesIntegrityTypes.includes(t));
+  return ok ? { valid: true, rule } : { valid: false };
+}
+
+// Derive a transformation label, optionally preserving/upgrading integrity for endorsed transformers.
+//
+// For simplicity, the preserved integrity here is: "copy forward any atom whose type is in the
+// allowlist AND which appears in every input integrity list".
+function deriveTransformationLabel(
+  registry: EndorsedTransformerRule[],
+  measuredCodeHash: string,
+  inputRefs: Reference[],
+  inputLabels: Label[],
+  declared?: { codeHash: string; preservesIntegrity?: string[] }
+): Label {
+  const base: Label = {
+    confidentiality: concatClauses(inputLabels.map(l => l.confidentiality)),
+    integrity: [{
+      type: "TransformedBy",
+      codeHash: measuredCodeHash,
+      inputs: inputRefs
+    }]
+  };
+
+  // If the schema declares preserved integrity, it must be verified against the trusted registry.
+  if (declared?.preservesIntegrity?.length) {
+    const v = verifyEndorsedTransformation(registry, measuredCodeHash, declared);
+    if (!v.valid) throw new Error("IFC endorsed transformation violation");
+
+    const allowed = new Set(v.rule!.preservesIntegrityTypes);
+    const common = intersectAtoms(inputLabels.map(l => l.integrity));
+    const preserved = common.filter(a => allowed.has(a.type));
+
+    // In richer models, this is where trusted upgrades can occur (e.g. unit conversion).
+    base.integrity = [...base.integrity, ...preserved];
+  }
+
+  return base;
+}
+```
+
 ### 8.7.3 Handler-Level Transitions
 
 A handler's output schema declares how labels transition:
@@ -1011,14 +1093,15 @@ function propagateLabels(
       const sourceLabels = sourcePaths.map(p => inputLabels.get(p)!);
 
       if (ifc.combinationType === "transformation") {
-        outputLabels.set(path, {
-          confidentiality: concatClauses(sourceLabels.map(l => l.confidentiality)),
-          integrity: [{
-            type: "TransformedBy",
-            codeHash: refer(handler.code).toString(),
-            inputs: sourcePaths.map(p => refer(getValueAtPath(handler.input, p)))
-          }]
-        });
+        const measuredCodeHash = refer(handler.code).toString();
+        const inputRefs = sourcePaths.map(p => refer(getValueAtPath(handler.input, p)));
+        outputLabels.set(path, deriveTransformationLabel(
+          /* registry */ getEndorsedTransformerRegistry(),
+          measuredCodeHash,
+          inputRefs,
+          sourceLabels,
+          ifc.transformation
+        ));
       } else {
         // Default combination type: "join"
         outputLabels.set(path, {
@@ -1127,6 +1210,18 @@ function verifyTransition(
       const expectedFieldValue = getValueAtPath(sourceValue, ifc.projection.path);
       const outputVal = getValueAtPath(outputValue, path);
       if (!refer(expectedFieldValue).equals(refer(outputVal))) return false;
+    }
+
+    // Endorsed transformations (8.7.2):
+    // if the schema claims preserved integrity, the transformer must be endorsed by the registry.
+    if (ifc?.transformation?.preservesIntegrity?.length) {
+      const measuredCodeHash = refer(handler.code).toString();
+      const v = verifyEndorsedTransformation(
+        /* registry */ getEndorsedTransformerRegistry(),
+        measuredCodeHash,
+        ifc.transformation
+      );
+      if (!v.valid) return false;
     }
 
     // Collection constraints (8.5): handler claims are verified and violations reject output.
