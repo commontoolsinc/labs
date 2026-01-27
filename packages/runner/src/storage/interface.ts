@@ -77,9 +77,6 @@ export interface StorageValue<T = any> {
   value: T;
   source?: EntityId;
   labels?: Labels;
-  // TODO(@danfuzz): This field appears to be dead code. The retry-on-conflict
-  // logic was removed during the transaction transition. Consider removing.
-  retry?: ((previousValue: T) => T)[];
 }
 
 /** Immutable version of `StorageValue<T>`. */
