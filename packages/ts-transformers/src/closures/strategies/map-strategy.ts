@@ -216,14 +216,12 @@ function shouldTransformMap(
     return false;
   }
 
-  // Determine the specific cell kind
-  const cellKind = getCellKind(targetType, context.checker);
-
   // Inside safe wrappers (computed, derive, action, lift, handler),
   // OpaqueRef gets auto-unwrapped to plain values, so we should NOT transform.
   // Cell and Stream do NOT get auto-unwrapped, so we still transform those.
   if (isInsideSafeCallbackWrapper(mapCall, context.checker)) {
     // Only transform Cell and Stream (not auto-unwrapped), not OpaqueRef (auto-unwrapped)
+    const cellKind = getCellKind(targetType, context.checker);
     return cellKind === "cell" || cellKind === "stream";
   }
 
