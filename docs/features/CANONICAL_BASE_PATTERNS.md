@@ -1,21 +1,21 @@
-# Canonical Base Patterns Design - person.tsx
+# Canonical Base Patterns Design
 
-**Status:** Ready for Architect Review
-**Date:** 2026-01-27 (Updated)
+**Status:** Revised per Architect Feedback
+**Date:** 2026-01-27
 **Author:** Claude (with Alex & Berni)
 
 ---
 
 ## Executive Summary
 
-Design a set of ~8 canonical base patterns (person, project, task, family, event, etc.) that are:
-- **Minimal**: Simple core schema (e.g., `name: string` for Person)
-- **Extensible**: Via an `[ANNOTATIONS]` system for arbitrary extensions
-- **Pragmatic**: Usable immediately, not a research project
-- **Late-bindable**: Sub-patterns (annotations) use `compileAndRun`, not static imports
-- **Computed-friendly**: Support speculative/computed annotations, not just explicit ones
+Design a set of canonical base patterns using a **Container + Minimal Interface Types** approach:
 
-This replaces the heavyweight "record.tsx" approach with something simpler and more composable.
+- **Minimal Interface Types**: Simple TypeScript interfaces (`TaskLike`, `PersonLike`, `EventLike`)
+- **N Variant Patterns**: Coherent, complete patterns that implement these interfaces (`family-member.tsx`, `potluck.tsx`)
+- **Container Patterns**: Aggregate items matching a minimal interface, expose `addItem` handler
+- **Collection Projections**: Add/remove entire collections to containers (e.g., "notebooks projected to tasks")
+
+This is simpler than the annotation-based approach and directly addresses Tony's actual needs.
 
 ---
 
@@ -23,484 +23,364 @@ This replaces the heavyweight "record.tsx" approach with something simpler and m
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| **Tags** | Regular `.tags: string[]` field | Simple, works with existing `<ct-tags>` component |
-| **Type Identity (now)** | `baseType: "person"` field | Works with existing wish/schema queries |
-| **Type Identity (future)** | Schema `description` field | More idiomatic, architect-preferred |
-| **Annotation Discovery** | Static index file | Lists annotation patterns per base type |
-| **record.tsx Relationship** | person.tsx replaces it | Simpler, more pragmatic approach |
-| **Annotation Storage** | Cells with `[UI]` (optionally `[NAME]`) | `[NAME]` = mentionable/navigable; `[UI]` only = renderable |
-| **Computed Annotations** | Supported via adapter patterns | Three classes unified for consumers |
-
----
-
-## Three Classes of Annotations
-
-A key insight from architect review: annotations aren't just explicit user additions. There are three classes that consumers should treat uniformly:
-
-| Class | Description | Example |
-|-------|-------------|---------|
-| **Built-in** | Original data structures with all fields already | A contact record that already has `dietaryRestrictions: string[]` |
-| **Explicit Link** | Base data + annotation sub-pattern linked via `[ANNOTATIONS]` | User adds SSN annotation to a person |
-| **Computed** | Pattern computes annotations speculatively (no explicit link yet) | LLM scans emails to infer dietary restrictions for all contacts |
-
-### Why This Matters
-
-Consider a `DietaryRestrictionsScanner` pattern that uses LLM/email-scanning to compute dietary restrictions for all contacts. Another pattern wants to query "persons with their dietary restrictions":
-
-- **With only explicit annotations**: Query fails - computed results aren't in `[ANNOTATIONS]`
-- **With computed annotation support**: Query succeeds - adapter merges explicit + computed
-
-### Consumer Transparency
-
-To something consuming this data, there should be **little to no difference** between the three classes. A "person with dietary restrictions" view shouldn't care whether:
-- The person record always had a `dietaryRestrictions` field
-- A user explicitly added a dietary restrictions annotation
-- A pattern computed it from email analysis
-
-### Confirmation Flow
-
-Users should be able to:
-1. **Control sources**: Mark a computed source as trusted/untrusted
-2. **Confirm annotations**: Confirming a computed annotation adds an explicit `[ANNOTATES]` link (= approval)
-3. **Override**: Explicit annotations take precedence over computed ones
-
-### New Symbol: `[ANNOTATION_SOURCE]`
-
-To support provenance tracking:
-
-```typescript
-// packages/api/index.ts additions
-export const ANNOTATION_SOURCE = "$ANNOTATION_SOURCE";
-
-interface AnnotationSource {
-  type: 'explicit' | 'computed' | 'imported';
-  pattern?: CellRef;      // Which pattern computed this
-  confirmed: boolean;     // User has approved
-  confidence?: number;    // For LLM-computed annotations (0-1)
-  createdAt: number;
-}
-
-interface AnnotationWithSource extends Annotation {
-  [ANNOTATION_SOURCE]?: AnnotationSource;
-}
-```
-
-### Pragmatic Approach
-
-Per architect guidance: "Don't need all of this immediately - build interim patterns that convert, then later optimize with runtime features (backlinks/joins)."
-
-**Phase 1 (Now)**: Adapter patterns that manually merge sources
-**Phase 2 (Later)**: Runtime backlink queries via `wish`
+| **Core Model** | Container + Minimal Interfaces | Simple, addresses actual needs |
+| **Pattern Variants** | N coherent variants per type | "family-member", "employee" not "person + annotations" |
+| **Type Identity** | Minimal interface conformance | TaskLike, PersonLike, EventLike |
+| **Collections** | Projection-based | Add entire projections to containers, not individual items |
+| **Annotations** | Demoted to edge case | Optional linked records if needed, not the primary model |
 
 ---
 
 ## Architecture Overview
 
-### Core Concept: Entity + Annotations
+### Core Concept: Container + Minimal Interface Types
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Person                                │
-│  ┌─────────────────────────────────────────────────────────┐│
-│  │ baseType: "person"                                      ││
-│  │ name: "John Smith"                                      ││
-│  │ notes: ["Met at conference..."]                         ││
-│  │ tags: ["professional", "tech"]                          ││
-│  └─────────────────────────────────────────────────────────┘│
-│                                                              │
-│  [ANNOTATIONS]: [                                            │
-│    ┌───────────────────┐  ┌───────────────────┐             │
-│    │ SSN Annotation    │  │ Address Annotation│             │
-│    │ type: "ssn"       │  │ type: "address"   │             │
-│    │ ssn: "***-**-1234"│  │ street: "123 Main"│             │
-│    │ [ANNOTATES]: [^]  │  │ [ANNOTATES]: [^]  │             │
-│    └───────────────────┘  └───────────────────┘             │
-│  ]                                                           │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                      CONTAINER PATTERN                               │
+│  ┌─────────────────────────────────────────────────────────────────┐│
+│  │ Minimal Interface Type: TaskLike { title: string, done: boolean }│
+│  └─────────────────────────────────────────────────────────────────┘│
+│                                                                      │
+│  items: [                                                            │
+│    ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐   │
+│    │ TodoItem        │  │ ShoppingItem    │  │ ProjectTask     │   │
+│    │ title: "..."    │  │ title: "..."    │  │ title: "..."    │   │
+│    │ done: false     │  │ done: true      │  │ done: false     │   │
+│    │ + priority      │  │ + quantity      │  │ + assignee      │   │
+│    │ + notes         │  │ + aisle         │  │ + dueDate       │   │
+│    └─────────────────┘  └─────────────────┘  └─────────────────┘   │
+│  ]                                                                   │
+│                                                                      │
+│  addItem: Stream<{ item: TaskLike }>                                │
+│  mentionable: [non-archived items...]                               │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 Key properties:
-- **Annotations can have multiple parents** (e.g., shared address for family)
-- **Late-bound via compileAndRun** (not compiled into base pattern)
-- **Discovery via static index** (lists available annotations per base type)
+- **Containers aggregate items matching a minimal interface**
+- **Each variant is a coherent, complete UX** that can evolve independently
+- **Containers expose `addItem` handler** for adding new items
+- **Mentionable items** can be @-mentioned from container
 
-### New Symbols
+---
+
+## Minimal Interface Types
+
+Define simple TypeScript interfaces that many patterns can implement:
 
 ```typescript
-// packages/api/index.ts additions
-export const ANNOTATIONS = "$ANNOTATIONS";        // Array of explicit annotations on an entity
-export const ANNOTATES = "$ANNOTATES";            // Back-reference from annotation to parent(s)
-export const ANNOTATION_SOURCE = "$ANNOTATION_SOURCE";  // Provenance metadata for annotations
+// packages/api/types/interfaces.ts
+
+/** Minimal interface for task-like items */
+export interface TaskLike {
+  title: string;
+  done: boolean;
+}
+
+/** Minimal interface for person-like items */
+export interface PersonLike {
+  name: string;
+}
+
+/** Minimal interface for event-like items */
+export interface EventLike {
+  title: string;
+  date: string;    // ISO date
+  time?: string;   // Optional time
+}
+
+/** Minimal interface for calendar-renderable items */
+export interface CalendarItem {
+  title: string;
+  date: string;
+  time?: string;
+  duration?: number;  // minutes
+}
 ```
 
 ---
 
-## person.tsx - Reference Implementation
+## N Variant Patterns
+
+Instead of one "person" pattern with annotations, create N coherent variants:
+
+### Person Variants
+
+| Pattern | Extra Fields | Use Case |
+|---------|--------------|----------|
+| `family-member.tsx` | birthday, dietary, gift preferences | Personal contacts |
+| `employee.tsx` | department, role, start date, manager | Work contacts |
+| `contact.tsx` | phone, email, address | Lightweight CRM |
+| `friend.tsx` | interests, how we met, relationship notes | Social |
+
+### Event Variants
+
+| Pattern | Extra Fields | Use Case |
+|---------|--------------|----------|
+| `staff-meeting.tsx` | agenda, attendees, action items | Work |
+| `potluck.tsx` | dishes, dietary needs, who's bringing what | Social |
+| `kids-birthday.tsx` | theme, guest list, gifts, activities | Family |
+| `appointment.tsx` | location, provider, confirmation | Personal |
+
+### Task Variants
+
+| Pattern | Extra Fields | Use Case |
+|---------|--------------|----------|
+| `todo-item.tsx` | priority, notes | General |
+| `shopping-item.tsx` | quantity, aisle, store | Shopping |
+| `project-task.tsx` | assignee, dueDate, project | Work |
+
+Each variant:
+1. **Is a complete, coherent UX** - not fragmented pieces
+2. **Exports `NAME` and `[UI]`** - can be rendered standalone
+3. **Implements relevant minimal interfaces** - can be used in containers
+4. **Can evolve independently** - add features without affecting others
+
+---
+
+## Container Pattern Protocol
+
+Containers aggregate items that match a minimal interface:
+
+```typescript
+// packages/patterns/container-protocol.ts
+
+import type { Stream, Writable, VNode } from "commontools";
+
+/**
+ * What containers expect from their items
+ */
+export interface ContainerItem<T> {
+  item: T;           // The actual item (matches minimal interface)
+  name: string;      // Display name
+  ui?: VNode;        // Optional inline UI
+}
+
+/**
+ * What containers expose
+ */
+export interface ContainerProtocol<T> {
+  items: Writable<ContainerItem<T>[]>;
+  addItem: Stream<{ item: T }>;
+  removeItem: Stream<{ item: T }>;
+  mentionable: unknown[];  // Items that can be @-mentioned
+}
+```
+
+---
+
+## Example: Task Container
 
 ```typescript
 /// <cts-enable />
-import {
-  pattern, NAME, UI, Writable, Default, computed, handler, VNode
-} from "commontools";
-
-// Base type marker for queries (v1: explicit field, v2: schema description)
-export const PERSON_BASE_TYPE = "person" as const;
-
-export interface Person {
-  baseType: typeof PERSON_BASE_TYPE;
-  name: string;
-  notes: Default<string[], [""]>;  // Always at least one note slot
-  tags: Default<string[], []>;
-}
-
-export interface Annotation {
-  type: string;           // e.g., "ssn", "address", "hobbies"
-  [ANNOTATES]: unknown[]; // Back-reference to parent entity(ies)
-  // ... annotation-specific fields handled by annotation pattern
-}
+import { pattern, NAME, UI, Writable, action, computed } from "commontools";
+import type { TaskLike, ContainerItem } from "commontools";
 
 interface Input {
-  person?: Writable<Person>;
+  title?: string;
+  items?: Writable<ContainerItem<TaskLike>[]>;
 }
 
 interface Output {
   [NAME]: string;
   [UI]: VNode;
-  person: Person;
-  annotations: Annotation[];
-  addAnnotation: Stream<{ type: string; source: string }>;
+  items: ContainerItem<TaskLike>[];
+  addItem: Stream<{ item: TaskLike }>;
+  mentionable: unknown[];
 }
 
-export default pattern<Input, Output>(({ person }) => {
-  // Initialize defaults
-  const data = person ?? {
-    baseType: PERSON_BASE_TYPE,
-    name: "",
-    notes: [""],
-    tags: [],
-  };
+export default pattern<Input, Output>(({ title, items }) => {
+  const data = items ?? Writable.of<ContainerItem<TaskLike>[]>([]);
 
-  const annotations = Writable.of<Annotation[]>([]);
-
-  // Add annotation via compileAndRun (late-binding)
-  const addAnnotation = handler<{ type: string; source: string }>(
-    async (event, { annotations }) => {
-      // Fetch and compile annotation pattern dynamically
-      const result = await compileAndRun({
-        files: [{ path: event.source, content: await fetch(event.source).then(r => r.text()) }],
-        main: event.type,
-        input: { [ANNOTATES]: [person] },
-      });
-      if (result.result) {
-        annotations.push(result.result);
-      }
-    },
-  );
+  const addItem = action(({ item }: { item: TaskLike }) => {
+    data.push({
+      item,
+      name: item.title,
+    });
+  });
 
   return {
-    [NAME]: computed(() => `👤 ${data.name || "Person"}`),
+    [NAME]: computed(() => title ?? "Tasks"),
     [UI]: (
       <ct-screen>
-        <ct-vstack gap="md">
-          {/* Core fields */}
-          <ct-input $value={data.key("name")} placeholder="Name" />
-          <ct-text-area $value={data.key("notes").key(0)} placeholder="Notes..." />
-          <ct-tags tags={data.key("tags")} />
-
-          {/* Annotations rendered dynamically */}
-          <ct-divider />
-          <ct-text variant="label">Annotations</ct-text>
-          {annotations.map(ann => (
-            <AnnotationRenderer annotation={ann} />
+        <ct-vstack gap="sm">
+          {data.map(entry => (
+            <ct-card>
+              <ct-hstack gap="sm" align="center">
+                <ct-checkbox $checked={entry.item.done} />
+                <span>{entry.name}</span>
+              </ct-hstack>
+            </ct-card>
           ))}
-
-          {/* Add annotation dropdown */}
-          <AddAnnotationDropdown
-            baseType={PERSON_BASE_TYPE}
-            onAdd={addAnnotation}
-          />
         </ct-vstack>
       </ct-screen>
     ),
-    person: data,
-    annotations,
-    addAnnotation,
+    items: data,
+    addItem,
+    mentionable: computed(() =>
+      data.get().filter(e => !e.item.done).map(e => e.item)
+    ),
   };
 });
 ```
 
 ---
 
-## Annotation Pattern Example: ssn.tsx
+## Example: Family Member Variant
+
+A complete, coherent person variant:
 
 ```typescript
 /// <cts-enable />
-import { recipe, NAME, UI, ANNOTATES, computed, Default } from "commontools";
+import { pattern, NAME, UI, Writable, Default, computed } from "commontools";
+import type { PersonLike } from "commontools";
 
-export interface SSNData {
-  [ANNOTATES]: unknown[];  // The person(s) this SSN belongs to
-  ssn: Default<string, "">;
+export interface FamilyMember extends PersonLike {
+  name: string;
+  relationship: string;           // "spouse", "child", "parent", etc.
+  birthday?: string;              // ISO date
+  dietaryRestrictions?: string[];
+  giftPreferences?: string[];
+  notes?: string;
 }
 
-// Metadata for discovery and UI
-export const MODULE_METADATA = {
-  type: "ssn",
-  label: "Social Security Number",
-  icon: "🔢",
-  baseTypes: ["person"],  // Applicable to person base type
-  schema: {
-    ssn: { type: "string", pattern: "^\\d{3}-\\d{2}-\\d{4}$" },
-  },
-};
-
-export default recipe<SSNData, SSNData>("SSN", ({ ssn, [ANNOTATES]: annotates }) => ({
-  [NAME]: computed(() => `🔢 SSN: ${ssn ? "***-**-" + ssn.slice(-4) : "Not set"}`),
-  [UI]: (
-    <ct-vstack gap="sm">
-      <ct-input
-        $value={ssn}
-        placeholder="123-45-6789"
-        type="password"
-        pattern="\\d{3}-\\d{2}-\\d{4}"
-      />
-    </ct-vstack>
-  ),
-  ssn,
-  [ANNOTATES]: annotates,
-}));
-```
-
----
-
-## Annotation Discovery: annotations/person/index.md
-
-```markdown
-# Person Annotations
-
-Available annotation patterns for the `person` base type:
-
-| Type | Label | Source | Description |
-|------|-------|--------|-------------|
-| ssn | Social Security Number | ./ssn.tsx | US SSN (masked display) |
-| address | Address | ./address.tsx | Physical address with street, city, state, zip |
-| phone | Phone Number | ./phone.tsx | Phone with type label (mobile, work, etc.) |
-| email | Email | ./email.tsx | Email address with type label |
-| birthday | Birthday | ./birthday.tsx | Birth date |
-| hobbies | Hobbies & Interests | ./hobbies.tsx | Array of hobby strings |
-| relationship | Relationship | ./relationship.tsx | Connection to another person |
-```
-
----
-
-## Computed Annotations: Adapter Patterns
-
-### The Problem
-
-A `DietaryRestrictionsScanner` pattern computes dietary restrictions for all contacts:
-
-```typescript
-// Output: Array of { person: PersonRef, restrictions: string[] }
-// These are NOT in each person's [ANNOTATIONS] array
-```
-
-How do consumers query "persons with their dietary restrictions"?
-
-### Solution: Adapter Pattern (v1)
-
-Create adapter patterns that merge explicit + computed annotations:
-
-```typescript
-/// <cts-enable />
-import { pattern, computed, ANNOTATIONS, ANNOTATION_SOURCE } from "commontools";
-import type { Person, Annotation } from "./person.tsx";
-
-interface ComputedAnnotationSource {
-  sourcePattern: CellRef;
-  annotationsForPerson: (person: Person) => Annotation[];
+interface Input {
+  member?: Writable<FamilyMember>;
 }
 
-interface PersonWithAllAnnotations {
-  person: Person;
-  annotations: Annotation[];  // Combined: explicit + computed
+interface Output {
+  [NAME]: string;
+  [UI]: VNode;
+  member: FamilyMember;
 }
 
-// Adapter that merges explicit + computed annotations
-export default pattern<{
-  person: Person & { [ANNOTATIONS]?: Annotation[] };
-  computedSources?: ComputedAnnotationSource[];
-}, { result: PersonWithAllAnnotations }>(
-  ({ person, computedSources }) => {
-    const annotations = computed(() => {
-      // Start with explicit annotations
-      const explicit = person[ANNOTATIONS] ?? [];
+export default pattern<Input, Output>(({ member }) => {
+  const data = member ?? Writable.of<FamilyMember>({
+    name: "",
+    relationship: "",
+  });
 
-      // Merge in computed annotations (if sources provided)
-      const computed = (computedSources ?? []).flatMap(source => {
-        const anns = source.annotationsForPerson(person);
-        // Tag computed annotations with source metadata
-        return anns.map(ann => ({
-          ...ann,
-          [ANNOTATION_SOURCE]: {
-            type: 'computed' as const,
-            pattern: source.sourcePattern,
-            confirmed: false,
-            createdAt: Date.now(),
-          },
-        }));
-      });
-
-      return [...explicit, ...computed];
-    });
-
-    return {
-      result: computed(() => ({
-        person,
-        annotations: annotations.get(),
-      })),
-    };
-  }
-);
-```
-
-### Solution: Runtime Backlinks (v2 - Future)
-
-Once the runtime supports backlink queries:
-
-```typescript
-// Query all annotations that [ANNOTATES] this person
-const computedAnnotations = wish({
-  query: "#backlinks",
-  target: person,
-  schema: {
-    type: "object",
-    properties: {
-      [ANNOTATES]: { contains: { $ref: person } },
-      type: { const: "dietary-restrictions" }
-    }
-  }
+  return {
+    [NAME]: computed(() => `👨‍👩‍👧 ${data.name || "Family Member"}`),
+    [UI]: (
+      <ct-screen>
+        <ct-vstack gap="md">
+          <ct-input $value={data.key("name")} placeholder="Name" />
+          <ct-picker
+            $value={data.key("relationship")}
+            options={["spouse", "child", "parent", "sibling", "grandparent"]}
+          />
+          <ct-input $value={data.key("birthday")} type="date" placeholder="Birthday" />
+          <ct-tags tags={data.key("dietaryRestrictions")} placeholder="Dietary restrictions" />
+          <ct-tags tags={data.key("giftPreferences")} placeholder="Gift ideas" />
+          <ct-textarea $value={data.key("notes")} placeholder="Notes..." />
+        </ct-vstack>
+      </ct-screen>
+    ),
+    member: data,
+  };
 });
 ```
 
-### Confirmation Handler
-
-When a user confirms a computed annotation:
-
-```typescript
-const confirmAnnotation = handler<{ annotation: Annotation }>(
-  async (event, { person }) => {
-    const ann = event.annotation;
-
-    // 1. Add explicit [ANNOTATES] link
-    ann[ANNOTATES] = [...(ann[ANNOTATES] ?? []), person];
-
-    // 2. Add to person's [ANNOTATIONS] array
-    person[ANNOTATIONS] = [...(person[ANNOTATIONS] ?? []), ann];
-
-    // 3. Mark as confirmed
-    ann[ANNOTATION_SOURCE] = {
-      ...ann[ANNOTATION_SOURCE],
-      confirmed: true,
-      type: 'explicit',
-    };
-  }
-);
-```
-
 ---
 
-## Projection Pattern: person-with-hobbies.tsx
+## Collection Projections
 
-For patterns that need specific annotation data materialized as fields:
+For "show me all X in space" queries, create **collection projections**:
 
 ```typescript
 /// <cts-enable />
-import { pattern, computed, ANNOTATIONS } from "commontools";
-import type { Person, Annotation } from "./person.tsx";
+import { pattern, computed } from "commontools";
+import type { TaskLike } from "commontools";
 
-export interface PersonWithHobbies {
-  name: string;
-  hobbies: string[];  // Materialized from annotations
+interface Notebook {
+  title: string;
+  items: Array<{ title: string; completed?: boolean }>;
 }
 
-// Takes a Person, scans annotations, produces flat projection
-export default pattern<{ person: Person & { [ANNOTATIONS]: Annotation[] } }, { result: PersonWithHobbies }>(
-  ({ person }) => {
-    const hobbies = computed(() => {
-      const anns = person[ANNOTATIONS] ?? [];
-      return anns
-        .filter(a => a.type === "hobbies" || a.type === "interests")
-        .flatMap(a => (a as any).hobbies ?? (a as any).interests ?? []);
-    });
-
-    return {
-      result: computed(() => ({
-        name: person.name,
-        hobbies: hobbies.get(),
-      })),
-    };
-  }
-);
-```
-
-**Future**: `AnnotatedPerson<T>` where T describes desired schema, with CTS generating the bridge code.
-
----
-
-## Type Identity Evolution
-
-### Phase 1 (Now): `baseType` Field
-
-```typescript
-interface Person {
-  baseType: "person";  // Explicit marker
-  name: string;
-  // ...
+interface Input {
+  notebooks: Notebook[];
 }
 
-// Query all persons
-wish({
-  query: "#allCharms",
-  schema: { properties: { baseType: { const: "person" } } }
+interface Output {
+  tasks: TaskLike[];  // Notebooks projected as tasks
+}
+
+// Project notebook items to TaskLike interface
+export default pattern<Input, Output>(({ notebooks }) => {
+  const tasks = computed(() => {
+    return notebooks.flatMap(nb =>
+      nb.items.map(item => ({
+        title: `${nb.title}: ${item.title}`,
+        done: item.completed ?? false,
+      }))
+    );
+  });
+
+  return { tasks };
 });
 ```
 
-### Phase 2 (Future): Schema `description`
+**Containers can add entire projections:**
 
 ```typescript
-// Schema-level identity (more idiomatic)
-const personSchema = {
-  type: "object",
-  description: "common:person/v1",  // Namespaced type identifier
-  properties: {
-    name: { type: "string" },
-    // ... no baseType field needed
-  },
-} as const satisfies JSONSchema;
-
-// Query via schema description (requires new infrastructure)
-runtime.queryBySchemaDescription("common:person/v1");
+// In a task container, add "notebooks projected as tasks"
+const notebookTasks = NotebooksAsTasks({ notebooks });
+taskContainer.addCollection.send({ projection: notebookTasks });
 ```
+
+This enables:
+- Add/remove **entire collections** to containers
+- Higher quality because the process is aware of what it processes
+- Works for birthdays → calendar, notebook checkboxes → tasks, etc.
 
 ---
 
-## Proposed Base Types (~8)
+## Tony's Needs - Addressed
 
-| Type | Key Fields | Notes |
-|------|------------|-------|
-| **person.tsx** | `name` | Individual humans |
-| **project.tsx** | `title`, `status` | Work initiatives |
-| **task.tsx** | `title`, `done` | Actionable items |
-| **event.tsx** | `title`, `date`, `location` | Calendar events |
-| **family.tsx** | `name`, `members` | Family units (members are person refs) |
-| **place.tsx** | `name`, `address`, `coordinates` | Locations |
-| **organization.tsx** | `name` | Companies, groups |
-| **document.tsx** | `title`, `content` | Content containers |
+The architect clarified Tony's actual pattern needs:
 
-All share:
-- `baseType: string` (for queries)
-- `notes: string[]` (always length >= 1)
-- `tags: string[]` (optional)
-- `[ANNOTATIONS]: Annotation[]` (optional)
+| Need | Solution |
+|------|----------|
+| Task list with tasks | Container pattern for `TaskLike` |
+| Calendar with events | Container pattern for `EventLike`/`CalendarItem` |
+| Tasks/events can be different shapes | N variant patterns that implement the interface |
+| Create new items | `addItem` handler on container |
+| Mentionable items | `mentionable` output on container |
+
+**Implementation recipe:**
+1. Define TypeScript type for minimal interface: `{ done: boolean, title: string }`
+2. Define N patterns that have at least that, but expand into other shapes
+3. Patterns output `NAME` and `[UI]`
+4. Container pattern lists them, exposes `addItem` handler
+5. Add mentionable items to container's `mentionable` output
+
+---
+
+## Annotations (Demoted)
+
+The annotation system is demoted to an **optional edge case mechanism**:
+
+**When you might need it:**
+- Started with an entity one way, later decided it's also another kind
+- Entity reconciliation: multiple instances that should be the same entity
+- Complementary data from different sources
+
+**If needed, use simple linked records:**
+
+```typescript
+interface LinkedRecord<T> {
+  primary: CellRef;        // The main record this augments
+  data: T;                 // Complementary data
+  relationship: string;    // e.g., "augments", "extends"
+}
+```
+
+This is NOT the primary model. Most cases are better served by:
+- Creating a new variant pattern
+- Using collection projections
+- Designing the original pattern to include the fields
 
 ---
 
@@ -508,103 +388,102 @@ All share:
 
 | File | Change |
 |------|--------|
-| `packages/api/index.ts` | Add `ANNOTATIONS`, `ANNOTATES`, `ANNOTATION_SOURCE` symbols |
-| `packages/patterns/base/person.tsx` | New canonical person pattern |
-| `packages/patterns/base/person-with-annotations.tsx` | Adapter pattern merging explicit + computed |
-| `packages/patterns/annotations/` | New directory for annotation patterns |
-| `packages/patterns/annotations/person/index.md` | Annotation discovery index |
+| `packages/api/types/interfaces.ts` | New: Minimal interface types |
+| `packages/patterns/container-protocol.ts` | Revise for minimal interfaces |
+| `packages/patterns/variants/` | New: Variant patterns directory |
+| `packages/patterns/containers/` | New: Container patterns directory |
 
 ---
 
 ## Implementation Phases
 
 ### Phase 1: Core Infrastructure
-- [ ] Define `ANNOTATIONS`, `ANNOTATES`, `ANNOTATION_SOURCE` symbols in `packages/api/index.ts`
+- [ ] Define minimal interface types (`TaskLike`, `PersonLike`, `EventLike`)
 - [ ] Export from "commontools" entrypoint
-- [ ] Create annotation type interfaces (including `AnnotationSource`)
+- [ ] Revise container-protocol.ts
 
-### Phase 2: person.tsx
-- [ ] Create `packages/patterns/base/person.tsx` with minimal schema
-- [ ] Implement annotation rendering (iterate `[ANNOTATIONS]`, render each with compileAndRun)
-- [ ] Create AddAnnotationDropdown component (reads index, triggers compileAndRun)
+### Phase 2: First Container + Variants
+- [ ] `task-container.tsx` - Container for TaskLike
+- [ ] `todo-item.tsx` - Basic task variant
+- [ ] `shopping-item.tsx` - Shopping task variant
 
-### Phase 3: Example Annotations
-- [ ] `ssn.tsx` - Simple single-field annotation
-- [ ] `address.tsx` - Multi-field annotation
-- [ ] `hobbies.tsx` - Array-based annotation
+### Phase 3: Person Variants
+- [ ] `family-member.tsx` - With birthday, dietary, gifts
+- [ ] `contact.tsx` - Lightweight CRM
+- [ ] `employee.tsx` - Work contacts
 
-### Phase 4: Computed Annotation Support
-- [ ] `person-with-annotations.tsx` adapter pattern (merges explicit + computed)
-- [ ] Confirmation handler for promoting computed -> explicit
-- [ ] Example computed annotation source (e.g., dietary restrictions scanner)
+### Phase 4: Event Variants
+- [ ] `potluck.tsx` - Social event with dishes
+- [ ] `staff-meeting.tsx` - Work event with agenda
+- [ ] `kids-birthday.tsx` - Family event with guests
 
-### Phase 5: Projections & Views
-- [ ] `person-with-hobbies.tsx` example
-- [ ] Document projection pattern for others
+### Phase 5: Collection Projections
+- [ ] `notebooks-as-tasks.tsx` - Example projection
+- [ ] Container `addCollection` handler
+- [ ] Calendar integration with event projections
 
-### Phase 6: Additional Base Types
-- [ ] Implement remaining ~7 base types following person.tsx idiom
-
-### Phase 7 (Future): Runtime Optimizations
-- [ ] Backlink index for `[ANNOTATES]` links
-- [ ] `wish` support for backlink queries
-- [ ] Automatic annotation merging in runtime (remove need for adapter patterns)
+### Phase 6 (If Needed): Linked Records
+- [ ] Simple linked record mechanism for edge cases
+- [ ] Entity reconciliation patterns
 
 ---
 
 ## Verification Plan
 
-### Explicit Annotations
-1. **Unit test person.tsx**: Create person, add annotations, verify rendering
-2. **Test compileAndRun integration**: Add SSN annotation dynamically, verify it compiles and renders
-3. **Test queries**: Create multiple persons, query by `baseType: "person"`, verify all returned
+### Container Protocol
+1. **Test addItem**: Add task to container, verify it appears
+2. **Test variant compatibility**: Add different TaskLike variants to same container
+3. **Test mentionable**: Verify non-archived items appear in mentionable
 
-### Computed Annotations
-4. **Test adapter pattern**: Create person + computed source, verify merged annotations
-5. **Test confirmation flow**: Confirm a computed annotation, verify it becomes explicit
-6. **Test provenance**: Verify `[ANNOTATION_SOURCE]` metadata is preserved and queryable
+### Variant Patterns
+4. **Test family-member.tsx**: Create, edit, verify all fields work
+5. **Test interface conformance**: Verify variant can be added to container
 
-### Projections
-7. **Test projection**: Create person with hobbies annotation, use person-with-hobbies.tsx, verify hobbies materialized
+### Collection Projections
+6. **Test notebook → tasks**: Project notebooks, verify TaskLike output
+7. **Test add projection to container**: Add entire projection, verify items appear
 
 ### Integration
-8. **Manual test**: Deploy to local toolshed, create person via UI, add annotations interactively
-9. **Computed source test**: Run dietary restrictions scanner, verify results appear in person-with-annotations adapter
+8. **Manual test**: Create task container, add various task variants
+9. **Manual test**: Create calendar, add event variants and projections
 
 ---
 
 ## Questions for Architect (Berni)
 
-### Previously Discussed (Incorporated)
+### Addressed by Revision
 
-1. ~~**Annotation storage**: Should annotations be stored inline or as separate cells?~~
-   - **Answer**: Support both explicit (inline) AND computed (separate cells). Adapter patterns merge them.
-
-2. ~~**Computed annotations**: How do we handle speculative/computed annotations?~~
-   - **Answer**: Three classes (built-in, explicit, computed) unified via adapter patterns now, runtime backlinks later.
+1. ~~Over-engineering~~ → Simplified to Container + Minimal Interfaces
+2. ~~Annotation complexity~~ → Demoted to optional edge case
+3. ~~Tony's needs~~ → Directly addressed with container protocol
 
 ### Still Open
 
-1. **Symbol naming**: Is `$ANNOTATIONS` / `$ANNOTATES` / `$ANNOTATION_SOURCE` the right convention? Or should these be true Symbols like `SELF`?
+1. **Interface location**: Should minimal interfaces live in `packages/api/types/` or elsewhere?
 
-2. **Discovery mechanism**: Static index.md vs. dynamic registry query - is static sufficient for v1?
+2. **Container registration**: How do containers discover available variant patterns?
 
-3. **Schema description timeline**: When should we prioritize migrating from `baseType` field to schema `description` for type identity?
+3. **Projection mechanics**: Pull vs push? Who creates projections? Should they point back to original?
 
-4. **compileAndRun caching**: Are compiled annotation patterns cached appropriately, or do we need additional caching layer?
+4. **Entity reconciliation**: When multiple instances should be the same entity, what's the resolution pattern?
 
-5. **Backlink query priority**: When should we invest in runtime backlink queries (`wish` with `#backlinks`) to replace adapter patterns?
+---
 
-6. **Confidence thresholds**: For computed annotations with confidence scores, should there be a system-wide threshold for display, or per-source configuration?
+## Appendix: What Changed from v1
+
+| Original Design | Revised Design | Rationale |
+|----------------|----------------|-----------|
+| `[ANNOTATIONS]` array | Demoted to edge case | Over-engineering |
+| `[ANNOTATES]` back-reference | Removed | Not needed |
+| `[ANNOTATION_SOURCE]` provenance | Removed | Over-engineering |
+| Computed annotation adapters | Removed | Collection projections are simpler |
+| Three-class annotation model | Removed | Too complex |
+| Single "person" + annotations | N variant patterns | Coherent UX per variant |
 
 ---
 
 ## Appendix: Research Sources
 
-- **Whiteboard photo**: `~/Downloads/IMG_9072.HEIC` (2026-01-26 meeting)
-- **Meeting transcript**: Inline in conversation (2026-01-26, 16:12 PST)
-- **Record PRD**: `labs-2` branch `prd/record-functionality:docs/features/RECORD_PRD.md`
-- **compileAndRun source**: `packages/runner/src/builtins/compile-and-run.ts`
-- **Current symbols**: `packages/api/index.ts`, `packages/runner/src/builder/types.ts`
-- **Tags pattern**: `packages/patterns/tags.tsx`
-- **Contact pattern**: `packages/patterns/contacts/contact-detail.tsx`
+- **Architect feedback**: Discord messages (2026-01-27)
+- **Container protocol**: `packages/patterns/container-protocol.ts`
+- **Existing patterns**: `packages/patterns/contacts/`, `packages/patterns/todo-list/`
