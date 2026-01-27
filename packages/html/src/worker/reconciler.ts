@@ -429,6 +429,8 @@ export class WorkerReconciler {
     let currentChild: NodeState | null = null;
     let childCancel: Cancel | undefined;
 
+    let currentSlot: string | null = null;
+
     addCancel(
       cell.sink((resolvedNode) => {
         // Clean up previous child
@@ -442,6 +444,28 @@ export class WorkerReconciler {
         }
 
         if (!resolvedNode) return;
+
+        // Propagate slot attribute from child to wrapper for Shadow DOM slot distribution
+        const childSlot = this.extractSlotFromNode(resolvedNode);
+        if (childSlot !== currentSlot) {
+          if (childSlot) {
+            this.queueOps([
+              {
+                op: "set-prop",
+                nodeId: wrapperId,
+                key: "slot",
+                value: childSlot,
+              },
+            ]);
+          } else if (currentSlot) {
+            this.queueOps([{
+              op: "remove-prop",
+              nodeId: wrapperId,
+              key: "slot",
+            }]);
+          }
+          currentSlot = childSlot;
+        }
 
         // Render new child
         const childState = this.renderNode(ctx, resolvedNode, new Set(visited));
@@ -891,6 +915,7 @@ export class WorkerReconciler {
       ]);
 
       let currentState: ChildNodeState | null = null;
+      let currentSlot: string | null = null;
 
       addCancel(
         (child as Cell<unknown>).sink((resolvedChild) => {
@@ -898,6 +923,28 @@ export class WorkerReconciler {
           if (currentState) {
             currentState.cancel();
             this.queueOps([{ op: "remove-node", nodeId: currentState.nodeId }]);
+          }
+
+          // Propagate slot attribute from child to wrapper for Shadow DOM slot distribution
+          const childSlot = this.extractSlotFromNode(resolvedChild);
+          if (childSlot !== currentSlot) {
+            if (childSlot) {
+              this.queueOps([
+                {
+                  op: "set-prop",
+                  nodeId: wrapperId,
+                  key: "slot",
+                  value: childSlot,
+                },
+              ]);
+            } else if (currentSlot) {
+              this.queueOps([{
+                op: "remove-prop",
+                nodeId: wrapperId,
+                key: "slot",
+              }]);
+            }
+            currentSlot = childSlot;
           }
 
           // Render new
@@ -1009,6 +1056,43 @@ export class WorkerReconciler {
       }
     }
     return String(value);
+  }
+
+  /**
+   * Extract the slot attribute from a render node if present.
+   * This is used to propagate slot attributes to wrapper elements
+   * for proper Shadow DOM slot distribution.
+   */
+  private extractSlotFromNode(node: unknown): string | null {
+    if (!node || typeof node !== "object") return null;
+
+    // Check for VNode with slot prop
+    if (isWorkerVNode(node) && node.props) {
+      const props = node.props;
+      if (isCell(props)) {
+        // If props is a Cell, we can't synchronously extract slot
+        // This is a limitation - slot won't be propagated for Cell props
+        return null;
+      }
+      if (typeof props === "object" && "slot" in props) {
+        const slot = (props as Record<string, unknown>).slot;
+        if (typeof slot === "string") return slot;
+        if (isCell(slot)) {
+          // Try to get current value synchronously
+          const value = slot.get();
+          if (typeof value === "string") return value;
+        }
+      }
+    }
+
+    // Check for objects with [UI] - follow the chain to find the actual node
+    // deno-lint-ignore no-explicit-any
+    if (UI in node && (node as any)[UI]) {
+      // deno-lint-ignore no-explicit-any
+      return this.extractSlotFromNode((node as any)[UI]);
+    }
+
+    return null;
   }
 }
 
