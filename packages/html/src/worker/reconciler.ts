@@ -16,6 +16,8 @@ import {
   type Cancel,
   type Cell,
   isCell,
+  isStream,
+  type Stream,
   UI,
   useCancelGroup,
 } from "@commontools/runner";
@@ -51,7 +53,7 @@ export class WorkerReconciler {
   private pendingOps: VDomOp[] = [];
   private flushScheduled = false;
 
-  private rootState: NodeState | null = null;
+  private rootNodeId: number | null = null;
   private rootCancel: Cancel | null = null;
 
   private readonly onOps: (ops: VDomOp[]) => void;
@@ -92,12 +94,18 @@ export class WorkerReconciler {
     const ctx = this.createContext();
     const [cancel, addCancel] = useCancelGroup();
 
-    // Create a container node (like the parent element in main-thread render)
-    const containerId = ctx.nextNodeId();
+    // Create a root wrapper element - this is what gets mounted into the container
+    const rootId = ctx.nextNodeId();
+    this.rootNodeId = rootId;
+
+    // Emit the root element creation
+    this.queueOps([
+      { op: "create-element", nodeId: rootId, tagName: "ct-vdom-root" },
+    ]);
 
     // Handle Cell<VNode> at the root
     if (isCell(vnode)) {
-      const wrapperState = this.createWrapperState(ctx, containerId);
+      const wrapperState = this.createWrapperState(ctx, rootId);
 
       addCancel(
         vnode.sink((resolvedVnode: unknown) => {
@@ -125,7 +133,7 @@ export class WorkerReconciler {
         this.queueOps([
           {
             op: "insert-child",
-            parentId: containerId,
+            parentId: rootId,
             childId: state.nodeId,
             beforeId: null,
           },
@@ -141,16 +149,19 @@ export class WorkerReconciler {
   }
 
   /**
-   * Check if a value is a valid render node (VNode, string, number, or null/undefined).
+   * Check if a value is a valid render node (VNode, string, number, object with [UI], or null/undefined).
    */
   private isValidRenderNode(value: unknown): value is WorkerRenderNode {
     if (value === null || value === undefined) return true;
     if (typeof value === "string" || typeof value === "number") return true;
+    if (typeof value === "boolean") return true;
     if (isWorkerVNode(value)) return true;
     if (Array.isArray(value)) {
       return value.every((item) => this.isValidRenderNode(item));
     }
     if (isCell(value)) return true;
+    // Accept objects with [UI] property - will be unwrapped in renderNode
+    if (typeof value === "object" && UI in value) return true;
     return false;
   }
 
@@ -162,9 +173,9 @@ export class WorkerReconciler {
       this.rootCancel();
       this.rootCancel = null;
     }
-    if (this.rootState) {
-      this.queueOps([{ op: "remove-node", nodeId: this.rootState.nodeId }]);
-      this.rootState = null;
+    if (this.rootNodeId !== null) {
+      this.queueOps([{ op: "remove-node", nodeId: this.rootNodeId }]);
+      this.rootNodeId = null;
     }
     this.flushOps();
   }
@@ -189,7 +200,7 @@ export class WorkerReconciler {
    * Get the root node ID.
    */
   getRootNodeId(): number | null {
-    return this.rootState?.nodeId ?? null;
+    return this.rootNodeId;
   }
 
   // ============== Private Methods ==============
@@ -596,9 +607,23 @@ export class WorkerReconciler {
 
     for (const [key, value] of Object.entries(props)) {
       if (isEventProp(key)) {
-        // Event handler
-        if (isEventHandler(value)) {
-          const eventType = getEventType(key);
+        const eventType = getEventType(key);
+
+        // Handle Streams (actions) - wrap in a handler that calls .send()
+        if (isStream(value)) {
+          const stream = value as Stream<unknown>;
+          const handlerId = ctx.registerHandler((event: unknown) => {
+            stream.send(event);
+          });
+          state.eventHandlers.set(eventType, handlerId);
+          this.queueOps([{
+            op: "set-event",
+            nodeId: state.nodeId,
+            eventType,
+            handlerId,
+          }]);
+        } else if (isEventHandler(value)) {
+          // Plain function event handler
           const handlerId = ctx.registerHandler(value);
           state.eventHandlers.set(eventType, handlerId);
           this.queueOps([{
@@ -816,69 +841,31 @@ export class WorkerReconciler {
       this.queueOps([{ op: "remove-node", nodeId: oldState.nodeId }]);
     }
 
-    // Update children order
-    let prevNodeId: number | null = null;
-    for (const key of newKeyOrder) {
+    // Update children order by inserting from END to BEGINNING.
+    // This ensures each insertBefore has a valid reference node.
+    // Processing in reverse means each child is inserted before the
+    // previously processed child (which is already in the DOM).
+    let nextNodeId: number | null = null;
+    for (let i = newKeyOrder.length - 1; i >= 0; i--) {
+      const key = newKeyOrder[i];
       const childState = newMapping.get(key);
       if (!childState) continue;
 
-      // Determine the correct position
-      const currentIndex = this.getChildIndex(state, childState.nodeId);
-      const expectedIndex = prevNodeId
-        ? this.getChildIndex(state, prevNodeId) + 1
-        : 0;
+      // Insert this child before the next one (or append if it's the last)
+      this.queueOps([
+        {
+          op: "insert-child",
+          parentId: state.nodeId,
+          childId: childState.nodeId,
+          beforeId: nextNodeId,
+        },
+      ]);
 
-      if (currentIndex !== expectedIndex) {
-        // Need to move or insert
-        this.queueOps([
-          {
-            op: "insert-child",
-            parentId: state.nodeId,
-            childId: childState.nodeId,
-            beforeId: this.getNodeIdAfter(state, newKeyOrder, key, newMapping),
-          },
-        ]);
-      }
-
-      prevNodeId = childState.nodeId;
+      nextNodeId = childState.nodeId;
     }
 
     // Update state
     state.children = newMapping;
-  }
-
-  /**
-   * Get the node ID that should come after a given key in the order.
-   */
-  private getNodeIdAfter(
-    _state: NodeState,
-    keyOrder: string[],
-    currentKey: string,
-    mapping: Map<string, ChildNodeState>,
-  ): number | null {
-    const idx = keyOrder.indexOf(currentKey);
-    if (idx === -1 || idx === keyOrder.length - 1) {
-      return null; // Append at end
-    }
-
-    // Find the next key that exists in the mapping
-    for (let i = idx + 1; i < keyOrder.length; i++) {
-      const nextState = mapping.get(keyOrder[i]);
-      if (nextState) {
-        return nextState.nodeId;
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Get the index of a child node (placeholder - actual tracking would be in DOM).
-   */
-  private getChildIndex(_state: NodeState, _nodeId: number): number {
-    // In the worker, we don't track actual DOM order
-    // The main thread handles actual positioning
-    return -1;
   }
 
   /**

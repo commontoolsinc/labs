@@ -16,7 +16,11 @@ import {
   RuntimeTelemetryEvent,
   setRecipeEnvironment,
 } from "@commontools/runner";
-import { NameSchema, nameSchema } from "@commontools/runner/schemas";
+import {
+  NameSchema,
+  nameSchema,
+  vdomSchema,
+} from "@commontools/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
 import {
   type NormalizedFullLink,
@@ -674,14 +678,13 @@ export class RuntimeProcessor {
 
     // Check if already mounted
     if (this.vdomMounts.has(mountId)) {
-      console.warn(
-        `[RuntimeProcessor] Mount ${mountId} already exists, unmounting first`,
-      );
       this.handleVDomUnmount({ type: RequestType.VDomUnmount, mountId });
     }
 
-    // Get the cell from the runtime
-    const cell = getCell(this.runtime, cellRef);
+    // Get the cell from the runtime and apply vdomSchema
+    // The schema has a [UI] property definition that handles VDOM unwrapping
+    const rawCell = getCell(this.runtime, cellRef);
+    const cell = rawCell.asSchema(vdomSchema);
 
     // Create a reconciler that sends ops to the main thread
     const reconciler = new WorkerReconciler({
@@ -692,13 +695,10 @@ export class RuntimeProcessor {
           batchId,
           ops,
           mountId,
+          rootId: reconciler.getRootNodeId(),
         });
       },
       onError: (error: Error) => {
-        console.error(
-          `[RuntimeProcessor] VDom reconciler error for mount ${mountId}:`,
-          error,
-        );
         self.postMessage({
           type: NotificationType.ErrorReport,
           message: error.message,

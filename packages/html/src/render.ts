@@ -36,6 +36,8 @@ export interface RenderOptions {
   rootCell?: CellHandle<VNode>;
   /** Force use of legacy main-thread rendering (default: false) */
   useLegacyRenderer?: boolean;
+  /** Optional error handler */
+  onError?: (error: Error) => void;
 }
 
 type KeyedChildren = Map<string, VdomChildNode>;
@@ -91,9 +93,7 @@ function renderViaWorker(
     runtimeClient,
     connection,
     document: options.document,
-    onError: (error) => {
-      console.error("[render] VDomRenderer error:", error);
-    },
+    onError: options.onError,
   });
 
   // Start rendering asynchronously
@@ -111,7 +111,7 @@ function renderViaWorker(
       }
     })
     .catch((error) => {
-      console.error("[render] VDomRenderer.render() failed:", error);
+      options.onError?.(error);
     });
 
   // Return synchronous cancel function

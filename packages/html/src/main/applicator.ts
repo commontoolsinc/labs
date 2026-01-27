@@ -317,9 +317,11 @@ export class DomApplicator {
       ? this.nodes.get(beforeId) ?? null
       : null;
 
-    if (beforeNode) {
+    if (beforeNode && beforeNode.parentNode === parent) {
+      // Only use insertBefore if the beforeNode is actually a child of parent
       parent.insertBefore(child, beforeNode);
     } else {
+      // Either no beforeNode, or it's not a child of this parent - just append
       parent.appendChild(child);
     }
   }
