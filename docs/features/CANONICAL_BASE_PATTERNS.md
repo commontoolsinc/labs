@@ -678,7 +678,7 @@ This shows how a user might fork the base Contact pattern to create a FamilyMemb
 ### Base: contact.tsx (provided)
 ```typescript
 /// <cts-enable />
-import { pattern, NAME, UI, Writable, computed } from "commontools";
+import { pattern, NAME, UI, Writable, Default, computed } from "commontools";
 import type { PersonLike } from "commontools";
 
 export interface Contact extends PersonLike {
@@ -687,20 +687,19 @@ export interface Contact extends PersonLike {
   phone?: string;
 }
 
-export default pattern<{ contact?: Writable<Contact> }, { contact: Contact }>(({ contact }) => {
-  const data = contact ?? Writable.of<Contact>({ name: "" });
+export default pattern<{ contact: Writable<Default<Contact, { name: "" }>> }, { contact: Contact }>(({ contact }) => {
   return {
-    [NAME]: computed(() => data.name || "Contact"),
+    [NAME]: computed(() => contact.name || "Contact"),
     [UI]: (
       <ct-screen>
         <ct-vstack gap="md">
-          <ct-input $value={data.key("name")} placeholder="Name" />
-          <ct-input $value={data.key("email")} placeholder="Email" />
-          <ct-input $value={data.key("phone")} placeholder="Phone" />
+          <ct-input $value={contact.key("name")} placeholder="Name" />
+          <ct-input $value={contact.key("email")} placeholder="Email" />
+          <ct-input $value={contact.key("phone")} placeholder="Phone" />
         </ct-vstack>
       </ct-screen>
     ),
-    contact: data,
+    contact,
   };
 });
 ```
@@ -712,7 +711,7 @@ LLM forks contact.tsx and adds the requested fields:
 
 ```typescript
 /// <cts-enable />
-import { pattern, NAME, UI, Writable, computed } from "commontools";
+import { pattern, NAME, UI, Writable, Default, computed } from "commontools";
 import type { PersonLike } from "commontools";
 
 // Forked from Contact, added: relationship, birthday, dietary, gifts
@@ -724,25 +723,24 @@ export interface FamilyMember extends PersonLike {
   giftPreferences?: string[];     // Added: for gift giving
 }
 
-export default pattern<{ member?: Writable<FamilyMember> }, { member: FamilyMember }>(({ member }) => {
-  const data = member ?? Writable.of<FamilyMember>({ name: "", relationship: "" });
+export default pattern<{ member: Writable<Default<FamilyMember, { name: "", relationship: "" }>> }, { member: FamilyMember }>(({ member }) => {
   return {
-    [NAME]: computed(() => data.name || "Family Member"),
+    [NAME]: computed(() => member.name || "Family Member"),
     [UI]: (
       <ct-screen>
         <ct-vstack gap="md">
-          <ct-input $value={data.key("name")} placeholder="Name" />
+          <ct-input $value={member.key("name")} placeholder="Name" />
           <ct-picker
-            $value={data.key("relationship")}
+            $value={member.key("relationship")}
             options={["spouse", "child", "parent", "sibling", "grandparent"]}
           />
-          <ct-input $value={data.key("birthday")} type="date" placeholder="Birthday" />
-          <ct-tags tags={data.key("dietaryRestrictions")} placeholder="Dietary restrictions" />
-          <ct-tags tags={data.key("giftPreferences")} placeholder="Gift ideas" />
+          <ct-input $value={member.key("birthday")} type="date" placeholder="Birthday" />
+          <ct-tags tags={member.key("dietaryRestrictions")} placeholder="Dietary restrictions" />
+          <ct-tags tags={member.key("giftPreferences")} placeholder="Gift ideas" />
         </ct-vstack>
       </ct-screen>
     ),
-    member: data,
+    member,
   };
 });
 ```
