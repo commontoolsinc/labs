@@ -5,7 +5,7 @@ export interface Mentionable {
   [key: string]: unknown;
 }
 
-export type MentionableArray = Mentionable[];
+export type MentionableArray = readonly Mentionable[];
 
 export const MentionableSchema = {
   type: "object",
