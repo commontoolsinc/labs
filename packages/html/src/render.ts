@@ -1,4 +1,5 @@
 import {
+  $conn,
   type Cancel,
   type CellHandle,
   isCellHandle,
@@ -26,12 +27,15 @@ import {
   styleObjectToCssString,
 } from "./render-utils.ts";
 import { vdomSchema } from "@commontools/runner/schemas";
+import { VDomRenderer } from "./main/renderer.ts";
 //import { animate } from "./debug-element.ts";
 
 export interface RenderOptions {
   setProp?: SetPropHandler;
   document?: Document;
   rootCell?: CellHandle<VNode>;
+  /** Force use of legacy main-thread rendering (default: false) */
+  useLegacyRenderer?: boolean;
 }
 
 type KeyedChildren = Map<string, VdomChildNode>;
@@ -44,11 +48,89 @@ type PropsValues =
   | CellHandle<any>
   | null;
 
+/**
+ * Render a VNode or CellHandle<VNode> into a parent element.
+ *
+ * When given a CellHandle, this function uses worker-side VDOM rendering:
+ * - The worker reconciles the VDOM and sends operations over IPC
+ * - The main thread applies operations to the DOM
+ * - This eliminates IPC latency for reactive updates
+ *
+ * When given a plain VNode, or when useLegacyRenderer is true, this uses
+ * main-thread rendering for backward compatibility.
+ */
 export const render = (
   parent: HTMLElement,
   view: VNode | CellHandle<VNode>,
   options: RenderOptions = {},
 ): Cancel => {
+  // Use worker-side rendering for CellHandle inputs (unless legacy mode requested)
+  // Also skip worker-side rendering if custom setProp is provided (not supported yet)
+  if (isCellHandle(view) && !options.useLegacyRenderer && !options.setProp) {
+    return renderViaWorker(parent, view as CellHandle<VNode>, options);
+  }
+
+  // Legacy main-thread rendering
+  return renderLegacy(parent, view, options);
+};
+
+/**
+ * Worker-side VDOM rendering via VDomRenderer.
+ * The worker does reconciliation and sends VDomOps over IPC.
+ */
+function renderViaWorker(
+  parent: HTMLElement,
+  cellHandle: CellHandle<VNode>,
+  options: RenderOptions,
+): Cancel {
+  const runtimeClient = cellHandle.runtime();
+  const connection = runtimeClient[$conn]();
+  const cellRef = cellHandle.ref();
+
+  const renderer = new VDomRenderer({
+    runtimeClient,
+    connection,
+    document: options.document,
+    onError: (error) => {
+      console.error("[render] VDomRenderer error:", error);
+    },
+  });
+
+  // Start rendering asynchronously
+  let cancelAsync: (() => Promise<void>) | null = null;
+  let disposed = false;
+
+  renderer
+    .render(parent, cellRef)
+    .then((cancel) => {
+      if (disposed) {
+        // Already cancelled before render completed
+        cancel();
+      } else {
+        cancelAsync = cancel;
+      }
+    })
+    .catch((error) => {
+      console.error("[render] VDomRenderer.render() failed:", error);
+    });
+
+  // Return synchronous cancel function
+  return () => {
+    disposed = true;
+    if (cancelAsync) {
+      cancelAsync();
+    }
+  };
+}
+
+/**
+ * Legacy main-thread rendering for backward compatibility.
+ */
+function renderLegacy(
+  parent: HTMLElement,
+  view: VNode | CellHandle<VNode>,
+  options: RenderOptions,
+): Cancel {
   let rootCell: CellHandle<VNode> | undefined;
 
   if (isCellHandle(view)) {
@@ -68,7 +150,7 @@ export const render = (
     }
     return renderImpl(parent, value, optionsWithCell, visited);
   });
-};
+}
 
 export const renderImpl = (
   parent: HTMLElement,

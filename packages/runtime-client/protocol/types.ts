@@ -307,6 +307,8 @@ export interface PageSyncedRequest extends BaseRequest {
  */
 export interface VDomEventRequest extends BaseRequest {
   type: RequestType.VDomEvent;
+  /** The mount ID that this event belongs to */
+  mountId: number;
   /** The handler ID that should process this event */
   handlerId: number;
   /** The serialized event data */

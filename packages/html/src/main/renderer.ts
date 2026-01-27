@@ -194,10 +194,11 @@ export class VDomRenderer {
   };
 
   private handleDomEvent(message: DomEventMessage): void {
-    if (this.disposed) return;
+    if (this.disposed || this.mountId === null) return;
 
     // Send the event to the worker via the connection
     this.connection.sendVDomEvent(
+      this.mountId,
       message.handlerId,
       message.event,
       message.nodeId,

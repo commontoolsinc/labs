@@ -279,6 +279,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
    * This is a fire-and-forget operation - we don't wait for a response.
    */
   sendVDomEvent(
+    mountId: number,
     handlerId: number,
     event: import("../protocol/mod.ts").SerializedDomEvent,
     nodeId: number,
@@ -286,6 +287,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     // Use request but don't await - fire and forget
     this.request<RequestType.VDomEvent>({
       type: RequestType.VDomEvent,
+      mountId,
       handlerId,
       event,
       nodeId,

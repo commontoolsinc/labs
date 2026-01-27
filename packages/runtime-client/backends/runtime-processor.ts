@@ -87,10 +87,6 @@ export class RuntimeProcessor {
   private telemetry: RuntimeTelemetry;
   #telemetryEnabled = false;
 
-  // VDOM event handlers registered by WorkerReconciler instances
-  private vdomHandlers = new Map<number, (event: unknown) => void>();
-  private nextVDomHandlerId = 1;
-
   // VDOM mounts: mountId -> { reconciler, cancel }
   private vdomMounts = new Map<
     number,
@@ -654,39 +650,19 @@ export class RuntimeProcessor {
 
   /**
    * Handle a DOM event dispatched from the main thread.
-   * This routes the event to the appropriate handler registered by a pattern's reconciler.
+   * This routes the event to the appropriate reconciler based on mountId.
    */
   handleVDomEvent(request: VDomEventRequest): void {
-    // Get the reconciler for this handler and dispatch the event
-    const handler = this.vdomHandlers.get(request.handlerId);
-    if (handler) {
-      try {
-        handler(request.event);
-      } catch (error) {
-        console.error("[RuntimeProcessor] VDom event handler error:", error);
-      }
-    } else {
+    const mount = this.vdomMounts.get(request.mountId);
+    if (!mount) {
       console.warn(
-        `[RuntimeProcessor] No handler found for handlerId: ${request.handlerId}`,
+        `[RuntimeProcessor] No mount found for mountId: ${request.mountId}`,
       );
+      return;
     }
-  }
 
-  /**
-   * Register a VDOM event handler and return its ID.
-   * Used by WorkerReconciler to register handlers for DOM events.
-   */
-  registerVDomHandler(handler: (event: unknown) => void): number {
-    const id = this.nextVDomHandlerId++;
-    this.vdomHandlers.set(id, handler);
-    return id;
-  }
-
-  /**
-   * Unregister a VDOM event handler.
-   */
-  unregisterVDomHandler(handlerId: number): void {
-    this.vdomHandlers.delete(handlerId);
+    // Dispatch the event to the reconciler
+    mount.reconciler.dispatchEvent(request.handlerId, request.event);
   }
 
   /**
