@@ -811,6 +811,26 @@ export class WorkerReconciler {
   }
 
   /**
+   * Find the nodeId of the next sibling after the given key.
+   * Used for position-aware insertion of reactive children.
+   */
+  private findNextSiblingId(
+    children: Map<string, ChildNodeState>,
+    afterKey: string,
+  ): number | null {
+    const entries = Array.from(children.entries());
+    const myIndex = entries.findIndex(([key]) => key === afterKey);
+    if (myIndex === -1) return null;
+
+    // Look for next sibling with valid nodeId
+    for (let i = myIndex + 1; i < entries.length; i++) {
+      const [, sibling] = entries[i];
+      if (sibling.nodeId !== -1) return sibling.nodeId;
+    }
+    return null;
+  }
+
+  /**
    * Update children with keyed reconciliation.
    */
   private updateChildren(
@@ -851,8 +871,8 @@ export class WorkerReconciler {
         // Update if it's an element with new data
         // (For now, we trust the key - updates happen through Cell subscriptions)
       } else {
-        // Create new child
-        const childState = this.renderChild(ctx, child, visited);
+        // Create new child, passing parent state and key for position tracking
+        const childState = this.renderChild(ctx, child, visited, state, key);
         if (childState) {
           newMapping.set(key, childState);
         }
@@ -894,86 +914,116 @@ export class WorkerReconciler {
 
   /**
    * Render a child node (which may be a VNode, text, or Cell).
+   * For Cell children, uses position-aware insertion instead of wrapper elements.
    */
   private renderChild(
     ctx: ReconcileContext,
     child: unknown,
     visited: Set<object>,
+    parentState: NodeState,
+    childKey: string,
   ): ChildNodeState | null {
-    // Handle Cell children
+    // Handle Cell children - no wrapper, track position dynamically
     if (isCell(child)) {
-      const [cancel, addCancel] = useCancelGroup();
+      return this.renderCellChild(
+        ctx,
+        child as Cell<unknown>,
+        visited,
+        parentState,
+        childKey,
+      );
+    }
 
-      // Create wrapper for reactive child
-      const wrapperId = ctx.nextNodeId();
-      this.queueOps([
-        {
-          op: "create-element",
-          nodeId: wrapperId,
-          tagName: "ct-internal-fill-element",
-        },
-      ]);
+    // Handle non-Cell content
+    return this.renderChildContent(ctx, child, visited);
+  }
 
-      let currentState: ChildNodeState | null = null;
-      let currentSlot: string | null = null;
+  /**
+   * Render a Cell child with position-aware updates (no wrapper element).
+   */
+  private renderCellChild(
+    ctx: ReconcileContext,
+    cell: Cell<unknown>,
+    visited: Set<object>,
+    parentState: NodeState,
+    childKey: string,
+  ): ChildNodeState {
+    const [cancel, addCancel] = useCancelGroup();
 
-      addCancel(
-        (child as Cell<unknown>).sink((resolvedChild) => {
-          // Clean up previous
-          if (currentState) {
-            currentState.cancel();
-            this.queueOps([{ op: "remove-node", nodeId: currentState.nodeId }]);
+    // Create child state that will track the current node
+    // nodeId will be set synchronously when sink fires
+    const childState: ChildNodeState = {
+      nodeId: -1,
+      isText: false,
+      cancel,
+    };
+
+    let currentCancel: Cancel | undefined;
+
+    addCancel(
+      cell.sink((resolvedChild) => {
+        const isInitialRender = childState.nodeId === -1;
+
+        // Clean up previous (skip if initial render - nothing to clean)
+        if (!isInitialRender) {
+          if (currentCancel) {
+            currentCancel();
+            currentCancel = undefined;
           }
+          this.queueOps([{ op: "remove-node", nodeId: childState.nodeId }]);
+        }
 
-          // Propagate slot attribute from child to wrapper for Shadow DOM slot distribution
-          const childSlot = this.extractSlotFromNode(resolvedChild);
-          if (childSlot !== currentSlot) {
-            if (childSlot) {
-              this.queueOps([
-                {
-                  op: "set-prop",
-                  nodeId: wrapperId,
-                  key: "slot",
-                  value: childSlot,
-                },
-              ]);
-            } else if (currentSlot) {
-              this.queueOps([{
-                op: "remove-prop",
-                nodeId: wrapperId,
-                key: "slot",
-              }]);
-            }
-            currentSlot = childSlot;
-          }
+        // Reset nodeId
+        childState.nodeId = -1;
+        childState.elementState = undefined;
 
-          // Render new
-          const newState = this.renderChild(
-            ctx,
-            resolvedChild as WorkerRenderNode,
-            new Set(visited),
-          );
-          if (newState) {
+        if (resolvedChild === null || resolvedChild === undefined) {
+          return;
+        }
+
+        // Render new content
+        const newState = this.renderChildContent(
+          ctx,
+          resolvedChild,
+          new Set(visited),
+        );
+        if (newState) {
+          childState.nodeId = newState.nodeId;
+          childState.elementState = newState.elementState;
+          currentCancel = newState.cancel;
+
+          // Only insert on subsequent updates, not initial render.
+          // Initial render is handled by updateChildren's backward iteration
+          // which ensures correct ordering of all children.
+          if (!isInitialRender) {
+            const beforeId = this.findNextSiblingId(
+              parentState.children,
+              childKey,
+            );
             this.queueOps([
               {
                 op: "insert-child",
-                parentId: wrapperId,
+                parentId: parentState.nodeId,
                 childId: newState.nodeId,
-                beforeId: null,
+                beforeId,
               },
             ]);
-            currentState = newState;
           }
-        }),
-      );
+        }
+      }),
+    );
 
-      return {
-        nodeId: wrapperId,
-        isText: false,
-        cancel,
-      };
-    }
+    return childState;
+  }
 
+  /**
+   * Render non-Cell child content (VNode, array, text, etc).
+   */
+  private renderChildContent(
+    ctx: ReconcileContext,
+    child: unknown,
+    visited: Set<object>,
+  ): ChildNodeState | null {
     // Handle arrays - wrap in a span with display:contents
     if (Array.isArray(child)) {
       const wrapperVNode: WorkerVNode = {
@@ -1016,6 +1066,19 @@ export class WorkerReconciler {
         child as WorkerRenderNode,
         new Set(visited),
       );
+      if (!state) return null;
+
+      return {
+        nodeId: state.nodeId,
+        isText: false,
+        cancel: state.cancel,
+        elementState: state,
+      };
+    }
+
+    // Handle Cell<Cell<X>> - delegate to renderNode which handles Cells
+    if (isCell(child)) {
+      const state = this.renderNode(ctx, child, new Set(visited));
       if (!state) return null;
 
       return {
