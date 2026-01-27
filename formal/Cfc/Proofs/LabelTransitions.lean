@@ -27,6 +27,9 @@ Style note for new Lean readers:
 /-
 `scopeIntegrity` is defined as `List.map (Atom.scoped path ·)`.
 
+There is also a source-carrying variant `scopeIntegrityFrom` defined as
+`List.map (Atom.scopedFrom source path ·)`, which is used for safe recomposition proofs.
+
 So this lemma is the direct correspondence you'd expect:
 
   `scoped path a` is in `map (scoped path ·) I`  iff  `a` is in `I`.
@@ -38,6 +41,18 @@ theorem mem_scopeIntegrity (path : List String) (a : Atom) (I : IntegLabel) :
     Atom.scoped path a ∈ LabelTransition.scopeIntegrity path I ↔ a ∈ I := by
   classical
   simp [LabelTransition.scopeIntegrity]
+
+/-
+Membership lemma for the source-carrying scoping function:
+
+  scopedFrom source path a ∈ scopeIntegrityFrom source path I   <->   a ∈ I
+
+Same proof as the un-sourced version: it's just `List.map`.
+-/
+theorem mem_scopeIntegrityFrom (source : Nat) (path : List String) (a : Atom) (I : IntegLabel) :
+    Atom.scopedFrom source path a ∈ LabelTransition.scopeIntegrityFrom source path I ↔ a ∈ I := by
+  classical
+  simp [LabelTransition.scopeIntegrityFrom]
 
 /-
 `exactCopyOf` returns `some ...` exactly in the success case of its runtime check.
@@ -117,6 +132,58 @@ theorem pc_subset_combinedFrom_conf (pc : ConfLabel) (inputs : List Label) :
   | cons ℓ rest =>
     -- `taintPc` prefixes `pc`.
     exact List.mem_append.2 (Or.inl (by simpa [LabelTransition.combinedFrom, LabelTransition.taintPc] using hc))
+
+/-
+If `verifyRecomposeProjections` succeeds (`= true`), then each part really contains the required
+scoped integrity atom.
+
+This is the direct `List.all` soundness lemma.
+-/
+theorem verifyRecomposeProjections_of_mem {source : Nat} {base : Atom} {parts : List (List String × Label)}
+    (h : LabelTransition.verifyRecomposeProjections source base parts = true) :
+    ∀ pl, pl ∈ parts → Atom.scopedFrom source pl.1 base ∈ pl.2.integ := by
+  classical
+  intro pl hpl
+  have hAll : parts.all (fun pl => decide (Atom.scopedFrom source pl.1 base ∈ pl.2.integ)) = true := by
+    simpa [LabelTransition.verifyRecomposeProjections] using h
+  -- Use the standard `List.all_eq_true` characterization.
+  have hPred : ∀ pl, pl ∈ parts → decide (Atom.scopedFrom source pl.1 base ∈ pl.2.integ) = true := by
+    simpa [List.all_eq_true] using hAll
+  have : decide (Atom.scopedFrom source pl.1 base ∈ pl.2.integ) = true := hPred pl hpl
+  exact of_decide_eq_true this
+
+/-
+If recomposition returns `some out`, then the output integrity contains the "whole object"
+atom `scopedFrom source [] base`.
+
+This is the key "safe recomposition restores integrity" fact.
+-/
+theorem mem_recomposeFromProjections_whole_of_eq_some
+    (pc : ConfLabel) (source : Nat) (base : Atom) (parts : List (List String × Label)) (out : Label)
+    (h : LabelTransition.recomposeFromProjections pc source base parts = some out) :
+    Atom.scopedFrom source [] base ∈ out.integ := by
+  classical
+  cases hv : LabelTransition.verifyRecomposeProjections source base parts with
+  | false =>
+    -- If verification is false, recomposition returns `none`, contradiction.
+    have h' := h
+    -- With `hv = false`, `recomposeFromProjections ... = none`, so `h` becomes `none = some out`.
+    simp [LabelTransition.recomposeFromProjections, hv] at h'
+    -- `simp` reduces `none = some out` to `False` and closes the goal by contradiction.
+  | true =>
+    -- Successful branch: `out` is definitionally the constructed label.
+    have : some { (LabelTransition.combinedFrom pc (parts.map Prod.snd)) with
+        integ := (LabelTransition.combinedFrom pc (parts.map Prod.snd)).integ ++
+          [Atom.scopedFrom source [] base] } = some out := by
+      simpa [LabelTransition.recomposeFromProjections, hv] using h
+    have hout :
+        { (LabelTransition.combinedFrom pc (parts.map Prod.snd)) with
+          integ := (LabelTransition.combinedFrom pc (parts.map Prod.snd)).integ ++
+            [Atom.scopedFrom source [] base] } = out := by
+      exact Option.some.inj this
+    -- Conclude by rewriting and using list membership of append.
+    subst hout
+    simp
 
 end LabelTransitions
 end Proofs

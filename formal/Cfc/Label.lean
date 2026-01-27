@@ -45,7 +45,7 @@ abbrev IntegLabel := List Atom
 structure Label where
   conf : ConfLabel
   integ : IntegLabel
-  deriving Repr
+  deriving Repr, DecidableEq
 
 namespace Label
 

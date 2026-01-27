@@ -29,8 +29,8 @@ you must not be able to take `.lat` from one measurement and `.long` from anothe
 "this pair is a valid GPS measurement".
 
 In our model:
-- projecting scopes integrity atoms, turning `GPSMeasurement` into `scoped ["lat"] GPSMeasurement`
-  or `scoped ["long"] GPSMeasurement`
+- projecting scopes integrity atoms, turning `GPSMeasurement` into
+  `scopedFrom source ["lat"] GPSMeasurement` or `scopedFrom source ["long"] GPSMeasurement`
 - integrity join is intersection
 
 Therefore, joining the two projections produces *no* integrity atoms (empty intersection),
@@ -39,15 +39,76 @@ because the scoped atoms are different.
 The Lean proof just unfolds the definitions and lets `simp` compute the intersection.
 -/
 theorem projection_scoping_drops_integrity_on_join :
-    let input : Label := { conf := [], integ := [Atom.integrityTok "GPSMeasurement"] }
-    let lat := LabelTransition.projection [] input ["lat"]
-    let lon := LabelTransition.projection [] input ["long"]
+    let base : Atom := Atom.integrityTok "GPSMeasurement"
+    let input : Label := { conf := [], integ := [base] }
+    let source : Nat := 7
+    let lat := LabelTransition.projectionFrom [] input source ["lat"]
+    let lon := LabelTransition.projectionFrom [] input source ["long"]
     (lat + lon).integ = [] := by
   classical
-  intro input lat lon
+  intro base input source lat lon
   -- `joinIntegrity` is list intersection implemented via `List.filter`.
   -- After unfolding, Lean sees two singleton lists with different atoms, so the filter returns `[]`.
-  simp [lat, lon, LabelTransition.projection, LabelTransition.taintPc, LabelTransition.scopeIntegrity, Label.joinIntegrity]
+  simp [lat, lon, LabelTransition.projectionFrom, LabelTransition.taintPc,
+    LabelTransition.scopeIntegrityFrom, Label.joinIntegrity]
+
+/-
+Safe recomposition (motivated by spec 8.3.2):
+
+If `/lat` and `/long` projections come from the *same* source measurement, the runtime can verify
+that fact and restore the integrity of the whole measurement for the recomposed object.
+
+We model this with `recomposeFromProjections`, which checks for the presence of the scoped
+integrity atoms and then adds `scopedFrom source [] base` (empty path = whole object).
+-/
+theorem projection_recompose_restores_integrity :
+    let base : Atom := Atom.integrityTok "GPSMeasurement"
+    let input : Label := { conf := [], integ := [base] }
+    let source : Nat := 7
+    let lat := LabelTransition.projectionFrom [] input source ["lat"]
+    let lon := LabelTransition.projectionFrom [] input source ["long"]
+    let parts : List (List String × Label) := [(["lat"], lat), (["long"], lon)]
+    ∃ out, LabelTransition.recomposeFromProjections [] source base parts = some out ∧
+      Atom.scopedFrom source [] base ∈ out.integ := by
+  classical
+  intro base input source lat lon parts
+  let out0 : Label := LabelTransition.combinedFrom [] [lat, lon]
+  let out : Label := { out0 with integ := out0.integ ++ [Atom.scopedFrom source [] base] }
+  refine ⟨out, ?_, ?_⟩
+  ·
+    -- Discharge the verification check (`List.all` of membership facts) and unfold the definition.
+    simp [out, out0, LabelTransition.recomposeFromProjections, LabelTransition.verifyRecomposeProjections,
+      LabelTransition.combinedFrom, parts, lat, lon, input, LabelTransition.projectionFrom,
+      LabelTransition.taintPc, LabelTransition.scopeIntegrityFrom]
+  ·
+    -- The recomposition function appends the "whole object" integrity atom by construction.
+    simp [out, out0]
+
+/-
+Unsafe recomposition is rejected:
+
+If the parts come from different sources, the verification check fails and the runtime rejects
+the recomposition claim (`none`).
+-/
+theorem projection_recompose_rejects_mixed_sources :
+    let base : Atom := Atom.integrityTok "GPSMeasurement"
+    let input : Label := { conf := [], integ := [base] }
+    let source₁ : Nat := 7
+    let source₂ : Nat := 8
+    let lat := LabelTransition.projectionFrom [] input source₁ ["lat"]
+    let lon := LabelTransition.projectionFrom [] input source₂ ["long"]
+    let parts : List (List String × Label) := [(["lat"], lat), (["long"], lon)]
+    LabelTransition.recomposeFromProjections [] source₁ base parts = none := by
+  classical
+  intro base input source₁ source₂ lat lon parts
+  -- In this concrete example, `source₁` and `source₂` are definitional equal to `7` and `8`,
+  -- so Lean can decide that they are different.
+  have hs : source₁ ≠ source₂ := by decide
+  -- With `hs`, the integrity atom demanded by the recomposition verifier cannot be present in `lon`'s label,
+  -- so the boolean check fails and the transition returns `none`.
+  simp [LabelTransition.recomposeFromProjections, LabelTransition.verifyRecomposeProjections,
+    parts, lat, lon, input, LabelTransition.projectionFrom, LabelTransition.taintPc,
+    LabelTransition.scopeIntegrityFrom, hs]
 
 /-
 Spec 8.4 (exactCopyOf) says:

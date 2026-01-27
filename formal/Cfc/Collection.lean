@@ -160,6 +160,79 @@ def filteredFrom {Ref : Type} (pc : ConfLabel) (source : Nat) (predicate : Strin
           [Atom.filteredFrom source predicate] }
     members := outputMembers }
 
+namespace Verify
+
+/-
+Executable (boolean) verification algorithms for the collection constraints in spec 8.5.
+
+The spec presents these checks in TypeScript-like pseudocode (subset/permutation/filter).
+Here we provide Lean `Bool` versions and later prove soundness lemmas about them.
+
+Design choice:
+- We check membership/permutation on the full `(Ref × Label)` pairs, not just the `Ref`.
+  This is slightly stronger than the spec's "reference-only" checks, but it matches our
+  current representation where a member is already a `(ref, label)` pair.
+  If output members are constructed by copying labels from the input, these checks coincide.
+-/
+
+def subsetOfB {Ref : Type} [DecidableEq Ref]
+    (input : LabeledCollection Ref) (outputMembers : List (Ref × Label)) : Bool :=
+  outputMembers.all (fun m => decide (m ∈ input.members))
+
+def permutationOfB {Ref : Type} [DecidableEq Ref]
+    (input : LabeledCollection Ref) (outputMembers : List (Ref × Label)) : Bool :=
+  decide (outputMembers.Perm input.members)
+
+/-- Filtered-from is verified the same way as subset-of (it is a particular kind of subset). -/
+def filteredFromB {Ref : Type} [DecidableEq Ref]
+    (input : LabeledCollection Ref) (outputMembers : List (Ref × Label)) : Bool :=
+  subsetOfB input outputMembers
+
+/-
+Checked versions of the collection transitions:
+- return `some out` when the verification passes,
+- return `none` (reject) when verification fails.
+
+This matches the spec's "runtime verification" story: if a handler claims a particular
+constraint (subset/permutation/filter) but does not satisfy it, the runtime rejects the output.
+-/
+
+def subsetOfChecked {Ref : Type} [DecidableEq Ref] (pc : ConfLabel)
+    (input : LabeledCollection Ref) (outputMembers : List (Ref × Label)) : Option (LabeledCollection Ref) :=
+  if subsetOfB input outputMembers then
+    some
+      { container :=
+          { conf := pc ++ input.container.conf
+            integ := stripCollectionIntegrity input.container.integ }
+        members := outputMembers }
+  else
+    none
+
+def filteredFromChecked {Ref : Type} [DecidableEq Ref] (pc : ConfLabel) (source : Nat) (predicate : String)
+    (input : LabeledCollection Ref) (outputMembers : List (Ref × Label)) : Option (LabeledCollection Ref) :=
+  if filteredFromB input outputMembers then
+    some
+      { container :=
+          { conf := pc ++ input.container.conf
+            integ := stripCollectionIntegrity input.container.integ ++
+              [Atom.filteredFrom source predicate] }
+        members := outputMembers }
+  else
+    none
+
+def permutationOfChecked {Ref : Type} [DecidableEq Ref] (pc : ConfLabel) (source : Nat)
+    (input : LabeledCollection Ref) (outputMembers : List (Ref × Label)) : Option (LabeledCollection Ref) :=
+  if permutationOfB input outputMembers then
+    some
+      { container :=
+          { conf := pc ++ input.container.conf
+            integ := input.container.integ ++ [Atom.permutationOf source] }
+        members := outputMembers }
+  else
+    none
+
+end Verify
+
 end CollectionTransition
 
 end Cfc

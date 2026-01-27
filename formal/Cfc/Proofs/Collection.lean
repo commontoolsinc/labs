@@ -163,6 +163,71 @@ theorem canAccess_derefMember_iff {Ref : Type} (p : Principal) (c : LabeledColle
     canAccess p (LabeledCollection.derefMember c member) ↔ canAccess p c.container ∧ canAccess p member := by
   simpa [LabeledCollection.derefMember] using (Proofs.Link.canAccess_deref_iff p c.container member)
 
+/-
+Soundness lemmas for the executable verification checks in `CollectionTransition.Verify`.
+
+These are the connection between the spec's "runtime verification algorithm" story and the
+pure transition rules:
+- the boolean checks are what a runtime would *compute*,
+- the lemmas below say that when a check returns `true`, the intended mathematical property holds.
+-/
+
+theorem subsetOfB_eq_true_iff {Ref : Type} [DecidableEq Ref]
+    (input : LabeledCollection Ref) (outputMembers : List (Ref × Label)) :
+    CollectionTransition.Verify.subsetOfB input outputMembers = true ↔
+      ∀ m, m ∈ outputMembers → m ∈ input.members := by
+  classical
+  simp [CollectionTransition.Verify.subsetOfB, List.all_eq_true]
+
+theorem permutationOfB_eq_true_iff {Ref : Type} [DecidableEq Ref]
+    (input : LabeledCollection Ref) (outputMembers : List (Ref × Label)) :
+    CollectionTransition.Verify.permutationOfB input outputMembers = true ↔
+      outputMembers.Perm input.members := by
+  simp [CollectionTransition.Verify.permutationOfB]
+
+theorem subsetOfChecked_eq_some_iff {Ref : Type} [DecidableEq Ref]
+    (pc : ConfLabel) (input : LabeledCollection Ref) (outputMembers : List (Ref × Label)) (out : LabeledCollection Ref) :
+    CollectionTransition.Verify.subsetOfChecked pc input outputMembers = some out ↔
+      CollectionTransition.Verify.subsetOfB input outputMembers = true ∧
+      out =
+        { container :=
+            { conf := pc ++ input.container.conf
+              integ := CollectionTransition.stripCollectionIntegrity input.container.integ }
+          members := outputMembers } := by
+  classical
+  by_cases h : CollectionTransition.Verify.subsetOfB input outputMembers = true <;>
+    simp [CollectionTransition.Verify.subsetOfChecked, h, eq_comm]
+
+theorem filteredFromChecked_eq_some_iff {Ref : Type} [DecidableEq Ref]
+    (pc : ConfLabel) (source : Nat) (predicate : String)
+    (input : LabeledCollection Ref) (outputMembers : List (Ref × Label)) (out : LabeledCollection Ref) :
+    CollectionTransition.Verify.filteredFromChecked pc source predicate input outputMembers = some out ↔
+      CollectionTransition.Verify.filteredFromB input outputMembers = true ∧
+      out =
+        { container :=
+            { conf := pc ++ input.container.conf
+              integ :=
+                CollectionTransition.stripCollectionIntegrity input.container.integ ++
+                  [Atom.filteredFrom source predicate] }
+          members := outputMembers } := by
+  classical
+  by_cases h : CollectionTransition.Verify.filteredFromB input outputMembers = true <;>
+    simp [CollectionTransition.Verify.filteredFromChecked, h, eq_comm]
+
+theorem permutationOfChecked_eq_some_iff {Ref : Type} [DecidableEq Ref]
+    (pc : ConfLabel) (source : Nat)
+    (input : LabeledCollection Ref) (outputMembers : List (Ref × Label)) (out : LabeledCollection Ref) :
+    CollectionTransition.Verify.permutationOfChecked pc source input outputMembers = some out ↔
+      CollectionTransition.Verify.permutationOfB input outputMembers = true ∧
+      out =
+        { container :=
+            { conf := pc ++ input.container.conf
+              integ := input.container.integ ++ [Atom.permutationOf source] }
+          members := outputMembers } := by
+  classical
+  by_cases h : CollectionTransition.Verify.permutationOfB input outputMembers = true <;>
+    simp [CollectionTransition.Verify.permutationOfChecked, h, eq_comm]
+
 end Collection
 end Proofs
 

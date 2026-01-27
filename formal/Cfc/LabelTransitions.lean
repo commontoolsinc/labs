@@ -73,6 +73,14 @@ but integrity becomes *scoped* to the field path.
 
 We represent scoping by wrapping every integrity atom `a` as `Atom.scoped path a`.
 
+In the full spec, scoped integrity also carries a reference to the *source* structured value
+(the "valueRef"). To support safe recomposition (e.g. `/lat` and `/long` from the *same*
+measurement), this file also provides a source-carrying variant:
+
+  `Atom.scopedFrom source path a`
+
+See `scopeIntegrityFrom` / `projectionFrom` / `recomposeFromProjections` below.
+
 Key intuition:
 - After projecting `.lat` and `.long`, the integrity atoms are distinct
   (`scoped ["lat"] GPSMeasurement` vs `scoped ["long"] GPSMeasurement`).
@@ -81,6 +89,16 @@ Key intuition:
 -/
 def scopeIntegrity (path : List String) (I : IntegLabel) : IntegLabel :=
   I.map (fun a => Atom.scoped path a)
+
+/-
+Source-carrying version of `scopeIntegrity`.
+
+Here `source : Nat` stands in for the spec's `valueRef` / content-addressed reference of the
+original structured value. By threading a `source` through scoped integrity, we can later prove
+"recompose only if the parts came from the same source".
+-/
+def scopeIntegrityFrom (source : Nat) (path : List String) (I : IntegLabel) : IntegLabel :=
+  I.map (fun a => Atom.scopedFrom source path a)
 
 /-
 Projection transition (spec 8.3):
@@ -101,6 +119,21 @@ def projection (pc : ConfLabel) (input : Label) (path : List String) : Label :=
 
 @[simp] theorem integ_projection (pc : ConfLabel) (input : Label) (path : List String) :
     (projection pc input path).integ = scopeIntegrity path input.integ := rfl
+
+/-
+Source-carrying projection rule (closer to spec 8.3.2).
+
+This is the same as `projection`, except integrity atoms are scoped with the `source` id:
+  scopedFrom source path a
+-/
+def projectionFrom (pc : ConfLabel) (input : Label) (source : Nat) (path : List String) : Label :=
+  taintPc pc { conf := input.conf, integ := scopeIntegrityFrom source path input.integ }
+
+@[simp] theorem conf_projectionFrom (pc : ConfLabel) (input : Label) (source : Nat) (path : List String) :
+    (projectionFrom pc input source path).conf = pc ++ input.conf := rfl
+
+@[simp] theorem integ_projectionFrom (pc : ConfLabel) (input : Label) (source : Nat) (path : List String) :
+    (projectionFrom pc input source path).integ = scopeIntegrityFrom source path input.integ := rfl
 
 /--
 Exact-copy verification (8.4): the runtime checks content-addressed equality.
@@ -144,6 +177,35 @@ def combinedFrom (pc : ConfLabel) (inputs : List Label) : Label :=
   | [] => taintPc pc Label.bot
   | ℓ :: rest =>
       taintPc pc (rest.foldl (fun acc x => acc + x) ℓ)
+
+/-
+"Safe recomposition" of projections (not explicitly named in the spec, but motivated by 8.3.2).
+
+The spec motivation for scoped integrity has two halves:
+1) prevent *unsafe* recombination (mixing pieces from different sources), and
+2) allow *safe* recombination when all pieces come from the same source.
+
+We model the second part as a *checked* runtime rule:
+
+- The schema can declare that an output object is a recomposition of several projections.
+- The runtime verifies that each part label carries the appropriate `scopedFrom source path base` atom.
+- If the check passes, we allow the output to regain the integrity of the whole object,
+  represented as `Atom.scopedFrom source [] base` (empty path = "whole object").
+- If the check fails, the output is rejected (`none`), like `exactCopyOf`.
+
+This is intentionally minimal: it only restores the *one* integrity atom `base`, and it does not
+try to model all possible structured integrity fields from the spec.
+-/
+def verifyRecomposeProjections (source : Nat) (base : Atom) (parts : List (List String × Label)) : Bool :=
+  parts.all (fun pl => decide (Atom.scopedFrom source pl.1 base ∈ pl.2.integ))
+
+def recomposeFromProjections (pc : ConfLabel) (source : Nat) (base : Atom)
+    (parts : List (List String × Label)) : Option Label :=
+  if verifyRecomposeProjections source base parts then
+    let out := combinedFrom pc (parts.map Prod.snd)
+    some { out with integ := out.integ ++ [Atom.scopedFrom source [] base] }
+  else
+    none
 
 end LabelTransition
 

@@ -37,6 +37,16 @@ inductive Atom where
   -/
   | scoped (path : List String) (atom : Atom)
   /-
+  Like `scoped`, but also carries an explicit `source` id for the original structured value.
+
+  This supports the "safe recomposition" use case from the spec:
+  you *can* recombine `/lat` and `/long` from the same measurement and recover the integrity of the
+  whole measurement, but you should not be able to recombine projections from *different* sources.
+
+  We use `Nat` as a stand-in for the spec's "content-addressed reference" / `valueRef`.
+  -/
+  | scopedFrom (source : Nat) (path : List String) (atom : Atom)
+  /-
   Collection-level integrity atoms (spec 8.5.6).
 
   In the spec, these mention a "source reference". We do not model cryptographic references
