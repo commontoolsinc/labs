@@ -1199,12 +1199,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     // retry on conflict.
     if (!this.synced) this.sync();
 
-    try {
-      value = toDeepStorableValue(value);
-    } catch (e) {
-      console.error("Can't set raw value, it's not JSON serializable", e);
-      return;
-    }
+    value = toDeepStorableValue(value);
     this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
   }
 

@@ -43,7 +43,7 @@ export interface LLMToolResult {
 export type LLMRequestMetadata = Record<string, string | undefined | object>;
 export interface LLMRequest {
   cache?: boolean;
-  messages: BuiltInLLMMessage[];
+  messages: readonly BuiltInLLMMessage[];
   model: ModelName;
   system?: string;
   maxTokens?: number;
@@ -56,7 +56,7 @@ export interface LLMRequest {
 
 export interface LLMGenerateObjectRequest {
   schema: Record<string, unknown>;
-  messages: BuiltInLLMMessage[];
+  messages: readonly BuiltInLLMMessage[];
   model?: ModelName;
   system?: string;
   cache?: boolean;

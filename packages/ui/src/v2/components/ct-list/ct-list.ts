@@ -419,9 +419,9 @@ export class CTList extends BaseElement {
     if (index === -1) {
       throw new Error("Could not find index");
     }
-    let array = this.value.get() as ListItem[];
-    array = array.slice(index);
-    this.value.set(array);
+    const array = this.value.get();
+    if (!array) return;
+    this.value.set(array.slice(index));
 
     this.requestUpdate();
   }

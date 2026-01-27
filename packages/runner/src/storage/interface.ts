@@ -1,3 +1,4 @@
+import type { Immutable } from "@commontools/utils/types";
 import type { EntityId } from "../create-ref.ts";
 import type { Cancel } from "../cancel.ts";
 import type {
@@ -75,10 +76,19 @@ export type Labels = {
 export interface StorageValue<T = any> {
   value: T;
   source?: EntityId;
-  // This is used on writes to retry on conflicts.
-  retry?: ((previousValue: T) => T)[];
   labels?: Labels;
+  // TODO(@danfuzz): This field appears to be dead code. The retry-on-conflict
+  // logic was removed during the transaction transition. Consider removing.
+  retry?: ((previousValue: T) => T)[];
 }
+
+/** Immutable version of `StorageValue<T>`. */
+export type ImmutableStorageValue<T = any> = Immutable<StorageValue<T>>;
+
+/** Optional immutable version of `StorageValue<T>`. */
+export type OptImmutableStorageValue<T = any> =
+  | ImmutableStorageValue<T>
+  | undefined;
 
 export interface IStorageManager extends IStorageSubscriptionCapability {
   id: string;
@@ -189,7 +199,7 @@ export interface IStorageProvider {
    * @param uri - uri of the entity to get the value for.
    * @returns Value or undefined if the value is not in storage.
    */
-  get<T = any>(uri: URI): StorageValue<T> | undefined;
+  get<T = any>(uri: URI): OptImmutableStorageValue<T>;
 
   /**
    * Subscribe to storage updates.
@@ -198,7 +208,10 @@ export interface IStorageProvider {
    * @param callback - Callback function.
    * @returns Cancel function to stop the subscription.
    */
-  sink<T = any>(uri: URI, callback: (value: StorageValue<T>) => void): Cancel;
+  sink<T = any>(
+    uri: URI,
+    callback: (value: ImmutableStorageValue<T>) => void,
+  ): Cancel;
 
   /**
    * Destroy the storage provider. Used for tests only.
