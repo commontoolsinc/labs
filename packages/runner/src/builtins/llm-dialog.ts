@@ -28,6 +28,7 @@ import { ID, NAME, type Recipe } from "../builder/types.ts";
 import type { Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { schemaToTypeString } from "../schema-format.ts";
 import { formatTransactionSummary } from "../storage/transaction-summary.ts";
 import {
   createLLMFriendlyLink,
@@ -132,52 +133,130 @@ function buildMinimalSchemaFromValue(charm: Cell<any>): JSONSchema | undefined {
 }
 
 /**
+ * @deprecated Use schemaToTypeString instead for cleaner TypeScript-like output.
+ *
  * Simplifies a schema for LLM context documentation.
  * Removes $defs and $ref which can make schemas very large with recursive types.
- * Keeps only essential type information.
+ * Preserves essential type information including wrapper markers (asStream, asCell, asOpaque),
+ * nested properties, required arrays, and small enums.
+ *
+ * @param schema - The schema to simplify
+ * @param depth - Current recursion depth (default 0)
+ * @param maxDepth - Maximum recursion depth (default 3)
  */
-function simplifySchemaForContext(schema: JSONSchema): JSONSchema {
+function simplifySchemaForContext(
+  schema: JSONSchema,
+  depth: number = 0,
+  maxDepth: number = 3,
+): JSONSchema {
   if (typeof schema !== "object" || schema === null) {
     return schema;
   }
 
-  // Create a shallow copy without $defs and $ref
+  const schemaObj = schema as Record<string, unknown>;
+
+  // At max depth, return a minimal schema preserving only type and wrapper markers
+  if (depth >= maxDepth) {
+    const minimal: Record<string, unknown> = {};
+    if (schemaObj.type) minimal.type = schemaObj.type;
+    if (schemaObj.asStream) minimal.asStream = schemaObj.asStream;
+    if (schemaObj.asCell) minimal.asCell = schemaObj.asCell;
+    if (schemaObj.asOpaque) minimal.asOpaque = schemaObj.asOpaque;
+    return minimal as JSONSchema;
+  }
+
   const simplified: Record<string, unknown> = {};
 
-  for (const [key, value] of Object.entries(schema)) {
-    // Skip $defs (definitions) and $ref (references) - these can be huge
+  // Semantic markers and essential keys to always preserve
+  const PRESERVE_KEYS = [
+    "type",
+    "description",
+    "asStream",
+    "asCell",
+    "asOpaque",
+    "default",
+    "required",
+    "additionalProperties",
+  ];
+
+  // Maximum enum values to preserve (to prevent bloat)
+  const MAX_ENUM_VALUES = 10;
+
+  for (const [key, value] of Object.entries(schemaObj)) {
+    // Skip $defs and $ref - these can be huge with recursive types
     if (key === "$defs" || key === "$ref") {
       continue;
     }
 
-    // Recursively simplify nested schemas (properties, items, etc.)
+    // Skip $-prefixed keys (like $UI schemas) - these are internal/VDOM
+    if (key.startsWith("$")) {
+      continue;
+    }
+
+    // Handle properties recursively
     if (key === "properties" && typeof value === "object" && value !== null) {
       const simplifiedProps: Record<string, unknown> = {};
       for (const [propKey, propValue] of Object.entries(value)) {
+        // Skip $-prefixed properties ($UI, $TYPE, etc.) - these are internal/VDOM
+        if (propKey.startsWith("$")) {
+          continue;
+        }
         if (typeof propValue === "object" && propValue !== null) {
-          // For nested properties, just keep type info, don't recurse deeply
-          const propSchema = propValue as Record<string, unknown>;
-          const simpleProp: Record<string, unknown> = {};
-          if (propSchema.type) simpleProp.type = propSchema.type;
-          if (propSchema.description) {
-            simpleProp.description = propSchema.description;
-          }
-          simplifiedProps[propKey] = simpleProp;
+          simplifiedProps[propKey] = simplifySchemaForContext(
+            propValue as JSONSchema,
+            depth + 1,
+            maxDepth,
+          );
         } else {
           simplifiedProps[propKey] = propValue;
         }
       }
       simplified[key] = simplifiedProps;
-    } else if (key === "items" && typeof value === "object" && value !== null) {
-      // For array items, simplify recursively but not too deep
-      const itemSchema = value as Record<string, unknown>;
-      const simpleItem: Record<string, unknown> = {};
-      if (itemSchema.type) simpleItem.type = itemSchema.type;
-      if (itemSchema.description) {
-        simpleItem.description = itemSchema.description;
+      continue;
+    }
+
+    // Handle items recursively (for arrays)
+    if (key === "items" && typeof value === "object" && value !== null) {
+      simplified[key] = simplifySchemaForContext(
+        value as JSONSchema,
+        depth + 1,
+        maxDepth,
+      );
+      continue;
+    }
+
+    // Handle enum - preserve if small, otherwise truncate
+    if (key === "enum" && Array.isArray(value)) {
+      if (value.length <= MAX_ENUM_VALUES) {
+        simplified[key] = value;
+      } else {
+        // Truncate large enums and add indicator
+        simplified[key] = [...value.slice(0, MAX_ENUM_VALUES), "..."];
       }
-      simplified[key] = simpleItem;
-    } else {
+      continue;
+    }
+
+    // Handle anyOf/oneOf/allOf recursively
+    if (
+      (key === "anyOf" || key === "oneOf" || key === "allOf") &&
+      Array.isArray(value)
+    ) {
+      simplified[key] = value.map((v) =>
+        typeof v === "object" && v !== null
+          ? simplifySchemaForContext(v as JSONSchema, depth + 1, maxDepth)
+          : v
+      );
+      continue;
+    }
+
+    // Preserve keys from PRESERVE_KEYS list
+    if (PRESERVE_KEYS.includes(key)) {
+      simplified[key] = value;
+      continue;
+    }
+
+    // Preserve other primitive values, but skip complex objects not handled above
+    if (typeof value !== "object" || value === null) {
       simplified[key] = value;
     }
   }
@@ -847,16 +926,18 @@ function buildAvailableCellsDocumentation(
         let entry = `## ${name} (${path})\n`;
 
         if (schemaInfo?.schema) {
-          // Simplify schema for context - remove $defs to reduce size
-          const simplifiedSchema = simplifySchemaForContext(schemaInfo.schema);
-          let schemaJson = JSON.stringify(simplifiedSchema, null, 2);
+          // Convert schema to TypeScript-like string for readability
+          const defs = (schemaInfo.schema as Record<string, unknown>).$defs as
+            | Record<string, JSONSchema>
+            | undefined;
+          let schemaStr = schemaToTypeString(schemaInfo.schema, { defs });
 
           const MAX_SCHEMA_LENGTH = 1000;
-          if (schemaJson.length > MAX_SCHEMA_LENGTH) {
-            schemaJson = schemaJson.substring(0, MAX_SCHEMA_LENGTH) +
-              "\n... (schema truncated)";
+          if (schemaStr.length > MAX_SCHEMA_LENGTH) {
+            schemaStr = schemaStr.substring(0, MAX_SCHEMA_LENGTH) +
+              "\n  // ... truncated";
           }
-          entry += `- Schema: \`\`\`json\n${schemaJson}\n\`\`\`\n`;
+          entry += `- Schema: \`\`\`typescript\n${schemaStr}\n\`\`\`\n`;
         }
 
         try {
@@ -921,16 +1002,18 @@ function buildAvailableCellsDocumentation(
 
       // Add schema if available
       if (schemaInfo?.schema) {
-        // Simplify schema for context - remove $defs to reduce size
-        const simplifiedSchema = simplifySchemaForContext(schemaInfo.schema);
-        let schemaJson = JSON.stringify(simplifiedSchema, null, 2);
+        // Convert schema to TypeScript-like string for readability
+        const defs = (schemaInfo.schema as Record<string, unknown>).$defs as
+          | Record<string, JSONSchema>
+          | undefined;
+        let schemaStr = schemaToTypeString(schemaInfo.schema, { defs });
 
         const MAX_SCHEMA_LENGTH = 1000;
-        if (schemaJson.length > MAX_SCHEMA_LENGTH) {
-          schemaJson = schemaJson.substring(0, MAX_SCHEMA_LENGTH) +
-            "\n... (schema truncated)";
+        if (schemaStr.length > MAX_SCHEMA_LENGTH) {
+          schemaStr = schemaStr.substring(0, MAX_SCHEMA_LENGTH) +
+            "\n  // ... truncated";
         }
-        entry += `- Schema: \`\`\`json\n${schemaJson}\n\`\`\`\n`;
+        entry += `- Schema: \`\`\`typescript\n${schemaStr}\n\`\`\`\n`;
       }
 
       // Add current value
@@ -1310,6 +1393,7 @@ export const llmDialogTestHelpers = {
   createToolResultMessages,
   hasValidContent,
   FINAL_RESULT_TOOL_NAME,
+  simplifySchemaForContext,
 };
 
 /**
