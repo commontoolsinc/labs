@@ -263,19 +263,6 @@ describe("Cell", () => {
     expect(proxy.y).toBe(2);
   });
 
-  it("should update cell value through proxy", () => {
-    const c = runtime.getCell<{ x: number; y: number }>(
-      space,
-      "should update cell value through proxy",
-      undefined,
-      tx,
-    );
-    c.set({ x: 1, y: 2 });
-    const proxy = c.getAsQueryResult();
-    proxy.x = 10;
-    expect(c.get()).toEqual({ x: 10, y: 2 });
-  });
-
   it("should get value at path", () => {
     const c = runtime.getCell<{ a: { b: { c: number } } }>(
       space,
@@ -285,18 +272,6 @@ describe("Cell", () => {
     );
     c.set({ a: { b: { c: 42 } } });
     expect(c.key("a").key("b").key("c").get()).toBe(42);
-  });
-
-  it("should set value at path", () => {
-    const c = runtime.getCell<{ a: { b: { c: number } } }>(
-      space,
-      "should set value at path",
-      undefined,
-      tx,
-    );
-    c.set({ a: { b: { c: 42 } } });
-    c.getAsQueryResult().a.b.c = 100;
-    expect(c.key("a").key("b").key("c").get()).toBe(100);
   });
 
   it("should get raw value using getRaw", () => {
@@ -625,19 +600,6 @@ describe("createProxy", () => {
     expect(proxy.a.b.c).toBe(42);
   });
 
-  it("should support regular assigments", () => {
-    const c = runtime.getCell<{ x: number }>(
-      space,
-      "should support regular assigments",
-      undefined,
-      tx,
-    );
-    c.set({ x: 1 });
-    const proxy = c.getAsQueryResult();
-    proxy.x = 2;
-    expect(c.get()).toStrictEqual({ x: 2 });
-  });
-
   it("should handle $alias in objects", () => {
     const c = runtime.getCell(
       space,
@@ -648,19 +610,6 @@ describe("createProxy", () => {
     c.setRaw({ x: { $alias: { path: ["y"] } }, y: 42 });
     const proxy = c.getAsQueryResult();
     expect(proxy.x).toBe(42);
-  });
-
-  it("should handle aliases when writing", () => {
-    const c = runtime.getCell<{ x: number; y: number }>(
-      space,
-      "should handle aliases when writing",
-      undefined,
-      tx,
-    );
-    c.setRaw({ x: { $alias: { path: ["y"] } }, y: 42 });
-    const proxy = c.getAsQueryResult();
-    proxy.x = 100;
-    expect(c.get().y).toBe(100);
   });
 
   it("should handle nested cells", () => {
@@ -679,34 +628,6 @@ describe("createProxy", () => {
     );
     outerCell.set({ x: innerCell });
     const proxy = outerCell.getAsQueryResult();
-    expect(proxy.x).toBe(42);
-  });
-
-  it("should handle cell references", () => {
-    const c = runtime.getCell<{ x: number; y?: any }>(
-      space,
-      "should handle cell references",
-      undefined,
-      tx,
-    );
-    c.set({ x: 42 });
-    const ref = c.key("x").getAsLink();
-    const proxy = c.getAsQueryResult();
-    proxy.y = ref;
-    expect(proxy.y).toBe(42);
-  });
-
-  it("should handle infinite loops in cell references", () => {
-    const c = runtime.getCell<{ x: number; y?: any }>(
-      space,
-      "should handle infinite loops in cell references",
-      undefined,
-      tx,
-    );
-    c.set({ x: 42 });
-    const ref = c.key("x").getAsLink();
-    const proxy = c.getAsQueryResult();
-    proxy.x = ref;
     expect(proxy.x).toBe(42);
   });
 
@@ -792,42 +713,6 @@ describe("createProxy", () => {
     expect(sliced.length).toBe(3);
     expect(sliced[0]).toBe(2);
     expect(sliced[2]).toBe(4);
-  });
-
-  it("should maintain reactivity with nested array operations", () => {
-    const c = runtime.getCell<{ nested: { arrays: number[][] } }>(
-      space,
-      "should maintain reactivity with nested array operations",
-      undefined,
-      tx,
-    );
-    c.set({ nested: { arrays: [[1, 2], [3, 4]] } });
-    const proxy = c.getAsQueryResult();
-
-    // Access a nested array through multiple levels
-    const firstInnerArray = proxy.nested.arrays[0];
-    expect(firstInnerArray).toEqual([1, 2]);
-    expect(isCellResult(firstInnerArray)).toBe(true);
-
-    // Modify the deeply nested array
-    firstInnerArray.push(3);
-    expect(firstInnerArray).toEqual([1, 2, 3]);
-
-    // Verify the change is reflected in the original data
-    expect(proxy.nested.arrays[0]).toEqual([1, 2, 3]);
-    expect(c.get().nested.arrays[0]).toEqual([1, 2, 3]);
-
-    // Create a flattened array using array methods
-    const flattened = proxy.nested.arrays.flat();
-    expect(flattened).toEqual([1, 2, 3, 3, 4]);
-    expect(isCellResult(flattened)).toBe(false);
-
-    // Modify the flattened result
-    flattened[0] = 10;
-    expect(flattened[0]).toBe(10);
-
-    // Original arrays should not be affected by modifying the flattened result
-    expect(proxy.nested.arrays[0][0]).toBe(1);
   });
 
   it("should support spreading array query results with for...of", () => {
@@ -1298,17 +1183,17 @@ describe("asCell", () => {
       values.push(value);
     });
     expect(values).toEqual([42]); // Initial call
-    c.withTx(tx).getAsQueryResult().d = 50;
+    c.withTx(tx).key("d").set(50);
     tx.commit();
     tx = runtime.edit();
-    c.withTx(tx).getAsQueryResult().a.c = 100;
+    c.withTx(tx).key("a").key("c").set(100);
     tx.commit();
     tx = runtime.edit();
-    c.withTx(tx).getAsQueryResult().a.b = 42;
+    c.withTx(tx).key("a").key("b").set(42);
     tx.commit();
     tx = runtime.edit();
     expect(values).toEqual([42]); // Didn't get called again
-    c.withTx(tx).getAsQueryResult().a.b = 300;
+    c.withTx(tx).key("a").key("b").set(300);
     tx.commit();
     await runtime.idle();
     expect(c.get()).toEqual({ a: { b: 300, c: 100 }, d: 50 });
@@ -2593,7 +2478,7 @@ describe("getAsLink method", () => {
     expect(link["/"][LINK_V1_TAG].path).toEqual(["nested", "value"]);
   });
 
-  it("should return different formats for getAsLink vs toJSON", () => {
+  it("should return sigil format for both getAsLink and toJSON", () => {
     const cell = runtime.getCell<{ value: number }>(
       space,
       "getAsLink-json-test",
@@ -2605,14 +2490,17 @@ describe("getAsLink method", () => {
     const link = cell.getAsLink();
     const json = cell.toJSON();
 
-    // getAsLink returns new sigil format
+    // getAsLink returns sigil format
     expect(link).toHaveProperty("/");
     expect(link["/"][LINK_V1_TAG]).toBeDefined();
 
-    // toJSON returns old format for backward compatibility
-    expect(json).toHaveProperty("cell");
-    expect(json).toHaveProperty("path");
-    expect((json as any).cell).toHaveProperty("/");
+    // toJSON now also returns sigil format (includes space for cross-space references)
+    expect(json).toHaveProperty("/");
+    expect((json as any)["/"][LINK_V1_TAG]).toBeDefined();
+    expect((json as any)["/"][LINK_V1_TAG].id).toBeDefined();
+    expect((json as any)["/"][LINK_V1_TAG].path).toEqual([]);
+    // Verify space is included for cross-space resolution
+    expect((json as any)["/"][LINK_V1_TAG].space).toEqual(space);
   });
 
   it("should create relative links with base parameter - same document", () => {

@@ -1,4 +1,4 @@
-import { JSONValue, URI } from "@commontools/runner";
+import type { JSONValue, URI } from "./interface.ts";
 import {
   Assertion,
   Fact,

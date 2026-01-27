@@ -19,6 +19,10 @@
  *   { action: action(() => game.start.send(undefined)) },
  *   { assertion: computed(() => game.phase === "started") },
  * ]
+ *
+ * Note: By default, test patterns can only import from their own directory or
+ * subdirectories. To enable imports from sibling directories (e.g., `../shared/`),
+ * use the --root option to specify a common ancestor directory.
  */
 
 import { Identity } from "@commontools/identity";
@@ -55,6 +59,8 @@ export interface TestRunResult {
 export interface TestRunnerOptions {
   timeout?: number;
   verbose?: boolean;
+  /** Root directory for resolving imports. If not provided, uses the test file's directory. */
+  root?: string;
 }
 
 /**
@@ -86,7 +92,7 @@ export async function runTestPattern(
   try {
     // 2. Compile the test pattern
     const program = await engine.resolve(
-      new FileSystemProgramResolver(testPath),
+      new FileSystemProgramResolver(testPath, options.root),
     );
     const { main } = await engine.process(program, {
       noCheck: false,
@@ -256,11 +262,23 @@ export async function runTestPattern(
       totalDurationMs: performance.now() - startTime,
     };
   } catch (err) {
+    let errorMessage = err instanceof Error ? err.message : String(err);
+
+    // Add helpful hint for import resolution errors when --root wasn't provided
+    if (
+      errorMessage.includes("No such file or directory") &&
+      errorMessage.includes("readfile") &&
+      !options.root
+    ) {
+      errorMessage +=
+        "\n    Hint: If the test imports from sibling directories (e.g., ../shared/), use --root to specify a common ancestor.";
+    }
+
     return {
       path: testPath,
       results: [],
       totalDurationMs: performance.now() - startTime,
-      error: err instanceof Error ? err.message : String(err),
+      error: errorMessage,
     };
   } finally {
     // 6. Cleanup

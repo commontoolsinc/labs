@@ -5,10 +5,9 @@ import type {
   Cell,
   CELL_LIKE,
   CellLike,
-  Props,
+  JSXElement,
   RenderNode,
   Stream,
-  VNode,
 } from "commontools";
 
 /**
@@ -2862,6 +2861,7 @@ type CtListItem = {
 
 interface CTOutlinerElement extends CTHTMLElement {}
 interface CTCellLinkElement extends CTHTMLElement {}
+interface CTSpaceLinkElement extends CTHTMLElement {}
 interface CTListElement extends CTHTMLElement {}
 interface CTListItemElement extends CTHTMLElement {}
 interface CTLoaderElement extends CTHTMLElement {}
@@ -3171,6 +3171,12 @@ interface CTCellLinkAttributes<T> extends CTHTMLAttributes<T> {
   "$cell": CellLike<any>;
 }
 
+interface CTSpaceLinkAttributes<T> extends CTHTMLAttributes<T> {
+  "spaceName"?: string;
+  "spaceDid"?: string;
+  "label"?: string;
+}
+
 interface CTChatMessageAttributes<T> extends CTHTMLAttributes<T> {
   "role"?: "user" | "assistant";
   "content"?: string;
@@ -3215,7 +3221,7 @@ interface CTButtonAttributes<T> extends CTHTMLAttributes<T> {
 }
 
 interface CTCopyButtonAttributes<T> extends CTHTMLAttributes<T> {
-  "text": string;
+  "text": string | Record<string, string>;
   "variant"?:
     | "primary"
     | "secondary"
@@ -3583,6 +3589,9 @@ interface CTToolsChipAttributes<T> extends CTHTMLAttributes<T> {
    * - Native map: { [toolName]: { handler?: any, pattern?: any } | any }
    */
   "tools"?:
+    | { name: string; description?: string; schema?: unknown }[]
+    | Record<string, { handler?: unknown; pattern?: unknown } | any>;
+  "$tools"?:
     | { name: string; description?: string; schema?: unknown }[]
     | Record<string, { handler?: unknown; pattern?: unknown } | any>;
 }
@@ -4414,22 +4423,20 @@ interface DOMIntrinsicElements {
 declare global {
   namespace JSX {
     // The output of a JSX renderer is a JSX.Element.
-    // Our renderer (`@commontools/api#h`) outputs
-    // `VNode`s. Redefine `JSX.Element` here as a `VNode`
-    // for consistency.
-    interface Element extends VNode {
-      type: "vnode";
-      name: string;
-      props: Props;
-      children?: RenderNode;
-      $UI?: VNode;
-    }
+    // Our renderer (`@commontools/api#h`) outputs `VNode`s,
+    // but also accepts cells containing objects with [UI] properties
+    // (patterns used as components return OpaqueCell<{[UI]: VNode}>).
+    type Element = JSXElement;
 
     interface IntrinsicElements extends DOMIntrinsicElements {
       //[elemName: string]: any;
       "ct-cell-link": CTDOM.DetailedHTMLProps<
         CTCellLinkAttributes<CTCellLinkElement>,
         CTCellLinkElement
+      >;
+      "ct-space-link": CTDOM.DetailedHTMLProps<
+        CTSpaceLinkAttributes<CTSpaceLinkElement>,
+        CTSpaceLinkElement
       >;
       "ct-outliner": CTDOM.DetailedHTMLProps<
         CTOutlinerAttributes<CTOutlinerElement>,

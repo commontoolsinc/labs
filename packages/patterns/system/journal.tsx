@@ -79,6 +79,7 @@ const clearJournal = handler<
 });
 
 export default pattern<Record<string, never>>((_) => {
+  // Use wish() to access journal from home.tsx via defaultPattern
   const journalResult = wish<Array<JournalEntry>>({
     query: "#journal",
   });
@@ -235,7 +236,7 @@ export default pattern<Record<string, never>>((_) => {
                     flexWrap: "wrap",
                   }}
                 >
-                  {entry.tags.map((tag) => (
+                  {entry.tags.map((tag: string) => (
                     <span
                       style={{
                         fontSize: "0.8em",

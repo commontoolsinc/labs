@@ -1883,6 +1883,11 @@ export class Scheduler {
       (error as Error & { frame?: Frame }).frame,
     );
 
+    // Transform stack trace to show original source locations
+    if (error.stack) {
+      error.stack = this.runtime.harness.parseStack(error.stack);
+    }
+
     const errorWithContext = error as ErrorWithContext;
     errorWithContext.action = action;
     if (charmId) errorWithContext.charmId = charmId;
@@ -1900,6 +1905,8 @@ export class Scheduler {
 
     if (this.errorHandlers.size === 0) {
       console.error("Uncaught error in action:", errorWithContext);
+    } else {
+      console.error("Error in action:", errorWithContext);
     }
   }
 

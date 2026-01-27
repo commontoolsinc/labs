@@ -1,4 +1,11 @@
+import { deepEqual } from "@commontools/utils/deep-equal";
 import { isRecord } from "@commontools/utils/types";
+import { isArrayIndexPropertyName } from "../../value-codec.ts";
+import type {
+  StorableDatum,
+  StorableObject,
+  StorableValue,
+} from "@commontools/memory/interface";
 import type {
   IAttestation,
   IInvalidDataURIError,
@@ -8,7 +15,6 @@ import type {
   IStorageTransactionInconsistent,
   ITypeMismatchError,
   IUnsupportedMediaTypeError,
-  JSONValue,
   MemoryAddressPathComponent,
   MemorySpace,
   Result,
@@ -16,6 +22,7 @@ import type {
 } from "../interface.ts";
 import { unclaimed } from "@commontools/memory/fact";
 import { getLogger } from "@commontools/utils/logger";
+import { LRUCache } from "@commontools/utils/cache";
 
 const logger = getLogger("attestation", {
   enabled: false,
@@ -30,11 +37,10 @@ const cacheHitLogger = getLogger("attestation-hit", {
  * Cache for parsed data URIs to avoid redundant parsing.
  * Key format: `${address.id}::${address.type}`
  */
-const dataURICache = new Map<
+const dataURICache = new LRUCache<
   string,
   Result<IAttestation, IInvalidDataURIError | IUnsupportedMediaTypeError>
->();
-const MAX_CACHE_SIZE = 1000;
+>({ capacity: 1000 });
 
 export const InvalidDataURIError = (
   message: string,
@@ -59,17 +65,6 @@ export const UnsupportedMediaTypeError = (
 });
 
 /**
- * Checks if a string is a valid non-negative integer array index.
- * Valid: "0", "1", "123"
- * Invalid: "-1", "1.5", "abc", "", "01" (leading zeros except "0"), "length"
- */
-const isValidArrayIndex = (key: string): boolean => {
-  if (key === "" || key === "length") return false;
-  const num = Number(key);
-  return Number.isInteger(num) && num >= 0 && String(num) === key;
-};
-
-/**
  * Sets a value at path using structural sharing. Only clones along the path.
  * Returns original reference if nothing changed (noop propagation).
  *
@@ -77,10 +72,10 @@ const isValidArrayIndex = (key: string): boolean => {
  * with O(D) structural sharing where D is path depth.
  */
 const setAtPath = (
-  root: JSONValue | undefined,
+  root: StorableValue,
   path: readonly MemoryAddressPathComponent[],
-  value: JSONValue | undefined,
-): { ok: JSONValue | undefined } | {
+  value: StorableValue,
+): { ok: StorableValue } | {
   error: { at: number; type: string; notFound?: boolean };
 } => {
   // Base case: empty path = replace root
@@ -94,7 +89,10 @@ const setAtPath = (
   if (root === null || root === undefined || typeof root !== "object") {
     // Distinguish between undefined (path not found) vs primitive (type mismatch)
     if (root === undefined) {
-      return { error: { at: 0, type: "undefined", notFound: true } };
+      // Return at: -1 to indicate the error is at the parent level (the key that
+      // led here doesn't exist). After +1 adjustments during unwinding, this
+      // produces a path that includes the missing key, matching read semantics.
+      return { error: { at: -1, type: "undefined", notFound: true } };
     }
     const actualType = root === null ? "null" : typeof root;
     return { error: { at: 0, type: actualType } };
@@ -119,7 +117,7 @@ const setAtPath = (
     }
 
     // Validate array key
-    if (!isValidArrayIndex(key)) {
+    if (!isArrayIndexPropertyName(key)) {
       return { error: { at: 0, type: "array" } };
     }
 
@@ -151,12 +149,12 @@ const setAtPath = (
     }
     if (result.ok === nested) return { ok: root }; // noop propagation
     const newArray = [...root];
-    newArray[index] = result.ok as JSONValue;
+    newArray[index] = result.ok as StorableDatum;
     return { ok: newArray };
   }
 
   // Handle objects
-  const obj = root as Record<string, JSONValue>;
+  const obj = root as StorableObject;
 
   // Terminal case
   if (rest.length === 0) {
@@ -164,7 +162,7 @@ const setAtPath = (
     if (value === undefined) {
       if (!(key in obj)) return { ok: root }; // delete non-existent = noop
       const { [key]: _, ...without } = obj;
-      return { ok: without as JSONValue };
+      return { ok: without as StorableDatum };
     }
     return { ok: { ...obj, [key]: value } };
   }
@@ -182,7 +180,7 @@ const setAtPath = (
     };
   }
   if (result.ok === nested) return { ok: root }; // noop propagation
-  return { ok: { ...obj, [key]: result.ok as JSONValue } };
+  return { ok: { ...obj, [key]: result.ok as StorableDatum } };
 };
 
 /**
@@ -198,7 +196,7 @@ const setAtPath = (
 export const write = (
   source: IAttestation,
   address: IMemoryAddress,
-  value: JSONValue | undefined,
+  value: StorableValue,
 ): Result<
   IAttestation,
   IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
@@ -224,6 +222,7 @@ export const write = (
 
   if ("error" in result) {
     // Map error position to full address path
+    // result.error.at is the depth where the error occurred; +1 to include the failed key
     const errorPath = address.path.slice(
       0,
       source.address.path.length + result.error.at + 1,
@@ -231,8 +230,9 @@ export const write = (
 
     // Distinguish between NotFound (path doesn't exist) and TypeMismatch (wrong type)
     if (result.error.notFound) {
+      // errorPath includes the missing key, matching read error semantics
       return {
-        error: NotFound(source, address, errorPath.slice(0, -1)),
+        error: NotFound(source, address, errorPath),
       };
     }
     return {
@@ -326,12 +326,9 @@ export const claim = (
   const source = attest(state);
   const actual = read(source, address)?.ok?.value;
 
-  // Fast path: reference equality check avoids expensive JSON.stringify
+  // Fast path: reference equality check avoids expensive comparison
   // when the replica state hasn't changed since the original read
-  if (
-    expected === actual ||
-    JSON.stringify(expected) === JSON.stringify(actual)
-  ) {
+  if (expected === actual || deepEqual(expected, actual)) {
     return { ok: state };
   } else {
     return {
@@ -363,13 +360,10 @@ export const resolve = (
       error: NotFound(
         source,
         address,
-        // Last valid path component is assumed to be the one that points to
-        // `undefined`. If the path was empty this means the document doesn't
-        // exist at all. If it isn't empty, we're assuming the parent is
-        // correct, but that depends on the validity of the source attestation.
-        source.address.path.length > 0
-          ? source.address.path.slice(0, -1)
-          : undefined,
+        // Return the source path (empty array for root). This is consistent with
+        // how writes handle document-not-found. If source.address.path has content,
+        // we slice off the last element since that's what points to undefined.
+        source.address.path.length > 0 ? source.address.path.slice(0, -1) : [],
       ),
     };
   }
@@ -377,7 +371,7 @@ export const resolve = (
   while (++at < path.length) {
     const key = path[at];
     if (isRecord(value)) {
-      value = value[key] as JSONValue;
+      value = value[key] as StorableDatum;
     } else {
       // If the value is undefined, the path doesn't exist, but we can still
       // write onto it. Return error with last valid path component.
@@ -462,7 +456,7 @@ export const load = (
           };
         } else if (mediaType === "application/json") {
           // Handle JSON media type
-          let value: JSONValue;
+          let value: StorableDatum;
           try {
             value = JSON.parse(content);
             result = { ok: { address: { ...address, path: [] }, value } };
@@ -498,23 +492,23 @@ export const load = (
     };
   }
 
-  // Cache the result (with FIFO eviction)
-  if (dataURICache.size >= MAX_CACHE_SIZE) {
-    // Remove the first (oldest) entry
-    const firstKey = dataURICache.keys().next().value;
-    if (firstKey !== undefined) {
-      dataURICache.delete(firstKey);
-    }
-  }
-  dataURICache.set(cacheKey, result);
+  dataURICache.put(cacheKey, result);
 
   return result;
 };
 
+/**
+ * Creates a NotFoundError.
+ *
+ * @param source - The attestation that was being read from or written to
+ * @param address - The full address that was attempted
+ * @param path - Path to the non-existent key (includes the missing key).
+ *   Consistent for both reads and writes. See INotFoundError docs.
+ */
 export const NotFound = (
   source: IAttestation,
   address: IMemoryAddress,
-  path?: readonly MemoryAddressPathComponent[],
+  path: readonly MemoryAddressPathComponent[],
 ): INotFoundError => {
   let message: string;
 
@@ -562,8 +556,8 @@ export const TypeMismatchError = (
 
 export const StateInconsistency = (source: {
   address: IMemoryAddress;
-  expected?: JSONValue;
-  actual?: JSONValue;
+  expected?: StorableDatum;
+  actual?: StorableDatum;
   space?: MemorySpace;
 }): IStorageTransactionInconsistent => {
   const { address, space, expected, actual } = source;

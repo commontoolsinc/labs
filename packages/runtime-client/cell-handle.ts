@@ -222,6 +222,21 @@ export class CellHandle<T = unknown> {
     return this.#value;
   }
 
+  /**
+   * Resolve links in this cell to get the actual cell it points to.
+   * Returns a new CellHandle pointing to the resolved cell.
+   */
+  async resolveAsCell(): Promise<CellHandle<T>> {
+    const response = await this.#conn.request<
+      RequestType.CellResolveAsCell
+    >({
+      type: RequestType.CellResolveAsCell,
+      cell: this.ref(),
+    });
+
+    return new CellHandle<T>(this.#rt, response.cell);
+  }
+
   equals(other: unknown): boolean {
     if (this === other) return true;
     if (!isCellHandle(other)) return false;

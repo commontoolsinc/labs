@@ -1,4 +1,5 @@
 import { handler, schema } from "commontools";
+import "commontools/schema";
 
 // Different way to define the same schema, using 'schema' helper function,
 // let's as leave off `as const satisfies JSONSchema`.

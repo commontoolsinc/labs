@@ -240,13 +240,15 @@ Debugging tool for inspecting cell values. See [CELL_CONTEXT.md](CELL_CONTEXT.md
 
 ## Removing Array Items
 
-Use `Cell.equals()` for identity comparison:
+Use `equals()` for identity comparison:
 
 ```tsx
+import { equals, handler, Writable } from 'commontools';
+
 const removeItem = handler<unknown, { items: Writable<Item[]>; item: Item }>(
   (_, { items, item }) => {
     const current = items.get();
-    const index = current.findIndex((el) => Cell.equals(item, el));
+    const index = current.findIndex((el) => equals(item, el));
     if (index >= 0) items.set(current.toSpliced(index, 1));
   }
 );
@@ -316,10 +318,10 @@ Interactive map component using Leaflet with OpenStreetMap tiles. No API key req
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `value` / `$value` | `MapValue \| Cell<MapValue>` | `{}` | Map data with markers, circles, polylines |
-| `center` / `$center` | `LatLng \| Cell<LatLng>` | San Francisco | Map center coordinates (bidirectional) |
-| `zoom` / `$zoom` | `number \| Cell<number>` | `13` | Zoom level 0-18 (bidirectional) |
-| `bounds` / `$bounds` | `Bounds \| Cell<Bounds>` | - | Visible map bounds (bidirectional) |
+| `value` / `$value` | `MapValue \| Writable<MapValue>` | `{}` | Map data with markers, circles, polylines |
+| `center` / `$center` | `LatLng \| Writable<LatLng>` | San Francisco | Map center coordinates (bidirectional) |
+| `zoom` / `$zoom` | `number \| Writable<number>` | `13` | Zoom level 0-18 (bidirectional) |
+| `bounds` / `$bounds` | `Bounds \| Writable<Bounds>` | - | Visible map bounds (bidirectional) |
 | `fitToBounds` | `boolean` | `false` | Auto-fit to show all features |
 | `interactive` | `boolean` | `true` | Enable pan/zoom |
 

@@ -19,28 +19,38 @@ export type WishParams = {
 };
 
 export default pattern<
-  WishParams & { candidates: Default<Writable<never>[], []> },
-  WishState<never>
+  WishParams & { candidates: Default<Writable<unknown>[], []> },
+  WishState<unknown>
 >(
-  ({ query: _query, context: _context, candidates }) => {
+  ({ candidates }) => {
     const selectedIndex = Writable.of(0);
+    const confirmedIndex = Writable.of<number | null>(null);
+
+    // Result: the confirmed cell, or current selection while browsing
     const result = computed(() => {
       if (candidates.length === 0) return undefined;
-      const idx = Math.min(selectedIndex.get(), candidates.length - 1);
-      return candidates[idx];
+      const idx = confirmedIndex.get() ?? selectedIndex.get();
+      return candidates[Math.min(idx, candidates.length - 1)];
     });
 
     return {
       result,
-      [UI]: (
-        <div>
+      [UI]: computed(() => {
+        if (candidates.length === 0) return <div>No candidates</div>;
+        if (confirmedIndex.get() !== null) return result;
+        return (
           <ct-card>
-            <h2>Wish Results ({candidates.length})</h2>
+            <h2>Choose Result ({candidates.length})</h2>
             <ct-picker $items={candidates} $selectedIndex={selectedIndex} />
-            <ct-cell-link $cell={result} />
+            <ct-button
+              variant="primary"
+              onClick={() => confirmedIndex.set(selectedIndex.get())}
+            >
+              Confirm Selection
+            </ct-button>
           </ct-card>
-        </div>
-      ),
+        );
+      }),
     };
   },
 );

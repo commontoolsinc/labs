@@ -18,7 +18,6 @@ import {
   QueryResult,
   Result,
   SchemaQuery,
-  SpaceSession,
   Subscriber,
   SubscribeResult,
   SystemError,
@@ -28,10 +27,13 @@ import {
 export * from "./interface.ts";
 import { type DID } from "@commontools/identity";
 
+/** A mounted space instance with both low-level and high-level access. */
+type MountedSpace = Space.SpaceInstance<Subject>;
+
 interface Session {
   store: URL;
   subscribers: Set<Subscriber>;
-  spaces: Map<string, SpaceSession>;
+  spaces: Map<string, MountedSpace>;
 }
 
 export class Memory implements Session, MemorySession {
@@ -42,7 +44,7 @@ export class Memory implements Session, MemorySession {
   constructor(
     options: Options,
     public subscribers: Set<Subscriber> = new Set(),
-    public spaces: Map<Subject, SpaceSession> = new Map(),
+    public spaces: Map<Subject, MountedSpace> = new Map(),
   ) {
     this.store = options.store;
     this.ready = Promise.resolve();
@@ -194,7 +196,7 @@ export const querySchemaWithTracker = async (
     }
 
     span.setAttribute("mount.status", "success");
-    // Cast is safe: the Space class implements both SpaceSession and Session<Subject>
+    // Cast needed to align generic type parameter with query.sub
     return Space.querySchemaWithTracker(
       space as unknown as Space.Session<typeof query.sub>,
       query,
@@ -225,33 +227,36 @@ export const transact = async (session: Session, transaction: Transaction) => {
 
     if (result.error) {
       return result;
-    } else {
-      return await traceAsync(
-        "memory.notify_subscribers",
-        async (notifySpan) => {
-          notifySpan.setAttribute(
-            "memory.subscriber_count",
-            session.subscribers.size,
-          );
-
-          const promises = [];
-          // Copy here, in case a subscriber modifies the set of subscribers
-          for (const subscriber of [...session.subscribers]) {
-            promises.push(subscriber.commit(result.ok));
-          }
-          await Promise.all(promises);
-
-          return result;
-        },
-      );
     }
+
+    // Get labels for classified content redaction
+    const labels = Space.getLabelsForCommit(space, result.ok);
+
+    return await traceAsync(
+      "memory.notify_subscribers",
+      async (notifySpan) => {
+        notifySpan.setAttribute(
+          "memory.subscriber_count",
+          session.subscribers.size,
+        );
+
+        const promises = [];
+        // Copy here, in case a subscriber modifies the set of subscribers
+        for (const subscriber of [...session.subscribers]) {
+          promises.push(subscriber.commit(result.ok, labels));
+        }
+        await Promise.all(promises);
+
+        return result;
+      },
+    );
   });
 };
 
 export const mount = async (
   session: Session,
   subject: Subject,
-): Promise<Result<SpaceSession, ConnectionError>> => {
+): Promise<Result<MountedSpace, ConnectionError>> => {
   return await traceAsync("memory.mount", async (span) => {
     addMemoryAttributes(span, {
       operation: "mount",
@@ -282,7 +287,7 @@ export const mount = async (
         return result;
       }
 
-      const replica = result.ok as SpaceSession;
+      const replica = result.ok as MountedSpace;
       session.spaces.set(subject, replica);
       span.setAttribute("memory.spaces_count", session.spaces.size);
       return { ok: replica };

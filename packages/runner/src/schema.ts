@@ -3,7 +3,8 @@ import { getLogger } from "@commontools/utils/logger";
 import { Immutable, isObject, isRecord } from "@commontools/utils/types";
 import { JSONSchemaMutable } from "@commontools/runner";
 import { ContextualFlowControl } from "./cfc.ts";
-import { type JSONSchema, type JSONValue } from "./builder/types.ts";
+import { type JSONSchema } from "./builder/types.ts";
+import { type StorableDatum } from "@commontools/memory/interface";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
@@ -300,7 +301,7 @@ export function processDefaultValue(
 
 function mergeDefaults(
   schema: JSONSchema | undefined,
-  defaultValue: Readonly<JSONValue>,
+  defaultValue: Readonly<StorableDatum>,
 ): JSONSchema {
   const result: JSONSchemaMutable = {
     ...(isObject(schema) ? structuredClone(schema) as JSONSchemaMutable : {}),
@@ -315,7 +316,7 @@ function mergeDefaults(
     result.default = {
       ...result.default,
       ...defaultValue,
-    } as Readonly<JSONValue>;
+    } as Readonly<StorableDatum>;
   } else result.default = defaultValue;
 
   return result;
@@ -473,7 +474,7 @@ export function validateAndTransform(
 }
 
 class TransformObjectCreator
-  implements IObjectCreator<AnyCellWrapping<JSONValue>> {
+  implements IObjectCreator<AnyCellWrapping<StorableDatum>> {
   constructor(
     private runtime: Runtime,
     private tx: IExtendedStorageTransaction,
@@ -509,9 +510,9 @@ class TransformObjectCreator
   // This controls the behavior when properties is specified, but
   // additonalProperties is not.
   addOptionalProperty(
-    _obj: Record<string, Immutable<OptJSONValue>>,
+    _obj: Record<string, Immutable<StorableDatum>>,
     _key: string,
-    _value: JSONValue,
+    _value: StorableDatum,
   ) {
     // We want to exclude properties when we have a properties map provided
     // in the schema, but it doesn't include our property, and we don't have
@@ -528,8 +529,8 @@ class TransformObjectCreator
   // If not, we will actually resolve our links to get to our values.
   createObject(
     link: NormalizedFullLink,
-    value: AnyCellWrapping<JSONValue> | undefined,
-  ): AnyCellWrapping<JSONValue> {
+    value: AnyCellWrapping<StorableDatum> | undefined,
+  ): AnyCellWrapping<StorableDatum> {
     // If we have a schema with an asCell or asStream (or if our anyOf values
     // do), we should create a cell here.
     // If we don't have a schema, or a true schema, we should create a query result proxy.
@@ -546,7 +547,7 @@ class TransformObjectCreator
           this.runtime,
           { ...link, schema: restSchema },
           getTransactionForChildCells(this.tx),
-        ) as AnyCellWrapping<JSONValue>;
+        ) as AnyCellWrapping<StorableDatum>;
       }
       // If it's not a cell/stream, but the schema is true-ish, use a
       // QueryResultProxy

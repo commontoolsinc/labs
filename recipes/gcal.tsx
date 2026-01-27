@@ -7,13 +7,12 @@ import {
   ID,
   ifElse,
   JSONSchema,
-  Mutable,
   NAME,
   recipe,
-  Schema,
   str,
   UI,
 } from "commontools";
+import type { Mutable, Schema } from "commontools/schema";
 
 const Classification = {
   Unclassified: "unclassified",

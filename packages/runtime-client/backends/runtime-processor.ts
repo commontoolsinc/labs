@@ -1,6 +1,7 @@
-import { DID, Identity } from "@commontools/identity";
+import { DID, Identity, type Session } from "@commontools/identity";
 import { CharmManager } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
+import { getLoggerCountsBreakdown, Logger } from "@commontools/utils/logger";
 import {
   type Cancel,
   convertCellsToLinks,
@@ -18,17 +19,24 @@ import {
 import {
   BooleanResponse,
   type CellGetRequest,
+  type CellResolveAsCellRequest,
   CellResponse,
   type CellSendRequest,
   type CellSetRequest,
   type CellSubscribeRequest,
   type CellUnsubscribeRequest,
+  type EnsureHomePatternRunningRequest,
   type GetCellRequest,
   GetGraphSnapshotRequest,
+  type GetHomeSpaceCellRequest,
+  type GetLoggerCountsRequest,
   GraphSnapshotResponse,
   type InitializationData,
   IPCClientRequest,
   JSONValueResponse,
+  type LoggerCountsResponse,
+  type LoggerMetadata,
+  type LogLevel,
   NotificationType,
   type PageCreateRequest,
   type PageGetRequest,
@@ -37,7 +45,12 @@ import {
   PageResponse,
   type PageStartRequest,
   type PageStopRequest,
+  type RecreateSpaceRootPatternRequest,
   RequestType,
+  type SetLoggerEnabledRequest,
+  type SetLoggerLevelRequest,
+  type SetPullModeRequest,
+  type SetTelemetryEnabledRequest,
 } from "../protocol/mod.ts";
 import { HttpProgramResolver, Program } from "@commontools/js-compiler";
 import { setLLMUrl } from "@commontools/llm";
@@ -45,7 +58,6 @@ import {
   createCellRef,
   createPageRef,
   getCell,
-  getPageResultCell,
   mapCellRefsToSigilLinks,
 } from "./utils.ts";
 import { cellRefToKey } from "../shared/utils.ts";
@@ -56,22 +68,26 @@ export class RuntimeProcessor {
   private charmManager: CharmManager;
   private cc: CharmsController;
   private space: DID;
+  private identity: Identity;
   private _isDisposed = false;
   private disposingPromise: Promise<void> | undefined;
   private subscriptions = new Map<string, Cancel>();
   private telemetry: RuntimeTelemetry;
+  #telemetryEnabled = false;
 
   private constructor(
     runtime: Runtime,
     charmManager: CharmManager,
     cc: CharmsController,
     space: DID,
+    identity: Identity,
     telemetry: RuntimeTelemetry,
   ) {
     this.runtime = runtime;
     this.charmManager = charmManager;
     this.cc = cc;
     this.space = space;
+    this.identity = identity;
     this.telemetry = telemetry;
     this.telemetry.addEventListener("telemetry", this.#onTelemetry);
   }
@@ -125,6 +141,18 @@ export class RuntimeProcessor {
           console.warn("Navigating cross-space, not adding to charms list.");
         } else {
           charmManager!.add([target]);
+
+          // Track as recently used (async, fire-and-forget)
+          RuntimeProcessor.trackRecentCharm(charmManager!, target).catch(
+            (e: unknown) => {
+              console.error(
+                "[RuntimeProcessor] Failed to track recent charm:",
+                {
+                  error: e instanceof Error ? e.message : e,
+                },
+              );
+            },
+          );
         }
 
         self.postMessage({
@@ -142,6 +170,7 @@ export class RuntimeProcessor {
             space: error.space,
             recipeId: error.recipeId,
             spellId: error.spellId,
+            stackTrace: error.stack,
           });
         },
       ],
@@ -155,7 +184,14 @@ export class RuntimeProcessor {
     await charmManager.synced();
     const cc = new CharmsController(charmManager);
 
-    return new RuntimeProcessor(runtime, charmManager, cc, space, telemetry);
+    return new RuntimeProcessor(
+      runtime,
+      charmManager,
+      cc,
+      space,
+      identity,
+      telemetry,
+    );
   }
 
   dispose(): Promise<void> {
@@ -202,40 +238,11 @@ export class RuntimeProcessor {
     tx.commit();
   }
 
-  /**
-   * Send event to a stream cell.
-   *
-   * For handler streams (paths containing "__#" indicating internal handler streams),
-   * we route directly to the scheduler. This is necessary because:
-   * 1. Stream cells are detected by their stored value having { $stream: true }
-   * 2. When events arrive before the charm has fully initialized, the stream
-   *    structure may not exist yet, causing Cell.set() to fall through to
-   *    regular cell behavior and fail with storage path errors like
-   *    "Value at path value/internal/__#7stream is not an object"
-   * 3. queueEvent bypasses storage entirely and goes directly to the scheduler
-   *
-   * For other cells, we use the standard set() method which handles both
-   * stream and non-stream cells appropriately.
-   */
   handleCellSend(request: CellSendRequest): void {
-    const link = request.cell;
-
-    // Check if this looks like a handler stream path (internal/__#Nstream pattern)
-    // These are created by handler() and may not have their structure initialized
-    // when the first event arrives
-    const isHandlerStream = link.path.some((segment) =>
-      segment.includes("__#") && segment.endsWith("stream")
-    );
-
-    const event = mapCellRefsToSigilLinks(request.event);
-    if (isHandlerStream) {
-      this.runtime.scheduler.queueEvent(link, event);
-    } else {
-      const tx = this.runtime.edit();
-      const cell = getCell(this.runtime, link);
-      cell.withTx(tx).send(event);
-      tx.commit();
-    }
+    const tx = this.runtime.edit();
+    const cell = getCell(this.runtime, request.cell);
+    cell.withTx(tx).send(mapCellRefsToSigilLinks(request.event));
+    tx.commit();
   }
 
   handleCellSubscribe(request: CellSubscribeRequest): BooleanResponse {
@@ -281,6 +288,14 @@ export class RuntimeProcessor {
     return { value: false };
   }
 
+  handleCellResolveAsCell(request: CellResolveAsCellRequest): CellResponse {
+    const cell = getCell(this.runtime, request.cell);
+    const resolved = cell.resolveAsCell();
+    return {
+      cell: createCellRef(resolved),
+    };
+  }
+
   handleGetCell(request: GetCellRequest): CellResponse {
     const cell = this.runtime.getCell(
       request.space,
@@ -290,6 +305,54 @@ export class RuntimeProcessor {
 
     return {
       cell: createCellRef(cell, request.schema),
+    };
+  }
+
+  handleGetHomeSpaceCell(_request: GetHomeSpaceCellRequest): CellResponse {
+    const homeSpaceCell = this.runtime.getHomeSpaceCell();
+    return {
+      cell: createCellRef(homeSpaceCell),
+    };
+  }
+
+  /**
+   * Ensure the home space's default pattern is running and return a CellRef to it.
+   * This is needed for favorites operations which require the pattern to be active.
+   * Creates the home pattern if it doesn't exist yet.
+   */
+  async handleEnsureHomePatternRunning(
+    _request: EnsureHomePatternRunningRequest,
+  ): Promise<CellResponse> {
+    const homeSpaceCell = this.runtime.getHomeSpaceCell();
+    await homeSpaceCell.sync();
+
+    const defaultPatternCell = homeSpaceCell.key("defaultPattern").get()
+      .resolveAsCell();
+    await defaultPatternCell.sync();
+
+    // Fast path: pattern already exists
+    // (Value is a Cell itself, and source cell means it's instantiated)
+    if (defaultPatternCell.getSourceCell()) {
+      await this.runtime.start(defaultPatternCell);
+      await this.runtime.idle();
+      return {
+        cell: createCellRef(defaultPatternCell),
+      };
+    }
+
+    // Pattern doesn't exist - create it via home space CharmController
+    const homeSession: Session = {
+      as: this.identity,
+      space: this.runtime.userIdentityDID,
+    };
+    const homeManager = new CharmManager(homeSession, this.runtime);
+    await homeManager.synced();
+    const homeCC = new CharmsController(homeManager);
+
+    const homePattern = await homeCC.ensureDefaultPattern();
+
+    return {
+      cell: createCellRef(homePattern.getCell()),
     };
   }
 
@@ -315,10 +378,8 @@ export class RuntimeProcessor {
       input: request.argument as object | undefined,
       start: request.run ?? true,
     }, request.cause);
-    const cell = charm.getCell();
-    const result = getPageResultCell(cell);
     return {
-      page: createPageRef(cell, result),
+      page: createPageRef(charm.getCell()),
     };
   }
 
@@ -326,10 +387,17 @@ export class RuntimeProcessor {
     _: PatternGetSpaceRoot,
   ): Promise<PageResponse> {
     const charm = await this.cc.ensureDefaultPattern();
-    const cell = charm.getCell();
-    const result = getPageResultCell(cell);
     return {
-      page: createPageRef(cell, result),
+      page: createPageRef(charm.getCell()),
+    };
+  }
+
+  async handleRecreateSpaceRootPattern(
+    _: RecreateSpaceRootPatternRequest,
+  ): Promise<PageResponse> {
+    const charm = await this.cc.recreateDefaultPattern();
+    return {
+      page: createPageRef(charm.getCell()),
     };
   }
 
@@ -342,14 +410,13 @@ export class RuntimeProcessor {
       "/": request.pageId,
     });
     cell = cell.asSchema(nameSchema);
-    const result = getPageResultCell(cell);
 
     if (request.runIt) {
       this.runtime.start(cell).catch(console.error);
     }
 
     return {
-      page: createPageRef(cell, result),
+      page: createPageRef(cell),
     };
   }
 
@@ -377,8 +444,8 @@ export class RuntimeProcessor {
     return { value: true };
   }
 
-  handlePageGetAll(): CellResponse {
-    const charmsCell = this.charmManager.getCharms();
+  async handlePageGetAll(): Promise<CellResponse> {
+    const charmsCell = await this.charmManager.getCharms();
     return {
       cell: createCellRef(charmsCell),
     };
@@ -392,13 +459,94 @@ export class RuntimeProcessor {
     return { snapshot: this.runtime.scheduler.getGraphSnapshot() };
   }
 
+  setPullMode(request: SetPullModeRequest): void {
+    if (request.pullMode) {
+      this.runtime.scheduler.enablePullMode();
+    } else {
+      this.runtime.scheduler.disablePullMode();
+    }
+  }
+
+  getLoggerCounts(_: GetLoggerCountsRequest): LoggerCountsResponse {
+    const counts = getLoggerCountsBreakdown();
+    const metadata = this.#getLoggerMetadata();
+    return { counts, metadata };
+  }
+
+  #getLoggerMetadata(): LoggerMetadata {
+    const global = globalThis as unknown as {
+      commontools?: { logger?: Record<string, Logger> };
+    };
+    const result: LoggerMetadata = {};
+    if (global.commontools?.logger) {
+      for (const [name, logger] of Object.entries(global.commontools.logger)) {
+        result[name] = {
+          enabled: !logger.disabled,
+          level: (logger.level ?? "info") as LogLevel,
+        };
+      }
+    }
+    return result;
+  }
+
+  setLoggerLevel(request: SetLoggerLevelRequest): void {
+    const loggers = this.#getLoggers(request.loggerName);
+    for (const logger of loggers) {
+      logger.level = request.level;
+    }
+  }
+
+  setLoggerEnabled(request: SetLoggerEnabledRequest): void {
+    const loggers = this.#getLoggers(request.loggerName);
+    for (const logger of loggers) {
+      logger.disabled = !request.enabled;
+    }
+  }
+
+  setTelemetryEnabled(request: SetTelemetryEnabledRequest): void {
+    this.#telemetryEnabled = request.enabled;
+  }
+
+  #getLoggers(loggerName?: string): Logger[] {
+    const global = globalThis as unknown as {
+      commontools?: { logger?: Record<string, Logger> };
+    };
+    if (!global.commontools?.logger) {
+      return [];
+    }
+    if (loggerName) {
+      const logger = global.commontools.logger[loggerName];
+      return logger ? [logger] : [];
+    }
+    return Object.values(global.commontools.logger);
+  }
+
   #onTelemetry = (event: Event) => {
+    if (!this.#telemetryEnabled) return;
     const marker = (event as RuntimeTelemetryEvent).marker;
     self.postMessage({
       type: NotificationType.Telemetry,
       marker,
     });
   };
+
+  private static async trackRecentCharm(
+    charmManager: CharmManager,
+    target: unknown,
+  ): Promise<void> {
+    const defaultPattern = await charmManager.getDefaultPattern();
+    if (!defaultPattern) return;
+
+    const cell = defaultPattern.asSchema({
+      type: "object",
+      properties: {
+        trackRecent: { asStream: true },
+      },
+      required: ["trackRecent"],
+    });
+    const handler = cell.key("trackRecent");
+    handler.send({ charm: target });
+  }
 
   async handleRequest(
     request: IPCClientRequest,
@@ -416,8 +564,14 @@ export class RuntimeProcessor {
         return this.handleCellSubscribe(request);
       case RequestType.CellUnsubscribe:
         return this.handleCellUnsubscribe(request);
+      case RequestType.CellResolveAsCell:
+        return this.handleCellResolveAsCell(request);
       case RequestType.GetCell:
         return this.handleGetCell(request);
+      case RequestType.GetHomeSpaceCell:
+        return this.handleGetHomeSpaceCell(request);
+      case RequestType.EnsureHomePatternRunning:
+        return await this.handleEnsureHomePatternRunning(request);
       case RequestType.Idle:
         return await this.handleIdle();
       case RequestType.PageCreate:
@@ -426,6 +580,10 @@ export class RuntimeProcessor {
         );
       case RequestType.GetSpaceRootPattern:
         return await this.handleGetSpaceRootPattern(
+          request,
+        );
+      case RequestType.RecreateSpaceRootPattern:
+        return await this.handleRecreateSpaceRootPattern(
           request,
         );
       case RequestType.PageGet:
@@ -437,11 +595,21 @@ export class RuntimeProcessor {
       case RequestType.PageStop:
         return await this.handlePageStop(request);
       case RequestType.PageGetAll:
-        return this.handlePageGetAll();
+        return await this.handlePageGetAll();
       case RequestType.PageSynced:
         return await this.handlePageSynced();
       case RequestType.GetGraphSnapshot:
         return this.getGraphSnapshot(request);
+      case RequestType.SetPullMode:
+        return this.setPullMode(request);
+      case RequestType.GetLoggerCounts:
+        return this.getLoggerCounts(request);
+      case RequestType.SetLoggerLevel:
+        return this.setLoggerLevel(request);
+      case RequestType.SetLoggerEnabled:
+        return this.setLoggerEnabled(request);
+      case RequestType.SetTelemetryEnabled:
+        return this.setTelemetryEnabled(request);
       default:
         throw new Error(`Unknown message type: ${(request as any).type}`);
     }

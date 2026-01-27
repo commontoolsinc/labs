@@ -22,6 +22,10 @@ export const test = new Command()
     "ct test ./counter.test.tsx --timeout 10000",
     "Run with custom timeout (10 seconds).",
   )
+  .example(
+    "ct test ./battleship/pass-and-play/main.test.tsx --root ./battleship",
+    "Run with custom root for resolving imports from sibling directories.",
+  )
   .option(
     "--timeout <ms:number>",
     "Timeout per test action in milliseconds.",
@@ -30,6 +34,10 @@ export const test = new Command()
   .option(
     "--verbose",
     "Show detailed execution logs.",
+  )
+  .option(
+    "--root <dir:string>",
+    "Root directory for resolving imports. Enables imports like '../shared/utils.tsx'.",
   )
   .arguments("<paths...:string>")
   .action(async (options, ...paths) => {
@@ -87,10 +95,14 @@ export const test = new Command()
 
     console.log(`Found ${uniqueTestFiles.length} test file(s)`);
 
+    // Resolve root path if provided
+    const root = options.root ? resolve(Deno.cwd(), options.root) : undefined;
+
     // Run tests
     const { failed } = await runTests(uniqueTestFiles, {
       timeout: options.timeout,
       verbose: options.verbose,
+      root,
     });
 
     // Exit with error code if any tests failed

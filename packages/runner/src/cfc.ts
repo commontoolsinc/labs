@@ -3,6 +3,7 @@ import { isObject, isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import type { JSONSchema } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
+import { isArrayIndexPropertyName } from "./value-codec.ts";
 
 const logger = getLogger("cfc");
 
@@ -595,16 +596,12 @@ export class ContextualFlowControl {
           cursor = true;
         }
       } else if (cursor.type === "array") {
-        const numericKeyValue = new Number(part).valueOf();
-        if (Number.isInteger(numericKeyValue) && numericKeyValue >= 0) {
-          if (
-            cursor.prefixItems && numericKeyValue < cursor.prefixItems.length
-          ) {
-            cursor = cursor.prefixItems[numericKeyValue];
-          } else if (cursor.items !== undefined) {
-            cursor = cursor.items;
-          } else { // default is true
-            cursor = true;
+        if (isArrayIndexPropertyName(part)) {
+          const index = Number(part);
+          if (cursor.prefixItems && index < cursor.prefixItems.length) {
+            cursor = cursor.prefixItems[index];
+          } else {
+            cursor = cursor.items ?? true;
           }
         } else {
           return false;

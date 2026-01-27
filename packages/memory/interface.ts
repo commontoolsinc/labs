@@ -13,6 +13,53 @@ export type SchemaPathSelector = {
 
 export type { JSONValue, Reference };
 
+/**
+ * A value that can be stored in the storage layer. This is similar to
+ * `JSONValue` but is specifically intended for use at storage boundaries
+ * (values going into or coming out of the database).
+ *
+ * `undefined` is allowed at the top level to indicate removal of a stored value.
+ */
+export type StorableValue = StorableDatum | undefined;
+
+/**
+ * A storable value that is definitely present (not `undefined`). This is the
+ * type used for nested values within arrays and objects, where `undefined`
+ * is not a valid JSON value.
+ */
+export type StorableDatum =
+  | null
+  | boolean
+  | number
+  | string
+  | StorableArray
+  | StorableObject;
+
+/** An array of storable data. */
+export interface StorableArray extends ArrayLike<StorableDatum> {}
+
+/** An object/record of storable data. */
+export interface StorableObject extends Record<string, StorableDatum> {}
+
+/**
+ * A storable value that allows `undefined` at any nesting level.
+ * This is used during traversal/processing where intermediate values
+ * may not yet be resolved.
+ */
+export type OptStorableValue =
+  | undefined
+  | StorableDatum
+  | OptStorableArray
+  | OptStorableObject;
+
+/** An array that can contain optional storable values at any nesting level. */
+export interface OptStorableArray extends Array<OptStorableValue> {}
+
+/** An object that can contain optional storable values at any nesting level. */
+export interface OptStorableObject {
+  [key: string]: OptStorableValue;
+}
+
 export interface Clock {
   now(): UTCUnixTimestampInSeconds;
 }
@@ -491,8 +538,19 @@ export interface MemorySession<Space extends MemorySpace = MemorySpace>
 }
 
 export interface Subscriber<Space extends MemorySpace = MemorySpace> {
-  // Notifies a subscriber of a commit that has been applied
-  commit(commit: Commit<Space>): AwaitResult<Unit, SystemError>;
+  /**
+   * Notifies a subscriber of a commit that has been applied.
+   *
+   * @param commit - The commit data to be processed and broadcast to listeners.
+   * @param labels - Label facts associated with documents in this commit. Used
+   *   to redact classified content before broadcasting to listeners who lack the
+   *   appropriate claims.
+   */
+  commit(
+    commit: Commit<Space>,
+    labels?: FactSelection,
+  ): AwaitResult<Unit, SystemError>;
+
   close(): AwaitResult<Unit, SystemError>;
 }
 
@@ -658,12 +716,9 @@ export type EnhancedCommit<Subject extends string = MemorySpace> = {
   commit: Commit<Subject>;
 };
 
-// We include labels here so we can use the commit data to redact the transaction
-// results before sending them to subscribers with insufficient access.
 export type CommitData = {
   since: number;
   transaction: Transaction;
-  labels?: FactSelection;
 };
 
 export type CommitFact<Subject extends MemorySpace = MemorySpace> = Assertion<

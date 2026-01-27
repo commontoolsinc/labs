@@ -10,7 +10,7 @@ import {
   UI,
   Writable,
 } from "commontools";
-import Counter from "../counter.tsx";
+import Counter from "../counter/counter.tsx";
 
 interface Item {
   title: string;

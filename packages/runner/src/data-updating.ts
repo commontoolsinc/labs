@@ -1,7 +1,11 @@
 import { isRecord } from "@commontools/utils/types";
-import { toStorableValue } from "./value-codec.ts";
+import { isArrayIndexPropertyName, toStorableValue } from "./value-codec.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
+import type {
+  StorableObject,
+  StorableValue,
+} from "@commontools/memory/interface";
 import { createRef } from "./create-ref.ts";
 import { CellImpl, isCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
@@ -18,10 +22,9 @@ import {
   parseLink,
 } from "./link-utils.ts";
 import { isCellResultForDereferencing } from "./query-result-proxy.ts";
-import {
-  type IExtendedStorageTransaction,
-  type IReadOptions,
-  type JSONValue,
+import type {
+  IExtendedStorageTransaction,
+  IReadOptions,
 } from "./storage/interface.ts";
 import { type Runtime } from "./runtime.ts";
 import { toURI } from "./uri-utils.ts";
@@ -80,7 +83,7 @@ export function diffAndUpdate(
 
 export type ChangeSet = {
   location: NormalizedFullLink;
-  value: JSONValue | undefined;
+  value: StorableValue;
 }[];
 
 /**
@@ -156,7 +159,7 @@ export function normalizeAndDiff(
     );
     const { [ID_FIELD]: fieldName, ...rest } = newValue as
       & { [ID_FIELD]: string }
-      & Record<string, JSONValue>;
+      & StorableObject;
     const id = newValue[fieldName as PropertyKey];
     if (link.path.length > 1) {
       const parent = tx.readValueOrThrow({
@@ -280,7 +283,7 @@ export function normalizeAndDiff(
         () =>
           `[BRANCH_WRITE_REDIRECT] Different redirect, updating at path=${pathStr}`,
       );
-      changes.push({ location: link, value: newValue as JSONValue });
+      changes.push({ location: link, value: newValue as StorableValue });
       return changes;
     }
   }
@@ -365,7 +368,7 @@ export function normalizeAndDiff(
       );
       return [
         // TODO(seefeld): Normalize the link to a sigil link?
-        { location: link, value: newValue as JSONValue },
+        { location: link, value: newValue as StorableValue },
       ];
     }
   }
@@ -378,7 +381,7 @@ export function normalizeAndDiff(
     );
     const { [ID]: id, ...rest } = newValue as
       & { [ID]: string }
-      & Record<string, JSONValue>;
+      & StorableObject;
     let path = link.path;
 
     // If we're setting an array element, make the array the context for the
@@ -604,7 +607,7 @@ export function normalizeAndDiff(
 
   // Handle primitive values and other cases (Object.is handles NaN and -0)
   if (!Object.is(currentValue, newValue)) {
-    changes.push({ location: link, value: newValue as JSONValue });
+    changes.push({ location: link, value: newValue as StorableValue });
   }
 
   return changes;
@@ -624,15 +627,15 @@ function hasPath(value: unknown, path: readonly string[]): boolean {
   const [first, ...rest] = path;
 
   if (Array.isArray(value)) {
-    const index = parseInt(first, 10);
-    if (isNaN(index) || index < 0 || index >= value.length) {
-      // Special case: "length" is always present on arrays
-      if (first === "length" && rest.length === 0) return true;
-      return false;
-    }
-    // Check if index actually exists (handles sparse arrays with holes)
-    if (!(index in value)) return false;
-    return hasPath(value[index], rest);
+    // Special case: "length" is always present on arrays
+    if (first === "length" && rest.length === 0) return true;
+    // Only valid array index strings can access array elements
+    if (!isArrayIndexPropertyName(first)) return false;
+    // Access with string key works for arrays (array["1"] === array[1]).
+    // JSON arrays can't be sparse or contain `undefined`, so `undefined`
+    // means the index is out of range.
+    const element = (value as unknown as Record<string, unknown>)[first];
+    return element !== undefined && hasPath(element, rest);
   }
 
   const obj = value as Record<string, unknown>;

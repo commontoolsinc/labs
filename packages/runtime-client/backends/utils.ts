@@ -60,30 +60,10 @@ export function createCellRef(cell: Cell<unknown>, schema?: unknown): CellRef {
   return cellRef;
 }
 
-export function createPageRef(
-  cell: Cell<unknown>,
-  result?: Cell<unknown>,
-  recipeId?: string,
-): PageRef {
-  const res: PageRef = {
+export function createPageRef(cell: Cell<unknown>): PageRef {
+  return {
     cell: createCellRef(cell),
   };
-
-  if (result) {
-    res.result = createCellRef(result);
-  }
-  if (recipeId) {
-    res.recipeId = recipeId;
-  }
-  return res;
-}
-
-export function unwrapProxy(proxy: unknown): any {
-  if (Array.isArray(proxy)) {
-    return [...proxy];
-  } else if (proxy && typeof proxy === "object") {
-    return { ...proxy };
-  }
 }
 
 export function getCell(runtime: Runtime, ref: CellRef): Cell<unknown> {
@@ -91,9 +71,4 @@ export function getCell(runtime: Runtime, ref: CellRef): Cell<unknown> {
   // the schema to both `schema` and `rootSchema`, and cell refs already
   // contain all this information. Maybe the upstream function should change.
   return runtime.getCellFromLink(ref);
-}
-
-export function getPageResultCell(cell: Cell<any>): Cell<any> {
-  const processCell = cell.getSourceCell();
-  return processCell ? processCell.key("resultRef").resolveAsCell() : cell;
 }

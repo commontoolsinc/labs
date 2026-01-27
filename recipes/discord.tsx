@@ -5,9 +5,10 @@ import {
   type JSONSchema,
   NAME,
   recipe,
-  type Schema,
   UI,
 } from "commontools";
+import type { Schema } from "commontools/schema";
+// Note: Import Schema from "commontools/schema" for typed schema inference
 
 // README:
 // sudo tailscale serve --https=443 localhost:8080

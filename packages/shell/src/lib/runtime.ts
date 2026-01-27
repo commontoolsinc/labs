@@ -2,6 +2,7 @@ import { createSession, DID, Identity, Session } from "@commontools/identity";
 import { NameSchema } from "@commontools/runner/schemas";
 import {
   CellHandle,
+  FavoritesManager,
   JSONValue,
   PageHandle,
   Program,
@@ -33,6 +34,8 @@ export class RuntimeInternals extends EventTarget {
   #space: DID;
   #spaceName?: string;
   #isHomeSpace: boolean;
+  #homeSpaceDID: DID;
+  #favorites: FavoritesManager;
   #spaceRootPattern?: Promise<PageHandle<NameSchema>>;
   #patternCache: Map<string, Promise<PageHandle<NameSchema>>> = new Map();
   // TODO(runtime-worker-refactor)
@@ -43,12 +46,15 @@ export class RuntimeInternals extends EventTarget {
     space: DID,
     spaceName: string | undefined,
     isHomeSpace: boolean,
+    homeSpaceDID: DID,
   ) {
     super();
     this.#client = client;
     this.#space = space;
     this.#spaceName = spaceName;
     this.#isHomeSpace = isHomeSpace;
+    this.#homeSpaceDID = homeSpaceDID;
+    this.#favorites = new FavoritesManager(client, space);
     this.#client.on("console", this.#onConsole);
     this.#client.on("navigaterequest", this.#onNavigateRequest);
     this.#client.on("error", this.#onError);
@@ -75,6 +81,15 @@ export class RuntimeInternals extends EventTarget {
     return this.#isHomeSpace;
   }
 
+  homeSpaceDID(): DID {
+    return this.#homeSpaceDID;
+  }
+
+  favorites(): FavoritesManager {
+    this.#check();
+    return this.#favorites;
+  }
+
   async createCharm<T>(
     source: URL | Program | string,
     options?: { argument?: JSONValue; run?: boolean },
@@ -97,6 +112,15 @@ export class RuntimeInternals extends EventTarget {
     if (this.#spaceRootPattern) return this.#spaceRootPattern;
     this.#spaceRootPattern = this.#client.getSpaceRootPattern();
     return this.#spaceRootPattern;
+  }
+
+  async recreateSpaceRootPattern(): Promise<PageHandle<NameSchema>> {
+    this.#check();
+    // Clear cached pattern since we're recreating it
+    this.#spaceRootPattern = undefined;
+    const pattern = await this.#client.recreateSpaceRootPattern();
+    this.#spaceRootPattern = Promise.resolve(pattern);
+    return pattern;
   }
 
   getPattern(id: string): Promise<PageHandle<NameSchema>> {
@@ -144,6 +168,7 @@ export class RuntimeInternals extends EventTarget {
     const { cell } = e;
     const charmId = cell.id();
     logger.log("navigate", `Navigating to charm: ${charmId}`);
+
     if (cell.space() === this.#space && this.#spaceName) {
       navigate({
         spaceName: this.#spaceName,
@@ -244,6 +269,7 @@ export class RuntimeInternals extends EventTarget {
       session.space,
       session.spaceName,
       isHomeSpace,
+      identity.did(), // homeSpaceDID is always identity.did()
     );
   }
 }

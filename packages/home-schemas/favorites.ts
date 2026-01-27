@@ -3,14 +3,18 @@
  * These define the structure of user's favorited charms.
  */
 
-import type { JSONSchema, Schema } from "@commontools/api";
+import type { JSONSchema } from "@commontools/api";
+import type { Schema } from "@commontools/api/schema";
 
 export const favoriteEntrySchema = {
   type: "object",
   properties: {
-    cell: { not: true, asCell: true },
+    // we use empty properties to validate, but avoid including children
+    cell: { type: "object", properties: {}, asCell: true },
     tag: { type: "string", default: "" },
     userTags: { type: "array", items: { type: "string" }, default: [] },
+    spaceName: { type: "string" },
+    spaceDid: { type: "string" },
   },
   required: ["cell"],
 } as const satisfies JSONSchema;

@@ -55,7 +55,6 @@
   },
   "exclude": [
     "**/node_modules/",
-    "**/.vite/",
     "**/dist/",
     "**/build/",
     "**/.cache/",
@@ -67,7 +66,13 @@
       ".beads/",
       "./packages/static/assets",
       "./packages/ui/src/v2/components/ct-outliner",
-      "./packages/vendor-astral"
+      "./packages/vendor-astral",
+      "./packages/patterns-saves-backup/",
+      "./tmp/",
+      "./packages/patterns/default-array-push-test.tsx",
+      "./packages/patterns/notes-menu.tsx",
+      "./packages/patterns/record/",
+      "./packages/patterns/weight-tracker.tsx"
     ],
     "rules": {
       "tags": [
@@ -105,6 +110,7 @@
   },
   "imports": {
     "commontools": "./packages/api/index.ts",
+    "commontools/schema": "./packages/api/schema.ts",
     "core-js/proposals/explicit-resource-management": "https://esm.sh/core-js/proposals/explicit-resource-management",
     "core-js/proposals/async-explicit-resource-management": "https://esm.sh/core-js/proposals/async-explicit-resource-management",
     "@astral/astral": "./packages/vendor-astral/mod.ts",

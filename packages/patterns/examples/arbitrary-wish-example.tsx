@@ -1,10 +1,10 @@
 /// <cts-enable />
-import { NAME, pattern, UI, wish, Writable } from "commontools";
+import { NAME, pattern, UI, VNode, wish, Writable } from "commontools";
 
 export default pattern<Record<string, never>>((_) => {
   const wishText = Writable.of("#note");
 
-  const wishResult = wish<unknown>({
+  const wishResult = wish<{ [UI]: VNode }>({
     query: wishText,
   });
 
@@ -14,7 +14,7 @@ export default pattern<Record<string, never>>((_) => {
       <div>
         <ct-textarea $value={wishText} />
         <hr />
-        {wishResult}
+        {wishResult.result}
       </div>
     ),
   };

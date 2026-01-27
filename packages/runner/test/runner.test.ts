@@ -654,7 +654,7 @@ describe("runRecipe", () => {
 
     // Now change the name
     const tx = runtime.edit();
-    resultCell.withTx(tx).getAsQueryResult()[NAME] = "my counter";
+    resultCell.withTx(tx).update({ [NAME]: "my counter" });
     await tx.commit();
 
     // Second run with same recipe but different argument

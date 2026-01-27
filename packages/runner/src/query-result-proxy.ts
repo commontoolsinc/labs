@@ -6,7 +6,7 @@ import { toCell } from "./back-to-cell.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
-import { type Cell, createCell } from "./cell.ts";
+import { type Cell, createCell, recursivelyAddIDIfNeeded } from "./cell.ts";
 import { type Runtime } from "./runtime.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { toURI } from "./uri-utils.ts";
@@ -80,6 +80,7 @@ export function createQueryResultProxy<T>(
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
   depth: number = 0,
+  writable: boolean = false,
 ): T {
   // Check recursion depth
   if (depth > MAX_RECURSION_DEPTH) {
@@ -142,10 +143,16 @@ export function createQueryResultProxy<T>(
                 }) as number;
                 if (index < length) {
                   const result = {
-                    value: createQueryResultProxy(runtime, tx, {
-                      ...link,
-                      path: [...link.path, String(index)],
-                    }, depth + 1),
+                    value: createQueryResultProxy(
+                      runtime,
+                      tx,
+                      {
+                        ...link,
+                        path: [...link.path, String(index)],
+                      },
+                      depth + 1,
+                      writable,
+                    ),
                     done: false,
                   };
                   index++;
@@ -199,12 +206,19 @@ export function createQueryResultProxy<T>(
                 tx,
                 { ...link, path: [...link.path, String(i)] },
                 depth + 1,
+                writable,
               );
             }
 
             return method.apply(copy, args);
           }
           : (...args: any[]) => {
+            if (!writable) {
+              throw new Error(
+                "This value is read-only, declare type as Writable<..> instead to get a writable version",
+              );
+            }
+
             if (!tx) {
               throw new Error(
                 "Transaction required for mutation\n" +
@@ -217,14 +231,23 @@ export function createQueryResultProxy<T>(
             // Wraps values in a proxy that remembers the original index and
             // creates cell value proxies on demand.
             let copy: any;
-            if (isReadWrite === ArrayMethodType.WriteOnly) copy = [...value];
-            else {
+            if (isReadWrite === ArrayMethodType.WriteOnly) {
+              // CT-1173: Read fresh value from transaction, not stale proxy target.
+              // The proxy target (value) is captured at proxy creation time and
+              // becomes stale after writes. We must read current state from tx.
+              const readTx = (tx?.status().status === "ready")
+                ? tx
+                : runtime.edit();
+              const currentValue = readTx.readValueOrThrow(link) as any[];
+              copy = [...currentValue];
+            } else {
               copy = value.map((_, index) =>
                 createProxyForArrayValue(
                   runtime,
                   tx,
                   index,
                   { ...link, path: [...link.path, String(index)] },
+                  writable,
                 )
               );
             }
@@ -246,26 +269,31 @@ export function createQueryResultProxy<T>(
               );
             }
 
-            // Turn any newly added elements into cells. And if there was a
-            // change at all, update the cell.
-            diffAndUpdate(runtime, tx, link, copy, {
+            // Turn any newly added elements into cells by adding [ID] symbols.
+            // This ensures objects get stored as separate entity documents
+            // rather than inline data, which is critical for persistence.
+            const frame = getTopFrame();
+
+            const processedCopy = recursivelyAddIDIfNeeded(copy, frame);
+
+            // And if there was a change at all, update the cell.
+            diffAndUpdate(runtime, tx, link, processedCopy, {
               parent: { id: link.id, space: link.space },
               method: prop,
               call: new Error().stack,
-              context: getTopFrame()?.cause ?? "unknown",
+              context: frame?.cause ?? "unknown",
             });
 
-            // Update target from store
-            const newValue = tx.readValueOrThrow(link) as typeof value;
-
-            if (!Array.isArray(newValue)) {
-              throw new Error(
-                `Array operation failed - value is no longer an array after .${prop}() (now ${typeof newValue})\n` +
-                  `help: ensure cell schema specifies array type, check for concurrent modifications`,
-              );
-            }
-
-            value.splice(0, value.length, ...newValue);
+            // CT-1173 FIX: Don't mutate proxy target (value) after writes.
+            // The old code did `value.splice(0, value.length, ...newValue)` which
+            // mutated the heap's stored array because `value` shares a reference
+            // with heap state. This caused StorageTransactionInconsistent errors
+            // because read invariants would see the written values before commit.
+            //
+            // The proxy still works correctly without this sync because:
+            // 1. Reads go through the transaction which returns fresh values
+            // 2. The diffAndUpdate above has already written the changes
+            // 3. Subsequent reads via the proxy will see the updated values
 
             if (Array.isArray(result)) {
               const cause = {
@@ -284,7 +312,13 @@ export function createQueryResultProxy<T>(
 
               diffAndUpdate(runtime, tx, resultLink, result, cause);
 
-              result = createQueryResultProxy(runtime, tx, resultLink);
+              result = createQueryResultProxy(
+                runtime,
+                tx,
+                resultLink,
+                0,
+                writable,
+              );
             }
 
             return result;
@@ -296,10 +330,17 @@ export function createQueryResultProxy<T>(
         tx,
         { ...link, path: [...link.path, prop] },
         depth + 1,
+        writable,
       );
     },
     set: (_, prop, value) => {
       if (typeof prop === "symbol") return false;
+
+      if (!writable) {
+        throw new Error(
+          "This value is read-only, declare type as Writable<..> instead to get a writable version",
+        );
+      }
 
       if (isCellResult(value)) value = value[toCell]();
 
@@ -340,13 +381,14 @@ const createProxyForArrayValue = (
   tx: IExtendedStorageTransaction | undefined,
   source: number,
   link: NormalizedFullLink,
+  writable: boolean = false,
 ): { [originalIndex]: number } => {
   const target = {
     valueOf: function () {
-      return createQueryResultProxy(runtime, tx, link);
+      return createQueryResultProxy(runtime, tx, link, 0, writable);
     },
     toString: function () {
-      return String(createQueryResultProxy(runtime, tx, link));
+      return String(createQueryResultProxy(runtime, tx, link, 0, writable));
     },
     [originalIndex]: source,
   };

@@ -9,6 +9,7 @@ import {
   pattern,
   patternTool,
   type PatternToolResult,
+  SELF,
   Stream,
   UI,
   type VNode,
@@ -50,6 +51,8 @@ type Input = {
   noteId?: Default<string, "">;
   /** Pattern JSON for [[wiki-links]]. Defaults to creating new Notes. */
   linkPattern?: Writable<Default<string, "">>;
+  /** Parent notebook reference (passed via SELF from notebook.tsx) */
+  parentNotebook?: any;
 };
 
 /** Represents a small #note a user took to remember some text. */
@@ -58,6 +61,7 @@ type Output = {
   [UI]: VNode;
   mentioned: Default<Array<MentionableCharm>, []>;
   backlinks: MentionableCharm[];
+  parentNotebook: any; // Reference to parent notebook (set on navigation for back link)
 
   content: Default<string, "">;
   isHidden: Default<boolean, false>;
@@ -195,6 +199,7 @@ const createNewNote = handler<
     content: "",
     noteId: generateId(),
     isHidden: !!notebook, // Hide from default-app if in a notebook
+    parentNotebook: notebook ?? undefined, // Set parent for back navigation
   });
   allCharms.push(note);
 
@@ -225,8 +230,11 @@ const menuGoToNotebook = handler<
 });
 
 // Navigate to parent notebook
-const goToParent = handler<void, { parent: Writable<NotebookCharm> }>(
-  (_, { parent }) => navigateTo(parent),
+const goToParent = handler<Record<string, never>, { self: any }>(
+  (_, { self }) => {
+    const p = (self as any).parentNotebook;
+    if (p) navigateTo(p);
+  },
 );
 
 // Handler that creates NoteMd dynamically when clicked (not during pattern construction)
@@ -238,6 +246,7 @@ const goToViewer = handler<
     content: Writable<string>;
     backlinks: Writable<MentionableCharm[]>;
     noteId: Writable<string>;
+    self: any;
   }
 >((_, state) => {
   return navigateTo(
@@ -248,6 +257,10 @@ const goToViewer = handler<
         backlinks: state.backlinks,
         noteId: state.noteId,
       },
+      // Pass direct reference to source note for Edit button
+      sourceNoteRef: state.self,
+      // Pass content Writable for checkbox updates
+      content: state.content,
     }),
   );
 });
@@ -299,12 +312,22 @@ const menuAllNotebooks = handler<
 });
 
 const Note = pattern<Input, Output>(
-  ({ title, content, isHidden, noteId, linkPattern }) => {
-    const { allCharms } = wish<{ allCharms: MinimalCharm[] }>("/");
+  (
+    {
+      title,
+      content,
+      isHidden,
+      noteId,
+      linkPattern,
+      parentNotebook: parentNotebookProp,
+      [SELF]: self,
+    },
+  ) => {
+    const { allCharms } = wish<{ allCharms: MinimalCharm[] }>("#default");
     const mentionable = wish<Default<MentionableCharm[], []>>(
       "#mentionable",
     );
-    const recentCharms = wish<MinimalCharm[]>("#recent");
+    const _recentCharms = wish<MinimalCharm[]>("#recent");
     const mentioned = Writable.of<MentionableCharm[]>([]);
 
     // Dropdown menu state
@@ -313,24 +336,31 @@ const Note = pattern<Input, Output>(
     // State for inline title editing
     const isEditingTitle = Writable.of<boolean>(false);
 
-    // Filter to find all notebooks (using 📓 prefix in NAME)
-    const notebooks = computed(() =>
-      allCharms.filter((charm: any) => {
+    // LAZY: Only filter notebooks when menu is open (dropdown needs them)
+    // This avoids O(n) filter on every allCharms change for every note
+    const notebooks = computed(() => {
+      if (!menuOpen.get()) return [];
+      return allCharms.filter((charm: any) => {
         const name = charm?.[NAME];
         return typeof name === "string" && name.startsWith("📓");
-      })
-    );
+      });
+    });
 
-    // Check if "All Notes" charm exists in the space
-    const allNotesCharm = computed(() =>
-      allCharms.find((charm: any) => {
+    // LAZY: Only check for "All Notes" charm when menu is open
+    const allNotesCharm = computed(() => {
+      if (!menuOpen.get()) return null;
+      return allCharms.find((charm: any) => {
         const name = charm?.[NAME];
         return typeof name === "string" && name.startsWith("All Notes");
-      })
-    );
+      });
+    });
 
-    // Compute which notebooks contain this note by noteId
+    // LAZY: Only compute which notebooks contain this note when menu is open
+    // This avoids O(n*m) computation on every allCharms change
     const containingNotebookNames = computed(() => {
+      // Only compute when menu is actually open
+      if (!menuOpen.get()) return [];
+
       const myId = noteId; // CTS handles Cell unwrapping
       if (!myId) return []; // Can't match if we have no noteId
       const result: string[] = [];
@@ -347,31 +377,18 @@ const Note = pattern<Input, Output>(
       return result;
     });
 
-    // Compute actual notebook references that contain this note
-    const containingNotebooks = computed(() => {
-      const myId = noteId; // CTS handles Cell unwrapping
-      if (!myId) return []; // Can't match if we have no noteId
-      return notebooks.filter((nb) => {
-        const nbNotes = (nb as any)?.notes ?? [];
-        return nbNotes.some((n: any) => n?.noteId && n.noteId === myId);
-      });
-    });
-
-    // Find parent notebook: prioritize most recently visited, fall back to first
+    // Parent notebook: use direct reference (set when navigating from notebook)
+    // No expensive fallback - if parentNotebook isn't set, it's null
     const parentNotebook = computed(() => {
-      if (containingNotebooks.length === 0) return null;
+      // Read from self.parentNotebook for reactive updates when navigating
+      const selfParent = (self as any)?.parentNotebook;
+      if (selfParent) return selfParent;
 
-      // Find most recent notebook that contains this note
-      for (const recent of (recentCharms ?? [])) {
-        const name = (recent as any)?.[NAME];
-        if (typeof name === "string" && name.startsWith("📓")) {
-          if (containingNotebooks.some((nb: any) => nb?.[NAME] === name)) {
-            return recent;
-          }
-        }
-      }
-      // Fall back to first containing notebook
-      return containingNotebooks[0];
+      // If parent was passed explicitly as prop, use it
+      if (parentNotebookProp) return parentNotebookProp;
+
+      // No expensive fallback - just return null if not set
+      return null;
     });
 
     // populated in backlinks-index.tsx
@@ -415,27 +432,40 @@ const Note = pattern<Input, Output>(
               borderBottom: "1px solid var(--ct-color-border, #e5e5e7)",
             }}
           >
+            {/* Parent notebook chip - shows where we navigated from */}
+            <ct-hstack
+              gap="2"
+              align="center"
+              style={{
+                display: computed(() => {
+                  const p = (self as any).parentNotebook;
+                  return p ? "flex" : "none";
+                }),
+                marginBottom: "4px",
+              }}
+            >
+              <span
+                style={{
+                  fontSize: "13px",
+                  color: "var(--ct-color-text-secondary)",
+                }}
+              >
+                In:
+              </span>
+              <ct-chip
+                label={computed(() => {
+                  const p = (self as any).parentNotebook;
+                  return p?.[NAME] ?? p?.title ?? "Notebook";
+                })}
+                interactive
+                onct-click={goToParent({ self })}
+              />
+            </ct-hstack>
+
             <ct-hstack
               gap="3"
               style={{ alignItems: "center" }}
             >
-              {/* Parent notebook button */}
-              <ct-button
-                variant="ghost"
-                onClick={goToParent({ parent: parentNotebook })}
-                style={{
-                  display: computed(() => (parentNotebook ? "flex" : "none")),
-                  alignItems: "center",
-                  padding: "6px 8px",
-                  fontSize: "16px",
-                }}
-                title={computed(() =>
-                  `Go to ${parentNotebook?.[NAME] ?? "notebook"}`
-                )}
-              >
-                ⬆️
-              </ct-button>
-
               {/* Editable Title - click to edit */}
               <div
                 style={{
@@ -476,7 +506,13 @@ const Note = pattern<Input, Output>(
               {/* View Mode button */}
               <ct-button
                 variant="ghost"
-                onClick={goToViewer({ title, content, backlinks, noteId })}
+                onClick={goToViewer({
+                  title,
+                  content,
+                  backlinks,
+                  noteId,
+                  self,
+                })}
                 style={{
                   alignItems: "center",
                   padding: "6px 12px",
@@ -604,6 +640,7 @@ const Note = pattern<Input, Output>(
       content,
       mentioned,
       backlinks,
+      parentNotebook,
       isHidden,
       noteId,
       grep: patternTool(grepFn, { content }),

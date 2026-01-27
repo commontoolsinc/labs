@@ -6,6 +6,7 @@ import {
   type JournalEventType,
   journalSchema,
   type JournalSnapshot,
+  type ObjectStub,
 } from "@commontools/home-schemas";
 
 // Re-export types for consumers
@@ -185,7 +186,7 @@ export async function addJournalEntry(
   const entry: JournalEntry = {
     timestamp: Date.now(),
     eventType,
-    subject,
+    subject: subject as Cell<ObjectStub>,
     snapshot,
     narrative,
     tags,

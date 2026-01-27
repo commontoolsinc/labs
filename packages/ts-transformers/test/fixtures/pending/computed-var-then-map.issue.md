@@ -22,7 +22,7 @@ messages.map((msg) => {
 
 ```bash
 # See untransformed .map() in output
-deno task ct dev packages/ts-transformers/test/fixtures/pending/computed-var-then-map.input.tsx --no-run
+deno task ct check packages/ts-transformers/test/fixtures/pending/computed-var-then-map.input.tsx --no-run
 
 # Runtime error
 deno task ct charm new packages/ts-transformers/test/fixtures/pending/computed-var-then-map.input.tsx \

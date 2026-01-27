@@ -13,6 +13,7 @@ const logger = getLogger("charm-render", { level: "info", enabled: false });
 export interface RenderOptions {
   watch?: boolean;
   onUpdate?: (html: string) => void;
+  start?: boolean;
 }
 
 /**
@@ -31,7 +32,7 @@ export async function renderCharm(
   // 2. Get charm controller to access the Cell
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm, true);
+  const charm = await charms.get(config.charm, options.start ?? true);
   const cell = charm.getCell().asSchema({
     type: "object",
     properties: {

@@ -3,12 +3,13 @@ import {
   computed,
   Default,
   equals,
-  ifElse,
-  lift,
+  handler,
   NAME,
   navigateTo,
   pattern,
+  Stream,
   UI,
+  type VNode,
   Writable,
 } from "commontools";
 
@@ -18,53 +19,116 @@ import ReadingItemDetail, {
   type ReadingItem,
 } from "./reading-item-detail.tsx";
 
+// Pre-computed item data for rendering (avoids closure issues in .map())
+interface ItemDisplayData {
+  item: ReadingItem;
+  typeEmoji: string;
+  stars: string;
+}
+
 interface Input {
   items: Writable<Default<ReadingItem[], []>>;
 }
 
 interface Output {
+  [NAME]: string;
+  [UI]: VNode;
   items: ReadingItem[];
+  totalCount: number;
+  addItem: Stream<{ title: string; author: string; type: ItemType }>;
+  removeItem: Stream<{ item: ReadingItem }>;
 }
 
-const typeEmoji: Record<ItemType, string> = {
+const TYPE_EMOJI: Record<ItemType, string> = {
   book: "📚",
   article: "📄",
   paper: "📑",
   video: "🎬",
 };
 
-const filterByStatus = lift(
-  (
-    args: { items: ReadingItem[]; status: ItemStatus | "all" },
-  ): ReadingItem[] => {
-    const { items, status } = args;
-    if (!Array.isArray(items)) return [];
-    if (status === "all") return items;
-    return items.filter((item) => item.status === status);
-  },
-);
+// Pure helper functions (used inside computed())
+const getTypeEmoji = (t: ItemType): string => TYPE_EMOJI[t] || "📄";
 
-const renderStars = lift((rating: number | null): string => {
+const renderStars = (rating: number | null): string => {
   if (!rating) return "";
   return "★".repeat(rating) + "☆".repeat(5 - rating);
+};
+
+// ===== Handlers at module scope =====
+
+const addItem = handler<
+  { title: string; author: string; type: ItemType },
+  {
+    items: Writable<ReadingItem[]>;
+    newTitle: Writable<string>;
+    newAuthor: Writable<string>;
+  }
+>(({ title, author, type }, { items, newTitle, newAuthor }) => {
+  const trimmedTitle = title.trim();
+  if (trimmedTitle) {
+    items.push({
+      title: trimmedTitle,
+      author: author.trim(),
+      url: "",
+      type,
+      status: "want",
+      rating: null,
+      notes: "",
+      addedAt: Date.now(),
+      finishedAt: null,
+    });
+    newTitle.set("");
+    newAuthor.set("");
+  }
 });
 
-const getTypeEmoji = lift((t: ItemType) => typeEmoji[t] || "📄");
-
-const getArrayLength = lift((arr: ReadingItem[]) => arr.length);
-
-const isZero = lift((count: number) => count === 0);
+const removeItem = handler<
+  { item: ReadingItem },
+  { items: Writable<ReadingItem[]> }
+>(({ item }, { items }) => {
+  const current = items.get();
+  const idx = current.findIndex((i) => equals(item, i));
+  if (idx >= 0) {
+    items.set(current.toSpliced(idx, 1));
+  }
+});
 
 export default pattern<Input, Output>(({ items }) => {
   const filterStatus = Writable.of<ItemStatus | "all">("all");
-
   const newTitle = Writable.of("");
   const newAuthor = Writable.of("");
   const newType = Writable.of<ItemType>("article");
 
+  // Bind handlers with their required context
+  const boundAddItem = addItem({ items, newTitle, newAuthor });
+  const boundRemoveItem = removeItem({ items });
+
+  // Computed values
   const totalCount = computed(() => items.get().length);
-  const filteredItems = filterByStatus({ items, status: filterStatus });
-  const filteredCount = getArrayLength(filteredItems);
+
+  // Pre-compute filtered items with display data to avoid closure issues in .map()
+  const filteredDisplayData = computed((): ItemDisplayData[] => {
+    const itemList = items.get();
+    const status = filterStatus.get();
+
+    const filtered = status === "all"
+      ? itemList
+      : itemList.filter((item) => item.status === status);
+
+    return filtered.map((item) => ({
+      item,
+      typeEmoji: getTypeEmoji(item.type),
+      stars: renderStars(item.rating),
+    }));
+  });
+
+  // Compute hasNoFilteredItems directly from source data (not from another computed)
+  const hasNoFilteredItems = computed(() => {
+    const itemList = items.get();
+    const status = filterStatus.get();
+    if (status === "all") return itemList.length === 0;
+    return itemList.filter((item) => item.status === status).length === 0;
+  });
 
   return {
     [NAME]: "Reading List",
@@ -88,47 +152,41 @@ export default pattern<Input, Output>(({ items }) => {
 
         <ct-vscroll flex showScrollbar fadeEdges>
           <ct-vstack gap="2" style="padding: 1rem;">
-            {filteredItems.map((item) => (
+            {filteredDisplayData.map((data) => (
               <ct-card
                 style="cursor: pointer;"
                 onClick={() => {
-                  const detail = ReadingItemDetail({ item });
+                  const detail = ReadingItemDetail({ item: data.item });
                   return navigateTo(detail);
                 }}
               >
                 <ct-hstack gap="2" align="center">
                   <span style="font-size: 1.5rem;">
-                    {getTypeEmoji(item.type)}
+                    {data.typeEmoji}
                   </span>
                   <ct-vstack gap="0" style="flex: 1;">
                     <span style="font-weight: 500;">
-                      {item.title || "(untitled)"}
+                      {data.item.title || "(untitled)"}
                     </span>
-                    {item.author && (
+                    {data.item.author && (
                       <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
-                        by {item.author}
+                        by {data.item.author}
                       </span>
                     )}
                     <ct-hstack gap="2" align="center">
                       <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
-                        {item.status}
+                        {data.item.status}
                       </span>
-                      {item.rating && (
+                      {data.stars && (
                         <span style="font-size: 0.75rem; color: var(--ct-color-warning-500);">
-                          {renderStars(item.rating)}
+                          {data.stars}
                         </span>
                       )}
                     </ct-hstack>
                   </ct-vstack>
                   <ct-button
                     variant="ghost"
-                    onClick={() => {
-                      const current = items.get();
-                      const idx = current.findIndex((i) => equals(item, i));
-                      if (idx >= 0) {
-                        items.set(current.toSpliced(idx, 1));
-                      }
-                    }}
+                    onClick={() => boundRemoveItem.send({ item: data.item })}
                   >
                     ×
                   </ct-button>
@@ -136,13 +194,13 @@ export default pattern<Input, Output>(({ items }) => {
               </ct-card>
             ))}
 
-            {ifElse(
-              isZero(filteredCount),
-              <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
-                No items yet. Add something to read!
-              </div>,
-              null,
-            )}
+            {hasNoFilteredItems
+              ? (
+                <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
+                  No items yet. Add something to read!
+                </div>
+              )
+              : null}
           </ct-vstack>
         </ct-vscroll>
 
@@ -170,24 +228,12 @@ export default pattern<Input, Output>(({ items }) => {
             />
             <ct-button
               variant="primary"
-              onClick={() => {
-                const title = newTitle.get().trim();
-                if (title) {
-                  items.push({
-                    title,
-                    author: newAuthor.get().trim(),
-                    url: "",
-                    type: newType.get(),
-                    status: "want",
-                    rating: null,
-                    notes: "",
-                    addedAt: Date.now(),
-                    finishedAt: null,
-                  });
-                  newTitle.set("");
-                  newAuthor.set("");
-                }
-              }}
+              onClick={() =>
+                boundAddItem.send({
+                  title: newTitle.get(),
+                  author: newAuthor.get(),
+                  type: newType.get(),
+                })}
             >
               Add
             </ct-button>
@@ -196,5 +242,8 @@ export default pattern<Input, Output>(({ items }) => {
       </ct-screen>
     ),
     items,
+    totalCount,
+    addItem: boundAddItem,
+    removeItem: boundRemoveItem,
   };
 });

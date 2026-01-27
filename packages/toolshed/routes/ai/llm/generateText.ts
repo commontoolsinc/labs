@@ -311,7 +311,10 @@ export async function generateText(
         }> = [];
 
         // If last message was from assistant, send it first
-        if (messages[messages.length - 1].role === "assistant") {
+        if (
+          messages.length > 0 &&
+          messages[messages.length - 1].role === "assistant"
+        ) {
           const content = messages[messages.length - 1].content;
           // This `content` could be a structured content array, which isn't supported here.
           if (typeof content !== "string") {

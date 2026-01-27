@@ -29,6 +29,7 @@ import {
   Revision,
   SchemaQuery,
   Selection,
+  StorableDatum,
   Subscribe,
   Subscriber,
   Transaction,
@@ -459,15 +460,14 @@ class MemoryProviderSession<
     }
   }
 
-  async commit(commit: Commit<Space>) {
+  async commit(commit: Commit<Space>, labels?: Memory.FactSelection) {
     // We should really only have one item, but it's technically legal to have
     // multiple transactions in the same commit, so iterate
     for (
       const item of SelectionBuilder.iterate<{ is: Memory.CommitData }>(commit)
     ) {
-      // We need to remove any classified results from our commit.
-      // The schema subscription has a classification claim, but these don't.
-      const redactedData = redactCommitData(item.value.is);
+      // Remove any classified results from our commit before broadcasting.
+      const redactedData = redactCommitData(item.value.is, labels);
       if (Subscription.isTransactionReadOnly(redactedData.transaction)) {
         continue;
       }
@@ -526,7 +526,7 @@ class MemoryProviderSession<
 
   private toSelection(factVersions: Revision<Fact>[]) {
     const selection: Memory.OfTheCause<
-      { is?: Memory.JSONValue; since: number }
+      { is?: StorableDatum; since: number }
     > = {};
     for (const fact of factVersions) {
       setRevision(

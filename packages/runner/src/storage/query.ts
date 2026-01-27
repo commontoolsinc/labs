@@ -1,15 +1,20 @@
 import type { Revision, State } from "@commontools/memory/interface";
 
-import type {
-  BaseMemoryAddress,
+import {
+  type BaseMemoryAddress,
   IAttestation,
   ObjectStorageManager,
 } from "../traverse.ts";
 
-// Object Manager backed by a store map
+/**
+ * Object Manager backed by a store map.
+ *
+ * The keys for the store map are of the form: `${address.id}/${address.type}`
+ */
 export class StoreObjectManager implements ObjectStorageManager {
   private readValues = new Map<string, IAttestation>();
-  private missingDocs = new Map<string, BaseMemoryAddress>();
+  // Cache our read labels, and any docs we can't read
+  public missingDocs = new Map<string, BaseMemoryAddress>();
 
   constructor(private store = new Map<string, Revision<State>>()) {
   }

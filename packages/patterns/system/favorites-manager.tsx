@@ -1,25 +1,31 @@
 /// <cts-enable />
 /**
  * Favorites Manager pattern.
- * Referenced in: docs/common/FAVORITES.md
- *
- * @reviewed 2025-12-10 docs-rationalization
  */
-import { handler, NAME, pattern, UI, wish, Writable } from "commontools";
+import {
+  Default,
+  handler,
+  NAME,
+  pattern,
+  UI,
+  wish,
+  Writable,
+} from "commontools";
 
 type Favorite = {
   cell: Writable<{ [NAME]?: string }>;
   tag: string;
   userTags: Writable<string[]>;
+  spaceName?: string;
+  spaceDid?: string;
 };
 
 const onRemoveFavorite = handler<
   Record<string, never>,
-  { favorites: Writable<Array<Favorite>>; item: Writable<unknown> }
+  { favorites: Writable<Default<Array<Favorite>, []>>; item: Writable<unknown> }
 >((_, { favorites, item }) => {
-  favorites.set([
-    ...favorites.get().filter((f: Favorite) => !f.cell.equals(item)),
-  ]);
+  const favorite = favorites.get().find((f: Favorite) => f.cell.equals(item));
+  if (favorite) favorites.remove(favorite);
 });
 
 const onUpdateUserTags = handler<
@@ -30,13 +36,16 @@ const onUpdateUserTags = handler<
 });
 
 export default pattern<Record<string, never>>((_) => {
-  const wishResult = wish<Array<Favorite>>({ query: "#favorites" });
+  // Use wish() to access favorites from home.tsx via defaultPattern
+  const { result: favorites } = wish<Default<Array<Favorite>, []>>({
+    query: "#favorites",
+  });
 
   return {
     [NAME]: "Favorites Manager",
     [UI]: (
       <ct-vstack gap="3">
-        {wishResult.result.map((item) => (
+        {favorites.map((item) => (
           <ct-cell-context $cell={item.cell}>
             <ct-vstack gap="2">
               <ct-hstack gap="2" align="center">
@@ -45,7 +54,7 @@ export default pattern<Record<string, never>>((_) => {
                   variant="destructive"
                   size="sm"
                   onClick={onRemoveFavorite({
-                    favorites: wishResult.result,
+                    favorites,
                     item: item.cell,
                   })}
                 >
@@ -59,6 +68,7 @@ export default pattern<Record<string, never>>((_) => {
             </ct-vstack>
           </ct-cell-context>
         ))}
+        {favorites.length === 0 && <ct-text>No favorites yet.</ct-text>}
       </ct-vstack>
     ),
   };

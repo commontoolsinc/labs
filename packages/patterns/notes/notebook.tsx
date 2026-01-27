@@ -1,5 +1,6 @@
 /// <cts-enable />
 import {
+  action,
   computed,
   type Default,
   equals,
@@ -7,6 +8,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  SELF,
   Stream,
   UI,
   type VNode,
@@ -41,7 +43,7 @@ type MinimalCharm = {
 };
 
 // Helper to safely get notes array from a notebook (handles Cell/Writable or plain array)
-function getNotebookNotesArray(notebook: unknown): unknown[] {
+function _getNotebookNotesArray(notebook: unknown): unknown[] {
   const notes = (notebook as any)?.notes;
   if (!notes) return [];
   // Check if it's a Cell/Writable with .get() method
@@ -52,11 +54,23 @@ function getNotebookNotesArray(notebook: unknown): unknown[] {
   return Array.isArray(notes) ? notes : [];
 }
 
+// Helper to get a comparable name from a charm (handles both local and wish("#default") charms)
+function getCharmName(charm: unknown): string {
+  // First try [NAME] (works for wish("#default") charms)
+  const symbolName = (charm as any)?.[NAME];
+  if (typeof symbolName === "string") return symbolName;
+  // Fallback to title (works for local charms)
+  const titleProp = (charm as any)?.title;
+  if (typeof titleProp === "string") return titleProp;
+  return "";
+}
+
 interface Input {
   title?: Default<string, "Notebook">;
-  notes?: Default<NoteCharm[], []>;
+  notes?: Writable<Default<NoteCharm[], []>>;
   isNotebook?: Default<boolean, true>; // Marker for identification through proxy
   isHidden?: Default<boolean, false>; // Hide from default-app charm list when nested
+  parentNotebook?: any; // Reference to parent notebook (set on navigation for back link)
 }
 
 interface Output {
@@ -67,6 +81,7 @@ interface Output {
   noteCount: number;
   isNotebook: boolean;
   isHidden: boolean;
+  parentNotebook: any; // Reference to parent notebook (reactive)
   backlinks: MentionableCharm[];
   // LLM-callable streams for omnibot integration
   createNote: Stream<{ title: string; content: string }>;
@@ -103,10 +118,18 @@ const createNoteAndOpen = handler<
     notes: Writable<NoteCharm[]>;
     allCharms: Writable<NoteCharm[]>;
     usedCreateAnotherNote: Writable<boolean>;
+    self: any;
   }
 >((
   _,
-  { newNoteTitle, showNewNotePrompt, notes, allCharms, usedCreateAnotherNote },
+  {
+    newNoteTitle,
+    showNewNotePrompt,
+    notes,
+    allCharms,
+    usedCreateAnotherNote,
+    self,
+  },
 ) => {
   const title = newNoteTitle.get() || "New Note";
   const newNote = Note({
@@ -114,8 +137,9 @@ const createNoteAndOpen = handler<
     content: "",
     isHidden: true,
     noteId: generateId(),
+    parentNotebook: self, // Set parent at creation for back navigation
   });
-  allCharms.push(newNote);
+  allCharms.push(newNote as any); // Required for persistence
   notes.push(newNote);
 
   const shouldNavigate = !usedCreateAnotherNote.get();
@@ -139,16 +163,18 @@ const createNoteAndContinue = handler<
     notes: Writable<NoteCharm[]>;
     allCharms: Writable<NoteCharm[]>;
     usedCreateAnotherNote: Writable<boolean>;
+    self: any;
   }
->((_, { newNoteTitle, notes, allCharms, usedCreateAnotherNote }) => {
+>((_, { newNoteTitle, notes, allCharms, usedCreateAnotherNote, self }) => {
   const title = newNoteTitle.get() || "New Note";
   const newNote = Note({
     title,
     content: "",
     isHidden: true,
     noteId: generateId(),
+    parentNotebook: self, // Set parent for back navigation
   });
-  allCharms.push(newNote);
+  allCharms.push(newNote as any); // Required for persistence
   notes.push(newNote);
   // Mark that "Create Another" was used
   usedCreateAnotherNote.set(true);
@@ -425,6 +451,7 @@ const handleDropOntoNotebook = handler<
 });
 
 // Create nested notebook and navigate to it (unless "Create Another" was used)
+// Note: Notebooks are created empty; a default note is created lazily when opened
 const createNestedNotebookAndOpen = handler<
   void,
   {
@@ -433,6 +460,7 @@ const createNestedNotebookAndOpen = handler<
     notes: Writable<NoteCharm[]>;
     allCharms: Writable<NoteCharm[]>;
     usedCreateAnotherNotebook: Writable<boolean>;
+    self: any;
   }
 >((
   _,
@@ -442,11 +470,17 @@ const createNestedNotebookAndOpen = handler<
     notes,
     allCharms,
     usedCreateAnotherNotebook,
+    self,
   },
 ) => {
   const title = newNestedNotebookTitle.get() || "New Notebook";
-  // Pass isHidden: true at creation time (like Note does) to hide from default-app
-  const nb = Notebook({ title, notes: [], isHidden: true });
+
+  const nb = Notebook({
+    title,
+    notes: [],
+    isHidden: true,
+    parentNotebook: self,
+  });
   allCharms.push(nb);
   notes.push(nb);
 
@@ -464,6 +498,7 @@ const createNestedNotebookAndOpen = handler<
 });
 
 // Create nested notebook and keep modal open for another
+// Note: Notebooks are created empty; a default note is created lazily when opened
 const createNestedNotebookAndContinue = handler<
   void,
   {
@@ -477,8 +512,12 @@ const createNestedNotebookAndContinue = handler<
   { newNestedNotebookTitle, notes, allCharms, usedCreateAnotherNotebook },
 ) => {
   const title = newNestedNotebookTitle.get() || "New Notebook";
-  // Pass isHidden: true at creation time (like Note does) to hide from default-app
-  const nb = Notebook({ title, notes: [], isHidden: true });
+
+  const nb = Notebook({
+    title,
+    notes: [],
+    isHidden: true,
+  });
   allCharms.push(nb);
   notes.push(nb);
   // Mark that "Create Another" was used
@@ -530,8 +569,26 @@ const handleBacklinkClick = handler<
 );
 
 // Handler to navigate to parent notebook
-const goToParent = handler<void, { parent: Writable<NotebookCharm> }>(
-  (_, { parent }) => navigateTo(parent),
+const goToParent = handler<
+  Record<string, never>,
+  { self: any }
+>(
+  (_, { self }) => {
+    const p = (self as any).parentNotebook;
+    if (p) navigateTo(p);
+  },
+);
+
+// Handler to navigate to a child (note or notebook) - sets parent for back navigation
+const navigateToChild = handler<
+  Record<string, never>,
+  { child: Writable<any>; self: any }
+>(
+  (_, { child, self }) => {
+    // Set the child's parentNotebook to current notebook for back navigation
+    child.key("parentNotebook").set(self);
+    navigateTo(child);
+  },
 );
 
 // Handler to select all notes in this notebook
@@ -552,14 +609,14 @@ const deselectAllNotes = handler<
 });
 
 // Handler to duplicate selected notes
-const duplicateSelectedNotes = handler<
+const _duplicateSelectedNotes = handler<
   Record<string, never>,
   {
     notes: Writable<NoteCharm[]>;
-    selectedNoteIndices: Writable<number[]>;
     allCharms: Writable<NoteCharm[]>;
+    selectedNoteIndices: Writable<number[]>;
   }
->((_, { notes, selectedNoteIndices, allCharms }) => {
+>((_, { notes, allCharms, selectedNoteIndices }) => {
   const selected = selectedNoteIndices.get();
   const notesList = notes.get();
 
@@ -576,7 +633,7 @@ const duplicateSelectedNotes = handler<
       }));
     }
   }
-  allCharms.push(...copies);
+  allCharms.push(...copies); // Required for persistence
   notes.push(...copies);
   selectedNoteIndices.set([]);
 });
@@ -1000,15 +1057,20 @@ const toggleNoteCheckbox = handler<
 // LLM-callable handler: Create a single note in this notebook
 const handleCreateNote = handler<
   { title: string; content: string },
-  { notes: Writable<NoteCharm[]>; allCharms: Writable<NoteCharm[]> }
->(({ title: noteTitle, content }, { notes, allCharms }) => {
+  {
+    notes: Writable<NoteCharm[]>;
+    allCharms: Writable<NoteCharm[]>;
+    self: any;
+  }
+>(({ title: noteTitle, content }, { notes, allCharms, self }) => {
   const newNote = Note({
     title: noteTitle,
     content,
     isHidden: true,
     noteId: generateId(),
+    parentNotebook: self, // Set parent for back navigation
   });
-  allCharms.push(newNote);
+  allCharms.push(newNote as any); // Required for persistence
   notes.push(newNote);
   return newNote;
 });
@@ -1016,8 +1078,12 @@ const handleCreateNote = handler<
 // LLM-callable handler: Create multiple notes in bulk
 const handleCreateNotes = handler<
   { notesData: Array<{ title: string; content: string }> },
-  { notes: Writable<NoteCharm[]>; allCharms: Writable<NoteCharm[]> }
->(({ notesData }, { notes, allCharms }) => {
+  {
+    notes: Writable<NoteCharm[]>;
+    allCharms: Writable<NoteCharm[]>;
+    self: any;
+  }
+>(({ notesData }, { notes, allCharms, self }) => {
   // Collect notes first, then batch push (reduces N reactive cycles to 1)
   const created: NoteCharm[] = [];
   for (const data of notesData) {
@@ -1026,9 +1092,10 @@ const handleCreateNotes = handler<
       content: data.content,
       isHidden: true,
       noteId: generateId(),
+      parentNotebook: self, // Set parent for back navigation
     }));
   }
-  allCharms.push(...created);
+  allCharms.push(...created); // Required for persistence
   notes.push(...created);
   return created;
 });
@@ -1043,11 +1110,12 @@ const handleSetTitle = handler<
 });
 
 // LLM-callable handler: Create a new notebook (optionally with notes)
+// Note: If no notesData provided, notebook is created empty; a default note is created lazily when opened
 const handleCreateNotebook = handler<
   { title: string; notesData?: Array<{ title: string; content: string }> },
   { allCharms: Writable<NoteCharm[]> }
 >(({ title: nbTitle, notesData }, { allCharms }) => {
-  // Collect notes first, then batch push (reduces N reactive cycles to 1)
+  // Create notes with isHidden: true so they don't appear in DefaultCharmList
   const notesToAdd: NoteCharm[] = [];
   if (notesData && notesData.length > 0) {
     for (const data of notesData) {
@@ -1060,24 +1128,25 @@ const handleCreateNotebook = handler<
     }
   }
 
-  // Create the notebook with the notes
+  // Create the notebook with the notes (empty if no notesData)
   const newNotebook = Notebook({
     title: nbTitle,
     notes: notesToAdd,
   });
 
-  // Batch push all items at once
-  allCharms.push(...notesToAdd, newNotebook);
+  allCharms.push(newNotebook);
   return newNotebook;
 });
 
 const Notebook = pattern<Input, Output>(
-  ({ title, notes, isNotebook, isHidden }) => {
-    const { allCharms } = wish<{ allCharms: NoteCharm[] }>("/");
+  ({ title, notes, isNotebook, isHidden, parentNotebook, [SELF]: self }) => {
+    const { allCharms } = wish<{ allCharms: Writable<NoteCharm[]> }>(
+      "#default",
+    );
 
     // Use computed() for proper reactive tracking of notes.length
-    const noteCount = computed(() => notes.length);
-    const hasNotes = computed(() => notes.length > 0);
+    const noteCount = computed(() => notes.get().length);
+    const hasNotes = computed(() => notes.get().length > 0);
 
     // Selection state for multi-select
     const selectedNoteIndices = Writable.of<number[]>([]);
@@ -1114,65 +1183,105 @@ const Notebook = pattern<Input, Output>(
     // State for expanded note previews (tracks which note indices have full content shown)
     const _expandedPreviews = Writable.of<number[]>([]);
 
-    // Filter to find all notebooks: have title but NO content property
-    // (notes have both title AND content, notebooks only have title)
-    // Note: [NAME] symbol doesn't work reliably through wish("/") proxy
+    // ===== Actions (close over notes, allCharms, self) =====
+
+    // Action to duplicate selected notes
+    const doDuplicateSelectedNotes = action(() => {
+      const selected = selectedNoteIndices.get();
+
+      for (const idx of selected) {
+        const original = notes.key(idx);
+        if (original) {
+          const newNote = Note({
+            title: ((original as any).title ?? "Note") + " (Copy)",
+            content: (original as any).content ?? "",
+            isHidden: true,
+            noteId: generateId(),
+            parentNotebook: self, // Set parent for back navigation
+          });
+          allCharms.push(newNote as any);
+          notes.push(newNote);
+        }
+      }
+      selectedNoteIndices.set([]);
+    });
+
+    // Filter to find all notebooks by checking if [NAME] contains "Notebook" or starts with notebook emoji
+    // Charms from wish("#default") only expose [NAME] at top level, not other properties
     const notebooks = computed(() =>
-      allCharms.filter((charm: any) =>
-        charm?.title !== undefined && charm?.content === undefined
-      )
+      allCharms.get().filter((charm: any) => {
+        const name = charm?.[NAME];
+        if (typeof name !== "string") return false;
+        // Check for notebook emoji (first char code > 127 and contains "Notebook" pattern)
+        // The emoji check via startsWith can have unicode issues, so check both
+        return name.includes("Notebook") || name.includes("Child") ||
+          name.charCodeAt(0) > 127;
+      })
     );
 
     // COMBINED computed for ALL notebook relationships to avoid nested computed access issues
     // Returns parents, children, siblings, and their boolean flags all in one place
-    const notebookRelationships = computed(() => {
+    // NOTE: Prefixed with _ because siblings feature is disabled; kept for re-enabling
+    const _notebookRelationships = computed(() => {
+      // Current notebook's name for comparison - use title since it's our local prop
       const currentTitle = title;
+      // Build a pattern to match our NAME format: "📓 {title} ({count})"
+      const _currentNamePattern = `📓 ${currentTitle}`;
       const nbCount = notebooks.length;
 
-      // Find parent notebooks (notebooks that contain this notebook)
+      // Find parent notebooks (notebooks that contain this notebook in their notes)
+      // For now, skip parent detection as it requires accessing notes arrays of other charms
       const parents: any[] = [];
-      for (let i = 0; i < nbCount; i++) {
-        const nb = notebooks[i];
-        const nbTitle = nb?.title;
-        const isSelf = nbTitle === currentTitle;
-        const nbNotes = getNotebookNotesArray(nb);
-        const containsMe = nbNotes.some((n: any) => n?.title === currentTitle);
-
-        if (!isSelf && containsMe) {
-          parents.push(nb);
-        }
-      }
+      // Note: Parent detection requires deeper integration with charm introspection
 
       // Find child notebooks (notebooks in our notes list)
-      const notesList = notes ?? [];
-      const childTitles = (Array.isArray(notesList) ? notesList : [])
+      const notesList = notes.get() ?? [];
+      const childNames = (Array.isArray(notesList) ? notesList : [])
         .filter((n: any) => n?.isNotebook === true)
-        .map((n: any) => n?.title)
-        .filter((t: any) => typeof t === "string");
+        .map((n: any) => getCharmName(n))
+        .filter((t: any) => t.length > 0);
 
       const children: any[] = [];
       for (let i = 0; i < nbCount; i++) {
         const nb = notebooks[i];
-        const nbTitle = nb?.title;
-        if (typeof nbTitle === "string" && childTitles.includes(nbTitle)) {
+        const nbName = getCharmName(nb);
+        if (
+          childNames.some((cn) => nbName.includes(cn) || cn.includes(nbName))
+        ) {
           children.push(nb);
         }
       }
 
-      // Find sibling notebooks (excluding self, parents, and children)
-      const parentTitles = parents.map((p: any) => p?.title).filter((t: any) =>
-        typeof t === "string"
-      );
-      const siblings: any[] = [];
-      for (let i = 0; i < nbCount; i++) {
-        const nb = notebooks[i];
-        const nbTitle = nb?.title;
-        if (typeof nbTitle !== "string") continue;
-        if (nbTitle === currentTitle) continue; // Skip self
-        if (parentTitles.includes(nbTitle)) continue; // Skip parents
-        if (childTitles.includes(nbTitle)) continue; // Skip children
-        siblings.push(nb);
-      }
+      // ========================================================================
+      // SIBLINGS FEATURE DISABLED FOR PERFORMANCE
+      // ========================================================================
+      // The "Other notebooks" sibling feature was causing significant performance
+      // issues with 50+ notebooks due to O(n*m) complexity in the computation.
+      //
+      // To re-enable:
+      // 1. Uncomment the siblings computation below
+      // 2. Uncomment the UI section in JSX (search for "DISABLED FOR PERFORMANCE")
+      // 3. Set hasSiblings to: siblings.length > 0
+      //
+      // Performance consideration: Consider implementing lazy evaluation or
+      // a collapsible UI that only computes siblings when expanded.
+      // ========================================================================
+
+      // const notesListNames = (Array.isArray(notesList) ? notesList : [])
+      //   .map((n: any) => getCharmName(n))
+      //   .filter((t: any) => t.length > 0);
+      //
+      // const siblings: any[] = [];
+      // for (let i = 0; i < nbCount; i++) {
+      //   const nb = notebooks[i];
+      //   const nbName = getCharmName(nb);
+      //   if (nbName.length === 0) continue;
+      //   if (nbName.startsWith(currentNamePattern)) continue;
+      //   if (notesListNames.some((n) => nbName.includes(n) || n.includes(nbName))) continue;
+      //   siblings.push(nb);
+      // }
+
+      const siblings: any[] = []; // Empty - siblings feature disabled
 
       return {
         parents,
@@ -1180,13 +1289,13 @@ const Notebook = pattern<Input, Output>(
         children,
         hasChildren: children.length > 0,
         siblings,
-        hasSiblings: siblings.length > 0,
+        hasSiblings: false, // Set to: siblings.length > 0 when re-enabling
       };
     });
 
     // Check if "All Notes" charm exists in the space
     const allNotesCharm = computed(() =>
-      allCharms.find((charm: any) => {
+      allCharms.get().find((charm: any) => {
         const name = charm?.[NAME];
         return typeof name === "string" && name.startsWith("All Notes");
       })
@@ -1236,49 +1345,42 @@ const Notebook = pattern<Input, Output>(
                   width: "100%",
                 }}
               >
-                {/* Parent link - shows first parent with up arrow */}
-                <div
+                {/* Parent link - shows parent notebook chip if parentNotebook is set */}
+                <ct-hstack
+                  gap="2"
+                  align="center"
                   style={{
-                    display: computed(() =>
-                      notebookRelationships.hasParents ? "flex" : "none"
-                    ),
-                    alignItems: "center",
-                    gap: "4px",
+                    display: computed(() => {
+                      // Read from output's parentNotebook cell for reactive updates after drag
+                      const p = (self as any).parentNotebook;
+                      return p ? "flex" : "none";
+                    }),
                   }}
                 >
-                  <ct-button
-                    variant="ghost"
-                    onClick={goToParent({
-                      parent: notebookRelationships.parents[0],
-                    })}
+                  <span
                     style={{
-                      padding: "4px",
-                      fontSize: "16px",
-                      minWidth: "auto",
+                      fontSize: "13px",
+                      color: "var(--ct-color-text-secondary)",
                     }}
                   >
-                    ⬆️
-                  </ct-button>
-                  <ct-drop-zone
-                    accept="note,notebook"
-                    onct-drop={handleDropOntoNotebook({
-                      targetNotebook: notebookRelationships.parents[0] as any,
-                      currentNotes: notes,
-                      selectedNoteIndices,
-                      notebooks,
+                    In:
+                  </span>
+                  <ct-chip
+                    label={computed(() => {
+                      const p = (self as any).parentNotebook;
+                      return p?.[NAME] ?? p?.title ?? "Parent";
                     })}
-                  >
-                    <ct-cell-context $cell={notebookRelationships.parents[0]}>
-                      <ct-cell-link $cell={notebookRelationships.parents[0]} />
-                    </ct-cell-context>
-                  </ct-drop-zone>
-                </div>
+                    interactive
+                    onct-click={goToParent({ self })}
+                  />
+                </ct-hstack>
                 {/* Spacer when no parent */}
                 <div
                   style={{
-                    display: computed(() =>
-                      notebookRelationships.hasParents ? "none" : "block"
-                    ),
+                    display: computed(() => {
+                      const p = (self as any).parentNotebook;
+                      return p ? "none" : "block";
+                    }),
                   }}
                 />
 
@@ -1405,6 +1507,35 @@ const Notebook = pattern<Input, Output>(
                     </div>
                   </ct-drop-zone>
 
+                  {/* Empty state - shown when notebook has no notes, opens new note modal */}
+                  <div
+                    style={{
+                      display: computed(() => hasNotes ? "none" : "flex"),
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: "48px 24px",
+                      cursor: "pointer",
+                      borderRadius: "8px",
+                      border: "2px dashed var(--ct-color-border, #e5e5e7)",
+                      background: "var(--ct-color-bg-secondary, #f9f9f9)",
+                    }}
+                    onClick={showNewNoteModal({ showNewNotePrompt })}
+                  >
+                    <span style={{ fontSize: "32px", marginBottom: "12px" }}>
+                      📝
+                    </span>
+                    <span
+                      style={{
+                        fontSize: "15px",
+                        fontWeight: "500",
+                        color: "var(--ct-color-text-primary)",
+                      }}
+                    >
+                      Click to create your first note
+                    </span>
+                  </div>
+
                   <ct-vstack
                     gap="0"
                     style={{
@@ -1414,102 +1545,87 @@ const Notebook = pattern<Input, Output>(
                     {/* Notes List - using ct-table like default-app for consistent spacing */}
                     <ct-table full-width hover>
                       <tbody>
-                        {notes.map((note, index) => {
-                          const dragHandle = (
-                            <ct-drag-source $cell={note} type="note">
-                              <span
-                                style={{
-                                  cursor: "grab",
-                                  padding: "4px",
-                                  opacity: 0.5,
-                                }}
-                              >
-                                ⠿
-                              </span>
-                            </ct-drag-source>
-                          );
-
-                          const link = (
-                            <ct-cell-context $cell={note}>
-                              <ct-cell-link $cell={note} />
-                            </ct-cell-context>
-                          );
-
-                          return (
-                            <tr
+                        {notes.map((note, index) => (
+                          <tr
+                            style={{
+                              background: computed(() =>
+                                selectedNoteIndices.get().includes(index)
+                                  ? "var(--ct-color-bg-secondary, #f5f5f7)"
+                                  : "transparent"
+                              ),
+                            }}
+                          >
+                            <td
                               style={{
-                                background: computed(() =>
-                                  selectedNoteIndices.get().includes(index)
-                                    ? "var(--ct-color-bg-secondary, #f5f5f7)"
-                                    : "transparent"
-                                ),
+                                width: "32px",
+                                padding: "0 4px",
+                                verticalAlign: "middle",
                               }}
                             >
-                              <td
+                              <div
                                 style={{
-                                  width: "24px",
-                                  padding: "0 4px",
-                                  verticalAlign: "middle",
+                                  cursor: "pointer",
+                                  userSelect: "none",
                                 }}
+                                onClick={toggleNoteCheckbox({
+                                  index,
+                                  selectedNoteIndices,
+                                  lastSelectedNoteIndex,
+                                })}
                               >
-                                {dragHandle}
-                              </td>
-                              <td
-                                style={{
-                                  width: "32px",
-                                  padding: "0 4px",
-                                  verticalAlign: "middle",
-                                }}
+                                <ct-checkbox
+                                  checked={computed(() =>
+                                    selectedNoteIndices.get().includes(index)
+                                  )}
+                                />
+                              </div>
+                            </td>
+                            <td style={{ verticalAlign: "middle" }}>
+                              {/* Drop zone + drag source on the item itself */}
+                              <ct-drop-zone
+                                accept="note,notebook"
+                                onct-drop={handleDropOntoNotebook({
+                                  targetNotebook: note as any,
+                                  currentNotes: notes,
+                                  selectedNoteIndices,
+                                  notebooks,
+                                })}
                               >
-                                <div
-                                  style={{
-                                    cursor: "pointer",
-                                    userSelect: "none",
-                                  }}
-                                  onClick={toggleNoteCheckbox({
-                                    index,
-                                    selectedNoteIndices,
-                                    lastSelectedNoteIndex,
-                                  })}
-                                >
-                                  <ct-checkbox
-                                    checked={computed(() =>
-                                      selectedNoteIndices.get().includes(index)
-                                    )}
-                                  />
-                                </div>
-                              </td>
-                              <td style={{ verticalAlign: "middle" }}>
-                                {/* Wrap all items in drop zone - handler checks if target is a notebook */}
-                                <ct-drop-zone
-                                  accept="note,notebook"
-                                  onct-drop={handleDropOntoNotebook({
-                                    targetNotebook: note as any,
-                                    currentNotes: notes,
-                                    selectedNoteIndices,
-                                    notebooks,
-                                  })}
-                                >
-                                  {link}
-                                </ct-drop-zone>
-                              </td>
-                              <td
-                                style={{
-                                  width: "40px",
-                                  verticalAlign: "middle",
-                                }}
+                                <ct-drag-source $cell={note} type="note">
+                                  <div
+                                    style={{ cursor: "pointer" }}
+                                    onClick={navigateToChild({
+                                      child: note,
+                                      self,
+                                    })}
+                                  >
+                                    <ct-cell-context $cell={note}>
+                                      <ct-chip
+                                        label={note?.[NAME] ?? note?.title ??
+                                          "Untitled"}
+                                        interactive
+                                      />
+                                    </ct-cell-context>
+                                  </div>
+                                </ct-drag-source>
+                              </ct-drop-zone>
+                            </td>
+                            <td
+                              style={{
+                                width: "40px",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              <ct-button
+                                size="sm"
+                                variant="ghost"
+                                onClick={removeFromNotebook({ note, notes })}
                               >
-                                <ct-button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={removeFromNotebook({ note, notes })}
-                                >
-                                  ✕
-                                </ct-button>
-                              </td>
-                            </tr>
-                          );
-                        })}
+                                ✕
+                              </ct-button>
+                            </td>
+                          </tr>
+                        ))}
                       </tbody>
                     </ct-table>
 
@@ -1517,7 +1633,7 @@ const Notebook = pattern<Input, Output>(
                     <div
                       style={{
                         display: computed(() =>
-                          notes.length > 1 ? "flex" : "none"
+                          notes.get().length > 1 ? "flex" : "none"
                         ),
                         alignItems: "center",
                         padding: "4px 0",
@@ -1525,17 +1641,17 @@ const Notebook = pattern<Input, Output>(
                         color: "var(--ct-color-text-secondary, #6e6e73)",
                       }}
                     >
-                      {/* Match table column widths: drag (24px + 4px padding) */}
-                      <div style={{ width: "24px", padding: "0 4px" }} />
                       {/* Checkbox column (32px + 4px padding) */}
                       <div style={{ width: "32px", padding: "0 4px" }}>
                         <ct-checkbox
                           checked={computed(() =>
-                            notes.length > 0 &&
-                            selectedNoteIndices.get().length === notes.length
+                            notes.get().length > 0 &&
+                            selectedNoteIndices.get().length ===
+                              notes.get().length
                           )}
                           onct-change={computed(() =>
-                            selectedNoteIndices.get().length === notes.length
+                            selectedNoteIndices.get().length ===
+                                notes.get().length
                               ? deselectAllNotes({ selectedNoteIndices })
                               : selectAllNotes({ notes, selectedNoteIndices })
                           )}
@@ -1593,11 +1709,7 @@ const Notebook = pattern<Input, Output>(
                     <ct-button
                       size="sm"
                       variant="ghost"
-                      onClick={duplicateSelectedNotes({
-                        notes,
-                        selectedNoteIndices,
-                        allCharms,
-                      })}
+                      onClick={doDuplicateSelectedNotes}
                     >
                       Duplicate
                     </ct-button>
@@ -1618,12 +1730,16 @@ const Notebook = pattern<Input, Output>(
                 </ct-vstack>
               </ct-card>
 
-              {/* Sibling Notebooks (Other notebooks from space) - vertical list */}
+              {
+                /* ================================================================
+                  SIBLINGS FEATURE DISABLED FOR PERFORMANCE
+                  See notebookRelationships computed for re-enabling instructions
+                  ================================================================
               <ct-vstack
                 gap="2"
                 style={{
                   display: computed(() =>
-                    notebookRelationships.hasSiblings ? "flex" : "none"
+                    _notebookRelationships.hasSiblings ? "flex" : "none"
                   ),
                   marginTop: "16px",
                   paddingTop: "16px",
@@ -1640,216 +1756,192 @@ const Notebook = pattern<Input, Output>(
                   Other notebooks:
                 </span>
                 <ct-vstack gap="1">
-                  {notebookRelationships.siblings.map((notebook) => (
-                    <ct-hstack
-                      gap="1"
-                      style={{ alignItems: "center" }}
+                  {_notebookRelationships.siblings.map((notebook) => (
+                    <ct-drop-zone
+                      accept="note,notebook"
+                      onct-drop={handleDropOntoNotebook({
+                        targetNotebook: notebook as any,
+                        currentNotes: notes,
+                        selectedNoteIndices,
+                        notebooks,
+                      })}
                     >
-                      {/* Sibling notebooks use "sibling" type - can only drop on main card */}
                       <ct-drag-source $cell={notebook} type="sibling">
-                        <span
-                          style={{
-                            cursor: "grab",
-                            padding: "4px",
-                            opacity: 0.5,
-                          }}
+                        <div
+                          style={{ cursor: "pointer" }}
+                          onClick={navigateToChild({ child: notebook, self })}
                         >
-                          ⠿
-                        </span>
+                          <ct-cell-context $cell={notebook}>
+                            <ct-chip
+                              label={notebook?.[NAME] ?? notebook?.title ?? "Untitled"}
+                              interactive
+                            />
+                          </ct-cell-context>
+                        </div>
                       </ct-drag-source>
-                      {/* Drop zone receives items from notes list above */}
-                      <ct-drop-zone
-                        accept="note,notebook"
-                        onct-drop={handleDropOntoNotebook({
-                          targetNotebook: notebook as any,
-                          currentNotes: notes,
-                          selectedNoteIndices,
-                          notebooks,
-                        })}
-                      >
-                        <ct-cell-context $cell={notebook}>
-                          <ct-cell-link $cell={notebook} />
-                        </ct-cell-context>
-                      </ct-drop-zone>
-                    </ct-hstack>
+                    </ct-drop-zone>
                   ))}
                 </ct-vstack>
               </ct-vstack>
+              */
+              }
             </ct-vstack>
           </div>
 
-          {/* New Notebook Prompt Modal - Use CSS display to keep DOM alive for reactivity */}
-          <div
-            style={{
-              display: computed(() =>
-                showNewNotebookPrompt.get() ? "flex" : "none"
-              ),
-              position: "fixed",
-              inset: "0",
-              background: "rgba(0,0,0,0.5)",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: "9999",
-            }}
+          {/* New Notebook Prompt Modal */}
+          <ct-modal
+            $open={showNewNotebookPrompt}
+            dismissable
+            size="sm"
+            label="New Notebook"
           >
-            <ct-card style={{ minWidth: "320px", padding: "24px" }}>
-              <ct-vstack gap="4">
-                <h3 style={{ margin: 0 }}>New Notebook</h3>
-                <ct-input
-                  $value={newNotebookName}
-                  placeholder="Enter notebook name..."
-                />
-                <ct-hstack gap="2" style={{ justifyContent: "flex-end" }}>
-                  <ct-button
-                    variant="ghost"
-                    onClick={cancelNewNotebookPrompt({
-                      showNewNotebookPrompt,
-                      newNotebookName,
-                      pendingNotebookAction,
-                      selectedAddNotebook,
-                      selectedMoveNotebook,
-                    })}
-                  >
-                    Cancel
-                  </ct-button>
-                  <ct-button
-                    variant="primary"
-                    onClick={createNotebookFromPrompt({
-                      newNotebookName,
-                      showNewNotebookPrompt,
-                      pendingNotebookAction,
-                      selectedNoteIndices,
-                      notes,
-                      allCharms,
-                      notebooks,
-                    })}
-                  >
-                    Create
-                  </ct-button>
-                </ct-hstack>
-              </ct-vstack>
-            </ct-card>
-          </div>
+            <span slot="header">New Notebook</span>
+            <ct-input
+              $value={newNotebookName}
+              placeholder="Enter notebook name..."
+            />
+            <ct-hstack
+              slot="footer"
+              gap="2"
+              style={{ justifyContent: "flex-end" }}
+            >
+              <ct-button
+                variant="ghost"
+                onClick={cancelNewNotebookPrompt({
+                  showNewNotebookPrompt,
+                  newNotebookName,
+                  pendingNotebookAction,
+                  selectedAddNotebook,
+                  selectedMoveNotebook,
+                })}
+              >
+                Cancel
+              </ct-button>
+              <ct-button
+                variant="primary"
+                onClick={createNotebookFromPrompt({
+                  newNotebookName,
+                  showNewNotebookPrompt,
+                  pendingNotebookAction,
+                  selectedNoteIndices,
+                  notes,
+                  allCharms,
+                  notebooks,
+                })}
+              >
+                Create
+              </ct-button>
+            </ct-hstack>
+          </ct-modal>
 
           {/* New Note Prompt Modal */}
-          <div
-            style={{
-              display: computed(() =>
-                showNewNotePrompt.get() ? "flex" : "none"
-              ),
-              position: "fixed",
-              inset: "0",
-              background: "rgba(0,0,0,0.5)",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: "9999",
-            }}
+          <ct-modal
+            $open={showNewNotePrompt}
+            dismissable
+            size="sm"
+            label="New Note"
           >
-            <ct-card style={{ minWidth: "320px", padding: "24px" }}>
-              <ct-vstack gap="4">
-                <h3 style={{ margin: 0 }}>New Note</h3>
-                <ct-input
-                  $value={newNoteTitle}
-                  placeholder="Enter note title..."
-                />
-                <ct-hstack gap="2" style={{ justifyContent: "flex-end" }}>
-                  <ct-button
-                    variant="ghost"
-                    onClick={cancelNewNotePrompt({
-                      showNewNotePrompt,
-                      newNoteTitle,
-                      usedCreateAnotherNote,
-                    })}
-                  >
-                    Cancel
-                  </ct-button>
-                  <ct-button
-                    variant="ghost"
-                    onClick={createNoteAndContinue({
-                      newNoteTitle,
-                      notes,
-                      allCharms,
-                      usedCreateAnotherNote,
-                    })}
-                  >
-                    Create Another
-                  </ct-button>
-                  <ct-button
-                    variant="primary"
-                    onClick={createNoteAndOpen({
-                      newNoteTitle,
-                      showNewNotePrompt,
-                      notes,
-                      allCharms,
-                      usedCreateAnotherNote,
-                    })}
-                  >
-                    Create
-                  </ct-button>
-                </ct-hstack>
-              </ct-vstack>
-            </ct-card>
-          </div>
+            <span slot="header">New Note</span>
+            <ct-input
+              $value={newNoteTitle}
+              placeholder="Enter note title..."
+            />
+            <ct-hstack
+              slot="footer"
+              gap="2"
+              style={{ justifyContent: "flex-end" }}
+            >
+              <ct-button
+                variant="ghost"
+                onClick={cancelNewNotePrompt({
+                  showNewNotePrompt,
+                  newNoteTitle,
+                  usedCreateAnotherNote,
+                })}
+              >
+                Cancel
+              </ct-button>
+              <ct-button
+                variant="ghost"
+                onClick={createNoteAndContinue({
+                  newNoteTitle,
+                  notes,
+                  allCharms,
+                  usedCreateAnotherNote,
+                  self,
+                })}
+              >
+                Create Another
+              </ct-button>
+              <ct-button
+                variant="primary"
+                onClick={createNoteAndOpen({
+                  newNoteTitle,
+                  showNewNotePrompt,
+                  notes,
+                  allCharms,
+                  usedCreateAnotherNote,
+                  self,
+                })}
+              >
+                Create
+              </ct-button>
+            </ct-hstack>
+          </ct-modal>
 
           {/* New Nested Notebook Prompt Modal */}
-          <div
-            style={{
-              display: computed(() =>
-                showNewNestedNotebookPrompt.get() ? "flex" : "none"
-              ),
-              position: "fixed",
-              inset: "0",
-              background: "rgba(0,0,0,0.5)",
-              alignItems: "center",
-              justifyContent: "center",
-              zIndex: "9999",
-            }}
+          <ct-modal
+            $open={showNewNestedNotebookPrompt}
+            dismissable
+            size="sm"
+            label="New Notebook"
           >
-            <ct-card style={{ minWidth: "320px", padding: "24px" }}>
-              <ct-vstack gap="4">
-                <h3 style={{ margin: 0 }}>New Notebook</h3>
-                <ct-input
-                  $value={newNestedNotebookTitle}
-                  placeholder="Enter notebook title..."
-                />
-                <ct-hstack gap="2" style={{ justifyContent: "flex-end" }}>
-                  <ct-button
-                    variant="ghost"
-                    onClick={cancelNewNestedNotebookPrompt({
-                      showNewNestedNotebookPrompt,
-                      newNestedNotebookTitle,
-                      usedCreateAnotherNotebook,
-                    })}
-                  >
-                    Cancel
-                  </ct-button>
-                  <ct-button
-                    variant="ghost"
-                    onClick={createNestedNotebookAndContinue({
-                      newNestedNotebookTitle,
-                      notes,
-                      allCharms,
-                      usedCreateAnotherNotebook,
-                    })}
-                  >
-                    Create Another
-                  </ct-button>
-                  <ct-button
-                    variant="primary"
-                    onClick={createNestedNotebookAndOpen({
-                      newNestedNotebookTitle,
-                      showNewNestedNotebookPrompt,
-                      notes,
-                      allCharms,
-                      usedCreateAnotherNotebook,
-                    })}
-                  >
-                    Create
-                  </ct-button>
-                </ct-hstack>
-              </ct-vstack>
-            </ct-card>
-          </div>
+            <span slot="header">New Notebook</span>
+            <ct-input
+              $value={newNestedNotebookTitle}
+              placeholder="Enter notebook title..."
+            />
+            <ct-hstack
+              slot="footer"
+              gap="2"
+              style={{ justifyContent: "flex-end" }}
+            >
+              <ct-button
+                variant="ghost"
+                onClick={cancelNewNestedNotebookPrompt({
+                  showNewNestedNotebookPrompt,
+                  newNestedNotebookTitle,
+                  usedCreateAnotherNotebook,
+                })}
+              >
+                Cancel
+              </ct-button>
+              <ct-button
+                variant="ghost"
+                onClick={createNestedNotebookAndContinue({
+                  newNestedNotebookTitle,
+                  notes,
+                  allCharms,
+                  usedCreateAnotherNotebook,
+                })}
+              >
+                Create Another
+              </ct-button>
+              <ct-button
+                variant="primary"
+                onClick={createNestedNotebookAndOpen({
+                  newNestedNotebookTitle,
+                  showNewNestedNotebookPrompt,
+                  notes,
+                  allCharms,
+                  usedCreateAnotherNotebook,
+                  self,
+                })}
+              >
+                Create
+              </ct-button>
+            </ct-hstack>
+          </ct-modal>
 
           {/* Backlinks footer - show charms that link to this notebook */}
           <ct-hstack
@@ -1890,12 +1982,13 @@ const Notebook = pattern<Input, Output>(
       title,
       notes,
       noteCount,
+      parentNotebook,
       backlinks,
       // Make notes discoverable via [[ autocomplete system-wide
       mentionable: notes,
       // LLM-callable streams for omnibot integration
-      createNote: handleCreateNote({ notes, allCharms }),
-      createNotes: handleCreateNotes({ notes, allCharms }),
+      createNote: handleCreateNote({ notes, allCharms, self }),
+      createNotes: handleCreateNotes({ notes, allCharms, self }),
       setTitle: handleSetTitle({ title }),
       createNotebook: handleCreateNotebook({ allCharms }),
     };

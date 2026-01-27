@@ -335,8 +335,13 @@ describe("fetch-data mutex mechanism", () => {
       pending?: boolean;
     };
 
-    // Should have an error
+    // Should have an error with proper @Error wrapper structure
     expect(data.error).toBeDefined();
+    expect(data.error).toHaveProperty("@Error");
+    const errorInfo =
+      (data.error as { "@Error": Record<string, unknown> })["@Error"];
+    expect(errorInfo.name).toBe("Error");
+    expect(errorInfo.message).toMatch(/HTTP 404/);
     expect(data.pending).toBe(false);
   });
 

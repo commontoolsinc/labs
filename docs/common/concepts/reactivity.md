@@ -8,15 +8,15 @@
 - **Omit `Writable<>`** for read-only access - the framework automatically provides reactive values
 
 ```tsx
-import { Writable, UI, pattern } from 'commontools'
+import { Default, Writable, UI, pattern } from 'commontools'
 
 interface Item {}
 
 // ✅ Read-only - No Writable<> needed (still reactive!)
 interface ReadOnlyInput {
-  count: number;        // Just display it
-  items: Item[];        // Just map/display
-  userName: string;     // Just show it
+  count: Default<number, 0>;         // Just display it (defaults to 0)
+  items: Item[];                     // Just map/display
+  userName: string;                  // Just show it
 }
 
 export const ReadOnly = pattern<ReadOnlyInput>(({ count, items, userName }) => {
@@ -33,9 +33,9 @@ export const ReadOnly = pattern<ReadOnlyInput>(({ count, items, userName }) => {
 
 // ✅ Write access - Writable<> required
 interface WritableInput {
-  count: Writable<number>;  // Will call count.set()
-  items: Writable<Item[]>;  // Will call items.push()
-  title: Writable<string>;  // Will call title.set()
+  count: Writable<Default<number, 0>>;  // Will call count.set()
+  items: Writable<Item[]>;              // Will call items.push()
+  title: Writable<string>;              // Will call title.set()
 }
 
 export default pattern<WritableInput>(({ count, items, title }) => {
@@ -50,8 +50,10 @@ export default pattern<WritableInput>(({ count, items, title }) => {
           Increment
         </ct-button>
 
+        {/* Bidirectional binding */}
         <ct-input $value={title} />
 
+        {/* Can also mutate */}
         <ct-button onClick={() => items.push({ title: "New" })}>
           Add Item
         </ct-button>

@@ -4,60 +4,58 @@
  *
  * ARCHITECTURE:
  * - Two-player lobby where each player joins from their own browser
- * - Shared state stored as JSON strings (workaround for Cell array proxy issues)
+ * - Shared state stored as properly typed Cells (no JSON serialization)
  * - Each player navigates to their own game room instance with myName parameter
  *
- * See: battleship-room.tsx for the game room pattern
+ * See: room.tsx for the game room pattern
  */
 
 import {
   computed,
-  Default,
   handler,
   NAME,
   navigateTo,
   pattern,
+  Stream,
   UI,
   Writable,
 } from "commontools";
 
 import BattleshipRoom from "./room.tsx";
 import {
-  createEmptyGrid,
+  createInitialShots,
+  type GameState,
   generateRandomShips,
   getRandomColor,
-  parseGameStateJson,
-  parsePlayerJson,
-  PlayerData,
-} from "./types.ts";
+  INITIAL_GAME_STATE,
+  type LobbyState,
+  type PlayerData,
+  type ShotsState,
+} from "./schemas.tsx";
 
 // =============================================================================
 // LOBBY PATTERN
 // =============================================================================
 
-interface LobbyInput {
-  gameName: Default<string, "Battleship">;
-  player1Json: Writable<Default<string, "null">>;
-  player2Json: Writable<Default<string, "null">>;
-  shotsJson: Writable<Default<string, "{}">>;
-  gameStateJson: Writable<Default<string, "{}">>;
-}
-
 interface LobbyOutput {
   gameName: string;
-  player1Json: string;
-  player2Json: string;
-  shotsJson: string;
-  gameStateJson: string;
+  player1: PlayerData | null;
+  player2: PlayerData | null;
+  shots: ShotsState;
+  gameState: GameState;
+  // Streams for testing and programmatic control
+  joinPlayer1: Stream<{ name: string }>;
+  joinPlayer2: Stream<{ name: string }>;
+  reset: Stream<void>;
 }
 
 // Module-level function for navigation (pattern from Scrabble)
 let createGameAndNavigate: (
   gameName: string,
-  player1Json: Writable<string>,
-  player2Json: Writable<string>,
-  shotsJson: Writable<string>,
-  gameStateJson: Writable<string>,
+  player1: Writable<PlayerData | null>,
+  player2: Writable<PlayerData | null>,
+  shots: Writable<ShotsState>,
+  gameState: Writable<GameState>,
   myName: string,
   myPlayerNumber: 1 | 2,
 ) => unknown = null as any;
@@ -69,10 +67,10 @@ const joinAsPlayer = handler<
     gameName: string;
     nameInput: Writable<string>;
     playerSlot: 1 | 2;
-    player1Json: Writable<string>;
-    player2Json: Writable<string>;
-    shotsJson: Writable<string>;
-    gameStateJson: Writable<string>;
+    player1: Writable<PlayerData | null>;
+    player2: Writable<PlayerData | null>;
+    shots: Writable<ShotsState>;
+    gameState: Writable<GameState>;
   }
 >(
   (
@@ -81,10 +79,10 @@ const joinAsPlayer = handler<
       gameName,
       nameInput,
       playerSlot,
-      player1Json,
-      player2Json,
-      shotsJson,
-      gameStateJson,
+      player1,
+      player2,
+      shots,
+      gameState,
     },
   ) => {
     console.log(`[joinAsPlayer] Handler started for slot ${playerSlot}`);
@@ -107,33 +105,28 @@ const joinAsPlayer = handler<
       joinedAt: Date.now(),
     };
 
-    // Store player data
+    // Store player data directly (no JSON serialization)
     if (playerSlot === 1) {
-      player1Json.set(JSON.stringify(playerData));
+      player1.set(playerData);
     } else {
-      player2Json.set(JSON.stringify(playerData));
+      player2.set(playerData);
     }
 
     // Check if both players have joined
-    const p1 = parsePlayerJson(player1Json.get());
-    const p2 = parsePlayerJson(player2Json.get());
+    const p1 = player1.get();
+    const p2 = player2.get();
 
     if (p1 && p2) {
       // Both players joined - initialize game state
-      const initialState = {
+      gameState.set({
         phase: "playing",
         currentTurn: 1,
         winner: null,
         lastMessage: `${p1.name}'s turn - fire at the enemy fleet!`,
-      };
-      gameStateJson.set(JSON.stringify(initialState));
+      });
 
       // Initialize shots grids
-      const initialShots = {
-        "1": createEmptyGrid(),
-        "2": createEmptyGrid(),
-      };
-      shotsJson.set(JSON.stringify(initialShots));
+      shots.set(createInitialShots());
     }
 
     nameInput.set("");
@@ -143,10 +136,10 @@ const joinAsPlayer = handler<
     if (createGameAndNavigate) {
       return createGameAndNavigate(
         gameName,
-        player1Json,
-        player2Json,
-        shotsJson,
-        gameStateJson,
+        player1,
+        player2,
+        shots,
+        gameState,
         name,
         playerSlot,
       );
@@ -160,10 +153,10 @@ const rejoinGame = handler<
   {
     gameName: string;
     playerSlot: 1 | 2;
-    player1Json: Writable<string>;
-    player2Json: Writable<string>;
-    shotsJson: Writable<string>;
-    gameStateJson: Writable<string>;
+    player1: Writable<PlayerData | null>;
+    player2: Writable<PlayerData | null>;
+    shots: Writable<ShotsState>;
+    gameState: Writable<GameState>;
   }
 >(
   (
@@ -171,24 +164,23 @@ const rejoinGame = handler<
     {
       gameName,
       playerSlot,
-      player1Json,
-      player2Json,
-      shotsJson,
-      gameStateJson,
+      player1,
+      player2,
+      shots,
+      gameState,
     },
   ) => {
-    const playerJson = playerSlot === 1 ? player1Json : player2Json;
-    const playerData = parsePlayerJson(playerJson.get());
+    const playerData = playerSlot === 1 ? player1.get() : player2.get();
     if (!playerData) return;
 
     console.log("[rejoinGame] Rejoining as:", playerData.name);
     if (createGameAndNavigate) {
       return createGameAndNavigate(
         gameName,
-        player1Json,
-        player2Json,
-        shotsJson,
-        gameStateJson,
+        player1,
+        player2,
+        shots,
+        gameState,
         playerData.name,
         playerSlot,
       );
@@ -200,35 +192,138 @@ const rejoinGame = handler<
 const resetLobby = handler<
   unknown,
   {
-    player1Json: Writable<string>;
-    player2Json: Writable<string>;
-    shotsJson: Writable<string>;
-    gameStateJson: Writable<string>;
+    player1: Writable<PlayerData | null>;
+    player2: Writable<PlayerData | null>;
+    shots: Writable<ShotsState>;
+    gameState: Writable<GameState>;
   }
->((_event, { player1Json, player2Json, shotsJson, gameStateJson }) => {
+>((_event, { player1, player2, shots, gameState }) => {
   console.log("[resetLobby] Resetting all game state...");
-  player1Json.set("null");
-  player2Json.set("null");
-  shotsJson.set("{}");
-  gameStateJson.set("{}");
+  player1.set(null);
+  player2.set(null);
+  shots.set(createInitialShots());
+  gameState.set(INITIAL_GAME_STATE);
   console.log("[resetLobby] Game state reset complete");
 });
 
-const BattleshipLobby = pattern<LobbyInput, LobbyOutput>(
-  ({ gameName, player1Json, player2Json, shotsJson, gameStateJson }) => {
+// Programmatic handler for joining as Player 1 (for testing)
+const joinPlayer1Handler = handler<
+  { name: string },
+  {
+    player1: Writable<PlayerData | null>;
+    player2: Writable<PlayerData | null>;
+    shots: Writable<ShotsState>;
+    gameState: Writable<GameState>;
+  }
+>(({ name }, { player1, player2, shots, gameState }) => {
+  if (!name || !name.trim()) return;
+
+  const playerData: PlayerData = {
+    name: name.trim(),
+    ships: generateRandomShips(),
+    color: getRandomColor(0),
+    joinedAt: Date.now(),
+  };
+
+  player1.set(playerData);
+
+  // Check if both players have joined
+  const p1 = player1.get();
+  const p2 = player2.get();
+
+  if (p1 && p2) {
+    gameState.set({
+      phase: "playing",
+      currentTurn: 1,
+      winner: null,
+      lastMessage: `${p1.name}'s turn - fire at the enemy fleet!`,
+    });
+    shots.set(createInitialShots());
+  }
+});
+
+// Programmatic handler for joining as Player 2 (for testing)
+const joinPlayer2Handler = handler<
+  { name: string },
+  {
+    player1: Writable<PlayerData | null>;
+    player2: Writable<PlayerData | null>;
+    shots: Writable<ShotsState>;
+    gameState: Writable<GameState>;
+  }
+>(({ name }, { player1, player2, shots, gameState }) => {
+  if (!name || !name.trim()) return;
+
+  const playerData: PlayerData = {
+    name: name.trim(),
+    ships: generateRandomShips(),
+    color: getRandomColor(1),
+    joinedAt: Date.now(),
+  };
+
+  player2.set(playerData);
+
+  // Check if both players have joined
+  const p1 = player1.get();
+  const p2 = player2.get();
+
+  if (p1 && p2) {
+    gameState.set({
+      phase: "playing",
+      currentTurn: 1,
+      winner: null,
+      lastMessage: `${p1.name}'s turn - fire at the enemy fleet!`,
+    });
+    shots.set(createInitialShots());
+  }
+});
+
+// Programmatic reset handler (for testing)
+const resetHandler = handler<
+  void,
+  {
+    player1: Writable<PlayerData | null>;
+    player2: Writable<PlayerData | null>;
+    shots: Writable<ShotsState>;
+    gameState: Writable<GameState>;
+  }
+>((_event, { player1, player2, shots, gameState }) => {
+  player1.set(null);
+  player2.set(null);
+  shots.set(createInitialShots());
+  gameState.set(INITIAL_GAME_STATE);
+});
+
+const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
+  ({ gameName, player1, player2, shots, gameState }) => {
     // Separate name inputs for each player slot
     const player1NameInput = Writable.of("");
     const player2NameInput = Writable.of("");
 
-    // Derive player data reactively
-    const player1 = computed(() => parsePlayerJson(player1Json.get()));
-    const player2 = computed(() => parsePlayerJson(player2Json.get()));
-    const player1Name = computed(() => player1?.name || null);
-    const player2Name = computed(() => player2?.name || null);
+    // Derive player names reactively (direct Cell access, no JSON parsing)
+    const player1Data = computed(() => player1.get());
+    const player2Data = computed(() => player2.get());
+    const player1Name = computed(() => player1Data?.name || null);
+    const player2Name = computed(() => player2Data?.name || null);
 
     // Game state
-    const gameState = computed(() => parseGameStateJson(gameStateJson.get()));
-    const isGameStarted = computed(() => gameState.phase === "playing");
+    const gameStateData = computed(() => gameState.get());
+    const isGameStarted = computed(() => gameStateData.phase === "playing");
+
+    // Programmatic handlers for testing
+    const joinPlayer1 = joinPlayer1Handler({
+      player1,
+      player2,
+      shots,
+      gameState,
+    });
+    const joinPlayer2 = joinPlayer2Handler({
+      player1,
+      player2,
+      shots,
+      gameState,
+    });
+    const reset = resetHandler({ player1, player2, shots, gameState });
 
     return {
       [NAME]: computed(() => `${gameName} - Lobby`),
@@ -328,31 +423,19 @@ const BattleshipLobby = pattern<LobbyInput, LobbyOutput>(
                     </div>
                     {isGameStarted
                       ? (
-                        <button
-                          type="button"
-                          style={{
-                            marginTop: "1rem",
-                            width: "100%",
-                            padding: "0.75rem 1.5rem",
-                            fontSize: "0.875rem",
-                            backgroundColor: "#1e40af",
-                            color: "white",
-                            fontWeight: "600",
-                            border: "none",
-                            borderRadius: "8px",
-                            cursor: "pointer",
-                          }}
+                        <ct-button
+                          style="margin-top: 1rem; width: 100%;"
                           onClick={rejoinGame({
                             gameName,
                             playerSlot: 1,
-                            player1Json,
-                            player2Json,
-                            shotsJson,
-                            gameStateJson,
+                            player1,
+                            player2,
+                            shots,
+                            gameState,
                           })}
                         >
                           Rejoin Game
-                        </button>
+                        </ct-button>
                       )
                       : <></>}
                   </div>
@@ -364,31 +447,20 @@ const BattleshipLobby = pattern<LobbyInput, LobbyOutput>(
                       placeholder="Your name"
                       style="width: 100%; margin-bottom: 1rem;"
                     />
-                    <button
-                      type="button"
-                      style={{
-                        width: "100%",
-                        padding: "0.75rem 1.5rem",
-                        fontSize: "1rem",
-                        backgroundColor: "#3b82f6",
-                        color: "white",
-                        fontWeight: "600",
-                        border: "none",
-                        borderRadius: "8px",
-                        cursor: "pointer",
-                      }}
+                    <ct-button
+                      style="width: 100%;"
                       onClick={joinAsPlayer({
                         gameName,
                         nameInput: player1NameInput,
                         playerSlot: 1,
-                        player1Json,
-                        player2Json,
-                        shotsJson,
-                        gameStateJson,
+                        player1,
+                        player2,
+                        shots,
+                        gameState,
                       })}
                     >
                       Join as Player 1
-                    </button>
+                    </ct-button>
                   </>
                 )}
             </div>
@@ -451,31 +523,19 @@ const BattleshipLobby = pattern<LobbyInput, LobbyOutput>(
                     </div>
                     {isGameStarted
                       ? (
-                        <button
-                          type="button"
-                          style={{
-                            marginTop: "1rem",
-                            width: "100%",
-                            padding: "0.75rem 1.5rem",
-                            fontSize: "0.875rem",
-                            backgroundColor: "#991b1b",
-                            color: "white",
-                            fontWeight: "600",
-                            border: "none",
-                            borderRadius: "8px",
-                            cursor: "pointer",
-                          }}
+                        <ct-button
+                          style="margin-top: 1rem; width: 100%;"
                           onClick={rejoinGame({
                             gameName,
                             playerSlot: 2,
-                            player1Json,
-                            player2Json,
-                            shotsJson,
-                            gameStateJson,
+                            player1,
+                            player2,
+                            shots,
+                            gameState,
                           })}
                         >
                           Rejoin Game
-                        </button>
+                        </ct-button>
                       )
                       : <></>}
                   </div>
@@ -487,31 +547,20 @@ const BattleshipLobby = pattern<LobbyInput, LobbyOutput>(
                       placeholder="Your name"
                       style="width: 100%; margin-bottom: 1rem;"
                     />
-                    <button
-                      type="button"
-                      style={{
-                        width: "100%",
-                        padding: "0.75rem 1.5rem",
-                        fontSize: "1rem",
-                        backgroundColor: "#ef4444",
-                        color: "white",
-                        fontWeight: "600",
-                        border: "none",
-                        borderRadius: "8px",
-                        cursor: "pointer",
-                      }}
+                    <ct-button
+                      style="width: 100%;"
                       onClick={joinAsPlayer({
                         gameName,
                         nameInput: player2NameInput,
                         playerSlot: 2,
-                        player1Json,
-                        player2Json,
-                        shotsJson,
-                        gameStateJson,
+                        player1,
+                        player2,
+                        shots,
+                        gameState,
                       })}
                     >
                       Join as Player 2
-                    </button>
+                    </ct-button>
                   </>
                 )}
             </div>
@@ -538,35 +587,29 @@ const BattleshipLobby = pattern<LobbyInput, LobbyOutput>(
           </div>
 
           {/* Reset Button */}
-          <button
-            type="button"
-            style={{
-              marginTop: "2rem",
-              padding: "0.5rem 1rem",
-              fontSize: "0.875rem",
-              background: "none",
-              color: "rgba(255,255,255,0.4)",
-              fontWeight: "400",
-              border: "1px solid rgba(255,255,255,0.2)",
-              borderRadius: "4px",
-              cursor: "pointer",
-            }}
+          <ct-button
+            variant="secondary"
+            style="margin-top: 2rem;"
             onClick={resetLobby({
-              player1Json,
-              player2Json,
-              shotsJson,
-              gameStateJson,
+              player1,
+              player2,
+              shots,
+              gameState,
             })}
           >
             Reset Game
-          </button>
+          </ct-button>
         </div>
       ),
       gameName,
-      player1Json,
-      player2Json,
-      shotsJson,
-      gameStateJson,
+      player1: player1Data,
+      player2: player2Data,
+      shots: computed(() => shots.get()),
+      gameState: gameStateData,
+      // Streams for testing and programmatic control
+      joinPlayer1,
+      joinPlayer2,
+      reset,
     };
   },
 );
@@ -574,10 +617,10 @@ const BattleshipLobby = pattern<LobbyInput, LobbyOutput>(
 // Navigation function setup
 createGameAndNavigate = (
   gameName: string,
-  player1Json: Writable<string>,
-  player2Json: Writable<string>,
-  shotsJson: Writable<string>,
-  gameStateJson: Writable<string>,
+  player1: Writable<PlayerData | null>,
+  player2: Writable<PlayerData | null>,
+  shots: Writable<ShotsState>,
+  gameState: Writable<GameState>,
   myName: string,
   myPlayerNumber: 1 | 2,
 ) => {
@@ -589,12 +632,13 @@ createGameAndNavigate = (
     myPlayerNumber,
   );
 
+  // Pass typed Cells to BattleshipRoom
   const gameInstance = BattleshipRoom({
     gameName,
-    player1Json,
-    player2Json,
-    shotsJson,
-    gameStateJson,
+    player1,
+    player2,
+    shots,
+    gameState,
     myName,
     myPlayerNumber,
   });

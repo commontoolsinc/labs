@@ -6,6 +6,7 @@ import {
 } from "@db/sqlite";
 
 import { COMMIT_LOG_TYPE, create as createCommit } from "./commit.ts";
+import * as SelectionBuilder from "./selection.ts";
 import { unclaimedRef } from "./fact.ts";
 import { fromString, refer } from "./reference.ts";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
@@ -57,7 +58,7 @@ import { SelectAllString } from "./schema.ts";
 import * as Error from "./error.ts";
 import { selectSchema, type SelectSchemaResult } from "./space-schema.ts";
 export type { SelectSchemaResult } from "./space-schema.ts";
-import { JSONValue } from "@commontools/runner";
+import { StorableDatum, StorableValue } from "./interface.ts";
 import { isObject } from "../utils/src/types.ts";
 export type * from "./interface.ts";
 
@@ -300,6 +301,14 @@ export interface Session<Space extends MemorySpace> {
   subject: Space;
   store: Database;
 }
+
+/**
+ * A space instance that provides both low-level database access (Session)
+ * and high-level operations (SpaceSession).
+ */
+export type SpaceInstance<Space extends MemorySpace> =
+  & Session<Space>
+  & SpaceSession<Space>;
 
 class Space<Subject extends MemorySpace = MemorySpace>
   implements Session<Subject>, SpaceSession {
@@ -656,7 +665,7 @@ export type SelectedFact = {
   the: MIME;
   of: URI;
   cause: CauseString;
-  is?: JSONValue;
+  is?: StorableDatum;
   since: number;
 };
 
@@ -667,7 +676,7 @@ const toFact = function (row: StateRow): SelectedFact {
     cause: row.cause
       ? row.cause as CauseString
       : unclaimedRef(row as FactAddress).toString() as CauseString,
-    is: row.is ? JSON.parse(row.is) as JSONValue : undefined,
+    is: row.is ? JSON.parse(row.is) as StorableDatum : undefined,
     since: row.since,
   };
 };
@@ -726,7 +735,7 @@ export const selectFact = function <Space extends MemorySpace>(
  */
 const importDatum = <Space extends MemorySpace>(
   session: Session<Space>,
-  datum: JSONValue | undefined,
+  datum: StorableValue,
 ): string => {
   if (datum === undefined) {
     return "undefined";
@@ -924,16 +933,6 @@ const commit = <Space extends MemorySpace>(
 
   swap(session, { assert: commit }, commit.is);
 
-  // attach labels to the commit, so the provider can remove any classified entries from the commit before we send it to subscribers
-  // For this, we need since fields on our objects
-  const changedFacts = toSelection(
-    commit.is.since,
-    commit.is.transaction.args.changes,
-  );
-  const labels = getLabels(session, changedFacts);
-  if (Object.keys(labels).length > 0) {
-    commit.is.labels = labels;
-  }
   const changes: Commit<Space> = {} as Commit<Space>;
   set(changes, commit.of, commit.the, commit.cause.toString() as CauseString, {
     is: commit.is,
@@ -969,6 +968,32 @@ const execute = <
       };
   }
 };
+
+/**
+ * Computes labels for a commit, used by providers to redact classified entries
+ * before sending to subscribers.
+ *
+ * @returns Label facts for documents in the commit, or undefined if none.
+ */
+export function getLabelsForCommit<S extends MemorySpace>(
+  session: Session<S>,
+  commit: Commit<S>,
+): FactSelection | undefined {
+  let allLabels: FactSelection | undefined;
+
+  for (const item of SelectionBuilder.iterate<{ is: CommitData }>(commit)) {
+    const changedFacts = toSelection(
+      item.value.is.since,
+      item.value.is.transaction.args.changes,
+    );
+    const labels = getLabels(session, changedFacts);
+    if (Object.keys(labels).length > 0) {
+      allLabels = { ...allLabels, ...labels } as FactSelection;
+    }
+  }
+
+  return allLabels;
+}
 
 export const transact = <Space extends MemorySpace>(
   session: Session<Space>,
@@ -1138,7 +1163,7 @@ export const querySchemaWithTracker = <Space extends MemorySpace>(
 };
 
 export const LABEL_TYPE = "application/label+json" as const;
-export type FactSelectionValue = { is?: JSONValue; since: number };
+export type FactSelectionValue = { is?: StorableDatum; since: number };
 // Get the labels associated with a set of commits.
 // It's possible to get more than one label for a single doc because our
 // includedFacts may include more than one cause for a single doc.
@@ -1236,11 +1261,23 @@ export function getClassifications(
   return classifications;
 }
 
-// Return the item with any classified results and the labels removed.
-export function redactCommitData(commitData: CommitData): CommitData {
-  if (commitData.labels === undefined) {
+/**
+ * Redacts any classified content from commit data based on the provided labels.
+ *
+ * @param commitData The commit data to redact
+ * @param labels Labels to use for redaction. If null or empty, returns the
+ *   original commit data unchanged.
+ * @returns A redacted copy of the commit data, or the original if no redaction
+ *   was needed.
+ */
+export function redactCommitData(
+  commitData: CommitData,
+  labels: FactSelection | null = null,
+): CommitData {
+  if (labels == null || Object.keys(labels).length === 0) {
     return commitData;
   }
+
   // Make a copy of the transaction with no changes
   const newChanges: Changes = {};
   // Add any non-redacted changes to the newCommitData
@@ -1254,7 +1291,7 @@ export function redactCommitData(commitData: CommitData): CommitData {
       continue;
     }
     // FIXME(@ubik2): Re-enable this once we've tracked down other issues
-    // const labelFact = getRevision(commitData.labels, fact.of, LABEL_TYPE);
+    // const labelFact = getRevision(labels, fact.of, LABEL_TYPE);
     // if (labelFact !== undefined && getClassifications(labelFact).size > 0) {
     //   setEmptyObj(newChanges, fact.of, fact.the);
     // } else {

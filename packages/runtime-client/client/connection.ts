@@ -104,7 +104,10 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
 
     this.#pendingRequests.set(msgId, pending as PendingRequest);
     if (DEBUG_IPC) {
-      console.log("[RuntimeClient->]", message);
+      console.log(
+        `[IPC(\x1B[1m${message.msgId}\x1B[0m)\x1B[96m=>\x1B[0m]`,
+        message.data,
+      );
     }
     this.#transport.send(message);
 
@@ -119,6 +122,15 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     if (instances) {
       if (!instances.has(cell)) {
         instances.add(cell);
+        // Copy the cached value from an existing subscriber to the new one
+        // This ensures late subscribers get the initial value
+        const existingInstance = instances.values().next().value;
+        if (existingInstance) {
+          const cachedValue = existingInstance.get();
+          if (cachedValue !== undefined) {
+            cell[$onCellUpdate](cachedValue);
+          }
+        }
       }
       return;
     }
@@ -175,15 +187,17 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
   }
 
   private _handleMessage = (message: IPCRemoteMessage): void => {
-    if (DEBUG_IPC) {
-      console.log("[RuntimeClient<-]", message);
-    }
-
     if (isIPCRemoteNotification(message)) {
+      if (isTelemetryNotification(message)) {
+        this.emit("telemetry", message);
+        // Do not log telemetry events when DEBUG_IPC is enabled
+        return;
+      }
+      if (DEBUG_IPC) {
+        console.log(`[IPC\x1B[92m<=\x1B[0m]`, message);
+      }
       if (isCellUpdateNotification(message)) {
         this._handleCellUpdate(message);
-      } else if (isTelemetryNotification(message)) {
-        this.emit("telemetry", message);
       } else if (isConsoleNotification(message)) {
         this.emit("console", message);
       } else if (isNavigateRequestNotification(message)) {
@@ -213,9 +227,22 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     this.#pendingRequests.delete(msgId);
 
     if ("error" in message && message.error) {
+      if (DEBUG_IPC) {
+        console.log(
+          `[IPC(\x1B[1m${msgId}\x1B[0m)\x1B[91m<=\x1B[0m]`,
+          message.error,
+        );
+      }
       pending.deferred.reject(new Error(message.error));
     } else {
-      pending.deferred.resolve("data" in message ? message.data : undefined);
+      const data = "data" in message ? message.data : undefined;
+      if (DEBUG_IPC) {
+        console.log(
+          `[IPC(\x1B[1m${msgId}\x1B[0m)\x1B[92m<=\x1B[0m]`,
+          data,
+        );
+      }
+      pending.deferred.resolve(data);
     }
   };
 

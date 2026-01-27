@@ -4,12 +4,14 @@ import turndown from "turndown";
 
 export type RuntimeModuleIdentifier =
   | "commontools"
+  | "commontools/schema"
   | "turndown"
   | "@commontools/html"
   | "@commontools/builder"
   | "@commontools/runner";
 export const RuntimeModuleIdentifiers: RuntimeModuleIdentifier[] = [
   "commontools",
+  "commontools/schema",
   "turndown",
   // backwards compat
   "@commontools/html",
@@ -35,8 +37,10 @@ export const getTypes = (() => {
       return depTypes;
     }
     const builderTypes = await cache.getText("types/commontools.d.ts");
+    const schemaTypes = await cache.getText("types/commontools-schema.d.ts");
     depTypes = {
       "commontools": builderTypes,
+      "commontools/schema": schemaTypes,
       "turndown": await cache.getText(
         "types/turndown.d.ts",
       ),
@@ -53,6 +57,8 @@ export function getExports() {
   return {
     runtimeExports: {
       "commontools": commontools,
+      // commontools/schema only exports types, no runtime values needed
+      "commontools/schema": {},
       // __esModule lets this load in the AMD loader
       // when finding the "default"
       "turndown": { default: turndown, __esModule: true },

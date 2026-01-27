@@ -8,13 +8,14 @@ import type {
   DID,
   Fact,
   Invariant as IClaim,
-  JSONValue,
   MemorySpace,
   QueryError as IQueryError,
   Result,
   SchemaPathSelector,
   Signer,
   State,
+  StorableDatum,
+  StorableValue,
   The as MediaType,
   TransactionError,
   Unit,
@@ -29,7 +30,6 @@ export type {
   DID,
   Fact,
   IClaim,
-  JSONValue,
   MediaType,
   MemorySpace,
   Result,
@@ -397,11 +397,11 @@ export interface IMemoryChange {
   /**
    * Value memory address had before change.
    */
-  before: JSONValue | undefined;
+  before: StorableValue;
   /**
    * Value memory address has after change.
    */
-  after: JSONValue | undefined;
+  after: StorableValue;
 }
 
 export type StorageTransactionStatus =
@@ -488,7 +488,7 @@ export interface IStorageTransaction {
    */
   write(
     address: IMemorySpaceAddress,
-    value?: JSONValue,
+    value?: StorableDatum,
   ): Result<IAttestation, WriterError | WriteError>;
 
   /**
@@ -554,7 +554,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   readOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): JSONValue | undefined;
+  ): StorableValue;
 
   /**
    * Reads a value from a (local) memory address and throws on error, except for
@@ -568,7 +568,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   readValueOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): JSONValue | undefined;
+  ): StorableValue;
 
   /**
    * Writes a value into a storage at a given address, including creating parent
@@ -579,7 +579,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    */
   writeOrThrow(
     address: IMemorySpaceAddress,
-    value: JSONValue | undefined,
+    value: StorableValue,
   ): void;
 
   /**
@@ -593,7 +593,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    */
   writeValueOrThrow(
     address: IMemorySpaceAddress,
-    value: JSONValue | undefined,
+    value: StorableValue,
   ): void;
 }
 
@@ -648,7 +648,7 @@ export interface ITransactionWriter extends ITransactionReader {
    */
   write(
     address: IMemoryAddress,
-    value?: JSONValue,
+    value?: StorableDatum,
   ): Result<IAttestation, WriteError>;
 }
 
@@ -716,11 +716,29 @@ export type CommitError =
   | InactiveTransactionError
   | StorageTransactionRejected;
 
+/**
+ * Error returned when a read or write operation fails because the intra-value
+ * path does not exist.
+ *
+ * The `path` property behavior is consistent for both reads and writes:
+ *
+ * **Nested path not found** (document exists but path doesn't):
+ * - `path` includes the missing key
+ * - Example: Document `{ user: { name: "Alice" } }`, access `["user", "settings", "theme"]`
+ * - → `path` is `["user", "settings"]` (path to the non-existent key)
+ * - To get last existing parent: `path.slice(0, -1)` → `["user"]`
+ *
+ * **Document not found** (document itself doesn't exist):
+ * - `path` is `[]` (empty array)
+ * - Example: Document doesn't exist, access `["foo", "bar"]`
+ * - → `path` is `[]`
+ */
 export interface INotFoundError extends IStorageError {
   readonly name: "NotFoundError";
   readonly source: IAttestation;
   readonly address: IMemoryAddress;
-  readonly path?: readonly MemoryAddressPathComponent[];
+  /** Path to the non-existent key, or `[]` if the document doesn't exist. */
+  readonly path: readonly MemoryAddressPathComponent[];
   from(space: MemorySpace): INotFoundError;
 }
 
@@ -783,8 +801,8 @@ export interface IMemoryAddress {
    */
   type: MediaType;
   /**
-   * Path to the {@link JSONValue} being reference by this address. It is path
-   * within the `is` field of the fact in memory protocol.
+   * Intra-value path to the {@link StorableDatum} being referenced by this
+   * address. It is a path within the `is` field of the fact in memory protocol.
    */
   path: readonly MemoryAddressPathComponent[];
 }
@@ -798,7 +816,7 @@ export type MemoryAddressPathComponent = string;
 export interface Assert {
   the: MediaType;
   of: URI;
-  is: JSONValue;
+  is: StorableDatum;
 
   claim?: void;
 }
@@ -947,7 +965,13 @@ export interface ITypeMismatchError extends IStorageError {
  */
 export interface IAttestation {
   readonly address: IMemoryAddress;
-  readonly value?: JSONValue;
+  readonly value?: StorableDatum;
+}
+
+// An IAttestation where the address is an IMemorySpaceAddress
+export interface IMemorySpaceAttestation {
+  readonly address: IMemorySpaceAddress;
+  readonly value?: StorableDatum;
 }
 
 // Re-export transaction wrapper utilities from implementation

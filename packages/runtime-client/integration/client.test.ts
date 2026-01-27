@@ -124,6 +124,47 @@ describe("RuntimeClient", () => {
       assertEquals(firstChild?.name, "p");
     });
 
+    it("resolves cell links with resolveAsCell()", async () => {
+      const session = await createSession({ identity, spaceName });
+      await using rt = await createRuntimeClient(session);
+
+      // Create a target cell with some data
+      const targetSchema = {
+        type: "object",
+        properties: { value: { type: "string" } },
+      } as const satisfies JSONSchema;
+
+      const targetCell = await rt.getCell<{ value: string }>(
+        session.space,
+        "resolve-target-" + Date.now(),
+        targetSchema,
+      );
+      await targetCell.set({ value: "resolved!" });
+      await rt.idle();
+
+      // Create a source cell that contains a link to the target
+      const sourceSchema = {
+        type: "object",
+        properties: { link: { type: "object" } },
+      } as const satisfies JSONSchema;
+
+      const sourceCell = await rt.getCell<{ link: unknown }>(
+        session.space,
+        "resolve-source-" + Date.now(),
+        sourceSchema,
+      );
+      await sourceCell.set({ link: targetCell });
+      await rt.idle();
+      await sourceCell.sync();
+
+      // Get the link cell and resolve it
+      const linkCell = sourceCell.key("link");
+      const resolved = await linkCell.resolveAsCell();
+
+      // The resolved cell should point to the target
+      assertEquals(resolved.id(), targetCell.id());
+    });
+
     it("subscribes to cell updates via subscribe()", async () => {
       const session = await createSession({ identity, spaceName });
       await using rt = await createRuntimeClient(session);
@@ -162,6 +203,132 @@ describe("RuntimeClient", () => {
       // Should have received updates (may include initial value)
       assertEquals(receivedValues.length >= 3, true);
       assertEquals(receivedValues[receivedValues.length - 1], { counter: 3 });
+    });
+
+    it("updates multiple instances of the same cell with different schema", async () => {
+      const session = await createSession({ identity, spaceName });
+      await using rt = await createRuntimeClient(session);
+
+      const schema = {
+        type: "string",
+      } as const satisfies JSONSchema;
+
+      const cause = "test-cell-" + Date.now();
+      const cell = await rt.getCell<string>(
+        session.space,
+        cause,
+        schema,
+      );
+
+      const cell2 = cell.asSchema<string>({
+        type: "string",
+        default: "default-string",
+      });
+
+      let _updatedValue1 = undefined;
+      const cancel1 = cell.subscribe((value) => {
+        _updatedValue1 = value;
+      });
+      let _updatedValue2 = undefined;
+      const cancel2 = cell2.subscribe((value) => {
+        _updatedValue2 = value;
+      });
+
+      await cell.set("my-value");
+      await waitFor(() => Promise.resolve(cell2.get() === "my-value"));
+      cancel1();
+      cancel2();
+    });
+
+    it("late subscribers receive initial value from existing subscription", async () => {
+      // Regression test for bug where text interpolation {value} would show blank
+      // when used alongside ct-input bound to the same cell. The issue was that
+      // late subscribers (those joining an existing subscription) would miss the
+      // initial value that was already sent to earlier subscribers.
+      //
+      // Fix: connection.subscribe() copies cached value from existing subscriber
+      // to new subscriber when joining an existing subscription.
+
+      const session = await createSession({ identity, spaceName });
+      await using rt = await createRuntimeClient(session);
+
+      const schema = {
+        type: "object",
+        properties: { message: { type: "string" } },
+      } as const satisfies JSONSchema;
+
+      // Create a cell and set an initial value
+      const cell = await rt.getCell<{ message: string }>(
+        session.space,
+        "test-late-subscriber-" + Date.now(),
+        schema,
+      );
+      await cell.set({ message: "hello world" });
+      await rt.idle();
+      await cell.sync();
+
+      // Create two CellHandles with the SAME schema - this produces the same
+      // subscription key (space:id:path:schema). In the real bug, this happens
+      // when ct-input and text interpolation both call asSchema(stringSchema).
+      const cellA = cell.asSchema<{ message: string }>(schema);
+      const cellB = cell.asSchema<{ message: string }>(schema);
+
+      // Subscribe cellA first - this establishes the backend subscription
+      const valuesA: ({ message: string } | undefined)[] = [];
+      const cancelA = cellA.subscribe((v) => {
+        valuesA.push(v);
+      });
+
+      // Wait for initial value to arrive from backend
+      await waitFor(
+        () =>
+          Promise.resolve(
+            valuesA.length > 0 && valuesA[valuesA.length - 1] !== undefined,
+          ),
+        { timeout: 5000 },
+      );
+
+      // Verify cellA received the value
+      assertEquals(
+        valuesA[valuesA.length - 1],
+        { message: "hello world" },
+        "First subscriber should receive value",
+      );
+
+      // Now subscribe cellB - this is the "late subscriber" that joins an
+      // existing subscription. Before the fix, its initial callback would
+      // receive undefined because no new backend request was made.
+      const valuesB: ({ message: string } | undefined)[] = [];
+      const cancelB = cellB.subscribe((v) => {
+        valuesB.push(v);
+      });
+
+      // The fix ensures cellB immediately receives the cached value
+      // synchronously in the subscribe() call
+      assertEquals(
+        valuesB.length,
+        1,
+        "Late subscriber should receive immediate callback",
+      );
+      assertEquals(
+        valuesB[0],
+        { message: "hello world" },
+        "Late subscriber should receive cached value, not undefined",
+      );
+
+      // Also verify both receive subsequent updates
+      await cell.set({ message: "updated" });
+      await waitFor(
+        () =>
+          Promise.resolve(
+            valuesA.some((v) => v?.message === "updated") &&
+              valuesB.some((v) => v?.message === "updated"),
+          ),
+        { timeout: 5000 },
+      );
+
+      cancelA();
+      cancelB();
     });
   });
 

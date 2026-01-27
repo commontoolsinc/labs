@@ -25,7 +25,12 @@ describe("counter direct operations test", () => {
       apiUrl: new URL(API_URL),
       identity: identity,
     });
-    const sourcePath = join(import.meta.dirname!, "..", "counter.tsx");
+    const sourcePath = join(
+      import.meta.dirname!,
+      "..",
+      "counter",
+      "counter.tsx",
+    );
     const program = await cc.manager().runtime.harness
       .resolve(
         new FileSystemProgramResolver(sourcePath),

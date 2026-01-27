@@ -29,6 +29,7 @@ describe("shell charm tests", () => {
       "..",
       "..",
       "patterns",
+      "counter",
       "counter.tsx",
     );
     const program = await cc.manager().runtime.harness

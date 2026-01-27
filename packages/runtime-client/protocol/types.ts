@@ -15,8 +15,6 @@ export type CellRef = NormalizedFullLink;
 
 export type PageRef = {
   cell: CellRef;
-  result?: CellRef;
-  recipeId?: string;
 };
 
 export enum RequestType {
@@ -30,14 +28,23 @@ export enum RequestType {
   CellSend = "cell:send",
   CellSubscribe = "cell:subscribe",
   CellUnsubscribe = "cell:unsubscribe",
+  CellResolveAsCell = "cell:resolveAsCell",
 
   // Runtime operations
   GetCell = "runtime:getCell",
+  GetHomeSpaceCell = "runtime:getHomeSpaceCell",
+  EnsureHomePatternRunning = "runtime:ensureHomePatternRunning",
   Idle = "runtime:idle",
   GetGraphSnapshot = "runtime:getGraphSnapshot",
+  SetPullMode = "runtime:setPullMode",
+  GetLoggerCounts = "runtime:getLoggerCounts",
+  SetLoggerLevel = "runtime:setLoggerLevel",
+  SetLoggerEnabled = "runtime:setLoggerEnabled",
+  SetTelemetryEnabled = "runtime:setTelemetryEnabled",
 
   // Page operations (main -> worker)
   GetSpaceRootPattern = "pattern:getSpaceRoot",
+  RecreateSpaceRootPattern = "pattern:recreateSpaceRoot",
   PageCreate = "page:create",
   PageGet = "page:get",
   PageRemove = "page:remove",
@@ -125,12 +132,25 @@ export interface CellUnsubscribeRequest extends BaseRequest {
   cell: CellRef;
 }
 
+export interface CellResolveAsCellRequest extends BaseRequest {
+  type: RequestType.CellResolveAsCell;
+  cell: CellRef;
+}
+
 // unused?
 export interface GetCellRequest extends BaseRequest {
   type: RequestType.GetCell;
   space: DID;
   cause: JSONValue;
   schema?: JSONSchema;
+}
+
+export interface GetHomeSpaceCellRequest extends BaseRequest {
+  type: RequestType.GetHomeSpaceCell;
+}
+
+export interface EnsureHomePatternRunningRequest extends BaseRequest {
+  type: RequestType.EnsureHomePatternRunning;
 }
 
 export interface IdleRequest extends BaseRequest {
@@ -140,6 +160,62 @@ export interface IdleRequest extends BaseRequest {
 export interface GetGraphSnapshotRequest extends BaseRequest {
   type: RequestType.GetGraphSnapshot;
 }
+
+export interface SetPullModeRequest extends BaseRequest {
+  type: RequestType.SetPullMode;
+  pullMode: boolean;
+}
+
+export interface GetLoggerCountsRequest extends BaseRequest {
+  type: RequestType.GetLoggerCounts;
+}
+
+export type LogLevel = "debug" | "info" | "warn" | "error";
+
+export interface SetLoggerLevelRequest extends BaseRequest {
+  type: RequestType.SetLoggerLevel;
+  /** Logger name. If not provided, sets level for all loggers. */
+  loggerName?: string;
+  level: LogLevel;
+}
+
+export interface SetLoggerEnabledRequest extends BaseRequest {
+  type: RequestType.SetLoggerEnabled;
+  /** Logger name. If not provided, sets enabled for all loggers. */
+  loggerName?: string;
+  enabled: boolean;
+}
+
+export interface SetTelemetryEnabledRequest extends BaseRequest {
+  type: RequestType.SetTelemetryEnabled;
+  enabled: boolean;
+}
+
+// Logger count types for IPC (matches @commontools/utils/logger types)
+export interface LogCounts {
+  debug: number;
+  info: number;
+  warn: number;
+  error: number;
+  total: number;
+}
+
+export type LoggerBreakdown = {
+  [messageKey: string]: LogCounts;
+} & {
+  total: number;
+};
+
+export type LoggerCountsData = Record<string, LoggerBreakdown> & {
+  total: number;
+};
+
+export interface LoggerInfo {
+  enabled: boolean;
+  level: LogLevel;
+}
+
+export type LoggerMetadata = Record<string, LoggerInfo>;
 
 export interface PageCreateRequest extends BaseRequest {
   type: RequestType.PageCreate;
@@ -155,6 +231,10 @@ export interface PageCreateRequest extends BaseRequest {
 
 export interface PageGetSpaceDefault extends BaseRequest {
   type: RequestType.GetSpaceRootPattern;
+}
+
+export interface RecreateSpaceRootPatternRequest extends BaseRequest {
+  type: RequestType.RecreateSpaceRootPattern;
 }
 
 export interface PageGetRequest extends BaseRequest {
@@ -194,11 +274,20 @@ export type IPCClientRequest =
   | CellSendRequest
   | CellSubscribeRequest
   | CellUnsubscribeRequest
+  | CellResolveAsCellRequest
   | GetCellRequest
+  | GetHomeSpaceCellRequest
+  | EnsureHomePatternRunningRequest
   | GetGraphSnapshotRequest
+  | SetPullModeRequest
+  | GetLoggerCountsRequest
+  | SetLoggerLevelRequest
+  | SetLoggerEnabledRequest
+  | SetTelemetryEnabledRequest
   | IdleRequest
   | PageCreateRequest
   | PageGetSpaceDefault
+  | RecreateSpaceRootPatternRequest
   | PageGetRequest
   | PageRemoveRequest
   | PageStartRequest
@@ -230,6 +319,11 @@ export interface GraphSnapshotResponse {
   snapshot: SchedulerGraphSnapshot;
 }
 
+export interface LoggerCountsResponse {
+  counts: LoggerCountsData;
+  metadata: LoggerMetadata;
+}
+
 export interface CellUpdateNotification {
   type: NotificationType.CellUpdate;
   cell: CellRef;
@@ -255,6 +349,7 @@ export interface ErrorNotification {
   space?: string;
   recipeId?: string;
   spellId?: string;
+  stackTrace?: string;
 }
 
 export interface TelemetryNotification {
@@ -269,6 +364,7 @@ export type RemoteResponse =
   | JSONValueResponse
   | CellResponse
   | GraphSnapshotResponse
+  | LoggerCountsResponse
   | PageResponse;
 
 export type IPCRemoteNotification =
@@ -291,6 +387,14 @@ export type Commands = {
     request: GetCellRequest;
     response: CellResponse;
   };
+  [RequestType.GetHomeSpaceCell]: {
+    request: GetHomeSpaceCellRequest;
+    response: CellResponse;
+  };
+  [RequestType.EnsureHomePatternRunning]: {
+    request: EnsureHomePatternRunningRequest;
+    response: CellResponse;
+  };
   [RequestType.Idle]: {
     request: IdleRequest;
     response: EmptyResponse;
@@ -298,6 +402,26 @@ export type Commands = {
   [RequestType.GetGraphSnapshot]: {
     request: GetGraphSnapshotRequest;
     response: GraphSnapshotResponse;
+  };
+  [RequestType.SetPullMode]: {
+    request: SetPullModeRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.GetLoggerCounts]: {
+    request: GetLoggerCountsRequest;
+    response: LoggerCountsResponse;
+  };
+  [RequestType.SetLoggerLevel]: {
+    request: SetLoggerLevelRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.SetLoggerEnabled]: {
+    request: SetLoggerEnabledRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.SetTelemetryEnabled]: {
+    request: SetTelemetryEnabledRequest;
+    response: EmptyResponse;
   };
   // Cell requests
   [RequestType.CellGet]: {
@@ -319,6 +443,10 @@ export type Commands = {
   [RequestType.CellUnsubscribe]: {
     request: CellUnsubscribeRequest;
     response: BooleanResponse;
+  };
+  [RequestType.CellResolveAsCell]: {
+    request: CellResolveAsCellRequest;
+    response: CellResponse;
   };
   // Page requests
   [RequestType.PageCreate]: {
@@ -351,6 +479,10 @@ export type Commands = {
   };
   [RequestType.GetSpaceRootPattern]: {
     request: PageGetSpaceDefault;
+    response: PageResponse;
+  };
+  [RequestType.RecreateSpaceRootPattern]: {
+    request: RecreateSpaceRootPatternRequest;
     response: PageResponse;
   };
 };

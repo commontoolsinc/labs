@@ -18,10 +18,10 @@ export async function searchCharms(
   thinking: string;
 }> {
   try {
-    const charms = charmManager.getCharms();
-    await charmManager.sync(charms);
+    const charmsCell = await charmManager.getCharms();
+    await charmManager.sync(charmsCell);
     const results = await Promise.all(
-      charms.get().map(async (charm) => {
+      charmsCell.get().map(async (charm: Cell<unknown>) => {
         try {
           const data = charm.asSchema(nameSchema).get();
           const title = data?.[NAME] ?? "Untitled";

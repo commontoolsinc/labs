@@ -41,7 +41,6 @@ import type {
   PatternToolFunction,
   Recipe,
   RecipeFunction,
-  Schema,
   schema as schemaFunction,
   SELF as SELFSymbol,
   StreamDataFunction,
@@ -50,6 +49,7 @@ import type {
   WhenFunction,
   WishFunction,
 } from "@commontools/api";
+import type { Schema } from "@commontools/api/schema";
 import { toSchema } from "@commontools/api";
 import { AuthSchema } from "./schema-lib.ts";
 import {
@@ -118,8 +118,6 @@ export type {
   RecipeFactory,
   RecipeFunction,
   RenderNode,
-  Schema,
-  SchemaWithoutCell,
   Stream,
   StripCell,
   toJSON,
@@ -127,6 +125,7 @@ export type {
   UnwrapCell,
   VNode,
 } from "@commontools/api";
+export type { Schema, SchemaWithoutCell } from "@commontools/api/schema";
 
 export type JSONSchemaMutable = Mutable<JSONSchemaObj>;
 

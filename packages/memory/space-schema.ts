@@ -2,9 +2,9 @@ import {
   ContextualFlowControl,
   deepEqual,
   type JSONObject,
-  type JSONValue,
   type SchemaContext,
 } from "@commontools/runner";
+import type { StorableDatum } from "./interface.ts";
 import {
   type BaseMemoryAddress,
   CompoundCycleTracker,
@@ -55,7 +55,7 @@ import {
   toSelection,
 } from "./space.ts";
 import { ExtendedStorageTransaction } from "../runner/src/storage/extended-storage-transaction.ts";
-import { IMemorySpaceAddress } from "../runner/src/storage/interface.ts";
+import { IMemorySpaceAttestation } from "../runner/src/storage/interface.ts";
 
 export type * from "./interface.ts";
 
@@ -163,7 +163,7 @@ export const selectSchema = <Space extends MemorySpace>(
   const manager = new ServerObjectManager(session, providedClassifications);
   // while loading dependent docs, we want to avoid cycles
   const tracker = new CompoundCycleTracker<
-    Immutable<JSONValue>,
+    Immutable<StorableDatum>,
     SchemaContext | undefined
   >();
   const cfc = new ContextualFlowControl();
@@ -296,7 +296,7 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
   const providedClassifications = new Set<string>(classification);
   const manager = new ServerObjectManager(session, providedClassifications);
   const tracker = new CompoundCycleTracker<
-    Immutable<JSONValue>,
+    Immutable<StorableDatum>,
     SchemaContext | undefined
   >();
   const cfc = new ContextualFlowControl();
@@ -364,7 +364,7 @@ function loadFactsForDoc(
     const managedTx = new ManagedStorageTransaction(manager);
     const tx = new ExtendedStorageTransaction(managedTx);
     if (!deepEqual(selector.schemaContext, SchemaNone)) {
-      const factValue: { address: IMemorySpaceAddress; value: JSONValue } = {
+      const factValue: IMemorySpaceAttestation = {
         address: { ...fact.address, space: space },
         value: (fact.value as Immutable<JSONObject>),
       };
@@ -420,18 +420,15 @@ const redactCommits = <Space extends MemorySpace>(
   if (change !== undefined) {
     const [cause, value] = change;
     const commitData = value.is as CommitData;
-    // attach labels to the commit, so the provider can remove any classified entries from the commit before we send it to subscribers
+    // Compute labels for the commit, used to redact classified entries before sending to subscribers
     // For this, we need since fields on our objects to determine labels
     const changedFacts = toSelection(
       commitData.since,
       commitData.transaction.args.changes,
     );
     const labels = getLabels(session, changedFacts);
-    if (Object.keys(labels).length > 0) {
-      commitData.labels = labels;
-    }
     // we don't need the since field anymore for these facts
-    const redactedData = redactCommitData(commitData);
+    const redactedData = redactCommitData(commitData, labels);
     const redactedValue = (redactedData !== undefined)
       ? { is: redactedData, since: commitData.since }
       : { since: commitData.since };

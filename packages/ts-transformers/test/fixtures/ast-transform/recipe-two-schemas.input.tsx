@@ -1,5 +1,6 @@
 /// <cts-enable />
 import { recipe, type JSONSchema } from "commontools";
+import "commontools/schema";
 
 // Test that recipe with both schemas already present is not transformed
 export default recipe(

@@ -15,14 +15,29 @@ import {
   getAtPath,
   ManagedStorageTransaction,
   MapSet,
+  PointerCycleTracker,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
 import { StoreObjectManager } from "../src/storage/query.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Immutable } from "@commontools/utils/types";
-import { ContextualFlowControl } from "@commontools/runner";
-import { IMemorySpaceAddress } from "../src/storage/interface.ts";
+import { ContextualFlowControl, deepEqual } from "@commontools/runner";
+import {
+  IMemorySpaceAddress,
+  IMemorySpaceAttestation,
+} from "../src/storage/interface.ts";
+
+// Helper function to get the SchemaObjectTraverser backed by a store map
+function getTraverser(
+  store: Map<string, Revision<State>>,
+  selector: SchemaPathSelector,
+): SchemaObjectTraverser<JSONValue> {
+  const manager = new StoreObjectManager(store);
+  const managedTx = new ManagedStorageTransaction(manager);
+  const tx = new ExtendedStorageTransaction(managedTx);
+  return new SchemaObjectTraverser(tx, selector);
+}
 
 describe("SchemaObjectTraverser.traverseDAG", () => {
   it("follows legacy cell links when traversing", () => {
@@ -153,10 +168,7 @@ describe("SchemaObjectTraverser array traversal", () => {
       items: { type: "number" },
     } as const satisfies JSONSchema;
 
-    const manager = new StoreObjectManager(store);
-    const managedTx = new ManagedStorageTransaction(manager);
-    const tx = new ExtendedStorageTransaction(managedTx);
-    const traverser = new SchemaObjectTraverser(tx, {
+    const traverser = getTraverser(store, {
       path: ["value"],
       schemaContext: { schema, rootSchema: schema },
     });
@@ -195,10 +207,7 @@ describe("SchemaObjectTraverser array traversal", () => {
       items: false,
     } as const satisfies JSONSchema;
 
-    const manager = new StoreObjectManager(store);
-    const managedTx = new ManagedStorageTransaction(manager);
-    const tx = new ExtendedStorageTransaction(managedTx);
-    const traverser = new SchemaObjectTraverser(tx, {
+    const traverser = getTraverser(store, {
       path: ["value"],
       schemaContext: { schema, rootSchema: schema },
     });
@@ -467,6 +476,283 @@ describe("SchemaObjectTraverser array traversal", () => {
       expect(redirDoc.address.path).toEqual(["value", "foo"]);
       expect(curDoc2.address.id).toBe(revD.of);
       expect(curDoc2.address.path).toEqual(["value", "foo"]);
+    });
+  });
+});
+
+describe("getAtPath array index validation", () => {
+  it("rejects leading-zero array index like '01'", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-getAtPath" as URI;
+    const docEntity = docUri as Entity;
+
+    // Array with three elements
+    const docValue = ["zero", "one", "two"];
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const manager = new StoreObjectManager(store);
+    const managedTx = new ManagedStorageTransaction(manager);
+    const tx = new ExtendedStorageTransaction(managedTx);
+    const tracker: PointerCycleTracker = new CompoundCycleTracker<
+      Immutable<JSONValue>,
+      SchemaContext | undefined
+    >();
+    const cfc = new ContextualFlowControl();
+    const schemaTracker = new MapSet<string, SchemaPathSelector>(deepEqual);
+
+    const doc: IMemorySpaceAttestation = {
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    };
+
+    // Navigate with invalid index "01"
+    const [result1] = getAtPath(
+      tx,
+      doc,
+      ["01"],
+      tracker,
+      cfc,
+      schemaTracker,
+    );
+
+    // Navigate with valid index "1"
+    const [result2] = getAtPath(
+      tx,
+      doc,
+      ["1"],
+      tracker,
+      cfc,
+      schemaTracker,
+    );
+
+    // "01" is not a valid array index (leading zero), should return undefined
+    // BUG: Current code returns "one" because new Number("01").valueOf() === 1
+    expect(result1.value).toBeUndefined();
+    // "1" is a valid array index, should return "one"
+    expect(result2.value).toBe("one");
+  });
+});
+
+describe("SchemaObjectTraverser boolean type handling", () => {
+  it("correctly validates boolean values against boolean schema", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-boolean" as URI;
+    const docEntity = docUri as Entity;
+
+    // Array of booleans (like the hits array in the bug)
+    const docValue = [true, false, true, false];
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const schema = {
+      type: "array",
+      items: { type: "boolean" },
+    } as const satisfies JSONSchema;
+
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schemaContext: { schema, rootSchema: schema },
+    });
+
+    const result = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // Should return the full array with boolean values preserved
+    expect(result).toEqual([true, false, true, false]);
+  });
+
+  it("rejects boolean values when schema expects different type", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-boolean-reject" as URI;
+    const docEntity = docUri as Entity;
+
+    const docValue = true;
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const schema = {
+      type: "string",
+    } as const satisfies JSONSchema;
+
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schemaContext: { schema, rootSchema: schema },
+    });
+
+    const result = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // Should return undefined because boolean doesn't match string schema
+    expect(result).toBeUndefined();
+  });
+});
+
+describe("SchemaObjectTraverser anyOf/oneOf handling", () => {
+  it("resolves anyOf schema by matching value type", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-anyof" as URI;
+    const docEntity = docUri as Entity;
+
+    const docValue = "hello";
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    // anyOf with string or number alternatives
+    const schema = {
+      anyOf: [
+        { type: "string" },
+        { type: "number" },
+      ],
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schemaContext: { schema, rootSchema: schema },
+    });
+
+    const result = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // Should return the string value since it matches the string alternative
+    expect(result).toBe("hello");
+  });
+
+  it("resolves oneOf schema with $ref by matching value type", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-oneof-ref" as URI;
+    const docEntity = docUri as Entity;
+
+    const docValue = { id: 1, name: "Item1" };
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    // oneOf with $ref that resolves to object type
+    const schema = {
+      oneOf: [
+        { $ref: "#/$defs/Item" },
+        { type: "null" },
+      ],
+      $defs: {
+        Item: {
+          type: "object",
+          properties: {
+            id: { type: "number" },
+            name: { type: "string" },
+          },
+        },
+      },
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schemaContext: { schema, rootSchema: schema },
+    });
+
+    const result = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // Should return the object since it matches the Item $ref alternative
+    expect(result).toEqual({ id: 1, name: "Item1" });
+  });
+
+  it("handles nested objects with boolean arrays in anyOf schema", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-nested-boolean-array" as URI;
+    const docEntity = docUri as Entity;
+
+    // This mirrors the battleship bug structure: object with boolean array
+    const docValue = {
+      id: 1,
+      name: "Ship1",
+      hits: [false, false, true],
+    };
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const schema = {
+      type: "object",
+      properties: {
+        id: { type: "number" },
+        name: { type: "string" },
+        hits: {
+          type: "array",
+          items: { type: "boolean" },
+        },
+      },
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schemaContext: { schema, rootSchema: schema },
+    });
+
+    const result = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // Should return the full object with hits array preserved
+    expect(result).toEqual({
+      id: 1,
+      name: "Ship1",
+      hits: [false, false, true],
     });
   });
 });

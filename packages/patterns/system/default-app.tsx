@@ -8,7 +8,6 @@ import {
   navigateTo,
   pattern,
   UI,
-  wish,
   Writable,
 } from "commontools";
 
@@ -17,6 +16,10 @@ import { default as Note } from "../notes/note.tsx";
 // Simple random ID generator (crypto.randomUUID not available in pattern env)
 const generateId = () =>
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
+
+// Maximum number of recent charms to track
+const MAX_RECENT_CHARMS = 10;
+
 import BacklinksIndex, { type MentionableCharm } from "./backlinks-index.tsx";
 import OmniboxFAB from "./omnibox-fab.tsx";
 import Notebook from "../notes/notebook.tsx";
@@ -54,7 +57,9 @@ const removeCharm = handler<
   }
 >((_, state) => {
   const allCharmsValue = state.allCharms.get();
-  const index = allCharmsValue.findIndex((c: any) => state.charm.equals(c));
+  const index = allCharmsValue.findIndex((c: any) =>
+    c && state.charm.equals(c)
+  );
 
   if (index !== -1) {
     const charmListCopy = [...allCharmsValue];
@@ -140,11 +145,37 @@ const menuAllNotebooks = handler<
   if (existing) {
     return navigateTo(existing);
   }
-  return navigateTo(NotesImportExport({ importMarkdown: "" }));
+  return navigateTo(NotesImportExport({ importMarkdown: "", allCharms }));
+});
+
+// Handler: Add charm to allCharms if not already present
+const addCharm = handler<
+  { charm: MentionableCharm },
+  { allCharms: Writable<MentionableCharm[]> }
+>(({ charm }, { allCharms }) => {
+  const current = allCharms.get();
+  if (!current.some((c) => equals(c, charm))) {
+    allCharms.push(charm);
+  }
+});
+
+// Handler: Track charm as recently used (add to front, maintain max)
+const trackRecent = handler<
+  { charm: MentionableCharm },
+  { recentCharms: Writable<MentionableCharm[]> }
+>(({ charm }, { recentCharms }) => {
+  const current = recentCharms.get();
+  // Remove if already present
+  const filtered = current.filter((c) => !equals(c, charm));
+  // Add to front and limit to max
+  const updated = [charm, ...filtered].slice(0, MAX_RECENT_CHARMS);
+  recentCharms.set(updated);
 });
 
 export default pattern<CharmsListInput, CharmsListOutput>((_) => {
-  const { allCharms } = wish<{ allCharms: MentionableCharm[] }>("/");
+  // OWN the data cells (not from wish)
+  const allCharms = Writable.of<MentionableCharm[]>([]);
+  const recentCharms = Writable.of<MentionableCharm[]>([]);
 
   // Dropdown menu state
   const menuOpen = Writable.of(false);
@@ -153,9 +184,10 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
   // (prevents transient hash-only pills during reactive updates)
   // NOTE: Use truthy check, not === true, because charm.isHidden is a proxy object
   const visibleCharms = computed(() =>
-    allCharms.filter((charm) => {
+    allCharms.get().filter((charm) => {
+      if (!charm) return false;
       if (charm.isHidden) return false;
-      const name = (charm as any)?.[NAME];
+      const name = charm?.[NAME];
       return typeof name === "string" && name.length > 0;
     })
   );
@@ -170,7 +202,7 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
 
   return {
     backlinksIndex: index,
-    [NAME]: computed(() => `DefaultCharmList (${charmCount})`),
+    [NAME]: computed(() => `Space Home (${charmCount})`),
     [UI]: (
       <ct-screen>
         <ct-keybind
@@ -283,33 +315,22 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
                 {visibleCharms.map((charm) => {
                   // Check if charm is a notebook by NAME prefix (isNotebook prop not reliable through proxy)
                   const isNotebook = computed(() => {
-                    const name = charm[NAME];
+                    const name = charm?.[NAME];
                     const result = typeof name === "string" &&
                       name.startsWith("📓");
                     return result;
                   });
 
-                  const dragHandle = (
-                    <ct-drag-source $cell={charm} type="note">
-                      <span
-                        style={{ cursor: "grab", padding: "4px", opacity: 0.5 }}
-                      >
-                        ⠿
-                      </span>
-                    </ct-drag-source>
-                  );
-
                   const link = (
-                    <ct-cell-context $cell={charm}>
-                      <ct-cell-link $cell={charm} />
-                    </ct-cell-context>
+                    <ct-drag-source $cell={charm} type="note">
+                      <ct-cell-context $cell={charm}>
+                        <ct-cell-link $cell={charm} />
+                      </ct-cell-context>
+                    </ct-drag-source>
                   );
 
                   return (
                     <tr>
-                      <td style={{ width: "24px", padding: "0 4px" }}>
-                        {dragHandle}
-                      </td>
                       <td>
                         {ifElse(
                           isNotebook,
@@ -344,5 +365,13 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
     ),
     sidebarUI: undefined,
     fabUI: fab[UI],
+
+    // Exported data
+    allCharms,
+    recentCharms,
+
+    // Exported handlers (bound to state cells for external callers)
+    addCharm: addCharm({ allCharms }),
+    trackRecent: trackRecent({ recentCharms }),
   };
 });

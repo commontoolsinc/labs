@@ -95,6 +95,9 @@ const configs: FixtureConfig[] = [
 
 const staticCache = new StaticCacheFS();
 const commontools = await staticCache.getText("types/commontools.d.ts");
+const commontoolsSchema = await staticCache.getText(
+  "types/commontools-schema.d.ts",
+);
 const FIXTURES_ROOT = "./test/fixtures";
 
 // Environment variable filtering for faster iteration
@@ -187,7 +190,10 @@ if (!Deno.env.get("SKIP_INPUT_CHECK")) {
     console.log(`Batch type-checking fixtures in ${config.describe}...`);
 
     const result = await batchTypeCheckFixtures(allFixtures, {
-      types: { "commontools.d.ts": commontools },
+      types: {
+        "commontools.d.ts": commontools,
+        "commontools-schema.d.ts": commontoolsSchema,
+      },
     });
 
     console.log(
@@ -236,7 +242,10 @@ for (const config of configs) {
       return await transformFixture(
         `${config.directory}/${fixture.relativeInputPath}`,
         {
-          types: { "commontools.d.ts": commontools },
+          types: {
+            "commontools.d.ts": commontools,
+            "commontools-schema.d.ts": commontoolsSchema,
+          },
           typeCheck: !Deno.env.get("SKIP_INPUT_CHECK"),
           precomputedDiagnostics,
         },

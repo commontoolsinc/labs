@@ -28,6 +28,8 @@ export type MarkdownVariant = "default" | "inverse";
  *
  * @csspart content - The markdown content wrapper
  *
+ * @fires ct-checkbox-change - Fired when a task list checkbox is toggled. Detail: { index: number, checked: boolean }
+ *
  * @cssprop [--ct-markdown-inverse-border=rgba(255,255,255,0.3)] - Border color for inverse variant
  * @cssprop [--ct-markdown-inverse-surface=rgba(255,255,255,0.2)] - Surface color for inverse variant (code blocks)
  * @cssprop [--ct-markdown-inverse-surface-subtle=rgba(255,255,255,0.1)] - Subtle surface for inverse (table headers)
@@ -365,6 +367,7 @@ export class CTMarkdown extends BaseElement {
       /* Task lists */
       .markdown-content input[type="checkbox"] {
         margin-right: 0.5em;
+        cursor: pointer;
       }
     `,
   ];
@@ -539,7 +542,46 @@ export class CTMarkdown extends BaseElement {
     if (changedProperties.has("theme") && this.theme) {
       this._updateThemeProperties();
     }
+
+    // Attach click handlers to checkboxes after content is rendered
+    this._attachCheckboxHandlers();
   }
+
+  private _attachCheckboxHandlers() {
+    const container = this.shadowRoot?.querySelector(".markdown-content");
+    if (!container) return;
+
+    const checkboxes = container.querySelectorAll('input[type="checkbox"]');
+    checkboxes.forEach((checkbox, index) => {
+      const inputEl = checkbox as HTMLInputElement;
+
+      // Remove the disabled attribute that marked adds by default
+      inputEl.removeAttribute("disabled");
+
+      // Remove existing handler to prevent duplicates
+      inputEl.removeEventListener("change", this._handleCheckboxChange);
+
+      // Store index as data attribute for retrieval in handler
+      inputEl.dataset.checkboxIndex = String(index);
+
+      // Add new handler
+      inputEl.addEventListener("change", this._handleCheckboxChange);
+    });
+  }
+
+  private _handleCheckboxChange = (event: Event) => {
+    const checkbox = event.target as HTMLInputElement;
+    const index = parseInt(checkbox.dataset.checkboxIndex ?? "0", 10);
+    const checked = checkbox.checked;
+
+    this.dispatchEvent(
+      new CustomEvent("ct-checkbox-change", {
+        detail: { index, checked },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  };
 
   override disconnectedCallback() {
     super.disconnectedCallback();

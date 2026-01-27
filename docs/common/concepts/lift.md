@@ -3,16 +3,16 @@
 This is lift in the sense of [lifted functions](https://en.wikipedia.org/wiki/Lift_(mathematics))
 
 ```tsx
-import { lift, Cell, pattern } from 'commontools'
+import { lift, Writable, pattern } from 'commontools'
 
 // Lifted functions will automatically be reactively re-computed based on their inputs
-const addCells = lift(({ a, b }: { a: Cell<number>, b: Cell<number> }) => {
-  return a.get() + b.get()
+const addCells = lift(({ a, b }: { a: number, b: number }) => {
+  return a + b
 })
 
 interface Props {
-  a: Cell<number>;
-  b: Cell<number>;
+  a: Writable<number>;
+  b: Writable<number>;
 }
 
 export default pattern<Props, { combined: number }>(({ 
@@ -24,7 +24,7 @@ export default pattern<Props, { combined: number }>(({
 })
 ```
 
-Typically it's unusual to use `lift()` directly. It is almost always better to use `computed()`.
+Typically it's unusual to use `lift()` directly. It is almost always better to use `computed()`. Use `lift()` when declaring a re-usable computed function that you want to use in multiple patterns or call multiple times in the same pattern.
 
 ## Module Scope Requirement
 

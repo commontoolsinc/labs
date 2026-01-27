@@ -1,7 +1,10 @@
 import { css, html, LitElement, TemplateResult } from "lit";
 import { property, state } from "lit/decorators.js";
 import { ResizableDrawerController } from "../lib/resizable-drawer-controller.ts";
-import type { RuntimeTelemetryMarkerResult } from "@commontools/runtime-client";
+import type {
+  LoggerMetadata,
+  RuntimeTelemetryMarkerResult,
+} from "@commontools/runtime-client";
 import { isRecord } from "@commontools/utils/types";
 import type { DebuggerController } from "../lib/debugger-controller.ts";
 import "./SchedulerGraphView.ts"; // Register x-scheduler-graph component
@@ -802,6 +805,9 @@ export class XDebuggerView extends LitElement {
   private loggerSample: Record<string, LoggerBreakdown | number> | null = null;
 
   @state()
+  private workerLoggerMetadata: LoggerMetadata | null = null;
+
+  @state()
   private expandedLoggers = new Set<string>();
 
   @state()
@@ -1382,33 +1388,143 @@ export class XDebuggerView extends LitElement {
     return typeof total === "number" ? total : 0;
   }
 
-  private sampleLoggerCounts(): void {
-    this.loggerSample = this.getLoggerBreakdown();
-  }
-
-  private resetBaseline(): void {
-    this.loggerBaseline = this.getLoggerBreakdown();
-    this.sampleLoggerCounts();
-  }
-
-  private toggleLogger(name: string): void {
-    const registry = this.getLoggerRegistry();
-    const logger = registry[name];
-    if (logger) {
-      logger.disabled = !logger.disabled;
-      this.requestUpdate();
+  private async getWorkerLoggerBreakdown(): Promise<
+    Record<
+      string,
+      LoggerBreakdown | number
+    > | null
+  > {
+    const runtime = this.debuggerController?.getRuntime();
+    if (!runtime) return null;
+    const rt = runtime.runtime();
+    if (!rt) return null;
+    try {
+      const result = await rt.getLoggerCounts();
+      this.workerLoggerMetadata = result.metadata;
+      return result.counts;
+    } catch {
+      return null;
     }
   }
 
-  private setLoggerLevel(
-    name: string,
-    level: "debug" | "info" | "warn" | "error",
-  ): void {
+  private mergeLoggerBreakdowns(
+    main: Record<string, LoggerBreakdown | number>,
+    worker: Record<string, LoggerBreakdown | number> | null,
+  ): Record<string, LoggerBreakdown | number> {
+    if (!worker) return main;
+
+    const merged: Record<string, LoggerBreakdown | number> = {};
+    const allKeys = new Set([
+      ...Object.keys(main).filter((k) => k !== "total"),
+      ...Object.keys(worker).filter((k) => k !== "total"),
+    ]);
+
+    for (const key of allKeys) {
+      const mainVal = main[key];
+      const workerVal = worker[key];
+
+      if (typeof mainVal === "number" || typeof workerVal === "number") {
+        // Handle simple number values
+        merged[key] = (typeof mainVal === "number" ? mainVal : 0) +
+          (typeof workerVal === "number" ? workerVal : 0);
+      } else if (mainVal && workerVal) {
+        // Both have LoggerBreakdown - merge them
+        merged[key] = this.mergeBreakdown(mainVal, workerVal);
+      } else {
+        // Only one has data
+        merged[key] = mainVal ?? workerVal;
+      }
+    }
+
+    // Merge totals
+    const mainTotal = typeof main.total === "number" ? main.total : 0;
+    const workerTotal = typeof worker.total === "number" ? worker.total : 0;
+    merged.total = mainTotal + workerTotal;
+
+    return merged;
+  }
+
+  private mergeBreakdown(
+    a: LoggerBreakdown,
+    b: LoggerBreakdown,
+  ): LoggerBreakdown {
+    const merged = { total: a.total + b.total } as LoggerBreakdown;
+    const allKeys = new Set([
+      ...Object.keys(a).filter((k) => k !== "total"),
+      ...Object.keys(b).filter((k) => k !== "total"),
+    ]);
+
+    for (const key of allKeys) {
+      const aVal = a[key];
+      const bVal = b[key];
+      if (aVal && bVal) {
+        merged[key] = {
+          debug: aVal.debug + bVal.debug,
+          info: aVal.info + bVal.info,
+          warn: aVal.warn + bVal.warn,
+          error: aVal.error + bVal.error,
+          total: aVal.total + bVal.total,
+        };
+      } else {
+        merged[key] = aVal ?? bVal;
+      }
+    }
+
+    return merged;
+  }
+
+  private async sampleLoggerCounts(): Promise<void> {
+    const mainCounts = this.getLoggerBreakdown();
+    const workerCounts = await this.getWorkerLoggerBreakdown();
+    this.loggerSample = this.mergeLoggerBreakdowns(mainCounts, workerCounts);
+  }
+
+  private async resetBaseline(): Promise<void> {
+    const mainCounts = this.getLoggerBreakdown();
+    const workerCounts = await this.getWorkerLoggerBreakdown();
+    this.loggerBaseline = this.mergeLoggerBreakdowns(mainCounts, workerCounts);
+    await this.sampleLoggerCounts();
+  }
+
+  private async toggleLogger(name: string): Promise<void> {
     const registry = this.getLoggerRegistry();
     const logger = registry[name];
     if (logger) {
+      // Local logger - toggle directly
+      logger.disabled = !logger.disabled;
+      this.requestUpdate();
+    } else if (this.workerLoggerMetadata?.[name]) {
+      // Worker logger - use IPC
+      const currentEnabled = this.workerLoggerMetadata[name].enabled;
+      const runtime = this.debuggerController?.getRuntime();
+      const rt = runtime?.runtime();
+      if (rt) {
+        await rt.setLoggerEnabled(!currentEnabled, name);
+        // Refresh metadata
+        await this.sampleLoggerCounts();
+      }
+    }
+  }
+
+  private async setLoggerLevel(
+    name: string,
+    level: "debug" | "info" | "warn" | "error",
+  ): Promise<void> {
+    const registry = this.getLoggerRegistry();
+    const logger = registry[name];
+    if (logger) {
+      // Local logger - set directly
       logger.level = level;
       this.requestUpdate();
+    } else if (this.workerLoggerMetadata?.[name]) {
+      // Worker logger - use IPC
+      const runtime = this.debuggerController?.getRuntime();
+      const rt = runtime?.runtime();
+      if (rt) {
+        await rt.setLoggerLevel(level, name);
+        // Refresh metadata
+        await this.sampleLoggerCounts();
+      }
     }
   }
 
@@ -1483,9 +1599,15 @@ export class XDebuggerView extends LitElement {
           const loggerData = sample[name] as LoggerBreakdown;
           const baselineData = baseline?.[name] as LoggerBreakdown | undefined;
           const logger = registry[name];
+          const workerMeta = this.workerLoggerMetadata?.[name];
           const isExpanded = this.expandedLoggers.has(name);
-          const isDisabled = logger?.disabled ?? false;
-          const currentLevel = logger?.level ?? "info";
+          // Use local registry first, fall back to worker metadata
+          const isDisabled = logger
+            ? logger.disabled
+            : workerMeta
+            ? !workerMeta.enabled
+            : false;
+          const currentLevel = logger?.level ?? workerMeta?.level ?? "info";
           const delta = this.getDelta(loggerData.total, baselineData?.total);
 
           return html`

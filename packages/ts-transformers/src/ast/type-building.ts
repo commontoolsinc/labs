@@ -2,10 +2,7 @@ import ts from "typescript";
 import type { TransformationContext } from "../core/mod.ts";
 import type { CaptureTreeNode } from "../utils/capture-tree.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
-import {
-  inferWidenedTypeFromExpression,
-  unwrapOpaqueLikeType,
-} from "./type-inference.ts";
+import { inferWidenedTypeFromExpression } from "./type-inference.ts";
 import {
   isOptionalProperty,
   isOptionalPropertyAccess,
@@ -153,44 +150,14 @@ export function buildTypeElementsFromCaptureTree(
         }
       }
 
-      // Check if this is an array type with property-only access (e.g., .length)
-      // In this case, we use the actual array type instead of building a nested
-      // object literal, and register a schema hint to generate items: false
-      const unwrappedType = currentType
-        ? unwrapOpaqueLikeType(currentType, checker)
-        : undefined;
-
-      if (
-        currentType &&
-        unwrappedType &&
-        checker.isArrayType(unwrappedType)
-      ) {
-        // Array with property-only access (children in capture tree are property
-        // names like "length", not element accesses)
-        // Use the full type (preserves OpaqueRef/Cell wrapper for asCell: true)
-        typeNode = typeToTypeNodeWithRegistry(
-          currentType,
-          context,
-          context.options.typeRegistry,
-        );
-
-        // Register schema hint to generate items: false for this array
-        // The hint is keyed by the TypeNode (unique per usage)
-        if (context.options.schemaHints) {
-          context.options.schemaHints.set(typeNode, { items: false });
-        }
-
-        // Don't recurse into children - .length etc are implicit for arrays
-      } else {
-        // Build nested type literal for regular objects
-        const nested = buildTypeElementsFromCaptureTree(
-          childNode.properties,
-          context,
-          currentExpr,
-          currentType,
-        );
-        typeNode = factory.createTypeLiteralNode(nested);
-      }
+      // Build nested type literal for objects (including array property access like .length)
+      const nested = buildTypeElementsFromCaptureTree(
+        childNode.properties,
+        context,
+        currentExpr,
+        currentType,
+      );
+      typeNode = factory.createTypeLiteralNode(nested);
     } else {
       // Fallback to unknown
       typeNode = factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);

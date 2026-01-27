@@ -1,10 +1,6 @@
-import { JSONObject } from "@commontools/api";
+import { JSONObject, JSONValue } from "@commontools/api";
 import { MemorySpace, MIME } from "@commontools/memory/interface";
-import {
-  JSONValue,
-  SchemaPathSelector,
-  URI,
-} from "../src/storage/interface.ts";
+import { SchemaPathSelector, URI } from "../src/storage/interface.ts";
 import {
   BaseMemoryAddress,
   IAttestation,

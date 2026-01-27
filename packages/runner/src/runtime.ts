@@ -4,7 +4,6 @@ import {
   StaticCacheHTTP,
 } from "@commontools/static";
 import { RuntimeTelemetry } from "@commontools/runner";
-import { favoriteListSchema, journalSchema } from "@commontools/home-schemas";
 import type {
   AnyCell,
   JSONSchema,
@@ -90,59 +89,12 @@ export interface RuntimeOptions {
 export const spaceCellSchema: JSONSchema = {
   type: "object",
   properties: {
-    allCharms: {
-      type: "array",
-      items: { type: "object", properties: {}, asCell: true },
-    },
-    recentCharms: {
-      type: "array",
-      items: { type: "object", properties: {}, asCell: true },
-    },
     defaultPattern: { type: "object", properties: {}, asCell: true },
-  },
-} as JSONSchema;
-
-export const homeSpaceCellSchema: JSONSchema = {
-  type: "object",
-  properties: {
-    // Include all space cell properties
-    allCharms: {
-      type: "array",
-      items: { type: "object", properties: {}, asCell: true },
-    },
-    recentCharms: {
-      type: "array",
-      items: { type: "object", properties: {}, asCell: true },
-    },
-    defaultPattern: { type: "object", properties: {}, asCell: true },
-    // Plus home-space-specific properties
-    favorites: { ...favoriteListSchema, asCell: true },
-    journal: { ...journalSchema, asCell: true },
   },
 } as JSONSchema;
 
 export interface SpaceCellContents {
-  allCharms: Cell<unknown[]>;
-  recentCharms: Cell<unknown[]>;
   defaultPattern: Cell<unknown>;
-}
-
-/**
- * Contents of the home space cell (where space DID = user identity DID).
- * Home space contains user-specific data like favorites that persists across all spaces.
- * See docs/common/HOME_SPACE.md for more details.
- */
-export interface HomeSpaceCellContents extends SpaceCellContents {
-  favorites: Cell<{ cell: Cell<unknown>; tag: string }[]>;
-  journal: Cell<{
-    timestamp: number;
-    eventType: string;
-    subject?: Cell<unknown>;
-    snapshot?: { name?: string; schemaTag?: string; valueExcerpt?: string };
-    narrative?: string;
-    tags?: string[];
-    space: string;
-  }[]>;
 }
 
 /**
@@ -485,13 +437,13 @@ export class Runtime {
 
   getHomeSpaceCell(
     tx?: IExtendedStorageTransaction,
-  ): Cell<HomeSpaceCellContents> {
+  ): Cell<SpaceCellContents> {
     return this.getCell(
       this.userIdentityDID,
       this.userIdentityDID,
-      homeSpaceCellSchema,
+      spaceCellSchema,
       tx,
-    ) as Cell<HomeSpaceCellContents>;
+    ) as Cell<SpaceCellContents>;
   }
 
   // Convenience methods that delegate to the runner

@@ -7,7 +7,7 @@ Charms can be favorites and added to your [[HOME_SPACE]]. These charms can be ac
 You can `wish` for the favorites list itself (see `system/favorites-manager.tsx` for a full example):
 
 ```tsx
-type Favorite = { cell: Cell<{ [NAME]?: string }>; tag: string };
+type Favorite = { cell: { [NAME]?: string }; tag: string };
 const wishResult = wish<Array<Favorite>>({ query: "#favorites" });
 ```
 
@@ -17,7 +17,7 @@ The `tag` field contains the serialized `resultSchema` of the charm pointed to b
 
 See `system/wish.tsx` for a full example. 
 
-In `note.tsx` I decorate my schema with a description containing "#note":
+In `note.tsx` I decorate my schema with a jsdoc comment containing "#note":
 ```tsx
 /** Represents a small #note a user took to remember some text. */
 type Output = {

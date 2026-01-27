@@ -19,6 +19,9 @@ import {
   ErrorNotification,
   InitializationData,
   JSONValue,
+  type LoggerCountsData,
+  type LoggerMetadata,
+  type LogLevel,
   NavigateRequestNotification,
   RequestType,
   TelemetryNotification,
@@ -104,15 +107,35 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return new CellHandle<T>(this, response.cell);
   }
 
+  async getHomeSpaceCell(): Promise<CellHandle<unknown>> {
+    const response = await this.#conn.request<RequestType.GetHomeSpaceCell>({
+      type: RequestType.GetHomeSpaceCell,
+    });
+    return new CellHandle(this, response.cell);
+  }
+
+  /**
+   * Ensure the home space's default pattern is running and return a CellHandle to it.
+   * This starts the pattern if needed and waits for it to be ready.
+   */
+  async ensureHomePatternRunning(): Promise<CellHandle<unknown>> {
+    const response = await this.#conn.request<
+      RequestType.EnsureHomePatternRunning
+    >({
+      type: RequestType.EnsureHomePatternRunning,
+    });
+    return new CellHandle(this, response.cell);
+  }
+
   // TODO(unused)
   async idle(): Promise<void> {
     await this.#conn.request<RequestType.Idle>({ type: RequestType.Idle });
   }
 
-  async createPage<T = unknown, R = unknown>(
+  async createPage<T = unknown>(
     input: string | URL | Program,
     options?: { argument?: JSONValue; run?: boolean },
-  ): Promise<PageHandle<T, R>> {
+  ): Promise<PageHandle<T>> {
     const source = input instanceof URL
       ? { url: input.href }
       : typeof input === "string"
@@ -136,7 +159,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       run: options?.run,
     });
 
-    return new PageHandle<T, R>(this, response.page);
+    return new PageHandle<T>(this, response.page);
   }
 
   async getSpaceRootPattern(): Promise<PageHandle<NameSchema>> {
@@ -148,10 +171,19 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return new PageHandle<NameSchema>(this, response.page);
   }
 
-  async getPage<T = unknown, R = unknown>(
+  async recreateSpaceRootPattern(): Promise<PageHandle<NameSchema>> {
+    const response = await this.#conn.request<
+      RequestType.RecreateSpaceRootPattern
+    >({
+      type: RequestType.RecreateSpaceRootPattern,
+    });
+    return new PageHandle<NameSchema>(this, response.page);
+  }
+
+  async getPage<T = unknown>(
     pageId: string,
     runIt?: boolean,
-  ): Promise<PageHandle<T, R> | null> {
+  ): Promise<PageHandle<T> | null> {
     const response = await this.#conn.request<RequestType.PageGet>({
       type: RequestType.PageGet,
       pageId: pageId,
@@ -160,7 +192,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
     if (!response) return null;
 
-    return new PageHandle<T, R>(this, response.page);
+    return new PageHandle<T>(this, response.page);
   }
 
   async removePage(pageId: string): Promise<boolean> {
@@ -197,6 +229,61 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       type: RequestType.GetGraphSnapshot,
     });
     return res.snapshot;
+  }
+
+  async setPullMode(pullMode: boolean): Promise<void> {
+    await this.#conn.request<RequestType.SetPullMode>({
+      type: RequestType.SetPullMode,
+      pullMode,
+    });
+  }
+
+  async getLoggerCounts(): Promise<{
+    counts: LoggerCountsData;
+    metadata: LoggerMetadata;
+  }> {
+    const res = await this.#conn.request<RequestType.GetLoggerCounts>({
+      type: RequestType.GetLoggerCounts,
+    });
+    return { counts: res.counts, metadata: res.metadata };
+  }
+
+  /**
+   * Set log level for a logger in the worker.
+   * @param level - The log level to set
+   * @param loggerName - Optional logger name. If not provided, sets level for all loggers.
+   */
+  async setLoggerLevel(level: LogLevel, loggerName?: string): Promise<void> {
+    await this.#conn.request<RequestType.SetLoggerLevel>({
+      type: RequestType.SetLoggerLevel,
+      level,
+      loggerName,
+    });
+  }
+
+  /**
+   * Enable or disable a logger in the worker.
+   * @param enabled - Whether to enable or disable the logger
+   * @param loggerName - Optional logger name. If not provided, sets enabled for all loggers.
+   */
+  async setLoggerEnabled(enabled: boolean, loggerName?: string): Promise<void> {
+    await this.#conn.request<RequestType.SetLoggerEnabled>({
+      type: RequestType.SetLoggerEnabled,
+      enabled,
+      loggerName,
+    });
+  }
+
+  /**
+   * Enable or disable telemetry data emission from the worker.
+   * When disabled, telemetry events will not be sent over IPC.
+   * @param enabled - Whether to enable or disable telemetry
+   */
+  async setTelemetryEnabled(enabled: boolean): Promise<void> {
+    await this.#conn.request<RequestType.SetTelemetryEnabled>({
+      type: RequestType.SetTelemetryEnabled,
+      enabled,
+    });
   }
 
   async dispose(): Promise<void> {

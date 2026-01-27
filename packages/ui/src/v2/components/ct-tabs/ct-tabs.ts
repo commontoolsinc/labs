@@ -40,14 +40,19 @@ export class CTTabs extends BaseElement {
     BaseElement.baseStyles,
     css`
       :host {
-        display: block;
+        display: flex;
+        flex-direction: column;
         width: 100%;
+        min-height: 0;
+        flex: 1;
       }
 
       .tabs {
         display: flex;
         flex-direction: column;
         width: 100%;
+        flex: 1;
+        min-height: 0;
       }
 
       .tabs[data-orientation="horizontal"] {
@@ -132,9 +137,15 @@ export class CTTabs extends BaseElement {
   override firstUpdated() {
     // Initialize cell controller binding
     this._cellController.bind(this.value, stringSchema);
-    // Track initial value
+
+    // Set up slotchange listener to handle dynamically added content
+    const slot = this.shadowRoot?.querySelector("slot");
+    if (slot) {
+      slot.addEventListener("slotchange", this.handleSlotChange);
+    }
+
+    // Track initial value and initialize tab selection
     this._lastKnownValue = this._cellController.getValue();
-    // Initialize tab selection
     this.updateTabSelection();
   }
 
@@ -177,16 +188,36 @@ export class CTTabs extends BaseElement {
     return this.querySelectorAll("ct-tab-panel");
   }
 
+  private _pendingRetry: number | null = null;
+
   private updateTabSelection(): void {
     const tabs = this.getTabs();
     const panels = this.getTabPanels();
     const currentValue = this._cellController.getValue();
+
+    // When tabs exist in DOM but the VDOM framework hasn't set their properties yet,
+    // defer selection until the next frame when properties will be available.
+    // This handles the timing gap between DOM element creation and property assignment.
+    if (tabs.length > 0 && (tabs[0] as CTTab).value === undefined) {
+      if (this._pendingRetry !== null) {
+        cancelAnimationFrame(this._pendingRetry);
+      }
+      this._pendingRetry = requestAnimationFrame(() => {
+        this._pendingRetry = null;
+        this.updateTabSelection();
+      });
+      return;
+    }
+
+    // Track if any tab matches the current value
+    let hasMatch = false;
 
     // Update tabs - use property access instead of getAttribute
     // because JSX sets properties, not attributes
     tabs.forEach((tab) => {
       const tabValue = (tab as CTTab).value;
       if (tabValue === currentValue) {
+        hasMatch = true;
         tab.setAttribute("aria-selected", "true");
         tab.setAttribute("data-selected", "true");
         (tab as CTTab).selected = true;
@@ -211,6 +242,58 @@ export class CTTabs extends BaseElement {
         (panel as CTTabPanel).hidden = true;
       }
     });
+
+    // If no tab matched the current value, default to first enabled tab
+    if (!hasMatch && tabs.length > 0) {
+      this.selectFirst();
+    }
+  }
+
+  private handleSlotChange = () => {
+    // Set up listener on ct-tab-list's internal slot when it appears.
+    // ct-tab elements are nested inside ct-tab-list (not direct children of ct-tabs),
+    // so we need to listen to the inner slot to detect when tabs are added.
+    this.setupTabListSlotListener();
+
+    this.updateTabSelection();
+  };
+
+  private _tabListSlotListenerSetup = false;
+
+  /**
+   * Sets up a slotchange listener on ct-tab-list's internal slot.
+   * This is necessary because ct-tab elements are slotted into ct-tab-list,
+   * not directly into ct-tabs. Without this listener, we wouldn't know when
+   * tabs are actually added to the DOM.
+   */
+  private setupTabListSlotListener(): void {
+    if (this._tabListSlotListenerSetup) return;
+
+    const tabList = this.querySelector("ct-tab-list") as
+      | (Element & { updateComplete?: Promise<boolean> })
+      | null;
+    if (!tabList) return;
+
+    // Wait for ct-tab-list to have its shadow DOM ready
+    const tabListSlot = tabList.shadowRoot?.querySelector("slot");
+    if (!tabListSlot) {
+      // ct-tab-list hasn't rendered yet, retry after it updates
+      tabList.updateComplete?.then(() => {
+        this.setupTabListSlotListener();
+      });
+      return;
+    }
+
+    this._tabListSlotListenerSetup = true;
+
+    tabListSlot.addEventListener("slotchange", () => {
+      this.updateTabSelection();
+    });
+
+    // Check if tabs are already present (slotchange may have already fired)
+    if (tabListSlot.assignedElements().length > 0) {
+      this.updateTabSelection();
+    }
   }
 
   private handleTabClick = (event: CustomEvent<{ tab: Element }>) => {
@@ -300,9 +383,10 @@ export class CTTabs extends BaseElement {
   selectFirst(): void {
     const tabs = this.getTabs();
     // Use property access instead of getAttribute because JSX sets properties
-    const firstEnabledTab = Array.from(tabs).find((tab) =>
-      !(tab as CTTab).disabled
+    const firstEnabledTab = Array.from(tabs).find(
+      (tab) => !(tab as CTTab).disabled,
     ) as CTTab | undefined;
+
     if (firstEnabledTab?.value) {
       this._cellController.setValue(firstEnabledTab.value);
     }

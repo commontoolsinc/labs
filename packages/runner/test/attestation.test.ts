@@ -4,6 +4,7 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { assert, unclaimed } from "@commontools/memory/fact";
 import * as Attestation from "../src/storage/transaction/attestation.ts";
+import type { INotFoundError } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("attestation test");
 const space = signer.did();
@@ -239,6 +240,56 @@ describe("Attestation Module", () => {
       );
     });
 
+    it("should fail when writing to array with leading-zero key", () => {
+      const source = {
+        address: {
+          id: "test:array-leading-zero",
+          type: "application/json",
+          path: [],
+        },
+        value: { items: ["a", "b", "c"] },
+      } as const;
+
+      // "01" looks numeric but is not a valid array index (leading zero)
+      const result = Attestation.write(source, {
+        id: "test:array-leading-zero",
+        type: "application/json",
+        path: ["items", "01"],
+      }, "value");
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.name).toBe("TypeMismatchError");
+      expect(result.error?.message).toContain("Cannot write property");
+      expect(result.error?.message).toContain(
+        "expected object but found array",
+      );
+    });
+
+    it("should fail when writing to array with index >= 2**31", () => {
+      const source = {
+        address: {
+          id: "test:array-huge-index",
+          type: "application/json",
+          path: [],
+        },
+        value: { items: ["a", "b", "c"] },
+      } as const;
+
+      // 4294967296 is 2**32, which exceeds the valid array index range
+      const result = Attestation.write(source, {
+        id: "test:array-huge-index",
+        type: "application/json",
+        path: ["items", "4294967296"],
+      }, "value");
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.name).toBe("TypeMismatchError");
+      expect(result.error?.message).toContain("Cannot write property");
+      expect(result.error?.message).toContain(
+        "expected object but found array",
+      );
+    });
+
     it("should fail when writing to array with string key (not 'length')", () => {
       const source = {
         address: {
@@ -315,6 +366,58 @@ describe("Attestation Module", () => {
 
       // Original source should be unmodified
       expect(source.value.modified.target).toBe("old");
+    });
+
+    it("should set NotFoundError.path to last valid parent for writes to non-existent nested path", () => {
+      // Source has { user: { name: "Alice" } } - no "settings" key
+      const source = {
+        address: {
+          id: "test:notfound-path",
+          type: "application/json",
+          path: [],
+        },
+        value: { user: { name: "Alice" } },
+      } as const;
+
+      // Try to write to ["user", "settings", "theme"] - "settings" doesn't exist
+      const result = Attestation.write(source, {
+        id: "test:notfound-path",
+        type: "application/json",
+        path: ["user", "settings", "theme"],
+      }, "dark");
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.name).toBe("NotFoundError");
+      // The path includes the non-existent key: ["user", "settings"]
+      // (consistent with read error semantics)
+      expect((result.error as INotFoundError).path).toEqual([
+        "user",
+        "settings",
+      ]);
+    });
+
+    it("should set NotFoundError.path to empty array when document does not exist (write)", () => {
+      // Document doesn't exist at all (value is undefined at root)
+      const source = {
+        address: {
+          id: "test:doc-not-found-write",
+          type: "application/json",
+          path: [],
+        },
+        value: undefined,
+      } as const;
+
+      // Try to write a nested path on non-existent document
+      const result = Attestation.write(source, {
+        id: "test:doc-not-found-write",
+        type: "application/json",
+        path: ["foo", "bar"],
+      }, "value");
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.name).toBe("NotFoundError");
+      // When document doesn't exist, path is [] (consistent with reads)
+      expect((result.error as INotFoundError).path).toEqual([]);
     });
   });
 
@@ -651,6 +754,57 @@ describe("Attestation Module", () => {
       expect(result.error).toBeDefined();
       expect(result.error?.name).toBe("NotFoundError");
     });
+
+    it("should set NotFoundError.path to empty array when document does not exist (read)", () => {
+      // Document doesn't exist at all (value is undefined at root)
+      const source = {
+        address: {
+          id: "test:doc-not-found-read",
+          type: "application/json",
+          path: [],
+        },
+        value: undefined,
+      } as const;
+
+      // Try to read a nested path on non-existent document
+      const result = Attestation.read(source, {
+        id: "test:doc-not-found-read",
+        type: "application/json",
+        path: ["foo", "bar"],
+      });
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.name).toBe("NotFoundError");
+      // When document doesn't exist, path is [] (consistent with writes)
+      expect((result.error as INotFoundError).path).toEqual([]);
+    });
+
+    it("should set NotFoundError.path to path of non-existent key for reads", () => {
+      // Source has { user: { name: "Alice" } } - no "settings" key
+      const source = {
+        address: {
+          id: "test:notfound-read-path",
+          type: "application/json",
+          path: [],
+        },
+        value: { user: { name: "Alice" } },
+      } as const;
+
+      // Try to read ["user", "settings", "theme"] - "settings" doesn't exist
+      const result = Attestation.read(source, {
+        id: "test:notfound-read-path",
+        type: "application/json",
+        path: ["user", "settings", "theme"],
+      });
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.name).toBe("NotFoundError");
+      // The path includes the non-existent key: ["user", "settings"]
+      expect((result.error as INotFoundError).path).toEqual([
+        "user",
+        "settings",
+      ]);
+    });
   });
 
   describe("attest function", () => {
@@ -890,12 +1044,13 @@ describe("Attestation Module", () => {
           path: ["data", "property"],
         } as const;
 
-        const error = Attestation.NotFound(source, address);
+        const error = Attestation.NotFound(source, address, ["data"]);
 
         expect(error.name).toBe("NotFoundError");
         expect(error.message).toBe(
           "Cannot access path [data, property] - path does not exist",
         );
+        expect(error.path).toEqual(["data"]);
         expect(error.source).toBe(source);
         expect(error.address).toBe(address);
       });
@@ -911,7 +1066,7 @@ describe("Attestation Module", () => {
           path: ["property"],
         } as const;
 
-        const error = Attestation.NotFound(source, address);
+        const error = Attestation.NotFound(source, address, []);
         const withSpace = error.from(space);
 
         // NotFound error now returns the same instance from .from()
@@ -919,6 +1074,7 @@ describe("Attestation Module", () => {
         expect(withSpace.message).toBe(
           "Cannot access path [property] - path does not exist",
         );
+        expect(error.path).toEqual([]);
       });
     });
 

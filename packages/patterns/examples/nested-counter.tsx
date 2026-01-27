@@ -1,30 +1,68 @@
 /// <cts-enable />
-import { computed, Default, NAME, pattern, UI } from "commontools";
-import { decrement, increment, nth, previous } from "../counter-handlers.ts";
+import {
+  computed,
+  Default,
+  handler,
+  NAME,
+  pattern,
+  UI,
+  Writable,
+} from "commontools";
 
-interface RecipeState {
-  value: Default<number, 0>;
+// ===== Types =====
+
+interface CounterInput {
+  value: Writable<Default<number, 0>>;
 }
 
-export const Counter = pattern<RecipeState>((state) => {
+// ===== Handlers at module scope =====
+
+const increment = handler<void, { value: Writable<number> }>(
+  (_, { value }) => {
+    value.set(value.get() + 1);
+  },
+);
+
+const decrement = handler<void, { value: Writable<number> }>(
+  (_, { value }) => {
+    value.set(value.get() - 1);
+  },
+);
+
+// ===== Helper functions =====
+
+function ordinal(n: number): string {
+  const num = n ?? 0;
+  if (num === 1) return "1st";
+  if (num === 2) return "2nd";
+  if (num === 3) return "3rd";
+  return `${num}th`;
+}
+
+// ===== Counter Pattern =====
+
+export const Counter = pattern<CounterInput>((state) => {
+  // Bind handlers with context
+  const boundIncrement = increment({ value: state.value });
+  const boundDecrement = decrement({ value: state.value });
+
+  // Computed value for ordinal display
+  const ordinalDisplay = computed(() => ordinal(state.value.get()));
+  const prevValue = computed(() => state.value.get() - 1);
+  const nextValue = computed(() => state.value.get() + 1);
+
   return {
-    // computed() is used to create reactive derived values
     [NAME]: computed(() => `Simple counter: ${state.value}`),
     [UI]: (
       <div>
-        {
-          /* Even though we could end up passing extra data to decrement, our schema prevents that actually reaching the handler.
-          In fact, we are passing `value` as an OpaqueRef<number> here but it becomes a Writable<number> at invocation time */
-        }
-        <ct-button onClick={decrement(state)}>
-          dec to {previous(state.value)}
+        <ct-button onClick={() => boundDecrement.send()}>
+          dec to {prevValue}
         </ct-button>
         <span id="counter-result">
-          {/* <cts-enable /> transforms pure functions (like nth) into the `derive(c, nth)` equivalent */}
-          Counter is the {nth(state.value)} number
+          Counter is the {ordinalDisplay} number
         </span>
-        <ct-button onClick={increment({ value: state.value })}>
-          inc to {state.value + 1}
+        <ct-button onClick={() => boundIncrement.send()}>
+          inc to {nextValue}
         </ct-button>
       </div>
     ),
@@ -32,11 +70,14 @@ export const Counter = pattern<RecipeState>((state) => {
   };
 });
 
+// ===== Nested Counter Pattern =====
 /*
-This demonstrates a pattern of passing a Cell to a sub-pattern and keeping the value in sync between all locations.
-It also demonstrates that any pattern can be invoked using JSX syntax.
+This demonstrates a pattern of passing a Cell to a sub-pattern and keeping
+the value in sync between all locations. It also demonstrates that any
+pattern can be invoked using JSX syntax.
 */
-export default pattern<RecipeState>((state) => {
+
+export default pattern<CounterInput>((state) => {
   // A pattern can be 'invoked' directly
   const counter = Counter({ value: state.value });
 
@@ -44,8 +85,8 @@ export default pattern<RecipeState>((state) => {
     [NAME]: computed(() => `Double counter: ${state.value}`),
     [UI]: (
       <div>
-        {/* Patterns can also be 'invoked' via JSX*/}
-        {/* These methods of rendering are functionally equivalent, you may prefer the explicit case for non-UI patterns */}
+        {/* Patterns can also be 'invoked' via JSX */}
+        {/* These methods of rendering are functionally equivalent */}
         <Counter value={state.value} />
         {counter}
       </div>

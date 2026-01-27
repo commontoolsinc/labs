@@ -3,7 +3,7 @@ Simple patterns appear very similar to most popular UI frameworks.
 Two-way bindings can be declared (for compatible components) with a `$` prefix on their properties. Here is a list with bidirectional binding and inline handlers:
 
 ```tsx
-import { Cell, Default, NAME, pattern, UI, Writable, equals } from "commontools";
+import { Default, NAME, pattern, UI, Writable, equals } from "commontools";
 
 interface Item {
   title: string;

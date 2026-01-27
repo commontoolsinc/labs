@@ -1,9 +1,6 @@
 /// <cts-enable />
 import { computed, Default, NAME, pattern, UI, Writable } from "commontools";
 
-/** Wrap all fields of T in Writable<> for write access */
-type Cellify<T> = { [K in keyof T]: Writable<T[K]> };
-
 /** Raw data shape - use in collection patterns */
 export interface Contact {
   name: string;
@@ -16,7 +13,7 @@ export interface Contact {
 }
 
 interface Input {
-  contact: Cellify<Contact>;
+  contact: Writable<Contact>;
 }
 
 /** #contact #person */
@@ -26,11 +23,13 @@ interface Output {
 
 export default pattern<Input, Output>(({ contact }) => {
   return {
-    [NAME]: computed(() => `Contact: ${contact.name}`),
+    [NAME]: computed(() => `Contact: ${contact.get().name}`),
     [UI]: (
       <ct-screen>
         <ct-vstack slot="header">
-          <ct-heading level={4}>{contact.name || "New Contact"}</ct-heading>
+          <ct-heading level={4}>
+            {contact.get().name || "New Contact"}
+          </ct-heading>
         </ct-vstack>
 
         <ct-vscroll flex showScrollbar fadeEdges>
@@ -41,7 +40,10 @@ export default pattern<Input, Output>(({ contact }) => {
                   <label style="font-size: 0.75rem; font-weight: 500; color: var(--ct-color-gray-500);">
                     Name
                   </label>
-                  <ct-input $value={contact.name} placeholder="Full name" />
+                  <ct-input
+                    $value={contact.key("name")}
+                    placeholder="Full name"
+                  />
                 </ct-vstack>
 
                 <ct-vstack gap="1">
@@ -49,7 +51,7 @@ export default pattern<Input, Output>(({ contact }) => {
                     Email
                   </label>
                   <ct-input
-                    $value={contact.email}
+                    $value={contact.key("email")}
                     placeholder="email@example.com"
                     type="email"
                   />
@@ -60,7 +62,7 @@ export default pattern<Input, Output>(({ contact }) => {
                     Phone
                   </label>
                   <ct-input
-                    $value={contact.phone}
+                    $value={contact.key("phone")}
                     placeholder="+1 (555) 123-4567"
                     type="tel"
                   />
@@ -71,7 +73,7 @@ export default pattern<Input, Output>(({ contact }) => {
                     Company
                   </label>
                   <ct-input
-                    $value={contact.company}
+                    $value={contact.key("company")}
                     placeholder="Company name"
                   />
                 </ct-vstack>
@@ -84,7 +86,7 @@ export default pattern<Input, Output>(({ contact }) => {
                   Notes
                 </label>
                 <ct-textarea
-                  $value={contact.notes}
+                  $value={contact.key("notes")}
                   placeholder="Add notes about this contact..."
                   rows={6}
                 />

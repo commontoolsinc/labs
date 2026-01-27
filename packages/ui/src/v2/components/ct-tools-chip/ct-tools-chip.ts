@@ -2,6 +2,8 @@ import { css, html, nothing, render } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { consume } from "@lit/context";
+import { type CellHandle, type JSONSchema } from "@commontools/runtime-client";
+import { createCellController } from "../../core/cell-controller.ts";
 import {
   applyThemeToElement,
   type CTTheme,
@@ -19,12 +21,19 @@ import {
  * @attr {boolean} open-on-hover - Open the panel on hover/focus (default).
  * @attr {boolean} toggle-on-click - Toggle the panel on click/tap (default).
  *
- * @prop {ToolsChipTool[]} tools - Array of tools to display in the panel.
+ * @prop {CellHandle<ToolsChipTool[]|ToolsRecord>|ToolsChipTool[]|ToolsRecord} tools -
+ *   Array or record of tools to display in the panel. Supports CellHandle for
+ *   reactive updates when tools change.
  *
  * @slot - Optional slot to override the chip label content.
  *
  * @example
- * <ct-tools-chip .tools=${tools} label="Workspace" />
+ * // With plain array
+ * <ct-tools-chip tools=${tools} label="Workspace" />
+ *
+ * @example
+ * // With CellHandle for reactive updates
+ * <ct-tools-chip $tools=${toolsCell} label="Workspace" />
  */
 export type ToolsChipTool = {
   name: string;
@@ -40,7 +49,68 @@ export type ToolsRecord = Record<
   | Record<string, unknown>
 >;
 
+// Union type for tools input
+type ToolsInput = ToolsChipTool[] | ToolsRecord;
+
+// JSON Schema for tools array (used when binding CellHandle)
+const ToolsArraySchema = {
+  anyOf: [
+    {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          description: { type: "string" },
+          schema: {
+            type: "object",
+            properties: { "description": { type: "string" } },
+          },
+        },
+        required: ["name"],
+      },
+    },
+    {
+      type: "object",
+      additionalProperties: {
+        type: "object",
+        properties: {
+          description: { type: "string" },
+          handler: {
+            type: "object",
+            properties: {
+              "description": { type: "string" },
+              "argumentSchema": {
+                type: "object",
+                properties: { "description": { type: "string" } },
+              },
+            },
+          },
+          pattern: {
+            type: "object",
+            properties: {
+              "description": { type: "string" },
+              "argumentSchema": {
+                type: "object",
+                properties: { "description": { type: "string" } },
+              },
+            },
+          },
+        },
+      },
+    },
+  ],
+} as const satisfies JSONSchema;
+
 export class CTToolsChip extends BaseElement {
+  /* ---------- Cell controller for tools binding ---------- */
+  private _cellController = createCellController<ToolsInput>(this, {
+    timing: { strategy: "immediate" },
+    onChange: () => {
+      this.requestUpdate();
+    },
+  });
+
   static override styles = [
     BaseElement.baseStyles,
     css`
@@ -224,9 +294,13 @@ export class CTToolsChip extends BaseElement {
       declare toggleOnClick: boolean;
       /** Current open state. Reflected to attribute. */
       declare open: boolean;
-      /** Tools array shown in the panel. */
+      /** Tools array shown in the panel. Accepts array, record, or CellHandle. */
       @property({ attribute: false })
-      declare tools: ToolsChipTool[] | ToolsRecord | undefined;
+      declare tools:
+        | CellHandle<ToolsInput>
+        | ToolsChipTool[]
+        | ToolsRecord
+        | undefined;
       /** Delay in ms before closing on hover-out. */
       declare closeDelay: number;
 
@@ -280,6 +354,22 @@ export class CTToolsChip extends BaseElement {
         globalThis.removeEventListener("scroll", this.#onWindowChange, true);
         this.#unmountOverlay();
         if (this.#closeTimer) globalThis.clearTimeout(this.#closeTimer);
+      }
+
+      override firstUpdated(changedProperties: Map<string, unknown>): void {
+        super.firstUpdated(changedProperties);
+        // Initialize cell controller binding
+        if (this.tools !== undefined) {
+          this._cellController.bind(this.tools, ToolsArraySchema);
+        }
+      }
+
+      override willUpdate(changedProperties: Map<string, unknown>): void {
+        super.willUpdate(changedProperties);
+        // If the tools property itself changed (e.g., switched to a different cell)
+        if (changedProperties.has("tools") && this.tools !== undefined) {
+          this._cellController.bind(this.tools, ToolsArraySchema);
+        }
       }
 
       #onKeyDown = (e: KeyboardEvent) => {
@@ -380,8 +470,13 @@ export class CTToolsChip extends BaseElement {
 
       // Normalize incoming tools (array or native record) to display-friendly
       // objects with name/description/schema.
+      // Get the resolved tools value (handles both CellHandle and plain values)
+      private get _toolsValue(): Readonly<ToolsInput> | undefined {
+        return this._cellController.getValue() ?? undefined;
+      }
+
       private _normalizedTools(): ToolsChipTool[] {
-        const t = this.tools;
+        const t = this._toolsValue;
         if (!t) return [];
         if (Array.isArray(t)) return t;
         const rec = t as ToolsRecord;
@@ -612,9 +707,10 @@ export class CTToolsChip extends BaseElement {
 
       override render() {
         const label = this.label || "Tools";
-        const count = Array.isArray(this.tools)
-          ? (this.tools?.length ?? 0)
-          : (this.tools ? Object.keys(this.tools as any).length : 0);
+        const tools = this._toolsValue;
+        const count = Array.isArray(tools)
+          ? (tools?.length ?? 0)
+          : (tools ? Object.keys(tools as object).length : 0);
 
         return html`
           <div

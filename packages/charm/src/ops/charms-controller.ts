@@ -71,9 +71,10 @@ export class CharmsController<T = unknown> {
     return new CharmController(this.#manager, cell);
   }
 
-  getAllCharms() {
+  async getAllCharms() {
     this.disposeCheck();
-    const charms = this.#manager.getCharms().get();
+    const charmsCell = await this.#manager.getCharms();
+    const charms = charmsCell.get();
     return charms.map((charm) => new CharmController(this.#manager, charm));
   }
 
@@ -136,6 +137,91 @@ export class CharmsController<T = unknown> {
 
   acl(): ACLManager {
     return new ACLManager(this.#manager.runtime, this.#manager.getSpace());
+  }
+
+  /**
+   * Recreates the default pattern from scratch.
+   * Stops and unlinks the existing default pattern, then creates a new one.
+   * This is useful for resetting the space's default pattern state.
+   *
+   * @returns The newly created default pattern charm
+   */
+  async recreateDefaultPattern(): Promise<CharmController<NameSchema>> {
+    this.disposeCheck();
+
+    // Stop and unlink the existing default pattern first (before any operations that might fail)
+    // We need to stop it to prevent resource leaks or duplicate behavior from the old pattern
+    // Access the space cell directly to get the pattern reference without running it
+    const spaceCellContents = this.#manager.getSpaceCellContents();
+    const defaultPatternRef = spaceCellContents.key("defaultPattern").get();
+    if (defaultPatternRef) {
+      // Stop the existing pattern (no-op if not running)
+      this.#manager.runtime.runner.stop(defaultPatternRef);
+    }
+    await this.#manager.unlinkDefaultPattern();
+
+    // Determine which pattern to use based on space type
+    const isHomeSpace =
+      this.#manager.getSpace() === this.#manager.runtime.userIdentityDID;
+
+    const patternConfig = isHomeSpace
+      ? {
+        name: "Home",
+        urlPath: "/api/patterns/system/home.tsx",
+        cause: `home-pattern-${Date.now()}`, // Unique cause to create new cell
+      }
+      : {
+        name: "DefaultCharmList",
+        urlPath: "/api/patterns/system/default-app.tsx",
+        cause: `space-root-${Date.now()}`, // Unique cause to create new cell
+      };
+
+    const patternUrl = new URL(
+      patternConfig.urlPath,
+      this.#manager.runtime.apiUrl,
+    );
+
+    // Load and compile the pattern
+    const program = await this.#manager.runtime.harness.resolve(
+      new HttpProgramResolver(patternUrl.href),
+    );
+    const recipe = await this.#manager.runtime.recipeManager.compileRecipe(
+      program,
+    );
+
+    // Create new charm cell
+    let charmCell: Cell<NameSchema>;
+
+    await this.#manager.runtime.editWithRetry((tx) => {
+      // Create charm cell within this transaction
+      charmCell = this.#manager.runtime.getCell<NameSchema>(
+        this.#manager.getSpace(),
+        patternConfig.cause,
+        nameSchema,
+        tx,
+      );
+
+      // Run pattern setup within same transaction
+      this.#manager.runtime.run(tx, recipe, {}, charmCell);
+
+      // Link as default pattern within same transaction
+      const spaceCellWithTx = this.#manager.getSpaceCellContents().withTx(tx);
+      const defaultPatternCell = spaceCellWithTx.key("defaultPattern");
+      defaultPatternCell.set(charmCell.withTx(tx));
+    });
+
+    // Fetch the final result
+    const finalPattern = await this.#manager.getDefaultPattern();
+    if (!finalPattern) {
+      throw new Error("Failed to create default pattern");
+    }
+
+    // Start the charm
+    await this.#manager.startCharm(finalPattern);
+    await this.#manager.runtime.idle();
+    await this.#manager.synced();
+
+    return new CharmController<NameSchema>(this.#manager, finalPattern);
   }
 
   /**
@@ -218,13 +304,6 @@ export class CharmsController<T = unknown> {
 
       // Run pattern setup within same transaction
       this.#manager.runtime.run(tx, recipe, {}, charmCell);
-
-      // Add to charms list within same transaction
-      const charmsCell = this.#manager.getCharms().withTx(tx);
-      const currentCharms = charmsCell.get();
-      if (!currentCharms.some((c) => c.equals(charmCell))) {
-        charmsCell.push(charmCell);
-      }
 
       // Link as default pattern within same transaction
       defaultPatternCell.set(charmCell.withTx(tx));

@@ -155,7 +155,7 @@ async function runCharm(data: RunData): Promise<void> {
     });
 
     // Check whether the charm is still active (in charms or pinned-charms)
-    const charmsEntryCell = manager.getActiveCharm(charmCell);
+    const charmsEntryCell = await manager.getActiveCharm(charmCell);
     if (charmsEntryCell === undefined) {
       // Skip any charms that aren't still in one of the lists
       throw new Error(`No charms list entry found for charm: ${charmId}`);

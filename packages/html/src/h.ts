@@ -1,4 +1,9 @@
-import { type HFunction, type RenderNode, type VNode } from "@commontools/api";
+import {
+  type HFunction,
+  type JSXElement,
+  type RenderNode,
+  type VNode,
+} from "@commontools/api";
 import { isCell, isCellResult } from "@commontools/runner";
 
 /**
@@ -11,14 +16,15 @@ const FRAGMENT_ELEMENT = "ct-fragment";
  * @param name - The element name or component function
  * @param props - Element properties
  * @param children - Child elements
- * @returns A virtual DOM node
+ * @returns A virtual DOM node or JSX element (for component functions)
  */
+// Implementation uses broader types than overloads - assertion needed for TS compatibility
 export const h: HFunction = Object.assign(
   function h(
-    name: string | ((...args: any[]) => VNode),
+    name: string | ((...args: any[]) => JSXElement),
     props: { [key: string]: any } | null,
     ...children: RenderNode[]
-  ): VNode {
+  ): JSXElement {
     if (typeof name === "function") {
       return name({
         ...(props ?? {}),
@@ -51,8 +57,8 @@ export const h: HFunction = Object.assign(
     }
   },
   {
-    fragment({ children }: { children: RenderNode[] }) {
+    fragment({ children }: { children: RenderNode[] }): VNode {
       return h(FRAGMENT_ELEMENT, null, ...children);
     },
   },
-);
+) as HFunction;

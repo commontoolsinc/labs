@@ -188,6 +188,7 @@ function handlerInternal<E, T>(
   stateSchema?: JSONSchema | { proxy: true },
   handler?: (event: E, props: T) => any,
 ): HandlerFactory<T, E> {
+  let writableProxy = false;
   if (typeof eventSchema === "function") {
     if (
       stateSchema && typeof stateSchema === "object" &&
@@ -195,6 +196,7 @@ function handlerInternal<E, T>(
     ) {
       handler = eventSchema;
       eventSchema = stateSchema = undefined;
+      writableProxy = true;
     } else {
       throw new Error(
         "Handler requires schemas or CTS transformer\n" +
@@ -236,6 +238,7 @@ function handlerInternal<E, T>(
     bind: (inputs: Opaque<StripCell<T>>) => factory(inputs),
     toJSON: () => moduleToJSON(module),
     ...(schema !== undefined && { argumentSchema: schema }),
+    ...(writableProxy && { writableProxy: true }),
   };
 
   const factory = Object.assign((props: Opaque<StripCell<T>>): Stream<E> => {

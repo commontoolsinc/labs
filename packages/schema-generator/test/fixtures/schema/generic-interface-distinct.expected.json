@@ -1,42 +1,55 @@
 {
-  "type": "object",
   "properties": {
     "first": {
-      "type": "object",
       "properties": {
         "data": {
           "type": "string"
         },
         "extraParams": {
-          "type": "object",
           "properties": {
             "alpha": {
               "type": "number"
             }
           },
-          "required": ["alpha"]
+          "required": [
+            "alpha"
+          ],
+          "type": "object"
         }
       },
-      "required": ["data", "extraParams"]
+      "required": [
+        "data",
+        "extraParams"
+      ],
+      "type": "object"
     },
     "second": {
-      "type": "object",
       "properties": {
         "data": {
           "type": "string"
         },
         "extraParams": {
-          "type": "object",
           "properties": {
             "beta": {
               "type": "string"
             }
           },
-          "required": ["beta"]
+          "required": [
+            "beta"
+          ],
+          "type": "object"
         }
       },
-      "required": ["data", "extraParams"]
+      "required": [
+        "data",
+        "extraParams"
+      ],
+      "type": "object"
     }
   },
-  "required": ["first", "second"]
+  "required": [
+    "first",
+    "second"
+  ],
+  "type": "object"
 }

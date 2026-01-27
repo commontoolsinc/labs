@@ -5,7 +5,7 @@
 ### 1. Check TypeScript Errors
 
 ```bash
-deno task ct dev pattern.tsx --no-run
+deno task ct check pattern.tsx --no-run
 ```
 
 Fix all type errors before deploying. Most issues are caught here.

@@ -9,6 +9,7 @@ import {
   UI,
   type VNode,
   wish,
+  Writable,
 } from "commontools";
 
 // Type for backlinks (same as note.tsx)
@@ -26,9 +27,51 @@ const handleBacklinkClick = (charm: MentionableCharm) => {
 
 // Handler for Edit button - go back to note editor (module scope)
 const goToEdit = handler<void, { sourceNote: any }>((_ev, { sourceNote }) => {
-  const noteRef = sourceNote?.get?.() ?? sourceNote;
-  if (noteRef) {
-    return navigateTo(noteRef);
+  console.log("goToEdit called, sourceNote:", sourceNote);
+  if (sourceNote) {
+    return navigateTo(sourceNote);
+  } else {
+    console.log("sourceNote is null/undefined, cannot navigate");
+  }
+});
+
+// Handler for checkbox toggle in markdown
+// Uses properly typed Writable<string> for content updates
+const handleCheckboxToggle = handler<
+  { detail: { index: number; checked: boolean } },
+  { content: Writable<string> }
+>((event, { content }) => {
+  const currentContent = content.get();
+  const { index, checked } = event.detail;
+
+  console.log("Toggling checkbox", {
+    index,
+    checked,
+    contentLength: currentContent.length,
+  });
+
+  // Find all checkbox patterns in the content
+  const checkboxPattern = /- \[([ xX])\]/g;
+  let match;
+  let currentIndex = 0;
+  let result = currentContent;
+
+  checkboxPattern.lastIndex = 0;
+
+  while ((match = checkboxPattern.exec(currentContent)) !== null) {
+    if (currentIndex === index) {
+      const newCheckbox = checked ? "- [x]" : "- [ ]";
+      result = currentContent.slice(0, match.index) +
+        newCheckbox +
+        currentContent.slice(match.index + match[0].length);
+      break;
+    }
+    currentIndex++;
+  }
+
+  if (result !== currentContent) {
+    content.set(result);
+    console.log("Updated content via Writable.set()");
   }
 });
 
@@ -45,6 +88,10 @@ interface Input {
     NoteData,
     { title: ""; content: ""; backlinks: []; noteId: "" }
   >;
+  /** Direct reference to source note for Edit navigation */
+  sourceNoteRef?: any;
+  /** Writable content cell for checkbox updates */
+  content?: Writable<string>;
 }
 
 interface Output {
@@ -58,7 +105,7 @@ interface Output {
   embeddedUI: VNode;
 }
 
-export default pattern<Input, Output>(({ note }) => {
+export default pattern<Input, Output>(({ note, sourceNoteRef, content }) => {
   const displayName = computed(() => {
     const title = note?.title || "Untitled";
     return `📖 ${title}`;
@@ -68,8 +115,9 @@ export default pattern<Input, Output>(({ note }) => {
 
   // Convert [[Name (id)]] wiki-links to markdown links [Name](/of:id)
   // ct-markdown will then convert these to clickable ct-cell-link components
+  // Use content prop if provided, otherwise fall back to note.content
   const processedContent = computed(() => {
-    const raw = note?.content || "";
+    const raw = content?.get?.() ?? note?.content ?? "";
     // Match [[Name (id)]] pattern and convert to [Name](/of:id)
     return raw.replace(
       /\[\[([^\]]*?)\s*\(([^)]+)\)\]\]/g,
@@ -77,20 +125,33 @@ export default pattern<Input, Output>(({ note }) => {
     );
   });
 
-  // Find source note by noteId using wish()
-  const { allCharms } = wish<{ allCharms: any[] }>("/");
+  // Get allCharms for noteId lookup fallback
+  const { allCharms } = wish<{ allCharms: any[] }>("#default");
+
+  // Use sourceNoteRef directly if provided, otherwise fall back to noteId lookup
   const sourceNote = computed(() => {
+    if (sourceNoteRef) {
+      console.log("Using sourceNoteRef directly");
+      return sourceNoteRef;
+    }
     const myNoteId = note?.noteId;
     if (!myNoteId) return null;
     return allCharms.find((charm: any) => charm?.noteId === myNoteId);
   });
+
+  // Bind checkbox toggle handler with properly typed Writable<string>
+  // Content is required for checkbox updates to work
+  const boundCheckboxToggle = handleCheckboxToggle({ content: content! });
 
   // Scrollable content with markdown + backlinks (for print support)
   const markdownViewer = (
     <ct-vscroll flex showScrollbar fadeEdges>
       <div style={{ padding: "1rem", minHeight: "100%" }}>
         {/* Markdown content with wiki-links converted to clickable links */}
-        <ct-markdown content={processedContent} />
+        <ct-markdown
+          content={processedContent}
+          onct-checkbox-change={boundCheckboxToggle}
+        />
 
         {/* Backlinks section - ct-chips at bottom */}
         <div

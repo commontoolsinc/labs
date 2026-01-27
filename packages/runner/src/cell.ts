@@ -60,7 +60,6 @@ import {
 import { toURI } from "./uri-utils.ts";
 import { createRef } from "./create-ref.ts";
 import {
-  type LegacyJSONCellLink,
   LINK_V1_TAG,
   type SigilLink,
   type SigilWriteRedirectLink,
@@ -158,6 +157,7 @@ declare module "@commontools/api" {
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
       tx?: IExtendedStorageTransaction,
+      writable?: boolean,
     ): CellResult<DeepKeyLookup<T, Path>>;
     getAsNormalizedFullLink(): NormalizedFullLink;
     getAsLink(
@@ -215,7 +215,7 @@ declare module "@commontools/api" {
     getAsOpaqueRefProxy(
       boundTarget?: (...args: unknown[]) => unknown,
     ): OpaqueRef<T>;
-    toJSON(): LegacyJSONCellLink | null;
+    toJSON(): SigilLink | null;
     runtime: Runtime;
     tx: IExtendedStorageTransaction | undefined;
     schema?: JSONSchema;
@@ -571,7 +571,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       options,
     );
     const elapsed = performance.now() - begin;
-    if (elapsed > 10) {
+    if (elapsed > 50) {
       logger.warn(
         `get >${Math.floor(elapsed - (elapsed % 10))}ms`,
         `get() took ${Math.floor(elapsed)}ms`,
@@ -1124,6 +1124,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Readonly<Path>,
     tx?: IExtendedStorageTransaction,
+    writable?: boolean,
   ): CellResult<DeepKeyLookup<T, Path>> {
     if (!this.synced) this.sync(); // No await, just kicking this off
     const subPath = path || [];
@@ -1134,6 +1135,8 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
         ...this.link,
         path: [...this.path, ...subPath.map((p) => p.toString())] as string[],
       },
+      0,
+      writable,
     );
   }
 
@@ -1480,23 +1483,14 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     });
   }
 
-  toJSON(): LegacyJSONCellLink | null {
+  toJSON(): SigilLink | null {
     // Return null when no link exists (cell hasn't been created yet)
     if (!this.hasFullLink()) {
       return null;
     }
 
-    // Otherwise return current Cell toJSON behavior
-    // Keep old format for backward compatibility
-    return {
-      cell: {
-        "/":
-          (this.link.id.startsWith("data:")
-            ? this.link.id
-            : fromURI(this.link.id)),
-      },
-      path: this.path as (string | number)[],
-    };
+    // Use sigil link format which includes space for cross-space references
+    return createSigilLinkFromParsedLink(this.link);
   }
 
   get value(): T {
@@ -1704,7 +1698,7 @@ function validateStaticData(value: unknown): void {
  * @param value - The value to add IDs to.
  * @returns The value with IDs added.
  */
-function recursivelyAddIDIfNeeded<T>(
+export function recursivelyAddIDIfNeeded<T>(
   value: T,
   frame: Frame | undefined,
   seen: Map<unknown, unknown> = new Map(),

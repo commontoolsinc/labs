@@ -12,7 +12,7 @@ import {
 } from "@commontools/runtime-client";
 import type { DID } from "@commontools/identity";
 import { runtimeContext, spaceContext } from "../../runtime-context.ts";
-import { navigate } from "@commontools/shell/shared";
+import { appViewToUrlPath, navigate } from "@commontools/shell/shared";
 
 /**
  * CTCellLink - Renders a link or cell as a clickable pill
@@ -109,9 +109,9 @@ export class CTCellLink extends BaseElement {
     }
   }
 
-  private _resolveCell() {
+  private async _resolveCell() {
     if (this.cell) {
-      this._resolvedCell = this.cell;
+      this._resolvedCell = await this.cell.resolveAsCell();
       return;
     }
 
@@ -124,9 +124,8 @@ export class CTCellLink extends BaseElement {
         if (!parsedLink.space) {
           throw new Error("Link missing space.");
         }
-        this._resolvedCell = this.runtime.getCellFromRef(
-          parsedLink as CellRef,
-        );
+        const cell = this.runtime.getCellFromRef(parsedLink as CellRef);
+        this._resolvedCell = await cell.resolveAsCell();
       } catch (e) {
         console.error("Failed to resolve link:", e);
         this._resolvedCell = undefined;
@@ -175,14 +174,28 @@ export class CTCellLink extends BaseElement {
     }
   }
 
-  private _handleClick(e: Event) {
+  private _handleClick(e: MouseEvent) {
     e.stopPropagation();
-    // @TODO(runtime-worker-refactor)
     if (this._resolvedCell) {
-      navigate({
+      if (this._resolvedCell.ref().path.length > 0) {
+        throw new Error(
+          "Attempted to navigate to a cell that isn't a root cell",
+        );
+      }
+
+      // TODO(runtime-worker-refactor):
+      const view = {
         spaceDid: this._resolvedCell.space(),
         charmId: this._resolvedCell.id(),
-      });
+      };
+
+      // Cmd (Mac) or Ctrl (Windows/Linux) opens in new tab
+      if (e.metaKey || e.ctrlKey) {
+        const url = appViewToUrlPath(view);
+        globalThis.open(url, "_blank");
+      } else {
+        navigate(view);
+      }
     }
   }
 

@@ -1,5 +1,4 @@
 {
-  "$ref": "#/$defs/SchemaRoot",
   "$defs": {
     "B": {
       "properties": {
@@ -34,5 +33,6 @@
       ],
       "type": "object"
     }
-  }
+  },
+  "$ref": "#/$defs/SchemaRoot"
 }

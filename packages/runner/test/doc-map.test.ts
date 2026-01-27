@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createRef, getEntityId } from "../src/create-ref.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { refer } from "@commontools/memory/reference";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
@@ -127,11 +128,13 @@ describe("cell-map", () => {
       );
       c.set({ value: 42 });
 
-      const expected = JSON.stringify({
-        cell: c.entityId,
-        path: [],
-      });
-      expect(JSON.stringify(c)).toEqual(expected);
+      // toJSON returns sigil format with space for cross-space resolution
+      const json = JSON.parse(JSON.stringify(c));
+      expect(json["/"]).toBeDefined();
+      expect(json["/"][LINK_V1_TAG]).toBeDefined();
+      expect(json["/"][LINK_V1_TAG].id).toContain(c.entityId!["/"].toString());
+      expect(json["/"][LINK_V1_TAG].path).toEqual([]);
+      expect(json["/"][LINK_V1_TAG].space).toEqual(space);
     });
   });
 });

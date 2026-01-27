@@ -5,6 +5,20 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { deepEqual } from "@commontools/utils/deep-equal";
+import {
+  largeStringA,
+  largeStringB,
+  largeStringC,
+  manySmallObjectsA,
+  manySmallObjectsB,
+  manySmallObjectsC,
+  manySmallObjectsD,
+  medianComplexityA,
+  medianComplexityB,
+  medianComplexityC,
+  medianComplexityD,
+} from "./bench-fixtures.ts";
 
 const signer = await Identity.fromPassphrase("bench storage");
 const space = signer.did();
@@ -856,5 +870,425 @@ Deno.bench(
 
     await runtime.dispose();
     await storageManager.close();
+  },
+);
+
+// ============================================================================
+// Realistic commit benchmarks - using "median complexity" data
+//
+// These measure commit performance with realistic Cell data, testing the
+// differential change detection (which now uses deepEqual).
+// ============================================================================
+
+Deno.bench(
+  "Realistic commit - equal values, no change (100x)",
+  { group: "realistic-commit" },
+  async (b) => {
+    const { runtime, storageManager, tx } = setup();
+
+    // Write 100 entities with medianComplexityA, then "update" with equal value
+    for (let i = 0; i < 100; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:realistic-eq-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        medianComplexityA,
+      );
+    }
+    // Commit first batch
+    await tx.commit();
+
+    // Start new transaction and write identical values
+    const tx2 = runtime.edit();
+    for (let i = 0; i < 100; i++) {
+      tx2.write(
+        {
+          space,
+          id: `test:realistic-eq-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        medianComplexityB, // identical to A
+      );
+    }
+
+    b.start();
+    await tx2.commit();
+    b.end();
+
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
+
+Deno.bench(
+  "Realistic commit - unequal late (100x)",
+  { group: "realistic-commit" },
+  async (b) => {
+    const { runtime, storageManager, tx } = setup();
+
+    // Write 100 entities with medianComplexityA
+    for (let i = 0; i < 100; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:realistic-late-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        medianComplexityA,
+      );
+    }
+    await tx.commit();
+
+    // Update with values that differ at end of structure
+    const tx2 = runtime.edit();
+    for (let i = 0; i < 100; i++) {
+      tx2.write(
+        {
+          space,
+          id: `test:realistic-late-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        medianComplexityC, // differs in items[4].done
+      );
+    }
+
+    b.start();
+    await tx2.commit();
+    b.end();
+
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
+
+Deno.bench(
+  "Realistic commit - unequal early (100x)",
+  { group: "realistic-commit" },
+  async (b) => {
+    const { runtime, storageManager, tx } = setup();
+
+    // Write 100 entities with medianComplexityA
+    for (let i = 0; i < 100; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:realistic-early-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        medianComplexityA,
+      );
+    }
+    await tx.commit();
+
+    // Update with values that differ at start of structure
+    const tx2 = runtime.edit();
+    for (let i = 0; i < 100; i++) {
+      tx2.write(
+        {
+          space,
+          id: `test:realistic-early-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        medianComplexityD, // differs in items[0].done
+      );
+    }
+
+    b.start();
+    await tx2.commit();
+    b.end();
+
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
+
+// ============================================================================
+// Realistic commit benchmarks with large strings (100k chars)
+//
+// This tests the case where deepEqual should clearly win: comparing large
+// strings. JSON.stringify must serialize both 100k strings every comparison,
+// while deepEqual just uses === on strings directly (no construction).
+// ============================================================================
+
+Deno.bench(
+  "Large string commit - equal values (50x)",
+  { group: "large-string-commit" },
+  async (b) => {
+    const { runtime, storageManager, tx } = setup();
+
+    // Write 50 entities with largeStringA (contains 100k string)
+    for (let i = 0; i < 50; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:large-eq-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        largeStringA,
+      );
+    }
+    await tx.commit();
+
+    // "Update" with identical values
+    const tx2 = runtime.edit();
+    for (let i = 0; i < 50; i++) {
+      tx2.write(
+        {
+          space,
+          id: `test:large-eq-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        largeStringB, // identical to A
+      );
+    }
+
+    b.start();
+    await tx2.commit();
+    b.end();
+
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
+
+Deno.bench(
+  "Large string commit - diff at end of string (50x)",
+  { group: "large-string-commit" },
+  async (b) => {
+    const { runtime, storageManager, tx } = setup();
+
+    // Write 50 entities with largeStringA
+    for (let i = 0; i < 50; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:large-diff-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        largeStringA,
+      );
+    }
+    await tx.commit();
+
+    // Update with values where 100k string differs only at last char
+    const tx2 = runtime.edit();
+    for (let i = 0; i < 50; i++) {
+      tx2.write(
+        {
+          space,
+          id: `test:large-diff-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        largeStringC, // 100k string differs at last character
+      );
+    }
+
+    b.start();
+    await tx2.commit();
+    b.end();
+
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
+
+// ============================================================================
+// Read invariant validation benchmarks (exercises attestation.claim())
+//
+// At commit time, each read invariant is validated via attestation.claim()
+// which compares expected vs actual values using JSON.stringify. This tests
+// the impact of that comparison with large string data.
+// ============================================================================
+
+Deno.bench(
+  "Read validation - large string, unchanged (50x)",
+  { group: "read-validation" },
+  async (b) => {
+    const { runtime, storageManager, tx } = setup();
+
+    // Write 50 entities with large strings
+    for (let i = 0; i < 50; i++) {
+      tx.write(
+        {
+          space,
+          id: `test:read-val-${i}`,
+          type: "application/json",
+          path: [],
+        },
+        largeStringA,
+      );
+    }
+    await tx.commit();
+
+    // New transaction: read all entities (creates read invariants)
+    const tx2 = runtime.edit();
+    for (let i = 0; i < 50; i++) {
+      tx2.read({
+        space,
+        id: `test:read-val-${i}`,
+        type: "application/json",
+        path: [],
+      });
+    }
+
+    // Commit validates each read invariant via attestation.claim()
+    b.start();
+    await tx2.commit();
+    b.end();
+
+    await runtime.dispose();
+    await storageManager.close();
+  },
+);
+
+// ============================================================================
+// Value comparison: JSON.stringify vs deepEqual
+//
+// These benchmarks compare the two approaches used for equality checking in
+// the storage layer. Uses shared "median complexity" fixtures defined at top.
+// ============================================================================
+
+Deno.bench(
+  "Compare - JSON.stringify, equal values (1000x)",
+  { group: "value-comparison" },
+  () => {
+    for (let i = 0; i < 1000; i++) {
+      const _result =
+        JSON.stringify(medianComplexityA) === JSON.stringify(medianComplexityB);
+    }
+  },
+);
+
+Deno.bench(
+  "Compare - deepEqual, equal values (1000x)",
+  { group: "value-comparison" },
+  () => {
+    for (let i = 0; i < 1000; i++) {
+      const _result = deepEqual(medianComplexityA, medianComplexityB);
+    }
+  },
+);
+
+Deno.bench(
+  "Compare - JSON.stringify, unequal late (1000x)",
+  { group: "value-comparison" },
+  () => {
+    for (let i = 0; i < 1000; i++) {
+      const _result =
+        JSON.stringify(medianComplexityA) === JSON.stringify(medianComplexityC);
+    }
+  },
+);
+
+Deno.bench(
+  "Compare - deepEqual, unequal late (1000x)",
+  { group: "value-comparison" },
+  () => {
+    for (let i = 0; i < 1000; i++) {
+      const _result = deepEqual(medianComplexityA, medianComplexityC);
+    }
+  },
+);
+
+Deno.bench(
+  "Compare - JSON.stringify, unequal early (1000x)",
+  { group: "value-comparison" },
+  () => {
+    for (let i = 0; i < 1000; i++) {
+      const _result =
+        JSON.stringify(medianComplexityA) === JSON.stringify(medianComplexityD);
+    }
+  },
+);
+
+Deno.bench(
+  "Compare - deepEqual, unequal early (1000x)",
+  { group: "value-comparison" },
+  () => {
+    for (let i = 0; i < 1000; i++) {
+      const _result = deepEqual(medianComplexityA, medianComplexityD);
+    }
+  },
+);
+
+// ============================================================================
+// Value comparison: JSON.stringify vs deepEqual (many small objects)
+//
+// Tests comparison performance on wide, shallow object graphs with many
+// properties spread across many small objects (4,500 properties total).
+// ============================================================================
+
+Deno.bench(
+  "Compare - JSON.stringify, many small objects equal (100x)",
+  { group: "value-comparison-small-objects" },
+  () => {
+    for (let i = 0; i < 100; i++) {
+      const _result = JSON.stringify(manySmallObjectsA) ===
+        JSON.stringify(manySmallObjectsB);
+    }
+  },
+);
+
+Deno.bench(
+  "Compare - deepEqual, many small objects equal (100x)",
+  { group: "value-comparison-small-objects" },
+  () => {
+    for (let i = 0; i < 100; i++) {
+      const _result = deepEqual(manySmallObjectsA, manySmallObjectsB);
+    }
+  },
+);
+
+Deno.bench(
+  "Compare - JSON.stringify, many small objects unequal late (100x)",
+  { group: "value-comparison-small-objects" },
+  () => {
+    for (let i = 0; i < 100; i++) {
+      const _result = JSON.stringify(manySmallObjectsA) ===
+        JSON.stringify(manySmallObjectsC);
+    }
+  },
+);
+
+Deno.bench(
+  "Compare - deepEqual, many small objects unequal late (100x)",
+  { group: "value-comparison-small-objects" },
+  () => {
+    for (let i = 0; i < 100; i++) {
+      const _result = deepEqual(manySmallObjectsA, manySmallObjectsC);
+    }
+  },
+);
+
+Deno.bench(
+  "Compare - JSON.stringify, many small objects unequal early (100x)",
+  { group: "value-comparison-small-objects" },
+  () => {
+    for (let i = 0; i < 100; i++) {
+      const _result = JSON.stringify(manySmallObjectsA) ===
+        JSON.stringify(manySmallObjectsD);
+    }
+  },
+);
+
+Deno.bench(
+  "Compare - deepEqual, many small objects unequal early (100x)",
+  { group: "value-comparison-small-objects" },
+  () => {
+    for (let i = 0; i < 100; i++) {
+      const _result = deepEqual(manySmallObjectsA, manySmallObjectsD);
+    }
   },
 );

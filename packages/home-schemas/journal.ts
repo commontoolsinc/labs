@@ -3,7 +3,8 @@
  * These define the structure of user's activity journal.
  */
 
-import type { JSONSchema, Schema } from "@commontools/api";
+import type { JSONSchema } from "@commontools/api";
+import type { Schema } from "@commontools/api/schema";
 
 /**
  * Journal entry event types - the significant events we track
@@ -44,11 +45,14 @@ export const journalEntrySchema = {
       enum: journalEventTypes as unknown as string[],
     },
     // Live cell reference (may update over time)
-    subject: { not: true, asCell: true },
+    // we use empty properties to validate, but avoid including children
+    subject: { type: "object", properties: {}, asCell: true },
     // Frozen snapshot at entry time
     snapshot: journalSnapshotSchema,
     // LLM-generated narrative prose
     narrative: { type: "string", default: "" },
+    // Flag to indicate narrative generation is pending
+    narrativePending: { type: "boolean", default: false },
     // Tags for filtering/searching
     tags: {
       type: "array",

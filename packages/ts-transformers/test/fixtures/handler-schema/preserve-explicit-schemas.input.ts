@@ -1,5 +1,6 @@
 /// <cts-enable />
 import { handler } from "commontools";
+import "commontools/schema";
 
 const eventSchema = {
   type: "object",

@@ -1,8 +1,9 @@
 /// <cts-enable />
-import { NAME, pattern, UI, wish } from "commontools";
+import { NAME, pattern, UI, VNode, wish } from "commontools";
 
 export default pattern<Record<string, never>>((_) => {
-  const wishResult = wish<{ content: string }>({ query: "#note" });
+  // bf: is this desirable to have to specify [UI] here if you want the UI
+  const wishResult = wish<{ content: string; [UI]: VNode }>({ query: "#note" });
 
   return {
     [NAME]: "Wish tester",
@@ -10,7 +11,7 @@ export default pattern<Record<string, never>>((_) => {
       <div>
         <pre>{wishResult.result.content}</pre>
         <hr />
-        {wishResult.$UI}
+        {wishResult.result}
       </div>
     ),
   };

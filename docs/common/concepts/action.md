@@ -5,10 +5,10 @@ Use `action()` to handle user events like button clicks, form submissions, and o
 ## Basic Usage
 
 ```tsx
-import { action, pattern, Cell, UI } from 'commontools';
+import { action, pattern, Writable, UI } from 'commontools';
 
 export default pattern(() => {
-  const count = Cell.of(0);
+  const count = Writable.of(0);
 
   // action() closes over `count` - no binding needed
   const increment = action(() => {
@@ -38,14 +38,14 @@ Actions are defined inside your pattern body and naturally close over any cells 
 When you need data from the event (like form input), the action receives it as a parameter:
 
 ```tsx
-const items = Cell.of<string[]>([]);
+const items = Writable.of<string[]>([]);
 
 const addItem = action((event: { title: string }) => {
   items.push(event.title);
 });
 
 // In JSX - pass data when calling
-<ct-button onClick={() => addItem({ title: "New Item" })}>
+<ct-button onClick={() => addItem.send({ title: "New Item" })}>
   Add Item
 </ct-button>
 ```
@@ -72,7 +72,7 @@ Use `action()` for most cases. Switch to `handler()` when you need to:
 
 ```tsx
 // If you need the SAME logic bound to DIFFERENT state:
-const increment = handler<void, { count: Cell<number> }>(
+const increment = handler<void, { count: Writable<number> }>(
   (_, { count }) => count.set(count.get() + 1)
 );
 

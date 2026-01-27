@@ -10,6 +10,9 @@
  * safely import schemas from here.
  */
 
+import { JSONSchema } from "@commontools/api";
+import { Schema } from "@commontools/api/schema";
+
 export {
   type FavoriteEntry,
   favoriteEntrySchema,
@@ -27,3 +30,11 @@ export {
   type JournalSnapshot,
   journalSnapshotSchema,
 } from "./journal.ts";
+
+export const objectStubSchema = {
+  type: "object",
+  properties: {},
+} as const satisfies JSONSchema;
+export type ObjectStub = Schema<typeof objectStubSchema>;
+
+export { type Home, homeSchema } from "./home.ts";

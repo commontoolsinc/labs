@@ -1,11 +1,11 @@
 ```tsx
-import { computed, Cell, UI, pattern } from 'commontools';
+import { computed, Writable, UI, pattern } from 'commontools';
 
 interface Item { title: string; }
 interface Input { items: Item[]; }
 
 export default pattern<Input>(({ items }) => {
-  const searchQuery = Cell.of("");
+  const searchQuery = Writable.of("");
 
   // Reactive filtered list
   const filteredItems = computed(() => {

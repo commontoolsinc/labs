@@ -1,4 +1,5 @@
 {
+  "description": "Root alias doc",
   "properties": {
     "id": {
       "description": "id",
@@ -8,6 +9,5 @@
   "required": [
     "id"
   ],
-  "description": "Root alias doc",
   "type": "object"
 }

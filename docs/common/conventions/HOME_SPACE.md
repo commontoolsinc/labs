@@ -79,8 +79,7 @@ const runtime = new Runtime({
 
 The home space requires special ACL handling since there's no separate space
 identity to delegate from. When `space === runtime.userIdentityDID`, the
-CharmManager detects this as a home space and uses `runtime.getHomeSpaceCell()`
-which applies the `homeSpaceCellSchema` for proper favorites support.
+CharmManager detects this as a home space and uses `runtime.getHomeSpaceCell()`.
 
 See `packages/charm/src/manager.ts` (home space detection) and
 `packages/runner/src/runtime.ts` `getHomeSpaceCell()` for implementation.

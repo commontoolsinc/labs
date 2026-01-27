@@ -5,6 +5,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./cache": "./src/cache.ts",
     "./defer": "./src/defer.ts",
     "./encoding": "./src/encoding.ts",
     "./env": "./src/env.ts",

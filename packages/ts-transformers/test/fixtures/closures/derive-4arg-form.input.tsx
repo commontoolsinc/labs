@@ -1,5 +1,6 @@
 /// <cts-enable />
 import { cell, derive, type JSONSchema } from "commontools";
+import "commontools/schema";
 
 export default function TestDerive() {
   const value = cell(10);

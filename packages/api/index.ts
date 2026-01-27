@@ -575,13 +575,11 @@ export interface ICreatable<C extends AnyBrandedCell<any>> {
 /**
  * Cells that can be resolved back to a Cell.
  * Only available on full Cell<T>, not on OpaqueCell or Stream.
+ * Note: Schema-typed overload available via "commontools/schema"
  */
 export interface IResolvable<T, C extends AnyBrandedCell<T>> {
   resolveAsCell(): C;
-  getArgumentCell<S extends JSONSchema = JSONSchema>(
-    schema?: S,
-  ): Cell<Schema<S>> | undefined;
-  getArgumentCell<U>(): Cell<U> | undefined;
+  getArgumentCell<U>(schema?: JSONSchema): Cell<U> | undefined;
 }
 
 /**
@@ -658,19 +656,6 @@ export interface CellTypeConstructor<
    * @returns A new cell
    */
   of<T>(value?: T, schema?: JSONSchema): Apply<Wrap, T>;
-
-  /**
-   * Create a cell with an initial/default value and a typed schema.
-   * Type is inferred from the schema.
-   *
-   * @param value - The initial/default value to set on the cell
-   * @param schema - JSON schema for the cell
-   * @returns A new cell with type derived from schema
-   */
-  of<S extends JSONSchema>(
-    value: Schema<S>,
-    schema: S,
-  ): Apply<Wrap, Schema<S>>;
 
   /**
    * Compare two cells or values for equality after resolving, i.e. after
@@ -927,6 +912,10 @@ type StripCellInner<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - i
  * Conceptually: T | AnyCell<T> at any nesting level, but we use OpaqueRef
  * for backward compatibility since it has the recursive proxy behavior that
  * allows property access (e.g., Opaque<{foo: string}> includes {foo: Opaque<string>}).
+ *
+ * Special cases for JSX:
+ * - Opaque<VNode> also accepts JSXElement
+ * - Opaque<UIRenderable> also accepts JSXElement (for .map() callbacks returning JSX)
  */
 export type Opaque<T> =
   | T
@@ -941,6 +930,10 @@ export type Opaque<T> =
   | ComparableCell<T>
   | ReadonlyCell<T>
   | WriteonlyCell<T>
+  // Special case: When T is VNode or UIRenderable (even with null/undefined),
+  // also accept JSXElement. Use NonNullable to handle VNode | undefined.
+  // Combined into single check to reduce type instantiation overhead.
+  | ([NonNullable<T>] extends [VNode | UIRenderable] ? JSXElement : never)
   | (T extends Array<infer U> ? Array<Opaque<U>>
     : T extends object ? { [K in keyof T]: Opaque<T[K]> }
     : T);
@@ -1385,7 +1378,7 @@ export interface BuiltInCompileAndRunState<T> {
 }
 
 // Function type definitions
-export type PatternFunction = {
+export interface PatternFunction {
   // Primary overload: T and R inferred from function
   <T, R>(
     fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
@@ -1397,21 +1390,10 @@ export type PatternFunction = {
   <T>(
     fn: (input: OpaqueRef<Required<T>> & { [SELF]: never }) => any,
   ): RecipeFactory<StripCell<T>, any>;
-
-  // Schema-based overload with explicit argument and result schemas
-  <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
-    fn: (
-      input: OpaqueRef<Required<Schema<IS>>> & {
-        [SELF]: OpaqueRef<Schema<OS>>;
-      },
-    ) => Opaque<Schema<OS>>,
-    argumentSchema: IS,
-    resultSchema: OS,
-  ): RecipeFactory<SchemaWithoutCell<IS>, SchemaWithoutCell<OS>>;
-};
+}
 
 /** @deprecated Use pattern() instead */
-export type RecipeFunction = {
+export interface RecipeFunction {
   // Function-only overload
   <T, R>(
     fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> }) => Opaque<R>,
@@ -1420,34 +1402,6 @@ export type RecipeFunction = {
   <T>(
     fn: (input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<any> }) => any,
   ): RecipeFactory<StripCell<T>, StripCell<ReturnType<typeof fn>>>;
-
-  <S extends JSONSchema>(
-    argumentSchema: S,
-    fn: (
-      input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
-        [SELF]: OpaqueRef<any>;
-      },
-    ) => any,
-  ): RecipeFactory<SchemaWithoutCell<S>, StripCell<ReturnType<typeof fn>>>;
-
-  <S extends JSONSchema, R>(
-    argumentSchema: S,
-    fn: (
-      input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
-        [SELF]: OpaqueRef<R>;
-      },
-    ) => Opaque<R>,
-  ): RecipeFactory<SchemaWithoutCell<S>, StripCell<R>>;
-
-  <S extends JSONSchema, RS extends JSONSchema>(
-    argumentSchema: S,
-    resultSchema: RS,
-    fn: (
-      input: OpaqueRef<Required<SchemaWithoutCell<S>>> & {
-        [SELF]: OpaqueRef<SchemaWithoutCell<RS>>;
-      },
-    ) => Opaque<SchemaWithoutCell<RS>>,
-  ): RecipeFactory<SchemaWithoutCell<S>, SchemaWithoutCell<RS>>;
 
   <T>(
     argumentSchema: string | JSONSchema,
@@ -1468,7 +1422,7 @@ export type RecipeFunction = {
       input: OpaqueRef<Required<T>> & { [SELF]: OpaqueRef<R> },
     ) => Opaque<R>,
   ): RecipeFactory<StripCell<T>, StripCell<R>>;
-};
+}
 
 /**
  * Result of patternTool() - an LLM tool definition with a pattern and optional pre-filled params.
@@ -1488,13 +1442,7 @@ export type PatternToolFunction = <
   extraParams?: StripCell<E> extends Partial<T> ? Opaque<E> : never,
 ) => PatternToolResult<E>;
 
-export type LiftFunction = {
-  <T extends JSONSchema = JSONSchema, R extends JSONSchema = JSONSchema>(
-    argumentSchema: T,
-    resultSchema: R,
-    implementation: (input: Schema<T>) => Schema<R>,
-  ): ModuleFactory<SchemaWithoutCell<T>, SchemaWithoutCell<R>>;
-
+export interface LiftFunction {
   <T, R>(
     implementation: (input: T) => R,
   ): ModuleFactory<StripCell<T>, StripCell<R>>;
@@ -1512,7 +1460,7 @@ export type LiftFunction = {
     resultSchema?: JSONSchema,
     implementation?: (input: T) => R,
   ): ModuleFactory<StripCell<T>, StripCell<R>>;
-};
+}
 
 // Helper type to make non-Cell and non-Stream properties readonly in handler state
 export type HandlerState<T> = T extends Cell<any> ? T
@@ -1521,15 +1469,7 @@ export type HandlerState<T> = T extends Cell<any> ? T
   : T extends object ? { readonly [K in keyof T]: HandlerState<T[K]> }
   : T;
 
-export type HandlerFunction = {
-  // With schemas
-
-  <E extends JSONSchema = JSONSchema, T extends JSONSchema = JSONSchema>(
-    eventSchema: E,
-    stateSchema: T,
-    handler: (event: Schema<E>, props: Schema<T>) => any,
-  ): HandlerFactory<SchemaWithoutCell<T>, SchemaWithoutCell<E>>;
-
+export interface HandlerFunction {
   // With inferred types
   <E, T>(
     eventSchema: JSONSchema,
@@ -1546,7 +1486,7 @@ export type HandlerFunction = {
   <E, T>(
     handler: (event: E, props: HandlerState<T>) => any,
   ): HandlerFactory<T, E>;
-};
+}
 
 /**
  * ActionFunction creates a handler that doesn't use the state parameter.
@@ -1559,6 +1499,9 @@ export type HandlerFunction = {
  * computed(() => expr) becomes derive({}, () => expr) with closure extraction.
  */
 export type ActionFunction = {
+  // Overload 1: Zero-parameter callback returns Stream<void>
+  (fn: () => void): Stream<void>;
+  // Overload 2: Parameterized callback returns Stream<T>
   <T>(fn: (event: T) => void): Stream<T>;
 };
 
@@ -1567,33 +1510,21 @@ export type ActionFunction = {
  *
  * Special overload ordering is critical for correct type inference:
  *
- * 1. Schema-based overload: For explicit schema definitions
- * 2. Boolean literal overload: Widens `OpaqueRef<true> | OpaqueRef<false>` to `boolean`
+ * 1. Boolean literal overload: Widens `OpaqueRef<true> | OpaqueRef<false>` to `boolean`
  *    - Required because TypeScript infers boolean cells as a union of literal types
  *    - Without this, the callback would get `true | false` instead of `boolean`
- * 3. Cell preservation overload: Keeps Cell types wrapped consistently
+ * 2. Cell preservation overload: Keeps Cell types wrapped consistently
  *    - Prevents unwrapping of Cell<T> to T, maintaining consistent behavior
  *    - Whether Cell is passed directly or nested in objects, it stays wrapped
  *    - Example: derive(cell<number>(), (c) => ...) gives c: Cell<number>, not number
- * 4. Generic overload: Handles all other cases, unwrapping Opaque types
+ * 3. Generic overload: Handles all other cases, unwrapping Opaque types
+ *
+ * Note: Schema-based overload is available when importing from "commontools/schema"
  *
  * @deprecated Use compute() instead
  */
-export type DeriveFunction = {
-  // Overload 1: Schema-based derive with explicit input/output schemas
-  <
-    InputSchema extends JSONSchema = JSONSchema,
-    ResultSchema extends JSONSchema = JSONSchema,
-  >(
-    argumentSchema: InputSchema,
-    resultSchema: ResultSchema,
-    input: Opaque<SchemaWithoutCell<InputSchema>>,
-    f: (
-      input: Schema<InputSchema>,
-    ) => Schema<ResultSchema>,
-  ): OpaqueRef<SchemaWithoutCell<ResultSchema>>;
-
-  // Overload 2: Boolean literal union -> boolean
+export interface DeriveFunction {
+  // Overload 1: Boolean literal union -> boolean
   // Fixes: cell<boolean>() returns OpaqueRef<true> | OpaqueRef<false>
   // Without this, callback gets (input: true | false) instead of (input: boolean)
   <In extends boolean, Out>(
@@ -1601,7 +1532,7 @@ export type DeriveFunction = {
     f: (input: In) => Out,
   ): OpaqueRef<Out>;
 
-  // Overload 3: Preserve Cell types - unwrap OpaqueRef layers but keep Cell
+  // Overload 2: Preserve Cell types - unwrap OpaqueRef layers but keep Cell
   // Ensures consistent behavior: Cell<T> stays Cell<T> whether passed directly or in objects
   // Handles: Cell<T>, OpaqueRef<Cell<T>>, OpaqueRef<OpaqueRef<Cell<T>>>, etc.
   <In, Out>(
@@ -1609,12 +1540,12 @@ export type DeriveFunction = {
     f: (input: In) => Out,
   ): OpaqueRef<Out>;
 
-  // Overload 4: Generic fallback - unwraps all Opaque types
+  // Overload 3: Generic fallback - unwraps all Opaque types
   <In, Out>(
     input: Opaque<In>,
     f: (input: In) => Out,
   ): OpaqueRef<Out>;
-};
+}
 
 export type ComputedFunction = <T>(fn: () => T) => OpaqueRef<T>;
 
@@ -1720,20 +1651,12 @@ export type WishState<T> = {
 };
 
 export type NavigateToFunction = (cell: OpaqueRef<any>) => OpaqueRef<boolean>;
-export type WishFunction = {
+export interface WishFunction {
   <T = unknown>(target: Opaque<WishParams>): OpaqueRef<Required<WishState<T>>>;
-  <S extends JSONSchema = JSONSchema>(
-    target: Opaque<WishParams>,
-    schema: S,
-  ): OpaqueRef<Required<WishState<Schema<S>>>>;
 
   // TODO(seefeld): Remove old interface mid December 2025
   <T = unknown>(target: Opaque<string>): OpaqueRef<T>;
-  <S extends JSONSchema = JSONSchema>(
-    target: Opaque<string>,
-    schema: S,
-  ): OpaqueRef<Schema<S>>;
-};
+}
 
 export type CreateNodeFactoryFunction = <T = any, R = any>(
   moduleSpec: Module,
@@ -1747,11 +1670,24 @@ export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;
 
 // Internal-only helper to create VDOM nodes
 export type HFunction = {
+  // Overload for string element names - returns VNode
   (
-    name: string | ((...args: any[]) => VNode),
+    name: string,
     props: { [key: string]: any } | null,
     ...children: RenderNode[]
   ): VNode;
+  // Overload for function components - returns whatever the component returns
+  <R extends JSXElement>(
+    name: (props: any) => R,
+    props: { [key: string]: any } | null,
+    ...children: RenderNode[]
+  ): R;
+  // Union overload for when type is not narrowed (used by jsx-runtime)
+  (
+    name: string | ((props: any) => JSXElement),
+    props: { [key: string]: any } | null,
+    ...children: RenderNode[]
+  ): JSXElement;
   fragment({ children }: { children: RenderNode[] }): VNode;
 };
 
@@ -1825,269 +1761,6 @@ export declare const schema: SchemaFunction;
 export declare const toSchema: ToSchemaFunction;
 
 /**
- * Helper type to recursively remove `readonly` properties from type `T`.
- *
- * (Duplicated from @commontools/utils/types.ts, but we want to keep this
- * independent for now)
- */
-export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
-  : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
-  : T;
-
-// ===== JSON Pointer Path Resolution Utilities =====
-
-/**
- * Split a JSON Pointer reference into path segments.
- *
- * Examples:
- * - "#" -> []
- * - "#/$defs/Address" -> ["$defs", "Address"]
- * - "#/properties/name" -> ["properties", "name"]
- *
- * Note: Does not handle JSON Pointer escaping (~0, ~1) at type level.
- * Refs with ~ in keys will not work correctly in TypeScript types.
- */
-type SplitPath<S extends string> = S extends "#" ? []
-  : S extends `#/${infer Rest}` ? SplitPathSegments<Rest>
-  : never;
-
-type SplitPathSegments<S extends string> = S extends
-  `${infer First}/${infer Rest}` ? [First, ...SplitPathSegments<Rest>]
-  : [S];
-
-/**
- * Navigate through a schema following a path of keys.
- * Returns never if the path doesn't exist.
- */
-type NavigatePath<
-  Schema extends JSONSchema,
-  Path extends readonly string[],
-  Depth extends DepthLevel = 9,
-> = Depth extends 0 ? unknown
-  : Path extends readonly [
-    infer First extends string,
-    ...infer Rest extends string[],
-  ]
-    ? Schema extends Record<string, any>
-      ? First extends keyof Schema
-        ? NavigatePath<Schema[First], Rest, DecrementDepth<Depth>>
-      : never
-    : never
-  : Schema;
-
-/**
- * Resolve a $ref string to the target schema.
- *
- * Supports:
- * - "#" (self-reference to root)
- * - "#/path/to/def" (JSON Pointer within document)
- *
- * External refs (URLs) return any.
- */
-type ResolveRef<
-  RefString extends string,
-  Root extends JSONSchema,
-  Depth extends DepthLevel,
-> = RefString extends "#" ? Root
-  : RefString extends `#/${string}`
-    ? SplitPath<RefString> extends infer Path extends readonly string[]
-      ? NavigatePath<Root, Path, Depth>
-    : never
-  : any; // External ref
-
-/**
- * Merge two schemas, with left side taking precedence.
- * Used to apply ref site siblings to resolved target schema.
- */
-type MergeSchemas<
-  Left extends JSONSchema,
-  Right extends JSONSchema,
-> = Left extends boolean ? Left
-  : Right extends boolean ? Right extends true ? Left
-    : false
-  : {
-    [K in keyof Left | keyof Right]: K extends keyof Left ? Left[K]
-      : K extends keyof Right ? Right[K]
-      : never;
-  };
-
-type MergeRefSiteWithTargetGeneric<
-  RefSite extends JSONSchema,
-  Target extends JSONSchema,
-  Root extends JSONSchema,
-  Depth extends DepthLevel,
-  WrapCells extends boolean,
-> = RefSite extends { $ref: string }
-  ? MergeSchemas<Omit<RefSite, "$ref">, Target> extends
-    infer Merged extends JSONSchema
-    ? SchemaInner<Merged, Root, Depth, WrapCells>
-  : never
-  : never;
-
-type SchemaAnyOf<
-  Schemas extends readonly JSONSchema[],
-  Root extends JSONSchema,
-  Depth extends DepthLevel,
-  WrapCells extends boolean,
-> = {
-  [I in keyof Schemas]: Schemas[I] extends JSONSchema
-    ? SchemaInner<Schemas[I], Root, DecrementDepth<Depth>, WrapCells>
-    : never;
-}[number];
-
-type SchemaArrayItems<
-  Items,
-  Root extends JSONSchema,
-  Depth extends DepthLevel,
-  WrapCells extends boolean,
-> = Items extends JSONSchema
-  ? Array<SchemaInner<Items, Root, DecrementDepth<Depth>, WrapCells>>
-  : unknown[];
-
-type SchemaCore<
-  T extends JSONSchema,
-  Root extends JSONSchema,
-  Depth extends DepthLevel,
-  WrapCells extends boolean,
-> = T extends { $ref: "#" } ? SchemaInner<
-    Omit<Root, "asCell" | "asStream">,
-    Root,
-    DecrementDepth<Depth>,
-    WrapCells
-  >
-  : T extends { $ref: infer RefStr extends string }
-    ? MergeRefSiteWithTargetGeneric<
-      T,
-      ResolveRef<RefStr, Root, DecrementDepth<Depth>>,
-      Root,
-      DecrementDepth<Depth>,
-      WrapCells
-    >
-  : T extends { enum: infer E extends readonly any[] } ? E[number]
-  : T extends { anyOf: infer U extends readonly JSONSchema[] }
-    ? SchemaAnyOf<U, Root, Depth, WrapCells>
-  : T extends { type: "string" } ? string
-  : T extends { type: "number" | "integer" } ? number
-  : T extends { type: "boolean" } ? boolean
-  : T extends { type: "null" } ? null
-  : T extends { type: "array" }
-    ? T extends { items: infer I } ? SchemaArrayItems<I, Root, Depth, WrapCells>
-    : unknown[]
-  : T extends { type: "object" }
-    ? T extends { properties: infer P }
-      ? P extends Record<string, JSONSchema> ? ObjectFromProperties<
-          P,
-          T extends { required: readonly string[] } ? T["required"] : [],
-          Root,
-          Depth,
-          T extends { additionalProperties: infer AP extends JSONSchema } ? AP
-            : false,
-          GetDefaultKeys<T>,
-          WrapCells
-        >
-      : Record<string, unknown>
-    : T extends { additionalProperties: infer AP }
-      ? AP extends false ? Record<string | number | symbol, never>
-      : AP extends true ? Record<string | number | symbol, unknown>
-      : AP extends JSONSchema ? Record<
-          string | number | symbol,
-          SchemaInner<AP, Root, DecrementDepth<Depth>, WrapCells>
-        >
-      : Record<string | number | symbol, unknown>
-    : Record<string, unknown>
-  : any;
-
-type SchemaInner<
-  T extends JSONSchema,
-  Root extends JSONSchema = T,
-  Depth extends DepthLevel = 9,
-  WrapCells extends boolean = true,
-> = Depth extends 0 ? unknown
-  : T extends { asCell: true }
-    ? WrapCells extends true
-      ? Cell<SchemaInner<Omit<T, "asCell">, Root, Depth, WrapCells>>
-    : SchemaInner<Omit<T, "asCell">, Root, Depth, WrapCells>
-  : T extends { asStream: true }
-    ? WrapCells extends true
-      ? Stream<SchemaInner<Omit<T, "asStream">, Root, Depth, WrapCells>>
-    : SchemaInner<Omit<T, "asStream">, Root, Depth, WrapCells>
-  : SchemaCore<T, Root, Depth, WrapCells>;
-
-export type Schema<
-  T extends JSONSchema,
-  Root extends JSONSchema = T,
-  Depth extends DepthLevel = 9,
-> = SchemaInner<T, Root, Depth, true>;
-
-// Get keys from the default object
-type GetDefaultKeys<T extends JSONSchema> = T extends { default: infer D }
-  ? D extends Record<string, any> ? keyof D & string
-  : never
-  : never;
-
-// Helper type for building object types from properties
-type ObjectFromProperties<
-  P extends Record<string, JSONSchema>,
-  R extends readonly string[] | never,
-  Root extends JSONSchema,
-  Depth extends DepthLevel,
-  AP extends JSONSchema = false,
-  DK extends string = never,
-  WrapCells extends boolean = true,
-> =
-  & {
-    [
-      K in keyof P as K extends string ? K extends R[number] | DK ? K : never
-        : never
-    ]: SchemaInner<P[K], Root, DecrementDepth<Depth>, WrapCells>;
-  }
-  & {
-    [
-      K in keyof P as K extends string ? K extends R[number] | DK ? never : K
-        : never
-    ]?: SchemaInner<P[K], Root, DecrementDepth<Depth>, WrapCells>;
-  }
-  & (
-    AP extends false ? Record<never, never>
-      : AP extends true ? { [key: string]: unknown }
-      : AP extends JSONSchema ? {
-          [key: string]: SchemaInner<
-            AP,
-            Root,
-            DecrementDepth<Depth>,
-            WrapCells
-          >;
-        }
-      : Record<string | number | symbol, never>
-  );
-
-// Restrict Depth to these numeric literal types
-type DepthLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
-
-// Decrement map for recursion limit
-type Decrement = {
-  0: 0;
-  1: 0;
-  2: 1;
-  3: 2;
-  4: 3;
-  5: 4;
-  6: 5;
-  7: 6;
-  8: 7;
-  9: 8;
-};
-
-// Helper function to safely get decremented depth
-type DecrementDepth<D extends DepthLevel> = Decrement[D] & DepthLevel;
-
-export type SchemaWithoutCell<
-  T extends JSONSchema,
-  Root extends JSONSchema = T,
-  Depth extends DepthLevel = 9,
-> = SchemaInner<T, Root, Depth, false>;
-
-/**
  * Dynamic properties. Can either be string type (static) or a Mustache
  * variable (dynamic).
  */
@@ -2106,8 +1779,10 @@ export type Props = {
 /** A child in a view can be one of a few things */
 export type RenderNode =
   | InnerRenderNode
-  | AnyBrandedCell<InnerRenderNode>
-  | AnyBrandedCell<UIRenderable>
+  | JSXElement
+  | AnyBrandedCell<
+    InnerRenderNode | UIRenderable | JSXElement | null | undefined
+  >
   | Array<RenderNode>;
 
 type InnerRenderNode =
@@ -2119,9 +1794,18 @@ type InnerRenderNode =
   | null;
 
 /** An object that can be rendered via its [UI] property */
-type UIRenderable = {
+export type UIRenderable = {
   [UI]: VNode;
 };
+
+/**
+ * JSX element type - the result of a JSX expression.
+ * Can be a VNode, or a cell containing something with a [UI] property.
+ */
+export type JSXElement =
+  | VNode
+  | AnyBrandedCell<UIRenderable>
+  | OpaqueRef<UIRenderable>;
 
 /** A "virtual view node", e.g. a virtual DOM element */
 export type VNode = {

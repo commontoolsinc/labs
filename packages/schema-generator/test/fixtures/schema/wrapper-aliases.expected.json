@@ -1,49 +1,48 @@
 {
   "$defs": {
     "AnonymousType_1": {
-      "type": "array",
       "items": {
         "$ref": "#/$defs/RecursiveItem"
-      }
+      },
+      "type": "array"
     },
     "RecursiveItem": {
-      "type": "object",
       "properties": {
-        "name": {
-          "type": "string"
-        },
         "children": {
           "$ref": "#/$defs/AnonymousType_1"
+        },
+        "name": {
+          "type": "string"
         }
       },
       "required": [
         "name"
-      ]
+      ],
+      "type": "object"
     }
   },
-  "type": "object",
   "properties": {
-    "directDefault": {
-      "$ref": "#/$defs/AnonymousType_1",
-      "default": []
-    },
-    "directCell": {
+    "aliasedCell": {
       "$ref": "#/$defs/AnonymousType_1",
       "asCell": true
-    },
-    "directStream": {
-      "$ref": "#/$defs/AnonymousType_1",
-      "asStream": true
     },
     "aliasedDefault": {
       "$ref": "#/$defs/AnonymousType_1",
       "default": []
     },
-    "aliasedCell": {
+    "aliasedStream": {
+      "$ref": "#/$defs/AnonymousType_1",
+      "asStream": true
+    },
+    "directCell": {
       "$ref": "#/$defs/AnonymousType_1",
       "asCell": true
     },
-    "aliasedStream": {
+    "directDefault": {
+      "$ref": "#/$defs/AnonymousType_1",
+      "default": []
+    },
+    "directStream": {
       "$ref": "#/$defs/AnonymousType_1",
       "asStream": true
     }
@@ -55,5 +54,6 @@
     "directCell",
     "directDefault",
     "directStream"
-  ]
+  ],
+  "type": "object"
 }

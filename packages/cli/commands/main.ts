@@ -1,7 +1,7 @@
 import { Command } from "@cliffy/command";
 import { HelpCommand } from "@cliffy/command/help";
 import { acl } from "./acl.ts";
-import { dev } from "./dev.ts";
+import { check, dev } from "./dev.ts";
 import { init } from "./init.ts";
 import { charm } from "./charm.ts";
 import { identity } from "./identity.ts";
@@ -10,7 +10,7 @@ import { test } from "./test.ts";
 const mainDescription = `Tool for running programs on common fabric.
 
 QUICK START:
-  ct dev ./pattern.tsx              # Type-check and test locally
+  ct check ./pattern.tsx             # Type-check and test locally
   ct charm new ./pattern.tsx ...    # Deploy to a space
   ct charm --help                   # Help for deployed patterns (with tips)
 
@@ -44,6 +44,7 @@ export const main = new Command()
   .command("acl", acl)
   // @ts-ignore for the above type issue
   .command("charm", charm)
+  .command("check", check)
   .command("dev", dev)
   .command("id", identity)
   .command("init", init)

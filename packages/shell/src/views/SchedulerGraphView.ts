@@ -946,7 +946,7 @@ export class XSchedulerGraph extends LitElement {
   private triggeredNodes = new Map<string, number>(); // id -> timestamp
 
   @state()
-  private isPullMode = true;
+  private isPullMode = false;
 
   @state()
   private zoomLevel = 1.0;
@@ -1026,8 +1026,6 @@ export class XSchedulerGraph extends LitElement {
       this.layoutEdges = [];
       return;
     }
-
-    this.isPullMode = graphData.pullMode;
 
     // Build a map of all nodes and identify which are hidden due to collapsed parents
     const nodeMap = new Map(graphData.nodes.map((n) => [n.id, n]));
@@ -1331,8 +1329,8 @@ export class XSchedulerGraph extends LitElement {
     return inferredParents;
   }
 
-  private handleSnapshot(): void {
-    this.debuggerController?.requestGraphSnapshot();
+  private async handleSnapshot(): Promise<void> {
+    await this.debuggerController?.requestGraphSnapshot();
     this.requestUpdate();
   }
 
@@ -1354,26 +1352,15 @@ export class XSchedulerGraph extends LitElement {
     this.debuggerController?.setSchedulerBaselineStats(newBaseline);
   }
 
-  private handleModeToggle(pullMode: boolean): void {
+  private async handleModeToggle(pullMode: boolean): Promise<void> {
     const runtime = this.debuggerController?.getRuntime();
     if (!runtime) return;
 
     const rt = runtime.runtime();
     if (!rt) return;
 
-    // TODO(runtime-worker-refactor)
-    /*
-    if (pullMode) {
-      rt.scheduler.enablePullMode();
-    } else {
-      rt.scheduler.disablePullMode();
-    }
-    */
-
+    await rt.setPullMode(pullMode);
     this.isPullMode = pullMode;
-
-    // Request a new snapshot so the controller caches the updated pullMode value.
-    // Without this, toggling the debugger off/on would reset to the stale mode.
     this.debuggerController?.requestGraphSnapshot();
   }
 

@@ -2,6 +2,11 @@ import { refer } from "merkle-reference/json";
 import { getLogger } from "@commontools/utils/logger";
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import { vdomSchema } from "./schemas.ts";
+import type {
+  JSONValue,
+  StorableDatum,
+  StorableValue,
+} from "@commontools/memory/interface";
 import {
   type Frame,
   isModule,
@@ -9,7 +14,6 @@ import {
   isRecipe,
   isStreamValue,
   type JSONSchema,
-  type JSONValue,
   type Module,
   NAME,
   type NodeFactory,
@@ -34,7 +38,6 @@ import {
 } from "./recipe-binding.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
-  areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
   isCellLink,
   isSigilLink,
@@ -165,7 +168,7 @@ export class Runner {
       [TYPE]: string;
       spell?: SigilLink;
       argument?: T;
-      internal?: JSONValue;
+      internal?: StorableDatum;
       resultRef: SigilLink;
     };
 
@@ -280,10 +283,10 @@ export class Runner {
     const previousInternal = processCell.key("internal").getRaw({
       meta: ignoreReadForScheduling,
     });
-    const internal: JSONValue = Object.assign(
+    const internal: StorableDatum = Object.assign(
       {},
       cellAwareDeepCopy(
-        (defaults as unknown as { internal: JSONValue })?.internal,
+        (defaults as unknown as { internal: StorableDatum })?.internal,
       ),
       cellAwareDeepCopy(
         isRecord(recipe.initial) && isRecord(recipe.initial.internal)
@@ -308,6 +311,8 @@ export class Runner {
         ? resultCell.asSchema(recipe.resultSchema).getAsLink({
           base: processCell,
           includeSchema: true,
+          keepStreams: true,
+          keepAsCell: true,
         })
         : resultCell.getAsLink({
           base: processCell,
@@ -1022,7 +1027,7 @@ export class Runner {
    * @param value The value to search for recipes
    */
   private discoverAndCacheFunctionsFromValue(
-    value: JSONValue,
+    value: StorableValue,
     seen: Set<object>,
   ): void {
     if (isRecipe(value)) {
@@ -1046,7 +1051,7 @@ export class Runner {
 
     // Recursively search in objects and arrays
     if (Array.isArray(value)) {
-      for (const item of value as JSONValue[]) {
+      for (const item of value as StorableValue[]) {
         this.discoverAndCacheFunctionsFromValue(item, seen);
       }
       return;
@@ -1054,7 +1059,7 @@ export class Runner {
 
     for (const key in value as Record<string, any>) {
       this.discoverAndCacheFunctionsFromValue(
-        value[key] as JSONValue,
+        value[key] as StorableValue,
         seen,
       );
     }
@@ -1063,8 +1068,8 @@ export class Runner {
   private instantiateNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: JSONValue,
-    outputBindings: JSONValue,
+    inputBindings: StorableValue,
+    outputBindings: StorableValue,
     processCell: Cell<any>,
     addCancel: AddCancel,
     recipe: Recipe,
@@ -1141,8 +1146,8 @@ export class Runner {
   private instantiateJavaScriptNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: JSONValue,
-    outputBindings: JSONValue,
+    inputBindings: StorableValue,
+    outputBindings: StorableValue,
     processCell: Cell<any>,
     addCancel: AddCancel,
     recipe: Recipe,
@@ -1182,56 +1187,37 @@ export class Runner {
       fn = moduleWrappers[module.wrapper](fn);
     }
 
-    // Check if any of the read cells is a stream alias
+    // Check if $event is a stream alias
     let streamLink: NormalizedFullLink | undefined = undefined;
-    if (isRecord(inputs)) {
-      for (const key in inputs) {
-        let value = inputs[key];
-        while (isWriteRedirectLink(value)) {
-          const maybeStreamLink = resolveLink(
-            this.runtime,
-            tx,
-            parseLink(value, processCell),
-            "writeRedirect",
-          );
-          value = tx.readValueOrThrow(maybeStreamLink);
-        }
-        if (isStreamValue(value)) {
-          streamLink = parseLink(inputs[key], processCell);
-          break;
-        }
+    if (isRecord(inputs) && "$event" in inputs) {
+      let value: JSONValue | undefined = inputs.$event as JSONValue | undefined;
+      while (isWriteRedirectLink(value)) {
+        const maybeStreamLink = resolveLink(
+          this.runtime,
+          tx,
+          parseLink(value, processCell),
+          "writeRedirect",
+        );
+        value = tx.readValueOrThrow(maybeStreamLink);
+      }
+      if (isStreamValue(value)) {
+        streamLink = parseLink(inputs.$event, processCell);
       }
     }
 
     if (streamLink) {
-      // Helper to merge event into inputs
-      const mergeEventIntoInputs = (event: any) => {
-        const eventInputs = { ...(inputs as Record<string, any>) };
-        for (const key in eventInputs) {
-          if (isWriteRedirectLink(eventInputs[key])) {
-            const eventLink = parseLink(eventInputs[key], processCell);
-            if (areNormalizedLinksSame(eventLink, streamLink)) {
-              eventInputs[key] = event;
-            }
-          }
-        }
-        return eventInputs;
-      };
-
       // Register as event handler for the stream
       const handler = (tx: IExtendedStorageTransaction, event: any) => {
         // TODO(seefeld): Scheduler has to create the transaction instead
         if (event?.preventDefault) event.preventDefault();
-        const eventInputs = mergeEventIntoInputs(event);
-        const cause = { ...(inputs as Record<string, any>) };
-        for (const key in cause) {
-          if (isWriteRedirectLink(cause[key])) {
-            const eventLink = parseLink(cause[key], processCell);
-            if (areNormalizedLinksSame(eventLink, streamLink)) {
-              cause[key] = crypto.randomUUID();
-            }
-          }
-        }
+        const eventInputs = {
+          ...(inputs as Record<string, any>),
+          $event: event,
+        };
+        const cause = {
+          ...(inputs as Record<string, any>),
+          $event: crypto.randomUUID(),
+        };
 
         const frame = pushFrameFromCause(
           cause,
@@ -1239,7 +1225,7 @@ export class Runner {
             unsafe_binding: {
               recipe,
               materialize: (path: readonly PropertyKey[]) =>
-                processCell.getAsQueryResult(path),
+                processCell.getAsQueryResult(path, tx),
               space: processCell.space,
               tx,
             },
@@ -1369,8 +1355,10 @@ export class Runner {
       // This reads all cells the handler will access (from the argument schema and event).
       const populateDependencies = module.argumentSchema
         ? (depTx: IExtendedStorageTransaction, event: any) => {
-          // Merge event into inputs the same way the handler does
-          const eventInputs = mergeEventIntoInputs(event);
+          const eventInputs = {
+            ...(inputs as Record<string, any>),
+            $event: event,
+          };
           const inputsCell = this.runtime.getImmutableCell(
             processCell.space,
             eventInputs,
@@ -1581,8 +1569,8 @@ export class Runner {
   private instantiateRawNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: JSONValue,
-    outputBindings: JSONValue,
+    inputBindings: StorableValue,
+    outputBindings: StorableValue,
     processCell: Cell<any>,
     addCancel: AddCancel,
     recipe: Recipe,
@@ -1704,8 +1692,8 @@ export class Runner {
   private instantiatePassthroughNode(
     tx: IExtendedStorageTransaction,
     _module: Module,
-    inputBindings: JSONValue,
-    outputBindings: JSONValue,
+    inputBindings: StorableValue,
+    outputBindings: StorableValue,
     processCell: Cell<any>,
     _addCancel: AddCancel,
     _recipe: Recipe,
@@ -1718,8 +1706,8 @@ export class Runner {
   private instantiateRecipeNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: JSONValue,
-    outputBindings: JSONValue,
+    inputBindings: StorableValue,
+    outputBindings: StorableValue,
     processCell: Cell<any>,
     addCancel: AddCancel,
     _recipe: Recipe,
@@ -1897,7 +1885,7 @@ export function cellAwareDeepCopy<T = unknown>(value: T): Mutable<T> {
  */
 export function extractDefaultValues(
   schema: JSONSchema,
-): JSONValue | undefined {
+): StorableValue {
   if (typeof schema !== "object" || schema === null) return undefined;
 
   if (

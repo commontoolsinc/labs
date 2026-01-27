@@ -271,13 +271,20 @@ export function decodeJsonPointer(pointer: string): string[] {
     .map((token) => token.replace(/~1/g, "/").replace(/~0/g, "~"));
 }
 
-export const matchLLMFriendlyLink = new RegExp("^/[a-zA-Z0-9]+:");
+// Matches both standard links (/of:...) and cross-space links (/@did:...)
+export const matchLLMFriendlyLink = new RegExp("^/[@a-zA-Z0-9]+:");
+
+// Matches a space DID prefix in a link (/@did:key:z6Mk...)
+const matchSpacePrefix = new RegExp("^@(did:[^:]+:[^/]+)$");
 
 /**
  * Parses a LLM friendly link from a target string.
+ * Supports both standard and cross-space formats:
+ * - Standard: /of:bafyabc123/path
+ * - Cross-space: /@did:key:z6Mk.../of:bafyabc123/path
  *
  * @param target - The target string to parse
- * @param space - The space to use to get the cells
+ * @param space - The fallback space to use if not embedded in link
  * @returns The parsed LLM friendly link
  */
 export function parseLLMFriendlyLink(
@@ -300,10 +307,25 @@ export function parseLLMFriendlyLink(
     );
   }
 
-  const [empty, id, ...path] = decodeJsonPointer(target);
+  const [empty, firstSegment, ...rest] = decodeJsonPointer(target);
 
   if (empty !== "") {
     throw new Error("Target must start with a slash.");
+  }
+
+  // Check if first segment is a space DID (cross-space link)
+  let id: string;
+  let path: string[];
+  const spaceMatch = firstSegment?.match(matchSpacePrefix);
+  if (spaceMatch) {
+    // Cross-space format: /@did:key:z6Mk.../of:bafyabc123/path
+    const embeddedSpace = spaceMatch[1] as MemorySpace;
+    [id, ...path] = rest;
+    space = embeddedSpace;
+  } else {
+    // Standard format: /of:bafyabc123/path
+    id = firstSegment;
+    path = rest;
   }
 
   // Check if first segment looks like a CID/handle by length
@@ -331,6 +353,22 @@ export function parseLLMFriendlyLink(
   };
 }
 
-export function createLLMFriendlyLink(link: NormalizedFullLink): string {
+/**
+ * Creates an LLM-friendly link string from a normalized link.
+ * If contextSpace is provided and differs from the link's space,
+ * includes the space DID in the link for cross-space resolution.
+ *
+ * @param link - The normalized link to encode
+ * @param contextSpace - The current execution space (optional)
+ * @returns The encoded link string
+ */
+export function createLLMFriendlyLink(
+  link: NormalizedFullLink,
+  contextSpace?: MemorySpace,
+): string {
+  // If contextSpace provided and differs, include space in link
+  if (contextSpace && link.space && link.space !== contextSpace) {
+    return encodeJsonPointer(["", `@${link.space}`, link.id, ...link.path]);
+  }
   return encodeJsonPointer(["", link.id, ...link.path]);
 }

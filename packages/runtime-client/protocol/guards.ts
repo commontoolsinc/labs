@@ -1,7 +1,5 @@
 import { isDID } from "@commontools/identity";
-import type { JSONSchema, JSONValue } from "@commontools/runner/shared";
 import { isRecord } from "@commontools/utils/types";
-import { type Program } from "@commontools/js-compiler/interface";
 import {
   CellRef,
   CellUpdateNotification,
@@ -18,7 +16,6 @@ import {
   RequestType,
   TelemetryNotification,
 } from "./types.ts";
-export { JSONSchema, JSONValue, Program };
 
 export function isCellRef(value: unknown): value is CellRef {
   if (!isRecord(value)) return false;

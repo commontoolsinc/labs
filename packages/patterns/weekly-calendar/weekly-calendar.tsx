@@ -365,7 +365,7 @@ const handleSetTitle = handler<
 
 const WeeklyCalendar = pattern<Input, Output>(
   ({ title, events, isCalendar, isHidden }) => {
-    const { allCharms } = wish<{ allCharms: EventCharm[] }>("/");
+    const { allCharms } = wish<{ allCharms: EventCharm[] }>("#default");
 
     // Navigation State
     const startDate = Cell.of(getWeekStart(getTodayDate()));

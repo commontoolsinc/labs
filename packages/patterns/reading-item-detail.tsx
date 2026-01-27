@@ -1,5 +1,13 @@
 /// <cts-enable />
-import { computed, Default, NAME, pattern, UI, Writable } from "commontools";
+import {
+  computed,
+  Default,
+  NAME,
+  pattern,
+  UI,
+  type VNode,
+  Writable,
+} from "commontools";
 
 /** Wrap all fields of T in Writable<> for write access */
 type Cellify<T> = { [K in keyof T]: Writable<T[K]> };
@@ -26,6 +34,8 @@ interface Input {
 
 /** #book #article #reading */
 interface Output {
+  [NAME]: ReturnType<typeof computed>;
+  [UI]: VNode;
   item: ReadingItem;
 }
 

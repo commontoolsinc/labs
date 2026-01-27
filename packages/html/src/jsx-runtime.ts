@@ -8,7 +8,7 @@
  */
 
 import { h } from "./h.ts";
-import type { RenderNode, VNode } from "@commontools/api";
+import type { JSXElement, RenderNode, VNode } from "@commontools/api";
 
 /**
  * Props type for JSX elements, including children
@@ -20,7 +20,7 @@ export interface JSXProps {
 }
 
 /**
- * Creates a VNode for a JSX element.
+ * Creates a JSX element.
  *
  * This is the core function used by the JSX automatic runtime for creating elements.
  * It handles both HTML/SVG elements (string types) and component functions.
@@ -28,13 +28,13 @@ export interface JSXProps {
  * @param type - The element type (string for HTML/SVG, function for components)
  * @param props - Element properties including children
  * @param key - Optional key for list reconciliation (currently unused but part of JSX spec)
- * @returns A virtual DOM node
+ * @returns A virtual DOM node or JSX element (for component functions)
  */
 export function jsx(
-  type: string | ((props: any) => VNode),
+  type: string | ((props: any) => JSXElement),
   props: JSXProps | null,
   _key?: string | number,
-): VNode {
+): JSXElement {
   const { children, ...restProps } = props ?? {};
 
   // Convert children to array format expected by h()
@@ -48,7 +48,7 @@ export function jsx(
 }
 
 /**
- * Creates a VNode for a JSX element with static children.
+ * Creates a JSX element with static children.
  *
  * The TypeScript compiler uses this when it can determine that children are static.
  * For our implementation, it's identical to jsx() since we don't optimize for static children.
@@ -56,7 +56,7 @@ export function jsx(
  * @param type - The element type (string for HTML/SVG, function for components)
  * @param props - Element properties including children
  * @param key - Optional key for list reconciliation
- * @returns A virtual DOM node
+ * @returns A virtual DOM node or JSX element
  */
 export const jsxs = jsx;
 

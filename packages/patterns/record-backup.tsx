@@ -6,7 +6,7 @@
  * Designed for data survival after server wipes.
  *
  * Features:
- * - Discovers all Records using wish("/")
+ * - Discovers all Records using wish("#default")
  * - Extracts module data using registry's fieldMapping
  * - Preserves wiki-links in notes as-is
  * - Includes trashed modules in export
@@ -607,7 +607,7 @@ const handleFileUpload = handler<
 
 export default pattern<Input, Output>(({ importJson }) => {
   // Get all charms in the space
-  const { allCharms } = wish<{ allCharms: RecordCharm[] }>("/");
+  const { allCharms } = wish<{ allCharms: RecordCharm[] }>("#default");
 
   // Build export data
   const exportData = buildExportData({ allCharms });

@@ -1440,6 +1440,22 @@ describe("compactChangeSet", () => {
       // Array has content, length change is subsumed
       expect(result).toHaveLength(1);
     });
+
+    it("should NOT subsume child with leading-zero index like '01'", () => {
+      // Parent writes array [1, 2], child writes to index "01"
+      // "01" is not a valid array index (has leading zero), so the child
+      // path does NOT exist in the parent and should NOT be subsumed.
+      // Fixed by isArrayIndexPropertyName() which correctly rejects "01".
+      const changes: ChangeSet = [
+        makeChange(["items"], [1, 2]),
+        makeChange(["items", "01"], 99),
+      ];
+      const result = compactChangeSet(changes);
+      // Child should NOT be subsumed because "01" is not a valid array index
+      expect(result).toHaveLength(2);
+      expect(result[0].location.path).toEqual(["items"]);
+      expect(result[1].location.path).toEqual(["items", "01"]);
+    });
   });
 
   describe("order independence", () => {
