@@ -62,30 +62,6 @@ const removeContact = handler<
   contacts.set(current.toSpliced(index, 1));
 });
 
-// Update firstName
-const updateFirstName = handler<
-  { detail: { value: string } },
-  { contacts: Writable<PersonLike[]>; index: number }
->(({ detail: { value } }, { contacts, index }) => {
-  const current = contacts.get().slice();
-  if (index >= 0 && index < current.length) {
-    current[index] = { ...current[index], firstName: value };
-    contacts.set(current);
-  }
-});
-
-// Update lastName
-const updateLastName = handler<
-  { detail: { value: string } },
-  { contacts: Writable<PersonLike[]>; index: number }
->(({ detail: { value } }, { contacts, index }) => {
-  const current = contacts.get().slice();
-  if (index >= 0 && index < current.length) {
-    current[index] = { ...current[index], lastName: value };
-    contacts.set(current);
-  }
-});
-
 // ============================================================================
 // Pattern
 // ============================================================================
@@ -179,14 +155,12 @@ export default pattern<Input, Output>(({ contacts }) => {
                       })}
                     </span>
                     <ct-input
-                      value={contact.firstName}
-                      onct-change={updateFirstName({ contacts, index })}
+                      $value={contact.firstName}
                       placeholder="First"
                       style={{ flex: 1 }}
                     />
                     <ct-input
-                      value={contact.lastName}
-                      onct-change={updateLastName({ contacts, index })}
+                      $value={contact.lastName}
                       placeholder="Last"
                       style={{ flex: 1 }}
                     />
