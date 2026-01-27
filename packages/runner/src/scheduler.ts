@@ -655,6 +655,7 @@ export class Scheduler {
   }
 
   async run(action: Action): Promise<any> {
+    logger.timeStart("scheduler", "run");
     const actionId = this.getActionId(action);
     this.runtime.telemetry.submit({
       type: "scheduler.run",
@@ -696,7 +697,10 @@ export class Scheduler {
           // reactive functions based on it will be retriggered. But also, the
           // retry logic below will have re-scheduled this action, so
           // topological sorting should move it before the dependencies.
-          tx.commit().then(({ error }) => {
+          logger.timeStart("scheduler", "run", "commit");
+          const commitPromise = tx.commit();
+          logger.timeEnd("scheduler", "run", "commit");
+          commitPromise.then(({ error }) => {
             // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note that
             // on every attempt we still call the re-subscribe below, so that
             // even after we run out of retries, this will be re-triggered when
@@ -740,8 +744,10 @@ export class Scheduler {
       try {
         // Track executing action for parent-child relationship tracking
         this.executingAction = action;
+        logger.timeStart("scheduler", "run", "action");
         Promise.resolve(action(tx))
           .then((actionResult) => {
+            logger.timeEnd("scheduler", "run", "action");
             result = actionResult;
             this.executingAction = null;
             logger.debug("schedule-action-timing", () => {
@@ -754,16 +760,21 @@ export class Scheduler {
             finalizeAction();
           })
           .catch((error) => {
+            logger.timeEnd("scheduler", "run", "action");
             this.executingAction = null;
             finalizeAction(error);
           });
       } catch (error) {
+        logger.timeEnd("scheduler", "run", "action");
         this.executingAction = null;
         finalizeAction(error);
       }
     });
 
-    return this.runningPromise;
+    return this.runningPromise.then((result) => {
+      logger.timeEnd("scheduler", "run");
+      return result;
+    });
   }
 
   idle(): Promise<void> {
@@ -1911,6 +1922,8 @@ export class Scheduler {
   }
 
   private async execute(): Promise<void> {
+    logger.timeStart("scheduler", "execute");
+
     // In case a directly invoked `run` is still running, wait for it to finish.
     if (this.runningPromise) await this.runningPromise;
 
@@ -1918,6 +1931,7 @@ export class Scheduler {
     this.executeStartTime = performance.now();
     this.runsThisExecute.clear();
 
+    logger.timeStart("scheduler", "execute", "depCollect");
     // Process pending dependency collection for newly subscribed actions.
     // This discovers what cells each action will read before it runs.
     for (const action of this.pendingDependencyCollection) {
@@ -1969,10 +1983,12 @@ export class Scheduler {
 
     // Clear the pending collection set - dependencies have been collected
     this.pendingDependencyCollection.clear();
+    logger.timeEnd("scheduler", "execute", "depCollect");
 
     // Track dirty dependencies that block events - these must be added to workSet
     const eventBlockingDeps = new Set<Action>();
 
+    logger.timeStart("scheduler", "execute", "event");
     // Process next event from the event queue.
     const queuedEvent = this.eventQueue.shift();
     if (queuedEvent) {
@@ -2097,6 +2113,7 @@ export class Scheduler {
         }
       } // Close else block for shouldSkipEvent
     }
+    logger.timeEnd("scheduler", "execute", "event");
 
     // Process any newly subscribed actions that were added during event handling.
     // This handles cases like event handlers that create sub-recipes whose
@@ -2152,6 +2169,7 @@ export class Scheduler {
     // Settle loop: runs until no more dirty work is found.
     // First iteration processes initial seeds + their dirty deps.
     // Subsequent iterations process new subscriptions and re-collect dirty deps.
+    logger.timeStart("scheduler", "execute", "settle");
     const maxSettleIterations = this.pullMode ? 10 : 1;
     const EARLY_ITERATION_THRESHOLD = 5;
     const earlyIterationComputations = new Set<Action>(); // Track computations in first N iterations
@@ -2324,6 +2342,7 @@ export class Scheduler {
         }
       }
     }
+    logger.timeEnd("scheduler", "execute", "settle");
 
     // If we hit max iterations without settling, break the cycle:
     // 1. Clear dirty/pending for computations that were in early iterations AND still in last workSet
@@ -2414,6 +2433,7 @@ export class Scheduler {
       // Keep scheduled = true since we're queuing another execution
       queueTask(() => this.execute());
     }
+    logger.timeEnd("scheduler", "execute");
   }
 
   /**

@@ -1,7 +1,13 @@
 import { DID, Identity, type Session } from "@commontools/identity";
 import { CharmManager } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
-import { getLoggerCountsBreakdown, Logger } from "@commontools/utils/logger";
+import {
+  getLoggerCountsBreakdown,
+  getTimingStatsBreakdown,
+  Logger,
+  resetAllCountBaselines,
+  resetAllTimingBaselines,
+} from "@commontools/utils/logger";
 import {
   type Cancel,
   convertCellsToLinks,
@@ -470,7 +476,8 @@ export class RuntimeProcessor {
   getLoggerCounts(_: GetLoggerCountsRequest): LoggerCountsResponse {
     const counts = getLoggerCountsBreakdown();
     const metadata = this.#getLoggerMetadata();
-    return { counts, metadata };
+    const timing = getTimingStatsBreakdown();
+    return { counts, metadata, timing };
   }
 
   #getLoggerMetadata(): LoggerMetadata {
@@ -505,6 +512,11 @@ export class RuntimeProcessor {
 
   setTelemetryEnabled(request: SetTelemetryEnabledRequest): void {
     this.#telemetryEnabled = request.enabled;
+  }
+
+  resetLoggerBaselines(_: any): void {
+    resetAllCountBaselines();
+    resetAllTimingBaselines();
   }
 
   #getLoggers(loggerName?: string): Logger[] {
@@ -610,6 +622,8 @@ export class RuntimeProcessor {
         return this.setLoggerEnabled(request);
       case RequestType.SetTelemetryEnabled:
         return this.setTelemetryEnabled(request);
+      case RequestType.ResetLoggerBaselines:
+        return this.resetLoggerBaselines(request);
       default:
         throw new Error(`Unknown message type: ${(request as any).type}`);
     }

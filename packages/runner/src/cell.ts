@@ -562,7 +562,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
 
   get(options?: { traverseCells?: boolean }): Readonly<T> {
     if (!this.synced) this.sync(); // No await, just kicking this off
-    const begin = performance.now();
+    logger.timeStart("cell", "get");
     const value = validateAndTransform(
       this.runtime,
       this.tx,
@@ -571,7 +571,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       [],
       options,
     );
-    const elapsed = performance.now() - begin;
+    const elapsed = logger.timeEnd("cell", "get")!;
     if (elapsed > 50) {
       logger.warn(
         `get >${Math.floor(elapsed - (elapsed % 10))}ms`,
