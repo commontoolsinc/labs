@@ -240,16 +240,17 @@ function verifyRecomposeProjections(
 
 // Checked recomposition transition:
 // - reject if verification fails,
-// - otherwise: join confidentiality (and PC), meet integrity across the parts,
+// - otherwise: join confidentiality and meet integrity across the parts,
 //   then *add back* the whole-object integrity scoped to the common source.
+//
+// Note: flow-path confidentiality (`pcConfidentiality`, Section 8.9.1) is appended by the
+// main propagation algorithm just like for other transitions.
 function recomposeFromProjections(
-  pcConfidentiality: Clause[],
   partLabels: Label[],
   sourceRef: Reference,
   baseIntegrityType: string
 ): Label {
   const out: Label = combineLabels(partLabels);
-  out.confidentiality = [...out.confidentiality, ...pcConfidentiality];
   out.integrity = [
     ...out.integrity,
     { type: baseIntegrityType, scope: { valueRef: sourceRef, projection: "/" } }
@@ -615,11 +616,14 @@ function verifyPermutationByRefs(inputMembers: unknown[], outputMembers: unknown
 // Subset/filtered/permutation propagate by *preserving member labels*:
 // the output elements are references to input elements, so their labels are re-used.
 //
-// The container label is separately tainted by `pcConfidentiality` because the *membership decision*
+// The container label is (also) tainted by flow-path confidentiality because the *membership decision*
 // (which elements were chosen / in what order) can be confidential.
+//
+// In this spec, that taint is represented by appending `pcConfidentiality` to the *container path* label
+// in the main propagation algorithm (8.9.1). Reads of members join prefix labels (4.6.3), so accesses
+// to `/items/0` are implicitly tainted by the label on `/items`.
 function propagateCollectionConstraint(
   kind: "subset" | "filtered" | "permutation",
-  pcConfidentiality: Clause[],
   inputContainerLabel: Label,
   inputMembers: unknown[],
   inputMemberLabels: Label[],
@@ -647,9 +651,13 @@ function propagateCollectionConstraint(
     }
   }
 
-  // Container label: membership confidentiality is tainted by PC.
+  // Container label: membership confidentiality is tainted by PC, but *via the container path label*
+  // (Section 4.6.3), not by rewriting each member label.
+  //
+  // Concretely: this helper returns a container label *without* PC; the runtime's main propagation
+  // algorithm (8.9.1) appends `pcConfidentiality` to the container path label after it is derived.
   const outContainer: Label = {
-    confidentiality: [...inputContainerLabel.confidentiality, ...pcConfidentiality],
+    confidentiality: [...inputContainerLabel.confidentiality],
     integrity: inputContainerLabel.integrity
   };
 
@@ -691,7 +699,6 @@ function propagateCollectionConstraint(
 //
 // The checked property is only: output length equals input length.
 function propagateLengthPreserved(
-  pcConfidentiality: Clause[],
   inputContainerLabel: Label,
   inputMembers: unknown[],
   outputMembers: unknown[],
@@ -712,7 +719,7 @@ function propagateLengthPreserved(
 
   return {
     outputContainerLabel: {
-      confidentiality: [...inputContainerLabel.confidentiality, ...pcConfidentiality],
+      confidentiality: [...inputContainerLabel.confidentiality],
       integrity: [
         ...stripCollectionIntegrity(inputContainerLabel.integrity),
         { type: "LengthPreserved", source: sourceRef }
@@ -1284,6 +1291,7 @@ function propagateLabels(
   outputSchema: JSONSchema
 ): Map<string, Label> {
   const outputLabels = new Map<string, Label>();
+  const pendingRecompositions: Array<{ path: string; schema: JSONSchema }> = [];
 
   for (const [path, schema] of walkSchema(outputSchema)) {
     const ifc = schema.ifc;
@@ -1299,6 +1307,100 @@ function propagateLabels(
         confidentiality: sourceLabel.confidentiality,
         integrity: scopeIntegrity(sourceLabel.integrity, ifc.projection.path)
       });
+
+    } else if (ifc?.collection) {
+      // Collection constraints (8.5):
+      //
+      // The container at `path` carries membership/selection taint, while the member labels
+      // describe per-item content/integrity. Reads join prefix path labels (4.6.3), so the
+      // container label taints reads of members without rewriting each member label.
+      const outputMembers = getValueAtPath(outputValue, path);
+      if (!Array.isArray(outputMembers)) {
+        throw new Error(`IFC collection annotation requires array at ${path}`);
+      }
+
+      // Determine the source collection declared by the schema.
+      const src =
+        ifc.collection.sourceCollection ??
+        ifc.collection.subsetOf ??
+        ifc.collection.filteredFrom ??
+        ifc.collection.permutationOf;
+      if (!src) {
+        throw new Error(`IFC collection annotation missing source collection at ${path}`);
+      }
+
+      const inputCollection = getValueAtPath(handler.input, src);
+      if (!Array.isArray(inputCollection)) {
+        throw new Error(`IFC collection source is not an array: ${src}`);
+      }
+
+      const inputContainerLabel = inputLabels.get(src)!;
+      const sourceRef = refer(inputCollection);
+
+      // Input member labels are available at indexed paths (e.g. `${src}/0`, `${src}/1`, ...).
+      const inputMemberLabels = inputCollection.map((_, i) =>
+        inputLabels.get(`${src}/${i}`)!
+      );
+
+      if (ifc.collection.lengthPreserved) {
+        // Map-like: members may be transformed, so their labels are derived by the per-element rules.
+        // The checked property here is only that the length is preserved.
+        if (inputCollection.length !== outputMembers.length) {
+          throw new Error("IFC lengthPreserved violation");
+        }
+
+        const extra: IntegrityAtom[] = [];
+        if (ifc.collection.selectionIntegrity) extra.push(ifc.collection.selectionIntegrity);
+        if (ifc.collection.addedCollectionIntegrity?.length) {
+          extra.push(...ifc.collection.addedCollectionIntegrity);
+        }
+
+        outputLabels.set(path, {
+          confidentiality: [...inputContainerLabel.confidentiality],
+          integrity: [
+            ...stripCollectionIntegrity(inputContainerLabel.integrity),
+            { type: "LengthPreserved", source: sourceRef },
+            ...extra
+          ]
+        });
+
+      } else {
+        const kind =
+          ifc.collection.subsetOf ? "subset" :
+          ifc.collection.filteredFrom ? "filtered" :
+          ifc.collection.permutationOf ? "permutation" :
+          null;
+        if (!kind) {
+          throw new Error(`IFC collection annotation missing constraint kind at ${path}`);
+        }
+
+        const { outputContainerLabel, outputMemberLabels } =
+          propagateCollectionConstraint(
+            kind,
+            inputContainerLabel,
+            inputCollection,
+            inputMemberLabels,
+            outputMembers,
+            {
+              sourceRef,
+              predicate: ifc.collection.predicate,
+              selectionIntegrity: ifc.collection.selectionIntegrity,
+              addedCollectionIntegrity: ifc.collection.addedCollectionIntegrity
+            }
+          );
+
+        outputLabels.set(path, outputContainerLabel);
+        outputMembers.forEach((_, i) => {
+          outputLabels.set(`${path}/${i}`, outputMemberLabels[i]);
+        });
+      }
+
+    } else if (ifc?.recomposeProjections) {
+      // Safe recomposition is a checked transition (8.3.4).
+      //
+      // We defer it to a second pass so the part labels are available in `outputLabels`.
+      pendingRecompositions.push({ path, schema });
+      continue;
 
     } else if (ifc?.exactCopyOf) {
       // Exact copy - verify and preserve if identical
@@ -1345,14 +1447,51 @@ function propagateLabels(
       outputLabels.set(path, deriveTransformedLabel(inputLabels, handler));
     }
 
-    // Add control/flow confidentiality (PC) to every output label.
+    // Add control/flow confidentiality (PC) to the path label we just derived.
     // (Content labels come from the rules above; flow labels come from control.)
+    //
+    // Note: for collections, member reads are tainted via the container path label (4.6.3),
+    // so we do not additionally rewrite each member label here.
     const outLabel = outputLabels.get(path)!;
     outLabel.confidentiality = [...outLabel.confidentiality, ...pcConfidentiality];
 
     // Add any explicit integrity
     if (ifc?.addedIntegrity) {
       outLabel.integrity = [...outLabel.integrity, ...ifc.addedIntegrity];
+    }
+  }
+
+  // Second pass: apply checked recompositions now that their parts are labeled.
+  for (const pending of pendingRecompositions) {
+    const ifc = pending.schema.ifc?.recomposeProjections!;
+    const { from, baseIntegrityType, parts } = ifc;
+
+    if (!verifyRecomposeProjections(
+      handler,
+      inputLabels,
+      outputLabels,
+      outputValue,
+      from,
+      baseIntegrityType,
+      parts
+    )) {
+      throw new Error(`IFC recomposeProjections violation at ${pending.path}`);
+    }
+
+    const sourceValue = getValueAtPath(handler.input, from);
+    const sourceRef = refer(sourceValue);
+    const partLabels = parts.map(p => outputLabels.get(p.outputPath)!);
+
+    outputLabels.set(
+      pending.path,
+      recomposeFromProjections(partLabels, sourceRef, baseIntegrityType)
+    );
+
+    // Apply the same post-processing as other derived labels.
+    const outLabel = outputLabels.get(pending.path)!;
+    outLabel.confidentiality = [...outLabel.confidentiality, ...pcConfidentiality];
+    if (pending.schema.ifc?.addedIntegrity) {
+      outLabel.integrity = [...outLabel.integrity, ...pending.schema.ifc.addedIntegrity];
     }
   }
 

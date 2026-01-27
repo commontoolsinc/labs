@@ -129,8 +129,10 @@ The Lean model does *not* currently include:
 - Write-authority sets (`writeAuthorizedBy`) and stateful authorization (Spec 8.15)
 - Full policy record architecture (hash binding, fixpoint evaluation, targeting)
 - Full schema-driven propagation algorithm (Spec 8.9) beyond local transition primitives
-- Transformation integrity / endorsed transformation registries (Spec 8.7)
-- Selection-decision integrity for ranking/recommendation scenarios (Spec 8.5.7)
+- Full transformation-integrity framework (Spec 8.7) beyond the minimal endorsed-transform allowlist
+  and "preserve only common integrity atoms" checked transition that is modeled in Chapter 8
+- Full selection-decision integrity framework (Spec 8.5.7) beyond the tokenized `selectionDecisionConf`
+  taint + guarded declassification primitive modeled in `formal/Cfc/Collection.lean`
 - Side effects / egress enforcement beyond the abstract exchange/declassify rules above
 
 These can be added incrementally, but would expand the model beyond the current "core IFC proofs"
