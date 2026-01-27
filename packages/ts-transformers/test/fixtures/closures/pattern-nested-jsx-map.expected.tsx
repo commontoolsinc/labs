@@ -306,11 +306,7 @@ export default pattern(({ items }) => {
                 }
             }, ({ i, item }) => i === item.selectedIndex)), "* ", "")}
                     {tag.name}
-                  </li>)), {
-                item: {
-                    selectedIndex: item.selectedIndex
-                }
-            })}
+                  </li>))}
               </ul>
             </div>)), {}), <p>No items</p>)}
       </div>),
