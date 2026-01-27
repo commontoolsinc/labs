@@ -46,10 +46,9 @@ Check that these are NOT inside the pattern body:
 
 | Violation | Fix |
 |-----------|-----|
-| `{show ? <Element /> : null}` | `{ifElse(show, <Element />, null)}` |
 | `onClick` inside `computed()` | Move button outside, use `disabled` attr |
 
-**Note:** Ternaries ARE fine for attributes: `style={done ? {...} : {}}`
+**Note:** Ternaries work fine in JSX - the transformer auto-converts them to `ifElse()`. Both `{show ? <Element /> : null}` and `{ifElse(show, ...)}` are valid.
 
 ### 4. Type System
 
@@ -212,10 +211,9 @@ export default pattern<Input>(({ deck }) => ({
 
 ### Correct Conditional Rendering
 ```typescript
-{ifElse(showDetails,
-  <div>Details content</div>,
-  null
-)}
+// Both are valid - ternaries auto-transform to ifElse()
+{showDetails ? <div>Details content</div> : null}
+{ifElse(showDetails, <div>Details content</div>, null)}
 ```
 
 ### Correct Style Syntax

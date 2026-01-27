@@ -41,7 +41,6 @@ These issues compile without errors but fail at runtime.
 - [Reactive Reference Outside Context](gotchas/reactive-reference-outside-context.md) - Use `lift()` for object indexing
 - [onClick Inside computed()](gotchas/onclick-inside-computed.md) - ReadOnlyAddressError
 - [ifElse with Composed Pattern Cells](gotchas/ifelse-composed-pattern-cells.md) - Charm hangs
-- [Conditional Rendering with Ternaries](gotchas/conditional-rendering-ternaries.md) - Use `ifElse()` for elements
 - [lift() Returns Stale/Empty Data](gotchas/lift-returns-stale-data.md) - Closure limitations
 - [Handler Binding Error](gotchas/handler-binding-error.md) - Two-step binding pattern
 - [Stream.of() / .subscribe() Don't Exist](gotchas/stream-subscribe-dont-exist.md) - Bound handlers ARE streams
