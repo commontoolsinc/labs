@@ -1715,7 +1715,25 @@ export function recursivelyAddIDIfNeeded<T>(
   // toStorableValue() to handle circular references properly.
   if (seen.has(value)) return seen.get(value) as T;
 
-  // Cell links pass through unchanged.
+  // Handle Cell objects and Cell proxies (OpaqueRef) by converting them to links.
+  // This must happen BEFORE isCellLink() check because isCellLink() returns true
+  // for Cell proxies (via isCellResultForDereferencing), but Cell proxies need
+  // to be converted to link format, not passed through unchanged.
+  //
+  // Also must happen BEFORE toStorableValue() because Cell.toJSON() returns
+  // null when the cell doesn't have a full link yet (id/space not assigned).
+  // getAsLink() doesn't have this restriction and produces valid links.
+  if (isCell(value)) {
+    return value.getAsLink() as T;
+  }
+  if (isCellResultForDereferencing(value)) {
+    const cell = getCellOrThrow(value);
+    return cell.getAsLink() as T;
+  }
+
+  // Cell links (already serialized) pass through unchanged.
+  // Note: This check must come AFTER the Cell/proxy checks above, since
+  // isCellLink() includes isCellResultForDereferencing() in its check.
   if (isCellLink(value)) {
     return value;
   }
