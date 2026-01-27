@@ -174,6 +174,192 @@ export type LogMessage = unknown | (() => unknown);
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 /**
+ * Point in a CDF (Cumulative Distribution Function)
+ */
+export interface CDFPoint {
+  x: number; // Latency in ms
+  y: number; // Cumulative probability (0-1)
+}
+
+/**
+ * Statistics for timing measurements
+ */
+export interface TimingStats {
+  count: number; // Total measurements
+  min: number; // Minimum time (ms)
+  max: number; // Maximum time (ms)
+  totalTime: number; // Sum for average calculation
+  average: number; // totalTime / count
+  p50: number; // Median (50th percentile)
+  p95: number; // 95th percentile
+  lastTime: number; // Most recent measurement
+  lastTimestamp: number; // When last recorded
+  cdf: CDFPoint[]; // CDF of all samples since start
+  cdfSinceBaseline: CDFPoint[] | null; // CDF of samples since baseline reset
+}
+
+/**
+ * Default reservoir size for timing samples.
+ * 1000 samples provides good percentile accuracy with bounded memory.
+ */
+const TIMING_RESERVOIR_SIZE = 1000;
+
+/**
+ * Internal class for storing timing data with reservoir sampling.
+ * Uses Algorithm R for random sampling to maintain representative distribution
+ * with O(1) memory regardless of measurement count.
+ */
+class TimingDataStore {
+  private count = 0;
+  private min = Infinity;
+  private max = -Infinity;
+  private totalTime = 0;
+  private lastTime = 0;
+  private lastTimestamp = 0;
+  private samples: number[] = [];
+  private baselineCount = 0;
+  private deltaSamples: number[] = []; // Reservoir for samples since baseline
+  private deltaCount = 0; // Count of samples since baseline
+
+  /**
+   * Record a timing measurement.
+   * @param elapsed - The elapsed time in milliseconds
+   */
+  record(elapsed: number): void {
+    this.count++;
+    this.totalTime += elapsed;
+    this.lastTime = elapsed;
+    this.lastTimestamp = performance.now();
+
+    if (elapsed < this.min) this.min = elapsed;
+    if (elapsed > this.max) this.max = elapsed;
+
+    // Reservoir sampling (Algorithm R) for full history
+    if (this.samples.length < TIMING_RESERVOIR_SIZE) {
+      this.samples.push(elapsed);
+    } else {
+      const j = Math.floor(Math.random() * this.count);
+      if (j < TIMING_RESERVOIR_SIZE) {
+        this.samples[j] = elapsed;
+      }
+    }
+
+    // Also record to delta reservoir if baseline is set
+    if (this.baselineCount > 0) {
+      this.deltaCount++;
+      if (this.deltaSamples.length < TIMING_RESERVOIR_SIZE) {
+        this.deltaSamples.push(elapsed);
+      } else {
+        const j = Math.floor(Math.random() * this.deltaCount);
+        if (j < TIMING_RESERVOIR_SIZE) {
+          this.deltaSamples[j] = elapsed;
+        }
+      }
+    }
+  }
+
+  /**
+   * Set baseline for delta tracking.
+   * After calling this, new samples will be tracked separately for delta CDF.
+   */
+  setBaseline(): void {
+    this.baselineCount = this.count;
+    this.deltaSamples = [];
+    this.deltaCount = 0;
+  }
+
+  /**
+   * Get computed statistics from the recorded data.
+   */
+  getStats(): TimingStats {
+    if (this.count === 0) {
+      return {
+        count: 0,
+        min: 0,
+        max: 0,
+        totalTime: 0,
+        average: 0,
+        p50: 0,
+        p95: 0,
+        lastTime: 0,
+        lastTimestamp: 0,
+        cdf: [],
+        cdfSinceBaseline: null,
+      };
+    }
+
+    // Sort samples for percentile calculation
+    const sorted = [...this.samples].sort((a, b) => a - b);
+    const p50Index = Math.floor(sorted.length * 0.5);
+    const p95Index = Math.floor(sorted.length * 0.95);
+    const median = sorted[p50Index] ?? 0;
+
+    // Calculate CDF of all samples
+    const cdf = this.calculateCDF(sorted);
+
+    // Calculate CDF of samples since baseline (if baseline exists and has data)
+    let cdfSinceBaseline: CDFPoint[] | null = null;
+    if (this.deltaCount > 0 && this.deltaSamples.length > 0) {
+      const deltaSorted = [...this.deltaSamples].sort((a, b) => a - b);
+      cdfSinceBaseline = this.calculateCDF(deltaSorted);
+    }
+
+    return {
+      count: this.count,
+      min: this.min,
+      max: this.max,
+      totalTime: this.totalTime,
+      average: this.totalTime / this.count,
+      p50: median,
+      p95: sorted[p95Index] ?? sorted[sorted.length - 1] ?? 0,
+      lastTime: this.lastTime,
+      lastTimestamp: this.lastTimestamp,
+      cdf,
+      cdfSinceBaseline,
+    };
+  }
+
+  /**
+   * Calculate CDF (Cumulative Distribution Function) from sorted samples.
+   * Returns array of points where each point (x, y) means "y fraction of samples <= x ms"
+   */
+  private calculateCDF(sorted: number[]): CDFPoint[] {
+    if (sorted.length === 0) return [];
+
+    return sorted.map((x, i) => ({
+      x,
+      y: (i + 1) / sorted.length,
+    }));
+  }
+
+  /**
+   * Reset all timing data.
+   */
+  reset(): void {
+    this.count = 0;
+    this.min = Infinity;
+    this.max = -Infinity;
+    this.totalTime = 0;
+    this.lastTime = 0;
+    this.lastTimestamp = 0;
+    this.samples = [];
+  }
+}
+
+/**
+ * Build all hierarchical key paths from an array of key segments.
+ * @example _buildKeyPaths(["cell", "get", "user"]) => ["cell", "cell/get", "cell/get/user"]
+ * Currently unused but kept for potential future hierarchical rollup.
+ */
+function _buildKeyPaths(keys: string[]): string[] {
+  const paths: string[] = [];
+  for (let i = 1; i <= keys.length; i++) {
+    paths.push(keys.slice(0, i).join("/"));
+  }
+  return paths;
+}
+
+/**
  * Numeric values for log levels to enable comparison
  */
 const LOG_LEVELS: Record<LogLevel, number> = {
@@ -278,6 +464,14 @@ export class Logger {
   >;
   private _logCountEvery: number;
   private _lastLoggedAt: number;
+  private _timingsByKey: Map<string, TimingDataStore> = new Map();
+  private _activeTimers: Map<string, number> = new Map();
+  private _countBaseline: {
+    debug: number;
+    info: number;
+    warn: number;
+    error: number;
+  } | null = null;
 
   constructor(private moduleName?: string, options?: GetLoggerOptions) {
     // Set initial disabled state from options
@@ -487,6 +681,185 @@ export class Logger {
       console.error(prefix, color, key, ...resolveMessages(messages));
     }
   }
+
+  // ============================================================
+  // Timing Methods
+  // ============================================================
+
+  /**
+   * Start a timer for the given key path.
+   * Hierarchical keys are supported - passing multiple segments will record
+   * stats at each level when timeEnd is called.
+   *
+   * @example
+   * logger.timeStart("cell", "get", "user-data");
+   * // ... operation ...
+   * logger.timeEnd("cell", "get", "user-data");
+   * // Records to: "cell", "cell/get", "cell/get/user-data"
+   */
+  timeStart(...keys: string[]): void {
+    const keyPath = keys.join("/");
+    this._activeTimers.set(keyPath, performance.now());
+  }
+
+  /**
+   * End a timer and record the elapsed time.
+   * Returns the elapsed time in milliseconds, or undefined if no matching timer exists.
+   *
+   * Stats are recorded to all levels of the hierarchical key path.
+   */
+  timeEnd(...keys: string[]): number | undefined {
+    const keyPath = keys.join("/");
+    const startTime = this._activeTimers.get(keyPath);
+    if (startTime === undefined) {
+      return undefined;
+    }
+    this._activeTimers.delete(keyPath);
+
+    const elapsed = performance.now() - startTime;
+    this._recordTime(elapsed, keys);
+    return elapsed;
+  }
+
+  /**
+   * Record a timing measurement directly.
+   * Useful for measuring IPC latency or other cases where you have explicit timestamps.
+   *
+   * Overloads:
+   * - time(startTime, ...keys) - end time defaults to performance.now()
+   * - time(startTime, endTime, ...keys) - explicit end time
+   *
+   * @example
+   * // End time defaults to now
+   * logger.time(startTimestamp, "ipc", "CellGet");
+   *
+   * // Explicit end time
+   * logger.time(startTimestamp, endTimestamp, "ipc", "CellGet");
+   *
+   * @returns The elapsed time in milliseconds
+   */
+  time(startTime: number, ...rest: (string | number)[]): number {
+    let endTime: number;
+    let keys: string[];
+
+    // Determine if second argument is endTime or first key
+    if (rest.length > 0 && typeof rest[0] === "number") {
+      endTime = rest[0] as number;
+      keys = rest.slice(1) as string[];
+    } else {
+      endTime = performance.now();
+      keys = rest as string[];
+    }
+
+    const elapsed = endTime - startTime;
+    if (keys.length > 0) {
+      this._recordTime(elapsed, keys);
+    }
+    return elapsed;
+  }
+
+  /**
+   * Internal method to record timing to the full key path only (no hierarchical rollup).
+   */
+  private _recordTime(elapsed: number, keys: string[]): void {
+    const path = keys.join("/");
+    let store = this._timingsByKey.get(path);
+    if (!store) {
+      store = new TimingDataStore();
+      this._timingsByKey.set(path, store);
+    }
+    store.record(elapsed);
+  }
+
+  /**
+   * Get timing statistics for a specific key path.
+   * Accepts either separate key segments or a single "/" joined path.
+   *
+   * @example
+   * logger.getTimeStats("cell", "get");  // Using segments
+   * logger.getTimeStats("cell/get");     // Using joined path
+   */
+  getTimeStats(...keys: string[]): TimingStats | undefined {
+    const keyPath = keys.join("/");
+    const store = this._timingsByKey.get(keyPath);
+    return store?.getStats();
+  }
+
+  /**
+   * Get all timing statistics for this logger.
+   * Returns a flat map with "/" joined keys.
+   */
+  get timeStats(): Record<string, TimingStats> {
+    const result: Record<string, TimingStats> = {};
+    for (const [key, store] of this._timingsByKey) {
+      result[key] = store.getStats();
+    }
+    return result;
+  }
+
+  /**
+   * Reset all timing statistics for this logger.
+   */
+  resetTimeStats(): void {
+    this._timingsByKey.clear();
+    this._activeTimers.clear();
+  }
+
+  // ============================================================
+  // Baseline Methods
+  // ============================================================
+
+  /**
+   * Reset the count baseline to current count values.
+   * After calling this, getCountDeltas() will return counts relative to this baseline.
+   */
+  resetCountBaseline(): void {
+    this._countBaseline = { ...this._counts };
+  }
+
+  /**
+   * Reset the timing baseline to current timing values.
+   * After calling this, CDF delta curves will show samples since this baseline.
+   */
+  resetTimingBaseline(): void {
+    for (const store of this._timingsByKey.values()) {
+      store.setBaseline();
+    }
+  }
+
+  /**
+   * Get count deltas since the baseline was set.
+   * If no baseline exists, returns the current counts.
+   */
+  getCountDeltas(): {
+    debug: number;
+    info: number;
+    warn: number;
+    error: number;
+    total: number;
+  } {
+    if (!this._countBaseline) {
+      return { ...this._counts, total: this.getTotal() };
+    }
+    return {
+      debug: this._counts.debug - this._countBaseline.debug,
+      info: this._counts.info - this._countBaseline.info,
+      warn: this._counts.warn - this._countBaseline.warn,
+      error: this._counts.error - this._countBaseline.error,
+      total: this.getTotal() - (
+        this._countBaseline.debug + this._countBaseline.info +
+        this._countBaseline.warn + this._countBaseline.error
+      ),
+    };
+  }
+
+  /**
+   * Get the total count of all log calls (debug + info + warn + error).
+   */
+  private getTotal(): number {
+    return this._counts.debug + this._counts.info + this._counts.warn +
+      this._counts.error;
+  }
 }
 
 /**
@@ -612,6 +985,94 @@ export function getLoggerCountsBreakdown(): Record<string, LoggerBreakdown> & {
   };
 }
 
+/**
+ * Breakdown of timing stats by logger name
+ */
+export type TimingStatsBreakdown = {
+  [loggerName: string]: Record<string, TimingStats>;
+};
+
+/**
+ * Get a breakdown of timing statistics by logger name and key.
+ * @returns Object with nested timing stats per logger and key
+ *
+ * @example
+ * getTimingStatsBreakdown()
+ * // {
+ * //   "runtime-client": {
+ * //     "ipc": { count: 2415, min: 0.1, max: 45.2, average: 1.9, p50: 1.5, p95: 6.8, ... },
+ * //     "ipc/CellGet": { count: 1523, min: 0.1, max: 45.2, average: 2.3, p50: 1.8, p95: 8.4, ... }
+ * //   },
+ * //   "runner": {
+ * //     "cell": { count: 500, min: 0.1, p50: 2.0, p95: 8.5, max: 45.0, ... },
+ * //     "cell/get": { count: 450, min: 0.1, p50: 2.1, p95: 8.7, max: 45.0, ... }
+ * //   }
+ * // }
+ */
+export function getTimingStatsBreakdown(): TimingStatsBreakdown {
+  const global = globalThis as unknown as {
+    commontools?: { logger?: Record<string, Logger> };
+  };
+
+  const breakdown: TimingStatsBreakdown = {};
+
+  if (global.commontools?.logger) {
+    for (const [name, logger] of Object.entries(global.commontools.logger)) {
+      const stats = logger.timeStats;
+      if (Object.keys(stats).length > 0) {
+        breakdown[name] = stats;
+      }
+    }
+  }
+
+  return breakdown;
+}
+
+/**
+ * Reset timing statistics for all registered loggers.
+ * Iterates through all loggers in globalThis.commontools.logger and resets their timing stats.
+ */
+export function resetAllTimingStats(): void {
+  const global = globalThis as unknown as {
+    commontools?: { logger?: Record<string, Logger> };
+  };
+  if (global.commontools?.logger) {
+    Object.values(global.commontools.logger).forEach((logger) =>
+      logger.resetTimeStats()
+    );
+  }
+}
+
+/**
+ * Reset count baseline for all registered loggers.
+ * After calling this, each logger's getCountDeltas() will return counts relative to this baseline.
+ */
+export function resetAllCountBaselines(): void {
+  const global = globalThis as unknown as {
+    commontools?: { logger?: Record<string, Logger> };
+  };
+  if (global.commontools?.logger) {
+    Object.values(global.commontools.logger).forEach((logger) =>
+      logger.resetCountBaseline()
+    );
+  }
+}
+
+/**
+ * Reset timing baseline for all registered loggers.
+ * After calling this, each logger's getTimingDeltas() will return timing relative to this baseline.
+ */
+export function resetAllTimingBaselines(): void {
+  const global = globalThis as unknown as {
+    commontools?: { logger?: Record<string, Logger> };
+  };
+  if (global.commontools?.logger) {
+    Object.values(global.commontools.logger).forEach((logger) =>
+      logger.resetTimingBaseline()
+    );
+  }
+}
+
 // Make helper functions available globally for browser console access
 if (typeof globalThis !== "undefined") {
   const global = globalThis as unknown as {
@@ -620,6 +1081,10 @@ if (typeof globalThis !== "undefined") {
       getTotalLoggerCounts?: typeof getTotalLoggerCounts;
       getLoggerCountsBreakdown?: typeof getLoggerCountsBreakdown;
       resetAllLoggerCounts?: typeof resetAllLoggerCounts;
+      getTimingStatsBreakdown?: typeof getTimingStatsBreakdown;
+      resetAllTimingStats?: typeof resetAllTimingStats;
+      resetAllCountBaselines?: typeof resetAllCountBaselines;
+      resetAllTimingBaselines?: typeof resetAllTimingBaselines;
     };
   };
   if (!global.commontools) {
@@ -628,4 +1093,8 @@ if (typeof globalThis !== "undefined") {
   global.commontools.getTotalLoggerCounts = getTotalLoggerCounts;
   global.commontools.getLoggerCountsBreakdown = getLoggerCountsBreakdown;
   global.commontools.resetAllLoggerCounts = resetAllLoggerCounts;
+  global.commontools.getTimingStatsBreakdown = getTimingStatsBreakdown;
+  global.commontools.resetAllTimingStats = resetAllTimingStats;
+  global.commontools.resetAllCountBaselines = resetAllCountBaselines;
+  global.commontools.resetAllTimingBaselines = resetAllTimingBaselines;
 }

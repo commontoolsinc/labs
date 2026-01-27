@@ -4,7 +4,10 @@ import {
   isObject,
   isRecord,
 } from "@commontools/utils/types";
-import { toDeepStorableValue, toStorableValue } from "./value-codec.ts";
+import {
+  toDeepStorableValue,
+  toStorableValue,
+} from "@commontools/memory/storable-value";
 import type { MemorySpace } from "@commontools/memory/interface";
 import { getTopFrame, recipe } from "./builder/recipe.ts";
 import { createNodeFactory } from "./builder/module.ts";
@@ -562,7 +565,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
 
   get(options?: { traverseCells?: boolean }): Readonly<T> {
     if (!this.synced) this.sync(); // No await, just kicking this off
-    const begin = performance.now();
+    logger.timeStart("cell", "get");
     const value = validateAndTransform(
       this.runtime,
       this.tx,
@@ -570,7 +573,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       [],
       options,
     );
-    const elapsed = performance.now() - begin;
+    const elapsed = logger.timeEnd("cell", "get")!;
     if (elapsed > 50) {
       logger.warn(
         `get >${Math.floor(elapsed - (elapsed % 10))}ms`,
@@ -1192,12 +1195,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     // retry on conflict.
     if (!this.synced) this.sync();
 
-    try {
-      value = toDeepStorableValue(value);
-    } catch (e) {
-      console.error("Can't set raw value, it's not JSON serializable", e);
-      return;
-    }
+    value = toDeepStorableValue(value);
     this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
   }
 

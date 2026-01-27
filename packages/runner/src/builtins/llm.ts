@@ -198,7 +198,7 @@ function createUpdatePartialCallback(
  * receive results, and continue the conversation.
  */
 async function executeWithToolsLoop(params: {
-  initialMessages: BuiltInLLMMessage[];
+  initialMessages: readonly BuiltInLLMMessage[];
   llmParams: LLMRequest;
   toolCatalog: ReturnType<typeof llmToolExecutionHelpers.buildToolCatalog>;
   updatePartial: (text: string) => void;
@@ -220,7 +220,7 @@ async function executeWithToolsLoop(params: {
   } = params;
 
   const executeRecursive = async (
-    currentMessages: BuiltInLLMMessage[],
+    currentMessages: readonly BuiltInLLMMessage[],
   ): Promise<void> => {
     if (thisRun !== getCurrentRun()) return;
 
@@ -421,7 +421,7 @@ export function llm(
 
     const llmParams: LLMRequest = {
       system: (system ?? "") + contextDocs,
-      messages: (messages as unknown as BuiltInLLMMessage[]) ?? [],
+      messages: (messages as unknown as readonly BuiltInLLMMessage[]) ?? [],
       stop: stop ?? "",
       maxTokens: maxTokens ?? 4096,
       stream: true,
@@ -476,7 +476,8 @@ export function llm(
           : undefined;
 
         await executeWithToolsLoop({
-          initialMessages: (messages as unknown as BuiltInLLMMessage[]) ?? [],
+          initialMessages:
+            (messages as unknown as readonly BuiltInLLMMessage[]) ?? [],
           llmParams,
           toolCatalog: toolCatalog!,
           updatePartial,
@@ -588,8 +589,8 @@ export function generateText(
     }
 
     // Convert prompt to messages if provided, otherwise use messages directly
-    const requestMessages: BuiltInLLMMessage[] =
-      (messages as unknown as BuiltInLLMMessage[]) ||
+    const requestMessages: readonly BuiltInLLMMessage[] =
+      (messages as unknown as readonly BuiltInLLMMessage[]) ||
       [{ role: "user", content: prompt! }];
 
     // Build context documentation from context cells and append to system prompt
@@ -789,8 +790,8 @@ export function generateObject<T extends Record<string, unknown>>(
     const readyMetadata = metadata ? JSON.parse(JSON.stringify(metadata)) : {};
 
     // Convert prompt to messages if provided, otherwise use messages directly
-    const requestMessages: BuiltInLLMMessage[] =
-      (messages as unknown as BuiltInLLMMessage[]) ||
+    const requestMessages: readonly BuiltInLLMMessage[] =
+      (messages as unknown as readonly BuiltInLLMMessage[]) ||
       [{ role: "user", content: prompt! }];
 
     // Build context documentation from context cells and append to system prompt
@@ -887,7 +888,7 @@ export function generateObject<T extends Record<string, unknown>>(
 
           // Custom execution loop for generateObject with finalResult extraction
           const executeRecursive = async (
-            currentMessages: BuiltInLLMMessage[],
+            currentMessages: readonly BuiltInLLMMessage[],
           ): Promise<void> => {
             if (thisRun !== currentRun) return;
 

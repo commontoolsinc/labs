@@ -276,11 +276,9 @@ repeat(items, (_, index) => index, ...)
 repeat(items, (item, index) => `${index}-${item.title}`, ...)
 ```
 
-## Real-World Example: ct-list
+## Real-World Examples
 
-See `packages/ui/src/v2/components/ct-list/ct-list.ts` for a complete example demonstrating:
-- Cell subscription management
-- Array cell manipulation
-- Finding items by cell equality
-- Transaction-based mutations
-- Supporting both Cell and plain array values
+See these components for complete examples demonstrating Cell integration patterns:
+- `ct-outliner` - Path-based operations, diff-based rendering with Cells
+- `ct-code-editor` - Bidirectional sync between Cell values and CodeMirror state
+- `ct-render` - Recipe loading and UI extraction with Cell subscriptions

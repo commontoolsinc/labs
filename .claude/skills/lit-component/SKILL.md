@@ -37,7 +37,7 @@ Identify which category the component falls into:
 - **Layout**: Arranges other components (vstack, hstack, screen)
 - **Visual**: Displays styled content (separator, skeleton, label)
 - **Input**: Captures user interaction (button, input, checkbox)
-- **Complex/Integrated**: Deep runtime integration with Cells (render, list, outliner)
+- **Complex/Integrated**: Deep runtime integration with Cells (render, code-editor, outliner)
 
 **Complexity spectrum:** Components range from pure presentation (no runtime) to deeply integrated (Cell operations, pattern execution, backlink resolution). Choose the simplest pattern that meets requirements.
 
@@ -375,7 +375,6 @@ Study these components to understand architectural patterns:
 
 **Advanced patterns:**
 - **Context provider:** `ct-theme` - Ambient configuration with `@provide`, `display: contents`, reactive Cell subscriptions
-- **Cell integration:** `ct-list` - Array cell manipulation, finding by equality, transaction-based mutations
 - **Runtime rendering:** `ct-render` - Recipe loading, UI extraction, lifecycle management
 - **Third-party integration:** `ct-code-editor` - CodeMirror lifecycle, Compartments, bidirectional sync, CellController
 - **Tree operations:** `ct-outliner` - Path-based operations, diff-based rendering, keyboard commands, MentionController

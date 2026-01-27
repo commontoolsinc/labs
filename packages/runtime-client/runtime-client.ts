@@ -21,6 +21,7 @@ import {
   JSONValue,
   type LoggerCountsData,
   type LoggerMetadata,
+  type LoggerTimingData,
   type LogLevel,
   NavigateRequestNotification,
   RequestType,
@@ -241,11 +242,12 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   async getLoggerCounts(): Promise<{
     counts: LoggerCountsData;
     metadata: LoggerMetadata;
+    timing: LoggerTimingData;
   }> {
     const res = await this.#conn.request<RequestType.GetLoggerCounts>({
       type: RequestType.GetLoggerCounts,
     });
-    return { counts: res.counts, metadata: res.metadata };
+    return { counts: res.counts, metadata: res.metadata, timing: res.timing };
   }
 
   /**
@@ -283,6 +285,16 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     await this.#conn.request<RequestType.SetTelemetryEnabled>({
       type: RequestType.SetTelemetryEnabled,
       enabled,
+    });
+  }
+
+  /**
+   * Reset logger baselines for both counts and timing in the worker.
+   * After calling this, loggers will track deltas from this baseline.
+   */
+  async resetLoggerBaselines(): Promise<void> {
+    await this.#conn.request<RequestType.ResetLoggerBaselines>({
+      type: RequestType.ResetLoggerBaselines,
     });
   }
 

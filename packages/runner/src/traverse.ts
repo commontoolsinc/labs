@@ -3,6 +3,7 @@ import { SchemaAll } from "@commontools/memory/schema";
 import { MIME } from "@commontools/memory/interface";
 import type { JSONSchemaObj } from "@commontools/api";
 import type {
+  JSONValue,
   MemorySpace,
   OptStorableValue,
   Result,
@@ -24,7 +25,7 @@ import {
 } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import type { JSONObject, JSONSchema, JSONValue } from "./builder/types.ts";
+import type { JSONObject, JSONSchema } from "./builder/types.ts";
 import {
   createDataCellURI,
   isPrimitiveCellLink,
@@ -34,9 +35,7 @@ import {
 import type {
   Activity,
   CommitError,
-  IAttestation,
   IExtendedStorageTransaction,
-  IMemoryAddress,
   IMemorySpaceAddress,
   InactiveTransactionError,
   IReadOptions,
@@ -54,6 +53,7 @@ import { resolve } from "./storage/transaction/attestation.ts";
 import { isWriteRedirectLink } from "./link-types.ts";
 import { LastNode } from "./link-resolution.ts";
 import { isArrayIndexPropertyName } from "./value-codec.ts";
+import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 

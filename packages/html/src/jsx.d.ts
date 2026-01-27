@@ -2854,16 +2854,9 @@ type OutlinerNode = {
   attachments: Charm[];
 };
 
-type CtListItem = {
-  title: string;
-  done?: boolean;
-};
-
 interface CTOutlinerElement extends CTHTMLElement {}
 interface CTCellLinkElement extends CTHTMLElement {}
 interface CTSpaceLinkElement extends CTHTMLElement {}
-interface CTListElement extends CTHTMLElement {}
-interface CTListItemElement extends CTHTMLElement {}
 interface CTLoaderElement extends CTHTMLElement {}
 interface CTInputElement extends CTHTMLElement {}
 interface CTTextAreaElement extends CTHTMLElement {}
@@ -3298,24 +3291,6 @@ interface CTDropZoneAttributes<T> extends CTHTMLAttributes<T> {
   "onct-drag-enter"?: EventHandler<{ sourceCell: any; type?: string }>;
   "onct-drag-leave"?: EventHandler<{}>;
   "onct-drop"?: EventHandler<{ sourceCell: any; type?: string }>;
-}
-
-interface CTListAttributes<T> extends CTHTMLAttributes<T> {
-  "$value": CellLike<CtListItem[]>;
-  /** setting this allows editing items inline */
-  "editable"?: boolean;
-  /** setting this hides the 'add item' form built into the list */
-  "readonly"?: boolean;
-  "title"?: string;
-  "onct-remove-item"?: EventHandler<{ item: CtListItem }>;
-}
-
-interface CTListItemAttributes<T> extends CTHTMLAttributes<T> {
-  "selected"?: boolean;
-  "active"?: boolean;
-  "disabled"?: boolean;
-  /** Fired when the row is activated (click/Enter/Space) */
-  "onct-activate"?: any;
 }
 
 interface CTLoaderAttributes<T> extends CTHTMLAttributes<T> {
@@ -4441,14 +4416,6 @@ declare global {
       "ct-outliner": CTDOM.DetailedHTMLProps<
         CTOutlinerAttributes<CTOutlinerElement>,
         CTOutlinerElement
-      >;
-      "ct-list": CTDOM.DetailedHTMLProps<
-        CTListAttributes<CTListElement>,
-        CTListElement
-      >;
-      "ct-list-item": CTDOM.DetailedHTMLProps<
-        CTListItemAttributes<CTListItemElement>,
-        CTListItemElement
       >;
       "ct-loader": CTDOM.DetailedHTMLProps<
         CTLoaderAttributes<CTLoaderElement>,

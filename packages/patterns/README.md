@@ -46,7 +46,7 @@ keywords/features.
 - chatbot-list-view.tsx: Chat application with sidebar list of chat sessions
   - **Data types**: array of objects (CharmEntry with ID and charm), selected
     charm object
-  - **Keywords**: lift, handler, navigateTo, ct-list-item, ct-select, ct-render,
+  - **Keywords**: lift, handler, navigateTo, ct-select, ct-render,
     ct-autolayout, wish, [ID]
 
 - chatbot.tsx: Full-featured chatbot with LLM integration and attachments
@@ -77,10 +77,6 @@ keywords/features.
 - ct-checkbox-handler.tsx: Checkbox with explicit handler for state changes
   - **Data types**: boolean
   - **Keywords**: ct-checkbox, handler, checked property, onct-change, ifElse
-
-- examples/ct-list.tsx: List component with editable items
-  - **Data types**: array of objects (items with title)
-  - **Keywords**: ct-list, $value (bidirectional binding), editable, ct-input
 
 - examples/ct-render.tsx: Rendering sub-recipes with ct-render component
   - **Data types**: number (counter value)

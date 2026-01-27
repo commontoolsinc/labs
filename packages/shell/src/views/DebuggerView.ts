@@ -4,6 +4,7 @@ import { ResizableDrawerController } from "../lib/resizable-drawer-controller.ts
 import type {
   LoggerMetadata,
   RuntimeTelemetryMarkerResult,
+  TimingStats,
 } from "@commontools/runtime-client";
 import { isRecord } from "@commontools/utils/types";
 import type { DebuggerController } from "../lib/debugger-controller.ts";
@@ -779,6 +780,52 @@ export class XDebuggerView extends LitElement {
     .delta.negative {
       color: #3b82f6;
     }
+
+    /* Timing histogram styles - Tufte-inspired minimal design */
+    .timing-histogram {
+      margin-top: 0.5rem;
+      padding: 0.5rem;
+      background-color: #0f172a;
+      border-radius: 0.25rem;
+    }
+
+    .timing-key-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.5rem;
+      font-size: 0.625rem;
+      color: #94a3b8;
+    }
+
+    .timing-key-name {
+      font-family: monospace;
+      color: #cbd5e1;
+      font-weight: 600;
+    }
+
+    .timing-stats-summary {
+      display: flex;
+      gap: 0.75rem;
+      font-size: 0.625rem;
+      color: #64748b;
+    }
+
+    .timing-tooltip {
+      position: fixed;
+      background-color: #1e293b;
+      color: #e2e8f0;
+      padding: 0.5rem;
+      border-radius: 0.25rem;
+      font-size: 0.75rem;
+      pointer-events: none;
+      z-index: 1000;
+      box-shadow:
+        0 4px 6px -1px rgba(0, 0, 0, 0.1),
+        0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      white-space: pre-line;
+      max-width: 250px;
+    }
   `;
 
   @property({ type: Boolean })
@@ -808,6 +855,16 @@ export class XDebuggerView extends LitElement {
   private workerLoggerMetadata: LoggerMetadata | null = null;
 
   @state()
+  private loggerTimingSample:
+    | Record<string, Record<string, TimingStats>>
+    | null = null;
+
+  @state()
+  private workerLoggerTiming:
+    | Record<string, Record<string, TimingStats>>
+    | null = null;
+
+  @state()
   private expandedLoggers = new Set<string>();
 
   @state()
@@ -827,6 +884,14 @@ export class XDebuggerView extends LitElement {
 
   @state()
   private pausedMarkers: RuntimeTelemetryMarkerResult[] = [];
+
+  @state()
+  private tooltipData: {
+    x: number;
+    y: number;
+    content: string;
+    visible: boolean;
+  } | null = null;
 
   private resizeController = new ResizableDrawerController(this, {
     initialHeight: 300,
@@ -1388,22 +1453,20 @@ export class XDebuggerView extends LitElement {
     return typeof total === "number" ? total : 0;
   }
 
-  private async getWorkerLoggerBreakdown(): Promise<
-    Record<
-      string,
-      LoggerBreakdown | number
-    > | null
-  > {
+  private async getWorkerLoggerBreakdown(): Promise<{
+    counts: Record<string, LoggerBreakdown | number> | null;
+    timing: Record<string, Record<string, TimingStats>> | null;
+  }> {
     const runtime = this.debuggerController?.getRuntime();
-    if (!runtime) return null;
+    if (!runtime) return { counts: null, timing: null };
     const rt = runtime.runtime();
-    if (!rt) return null;
+    if (!rt) return { counts: null, timing: null };
     try {
       const result = await rt.getLoggerCounts();
       this.workerLoggerMetadata = result.metadata;
-      return result.counts;
+      return { counts: result.counts, timing: result.timing };
     } catch {
-      return null;
+      return { counts: null, timing: null };
     }
   }
 
@@ -1473,16 +1536,83 @@ export class XDebuggerView extends LitElement {
     return merged;
   }
 
+  private getLoggerTiming(): Record<string, Record<string, TimingStats>> {
+    const global = globalThis as unknown as {
+      commontools?: {
+        getTimingStatsBreakdown?: () => Record<
+          string,
+          Record<string, TimingStats>
+        >;
+      };
+    };
+    return global.commontools?.getTimingStatsBreakdown?.() ?? {};
+  }
+
+  private mergeLoggerTiming(
+    main: Record<string, Record<string, TimingStats>>,
+    worker: Record<string, Record<string, TimingStats>> | null,
+  ): Record<string, Record<string, TimingStats>> {
+    if (!worker) return main;
+
+    const merged: Record<string, Record<string, TimingStats>> = { ...main };
+
+    for (const [loggerName, workerKeys] of Object.entries(worker)) {
+      if (!merged[loggerName]) {
+        merged[loggerName] = workerKeys;
+      } else {
+        // Merge keys within the same logger
+        merged[loggerName] = { ...merged[loggerName], ...workerKeys };
+      }
+    }
+
+    return merged;
+  }
+
   private async sampleLoggerCounts(): Promise<void> {
     const mainCounts = this.getLoggerBreakdown();
-    const workerCounts = await this.getWorkerLoggerBreakdown();
-    this.loggerSample = this.mergeLoggerBreakdowns(mainCounts, workerCounts);
+    const workerResult = await this.getWorkerLoggerBreakdown();
+    this.loggerSample = this.mergeLoggerBreakdowns(
+      mainCounts,
+      workerResult.counts,
+    );
+
+    // Merge timing data
+    const mainTiming = this.getLoggerTiming();
+    this.loggerTimingSample = this.mergeLoggerTiming(
+      mainTiming,
+      workerResult.timing,
+    );
+
+    // Debug logging
+    console.log("[sampleLoggerCounts] Timing data:", {
+      mainTiming,
+      workerTiming: workerResult.timing,
+      merged: this.loggerTimingSample,
+    });
   }
 
   private async resetBaseline(): Promise<void> {
-    const mainCounts = this.getLoggerBreakdown();
-    const workerCounts = await this.getWorkerLoggerBreakdown();
-    this.loggerBaseline = this.mergeLoggerBreakdowns(mainCounts, workerCounts);
+    // Reset counts baseline
+    const global = globalThis as unknown as {
+      commontools?: {
+        resetAllCountBaselines?: () => void;
+        resetAllTimingBaselines?: () => void;
+      };
+    };
+    global.commontools?.resetAllCountBaselines?.();
+    global.commontools?.resetAllTimingBaselines?.();
+
+    // Reset in worker via IPC
+    const runtime = this.debuggerController?.getRuntime();
+    const rt = runtime?.runtime();
+    if (rt) {
+      await rt.resetLoggerBaselines();
+    }
+
+    // Clear local baseline tracking
+    this.loggerBaseline = null;
+
+    // Sample to get fresh data
     await this.sampleLoggerCounts();
   }
 
@@ -1544,6 +1674,631 @@ export class XDebuggerView extends LitElement {
   private formatDelta(delta: number): string {
     if (delta === 0) return "0";
     return delta > 0 ? `+${delta}` : `${delta}`;
+  }
+
+  private renderTimingHistogram(
+    _loggerName: string,
+    timingData: Record<string, TimingStats>,
+  ): TemplateResult {
+    const keys = Object.keys(timingData).sort((a, b) =>
+      timingData[b].count - timingData[a].count
+    );
+
+    if (keys.length === 0) {
+      return html`
+
+      `;
+    }
+
+    return html`
+      <div class="timing-histogram">
+        ${keys.map((key) => {
+          const stats = timingData[key];
+          if (!stats.cdf || stats.cdf.length === 0) {
+            return html`
+
+            `;
+          }
+
+          return this.renderCDFForKey(key, stats);
+        })}
+      </div>
+    `;
+  }
+
+  private handleChartMouseMove(
+    e: MouseEvent,
+    cumulativePointsBlue: Array<{
+      latency: number;
+      cumulativeTime: number;
+      eventIndex: number;
+      normalizedPosition: number;
+    }>,
+    cumulativePointsGreen:
+      | Array<{
+        latency: number;
+        cumulativeTime: number;
+        eventIndex: number;
+        normalizedPosition: number;
+      }>
+      | null,
+    xScale: (normalizedPosition: number) => number,
+    yScaleBlue: (cumulativeTime: number) => number,
+    yScaleGreen: (cumulativeTime: number) => number,
+    formatTime: (ms: number) => string,
+    margin: { top: number; right: number; bottom: number; left: number },
+    _plotWidth: number,
+    _plotHeight: number,
+  ): void {
+    const svg = e.currentTarget as SVGElement;
+    const rect = svg.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // Check if mouse is inside plot area
+    if (
+      mouseX < margin.left ||
+      mouseX > rect.width - margin.right ||
+      mouseY < margin.top ||
+      mouseY > rect.height - margin.bottom
+    ) {
+      this.tooltipData = null;
+      return;
+    }
+
+    // Find closest point on blue curve
+    let closestPointBlue = cumulativePointsBlue[0];
+    let minDistanceBlue = Infinity;
+
+    for (const point of cumulativePointsBlue) {
+      const px = xScale(point.normalizedPosition);
+      const py = yScaleBlue(point.cumulativeTime);
+      const distance = Math.sqrt((mouseX - px) ** 2 + (mouseY - py) ** 2);
+      if (distance < minDistanceBlue) {
+        minDistanceBlue = distance;
+        closestPointBlue = point;
+      }
+    }
+
+    // Find closest point on green curve if it exists
+    let closestPointGreen: typeof closestPointBlue | null = null;
+    let minDistanceGreen = Infinity;
+
+    if (cumulativePointsGreen) {
+      for (const point of cumulativePointsGreen) {
+        const px = xScale(point.normalizedPosition);
+        const py = yScaleGreen(point.cumulativeTime);
+        const distance = Math.sqrt((mouseX - px) ** 2 + (mouseY - py) ** 2);
+        if (distance < minDistanceGreen) {
+          minDistanceGreen = distance;
+          closestPointGreen = point;
+        }
+      }
+    }
+
+    // Show tooltip if close enough to either curve (within 30px)
+    const isCloseToBlue = minDistanceBlue < 30;
+    const isCloseToGreen = minDistanceGreen < 30;
+
+    if (isCloseToBlue || isCloseToGreen) {
+      const lines: string[] = [];
+
+      if (isCloseToBlue) {
+        lines.push(
+          `All time: ${formatTime(closestPointBlue.latency)}`,
+          `  Cumulative: ${formatTime(closestPointBlue.cumulativeTime)}`,
+          `  Event #${closestPointBlue.eventIndex}`,
+        );
+      }
+
+      if (isCloseToGreen && closestPointGreen) {
+        if (lines.length > 0) lines.push(""); // Add blank line between sections
+        lines.push(
+          `Since baseline: ${formatTime(closestPointGreen.latency)}`,
+          `  Cumulative: ${formatTime(closestPointGreen.cumulativeTime)}`,
+          `  Event #${closestPointGreen.eventIndex}`,
+        );
+      }
+
+      this.tooltipData = {
+        x: e.clientX + 10,
+        y: e.clientY - 10,
+        content: lines.join("\n"),
+        visible: true,
+      };
+    } else {
+      this.tooltipData = null;
+    }
+  }
+
+  private handleChartMouseLeave(): void {
+    this.tooltipData = null;
+  }
+
+  private renderCDFForKey(
+    key: string,
+    stats: TimingStats,
+  ): TemplateResult {
+    const cdf = stats.cdf;
+    const cdfDelta = stats.cdfSinceBaseline;
+
+    if (cdf.length === 0) {
+      return html`
+
+      `;
+    }
+
+    // Format time for display
+    const formatTime = (ms: number) => {
+      if (ms < 1) return `${(ms * 1000).toFixed(0)}μs`;
+      if (ms < 1000) return `${ms.toFixed(1)}ms`;
+      return `${(ms / 1000).toFixed(2)}s`;
+    };
+
+    // Create unique ID for this chart
+    const chartId = `cdf-${key.replace(/\//g, "-")}`;
+
+    // SVG dimensions
+    const width = 600;
+    const height = 200;
+    const margin = { top: 25, right: 50, bottom: 40, left: 60 };
+    const plotWidth = width - margin.left - margin.right;
+    const plotHeight = height - margin.top - margin.bottom;
+
+    // Sort samples and compute cumulative time
+    const sortedSamples = [...cdf].sort((a, b) => a.x - b.x);
+    const cumulativePoints: Array<
+      {
+        latency: number;
+        cumulativeTime: number;
+        eventIndex: number;
+        normalizedPosition: number;
+      }
+    > = [];
+    let cumTime = 0;
+    const totalCount = sortedSamples.length;
+    sortedSamples.forEach((sample, i) => {
+      cumTime += sample.x;
+      cumulativePoints.push({
+        latency: sample.x,
+        cumulativeTime: cumTime,
+        eventIndex: i + 1,
+        normalizedPosition: totalCount > 0 ? (i + 1) / totalCount : 0,
+      });
+    });
+
+    // Do the same for delta if it exists
+    let cumulativePointsDelta:
+      | Array<
+        {
+          latency: number;
+          cumulativeTime: number;
+          eventIndex: number;
+          normalizedPosition: number;
+        }
+      >
+      | null = null;
+    if (cdfDelta) {
+      const sortedDelta = [...cdfDelta].sort((a, b) => a.x - b.x);
+      cumulativePointsDelta = [];
+      let cumTimeDelta = 0;
+      const deltaCount = sortedDelta.length;
+      sortedDelta.forEach((sample, i) => {
+        cumTimeDelta += sample.x;
+        cumulativePointsDelta!.push({
+          latency: sample.x,
+          cumulativeTime: cumTimeDelta,
+          eventIndex: i + 1,
+          normalizedPosition: deltaCount > 0 ? (i + 1) / deltaCount : 0,
+        });
+      });
+    }
+
+    // X-axis: normalized position (0 to 1)
+    // This allows both curves to use the full chart width
+    const xScale = (normalizedPosition: number) => {
+      return margin.left + normalizedPosition * plotWidth;
+    };
+
+    // Y-axis: cumulative time (0 to max cumulative from reservoir samples)
+    // Use separate scales for each curve so both fill the vertical space
+    const maxCumulativeTimeBlue =
+      cumulativePoints[cumulativePoints.length - 1]?.cumulativeTime ?? 0.001;
+    const maxCumulativeTimeGreen = cumulativePointsDelta?.[
+      cumulativePointsDelta.length - 1
+    ]?.cumulativeTime ?? maxCumulativeTimeBlue;
+
+    const yScaleBlue = (cumulativeTime: number) => {
+      return margin.top + plotHeight -
+        (cumulativeTime / maxCumulativeTimeBlue) * plotHeight;
+    };
+
+    const yScaleGreen = (cumulativeTime: number) => {
+      return margin.top + plotHeight -
+        (cumulativeTime / maxCumulativeTimeGreen) * plotHeight;
+    };
+
+    // For y-axis labels, use the maximum of both
+    const maxCumulativeTime = Math.max(
+      maxCumulativeTimeBlue,
+      maxCumulativeTimeGreen,
+    );
+    const yScale = yScaleBlue; // For grid lines/labels
+
+    // Generate SVG path from cumulative points
+    const pathFromCumulative = (
+      points: Array<{
+        latency: number;
+        cumulativeTime: number;
+        eventIndex: number;
+        normalizedPosition: number;
+      }>,
+      yScaleFn: (cumulativeTime: number) => number,
+    ) => {
+      if (points.length === 0) return "";
+      const pathParts = points.map((p, i) =>
+        `${i === 0 ? "M" : "L"} ${xScale(p.normalizedPosition)} ${
+          yScaleFn(p.cumulativeTime)
+        }`
+      );
+      const path = pathParts.join(" ");
+      return path;
+    };
+
+    // Generate x-axis tick marks (percentages: 0%, 20%, 40%, 60%, 80%, 100%)
+    const xTicks: number[] = [];
+    const xTickCount = 5;
+    for (let i = 0; i <= xTickCount; i++) {
+      xTicks.push(i / xTickCount); // 0, 0.2, 0.4, 0.6, 0.8, 1.0
+    }
+
+    // Generate y-axis tick marks (cumulative time)
+    const yTicks: number[] = [];
+    const yTickCount = 5;
+    for (let i = 0; i <= yTickCount; i++) {
+      yTicks.push((i / yTickCount) * maxCumulativeTime);
+    }
+
+    // Percentile positions (normalized 0-1)
+    const p50Position = 0.5; // Always at 50% by definition
+    const p95Position = 0.95; // Always at 95% by definition
+
+    // Find position closest to average latency in the blue curve
+    let avgPosition = 0.5; // default to middle
+    let minDiff = Infinity;
+    for (let i = 0; i < cumulativePoints.length; i++) {
+      const diff = Math.abs(cumulativePoints[i].latency - stats.average);
+      if (diff < minDiff) {
+        minDiff = diff;
+        avgPosition = cumulativePoints[i].normalizedPosition;
+      }
+    }
+
+    // Pre-render SVG path data
+    const greenPathData = cumulativePointsDelta
+      ? pathFromCumulative(cumulativePointsDelta, yScaleGreen)
+      : null;
+
+    const showGreenLegend = cdfDelta && cumulativePointsDelta &&
+      cumulativePointsDelta.length > 0;
+
+    return html`
+      <div style="margin-bottom: 1rem;">
+        <div class="timing-key-header">
+          <span class="timing-key-name">${key}</span>
+          <div class="timing-stats-summary">
+            <span>n=${stats.count}</span>
+            <span>p50=${formatTime(stats.p50)}</span>
+            <span>p95=${formatTime(stats.p95)}</span>
+            <span>avg=${formatTime(stats.average)}</span>
+          </div>
+        </div>
+
+        <svg
+          id="${chartId}"
+          width="${width}"
+          height="${height}"
+          style="background-color: #0f172a; border-radius: 0.25rem; cursor: crosshair;"
+          @mousemove="${(e: MouseEvent) =>
+            this.handleChartMouseMove(
+              e,
+              cumulativePoints,
+              cumulativePointsDelta,
+              xScale,
+              yScaleBlue,
+              yScaleGreen,
+              formatTime,
+              margin,
+              plotWidth,
+              plotHeight,
+            )}"
+          @mouseleave="${() => this.handleChartMouseLeave()}"
+        >
+          <!-- Y-axis grid lines and labels -->
+          ${yTicks.map((y) => {
+            const yPos = yScale(y);
+            return html`
+              <line
+                x1="${margin.left}"
+                y1="${yPos}"
+                x2="${width - margin.right}"
+                y2="${yPos}"
+                stroke="#334155"
+                stroke-width="1"
+                opacity="0.3"
+              />
+              <text
+                x="${margin.left - 8}"
+                y="${yPos + 1}"
+                text-anchor="end"
+                dominant-baseline="middle"
+                fill="#e2e8f0"
+                font-size="10"
+                font-family="monospace"
+              >
+                ${formatTime(y)}
+              </text>
+            `;
+          })}
+
+          <!-- X-axis grid lines and labels -->
+          ${xTicks.map((x) => {
+            const xPos = xScale(x);
+            return html`
+              <line
+                x1="${xPos}"
+                y1="${margin.top}"
+                x2="${xPos}"
+                y2="${height - margin.bottom}"
+                stroke="#334155"
+                stroke-width="1"
+                opacity="0.3"
+              />
+              <text
+                x="${xPos}"
+                y="${height - margin.bottom + 18}"
+                text-anchor="middle"
+                fill="#e2e8f0"
+                font-size="10"
+                font-family="monospace"
+              >
+                ${Math.round(x * 100)}%
+              </text>
+            `;
+          })}
+
+          <!-- Axes with tick marks -->
+          <line
+            x1="${margin.left}"
+            y1="${height - margin.bottom}"
+            x2="${width - margin.right}"
+            y2="${height - margin.bottom}"
+            stroke="#cbd5e1"
+            stroke-width="2"
+          />
+          <line
+            x1="${margin.left}"
+            y1="${margin.top}"
+            x2="${margin.left}"
+            y2="${height - margin.bottom}"
+            stroke="#cbd5e1"
+            stroke-width="2"
+          />
+
+          <!-- X-axis ticks -->
+          ${xTicks.map((x) => {
+            const xPos = xScale(x);
+            return html`
+              <line
+                x1="${xPos}"
+                y1="${height - margin.bottom}"
+                x2="${xPos}"
+                y2="${height - margin.bottom + 6}"
+                stroke="#e2e8f0"
+                stroke-width="2"
+              />
+            `;
+          })}
+
+          <!-- Y-axis ticks -->
+          ${yTicks.map((y) => {
+            const yPos = yScale(y);
+            return html`
+              <line
+                x1="${margin.left - 6}"
+                y1="${yPos}"
+                x2="${margin.left}"
+                y2="${yPos}"
+                stroke="#e2e8f0"
+                stroke-width="2"
+              />
+            `;
+          })}
+
+          <!-- Cumulative time curve (all samples since start) - blue -->
+          <path
+            d="${pathFromCumulative(cumulativePoints, yScaleBlue)}"
+            fill="none"
+            stroke="#3b82f6"
+            stroke-width="2"
+            opacity="0.8"
+            style="pointer-events: stroke;"
+          >
+            <title>Total: ${stats.count} samples, ${formatTime(
+              stats.totalTime,
+            )} cumulative</title>
+          </path>
+
+          <!-- Cumulative time delta curve (since baseline) - green -->
+          <path
+            d="${greenPathData || ""}"
+            fill="none"
+            stroke="#10b981"
+            stroke-width="2"
+            opacity="0.8"
+            style="pointer-events: stroke; ${greenPathData
+              ? ""
+              : "display: none;"}"
+          >
+            <title>Since baseline</title>
+          </path>
+
+          <!-- Percentile reference lines (p50, p95) - render AFTER curves -->
+          <g style="pointer-events: stroke;">
+            <line
+              x1="${xScale(p50Position)}"
+              y1="${margin.top}"
+              x2="${xScale(p50Position)}"
+              y2="${height - margin.bottom}"
+              stroke="#f59e0b"
+              stroke-width="1.5"
+              stroke-dasharray="4,2"
+              opacity="0.7"
+            >
+              <title>p50 (median): ${formatTime(stats.p50)}</title>
+            </line>
+            <text
+              x="${xScale(p50Position)}"
+              y="${margin.top - 4}"
+              text-anchor="middle"
+              fill="#f59e0b"
+              font-size="8"
+              font-weight="600"
+              style="pointer-events: none;"
+            >
+              <tspan x="${xScale(p50Position)}" dy="0">p50</tspan>
+              <tspan x="${xScale(p50Position)}" dy="10">${formatTime(
+                stats.p50,
+              )}</tspan>
+            </text>
+          </g>
+
+          <g style="pointer-events: stroke;">
+            <line
+              x1="${xScale(p95Position)}"
+              y1="${margin.top}"
+              x2="${xScale(p95Position)}"
+              y2="${height - margin.bottom}"
+              stroke="#ef4444"
+              stroke-width="1.5"
+              stroke-dasharray="4,2"
+              opacity="0.7"
+            >
+              <title>p95: ${formatTime(stats.p95)}</title>
+            </line>
+            <text
+              x="${xScale(p95Position)}"
+              y="${margin.top - 4}"
+              text-anchor="middle"
+              fill="#ef4444"
+              font-size="8"
+              font-weight="600"
+              style="pointer-events: none;"
+            >
+              <tspan x="${xScale(p95Position)}" dy="0">p95</tspan>
+              <tspan x="${xScale(p95Position)}" dy="10">${formatTime(
+                stats.p95,
+              )}</tspan>
+            </text>
+          </g>
+
+          <!-- Average reference line -->
+          <g style="pointer-events: stroke;">
+            <line
+              x1="${xScale(avgPosition)}"
+              y1="${margin.top}"
+              x2="${xScale(avgPosition)}"
+              y2="${height - margin.bottom}"
+              stroke="#8b5cf6"
+              stroke-width="1.5"
+              stroke-dasharray="4,2"
+              opacity="0.5"
+            >
+              <title>avg (mean): ${formatTime(stats.average)}</title>
+            </line>
+            <text
+              x="${xScale(avgPosition)}"
+              y="${margin.top - 4}"
+              text-anchor="middle"
+              fill="#8b5cf6"
+              font-size="8"
+              font-weight="600"
+              style="pointer-events: none;"
+            >
+              <tspan x="${xScale(avgPosition)}" dy="0">avg</tspan>
+              <tspan x="${xScale(avgPosition)}" dy="10">${formatTime(
+                stats.average,
+              )}</tspan>
+            </text>
+          </g>
+
+          <!-- Axis labels -->
+          <text
+            x="${margin.left + plotWidth / 2}"
+            y="${height - 5}"
+            text-anchor="middle"
+            fill="#e2e8f0"
+            font-size="12"
+            font-weight="600"
+          >
+            Events
+          </text>
+          <text
+            x="${margin.left - 40}"
+            y="${margin.top + plotHeight / 2}"
+            text-anchor="middle"
+            fill="#e2e8f0"
+            font-size="12"
+            font-weight="600"
+            transform="rotate(-90 ${margin.left - 40} ${margin.top +
+              plotHeight / 2})"
+          >
+            Cumulative Time
+          </text>
+
+          <!-- Legend -->
+          <g transform="translate(${margin.left + 10}, ${margin.top + 10})">
+            <line x1="0" y1="0" x2="20" y2="0" stroke="#3b82f6" stroke-width="2" />
+            <text
+              x="25"
+              y="0"
+              dominant-baseline="middle"
+              fill="#cbd5e1"
+              font-size="10"
+            >
+              All time (${(maxCumulativeTimeBlue / 1000).toFixed(
+                2,
+              )}s in ${cumulativePoints.length} samples)
+            </text>
+            <line
+              x1="0"
+              y1="15"
+              x2="20"
+              y2="15"
+              stroke="#10b981"
+              stroke-width="2"
+              style="${showGreenLegend ? "" : "display: none;"}"
+            />
+            <text
+              x="25"
+              y="15"
+              dominant-baseline="middle"
+              fill="#cbd5e1"
+              font-size="10"
+              style="${showGreenLegend ? "" : "display: none;"}"
+            >
+              Since baseline (${showGreenLegend
+                ? `${
+                  (maxCumulativeTimeGreen / 1000).toFixed(
+                    2,
+                  )
+                }s in ${cumulativePointsDelta!.length} samples`
+                : ""})
+            </text>
+          </g>
+        </svg>
+      </div>
+    `;
   }
 
   private renderLoggers(): TemplateResult {
@@ -1716,6 +2471,14 @@ export class XDebuggerView extends LitElement {
                         `;
                       })}
                   </div>
+
+                  ${/* Show timing histogram if available */
+                  this.loggerTimingSample?.[name]
+                    ? this.renderTimingHistogram(
+                      name,
+                      this.loggerTimingSample[name],
+                    )
+                    : ""}
                 `
                 : ""}
             </div>
@@ -2034,6 +2797,23 @@ export class XDebuggerView extends LitElement {
                         </div>
                       `;
                     })}
+                    <button
+                      type="button"
+                      class="action-button ${this.debuggerController
+                          ?.isTelemetryEnabled()
+                        ? "on"
+                        : "off"}"
+                      @click="${() =>
+                        this.debuggerController?.toggleTelemetry()}"
+                      title="${this.debuggerController?.isTelemetryEnabled()
+                        ? "Telemetry ON - click to disable"
+                        : "Telemetry OFF - click to enable"}"
+                      style="margin-left: 0.5rem;"
+                    >
+                      ${this.debuggerController?.isTelemetryEnabled()
+                        ? "●"
+                        : "○"} Telemetry
+                    </button>
                   </div>
 
                   <div class="controls">
@@ -2105,6 +2885,19 @@ export class XDebuggerView extends LitElement {
                 </div>
               `}
           </div>
+
+          <!-- Tooltip -->
+          ${this.tooltipData
+            ? html`
+              <div
+                class="timing-tooltip"
+                style="left: ${this.tooltipData.x}px; top: ${this.tooltipData
+                  .y}px;"
+              >
+                ${this.tooltipData.content}
+              </div>
+            `
+            : ""}
         `
         : ""}
     `;
