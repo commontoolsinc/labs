@@ -1246,7 +1246,11 @@ export class Runner {
 
           const argument = module.argumentSchema !== undefined
             ? inputsCell.asSchema(module.argumentSchema).get()
-            : inputsCell.getAsQueryResult([], tx);
+            : inputsCell.getAsQueryResult(
+              [],
+              tx,
+              (module as { writableProxy?: boolean }).writableProxy,
+            );
 
           // If we have a schema of false, we don't use our argument, so undefined is ok
           const isValidArgument = module.argumentSchema === false ||
