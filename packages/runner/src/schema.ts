@@ -21,7 +21,6 @@ import {
   IObjectCreator,
   mergeAnyOfMatches,
   mergeSchemaFlags,
-  OptJSONValue,
   SchemaObjectTraverser,
 } from "@commontools/runner/traverse";
 
