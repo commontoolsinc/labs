@@ -1211,6 +1211,21 @@ export type BuiltInLLMMessage = {
   content: BuiltInLLMContent;
 };
 
+// ============================================================================
+// Domain Types - Schelling points for common data shapes
+// ============================================================================
+
+/**
+ * Minimal interface for person-like items.
+ * The schelling point for person data - first and last name.
+ * Using firstName/lastName rather than just "name" to avoid accidental
+ * duck-typing matches with other named things (files, projects, etc.).
+ */
+export interface PersonLike {
+  firstName: string;
+  lastName: string;
+}
+
 // Image types from UI components
 export interface ImageData {
   id: string;
