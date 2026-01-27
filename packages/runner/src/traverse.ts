@@ -13,6 +13,7 @@ import type {
   Unit,
 } from "@commontools/memory/interface";
 import { deepEqual } from "@commontools/utils/deep-equal";
+import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
 // TODO(@ubik2): Ideally this would import from "@commontools/utils/types",
 // but rollup has issues
 import {
@@ -52,7 +53,6 @@ import type {
 import { resolve } from "./storage/transaction/attestation.ts";
 import { isWriteRedirectLink } from "./link-types.ts";
 import { LastNode } from "./link-resolution.ts";
-import { isArrayIndexPropertyName } from "./value-codec.ts";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
