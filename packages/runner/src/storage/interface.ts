@@ -81,6 +81,14 @@ export interface StorageValue<T = any> {
   labels?: Labels;
 }
 
+/** Immutable version of `StorageValue<T>`. */
+export type ImmutableStorageValue<T = any> = Immutable<StorageValue<T>>;
+
+/** Optional immutable version of `StorageValue<T>`. */
+export type OptImmutableStorageValue<T = any> =
+  | ImmutableStorageValue<T>
+  | undefined;
+
 export interface IStorageManager extends IStorageSubscriptionCapability {
   id: string;
 
@@ -190,7 +198,7 @@ export interface IStorageProvider {
    * @param uri - uri of the entity to get the value for.
    * @returns Value or undefined if the value is not in storage.
    */
-  get<T = any>(uri: URI): Immutable<StorageValue<T>> | undefined;
+  get<T = any>(uri: URI): OptImmutableStorageValue<T>;
 
   /**
    * Subscribe to storage updates.
@@ -201,7 +209,7 @@ export interface IStorageProvider {
    */
   sink<T = any>(
     uri: URI,
-    callback: (value: Immutable<StorageValue<T>>) => void,
+    callback: (value: ImmutableStorageValue<T>) => void,
   ): Cancel;
 
   /**
