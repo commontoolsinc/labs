@@ -92,14 +92,23 @@ Proofs corresponding to safety invariants:
 
 Trusted-runtime label propagation rules (schema-driven transitions):
 
-- Pass-through / reference preservation (8.2), projection scoping (8.3), exact-copy verification (8.4):
+- Pass-through / reference preservation (8.2), projection scoping (8.3), exact-copy verification (8.4), transformation provenance (8.7/8.9.2):
   - `formal/Cfc/LabelTransitions.lean`: `LabelTransition.passThrough`, `LabelTransition.projection`,
-    `LabelTransition.exactCopyOf`, `LabelTransition.combinedFrom` (8.6)
+    `LabelTransition.exactCopyOf`, `LabelTransition.combinedFrom` (8.6),
+    `LabelTransition.transformedFrom` (default transition / transformation integrity)
   - `formal/Cfc/Proofs/LabelTransitions.lean`: core preservation lemmas (e.g. scoped integrity membership,
-    exactCopyOf success/failure characterizations)
+    exactCopyOf success/failure characterizations, `transformedFrom` adds `TransformedBy`)
+- Safe recomposition of projections (motivated by 8.3.2 / 8.3.4):
+  - `formal/Cfc/LabelTransitions.lean`: `LabelTransition.recomposeFromProjections`
+    - checked transition that (a) validates each part via an abstract reference-equality check,
+      and (b) requires the expected scoped integrity atom before restoring whole-object integrity
+  - `formal/Cfc/Proofs/LabelTransitions.lean`: lemma `mem_recomposeFromProjections_whole_of_eq_some`
 - Collections (8.5):
   - `formal/Cfc/Collection.lean`: `LabeledCollection` (separates membership label from member labels),
-    `CollectionTransition.subsetOf`, `CollectionTransition.permutationOf`, `CollectionTransition.filteredFrom`
+    `CollectionTransition.subsetOf`, `CollectionTransition.permutationOf`, `CollectionTransition.filteredFrom`,
+    `CollectionTransition.lengthPreserved`
+  - `formal/Cfc/Collection.lean`: executable checks `CollectionTransition.Verify.*` and checked transitions
+    returning `Option` (reject on verification failure)
   - `formal/Cfc/Proofs/Collection.lean`: key container/member preservation lemmas
   - `formal/Cfc/Proofs/LabelTransitionExamples.lean`: small regressions that exercise projection scoping,
     exactCopyOf rejection, and membership-vs-member separation

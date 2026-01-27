@@ -133,24 +133,68 @@ theorem pc_subset_combinedFrom_conf (pc : ConfLabel) (inputs : List Label) :
     -- `taintPc` prefixes `pc`.
     exact List.mem_append.2 (Or.inl (by simpa [LabelTransition.combinedFrom, LabelTransition.taintPc] using hc))
 
+/-!
+Transformation integrity lemmas.
+
+These correspond to spec 8.7 and the default transition in 8.9.2.
+-/
+
+/-
+Flow-path confidentiality (`pc`) always appears in the output of `transformedFrom`.
+
+This is the same shape as `pc_subset_combinedFrom_conf`: `transformedFrom` ends with `taintPc pc`,
+so membership is injected by `List.mem_append`.
+-/
+theorem pc_subset_transformedFrom_conf (pc : ConfLabel) (codeHash : String) (inputRefs : List Nat) (inputs : List Label) :
+    pc ⊆ (LabelTransition.transformedFrom pc codeHash inputRefs inputs).conf := by
+  intro c hc
+  -- `taintPc` prefixes `pc`, so anything in `pc` is in the output confidentiality.
+  exact List.mem_append.2 (Or.inl (by simpa [LabelTransition.transformedFrom, LabelTransition.taintPc] using hc))
+
+/-
+`transformedFrom` always adds the `Atom.transformedBy ...` integrity atom.
+
+This is just list membership of the singleton list `[a]`.
+-/
+theorem mem_transformedFrom_transformedBy (pc : ConfLabel) (codeHash : String) (inputRefs : List Nat) (inputs : List Label) :
+    Atom.transformedBy codeHash inputRefs ∈ (LabelTransition.transformedFrom pc codeHash inputRefs inputs).integ := by
+  simp [LabelTransition.transformedFrom]
+
 /-
 If `verifyRecomposeProjections` succeeds (`= true`), then each part really contains the required
-scoped integrity atom.
+scoped integrity atom, *and* the abstract reference check succeeded for that part.
 
 This is the direct `List.all` soundness lemma.
 -/
-theorem verifyRecomposeProjections_of_mem {source : Nat} {base : Atom} {parts : List (List String × Label)}
+theorem verifyRecomposeProjections_of_mem {source : Nat} {base : Atom} {parts : List LabelTransition.ProjectionPart}
     (h : LabelTransition.verifyRecomposeProjections source base parts = true) :
-    ∀ pl, pl ∈ parts → Atom.scopedFrom source pl.1 base ∈ pl.2.integ := by
+    ∀ p, p ∈ parts → p.outputRef = p.expectedRef ∧ Atom.scopedFrom source p.path base ∈ p.label.integ := by
   classical
-  intro pl hpl
-  have hAll : parts.all (fun pl => decide (Atom.scopedFrom source pl.1 base ∈ pl.2.integ)) = true := by
+  intro p hp
+  have hAll :
+      parts.all (fun p =>
+        decide (p.outputRef = p.expectedRef) &&
+        decide (Atom.scopedFrom source p.path base ∈ p.label.integ)) = true := by
     simpa [LabelTransition.verifyRecomposeProjections] using h
   -- Use the standard `List.all_eq_true` characterization.
-  have hPred : ∀ pl, pl ∈ parts → decide (Atom.scopedFrom source pl.1 base ∈ pl.2.integ) = true := by
+  have hPred :
+      ∀ p, p ∈ parts →
+        (decide (p.outputRef = p.expectedRef) &&
+          decide (Atom.scopedFrom source p.path base ∈ p.label.integ)) = true := by
     simpa [List.all_eq_true] using hAll
-  have : decide (Atom.scopedFrom source pl.1 base ∈ pl.2.integ) = true := hPred pl hpl
-  exact of_decide_eq_true this
+  have hThis :
+      (decide (p.outputRef = p.expectedRef) &&
+        decide (Atom.scopedFrom source p.path base ∈ p.label.integ)) = true := hPred p hp
+  have hAnd :
+      decide (p.outputRef = p.expectedRef) = true ∧
+      decide (Atom.scopedFrom source p.path base ∈ p.label.integ) = true := by
+    -- `Bool.and_eq_true` is an equality of propositions:
+    --   ((a && b) = true) = (a = true ∧ b = true)
+    -- so we can transport `hThis` across it with `Eq.mp`.
+    exact (Eq.mp (Bool.and_eq_true _ _) hThis)
+  constructor
+  · exact of_decide_eq_true hAnd.1
+  · exact of_decide_eq_true hAnd.2
 
 /-
 If recomposition returns `some out`, then the output integrity contains the "whole object"
@@ -159,7 +203,7 @@ atom `scopedFrom source [] base`.
 This is the key "safe recomposition restores integrity" fact.
 -/
 theorem mem_recomposeFromProjections_whole_of_eq_some
-    (pc : ConfLabel) (source : Nat) (base : Atom) (parts : List (List String × Label)) (out : Label)
+    (pc : ConfLabel) (source : Nat) (base : Atom) (parts : List LabelTransition.ProjectionPart) (out : Label)
     (h : LabelTransition.recomposeFromProjections pc source base parts = some out) :
     Atom.scopedFrom source [] base ∈ out.integ := by
   classical
@@ -172,13 +216,13 @@ theorem mem_recomposeFromProjections_whole_of_eq_some
     -- `simp` reduces `none = some out` to `False` and closes the goal by contradiction.
   | true =>
     -- Successful branch: `out` is definitionally the constructed label.
-    have : some { (LabelTransition.combinedFrom pc (parts.map Prod.snd)) with
-        integ := (LabelTransition.combinedFrom pc (parts.map Prod.snd)).integ ++
+    have : some { (LabelTransition.combinedFrom pc (parts.map (fun p => p.label))) with
+        integ := (LabelTransition.combinedFrom pc (parts.map (fun p => p.label))).integ ++
           [Atom.scopedFrom source [] base] } = some out := by
       simpa [LabelTransition.recomposeFromProjections, hv] using h
     have hout :
-        { (LabelTransition.combinedFrom pc (parts.map Prod.snd)) with
-          integ := (LabelTransition.combinedFrom pc (parts.map Prod.snd)).integ ++
+        { (LabelTransition.combinedFrom pc (parts.map (fun p => p.label))) with
+          integ := (LabelTransition.combinedFrom pc (parts.map (fun p => p.label))).integ ++
             [Atom.scopedFrom source [] base] } = out := by
       exact Option.some.inj this
     -- Conclude by rewriting and using list membership of append.

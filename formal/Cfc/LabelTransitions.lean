@@ -179,6 +179,35 @@ def combinedFrom (pc : ConfLabel) (inputs : List Label) : Label :=
       taintPc pc (rest.foldl (fun acc x => acc + x) ℓ)
 
 /-
+Transformation (spec 8.7, and the default case in 8.9.2):
+
+If the handler *computes* a new value, the runtime should not blindly preserve the inputs'
+integrity claims. Instead it mints fresh integrity evidence of the form `TransformedBy(...)`.
+
+We model this as:
+- confidentiality: CNF-join of all input confidentiality, plus `pc` taint
+- integrity: a single `Atom.transformedBy codeHash inputRefs`
+
+Notes:
+- We do not model actual values here, so `inputRefs : List Nat` is a stand-in for the spec's
+  content-addressed references to the concrete input values.
+- This is the conceptual dual of `combinedFrom`:
+  `combinedFrom` preserves integrity only via intersection (meet),
+  while `transformedFrom` discards input integrity and records provenance instead.
+-/
+def transformedFrom (pc : ConfLabel) (codeHash : String) (inputRefs : List Nat) (inputs : List Label) : Label :=
+  taintPc pc
+    { conf := inputs.foldl (fun acc ℓ => acc ++ ℓ.conf) []
+      integ := [Atom.transformedBy codeHash inputRefs] }
+
+@[simp] theorem conf_transformedFrom (pc : ConfLabel) (codeHash : String) (inputRefs : List Nat) (inputs : List Label) :
+    (transformedFrom pc codeHash inputRefs inputs).conf =
+      pc ++ (inputs.foldl (fun acc ℓ => acc ++ ℓ.conf) []) := rfl
+
+@[simp] theorem integ_transformedFrom (pc : ConfLabel) (codeHash : String) (inputRefs : List Nat) (inputs : List Label) :
+    (transformedFrom pc codeHash inputRefs inputs).integ = [Atom.transformedBy codeHash inputRefs] := rfl
+
+/-
 "Safe recomposition" of projections (not explicitly named in the spec, but motivated by 8.3.2).
 
 The spec motivation for scoped integrity has two halves:
@@ -188,7 +217,12 @@ The spec motivation for scoped integrity has two halves:
 We model the second part as a *checked* runtime rule:
 
 - The schema can declare that an output object is a recomposition of several projections.
-- The runtime verifies that each part label carries the appropriate `scopedFrom source path base` atom.
+- The runtime verifies two things for each part:
+  1) the part label carries the appropriate `scopedFrom source path base` atom, and
+  2) (abstractly) the part value really is the projected field of the source object.
+
+We do not model actual values in Lean, so we represent (2) by two `Nat` references:
+`expectedRef` and `outputRef`. Think of them as content hashes; the check is `expectedRef = outputRef`.
 - If the check passes, we allow the output to regain the integrity of the whole object,
   represented as `Atom.scopedFrom source [] base` (empty path = "whole object").
 - If the check fails, the output is rejected (`none`), like `exactCopyOf`.
@@ -196,13 +230,26 @@ We model the second part as a *checked* runtime rule:
 This is intentionally minimal: it only restores the *one* integrity atom `base`, and it does not
 try to model all possible structured integrity fields from the spec.
 -/
-def verifyRecomposeProjections (source : Nat) (base : Atom) (parts : List (List String × Label)) : Bool :=
-  parts.all (fun pl => decide (Atom.scopedFrom source pl.1 base ∈ pl.2.integ))
+structure ProjectionPart where
+  /-- The JSON-path-like projection identifier (e.g. `["lat"]`). -/
+  path : List String
+  /-- Reference (content hash) of the expected source field value. -/
+  expectedRef : Nat
+  /-- Reference (content hash) of the handler's output value for this part. -/
+  outputRef : Nat
+  /-- The label attached to the handler's output value for this part. -/
+  label : Label
+  deriving Repr
+
+def verifyRecomposeProjections (source : Nat) (base : Atom) (parts : List ProjectionPart) : Bool :=
+  parts.all (fun p =>
+    decide (p.outputRef = p.expectedRef) &&
+    decide (Atom.scopedFrom source p.path base ∈ p.label.integ))
 
 def recomposeFromProjections (pc : ConfLabel) (source : Nat) (base : Atom)
-    (parts : List (List String × Label)) : Option Label :=
+    (parts : List ProjectionPart) : Option Label :=
   if verifyRecomposeProjections source base parts then
-    let out := combinedFrom pc (parts.map Prod.snd)
+    let out := combinedFrom pc (parts.map (fun p => p.label))
     some { out with integ := out.integ ++ [Atom.scopedFrom source [] base] }
   else
     none

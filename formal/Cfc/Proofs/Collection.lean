@@ -147,6 +147,55 @@ theorem not_mem_filteredFrom_completeCollection {Ref : Type} (pc : ConfLabel) (s
   classical
   simp [CollectionTransition.filteredFrom, CollectionTransition.stripCollectionIntegrity, Atom.isCollectionIntegrity]
 
+/-!
+Length-preservation transition lemmas (spec 8.5.4).
+
+Unlike `subsetOf` / `filteredFrom` / `permutationOf`, length preservation makes no claim about
+which elements are present, only about the *count* of elements.
+-/
+
+/-
+Container confidentiality for length preservation is still tainted by `pc` (membership secrecy).
+-/
+@[simp] theorem conf_lengthPreserved_container {Ref : Type} (pc : ConfLabel) (source : Nat)
+    (input : LabeledCollection Ref) (outputMembers : List (Ref × Label))
+    (hLen : outputMembers.length = input.members.length) :
+    (CollectionTransition.lengthPreserved pc source input outputMembers hLen).container.conf =
+      pc ++ input.container.conf := by
+  simp [CollectionTransition.lengthPreserved]
+
+/-
+Length preservation actually preserves the length, by its parameter `hLen`.
+-/
+theorem length_lengthPreserved_eq {Ref : Type} (pc : ConfLabel) (source : Nat)
+    (input : LabeledCollection Ref) (outputMembers : List (Ref × Label))
+    (hLen : outputMembers.length = input.members.length) :
+    (CollectionTransition.lengthPreserved pc source input outputMembers hLen).members.length =
+      input.members.length := by
+  simpa [CollectionTransition.lengthPreserved] using hLen
+
+/-
+The transition records its structural guarantee via a `lengthPreserved` integrity atom.
+-/
+theorem mem_lengthPreserved_lengthAtom {Ref : Type} (pc : ConfLabel) (source : Nat)
+    (input : LabeledCollection Ref) (outputMembers : List (Ref × Label))
+    (hLen : outputMembers.length = input.members.length) :
+    Atom.lengthPreserved source ∈
+      (CollectionTransition.lengthPreserved pc source input outputMembers hLen).container.integ := by
+  simp [CollectionTransition.lengthPreserved]
+
+/-
+Length preservation drops any existing "complete collection" claims (same reasoning as subsets):
+once elements are transformed, `completeCollection` is no longer justified.
+-/
+theorem not_mem_lengthPreserved_completeCollection {Ref : Type} (pc : ConfLabel) (source : Nat)
+    (input : LabeledCollection Ref) (outputMembers : List (Ref × Label))
+    (hLen : outputMembers.length = input.members.length) (completeSource : Nat) :
+    Atom.completeCollection completeSource ∉
+      (CollectionTransition.lengthPreserved pc source input outputMembers hLen).container.integ := by
+  classical
+  simp [CollectionTransition.lengthPreserved, CollectionTransition.stripCollectionIntegrity, Atom.isCollectionIntegrity]
+
 /-
 Access rule for "observing a member":
 
@@ -184,6 +233,13 @@ theorem permutationOfB_eq_true_iff {Ref : Type} [DecidableEq Ref]
     CollectionTransition.Verify.permutationOfB input outputMembers = true ↔
       outputMembers.Perm input.members := by
   simp [CollectionTransition.Verify.permutationOfB]
+
+theorem lengthPreservedB_eq_true_iff {Ref : Type}
+    (input : LabeledCollection Ref) (outputMembers : List (Ref × Label)) :
+    CollectionTransition.Verify.lengthPreservedB input outputMembers = true ↔
+      outputMembers.length = input.members.length := by
+  -- `lengthPreservedB` is defined as `decide (...)`, so `simp` turns `= true` into the proposition.
+  simp [CollectionTransition.Verify.lengthPreservedB]
 
 theorem subsetOfChecked_eq_some_iff {Ref : Type} [DecidableEq Ref]
     (pc : ConfLabel) (input : LabeledCollection Ref) (outputMembers : List (Ref × Label)) (out : LabeledCollection Ref) :
@@ -227,6 +283,21 @@ theorem permutationOfChecked_eq_some_iff {Ref : Type} [DecidableEq Ref]
   classical
   by_cases h : CollectionTransition.Verify.permutationOfB input outputMembers = true <;>
     simp [CollectionTransition.Verify.permutationOfChecked, h, eq_comm]
+
+theorem lengthPreservedChecked_eq_some_iff {Ref : Type}
+    (pc : ConfLabel) (source : Nat)
+    (input : LabeledCollection Ref) (outputMembers : List (Ref × Label)) (out : LabeledCollection Ref) :
+    CollectionTransition.Verify.lengthPreservedChecked pc source input outputMembers = some out ↔
+      CollectionTransition.Verify.lengthPreservedB input outputMembers = true ∧
+      out =
+        { container :=
+            { conf := pc ++ input.container.conf
+              integ := CollectionTransition.stripCollectionIntegrity input.container.integ ++
+                [Atom.lengthPreserved source] }
+          members := outputMembers } := by
+  classical
+  by_cases h : CollectionTransition.Verify.lengthPreservedB input outputMembers = true <;>
+    simp [CollectionTransition.Verify.lengthPreservedChecked, h, eq_comm]
 
 end Collection
 end Proofs

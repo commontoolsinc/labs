@@ -67,7 +67,9 @@ theorem projection_recompose_restores_integrity :
     let source : Nat := 7
     let lat := LabelTransition.projectionFrom [] input source ["lat"]
     let lon := LabelTransition.projectionFrom [] input source ["long"]
-    let parts : List (List String × Label) := [(["lat"], lat), (["long"], lon)]
+    let parts : List LabelTransition.ProjectionPart :=
+      [ { path := ["lat"], expectedRef := 1, outputRef := 1, label := lat }
+      , { path := ["long"], expectedRef := 2, outputRef := 2, label := lon } ]
     ∃ out, LabelTransition.recomposeFromProjections [] source base parts = some out ∧
       Atom.scopedFrom source [] base ∈ out.integ := by
   classical
@@ -97,7 +99,9 @@ theorem projection_recompose_rejects_mixed_sources :
     let source₂ : Nat := 8
     let lat := LabelTransition.projectionFrom [] input source₁ ["lat"]
     let lon := LabelTransition.projectionFrom [] input source₂ ["long"]
-    let parts : List (List String × Label) := [(["lat"], lat), (["long"], lon)]
+    let parts : List LabelTransition.ProjectionPart :=
+      [ { path := ["lat"], expectedRef := 1, outputRef := 1, label := lat }
+      , { path := ["long"], expectedRef := 2, outputRef := 2, label := lon } ]
     LabelTransition.recomposeFromProjections [] source₁ base parts = none := by
   classical
   intro base input source₁ source₂ lat lon parts
@@ -165,6 +169,72 @@ theorem filtered_collection_separates_membership_and_members :
   constructor
   · simp [out, input, publicLbl, CollectionTransition.filteredFrom]
   · rfl
+
+/-
+Length preservation (spec 8.5.4):
+
+This is the "map-like" collection constraint: the output collection is allowed to contain
+*different* elements, but it must have the same length as the source collection.
+
+Our Lean model provides a checked transition:
+  `CollectionTransition.Verify.lengthPreservedChecked`
+
+which returns:
+- `some out` if lengths match,
+- `none` if they do not.
+
+This example also checks the integrity behavior:
+- the runtime drops any existing `completeCollection` claim, and
+- adds a `lengthPreserved source` witness atom.
+-/
+theorem lengthPreservedChecked_accepts_equal_lengths :
+    let base : Atom := Atom.integrityTok "X"
+    let input : LabeledCollection Nat :=
+      { container := { conf := [], integ := [Atom.completeCollection 0, base] }
+        members := [(1, Label.bot), (2, Label.bot)] }
+    let outputMembers : List (Nat × Label) := [(10, Label.bot), (20, Label.bot)]
+    let pc : ConfLabel := [[Atom.user "Alice"]]
+    ∃ out,
+      CollectionTransition.Verify.lengthPreservedChecked pc 42 input outputMembers = some out ∧
+      Atom.lengthPreserved 42 ∈ out.container.integ ∧
+      Atom.completeCollection 0 ∉ out.container.integ := by
+  classical
+  intro base input outputMembers pc
+  -- The checked transition returns exactly this constructed output on success.
+  let out : LabeledCollection Nat :=
+    { container :=
+        { conf := pc ++ input.container.conf
+          integ :=
+            CollectionTransition.stripCollectionIntegrity input.container.integ ++
+              [Atom.lengthPreserved 42] }
+      members := outputMembers }
+  refine ⟨out, ?_, ?_, ?_⟩
+  ·
+    -- Lengths match (`2 = 2`), so the boolean verifier returns `true`.
+    simp [out, CollectionTransition.Verify.lengthPreservedChecked, CollectionTransition.Verify.lengthPreservedB,
+      input, outputMembers, pc]
+  ·
+    -- The witness atom is appended by construction.
+    simp [out]
+  ·
+    -- `completeCollection` is a collection-level integrity atom, so it is stripped.
+    simp [out, CollectionTransition.stripCollectionIntegrity, Atom.isCollectionIntegrity]
+
+/-
+If the output length does *not* match the input length, the runtime rejects the claimed
+`lengthPreserved` constraint.
+-/
+theorem lengthPreservedChecked_rejects_mismatched_lengths :
+    let input : LabeledCollection Nat :=
+      { container := Label.bot
+        members := [(1, Label.bot), (2, Label.bot)] }
+    let outputMembers : List (Nat × Label) := [(10, Label.bot)]
+    CollectionTransition.Verify.lengthPreservedChecked [] 0 input outputMembers = none := by
+  classical
+  intro input outputMembers
+  -- Lengths do not match (`1 ≠ 2`), so the check is false and the transition returns `none`.
+  simp [CollectionTransition.Verify.lengthPreservedChecked, CollectionTransition.Verify.lengthPreservedB,
+    input, outputMembers]
 
 /-
 This final example connects the "split label" story to `canAccess`:

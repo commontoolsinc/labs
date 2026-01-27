@@ -86,6 +86,7 @@ def isCollectionIntegrity : Atom → Bool
   | .completeCollection _ => true
   | .filteredFrom _ _ => true
   | .permutationOf _ => true
+  | .lengthPreserved _ => true
   | _ => false
 
 end Atom
@@ -160,6 +161,27 @@ def filteredFrom {Ref : Type} (pc : ConfLabel) (source : Nat) (predicate : Strin
           [Atom.filteredFrom source predicate] }
     members := outputMembers }
 
+/--
+Length-preserved transition (8.5.4):
+
+This models the "map-like" case where the output collection has the same length as the input,
+but elements may have been transformed (so there is no subset/permutation relationship).
+
+Semantics:
+- membership confidentiality is tainted by `pc` (selection/order decisions are control-flow)
+- we strip any existing collection-level integrity claims (e.g. `completeCollection`)
+  because the members have changed
+- we add a witness atom `lengthPreserved source` tying the output to an input collection id
+  (here `source : Nat` stands in for the spec's content-addressed reference).
+-/
+def lengthPreserved {Ref : Type} (pc : ConfLabel) (source : Nat)
+    (input : LabeledCollection Ref) (outputMembers : List (Ref × Label))
+    (_hLen : outputMembers.length = input.members.length) : LabeledCollection Ref :=
+  { container :=
+      { conf := pc ++ input.container.conf
+        integ := stripCollectionIntegrity input.container.integ ++ [Atom.lengthPreserved source] }
+    members := outputMembers }
+
 namespace Verify
 
 /-
@@ -187,6 +209,10 @@ def permutationOfB {Ref : Type} [DecidableEq Ref]
 def filteredFromB {Ref : Type} [DecidableEq Ref]
     (input : LabeledCollection Ref) (outputMembers : List (Ref × Label)) : Bool :=
   subsetOfB input outputMembers
+
+def lengthPreservedB {Ref : Type}
+    (input : LabeledCollection Ref) (outputMembers : List (Ref × Label)) : Bool :=
+  decide (outputMembers.length = input.members.length)
 
 /-
 Checked versions of the collection transitions:
@@ -227,6 +253,17 @@ def permutationOfChecked {Ref : Type} [DecidableEq Ref] (pc : ConfLabel) (source
       { container :=
           { conf := pc ++ input.container.conf
             integ := input.container.integ ++ [Atom.permutationOf source] }
+        members := outputMembers }
+  else
+    none
+
+def lengthPreservedChecked {Ref : Type} (pc : ConfLabel) (source : Nat)
+    (input : LabeledCollection Ref) (outputMembers : List (Ref × Label)) : Option (LabeledCollection Ref) :=
+  if lengthPreservedB input outputMembers then
+    some
+      { container :=
+          { conf := pc ++ input.container.conf
+            integ := stripCollectionIntegrity input.container.integ ++ [Atom.lengthPreserved source] }
         members := outputMembers }
   else
     none

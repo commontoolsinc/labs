@@ -26,6 +26,23 @@ inductive Atom where
   | multiPartyConsent (participant : String) (participants : List String)
   | integrityTok (name : String)
   /-
+  Transformation provenance (spec 8.7 and the default case in 8.9.2).
+
+  When a handler *computes* a new value from inputs (as opposed to passing through a reference or
+  proving an exact copy), the runtime should not preserve the inputs' integrity claims verbatim.
+  Instead, it mints new integrity evidence that records what code ran and what it depended on.
+
+  The full spec's `TransformedBy` atom carries structured details:
+  - a code hash
+  - references to inputs
+  - (optionally) the integrity of each input
+
+  Our Lean model keeps just enough structure to write useful safety lemmas:
+  - `codeHash : String` identifies the transformation code
+  - `inputs : List Nat` stands in for "references" / content-addresses of the inputs
+  -/
+  | transformedBy (codeHash : String) (inputs : List Nat)
+  /-
   Scoped integrity for projections (spec 8.3.2).
 
   This atom is mainly used in *integrity labels*.
@@ -57,6 +74,7 @@ inductive Atom where
   | completeCollection (source : Nat)
   | filteredFrom (source : Nat) (predicate : String)
   | permutationOf (source : Nat)
+  | lengthPreserved (source : Nat)
   /-
   Expiration is modeled as a special atom that depends on the principal's `now` time.
 
