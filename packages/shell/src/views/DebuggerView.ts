@@ -2257,8 +2257,7 @@ export class XDebuggerView extends LitElement {
           </text>
 
           <!-- Legend -->
-          <g transform="translate(${width - margin.right - 160}, ${margin.top +
-            10})">
+          <g transform="translate(${margin.left + 10}, ${margin.top + 10})">
             <line x1="0" y1="0" x2="20" y2="0" stroke="#3b82f6" stroke-width="2" />
             <text
               x="25"
