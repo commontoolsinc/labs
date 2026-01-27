@@ -11,3 +11,6 @@ export * from "./client/transport.ts";
 export * from "./protocol/mod.ts";
 export * from "./vnode-types.ts";
 export * from "@commontools/runner/shared";
+
+// VDOM system (main thread)
+export * from "./vdom-main/mod.ts";

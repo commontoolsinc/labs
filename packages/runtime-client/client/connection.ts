@@ -16,9 +16,11 @@ import {
   isIPCRemoteResponse,
   isNavigateRequestNotification,
   isTelemetryNotification,
+  isVDomBatchNotification,
   NavigateRequestNotification,
   RequestType,
   TelemetryNotification,
+  VDomBatchNotification,
 } from "../protocol/mod.ts";
 import { RuntimeTransport } from "./transport.ts";
 import { EventEmitter } from "./emitter.ts";
@@ -43,6 +45,7 @@ export type RuntimeConnectionEvents = {
   navigaterequest: [NavigateRequestNotification];
   error: [ErrorNotification];
   telemetry: [TelemetryNotification];
+  vdombatch: [VDomBatchNotification];
 };
 
 export interface InitializedRuntimeConnection extends RuntimeConnection {}
@@ -207,6 +210,8 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
         this.emit("navigaterequest", message);
       } else if (isErrorNotification(message)) {
         this.emit("error", message);
+      } else if (isVDomBatchNotification(message)) {
+        this.emit("vdombatch", message);
       } else {
         console.warn(`Unknown notification: ${JSON.stringify(message)}`);
       }
@@ -267,5 +272,50 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
         instance[$onCellUpdate](value);
       }
     }
+  }
+
+  /**
+   * Send a DOM event to the worker for dispatch to the appropriate handler.
+   * This is a fire-and-forget operation - we don't wait for a response.
+   */
+  sendVDomEvent(
+    handlerId: number,
+    event: import("../protocol/mod.ts").SerializedDomEvent,
+    nodeId: number,
+  ): void {
+    // Use request but don't await - fire and forget
+    this.request<RequestType.VDomEvent>({
+      type: RequestType.VDomEvent,
+      handlerId,
+      event,
+      nodeId,
+    }).catch((error) => {
+      console.error("[RuntimeClient] VDom event dispatch failed:", error);
+    });
+  }
+
+  /**
+   * Request the worker to start VDOM rendering for a cell.
+   */
+  async mountVDom(
+    mountId: number,
+    cellRef: import("../protocol/mod.ts").CellRef,
+  ): Promise<import("../protocol/mod.ts").VDomMountResponse> {
+    const response = await this.request<RequestType.VDomMount>({
+      type: RequestType.VDomMount,
+      mountId,
+      cell: cellRef,
+    });
+    return response!;
+  }
+
+  /**
+   * Request the worker to stop VDOM rendering for a mount.
+   */
+  async unmountVDom(mountId: number): Promise<void> {
+    await this.request<RequestType.VDomUnmount>({
+      type: RequestType.VDomUnmount,
+      mountId,
+    });
   }
 }

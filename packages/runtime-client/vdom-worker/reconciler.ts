@@ -1,0 +1,1015 @@
+/**
+ * Worker-side VDOM reconciler.
+ *
+ * This reconciler runs in the worker thread where Cell values can be
+ * accessed synchronously. It emits VDomOp operations that are batched
+ * and sent to the main thread for DOM application.
+ *
+ * Key differences from main-thread render.ts:
+ * - Uses Cell directly instead of CellHandle
+ * - Uses cell.sink() instead of effect() for subscriptions
+ * - Emits VDomOp operations instead of DOM mutations
+ * - Batches operations using queueMicrotask()
+ */
+
+import {
+  type Cancel,
+  type Cell,
+  isCell,
+  UI,
+  useCancelGroup,
+} from "@commontools/runner";
+import type {
+  ChildNodeState,
+  NodeState,
+  ReconcileContext,
+  WorkerProps,
+  WorkerReconcilerOptions,
+  WorkerRenderNode,
+  WorkerVNode,
+} from "./types.ts";
+import { isWorkerVNode } from "./types.ts";
+import type { VDomOp } from "./operations.ts";
+import { generateChildKeys } from "./keying.ts";
+import {
+  getBindingPropName,
+  getEventType,
+  isBindingProp,
+  isEventHandler,
+  isEventProp,
+} from "./h.ts";
+
+/**
+ * Main reconciler class for worker-side VDOM rendering.
+ */
+export class WorkerReconciler {
+  private nodeIdCounter = 0;
+  private handlerIdCounter = 0;
+  private handlers = new Map<number, (event: unknown) => void>();
+  private batchIdCounter = 0;
+
+  private pendingOps: VDomOp[] = [];
+  private flushScheduled = false;
+
+  private rootState: NodeState | null = null;
+  private rootCancel: Cancel | null = null;
+
+  private readonly onOps: (ops: VDomOp[]) => void;
+  private readonly onError?: (error: Error) => void;
+
+  constructor(options: WorkerReconcilerOptions) {
+    this.onOps = options.onOps;
+    this.onError = options.onError;
+  }
+
+  /**
+   * Create a reconciliation context for this reconciler instance.
+   */
+  private createContext(): ReconcileContext {
+    return {
+      emit: (ops) => this.queueOps(ops),
+      nextNodeId: () => ++this.nodeIdCounter,
+      registerHandler: (handler) => {
+        const id = ++this.handlerIdCounter;
+        this.handlers.set(id, handler);
+        return id;
+      },
+      getHandler: (id) => this.handlers.get(id),
+    };
+  }
+
+  /**
+   * Mount a VDOM tree, starting the reconciliation process.
+   *
+   * @param vnode - The root VNode, Cell<VNode>, or Cell<unknown> to mount
+   * @returns A cancel function to unmount the tree
+   */
+  mount(vnode: WorkerVNode | Cell<WorkerVNode> | Cell<unknown>): Cancel {
+    if (this.rootCancel) {
+      this.rootCancel();
+    }
+
+    const ctx = this.createContext();
+    const [cancel, addCancel] = useCancelGroup();
+
+    // Create a container node (like the parent element in main-thread render)
+    const containerId = ctx.nextNodeId();
+
+    // Handle Cell<VNode> at the root
+    if (isCell(vnode)) {
+      const wrapperState = this.createWrapperState(ctx, containerId);
+
+      addCancel(
+        vnode.sink((resolvedVnode: unknown) => {
+          if (!resolvedVnode) return;
+          // Validate that the resolved value is a valid render node
+          if (!this.isValidRenderNode(resolvedVnode)) {
+            this.onError?.(
+              new Error(
+                `Invalid VDOM content: expected WorkerVNode, string, or number, got ${typeof resolvedVnode}`,
+              ),
+            );
+            return;
+          }
+          this.reconcileIntoWrapper(
+            ctx,
+            wrapperState,
+            resolvedVnode as WorkerRenderNode,
+          );
+        }),
+      );
+    } else {
+      // Static VNode - render directly
+      const state = this.renderNode(ctx, vnode, new Set());
+      if (state) {
+        this.queueOps([
+          {
+            op: "insert-child",
+            parentId: containerId,
+            childId: state.nodeId,
+            beforeId: null,
+          },
+        ]);
+      }
+    }
+
+    // Flush any pending operations
+    this.scheduleFlush();
+
+    this.rootCancel = cancel;
+    return cancel;
+  }
+
+  /**
+   * Check if a value is a valid render node (VNode, string, number, or null/undefined).
+   */
+  private isValidRenderNode(value: unknown): value is WorkerRenderNode {
+    if (value === null || value === undefined) return true;
+    if (typeof value === "string" || typeof value === "number") return true;
+    if (isWorkerVNode(value)) return true;
+    if (Array.isArray(value)) {
+      return value.every((item) => this.isValidRenderNode(item));
+    }
+    if (isCell(value)) return true;
+    return false;
+  }
+
+  /**
+   * Unmount the current VDOM tree.
+   */
+  unmount(): void {
+    if (this.rootCancel) {
+      this.rootCancel();
+      this.rootCancel = null;
+    }
+    if (this.rootState) {
+      this.queueOps([{ op: "remove-node", nodeId: this.rootState.nodeId }]);
+      this.rootState = null;
+    }
+    this.flushOps();
+  }
+
+  /**
+   * Dispatch a DOM event to its handler.
+   */
+  dispatchEvent(handlerId: number, event: unknown): void {
+    const handler = this.handlers.get(handlerId);
+    if (handler) {
+      try {
+        handler(event);
+      } catch (error) {
+        this.onError?.(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+    }
+  }
+
+  /**
+   * Get the root node ID.
+   */
+  getRootNodeId(): number | null {
+    return this.rootState?.nodeId ?? null;
+  }
+
+  // ============== Private Methods ==============
+
+  /**
+   * Queue operations to be sent to the main thread.
+   */
+  private queueOps(ops: VDomOp[]): void {
+    this.pendingOps.push(...ops);
+    this.scheduleFlush();
+  }
+
+  /**
+   * Schedule a flush of pending operations.
+   */
+  private scheduleFlush(): void {
+    if (!this.flushScheduled) {
+      this.flushScheduled = true;
+      queueMicrotask(() => this.flushOps());
+    }
+  }
+
+  /**
+   * Flush all pending operations to the main thread.
+   */
+  private flushOps(): void {
+    this.flushScheduled = false;
+    if (this.pendingOps.length > 0) {
+      const ops = this.pendingOps;
+      this.pendingOps = [];
+      this.onOps(ops);
+    }
+  }
+
+  /**
+   * Create a wrapper state for reactive roots.
+   */
+  private createWrapperState(_ctx: ReconcileContext, nodeId: number): {
+    nodeId: number;
+    currentChild: NodeState | ChildNodeState | null;
+    cancel: Cancel;
+  } {
+    return {
+      nodeId,
+      currentChild: null,
+      cancel: () => {},
+    };
+  }
+
+  /**
+   * Reconcile a VNode into a wrapper (for reactive roots).
+   */
+  private reconcileIntoWrapper(
+    ctx: ReconcileContext,
+    wrapper: {
+      nodeId: number;
+      currentChild: NodeState | ChildNodeState | null;
+      cancel: Cancel;
+    },
+    node: WorkerRenderNode,
+  ): void {
+    // Clean up previous child
+    if (wrapper.currentChild) {
+      wrapper.cancel();
+      this.queueOps([{
+        op: "remove-node",
+        nodeId: wrapper.currentChild.nodeId,
+      }]);
+    }
+
+    // Render new node - renderNode handles all render node types
+    const [cancel, _addCancel] = useCancelGroup();
+    const state = this.renderNode(ctx, node, new Set());
+
+    if (state) {
+      this.queueOps([
+        {
+          op: "insert-child",
+          parentId: wrapper.nodeId,
+          childId: state.nodeId,
+          beforeId: null,
+        },
+      ]);
+      wrapper.currentChild = state;
+      wrapper.cancel = cancel;
+    }
+  }
+
+  /**
+   * Render any render node type and return its state.
+   */
+  private renderNode(
+    ctx: ReconcileContext,
+    inputNode: WorkerRenderNode,
+    visited: Set<object>,
+  ): NodeState | null {
+    // Handle null/undefined
+    if (inputNode === null || inputNode === undefined) {
+      return null;
+    }
+
+    // Handle text nodes (strings and numbers)
+    if (typeof inputNode === "string" || typeof inputNode === "number") {
+      return this.createTextNode(ctx, String(inputNode));
+    }
+
+    // Handle arrays - render as fragment wrapper
+    if (Array.isArray(inputNode)) {
+      return this.renderArrayAsFragment(ctx, inputNode, visited);
+    }
+
+    const [cancel, addCancel] = useCancelGroup();
+
+    // Follow [UI] chain (for objects with $UI property)
+    let node: unknown = inputNode;
+    while (
+      node &&
+      typeof node === "object" &&
+      UI in node &&
+      // deno-lint-ignore no-explicit-any
+      (node as any)[UI]
+    ) {
+      if (visited.has(node as object)) {
+        return this.createCyclePlaceholder(ctx);
+      }
+      visited.add(node as object);
+      // deno-lint-ignore no-explicit-any
+      node = (node as any)[UI];
+    }
+
+    // After following [UI] chain, node may have become a primitive
+    if (typeof node === "string" || typeof node === "number") {
+      return this.createTextNode(ctx, String(node));
+    }
+    if (node === null || node === undefined || typeof node === "boolean") {
+      return null;
+    }
+    if (Array.isArray(node)) {
+      return this.renderArrayAsFragment(
+        ctx,
+        node as WorkerRenderNode[],
+        visited,
+      );
+    }
+
+    // Handle Cell<VNode>
+    if (isCell(node)) {
+      return this.renderCellNode(
+        ctx,
+        node as Cell<WorkerVNode>,
+        visited,
+        addCancel,
+      );
+    }
+
+    // Now node must be an object (WorkerVNode)
+    if (typeof node !== "object") {
+      return null;
+    }
+
+    // Check for cycles
+    if (visited.has(node as object)) {
+      return this.createCyclePlaceholder(ctx);
+    }
+    visited.add(node as object);
+
+    // Sanitize node
+    const sanitized = this.sanitizeNode(node as WorkerVNode);
+    if (!sanitized) {
+      return null;
+    }
+
+    // Create element
+    const nodeId = ctx.nextNodeId();
+    this.queueOps([{ op: "create-element", nodeId, tagName: sanitized.name }]);
+
+    // Create state
+    const state: NodeState = {
+      nodeId,
+      tagName: sanitized.name,
+      cancel,
+      children: new Map(),
+      propSubscriptions: new Map(),
+      eventHandlers: new Map(),
+    };
+
+    // Bind props
+    addCancel(this.bindProps(ctx, state, sanitized.props));
+
+    // Bind children
+    if (sanitized.children !== undefined) {
+      addCancel(this.bindChildren(ctx, state, sanitized.children, visited));
+    }
+
+    return state;
+  }
+
+  /**
+   * Render a Cell<VNode> with reactive updates.
+   */
+  private renderCellNode(
+    ctx: ReconcileContext,
+    cell: Cell<WorkerVNode>,
+    visited: Set<object>,
+    addCancel: (c: Cancel) => void,
+  ): NodeState | null {
+    // Create a wrapper element for reactive content
+    const wrapperId = ctx.nextNodeId();
+    this.queueOps([
+      {
+        op: "create-element",
+        nodeId: wrapperId,
+        tagName: "ct-internal-fill-element",
+      },
+    ]);
+
+    const wrapperState: NodeState = {
+      nodeId: wrapperId,
+      tagName: "ct-internal-fill-element",
+      cancel: () => {},
+      children: new Map(),
+      propSubscriptions: new Map(),
+      eventHandlers: new Map(),
+    };
+
+    let currentChild: NodeState | null = null;
+    let childCancel: Cancel | undefined;
+
+    addCancel(
+      cell.sink((resolvedNode) => {
+        // Clean up previous child
+        if (childCancel) {
+          childCancel();
+          childCancel = undefined;
+        }
+        if (currentChild) {
+          this.queueOps([{ op: "remove-node", nodeId: currentChild.nodeId }]);
+          currentChild = null;
+        }
+
+        if (!resolvedNode) return;
+
+        // Render new child
+        const childState = this.renderNode(ctx, resolvedNode, new Set(visited));
+        if (childState) {
+          this.queueOps([
+            {
+              op: "insert-child",
+              parentId: wrapperId,
+              childId: childState.nodeId,
+              beforeId: null,
+            },
+          ]);
+          currentChild = childState;
+          childCancel = childState.cancel;
+        }
+      }),
+    );
+
+    return wrapperState;
+  }
+
+  /**
+   * Create a placeholder for circular references.
+   */
+  private createCyclePlaceholder(ctx: ReconcileContext): NodeState {
+    const nodeId = ctx.nextNodeId();
+    this.queueOps([
+      { op: "create-element", nodeId, tagName: "span" },
+      { op: "set-prop", nodeId, key: "textContent", value: "\uD83D\uDD04" }, // 🔄
+      {
+        op: "set-prop",
+        nodeId,
+        key: "title",
+        value: "Circular reference detected",
+      },
+    ]);
+
+    return {
+      nodeId,
+      tagName: "span",
+      cancel: () => {},
+      children: new Map(),
+      propSubscriptions: new Map(),
+      eventHandlers: new Map(),
+    };
+  }
+
+  /**
+   * Create a text node.
+   */
+  private createTextNode(ctx: ReconcileContext, text: string): NodeState {
+    const nodeId = ctx.nextNodeId();
+    this.queueOps([{ op: "create-text", nodeId, text }]);
+
+    return {
+      nodeId,
+      tagName: "#text",
+      cancel: () => {},
+      children: new Map(),
+      propSubscriptions: new Map(),
+      eventHandlers: new Map(),
+    };
+  }
+
+  /**
+   * Render an array of nodes as a fragment wrapper.
+   */
+  private renderArrayAsFragment(
+    ctx: ReconcileContext,
+    nodes: WorkerRenderNode[],
+    visited: Set<object>,
+  ): NodeState | null {
+    const nodeId = ctx.nextNodeId();
+    this.queueOps([
+      { op: "create-element", nodeId, tagName: "ct-fragment" },
+    ]);
+
+    const state: NodeState = {
+      nodeId,
+      tagName: "ct-fragment",
+      cancel: () => {},
+      children: new Map(),
+      propSubscriptions: new Map(),
+      eventHandlers: new Map(),
+    };
+
+    // Render each child and insert it
+    for (const childNode of nodes) {
+      const childState = this.renderNode(ctx, childNode, new Set(visited));
+      if (childState) {
+        this.queueOps([
+          {
+            op: "insert-child",
+            parentId: nodeId,
+            childId: childState.nodeId,
+            beforeId: null,
+          },
+        ]);
+      }
+    }
+
+    return state;
+  }
+
+  /**
+   * Sanitize a VNode, ensuring it has valid structure.
+   */
+  private sanitizeNode(node: WorkerVNode): WorkerVNode | null {
+    if (node.type !== "vnode" || node.name === "script") {
+      return null;
+    }
+
+    // Fragments appear as VNodes with no name property
+    let result = node;
+    if (!result.name) {
+      result = { ...result, name: "ct-fragment" };
+    }
+
+    // Ensure props is an object or Cell
+    if (
+      !isCell(result.props) &&
+      (typeof result.props !== "object" || result.props === null)
+    ) {
+      result = { ...result, props: {} };
+    }
+
+    // Ensure children is an array or Cell
+    if (!isCell(result.children) && !Array.isArray(result.children)) {
+      result = { ...result, children: [] };
+    }
+
+    return result;
+  }
+
+  /**
+   * Bind props to an element, handling reactive values and events.
+   */
+  private bindProps(
+    ctx: ReconcileContext,
+    state: NodeState,
+    props: WorkerProps | Cell<WorkerProps> | null,
+  ): Cancel {
+    if (!props) return () => {};
+
+    const [cancel, addCancel] = useCancelGroup();
+
+    // Handle Cell<Props>
+    if (isCell(props)) {
+      addCancel(
+        props.sink((resolvedProps) => {
+          if (resolvedProps) {
+            addCancel(this.bindProps(ctx, state, resolvedProps as WorkerProps));
+          }
+        }),
+      );
+      return cancel;
+    }
+
+    // Handle static props
+    if (typeof props !== "object") {
+      return cancel;
+    }
+
+    for (const [key, value] of Object.entries(props)) {
+      if (isEventProp(key)) {
+        // Event handler
+        if (isEventHandler(value)) {
+          const eventType = getEventType(key);
+          const handlerId = ctx.registerHandler(value);
+          state.eventHandlers.set(eventType, handlerId);
+          this.queueOps([{
+            op: "set-event",
+            nodeId: state.nodeId,
+            eventType,
+            handlerId,
+          }]);
+        } else if (isCell(value)) {
+          // Cell containing event handler - not common but handle it
+          const eventType = getEventType(key);
+          addCancel(
+            (value as Cell<(event: unknown) => void>).sink((handler) => {
+              if (handler) {
+                // Cast handler to mutable function type for registration
+                const handlerId = ctx.registerHandler(
+                  handler as (event: unknown) => void,
+                );
+                state.eventHandlers.set(eventType, handlerId);
+                this.queueOps([{
+                  op: "set-event",
+                  nodeId: state.nodeId,
+                  eventType,
+                  handlerId,
+                }]);
+              }
+            }),
+          );
+        }
+      } else if (isBindingProp(key)) {
+        // Bidirectional binding ($prop)
+        const propName = getBindingPropName(key);
+        if (isCell(value)) {
+          const cellRef = value.getAsNormalizedFullLink();
+          this.queueOps([{
+            op: "set-binding",
+            nodeId: state.nodeId,
+            propName,
+            cellRef,
+          }]);
+        }
+      } else if (isCell(value)) {
+        // Reactive prop value
+        addCancel(
+          (value as Cell<unknown>).sink((resolvedValue) => {
+            const propValue = this.transformPropValue(key, resolvedValue);
+            this.queueOps([{
+              op: "set-prop",
+              nodeId: state.nodeId,
+              key,
+              value: propValue,
+            }]);
+          }),
+        );
+      } else {
+        // Static prop value
+        const propValue = this.transformPropValue(key, value);
+        this.queueOps([{
+          op: "set-prop",
+          nodeId: state.nodeId,
+          key,
+          value: propValue,
+        }]);
+      }
+    }
+
+    return cancel;
+  }
+
+  /**
+   * Transform a prop value for sending over IPC.
+   */
+  private transformPropValue(key: string, value: unknown): any {
+    if (
+      key === "style" && value && typeof value === "object" &&
+      !Array.isArray(value)
+    ) {
+      return this.styleObjectToCssString(value as Record<string, unknown>);
+    }
+    return value;
+  }
+
+  /**
+   * Convert a style object to a CSS string.
+   */
+  private styleObjectToCssString(styleObject: Record<string, unknown>): string {
+    const unitlessProperties = new Set([
+      "animation-iteration-count",
+      "column-count",
+      "fill-opacity",
+      "flex",
+      "flex-grow",
+      "flex-shrink",
+      "font-weight",
+      "line-height",
+      "opacity",
+      "order",
+      "orphans",
+      "stroke-opacity",
+      "widows",
+      "z-index",
+      "zoom",
+    ]);
+
+    return Object.entries(styleObject)
+      .map(([key, value]) => {
+        if (value == null) return "";
+
+        let cssKey = key;
+        if (!key.startsWith("--")) {
+          if (/^(webkit|moz|ms|o)[A-Z]/.test(key)) {
+            cssKey = "-" + key;
+          }
+          cssKey = cssKey.replace(/([A-Z])/g, "-$1").toLowerCase();
+        }
+
+        let cssValue = value;
+        if (
+          typeof value === "number" &&
+          !cssKey.startsWith("--") &&
+          !unitlessProperties.has(cssKey) &&
+          value !== 0
+        ) {
+          cssValue = `${value}px`;
+        } else {
+          cssValue = String(value);
+        }
+
+        return `${cssKey}: ${cssValue}`;
+      })
+      .filter((s) => s !== "")
+      .join("; ");
+  }
+
+  /**
+   * Bind children to an element with keyed reconciliation.
+   */
+  private bindChildren(
+    ctx: ReconcileContext,
+    state: NodeState,
+    children: WorkerRenderNode | WorkerRenderNode[],
+    visited: Set<object>,
+  ): Cancel {
+    const [cancel, addCancel] = useCancelGroup();
+
+    // Handle Cell<children>
+    if (isCell(children)) {
+      addCancel(
+        (children as Cell<WorkerRenderNode | WorkerRenderNode[]>).sink(
+          (resolvedChildren) => {
+            this.updateChildren(ctx, state, resolvedChildren, visited);
+          },
+        ),
+      );
+    } else {
+      // Static children
+      this.updateChildren(ctx, state, children, visited);
+    }
+
+    return cancel;
+  }
+
+  /**
+   * Update children with keyed reconciliation.
+   */
+  private updateChildren(
+    ctx: ReconcileContext,
+    state: NodeState,
+    childrenValue:
+      | WorkerRenderNode
+      | WorkerRenderNode[]
+      | Readonly<WorkerRenderNode | WorkerRenderNode[]>
+      | null
+      | undefined,
+    visited: Set<object>,
+  ): void {
+    // Normalize to array
+    const newChildren = Array.isArray(childrenValue)
+      ? childrenValue.flat()
+      : childrenValue
+      ? [childrenValue]
+      : [];
+
+    // Generate keys for new children
+    const newKeys = generateChildKeys(newChildren);
+    const newMapping = new Map<string, ChildNodeState>();
+    const newKeyOrder: string[] = [];
+
+    // Process each new child
+    for (let i = 0; i < newChildren.length; i++) {
+      const child = newChildren[i];
+      const key = newKeys[i];
+      newKeyOrder.push(key);
+
+      if (state.children.has(key)) {
+        // Reuse existing child
+        const existingState = state.children.get(key)!;
+        newMapping.set(key, existingState);
+        state.children.delete(key);
+
+        // Update if it's an element with new data
+        // (For now, we trust the key - updates happen through Cell subscriptions)
+      } else {
+        // Create new child
+        const childState = this.renderChild(ctx, child, visited);
+        if (childState) {
+          newMapping.set(key, childState);
+        }
+      }
+    }
+
+    // Remove obsolete children
+    for (const [_, oldState] of state.children) {
+      oldState.cancel();
+      this.queueOps([{ op: "remove-node", nodeId: oldState.nodeId }]);
+    }
+
+    // Update children order
+    let prevNodeId: number | null = null;
+    for (const key of newKeyOrder) {
+      const childState = newMapping.get(key);
+      if (!childState) continue;
+
+      // Determine the correct position
+      const currentIndex = this.getChildIndex(state, childState.nodeId);
+      const expectedIndex = prevNodeId
+        ? this.getChildIndex(state, prevNodeId) + 1
+        : 0;
+
+      if (currentIndex !== expectedIndex) {
+        // Need to move or insert
+        this.queueOps([
+          {
+            op: "insert-child",
+            parentId: state.nodeId,
+            childId: childState.nodeId,
+            beforeId: this.getNodeIdAfter(state, newKeyOrder, key, newMapping),
+          },
+        ]);
+      }
+
+      prevNodeId = childState.nodeId;
+    }
+
+    // Update state
+    state.children = newMapping;
+  }
+
+  /**
+   * Get the node ID that should come after a given key in the order.
+   */
+  private getNodeIdAfter(
+    _state: NodeState,
+    keyOrder: string[],
+    currentKey: string,
+    mapping: Map<string, ChildNodeState>,
+  ): number | null {
+    const idx = keyOrder.indexOf(currentKey);
+    if (idx === -1 || idx === keyOrder.length - 1) {
+      return null; // Append at end
+    }
+
+    // Find the next key that exists in the mapping
+    for (let i = idx + 1; i < keyOrder.length; i++) {
+      const nextState = mapping.get(keyOrder[i]);
+      if (nextState) {
+        return nextState.nodeId;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Get the index of a child node (placeholder - actual tracking would be in DOM).
+   */
+  private getChildIndex(_state: NodeState, _nodeId: number): number {
+    // In the worker, we don't track actual DOM order
+    // The main thread handles actual positioning
+    return -1;
+  }
+
+  /**
+   * Render a child node (which may be a VNode, text, or Cell).
+   */
+  private renderChild(
+    ctx: ReconcileContext,
+    child: unknown,
+    visited: Set<object>,
+  ): ChildNodeState | null {
+    // Handle Cell children
+    if (isCell(child)) {
+      const [cancel, addCancel] = useCancelGroup();
+
+      // Create wrapper for reactive child
+      const wrapperId = ctx.nextNodeId();
+      this.queueOps([
+        {
+          op: "create-element",
+          nodeId: wrapperId,
+          tagName: "ct-internal-fill-element",
+        },
+      ]);
+
+      let currentState: ChildNodeState | null = null;
+
+      addCancel(
+        (child as Cell<unknown>).sink((resolvedChild) => {
+          // Clean up previous
+          if (currentState) {
+            currentState.cancel();
+            this.queueOps([{ op: "remove-node", nodeId: currentState.nodeId }]);
+          }
+
+          // Render new
+          const newState = this.renderChild(
+            ctx,
+            resolvedChild as WorkerRenderNode,
+            new Set(visited),
+          );
+          if (newState) {
+            this.queueOps([
+              {
+                op: "insert-child",
+                parentId: wrapperId,
+                childId: newState.nodeId,
+                beforeId: null,
+              },
+            ]);
+            currentState = newState;
+          }
+        }),
+      );
+
+      return {
+        nodeId: wrapperId,
+        isText: false,
+        cancel,
+      };
+    }
+
+    // Handle arrays - wrap in a span with display:contents
+    if (Array.isArray(child)) {
+      const wrapperVNode: WorkerVNode = {
+        type: "vnode",
+        name: "span",
+        props: { style: "display:contents" },
+        children: child,
+      };
+      const state = this.renderNode(ctx, wrapperVNode, new Set(visited));
+      if (!state) return null;
+
+      return {
+        nodeId: state.nodeId,
+        isText: false,
+        cancel: state.cancel,
+        elementState: state,
+      };
+    }
+
+    // Handle VNode
+    if (isWorkerVNode(child)) {
+      const state = this.renderNode(ctx, child, new Set(visited));
+      if (!state) return null;
+
+      return {
+        nodeId: state.nodeId,
+        isText: false,
+        cancel: state.cancel,
+        elementState: state,
+      };
+    }
+
+    // Handle primitive values (text nodes)
+    const text = this.stringifyText(child);
+    const nodeId = ctx.nextNodeId();
+    this.queueOps([{ op: "create-text", nodeId, text }]);
+
+    return {
+      nodeId,
+      isText: true,
+      cancel: () => {},
+    };
+  }
+
+  /**
+   * Convert a primitive value to text content.
+   */
+  private stringifyText(value: unknown): string {
+    if (typeof value === "string") {
+      return value;
+    } else if (value === null || value === undefined || value === false) {
+      return "";
+    } else if (typeof value === "object") {
+      // Handle unresolved alias objects
+      if (value && "$alias" in value) {
+        return "";
+      } else {
+        console.warn("unexpected object when value was expected", value);
+        return JSON.stringify(value);
+      }
+    }
+    return String(value);
+  }
+}
+
+/**
+ * Create a new reconciler instance.
+ */
+export function createReconciler(
+  options: WorkerReconcilerOptions,
+): WorkerReconciler {
+  return new WorkerReconciler(options);
+}

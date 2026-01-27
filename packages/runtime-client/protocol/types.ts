@@ -53,6 +53,11 @@ export enum RequestType {
   PageStop = "page:stop",
   PageGetAll = "page:getAll",
   PageSynced = "page:synced",
+
+  // VDOM operations (main -> worker)
+  VDomEvent = "vdom:event",
+  VDomMount = "vdom:mount",
+  VDomUnmount = "vdom:unmount",
 }
 
 export enum NotificationType {
@@ -61,6 +66,7 @@ export enum NotificationType {
   NavigateRequest = "callback:navigate",
   ErrorReport = "callback:error",
   Telemetry = "callback:telemetry",
+  VDomBatch = "vdom:batch",
 }
 
 export interface IPCClientMessage {
@@ -296,6 +302,81 @@ export interface PageSyncedRequest extends BaseRequest {
   type: RequestType.PageSynced;
 }
 
+/**
+ * VDOM event message sent from main thread to worker when a DOM event fires.
+ */
+export interface VDomEventRequest extends BaseRequest {
+  type: RequestType.VDomEvent;
+  /** The handler ID that should process this event */
+  handlerId: number;
+  /** The serialized event data */
+  event: SerializedDomEvent;
+  /** The node ID where the event occurred */
+  nodeId: number;
+}
+
+/**
+ * Serialized DOM event data for IPC.
+ */
+export interface SerializedDomEvent {
+  type: string;
+  key?: string;
+  code?: string;
+  repeat?: boolean;
+  altKey?: boolean;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  shiftKey?: boolean;
+  inputType?: string;
+  data?: string | null;
+  button?: number;
+  buttons?: number;
+  target?: SerializedEventTarget;
+  detail?: JSONValue;
+}
+
+/**
+ * Serialized event target data for IPC.
+ */
+export interface SerializedEventTarget {
+  name?: string;
+  value?: string;
+  checked?: boolean;
+  selected?: boolean;
+  selectedIndex?: number;
+  selectedOptions?: { value: string }[];
+  dataset?: Record<string, string>;
+}
+
+/**
+ * Request to start VDOM rendering for a cell.
+ * The worker will subscribe to the cell and send VDomBatch notifications.
+ */
+export interface VDomMountRequest extends BaseRequest {
+  type: RequestType.VDomMount;
+  /** Unique ID for this mount instance (used to match unmount) */
+  mountId: number;
+  /** The cell to render as VDOM */
+  cell: CellRef;
+}
+
+/**
+ * Request to stop VDOM rendering for a mount.
+ */
+export interface VDomUnmountRequest extends BaseRequest {
+  type: RequestType.VDomUnmount;
+  /** The mount ID to stop */
+  mountId: number;
+}
+
+/**
+ * Response to VDomMount with the root node ID.
+ */
+export interface VDomMountResponse {
+  /** The root node ID for this mount */
+  rootId: number;
+}
+
 export type IPCClientRequest =
   | InitializeRequest
   | DisposeRequest
@@ -324,7 +405,10 @@ export type IPCClientRequest =
   | PageStartRequest
   | PageStopRequest
   | PageGetAllRequest
-  | PageSyncedRequest;
+  | PageSyncedRequest
+  | VDomEventRequest
+  | VDomMountRequest
+  | VDomUnmountRequest;
 
 export type NullResponse = null;
 
@@ -389,6 +473,48 @@ export interface TelemetryNotification {
   marker: RuntimeTelemetryMarkerResult;
 }
 
+/**
+ * VDOM operation for IPC.
+ */
+export type VDomOp =
+  | { op: "create-element"; nodeId: number; tagName: string }
+  | { op: "create-text"; nodeId: number; text: string }
+  | { op: "update-text"; nodeId: number; text: string }
+  | { op: "set-prop"; nodeId: number; key: string; value: JSONValue }
+  | { op: "remove-prop"; nodeId: number; key: string }
+  | { op: "set-event"; nodeId: number; eventType: string; handlerId: number }
+  | { op: "remove-event"; nodeId: number; eventType: string }
+  | { op: "set-binding"; nodeId: number; propName: string; cellRef: CellRef }
+  | {
+    op: "insert-child";
+    parentId: number;
+    childId: number;
+    beforeId: number | null;
+  }
+  | {
+    op: "move-child";
+    parentId: number;
+    childId: number;
+    beforeId: number | null;
+  }
+  | { op: "remove-node"; nodeId: number }
+  | { op: "set-attrs"; nodeId: number; attrs: Record<string, JSONValue> };
+
+/**
+ * VDOM batch notification sent from worker to main thread.
+ */
+export interface VDomBatchNotification {
+  type: NotificationType.VDomBatch;
+  /** Identifier for this batch (for debugging/logging) */
+  batchId: number;
+  /** The operations to apply, in order */
+  ops: VDomOp[];
+  /** Optional: the root node ID for this render tree */
+  rootId?: number;
+  /** The mount ID this batch belongs to */
+  mountId?: number;
+}
+
 export type RemoteResponse =
   | EmptyResponse
   | NullResponse
@@ -397,13 +523,15 @@ export type RemoteResponse =
   | CellResponse
   | GraphSnapshotResponse
   | LoggerCountsResponse
-  | PageResponse;
+  | PageResponse
+  | VDomMountResponse;
 
 export type IPCRemoteNotification =
   | CellUpdateNotification
   | ConsoleNotification
   | NavigateRequestNotification
-  | ErrorNotification;
+  | ErrorNotification
+  | VDomBatchNotification;
 
 export type Commands = {
   // Runtime requests
@@ -520,6 +648,19 @@ export type Commands = {
   [RequestType.RecreateSpaceRootPattern]: {
     request: RecreateSpaceRootPatternRequest;
     response: PageResponse;
+  };
+  // VDOM requests
+  [RequestType.VDomEvent]: {
+    request: VDomEventRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.VDomMount]: {
+    request: VDomMountRequest;
+    response: VDomMountResponse;
+  };
+  [RequestType.VDomUnmount]: {
+    request: VDomUnmountRequest;
+    response: EmptyResponse;
   };
 };
 

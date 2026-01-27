@@ -15,6 +15,7 @@ import {
   NotificationType,
   RequestType,
   TelemetryNotification,
+  VDomBatchNotification,
 } from "./types.ts";
 
 export function isCellRef(value: unknown): value is CellRef {
@@ -73,7 +74,8 @@ export function isIPCRemoteNotification(
 ): value is IPCRemoteNotification {
   return isTelemetryNotification(value) || isCellUpdateNotification(value) ||
     isConsoleNotification(value) ||
-    isNavigateRequestNotification(value) || isErrorNotification(value);
+    isNavigateRequestNotification(value) || isErrorNotification(value) ||
+    isVDomBatchNotification(value);
 }
 
 export function isCellUpdateNotification(
@@ -125,5 +127,16 @@ export function isTelemetryNotification(
     isRecord(value) &&
     value.type === NotificationType.Telemetry &&
     typeof value.marker === "object"
+  );
+}
+
+export function isVDomBatchNotification(
+  value: unknown,
+): value is VDomBatchNotification {
+  return (
+    isRecord(value) &&
+    value.type === NotificationType.VDomBatch &&
+    typeof value.batchId === "number" &&
+    Array.isArray(value.ops)
   );
 }

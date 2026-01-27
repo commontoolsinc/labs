@@ -57,6 +57,10 @@ import {
   type SetLoggerLevelRequest,
   type SetPullModeRequest,
   type SetTelemetryEnabledRequest,
+  type VDomEventRequest,
+  type VDomMountRequest,
+  type VDomMountResponse,
+  type VDomUnmountRequest,
 } from "../protocol/mod.ts";
 import { HttpProgramResolver, Program } from "@commontools/js-compiler";
 import { setLLMUrl } from "@commontools/llm";
@@ -68,6 +72,8 @@ import {
 } from "./utils.ts";
 import { cellRefToKey } from "../shared/utils.ts";
 import { RemoteResponse } from "@commontools/runtime-client";
+import { WorkerReconciler } from "../vdom-worker/reconciler.ts";
+import type { VDomOp } from "../vdom-worker/operations.ts";
 
 export class RuntimeProcessor {
   private runtime: Runtime;
@@ -80,6 +86,17 @@ export class RuntimeProcessor {
   private subscriptions = new Map<string, Cancel>();
   private telemetry: RuntimeTelemetry;
   #telemetryEnabled = false;
+
+  // VDOM event handlers registered by WorkerReconciler instances
+  private vdomHandlers = new Map<number, (event: unknown) => void>();
+  private nextVDomHandlerId = 1;
+
+  // VDOM mounts: mountId -> { reconciler, cancel }
+  private vdomMounts = new Map<
+    number,
+    { reconciler: WorkerReconciler; cancel: Cancel }
+  >();
+  private vdomBatchIdCounter = 0;
 
   private constructor(
     runtime: Runtime,
@@ -624,8 +641,122 @@ export class RuntimeProcessor {
         return this.setTelemetryEnabled(request);
       case RequestType.ResetLoggerBaselines:
         return this.resetLoggerBaselines(request);
+      case RequestType.VDomEvent:
+        return this.handleVDomEvent(request);
+      case RequestType.VDomMount:
+        return this.handleVDomMount(request);
+      case RequestType.VDomUnmount:
+        return this.handleVDomUnmount(request);
       default:
         throw new Error(`Unknown message type: ${(request as any).type}`);
     }
+  }
+
+  /**
+   * Handle a DOM event dispatched from the main thread.
+   * This routes the event to the appropriate handler registered by a pattern's reconciler.
+   */
+  handleVDomEvent(request: VDomEventRequest): void {
+    // Get the reconciler for this handler and dispatch the event
+    const handler = this.vdomHandlers.get(request.handlerId);
+    if (handler) {
+      try {
+        handler(request.event);
+      } catch (error) {
+        console.error("[RuntimeProcessor] VDom event handler error:", error);
+      }
+    } else {
+      console.warn(
+        `[RuntimeProcessor] No handler found for handlerId: ${request.handlerId}`,
+      );
+    }
+  }
+
+  /**
+   * Register a VDOM event handler and return its ID.
+   * Used by WorkerReconciler to register handlers for DOM events.
+   */
+  registerVDomHandler(handler: (event: unknown) => void): number {
+    const id = this.nextVDomHandlerId++;
+    this.vdomHandlers.set(id, handler);
+    return id;
+  }
+
+  /**
+   * Unregister a VDOM event handler.
+   */
+  unregisterVDomHandler(handlerId: number): void {
+    this.vdomHandlers.delete(handlerId);
+  }
+
+  /**
+   * Handle a request to start VDOM rendering for a cell.
+   * Creates a WorkerReconciler, subscribes to the cell, and sends VDomBatch notifications.
+   */
+  handleVDomMount(request: VDomMountRequest): VDomMountResponse {
+    const { mountId, cell: cellRef } = request;
+
+    // Check if already mounted
+    if (this.vdomMounts.has(mountId)) {
+      console.warn(
+        `[RuntimeProcessor] Mount ${mountId} already exists, unmounting first`,
+      );
+      this.handleVDomUnmount({ type: RequestType.VDomUnmount, mountId });
+    }
+
+    // Get the cell from the runtime
+    const cell = getCell(this.runtime, cellRef);
+
+    // Create a reconciler that sends ops to the main thread
+    const reconciler = new WorkerReconciler({
+      onOps: (ops: VDomOp[]) => {
+        const batchId = this.vdomBatchIdCounter++;
+        self.postMessage({
+          type: NotificationType.VDomBatch,
+          batchId,
+          ops,
+          mountId,
+        });
+      },
+      onError: (error: Error) => {
+        console.error(
+          `[RuntimeProcessor] VDom reconciler error for mount ${mountId}:`,
+          error,
+        );
+        self.postMessage({
+          type: NotificationType.ErrorReport,
+          message: error.message,
+          stackTrace: error.stack,
+        });
+      },
+    });
+
+    // Mount the cell - the reconciler will subscribe and emit initial ops
+    const cancel = reconciler.mount(cell);
+
+    // Track this mount
+    this.vdomMounts.set(mountId, { reconciler, cancel });
+
+    // Return the root node ID
+    const rootId = reconciler.getRootNodeId() ?? 0;
+    return { rootId };
+  }
+
+  /**
+   * Handle a request to stop VDOM rendering for a mount.
+   */
+  handleVDomUnmount(request: VDomUnmountRequest): void {
+    const { mountId } = request;
+
+    const mount = this.vdomMounts.get(mountId);
+    if (!mount) {
+      console.warn(`[RuntimeProcessor] Mount ${mountId} not found for unmount`);
+      return;
+    }
+
+    // Cancel subscriptions and clean up
+    mount.cancel();
+    mount.reconciler.unmount();
+    this.vdomMounts.delete(mountId);
   }
 }
