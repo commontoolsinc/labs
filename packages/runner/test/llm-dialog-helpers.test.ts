@@ -656,3 +656,79 @@ Deno.test("schemaToTypeString produces compact output for complex schema", () =>
   assert(result.includes("aCell?:"), "should have aCell property");
   assert(result.includes("Cell<"), "aCell should use Cell wrapper");
 });
+
+Deno.test("schemaToTypeString converts PatternToolResult to function syntax", () => {
+  // PatternToolResult<{ content: string }> schema
+  const schema: any = {
+    type: "object",
+    properties: {
+      pattern: {
+        type: "object",
+        additionalProperties: true,
+      },
+      extraParams: {
+        type: "object",
+        properties: {
+          content: { type: "string" },
+        },
+      },
+    },
+  };
+  const result = schemaToTypeString(schema);
+  // Should format as a handler function, not as an object with pattern/extraParams
+  assert(
+    result.includes("=>"),
+    "PatternToolResult should use arrow function syntax",
+  );
+  assert(result.includes("void"), "PatternToolResult should return void");
+  assert(result.includes("content"), "extraParams content should be included");
+  assert(!result.includes("pattern"), "pattern property should not be visible");
+  assert(
+    !result.includes("extraParams"),
+    "extraParams key should not be visible",
+  );
+});
+
+Deno.test("schemaToTypeString handles nested PatternToolResult in object", () => {
+  // Schema for a charm output with handler properties
+  const schema: any = {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      grep: {
+        type: "object",
+        properties: {
+          pattern: { type: "object" },
+          extraParams: {
+            type: "object",
+            properties: {
+              content: { type: "string" },
+            },
+          },
+        },
+      },
+      translate: {
+        type: "object",
+        properties: {
+          pattern: { type: "object" },
+          extraParams: {
+            type: "object",
+            properties: {
+              content: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+  };
+  const result = schemaToTypeString(schema);
+
+  // Both grep and translate should be formatted as handlers
+  assert(
+    (result.match(/=>/g) || []).length >= 2,
+    "both grep and translate should be handlers",
+  );
+  assert(result.includes("grep?:"), "should have grep property");
+  assert(result.includes("translate?:"), "should have translate property");
+  assert(result.includes("void"), "handlers should return void");
+});

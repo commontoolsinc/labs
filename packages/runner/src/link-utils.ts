@@ -304,6 +304,8 @@ export function findAndInlineDataURILinks(value: any): any {
             ...(schema !== undefined && { schema }),
           }, {
             includeSchema: true,
+            keepStreams: true,
+            keepAsCell: true,
           });
           return findAndInlineDataURILinks(newSigilLink);
         }

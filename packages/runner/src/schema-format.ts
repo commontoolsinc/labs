@@ -65,6 +65,17 @@ export interface SchemaFormatOptions {
  * // → '"open" | "closed"'
  *
  * @example
+ * // PatternToolResult schemas (from patternTool())
+ * schemaToTypeString({
+ *   type: "object",
+ *   properties: {
+ *     pattern: { type: "object" },
+ *     extraParams: { properties: { content: { type: "string" } } }
+ *   }
+ * })
+ * // → "(e: { content?: string }) => void"
+ *
+ * @example
  * // With $defs resolution
  * schemaToTypeString(
  *   { $ref: "#/$defs/User" },
@@ -76,7 +87,7 @@ export function schemaToTypeString(
   schema: JSONSchema,
   options: SchemaFormatOptions = {},
 ): string {
-  const { defs = {}, depth = 0, maxDepth = 3, indent = 0 } = options;
+  const { defs = {}, depth = 0, maxDepth = 4, indent = 0 } = options;
   const nextOpts = { defs, depth: depth + 1, maxDepth, indent };
 
   if (typeof schema !== "object" || schema === null) {
@@ -136,6 +147,20 @@ export function schemaToTypeString(
   if (s.asOpaque) {
     // Opaque wrapper - just note it's opaque
     return "Opaque";
+  }
+
+  // Handle PatternToolResult - objects with { pattern, extraParams } structure
+  // These represent callable handlers created via patternTool()
+  // Format as (e: ExtraParamsType) => void for LLM readability
+  if (s.type === "object" || s.properties) {
+    const props = s.properties as Record<string, JSONSchema> | undefined;
+    if (props && "pattern" in props && "extraParams" in props) {
+      // This is a PatternToolResult schema - format as a handler
+      const extraParamsSchema = props.extraParams;
+      if (depth >= maxDepth) return "(e: {...}) => void";
+      const paramType = schemaToTypeString(extraParamsSchema, nextOpts);
+      return `(e: ${paramType}) => void`;
+    }
   }
 
   // Handle enum - show as union of literals
