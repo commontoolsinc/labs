@@ -73,17 +73,19 @@ export type Labels = {
   classification?: string[];
 };
 
-export interface StorageValue<T = any> {
+export interface StorageValue<T extends StorableValue = any> {
   value: T;
   source?: EntityId;
   labels?: Labels;
 }
 
 /** Immutable version of `StorageValue<T>`. */
-export type ImmutableStorageValue<T = any> = Immutable<StorageValue<T>>;
+export type ImmutableStorageValue<T extends StorableValue = any> = Immutable<
+  StorageValue<T>
+>;
 
 /** Optional immutable version of `StorageValue<T>`. */
-export type OptImmutableStorageValue<T = any> =
+export type OptImmutableStorageValue<T extends StorableValue = any> =
   | ImmutableStorageValue<T>
   | undefined;
 
