@@ -48,21 +48,7 @@ interface NotebookOutput {
   }>;
 }
 
-// Handler to show the new note modal
-const showNewNoteModal = handler<
-  void,
-  { showNewNotePrompt: Writable<boolean> }
->(
-  (_, { showNewNotePrompt }) => showNewNotePrompt.set(true),
-);
-
-// Handler to show the new notebook modal (from header button)
-const showNewNotebookModal = handler<
-  void,
-  { showNewNestedNotebookPrompt: Writable<boolean> }
->((_, { showNewNestedNotebookPrompt }) =>
-  showNewNestedNotebookPrompt.set(true)
-);
+// NOTE: showNewNoteModal and showNewNotebookModal converted to actions inside pattern
 
 // Handler to create note and navigate to it (unless "Create Another" was used)
 const createNoteAndOpen = handler<
@@ -137,19 +123,7 @@ const createNoteAndContinue = handler<
   newNoteTitle.set("");
 });
 
-// Handler to cancel new note prompt
-const cancelNewNotePrompt = handler<
-  void,
-  {
-    showNewNotePrompt: Writable<boolean>;
-    newNoteTitle: Writable<string>;
-    usedCreateAnotherNote: Writable<boolean>;
-  }
->((_, { showNewNotePrompt, newNoteTitle, usedCreateAnotherNote }) => {
-  showNewNotePrompt.set(false);
-  newNoteTitle.set("");
-  usedCreateAnotherNote.set(false);
-});
+// NOTE: cancelNewNotePrompt converted to action inside pattern
 
 // Handler to remove a note from this notebook (but keep it in the space)
 const removeFromNotebook = handler<
@@ -484,40 +458,9 @@ const createNestedNotebookAndContinue = handler<
   newNestedNotebookTitle.set("");
 });
 
-// Cancel nested notebook creation
-const cancelNewNestedNotebookPrompt = handler<
-  void,
-  {
-    showNewNestedNotebookPrompt: Writable<boolean>;
-    newNestedNotebookTitle: Writable<string>;
-    usedCreateAnotherNotebook: Writable<boolean>;
-  }
->((
-  _,
-  {
-    showNewNestedNotebookPrompt,
-    newNestedNotebookTitle,
-    usedCreateAnotherNotebook,
-  },
-) => {
-  showNewNestedNotebookPrompt.set(false);
-  newNestedNotebookTitle.set("");
-  usedCreateAnotherNotebook.set(false);
-});
+// NOTE: cancelNewNestedNotebookPrompt converted to action inside pattern
 
-// Simple button handler: Go to All Notes (no menu state)
-const goToAllNotes = handler<void, { allPieces: Writable<NotePiece[]> }>(
-  (_, { allPieces }) => {
-    const pieces = allPieces.get();
-    const existing = pieces.find((piece: any) => {
-      const name = piece?.[NAME];
-      return typeof name === "string" && name.startsWith("All Notes");
-    });
-    if (existing) {
-      return navigateTo(existing);
-    }
-  },
-);
+// NOTE: goToAllNotes converted to action inside pattern
 
 // Handler for clicking on a backlink
 const handleBacklinkClick = handler<
@@ -550,22 +493,7 @@ const navigateToChild = handler<
   },
 );
 
-// Handler to select all notes in this notebook
-const selectAllNotes = handler<
-  Record<string, never>,
-  { notes: Writable<NotePiece[]>; selectedNoteIndices: Writable<number[]> }
->((_, { notes, selectedNoteIndices }) => {
-  const notesList = notes.get();
-  selectedNoteIndices.set(notesList.map((_, i) => i));
-});
-
-// Handler to deselect all notes
-const deselectAllNotes = handler<
-  Record<string, never>,
-  { selectedNoteIndices: Writable<number[]> }
->((_, { selectedNoteIndices }) => {
-  selectedNoteIndices.set([]);
-});
+// NOTE: selectAllNotes and deselectAllNotes converted to actions inside pattern
 
 // Handler to duplicate selected notes
 const _duplicateSelectedNotes = handler<
@@ -904,23 +832,7 @@ const createNotebookFromPrompt = handler<
   showNewNotebookPrompt.set(false);
 });
 
-// Handler to cancel new notebook prompt
-const cancelNewNotebookPrompt = handler<
-  void,
-  {
-    showNewNotebookPrompt: Writable<boolean>;
-    newNotebookName: Writable<string>;
-    pendingNotebookAction: Writable<"add" | "move" | "">;
-    selectedAddNotebook: Writable<string>;
-    selectedMoveNotebook: Writable<string>;
-  }
->((_, state) => {
-  state.showNewNotebookPrompt.set(false);
-  state.newNotebookName.set("");
-  state.pendingNotebookAction.set("");
-  state.selectedAddNotebook.set("");
-  state.selectedMoveNotebook.set("");
-});
+// NOTE: cancelNewNotebookPrompt converted to action inside pattern
 
 // Handler to toggle visibility of all selected notes
 const _toggleSelectedVisibility = handler<
@@ -938,31 +850,7 @@ const _toggleSelectedVisibility = handler<
   selectedNoteIndices.set([]);
 });
 
-// Handler to start editing title
-const startEditingTitle = handler<
-  Record<string, never>,
-  { isEditingTitle: Writable<boolean> }
->((_, { isEditingTitle }) => {
-  isEditingTitle.set(true);
-});
-
-// Handler to stop editing title
-const stopEditingTitle = handler<
-  Record<string, never>,
-  { isEditingTitle: Writable<boolean> }
->((_, { isEditingTitle }) => {
-  isEditingTitle.set(false);
-});
-
-// Handler for keydown on title input (Enter to save)
-const handleTitleKeydown = handler<
-  { key?: string },
-  { isEditingTitle: Writable<boolean> }
->((event, { isEditingTitle }) => {
-  if (event?.key === "Enter") {
-    isEditingTitle.set(false);
-  }
-});
+// NOTE: startEditingTitle, stopEditingTitle, handleTitleKeydown converted to actions inside pattern
 
 // Handler to toggle preview expansion for a note
 const _togglePreviewExpansion = handler<
@@ -1133,6 +1021,62 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
 
     // State for inline title editing
     const isEditingTitle = Writable.of<boolean>(false);
+
+    // ===== Actions (converted from module-scope handlers) =====
+
+    const showNewNoteModalAction = action(() => showNewNotePrompt.set(true));
+    const showNewNotebookModalAction = action(() =>
+      showNewNestedNotebookPrompt.set(true)
+    );
+
+    const cancelNewNotePromptAction = action(() => {
+      showNewNotePrompt.set(false);
+      newNoteTitle.set("");
+      usedCreateAnotherNote.set(false);
+    });
+
+    const cancelNewNestedNotebookPromptAction = action(() => {
+      showNewNestedNotebookPrompt.set(false);
+      newNestedNotebookTitle.set("");
+      usedCreateAnotherNotebook.set(false);
+    });
+
+    const cancelNewNotebookPromptAction = action(() => {
+      showNewNotebookPrompt.set(false);
+      newNotebookName.set("");
+      pendingNotebookAction.set("");
+      selectedAddNotebook.set("");
+      selectedMoveNotebook.set("");
+    });
+
+    const goToAllNotesAction = action(() => {
+      const pieces = allPieces.get();
+      const existing = pieces.find((piece: any) => {
+        const name = piece?.[NAME];
+        return typeof name === "string" && name.startsWith("All Notes");
+      });
+      if (existing) {
+        return navigateTo(existing);
+      }
+    });
+
+    const selectAllNotesAction = action(() => {
+      const notesList = notes.get();
+      selectedNoteIndices.set(notesList.map((_, i) => i));
+    });
+
+    const deselectAllNotesAction = action(() => {
+      selectedNoteIndices.set([]);
+    });
+
+    const startEditingTitleAction = action(() => isEditingTitle.set(true));
+    const stopEditingTitleAction = action(() => isEditingTitle.set(false));
+
+    const handleTitleKeydownAction = action((event: { key?: string }) => {
+      if (event?.key === "Enter") {
+        isEditingTitle.set(false);
+      }
+    });
 
     // State for expanded note previews (tracks which note indices have full content shown)
     const _expandedPreviews = Writable.of<number[]>([]);
@@ -1340,7 +1284,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
 
                 <ct-button
                   variant="ghost"
-                  onClick={goToAllNotes({ allPieces })}
+                  onClick={goToAllNotesAction}
                   style={{
                     padding: "8px 16px",
                     fontSize: "16px",
@@ -1385,7 +1329,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                           gap: "8px",
                           cursor: "pointer",
                         }}
-                        onClick={startEditingTitle({ isEditingTitle })}
+                        onClick={startEditingTitleAction}
                       >
                         <span
                           style={{
@@ -1410,8 +1354,8 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                           $value={title}
                           placeholder="Notebook name..."
                           style={{ flex: 1 }}
-                          onct-blur={stopEditingTitle({ isEditingTitle })}
-                          onct-keydown={handleTitleKeydown({ isEditingTitle })}
+                          onct-blur={stopEditingTitleAction}
+                          onct-keydown={handleTitleKeydownAction}
                         />
                       </div>
                       <div
@@ -1425,7 +1369,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                           size="sm"
                           variant="ghost"
                           title="New Note"
-                          onClick={showNewNoteModal({ showNewNotePrompt })}
+                          onClick={showNewNoteModalAction}
                           style={{
                             padding: "6px 12px",
                             display: "flex",
@@ -1442,9 +1386,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                           size="sm"
                           variant="ghost"
                           title="New Notebook"
-                          onClick={showNewNotebookModal({
-                            showNewNestedNotebookPrompt,
-                          })}
+                          onClick={showNewNotebookModalAction}
                           style={{
                             padding: "6px 12px",
                             display: "flex",
@@ -1474,7 +1416,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                       border: "2px dashed var(--ct-color-border, #e5e5e7)",
                       background: "var(--ct-color-bg-secondary, #f9f9f9)",
                     }}
-                    onClick={showNewNoteModal({ showNewNotePrompt })}
+                    onClick={showNewNoteModalAction}
                   >
                     <span style={{ fontSize: "32px", marginBottom: "12px" }}>
                       📝
@@ -1606,8 +1548,8 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                           onct-change={computed(() =>
                             selectedNoteIndices.get().length ===
                                 notes.get().length
-                              ? deselectAllNotes({ selectedNoteIndices })
-                              : selectAllNotes({ notes, selectedNoteIndices })
+                              ? deselectAllNotesAction
+                              : selectAllNotesAction
                           )}
                         />
                       </div>
@@ -1761,13 +1703,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
             >
               <ct-button
                 variant="ghost"
-                onClick={cancelNewNotebookPrompt({
-                  showNewNotebookPrompt,
-                  newNotebookName,
-                  pendingNotebookAction,
-                  selectedAddNotebook,
-                  selectedMoveNotebook,
-                })}
+                onClick={cancelNewNotebookPromptAction}
               >
                 Cancel
               </ct-button>
@@ -1807,11 +1743,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
             >
               <ct-button
                 variant="ghost"
-                onClick={cancelNewNotePrompt({
-                  showNewNotePrompt,
-                  newNoteTitle,
-                  usedCreateAnotherNote,
-                })}
+                onClick={cancelNewNotePromptAction}
               >
                 Cancel
               </ct-button>
@@ -1862,11 +1794,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
             >
               <ct-button
                 variant="ghost"
-                onClick={cancelNewNestedNotebookPrompt({
-                  showNewNestedNotebookPrompt,
-                  newNestedNotebookTitle,
-                  usedCreateAnotherNotebook,
-                })}
+                onClick={cancelNewNestedNotebookPromptAction}
               >
                 Cancel
               </ct-button>
