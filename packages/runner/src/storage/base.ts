@@ -22,7 +22,7 @@ export abstract class BaseStorageProvider implements IStorageProvider {
   protected waitingForSync = new Map<string, Promise<void>>();
   protected waitingForSyncResolvers = new Map<string, () => void>();
 
-  abstract send<T extends StorableValue = any>(
+  abstract send<T extends StorableValue = StorableValue>(
     batch: { uri: URI; value: StorageValue<T> }[],
   ): Promise<
     { ok: object; error?: undefined } | { ok?: undefined; error: Error }
@@ -37,11 +37,11 @@ export abstract class BaseStorageProvider implements IStorageProvider {
 
   abstract synced(): Promise<void>;
 
-  abstract get<T extends StorableValue = any>(
+  abstract get<T extends StorableValue = StorableValue>(
     uri: URI,
   ): OptImmutableStorageValue<T>;
 
-  sink<T extends StorableValue = any>(
+  sink<T extends StorableValue = StorableValue>(
     uri: URI,
     callback: (value: ImmutableStorageValue<T>) => void,
   ): Cancel {
