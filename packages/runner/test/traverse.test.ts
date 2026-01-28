@@ -213,8 +213,7 @@ describe("SchemaObjectTraverser missing value handling", () => {
       value: docValue,
     });
 
-    // Current behavior: undefined gets nested in the object
-    // (This is asymmetric with array behavior above)
+    // Missing properties become undefined
     expect(result).toEqual({
       present: "here",
       missing: undefined,
