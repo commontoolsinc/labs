@@ -8,11 +8,11 @@
 
 import type {
   CellRef,
-  DomEventMessage,
   RuntimeClient,
   RuntimeConnection,
   VDomBatchNotification,
 } from "@commontools/runtime-client";
+import type { DomEventMessage } from "./events.ts";
 import { DomApplicator } from "./applicator.ts";
 import type { SetPropHandler } from "../render-utils.ts";
 import { getLogger } from "@commontools/utils/logger";

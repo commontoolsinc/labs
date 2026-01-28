@@ -10,3 +10,15 @@ export type { DomApplicatorOptions } from "./applicator.ts";
 
 export { createVDomRenderer, renderVDom, VDomRenderer } from "./renderer.ts";
 export type { VDomRendererOptions } from "./renderer.ts";
+
+export {
+  ALLOWLISTED_EVENT_PROPERTIES,
+  ALLOWLISTED_TARGET_PROPERTIES,
+  isDomEventMessage,
+  serializeEvent,
+} from "./events.ts";
+export type {
+  DomEventMessage,
+  SerializedEvent,
+  SerializedEventTarget,
+} from "./events.ts";

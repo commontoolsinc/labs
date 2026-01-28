@@ -5,7 +5,7 @@
  * on the main thread. They are batched and sent as a single message.
  */
 
-import type { CellRef, JSONValue } from "../protocol/mod.ts";
+import type { CellRef, JSONValue } from "@commontools/runtime-client";
 
 /**
  * Create a new DOM element.

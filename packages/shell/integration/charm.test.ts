@@ -10,7 +10,7 @@ import { FileSystemProgramResolver } from "@commontools/js-compiler";
 const { API_URL, SPACE_NAME, FRONTEND_URL } = env;
 
 describe("shell charm tests", () => {
-  const shell = new ShellIntegration({ pipeConsole: true });
+  const shell = new ShellIntegration();
   shell.bindLifecycle();
 
   let charmId: string;

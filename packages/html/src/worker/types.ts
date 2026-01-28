@@ -109,7 +109,7 @@ export interface ChildNodeState {
 export interface ReconcileContext {
   /** Function to emit VDOM operations */
   emit: (
-    ops: import("@commontools/runtime-client/vdom-worker/operations").VDomOp[],
+    ops: import("../vdom-ops.ts").VDomOp[],
   ) => void;
 
   /** Generate a new unique node ID */
@@ -134,7 +134,7 @@ export interface ReconcileContext {
 export interface WorkerReconcilerOptions {
   /** Callback when operations are ready to send to main thread */
   onOps: (
-    ops: import("@commontools/runtime-client/vdom-worker/operations").VDomOp[],
+    ops: import("../vdom-ops.ts").VDomOp[],
   ) => void;
 
   /** Optional: callback when an error occurs */

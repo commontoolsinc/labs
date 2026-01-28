@@ -6,14 +6,10 @@
  * and handles bidirectional bindings and event dispatch.
  */
 
-import type {
-  CellRef,
-  DomEventMessage,
-  RuntimeClient,
-  VDomBatch,
-  VDomOp,
-} from "@commontools/runtime-client";
-import { serializeEvent } from "@commontools/runtime-client/vdom-worker/events";
+import type { CellRef, RuntimeClient } from "@commontools/runtime-client";
+import { serializeEvent } from "./events.ts";
+import type { DomEventMessage } from "./events.ts";
+import type { VDomBatch, VDomOp } from "../vdom-ops.ts";
 import { CellHandle } from "@commontools/runtime-client";
 import { setPropDefault, type SetPropHandler } from "../render-utils.ts";
 import { getLogger } from "@commontools/utils/logger";

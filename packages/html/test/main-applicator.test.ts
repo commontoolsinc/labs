@@ -8,7 +8,8 @@
 
 import { assertEquals, assertExists } from "@std/assert";
 import { createDomApplicator } from "../src/main/applicator.ts";
-import type { DomEventMessage, VDomBatch } from "@commontools/runtime-client";
+import type { DomEventMessage } from "../src/main/events.ts";
+import type { VDomBatch } from "../src/vdom-ops.ts";
 
 // Mock RuntimeClient for testing
 const createMockRuntimeClient = () => {

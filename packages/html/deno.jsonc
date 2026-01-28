@@ -11,7 +11,8 @@
     "./jsx-dev-runtime": "./src/jsx-dev-runtime.ts",
     "./mock-doc": "./src/mock-doc.ts",
     "./worker": "./src/worker/mod.ts",
-    "./main": "./src/main/mod.ts"
+    "./main": "./src/main/mod.ts",
+    "./vdom-ops": "./src/vdom-ops.ts"
   },
   "imports": {
     "htmlparser2": "npm:htmlparser2",

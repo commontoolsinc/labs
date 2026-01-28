@@ -6,8 +6,6 @@
   },
   "exports": {
     ".": "./mod.ts",
-    "./transports/web-worker": "./client/transports/web-worker/transport-web-worker.ts",
-    "./vdom-worker/operations": "./vdom-worker/operations.ts",
-    "./vdom-worker/events": "./vdom-worker/events.ts"
+    "./transports/web-worker": "./client/transports/web-worker/transport-web-worker.ts"
   }
 }

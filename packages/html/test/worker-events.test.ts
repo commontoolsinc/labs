@@ -7,7 +7,7 @@ import {
   type DomEventMessage,
   isDomEventMessage,
   serializeEvent,
-} from "@commontools/runtime-client";
+} from "../src/main/events.ts";
 
 // Mock Event class for testing (Deno doesn't have full DOM by default)
 class MockEvent {
