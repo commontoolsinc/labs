@@ -50,10 +50,8 @@ export class TransformationContext {
       ...config.options,
     };
 
-    // Initialize hoisting context when SES validation is enabled
-    if (this.options.sesValidation) {
-      this.hoistingContext = new HoistingContext(config.sourceFile);
-    }
+    // Initialize hoisting context for SES-safe module-scope hoisting
+    this.hoistingContext = new HoistingContext(config.sourceFile);
   }
 
   reportDiagnostic(input: DiagnosticInput): void {

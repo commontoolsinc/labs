@@ -14,8 +14,11 @@ export {
   type HoistedDeclarationType,
   HoistingContext,
   isSelfContainedCallback,
+  referencesModuleScopeSymbols,
   type SourcePosition,
 } from "./hoisting-context.ts";
+
+export { HoistingTransformer } from "./hoisting-transformer.ts";
 
 export {
   extractHoistedType,
