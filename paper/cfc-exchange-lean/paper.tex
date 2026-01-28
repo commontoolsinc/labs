@@ -82,8 +82,9 @@ claimed transitions (exact copy, projections with scoping, endorsed transformati
 constraints, and safe recomposition) and then applies a propagation algorithm that accounts for
 flow-path confidentiality in reactive control decisions.
 
-We define CFC abstractly, describe an implementation architecture, and relate the design to classic
-IFC principles (noninterference, flow-path confidentiality, and robust declassification). We also
+We define CFC abstractly, describe an implementation in a reactive runtime, and relate the design
+to classic IFC principles (noninterference, flow-path confidentiality, and robust declassification).
+We also
 provide a Lean4 mechanization of the label core and a proof-oriented subset of the transition
 system, including a composed theorem showing that exchange-based cancellation cannot defeat PC
 confidentiality (no covert channel via a secret guard).
@@ -335,8 +336,8 @@ The Lean code models intents and commit points in a small form:
 
 \section{Implementation Overview}\label{sec:impl}
 
-We assume an implementation of CFC in a production-oriented reactive runtime (e.g., a TypeScript
-runtime embedded in an application framework). The central engineering goal is to keep the trusted
+We implemented CFC in a production-oriented reactive runtime (e.g., a TypeScript runtime embedded
+in an application framework). The central engineering goal is to keep the trusted
 computing base small: untrusted handlers never directly ``change labels'' or ``declassify''; they
 only compute outputs, and the runtime derives and verifies labels.
 
