@@ -171,51 +171,54 @@ export default pattern<Input, Output>(({ contacts }) => {
                 )}
 
                 {contacts.map((charm, index) => (
-                  <ct-list-item
-                    selected={computed(() => selectedIndex.get() === index)}
-                    onct-activate={selectContact({ selectedIndex, index })}
+                  <ct-card
+                    style={computed(() =>
+                      selectedIndex.get() === index
+                        ? "background: var(--ct-color-blue-50, #eff6ff); border: 1px solid var(--ct-color-blue-300, #93c5fd); cursor: pointer;"
+                        : "cursor: pointer;"
+                    )}
+                    onClick={selectContact({ selectedIndex, index })}
                   >
-                    <span
-                      slot="leading"
-                      style={{
-                        width: "32px",
-                        height: "32px",
-                        borderRadius: "50%",
-                        background: "#e5e7eb",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: "14px",
-                      }}
-                    >
-                      {computed(() => {
-                        // Get initials from the charm's [NAME]
-                        const name = charm[NAME] || "";
-                        const parts = name.split(" ");
-                        if (parts.length >= 2) {
-                          return (parts[0].charAt(0) + parts[1].charAt(0))
-                            .toUpperCase();
-                        }
-                        return name.charAt(0).toUpperCase() || "?";
-                      })}
-                    </span>
+                    <ct-hstack style="gap: 8px; align-items: center;">
+                      <span
+                        style={{
+                          width: "32px",
+                          height: "32px",
+                          borderRadius: "50%",
+                          background: "#e5e7eb",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: "14px",
+                          flexShrink: "0",
+                        }}
+                      >
+                        {computed(() => {
+                          const name = charm[NAME] || "";
+                          const parts = name.split(" ");
+                          if (parts.length >= 2) {
+                            return (parts[0].charAt(0) + parts[1].charAt(0))
+                              .toUpperCase();
+                          }
+                          return name.charAt(0).toUpperCase() || "?";
+                        })}
+                      </span>
 
-                    {/* Display the charm's [NAME] */}
-                    {charm[NAME]}
+                      <span style={{ flex: "1" }}>{charm[NAME]}</span>
 
-                    <ct-button
-                      slot="actions"
-                      variant="ghost"
-                      size="sm"
-                      onClick={removeContact({
-                        contacts,
-                        index,
-                        selectedIndex,
-                      })}
-                    >
-                      ×
-                    </ct-button>
-                  </ct-list-item>
+                      <ct-button
+                        variant="ghost"
+                        size="sm"
+                        onClick={removeContact({
+                          contacts,
+                          index,
+                          selectedIndex,
+                        })}
+                      >
+                        ×
+                      </ct-button>
+                    </ct-hstack>
+                  </ct-card>
                 ))}
               </ct-vstack>
             </ct-vscroll>
