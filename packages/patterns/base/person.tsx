@@ -179,25 +179,25 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
             // If linked, show compact display
             if (linkedName) {
               return (
-                <ct-hstack
+                <div
                   style={{
-                    gap: "8px",
+                    display: "flex",
                     alignItems: "center",
+                    gap: "4px",
                     paddingTop: "8px",
                     borderTop: "1px solid #e5e7eb",
+                    fontSize: "12px",
+                    color: "#6b7280",
                   }}
                 >
-                  <span style={{ fontSize: "12px", color: "#6b7280" }}>
-                    Same as: {linkedName}
-                  </span>
-                  <ct-button
-                    variant="ghost"
-                    size="sm"
+                  <span>Same as: {linkedName}</span>
+                  <span
+                    style={{ cursor: "pointer", fontSize: "14px" }}
                     onClick={clearSameAs({ person })}
                   >
                     ×
-                  </ct-button>
-                </ct-hstack>
+                  </span>
+                </div>
               );
             }
 
