@@ -16,7 +16,11 @@ import {
   RuntimeTelemetryEvent,
   setRecipeEnvironment,
 } from "@commontools/runner";
-import { NameSchema, nameSchema } from "@commontools/runner/schemas";
+import {
+  NameSchema,
+  nameSchema,
+  vdomSchema,
+} from "@commontools/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
 import {
   type NormalizedFullLink,
@@ -57,6 +61,10 @@ import {
   type SetLoggerLevelRequest,
   type SetPullModeRequest,
   type SetTelemetryEnabledRequest,
+  type VDomEventRequest,
+  type VDomMountRequest,
+  type VDomMountResponse,
+  type VDomUnmountRequest,
 } from "../protocol/mod.ts";
 import { HttpProgramResolver, Program } from "@commontools/js-compiler";
 import { setLLMUrl } from "@commontools/llm";
@@ -68,6 +76,8 @@ import {
 } from "./utils.ts";
 import { cellRefToKey } from "../shared/utils.ts";
 import { RemoteResponse } from "@commontools/runtime-client";
+import { WorkerReconciler } from "@commontools/html/worker";
+import type { VDomOp } from "../protocol/types.ts";
 
 export class RuntimeProcessor {
   private runtime: Runtime;
@@ -80,6 +90,13 @@ export class RuntimeProcessor {
   private subscriptions = new Map<string, Cancel>();
   private telemetry: RuntimeTelemetry;
   #telemetryEnabled = false;
+
+  // VDOM mounts: mountId -> { reconciler, cancel }
+  private vdomMounts = new Map<
+    number,
+    { reconciler: WorkerReconciler; cancel: Cancel }
+  >();
+  private vdomBatchIdCounter = 0;
 
   private constructor(
     runtime: Runtime,
@@ -210,6 +227,14 @@ export class RuntimeProcessor {
           cancel();
         }
         this.subscriptions.clear();
+
+        // Clean up VDOM mounts
+        for (const { reconciler, cancel } of this.vdomMounts.values()) {
+          cancel();
+          reconciler.unmount();
+        }
+        this.vdomMounts.clear();
+
         await this.runtime.storageManager.synced();
         await this.runtime.dispose();
       } catch (e) {
@@ -624,8 +649,98 @@ export class RuntimeProcessor {
         return this.setTelemetryEnabled(request);
       case RequestType.ResetLoggerBaselines:
         return this.resetLoggerBaselines(request);
+      case RequestType.VDomEvent:
+        return this.handleVDomEvent(request);
+      case RequestType.VDomMount:
+        return this.handleVDomMount(request);
+      case RequestType.VDomUnmount:
+        return this.handleVDomUnmount(request);
       default:
         throw new Error(`Unknown message type: ${(request as any).type}`);
     }
+  }
+
+  /**
+   * Handle a DOM event dispatched from the main thread.
+   * This routes the event to the appropriate reconciler based on mountId.
+   */
+  handleVDomEvent(request: VDomEventRequest): void {
+    const mount = this.vdomMounts.get(request.mountId);
+    if (!mount) {
+      console.warn(
+        `[RuntimeProcessor] No mount found for mountId: ${request.mountId}`,
+      );
+      return;
+    }
+
+    // Dispatch the event to the reconciler
+    mount.reconciler.dispatchEvent(request.handlerId, request.event);
+  }
+
+  /**
+   * Handle a request to start VDOM rendering for a cell.
+   * Creates a WorkerReconciler, subscribes to the cell, and sends VDomBatch notifications.
+   */
+  handleVDomMount(request: VDomMountRequest): VDomMountResponse {
+    const { mountId, cell: cellRef } = request;
+
+    // Check if already mounted
+    if (this.vdomMounts.has(mountId)) {
+      this.handleVDomUnmount({ type: RequestType.VDomUnmount, mountId });
+    }
+
+    // Get the cell from the runtime and apply vdomSchema
+    // The schema has a [UI] property definition that handles VDOM unwrapping
+    const rawCell = getCell(this.runtime, cellRef);
+    const cell = rawCell.asSchema(vdomSchema);
+
+    // Create a reconciler that sends ops to the main thread
+    const reconciler = new WorkerReconciler({
+      onOps: (ops: VDomOp[]) => {
+        const batchId = this.vdomBatchIdCounter++;
+        self.postMessage({
+          type: NotificationType.VDomBatch,
+          batchId,
+          ops,
+          mountId,
+          rootId: reconciler.getRootNodeId(),
+        });
+      },
+      onError: (error: Error) => {
+        self.postMessage({
+          type: NotificationType.ErrorReport,
+          message: error.message,
+          stackTrace: error.stack,
+        });
+      },
+    });
+
+    // Mount the cell - the reconciler will subscribe and emit initial ops
+    const cancel = reconciler.mount(cell);
+
+    // Track this mount
+    this.vdomMounts.set(mountId, { reconciler, cancel });
+
+    // Return the root node ID
+    const rootId = reconciler.getRootNodeId() ?? 0;
+    return { rootId };
+  }
+
+  /**
+   * Handle a request to stop VDOM rendering for a mount.
+   */
+  handleVDomUnmount(request: VDomUnmountRequest): void {
+    const { mountId } = request;
+
+    const mount = this.vdomMounts.get(mountId);
+    if (!mount) {
+      console.warn(`[RuntimeProcessor] Mount ${mountId} not found for unmount`);
+      return;
+    }
+
+    // Cancel subscriptions and clean up
+    mount.cancel();
+    mount.reconciler.unmount();
+    this.vdomMounts.delete(mountId);
   }
 }

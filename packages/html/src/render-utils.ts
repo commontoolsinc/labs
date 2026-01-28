@@ -22,6 +22,39 @@ export const createCyclePlaceholder = (document: Document): HTMLSpanElement => {
 
 export const isEventProp = (key: string) => key.startsWith("on");
 
+/**
+ * Get the event type from an event prop name.
+ * E.g., "onClick" -> "click", "onMouseMove" -> "mousemove"
+ */
+export const getEventType = (key: string): string => {
+  if (!key.startsWith("on") || key.length <= 2) return key;
+  return key.slice(2).toLowerCase();
+};
+
+/**
+ * Check if a value is an event handler function.
+ */
+export const isEventHandler = (
+  value: unknown,
+): value is (event: unknown) => void => {
+  return typeof value === "function";
+};
+
+/**
+ * Check if a prop name is a bidirectional binding (starts with $).
+ */
+export const isBindingProp = (key: string): boolean => {
+  return key.startsWith("$");
+};
+
+/**
+ * Get the property name from a binding prop.
+ * E.g., "$value" -> "value", "$checked" -> "checked"
+ */
+export const getBindingPropName = (key: string): string => {
+  return key.startsWith("$") ? key.slice(1) : key;
+};
+
 export const cleanEventProp = (key: string) => {
   if (!key.startsWith("on")) {
     return null;
