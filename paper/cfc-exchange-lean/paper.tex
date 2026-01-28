@@ -1,11 +1,11 @@
-% Draft paper for the CFC spec + Lean formalization.
+% Draft paper for Contextual Flow Control (CFC).
 %
 % Intentionally minimal toolchain: standard LaTeX + listings (no minted).
 % Keep this source ASCII-only; use TeX commands for symbols.
 %
 % Repo artifacts:
-%   - Spec: docs/specs/cfc/
-%   - Lean: formal/
+%   - Design notes/spec: docs/specs/cfc/
+%   - Lean mechanization: formal/
 %
 % Build (from this directory):
 %   latexmk -pdf -interaction=nonstopmode -halt-on-error paper.tex
@@ -67,21 +67,26 @@
 \maketitle
 
 \begin{abstract}
-Contextual Flow Control (CFC) is an information-flow control (IFC) design for reactive systems in
-which data flows through untrusted application code, but security decisions are enforced at trusted
+Contextual Flow Control (CFC) is an information-flow control (IFC) system for reactive applications
+in which most computation is untrusted, but access and release decisions are enforced at trusted
 boundaries (e.g., network egress).
-The CFC spec combines: (i) a label model with confidentiality as conjunctive normal form (CNF) over
-atoms and integrity as evidence atoms; (ii) a policy mechanism where \emph{declassification} is not
-a magical primitive but a policy-driven, integrity-guarded \emph{exchange rule} that rewrites CNF;
-and (iii) a schema-driven label propagation algorithm for structured values (projections, verified
-exact copies, endorsed transformations, collections, and safe recomposition).
+CFC represents confidentiality as conjunctive normal form (CNF) over atoms and integrity as
+evidence atoms. Its central idea is \emph{exchange-based declassification}: instead of exposing a
+privileged declassify primitive to application code, CFC expresses declassification as
+integrity-guarded rewrites of CNF labels (exchange rules) applied only at boundaries. This makes
+releases explicit, auditable, and compositional, and it supports ``authority-only'' secrets as
+singleton CNF obligations that can be cancelled only with appropriate integrity evidence.
 
-This paper reorganizes the full specification into a conventional research narrative and links it
-to a Lean4 formalization that machine-checks core IFC principles: noninterference for a pure
-language, flow-path confidentiality (PC confidentiality), robust declassification and transparent
-endorsement for an extended language, preservation lemmas for label transitions, and a composed
-theorem showing that exchange-based cancellation cannot defeat PC confidentiality (no covert
-channel via a secret guard).
+CFC also includes a schema-governed transition system for structured data. The runtime validates
+claimed transitions (exact copy, projections with scoping, endorsed transformations, collection
+constraints, and safe recomposition) and then applies a propagation algorithm that accounts for
+flow-path confidentiality in reactive control decisions.
+
+We define CFC abstractly, describe an implementation architecture, and relate the design to classic
+IFC principles (noninterference, flow-path confidentiality, and robust declassification). We also
+provide a Lean4 mechanization of the label core and a proof-oriented subset of the transition
+system, including a composed theorem showing that exchange-based cancellation cannot defeat PC
+confidentiality (no covert channel via a secret guard).
 \end{abstract}
 
 \tableofcontents
@@ -107,18 +112,35 @@ at trusted boundaries, but only when the boundary can present the required integ
 intent, authorization, transformation provenance, endorsed computation). This makes ``why release
 happened'' explicit, auditable, and proof-friendly.
 
+\begin{definition}[Contextual Flow Control (CFC) (informal)]\label{def:cfc}
+CFC is an IFC system for reactive programs in which:
+(i) every value carries a two-dimensional label (confidentiality + integrity);
+(ii) confidentiality is a CNF of access requirements over atoms, and integrity is a set of evidence
+atoms;
+(iii) untrusted application code may compute over labeled data but cannot directly declassify or
+mint integrity; and
+(iv) trusted boundaries enforce access and apply policy-driven label transitions, including
+exchange-based declassification and schema-validated transformations that account for flow-path
+confidentiality in control decisions.
+\end{definition}
+
 \paragraph{This paper's contributions.}
-The repository contains both a full spec and a Lean4 mechanization. This paper:
+This paper presents CFC as a complete IFC system and highlights what is novel about the design:
 \begin{enumerate}
-  \item reorganizes the spec (\texttt{docs/specs/cfc/}) into a traditional paper structure;
-  \item summarizes the label core (CNF confidentiality + integrity evidence) and exchange semantics,
-        relating them to classical IFC foundations \cite{DBLP:journals/cacm/Denning76,DBLP:conf/sp/GoguenM82a,DBLP:journals/jsac/SabelfeldM03};
-  \item explains the runtime pipeline for reactive systems (events, intents, commit points);
-  \item describes the schema-driven label propagation and label transition checks (projections,
-        exact copies, endorsed transforms, collections, recomposition);
-  \item documents a Lean4 development that proves core IFC properties and checks regressions,
-        including a composed theorem connecting exchange-based cancellation back to PC
-        confidentiality.
+  \item \textbf{Evidence-driven declassification as exchange:} declassification is expressed as
+        integrity-guarded CNF rewrites applied only at boundaries (not as an in-program primitive),
+        making releases explicit and auditable while supporting authority-only secrets as singleton
+        CNF obligations.
+  \item \textbf{Policy-carrying secrets:} policies and transmission principles can be represented as
+        atoms that propagate with data and are interpreted only at trusted boundaries.
+  \item \textbf{Schema-governed label transitions for structured data:} projections with scoping and
+        safe recomposition, exact-copy verification, endorsed transformations, and collection rules
+        that separate per-item labels from membership/selection leakage.
+  \item \textbf{Reactive runtime integration:} explicit flow-path confidentiality (\texttt{pcConfidentiality}),
+        consumable intents, and commit points that reduce ambient authority.
+  \item \textbf{Formal grounding:} a Lean4 mechanization that connects the above mechanisms back to
+        classical IFC principles (noninterference and robust declassification) \cite{DBLP:journals/cacm/Denning76,DBLP:conf/sp/GoguenM82a,DBLP:journals/jsac/SabelfeldM03,DBLP:conf/csfw/ZdancewicM01},
+        including a composed theorem showing exchange cancellation cannot defeat PC confidentiality.
 \end{enumerate}
 
 \paragraph{Reading map.}
@@ -129,8 +151,9 @@ Section~\ref{sec:lean}. Related work is in Section~\ref{sec:related}.
 
 \section{Motivating Example: Gmail OAuth}\label{sec:gmail}
 
-Chapter 1 of the spec (\texttt{docs/specs/cfc/01-gmail-example.md}) walks through a concrete
-workflow: a user authorizes a Gmail OAuth token, reads messages, and forwards a selected message.
+We use a concrete workflow as a running example: a user authorizes a Gmail OAuth token, reads
+messages, and forwards a selected message. (An extended walkthrough is provided as supplementary
+material in the project repository.)
 The example is designed to exercise the hard cases:
 \begin{itemize}
   \item sensitive inputs used as \emph{data} (token, message contents);
@@ -154,7 +177,7 @@ label core, exchange, intents, and commit points.
 
 \section{Threat Model and Design Goals}\label{sec:threat}
 
-The spec's threat model (\texttt{docs/specs/cfc/09-threat-model.md}) matches typical IFC practice:
+CFC's threat model matches typical IFC practice:
 \begin{itemize}
   \item \textbf{Untrusted:} application code (handlers/transforms), data sources, and most third
         party libraries. The attacker may control code that computes over secrets and tries to
@@ -163,7 +186,7 @@ The spec's threat model (\texttt{docs/specs/cfc/09-threat-model.md}) matches typ
         platform that supplies UI evidence, and policy records that are authenticated/verified
         before use.
   \item \textbf{Protection scope:} confidentiality and integrity of application-visible dataflow and
-        boundary egress. Standard side channels (timing, power) are out of scope, but the spec
+        boundary egress. Standard side channels (timing, power) are out of scope, but CFC
         explicitly addresses common \emph{reactive} covert channels (secret-dependent routing).
 \end{itemize}
 
@@ -186,9 +209,9 @@ CFC labels are inspired by lattice models \cite{DBLP:journals/cacm/Denning76}, d
 \subsection{Atoms and Two-Dimensional Labels}
 
 We model \textbf{atoms} as uninterpreted principals/claims (``User(Alice)'', ``Space(X)'',
-``OAuthAuthorized(Alice)'', ``Gesture(Click)'', ``ExactCopyVerified'', etc.). The spec has a typed
-atom registry (\texttt{docs/specs/cfc/13-atom-registry.md}), but the metatheory treats atoms as an
-abstract type.
+``OAuthAuthorized(Alice)'', ``Gesture(Click)'', ``ExactCopyVerified'', etc.). In an implementation,
+atoms are typically drawn from a typed registry (so that atoms have well-defined parameters and
+canonical encodings), but the core metatheory treats atoms as an abstract type.
 
 \begin{definition}[CNF confidentiality and integrity evidence]\label{def:cnf}
 A \emph{clause} is a finite disjunction of atoms (an OR). A confidentiality label is a finite
@@ -233,7 +256,7 @@ conjunction of components, each with a disjunctive set of allowed readers.
 
 \subsection{Combining Labels}
 
-The spec defines label accumulation rules (Chapter 4). At a high level:
+CFC defines label accumulation rules. At a high level:
 \begin{itemize}
   \item \textbf{Confidentiality joins by conjunction.} Combining sources accumulates access
         requirements (CNF append).
@@ -246,7 +269,7 @@ declassification \cite{DBLP:conf/csfw/ZdancewicM01}.
 
 \section{Exchange Rules: Declassification as Trusted CNF Rewrite}\label{sec:exchange}
 
-The core novelty in the spec is to model declassification as policy-controlled exchange rules.
+One core novelty in CFC is to model declassification as policy-controlled exchange rules.
 Rather than giving untrusted code a primitive ``declassify'', CFC declassifies by applying a
 verified, integrity-guarded rewrite at a boundary.
 
@@ -287,13 +310,12 @@ runtime at a boundary.
 
 \paragraph{Core safety constraint.}
 Exchange rules must not cancel flow-path confidentiality (PC confidentiality) derived from secret
-control flow. The spec makes this explicit, and the Lean development includes a composed theorem
+control flow. CFC enforces this constraint, and the Lean development includes a composed theorem
 that connects exchange-based cancellation back to PC confidentiality (Section~\ref{sec:composed}).
 
 \section{Runtime Model: Events, Intents, and Commit Points}\label{sec:runtime}
 
-Chapters 6 and 7 of the spec describe how CFC is intended to be used in a reactive runtime.
-The high-level pipeline is:
+CFC is designed to be used in a reactive runtime. The high-level pipeline is:
 \begin{enumerate}
   \item untrusted handlers compute over labeled data and produce labeled outputs;
   \item user gestures and other events produce \emph{intents} (single-use capabilities);
@@ -312,8 +334,8 @@ The Lean code models intents and commit points in a small form:
 
 \section{Structured Data: Schema-Driven Label Transitions}\label{sec:structured}
 
-The CFC spec is not only about atomic values. Chapter 8 (\texttt{docs/specs/cfc/08-label-transitions.md})
-defines a schema-driven propagation algorithm for structured data and transformations. The goal is
+CFC is not only about atomic values. To support structured data and transformations, CFC defines a
+schema-driven propagation algorithm and a corresponding boundary-verification procedure. The goal is
 to let untrusted code transform values while preventing it from asserting unjustified integrity or
 silently discarding confidentiality constraints.
 
@@ -329,7 +351,7 @@ verifiable.
 
 \subsection{Core Transition Forms}
 
-The spec defines a transition schema language that includes (among others):
+CFC defines a transition schema language that includes (among others):
 \begin{itemize}
   \item \texttt{passThrough}: output node preserves a reference to an input node (label follows reference);
   \item \texttt{projection}: output node is a projection of an input node (with scoped integrity);
@@ -346,8 +368,8 @@ it did not actually perform.
 
 \subsection{Propagation and Verification Algorithms}\label{sec:transitions-algorithms}
 
-This section summarizes the (trusted) runtime algorithms from Chapter 8 that make the transition
-story concrete. The spec presents these in TypeScript-like pseudocode; we include an abridged but
+This section summarizes the (trusted) runtime algorithms that make the transition story concrete.
+We present these in TypeScript-like pseudocode; we include an abridged but
 structurally faithful version here so the paper is self-contained.
 
 \paragraph{Design constraint.}
@@ -544,7 +566,7 @@ Projection scoping addresses the common pattern where multiple fields are correl
 treated as a unit (e.g., latitude and longitude from the same measurement). If an attacker can mix
 fields across sources, they may bypass integrity or confidentiality expectations.
 
-The spec introduces scoping constraints so that projections can be recomposed only when they are
+CFC introduces scoping constraints so that projections can be recomposed only when they are
 proven to come from the same scoped source (e.g., the same measurement instance). The Lean model
 includes these ideas in a small form (\texttt{formal/Cfc/LabelTransitions.lean}) and tests them with
 examples (\texttt{formal/Cfc/Proofs/LabelTransitionExamples.lean}).
@@ -552,7 +574,7 @@ examples (\texttt{formal/Cfc/Proofs/LabelTransitionExamples.lean}).
 \subsection{Collections and Selection-Decision Integrity}\label{sec:collections}
 
 Collections are tricky because operations like \texttt{filter} leak information through which
-elements are present. The spec makes this explicit via selection-decision taint: a filtered
+elements are present. CFC makes this explicit via selection-decision taint: a filtered
 collection inherits confidentiality from the predicate (PC) even if individual elements do not.
 
 The Lean development models a subset of these rules in \texttt{formal/Cfc/Collection.lean} with
@@ -561,14 +583,14 @@ preservation lemmas and executable examples in \texttt{formal/Cfc/Proofs/Collect
 \subsection{Recomposition from Projections}
 
 Some structured transformations intentionally break a value into projections and later recombine
-them. The spec supports this with explicit \texttt{recomposeProjections} annotations: verification
+them. CFC supports this with explicit \texttt{recomposeProjections} annotations: verification
 checks that each component is an allowed projection; propagation can then restore whole-object
 integrity when recomposition is justified.
 
 \section{Core Safety Invariants and Proof Obligations}\label{sec:invariants}
 
-Chapter 10 of the spec (\texttt{docs/specs/cfc/10-safety-invariants.md}) collects attack examples
-and the invariants that block them. The Lean development focuses on a small set of ``core proofs''
+CFC's design is motivated by concrete attack examples and the invariants that block them. The Lean
+development focuses on a small set of ``core proofs''
 that make the rest of the story trustworthy:
 \begin{itemize}
   \item \textbf{Noninterference} for a pure expression language (no secret-to-public leaks)
@@ -690,7 +712,7 @@ Secure multi-execution \cite{DBLP:conf/sp/DevrieseP10} and faceted execution
 for explicit, auditable releases at boundaries driven by policy and integrity evidence.
 
 \paragraph{Contextual integrity.}
-CFC is inspired by contextual integrity as a privacy framework. In particular, the spec's mapping
+CFC is inspired by contextual integrity as a privacy framework. In particular, CFC's mapping
 from transmission principles to exchange rules follows the formal treatment of contextual integrity
 in \cite{DBLP:conf/sp/BarthDMN06} and the broader contextual-integrity perspective of Nissenbaum
 \cite{nissenbaum2004privacy,nissenbaum2009privacy}.
@@ -700,7 +722,7 @@ CFC targets reactive systems; early FRP ideas appear in \cite{DBLP:conf/icfp/Ell
 
 \section{Conclusion and Future Work}\label{sec:conclusion}
 
-The CFC spec proposes a coherent story that connects: CNF confidentiality labels, integrity evidence,
+This paper presents CFC as a coherent story that connects: CNF confidentiality labels, integrity evidence,
 policy-carrying secrets, exchange-based declassification, and a schema-driven label propagation
 algorithm for structured reactive data. The accompanying Lean4 development provides a set of core
 proofs that support the most security-critical claims, and it already catches subtle consistency

@@ -1,8 +1,8 @@
 # Contextual Flow Control (CFC) Paper (Draft)
 
-This folder contains a LaTeX draft paper reorganizing the CFC spec into a more traditional
-paper structure, including the "exchange-based declassification" idea and its accompanying
-Lean4 formalization.
+This folder contains a LaTeX draft paper presenting Contextual Flow Control (CFC): an
+information-flow control (IFC) system with exchange-based declassification and schema-governed
+label transitions, plus a Lean4 mechanization of core properties.
 
 ## Build
 
