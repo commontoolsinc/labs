@@ -132,8 +132,8 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
                           color: dateIsToday
                             ? "var(--ct-color-primary-500)"
                             : dateIsPast
-                              ? "var(--ct-color-gray-400)"
-                              : "var(--ct-color-gray-700)",
+                            ? "var(--ct-color-gray-400)"
+                            : "var(--ct-color-gray-700)",
                         }}
                       >
                         {formatDate(date)}
