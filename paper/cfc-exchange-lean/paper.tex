@@ -1,0 +1,316 @@
+% Draft paper for the CFC spec + Lean formalization.
+% Intentionally minimal toolchain: standard LaTeX + listings (no minted).
+%
+% This write-up is meant to be readable as a prose proof companion to the Lean development:
+%   - Spec:   docs/specs/cfc/
+%   - Lean:   formal/
+%   - Key idea: declassification as integrity-guarded exchange (CNF rewrites at trusted boundaries)
+%
+% Build:
+%   latexmk -pdf paper.tex
+%
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{listings}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!50!black,
+  urlcolor=blue!50!black,
+  citecolor=blue!50!black
+}
+
+\lstdefinelanguage{lean4}{
+  keywords={theorem,def,namespace,open,import,inductive,structure,abbrev,by,where,match,with,if,then,else,let,in,have,show,exact,fun,forall,exists,Prop,Type},
+  sensitive=true,
+  comment=[l]{--},
+  morecomment=[s]{/-}{-/},
+  morestring=[b]"
+}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\bfseries\color{blue!50!black},
+  commentstyle=\itshape\color{black!60},
+  stringstyle=\color{black!70},
+  columns=fullflexible,
+  keepspaces=true,
+  breaklines=true,
+  frame=single,
+  framerule=0.4pt,
+  rulecolor=\color{black!20},
+  xleftmargin=1em,
+  xrightmargin=1em,
+  aboveskip=1em,
+  belowskip=1em
+}
+
+\newtheorem{definition}{Definition}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+\newtheorem{claim}{Claim}
+
+\title{Exchange-Based Declassification for Contextual Flow Control\\
+       \large A CNF Label Core with Machine-Checked Proofs in Lean4 (Draft)}
+\author{Draft in repo \texttt{commontoolsinc/labs} (\texttt{docs/specs/cfc}, \texttt{formal})}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Contextual Flow Control (CFC) is an information-flow control (IFC) model inspired by Contextual
+Integrity, where policy decisions are represented as integrity-guarded \emph{exchange rules}.
+Unlike many IFC designs that treat declassification as a privileged primitive, CFC treats
+declassification as a \emph{trusted rewrite} of confidentiality labels at boundaries, justified by
+integrity evidence (user intent, provenance, authorization, endorsed computation).
+
+This paper describes (i) a small formal core: confidentiality as conjunctive normal form (CNF) over
+atoms, integrity as a set of evidence atoms, and exchange rules as guarded CNF rewrites; and (ii)
+a Lean4 formalization that proves ``load-bearing'' IFC principles: non-interference (for a pure
+language), flow-path confidentiality (PC confidentiality), robust declassification and transparent
+endorsement (for an extended language), monotonicity of exchange rewrites, and a composed theorem
+showing that exchange-based cancellation cannot defeat PC confidentiality (no covert channel via a
+secret guard).
+\end{abstract}
+
+\section{Introduction}
+
+IFC systems aim to prevent secrets from flowing to unauthorized observers. In practice, real
+systems also need \emph{intentional release}: users and trusted components must be able to disclose
+some data under appropriate conditions. The classical term for this is \emph{declassification}.
+
+The novelty in CFC is to make declassification \emph{explicitly policy-driven and evidence-driven}:
+declassification happens by applying an \emph{exchange rule} at a trusted boundary. Conceptually,
+an exchange rule says:
+
+\begin{quote}
+``If the label contains certain confidentiality requirements, and the runtime can present certain
+integrity evidence, then the confidentiality requirements may be rewritten (widened or cancelled).''
+\end{quote}
+
+This paper focuses on the core technical ingredient that makes this simple and compositional:
+
+\begin{itemize}
+  \item Confidentiality is represented as a \emph{CNF} (AND of OR-clauses) over atoms.
+  \item Exchange rules are \emph{local} CNF rewrites, guarded by integrity.
+  \item ``Declassification'' is not a magical operator; it is just the result of the rewrite
+        enabling an observer to satisfy every clause.
+\end{itemize}
+
+The CFC spec also includes a schema-driven label propagation algorithm for structured data and
+transformations (projections, exact copies, endorsed transforms, collections, etc.), but the core
+security claims reduce to the small, proof-friendly model described here.
+
+\paragraph{Repository artifacts.}
+The spec lives in \texttt{docs/specs/cfc/}. The Lean4 formalization is in \texttt{formal/} and is
+Std-only (no Mathlib). Running \texttt{cd formal \&\& lake build} typechecks the entire proof
+suite.
+
+\section{Label Model}
+
+We model \textbf{atoms} as uninterpreted principals/claims (``User(Alice)'', ``Space(X)'',
+``GoogleAuth(Alice)'', ``Expires(t)'', etc.). The spec has a richer typed atom registry, but the
+core metatheory treats atoms abstractly.
+
+\begin{definition}[CNF Confidentiality and Integrity]
+A \emph{clause} is a finite disjunction of atoms (an OR). A confidentiality label is a finite
+conjunction of clauses (a CNF, an AND of ORs). Integrity is a finite conjunction of atoms.
+\end{definition}
+
+In Lean (\texttt{formal/Cfc/Label.lean}), we represent these as lists:
+\begin{lstlisting}[language=lean4,caption={Core label types (Lean model).}]
+abbrev Clause    := List Atom
+abbrev ConfLabel := List Clause
+abbrev IntegLabel := List Atom
+
+structure Label where
+  conf : ConfLabel
+  integ : IntegLabel
+\end{lstlisting}
+
+\paragraph{Join operations.}
+Confidentiality accumulates by conjunction, implemented as list append. Integrity of a composed
+value is the \emph{intersection} (meet) of integrity atoms that hold for all contributing sources.
+New integrity can be added only by explicit endorsement (trusted minting).
+
+\section{Access Semantics}
+
+A \emph{principal} has a set of atoms it can satisfy (e.g., ``User(Alice)'' is satisfied by
+Alice). Access to a CNF means satisfying every clause; satisfaction of a clause means satisfying
+at least one atom in it.
+
+In Lean (\texttt{formal/Cfc/Access.lean}) this is:
+\begin{lstlisting}[language=lean4,caption={CNF access check (Lean model).}]
+def clauseSat (p : Principal) (c : Clause) : Prop :=
+  Exists fun a => And (List.Mem a c) (p.satisfies a)
+
+def canAccessConf (p : Principal) (C : ConfLabel) : Prop :=
+  forall c, List.Mem c C -> clauseSat p c
+\end{lstlisting}
+
+This definition is the bridge between \emph{label algebra} and \emph{security}: a label does not
+grant or deny access by itself; it constrains which principals can satisfy all of its clauses.
+
+\section{Exchange Rules as Declassification}
+
+An exchange rule is a trusted rewrite step at a boundary. The boundary can supply additional
+integrity evidence (e.g., the request is authorized, the user performed a gesture, a certificate
+validated a transformation). If an exchange rule's integrity guard is satisfied, it may rewrite
+confidentiality.
+
+Two primitives are particularly important in the proof core:
+
+\begin{enumerate}
+  \item \textbf{Add an alternative} inside a clause: if a clause contains a target atom, insert an
+        additional atom as an OR-alternative. This widens access without removing requirements.
+  \item \textbf{Cancel a singleton requirement} by dropping a singleton clause \texttt{[A]}. This is
+        the ``authority-only'' pattern: a clause \texttt{[A]} encodes an authority requirement that
+        can be removed only by trusted integrity evidence.
+\end{enumerate}
+
+In Lean (\texttt{formal/Cfc/Exchange.lean}) the cancellation primitive is:
+\begin{lstlisting}[language=lean4,caption={Integrity-guarded cancellation of a singleton clause.}]
+def exchangeDropSingletonIf (needInteg : List Atom) (a : Atom)
+    (boundary : IntegLabel) (lbl : Label) : Label :=
+  let avail := availIntegrity lbl boundary
+  if hasAllB needInteg avail then
+    { lbl with conf := confDropSingleton a lbl.conf }
+  else
+    lbl
+\end{lstlisting}
+
+\paragraph{Why this is ``declassification''.}
+Suppose a value has confidentiality CNF \texttt{[[User(u)], [GoogleAuth(u)]]}. Without exchange, an
+acting user who lacks \texttt{GoogleAuth(u)} cannot access the value. If the boundary has integrity
+evidence that an OAuth request is authorized, it can drop the singleton clause
+\texttt{[GoogleAuth(u)]}, and the result becomes accessible. This is a declassification, but it is
+not performed by untrusted code; it is a policy-driven rewrite at a boundary.
+
+This mechanism is exercised in the Lean regression suite for the Gmail OAuth example
+(\texttt{formal/Cfc/Proofs/GmailExample.lean}).
+
+\section{Core IFC Principles and Proof Plan}
+
+The repository proves the following families of claims:
+
+\begin{itemize}
+  \item \textbf{Non-interference} for a pure expression language with PC confidentiality
+        (\texttt{formal/Cfc/Proofs/Noninterference.lean}).
+  \item \textbf{Robust declassification and transparent endorsement} for an extended language with
+        explicit \texttt{declassifyIf}/\texttt{endorseIf} constructs and PC integrity
+        (\texttt{formal/Cfc/Language/Declassify.lean} and proofs).
+  \item \textbf{Exchange monotonicity and safety invariants} for boundary rewrites
+        (\texttt{formal/Cfc/Proofs/Exchange.lean}, \texttt{formal/Cfc/Proofs/SafetyInvariants.lean}).
+  \item \textbf{A composed theorem} connecting endorsement (control-flow taint) to exchange-based
+        cancellation, ruling out covert channels.
+\end{itemize}
+
+The new contribution that ``ties it together'' is the composed theorem in
+\texttt{formal/Cfc/Proofs/ExchangeDeclassification.lean}.
+
+\section{A Composed Theorem: Cancellation Cannot Defeat PC Confidentiality}
+
+The central covert-channel risk is standard:
+if a secret guard influences whether declassification occurs, then an attacker might learn the
+secret by observing whether the output becomes observable.
+
+In the extended language, this is handled by PC confidentiality (and robust declassification rules
+for \texttt{declassifyIf}). But exchange-based cancellation is a separate boundary step, so we want
+an end-to-end theorem that composes these mechanisms.
+
+\paragraph{High-level statement (informal).}
+Let \texttt{guard} be a condition whose confidentiality is hidden from a principal \texttt{p}.
+Consider a value produced under control of \texttt{guard} (here, via \texttt{endorseIf}).
+Even if a boundary applies a rule that cancels a singleton requirement \texttt{[dropAtom]},
+the result remains unobservable to \texttt{p}, provided the rule does not remove the guard's own
+confidentiality clauses.
+
+In Lean, the theorem is:
+\begin{lstlisting}[language=lean4,caption={Composed theorem: exchange cancellation preserves hidden-guard secrecy.}]
+theorem observe_exchangeDropSingletonIf_endorseIf_eq_none_of_hidden_guard
+    (p : Principal) (env : Env) (pc : ConfLabel) (pcI : IntegLabel)
+    (needInteg : List Atom) (dropAtom : Atom) (boundary : IntegLabel)
+    (tok : Atom) (guard x : ExprD)
+    (hHide : Not (canAccessConf p (evalD env pc pcI guard).lbl.conf))
+    (hNoDrop : Not (List.Mem ([dropAtom] : Clause) (evalD env pc pcI guard).lbl.conf)) :
+    observe p
+      (applyExchangeDropSingletonIf needInteg dropAtom boundary
+        (evalD env pc pcI (.endorseIf tok guard x))) = none
+\end{lstlisting}
+
+\paragraph{Proof idea (prose).}
+\begin{enumerate}
+  \item \emph{PC confidentiality:} Evaluating \texttt{endorseIf tok guard x} runs \texttt{x} under an
+        extended program counter \texttt{pc' = pc ++ guard.conf}. Thus the output confidentiality
+        contains \texttt{guard.conf}.
+  \item \emph{Cancellation is local:} \texttt{exchangeDropSingletonIf} deletes only the singleton
+        clause \texttt{[dropAtom]}. Under the assumption that \texttt{[dropAtom]} is not a clause in
+        \texttt{guard.conf}, every clause of \texttt{guard.conf} remains present after the rewrite.
+  \item \emph{Hidden guard implies hidden output:} since \texttt{p} cannot satisfy the CNF
+        \texttt{guard.conf}, there exists a specific clause in \texttt{guard.conf} that \texttt{p}
+        cannot satisfy. That clause survives the cancellation, so \texttt{p} still cannot access the
+        rewritten label; therefore observation is \texttt{none}.
+\end{enumerate}
+
+\paragraph{What this does (and does not) prove.}
+This theorem does not claim that exchange cancellation is ``always safe''; rather, it shows that a
+standard IFC invariant (no covert channel through secret-dependent downgrading) continues to hold
+when declassification is implemented via a guarded CNF rewrite, \emph{as long as the rewrite does
+not delete the PC/guard taint}.
+
+This matches the intent in the spec: exchange rules are policy-controlled and must not be allowed
+to cancel flow-path confidentiality.
+
+\section{Structured Data and Schema-Driven Transitions (Brief)}
+
+Beyond the core label and exchange model, the CFC spec includes schema-driven label propagation for
+structured values (\texttt{docs/specs/cfc/08-label-transitions.md}): pass-through references,
+projection scoping, exact copy verification, endorsed transformation registries, safe recomposition
+of projections, and collection-specific rules (container vs member labels, selection-decision taint).
+
+The Lean model contains a minimal, proof-oriented subset of these transitions in
+\texttt{formal/Cfc/LabelTransitions.lean} and \texttt{formal/Cfc/Collection.lean}, with preservation
+lemmas and executable regressions in \texttt{formal/Cfc/Proofs/LabelTransitions.lean} and
+\texttt{formal/Cfc/Proofs/LabelTransitionExamples.lean}.
+
+The central design principle remains the same:
+\emph{untrusted code does not assert label changes; trusted runtime checks evidence and applies
+checked transitions.}
+
+\section{Limitations and Next Steps}
+
+The current Lean development is intentionally small and Std-only. Notably, it does not yet model:
+(i) full policy record evaluation to a fixpoint with variable binding; (ii) a full runtime state
+machine for commit points and side effects; (iii) write-authority sets and stateful authorization;
+(iv) end-to-end ``whole system'' semantics that interleaves program evaluation, label propagation,
+exchange, and egress enforcement.
+
+Even so, the existing proofs already pin down the most error-prone parts of the story:
+PC confidentiality, integrity-gated rewrite, and the ``no covert channel via hidden guard'' pattern,
+now including exchange-based cancellation.
+
+\section{Reproducibility}
+
+The Lean proofs are checked by building the \texttt{formal/} package:
+\begin{lstlisting}[language={},caption={How to typecheck the Lean proofs.}]
+cd formal && lake build
+\end{lstlisting}
+
+The spec is in \texttt{docs/specs/cfc/}. The key Lean modules referenced in this paper are:
+\texttt{formal/Cfc/Label.lean}, \texttt{formal/Cfc/Access.lean}, \texttt{formal/Cfc/Exchange.lean},
+\texttt{formal/Cfc/Language.lean}, \texttt{formal/Cfc/Language/Declassify.lean}, and
+\texttt{formal/Cfc/Proofs/ExchangeDeclassification.lean}.
+
+\section*{Acknowledgments}
+
+This is a draft write-up meant to track an evolving repo. Add formal citations and a related-work
+section once the spec and proofs stabilize.
+
+\end{document}
