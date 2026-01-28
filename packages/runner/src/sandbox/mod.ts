@@ -61,3 +61,33 @@ export {
   wrapExecution,
   type WrappedFunction,
 } from "./execution-wrapper.ts";
+
+// Frame classifier
+export {
+  type ClassifiedFrame,
+  classifyFrame,
+  classifyStack,
+  filterFrames,
+  formatFrames,
+  type FrameType,
+} from "./frame-classifier.ts";
+
+// Error mapping
+export {
+  createErrorMapper,
+  ErrorMapper,
+  type ErrorMappingOptions,
+  mapError,
+  type MappedError,
+} from "./error-mapping.ts";
+
+// Error display
+export {
+  createErrorReport,
+  type ErrorDisplayOptions,
+  type ErrorReport,
+  formatError,
+  formatErrorForConsole,
+  formatErrorForLog,
+  formatUserMessage,
+} from "./error-display.ts";

@@ -233,23 +233,58 @@ export function wrapAsyncExecution<T extends (...args: any[]) => Promise<any>>(
 /**
  * Map an error to its original source location.
  *
- * This is a placeholder for the full source map integration (PR 2.2).
- * Currently returns undefined - will be enhanced to parse stack traces
- * and map through source maps.
+ * Parses the error stack trace, classifies frames, and extracts
+ * the first pattern frame's location.
  *
- * @param _error - The error to map
- * @param _options - Execution options
+ * @param error - The error to map
+ * @param _options - Execution options (for future source map support)
  * @returns The source location, or undefined if not mappable
  */
 function mapErrorLocation(
-  _error: Error,
+  error: Error,
   _options: ExecutionWrapperOptions,
 ): SourceLocation | undefined {
-  // TODO(@seefeld): Implement source map integration (PR 2.2)
-  // 1. Parse the error stack trace
-  // 2. Extract the first user-code frame (not runtime/SES frames)
-  // 3. Map through source maps to original location
-  // 4. Return the mapped location
+  // Import lazily to avoid circular dependencies
+  // The full error mapper with source map support can be used here
+  // when source maps are available in the execution context
+
+  if (!error.stack) {
+    return undefined;
+  }
+
+  // Parse the stack trace to find the first pattern frame
+  // This is a simplified version - the full ErrorMapper can be used
+  // when source maps are loaded
+  const lines = error.stack.split("\n");
+  for (const line of lines) {
+    // Skip non-frame lines
+    if (!line.includes("at ")) continue;
+
+    // Skip internal frames
+    if (
+      line.includes("/runner/") ||
+      line.includes("/harness/") ||
+      line.includes("AMDLoader") ||
+      line.includes("<CT_INTERNAL>") ||
+      line.includes("/ses/") ||
+      line.includes("Compartment")
+    ) {
+      continue;
+    }
+
+    // Try to parse the frame
+    const match = line.match(
+      /at\s+(?:[\w.$<>[\]]+\s+)?\(?(.*?):(\d+):(\d+)\)?$/,
+    );
+    if (match) {
+      const [, file, lineStr, columnStr] = match;
+      return {
+        file,
+        line: parseInt(lineStr, 10),
+        column: parseInt(columnStr, 10),
+      };
+    }
+  }
 
   return undefined;
 }
