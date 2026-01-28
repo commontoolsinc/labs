@@ -25,6 +25,7 @@ export const rendererVDOMSchema = {
               { type: "string" },
               { type: "number" },
               { type: "boolean" },
+              { type: "null" },
               {
                 type: "array",
                 items: { $ref: "#/$defs/vdomNode", asCell: true },
