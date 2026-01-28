@@ -10,7 +10,7 @@
  * - Dashboard showing email threads due for follow-up (filtered by age)
  * - Thread context display so user understands context
  * - LLM-generated polite follow-up emails asking for updates
- * - One-click send via Gmail API (with confirmation)
+ * - Send via embedded gmail-sender sub-pattern (with Review & Send confirmation)
  * - Ping tracking with suggestion to remove label after multiple unanswered pings
  * - Label management to remove "expect-response" when user gives up
  *
@@ -35,6 +35,7 @@ import GmailExtractor, {
   type Auth,
   type Email,
 } from "../core/gmail-extractor.tsx";
+import GmailSender from "../core/experimental/gmail-sender.tsx";
 import {
   createGoogleAuth,
   type ScopeKey,
@@ -44,6 +45,17 @@ import {
   GmailSendClient,
 } from "../core/util/gmail-send-client.ts";
 import type { Stream } from "commontools";
+
+/** Email draft shape matching gmail-sender's expected input */
+type EmailDraft = {
+  to: string;
+  subject: string;
+  body: string;
+  cc: string;
+  bcc: string;
+  replyToMessageId: string;
+  replyToThreadId: string;
+};
 
 // =============================================================================
 // CONSTANTS
@@ -341,111 +353,64 @@ const updateDraft = handler<
 });
 
 /**
- * Send follow-up email
+ * Prepare to send follow-up via gmail-sender sub-pattern.
+ * Populates the senderDraft with thread reply data and sets activeSendThread.
  */
-const sendFollowUp = handler<
+const prepareSend = handler<
   unknown,
   {
-    auth: Writable<Auth>;
-    pendingSend: Writable<string | null>;
-    threadMetadata: Writable<Record<string, ThreadMetadata>>;
+    senderDraft: Writable<EmailDraft>;
+    activeSendThread: Writable<string | null>;
     drafts: Writable<Record<string, string>>;
-    sendingThreads: Writable<string[]>;
-    sendResults: Writable<Record<string, { success: boolean; error?: string }>>;
     thread: TrackedThread;
   }
->(
-  async (
-    _event,
-    {
-      auth,
-      pendingSend,
-      threadMetadata,
-      drafts,
-      sendingThreads,
-      sendResults,
-      thread,
-    },
-  ) => {
-    const threadId = thread.threadId;
-    const draft = drafts.get()[threadId];
+>((_event, { senderDraft, activeSendThread, drafts, thread }) => {
+  const threadId = thread.threadId;
+  const draftBody = drafts.get()[threadId];
 
-    if (!draft) {
-      console.error("[ExpectResponse] No draft to send");
-      return;
-    }
+  if (!draftBody) {
+    console.error("[ExpectResponse] No draft to send");
+    return;
+  }
 
-    if (!auth.get()) {
-      console.error("[ExpectResponse] No auth available");
-      sendResults.set({
-        ...sendResults.get(),
-        [threadId]: {
-          success: false,
-          error: "No auth available - complete Google authentication first",
-        },
-      });
-      return;
-    }
+  // Populate gmail-sender's draft input
+  senderDraft.set({
+    to: thread.lastResponder,
+    subject: thread.subject.startsWith("Re:")
+      ? thread.subject
+      : `Re: ${thread.subject}`,
+    body: draftBody,
+    cc: "",
+    bcc: "",
+    replyToMessageId: thread.lastMessageId,
+    replyToThreadId: threadId,
+  });
 
-    // Mark as sending
-    const currentSending = sendingThreads.get();
-    sendingThreads.set([...currentSending, threadId]);
+  // Track which thread is being sent
+  activeSendThread.set(threadId);
+});
 
-    try {
-      const client = new GmailSendClient(auth, { debugMode: DEBUG });
-
-      // Send as reply to the thread
-      await client.sendEmail({
-        to: thread.lastResponder,
-        subject: thread.subject.startsWith("Re:")
-          ? thread.subject
-          : `Re: ${thread.subject}`,
-        body: draft,
-        replyToMessageId: thread.lastMessageId,
-        replyToThreadId: threadId,
-      });
-
-      // Increment ping count
-      const currentMeta = threadMetadata.get();
-      const existing = currentMeta[threadId];
-      threadMetadata.set({
-        ...currentMeta,
-        [threadId]: {
-          ...existing,
-          pingCount: (existing?.pingCount || 0) + 1,
-        },
-      });
-
-      // Clear draft
-      const currentDrafts = drafts.get();
-      const { [threadId]: _removed, ...remainingDrafts } = currentDrafts;
-      drafts.set(remainingDrafts);
-
-      // Record success
-      sendResults.set({
-        ...sendResults.get(),
-        [threadId]: { success: true },
-      });
-
-      // Close confirmation
-      pendingSend.set(null);
-    } catch (error) {
-      console.error("[ExpectResponse] Failed to send:", error);
-      sendResults.set({
-        ...sendResults.get(),
-        [threadId]: {
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        },
-      });
-    } finally {
-      // Remove from sending - use the stored value from earlier to avoid reactive loop
-      sendingThreads.set(
-        currentSending.filter((id) => id !== threadId),
-      );
-    }
-  },
-);
+/**
+ * Cancel the send flow - clear activeSendThread and reset senderDraft.
+ */
+const cancelSendFlow = handler<
+  unknown,
+  {
+    senderDraft: Writable<EmailDraft>;
+    activeSendThread: Writable<string | null>;
+  }
+>((_event, { senderDraft, activeSendThread }) => {
+  activeSendThread.set(null);
+  senderDraft.set({
+    to: "",
+    subject: "",
+    body: "",
+    cc: "",
+    bcc: "",
+    replyToMessageId: "",
+    replyToThreadId: "",
+  });
+});
 
 /**
  * Give up on a thread (remove expect-response label)
@@ -524,21 +489,6 @@ const fetchLabels = handler<
 });
 
 /**
- * Dismiss send result
- */
-const dismissResult = handler<
-  unknown,
-  {
-    sendResults: Writable<Record<string, { success: boolean; error?: string }>>;
-    threadId: string;
-  }
->((_event, { sendResults, threadId }) => {
-  const current = sendResults.get();
-  const { [threadId]: _removed, ...remaining } = current;
-  sendResults.set(remaining);
-});
-
-/**
  * Toggle settings panel for a thread
  */
 const toggleSettings = handler<
@@ -598,12 +548,22 @@ export default pattern<PatternInput, PatternOutput>(() => {
   // UI state
   const expandedThreads = Writable.of<string[]>([]).for("expandedThreads");
   const drafts = Writable.of<Record<string, string>>({}).for("drafts");
-  const pendingSend = Writable.of<string | null>(null).for("pendingSend");
-  const sendingThreads = Writable.of<string[]>([]).for("sendingThreads");
-  const sendResults = Writable.of<
-    Record<string, { success: boolean; error?: string }>
-  >({}).for("sendResults");
   const expectResponseLabelId = Writable.of("").for("expectResponseLabelId");
+
+  // Gmail-sender integration state
+  const emptyDraft: EmailDraft = {
+    to: "",
+    subject: "",
+    body: "",
+    cc: "",
+    bcc: "",
+    replyToMessageId: "",
+    replyToThreadId: "",
+  };
+  const senderDraft = Writable.of<EmailDraft>(emptyDraft).for("senderDraft");
+  const activeSendThread = Writable.of<string | null>(null).for(
+    "activeSendThread",
+  );
   const loadingLabels = Writable.of(false).for("loadingLabels");
   const settingsOpenFor = Writable.of<string | null>(null).for(
     "settingsOpenFor",
@@ -622,7 +582,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
     isReady,
     currentEmail,
   } = createGoogleAuth({
-    requiredScopes: ["gmail", "gmailSend", "gmailModify"] as ScopeKey[],
+    requiredScopes: ["gmail", "gmailModify"] as ScopeKey[],
   });
 
   // ==========================================================================
@@ -824,6 +784,50 @@ Write only the email body, no subject line or greeting line (the greeting will b
   });
 
   // ==========================================================================
+  // GMAIL SENDER SUB-PATTERN
+  // ==========================================================================
+
+  const sender = GmailSender({ draft: senderDraft });
+
+  // Watch sender.result for successful sends → do bookkeeping
+  const _autoHandleSendResult = computed(() => {
+    const senderResult = sender.result;
+    const threadId = activeSendThread.get();
+
+    if (senderResult?.success && threadId) {
+      // Increment ping count
+      const currentMeta = threadMetadata.get();
+      const existing = currentMeta[threadId];
+      threadMetadata.set({
+        ...currentMeta,
+        [threadId]: {
+          ...existing,
+          pingCount: (existing?.pingCount || 0) + 1,
+        },
+      });
+
+      // Clear draft
+      const currentDrafts = drafts.get();
+      const { [threadId]: _removed, ...remainingDrafts } = currentDrafts;
+      drafts.set(remainingDrafts);
+
+      // Clear send state
+      activeSendThread.set(null);
+      senderDraft.set({
+        to: "",
+        subject: "",
+        body: "",
+        cc: "",
+        bcc: "",
+        replyToMessageId: "",
+        replyToThreadId: "",
+      });
+    }
+
+    return null;
+  });
+
+  // ==========================================================================
   // UI
   // ==========================================================================
 
@@ -979,10 +983,9 @@ Write only the email body, no subject line or greeting line (the greeting will b
                   const isExpanded = computed(() =>
                     expandedThreads.get().includes(uiThreadId)
                   );
-                  const isSending = computed(() =>
-                    sendingThreads.get().includes(uiThreadId)
+                  const isSendingThis = computed(() =>
+                    activeSendThread.get() === uiThreadId
                   );
-                  const result = computed(() => sendResults.get()[uiThreadId]);
                   const settingsOpen = computed(() =>
                     settingsOpenFor.get() === uiThreadId
                   );
@@ -1312,199 +1315,210 @@ Write only the email body, no subject line or greeting line (the greeting will b
                         null,
                       )}
 
-                      {/* Send result notification */}
-                      {ifElse(
-                        derive(result, (r) => r?.success === true),
-                        <div
-                          style={{
-                            padding: "8px 16px",
-                            backgroundColor: "#d1fae5",
-                            borderBottom: "1px solid #10b981",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                          }}
-                        >
-                          <span
-                            style={{ color: "#065f46", fontSize: "13px" }}
-                          >
-                            Follow-up sent successfully!
-                          </span>
-                          <button
-                            type="button"
-                            onClick={dismissResult({
-                              sendResults,
-                              threadId: uiThreadId,
-                            })}
-                            style={{
-                              background: "none",
-                              border: "none",
-                              color: "#065f46",
-                              cursor: "pointer",
-                              fontSize: "16px",
-                            }}
-                          >
-                            ×
-                          </button>
-                        </div>,
-                        null,
-                      )}
-
-                      {ifElse(
-                        derive(result, (r) => r?.success === false),
-                        <div
-                          style={{
-                            padding: "8px 16px",
-                            backgroundColor: "#fee2e2",
-                            borderBottom: "1px solid #ef4444",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                          }}
-                        >
-                          <span
-                            style={{ color: "#991b1b", fontSize: "13px" }}
-                          >
-                            Failed: {derive(result, (r) => r?.error)}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={dismissResult({
-                              sendResults,
-                              threadId: uiThreadId,
-                            })}
-                            style={{
-                              background: "none",
-                              border: "none",
-                              color: "#991b1b",
-                              cursor: "pointer",
-                              fontSize: "16px",
-                            }}
-                          >
-                            ×
-                          </button>
-                        </div>,
-                        null,
-                      )}
-
-                      {/* Draft area */}
+                      {/* Draft / Send area */}
                       <div style={{ padding: "12px 16px" }}>
-                        {(() => {
-                          // Compute draft state for this thread
-                          const isGenerating = computed(() =>
-                            generatingDraftFor.get() === uiThreadId &&
-                            draftLlmResult.pending
-                          );
-                          const hasDraft = computed(() => {
-                            const d = drafts.get();
-                            if (d[uiThreadId]) return true;
-                            // Also check if LLM just finished for this thread
-                            const genFor = generatingDraftFor.get();
-                            if (
-                              genFor === uiThreadId &&
-                              !draftLlmResult.pending &&
-                              draftLlmResult.result
-                            ) {
-                              return true;
-                            }
-                            return false;
-                          });
-                          const draftText = computed((): string => {
-                            const d = drafts.get();
-                            if (d[uiThreadId]) return String(d[uiThreadId]);
-                            const genFor = generatingDraftFor.get();
-                            if (genFor === uiThreadId) {
-                              // Access .result and .error reactively by dereferencing
-                              const result = draftLlmResult.result;
-                              const error = draftLlmResult.error;
-                              return String(result || error || "");
-                            }
-                            return "";
-                          });
-
-                          return ifElse(
-                            isGenerating,
+                        {ifElse(
+                          isSendingThis,
+                          // Gmail-sender UI shown inline when this thread is active
+                          <div>
+                            {sender}
                             <div
                               style={{
-                                padding: "12px",
-                                backgroundColor: "#f3f4f6",
-                                borderRadius: "6px",
-                                color: "#6b7280",
-                                fontSize: "13px",
-                                textAlign: "center",
+                                display: "flex",
+                                gap: "8px",
+                                marginTop: "8px",
                               }}
                             >
-                              Generating follow-up draft...
-                            </div>,
-                            ifElse(
-                              hasDraft,
-                              <div>
-                                {/* Draft textarea */}
-                                <textarea
-                                  value={derive(
-                                    draftText,
-                                    (t) => String(t || ""),
-                                  )}
-                                  onChange={updateDraft({
-                                    drafts,
-                                    threadId: uiThreadId,
-                                  })}
-                                  style={{
-                                    width: "100%",
-                                    minHeight: "100px",
-                                    padding: "8px 12px",
-                                    borderRadius: "6px",
-                                    border: "1px solid #d1d5db",
-                                    fontSize: "13px",
-                                    fontFamily: "inherit",
-                                    resize: "vertical",
-                                  }}
-                                />
+                              <button
+                                type="button"
+                                onClick={cancelSendFlow({
+                                  senderDraft,
+                                  activeSendThread,
+                                })}
+                                style={{
+                                  padding: "8px 16px",
+                                  backgroundColor: "transparent",
+                                  color: "#6b7280",
+                                  border: "1px solid #d1d5db",
+                                  borderRadius: "6px",
+                                  cursor: "pointer",
+                                  fontSize: "13px",
+                                }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>,
+                          // Draft editing UI
+                          (() => {
+                            const isGenerating = computed(() =>
+                              generatingDraftFor.get() === uiThreadId &&
+                              draftLlmResult.pending
+                            );
+                            const hasDraft = computed(() => {
+                              const d = drafts.get();
+                              if (d[uiThreadId]) return true;
+                              const genFor = generatingDraftFor.get();
+                              if (
+                                genFor === uiThreadId &&
+                                !draftLlmResult.pending &&
+                                draftLlmResult.result
+                              ) {
+                                return true;
+                              }
+                              return false;
+                            });
+                            const draftText = computed((): string => {
+                              const d = drafts.get();
+                              if (d[uiThreadId]) return String(d[uiThreadId]);
+                              const genFor = generatingDraftFor.get();
+                              if (genFor === uiThreadId) {
+                                const result = draftLlmResult.result;
+                                const error = draftLlmResult.error;
+                                return String(result || error || "");
+                              }
+                              return "";
+                            });
 
-                                {/* Action buttons */}
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    gap: "8px",
-                                    marginTop: "8px",
-                                  }}
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={sendFollowUp({
-                                      auth,
-                                      pendingSend,
-                                      threadMetadata,
+                            return ifElse(
+                              isGenerating,
+                              <div
+                                style={{
+                                  padding: "12px",
+                                  backgroundColor: "#f3f4f6",
+                                  borderRadius: "6px",
+                                  color: "#6b7280",
+                                  fontSize: "13px",
+                                  textAlign: "center",
+                                }}
+                              >
+                                Generating follow-up draft...
+                              </div>,
+                              ifElse(
+                                hasDraft,
+                                <div>
+                                  <textarea
+                                    value={derive(
+                                      draftText,
+                                      (t) => String(t || ""),
+                                    )}
+                                    onChange={updateDraft({
                                       drafts,
-                                      sendingThreads,
-                                      sendResults,
-                                      thread,
+                                      threadId: uiThreadId,
                                     })}
-                                    disabled={isSending}
                                     style={{
-                                      padding: "8px 16px",
-                                      backgroundColor: derive(
-                                        isSending,
-                                        (s) => (s ? "#9ca3af" : "#10b981"),
-                                      ),
-                                      color: "white",
-                                      border: "none",
+                                      width: "100%",
+                                      minHeight: "100px",
+                                      padding: "8px 12px",
                                       borderRadius: "6px",
-                                      cursor: derive(
-                                        isSending,
-                                        (s) => (s ? "not-allowed" : "pointer"),
-                                      ),
+                                      border: "1px solid #d1d5db",
                                       fontSize: "13px",
-                                      fontWeight: "500",
+                                      fontFamily: "inherit",
+                                      resize: "vertical",
+                                    }}
+                                  />
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      gap: "8px",
+                                      marginTop: "8px",
                                     }}
                                   >
-                                    {ifElse(
-                                      isSending,
-                                      "Sending...",
-                                      "Send Follow-up",
-                                    )}
-                                  </button>
-
+                                    <button
+                                      type="button"
+                                      onClick={prepareSend({
+                                        senderDraft,
+                                        activeSendThread,
+                                        drafts,
+                                        thread,
+                                      })}
+                                      style={{
+                                        padding: "8px 16px",
+                                        backgroundColor: "#10b981",
+                                        color: "white",
+                                        border: "none",
+                                        borderRadius: "6px",
+                                        cursor: "pointer",
+                                        fontSize: "13px",
+                                        fontWeight: "500",
+                                      }}
+                                    >
+                                      Send Follow-up
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={startDraftGeneration({
+                                        threadId: uiThreadId,
+                                        generatingDraftFor,
+                                        drafts,
+                                      })}
+                                      style={{
+                                        padding: "8px 16px",
+                                        backgroundColor: "transparent",
+                                        color: "#6366f1",
+                                        border: "1px solid #6366f1",
+                                        borderRadius: "6px",
+                                        cursor: "pointer",
+                                        fontSize: "13px",
+                                      }}
+                                    >
+                                      Regenerate
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={giveUp({
+                                        removeLabels: extractor.removeLabels,
+                                        thread,
+                                        expectResponseLabelId,
+                                        hiddenThreads,
+                                      })}
+                                      disabled={derive(
+                                        expectResponseLabelId,
+                                        (id) => !id,
+                                      )}
+                                      style={{
+                                        marginLeft: "auto",
+                                        padding: "8px 16px",
+                                        backgroundColor: derive(
+                                          thread,
+                                          (t) =>
+                                            t.shouldGiveUp
+                                              ? "#f97316"
+                                              : "transparent",
+                                        ),
+                                        color: derive(
+                                          thread,
+                                          (t) =>
+                                            t.shouldGiveUp
+                                              ? "white"
+                                              : "#f97316",
+                                        ),
+                                        border: derive(
+                                          thread,
+                                          (t) =>
+                                            t.shouldGiveUp
+                                              ? "none"
+                                              : "1px solid #f97316",
+                                        ),
+                                        borderRadius: "6px",
+                                        cursor: derive(
+                                          expectResponseLabelId,
+                                          (id) =>
+                                            id ? "pointer" : "not-allowed",
+                                        ),
+                                        fontSize: "13px",
+                                        fontWeight: derive(
+                                          thread,
+                                          (t) =>
+                                            t.shouldGiveUp ? "600" : "normal",
+                                        ),
+                                      }}
+                                    >
+                                      Give Up
+                                    </button>
+                                  </div>
+                                </div>,
+                                <div>
                                   <button
                                     type="button"
                                     onClick={startDraftGeneration({
@@ -1513,172 +1527,90 @@ Write only the email body, no subject line or greeting line (the greeting will b
                                       drafts,
                                     })}
                                     style={{
-                                      padding: "8px 16px",
-                                      backgroundColor: "transparent",
-                                      color: "#6366f1",
-                                      border: "1px solid #6366f1",
+                                      padding: "12px 24px",
+                                      backgroundColor: "#6366f1",
+                                      color: "white",
+                                      border: "none",
                                       borderRadius: "6px",
                                       cursor: "pointer",
-                                      fontSize: "13px",
+                                      fontSize: "14px",
+                                      fontWeight: "500",
+                                      width: "100%",
                                     }}
                                   >
-                                    Regenerate
+                                    Generate Follow-up Draft
                                   </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={giveUp({
-                                      removeLabels: extractor.removeLabels,
-                                      thread,
-                                      expectResponseLabelId,
-                                      hiddenThreads,
-                                    })}
-                                    disabled={derive(
-                                      expectResponseLabelId,
-                                      (id) => !id,
-                                    )}
+                                  <div
                                     style={{
-                                      marginLeft: "auto",
-                                      padding: "8px 16px",
-                                      backgroundColor: derive(
-                                        thread,
-                                        (t) =>
-                                          t.shouldGiveUp
-                                            ? "#f97316"
-                                            : "transparent",
-                                      ),
-                                      color: derive(
-                                        thread,
-                                        (t) => (t.shouldGiveUp
-                                          ? "white"
-                                          : "#f97316"),
-                                      ),
-                                      border: derive(
-                                        thread,
-                                        (t) =>
-                                          t.shouldGiveUp
-                                            ? "none"
-                                            : "1px solid #f97316",
-                                      ),
-                                      borderRadius: "6px",
-                                      cursor: derive(
-                                        expectResponseLabelId,
-                                        (
-                                          id,
-                                        ) => (id ? "pointer" : "not-allowed"),
-                                      ),
-                                      fontSize: "13px",
-                                      fontWeight: derive(
-                                        thread,
-                                        (
-                                          t,
-                                        ) => (t.shouldGiveUp
-                                          ? "600"
-                                          : "normal"),
-                                      ),
+                                      display: "flex",
+                                      gap: "8px",
+                                      marginTop: "8px",
+                                      justifyContent: "flex-end",
                                     }}
                                   >
-                                    Give Up
-                                  </button>
-                                </div>
-                              </div>,
-                              <div>
-                                {/* No draft yet - show generate button */}
-                                <button
-                                  type="button"
-                                  onClick={startDraftGeneration({
-                                    threadId: uiThreadId,
-                                    generatingDraftFor,
-                                    drafts,
-                                  })}
-                                  style={{
-                                    padding: "12px 24px",
-                                    backgroundColor: "#6366f1",
-                                    color: "white",
-                                    border: "none",
-                                    borderRadius: "6px",
-                                    cursor: "pointer",
-                                    fontSize: "14px",
-                                    fontWeight: "500",
-                                    width: "100%",
-                                  }}
-                                >
-                                  Generate Follow-up Draft
-                                </button>
-
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    gap: "8px",
-                                    marginTop: "8px",
-                                    justifyContent: "flex-end",
-                                  }}
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={giveUp({
-                                      removeLabels: extractor.removeLabels,
-                                      thread,
-                                      expectResponseLabelId,
-                                      hiddenThreads,
-                                    })}
-                                    disabled={derive(
-                                      expectResponseLabelId,
-                                      (id) => !id,
-                                    )}
-                                    style={{
-                                      padding: "8px 16px",
-                                      backgroundColor: derive(
+                                    <button
+                                      type="button"
+                                      onClick={giveUp({
+                                        removeLabels: extractor.removeLabels,
                                         thread,
-                                        (t) =>
-                                          t.shouldGiveUp
-                                            ? "#f97316"
-                                            : "transparent",
-                                      ),
-                                      color: derive(
-                                        thread,
-                                        (t) => (t.shouldGiveUp
-                                          ? "white"
-                                          : "#f97316"),
-                                      ),
-                                      border: derive(
-                                        thread,
-                                        (t) =>
-                                          t.shouldGiveUp
-                                            ? "none"
-                                            : "1px solid #f97316",
-                                      ),
-                                      borderRadius: "6px",
-                                      cursor: derive(
                                         expectResponseLabelId,
-                                        (
-                                          id,
-                                        ) => (id ? "pointer" : "not-allowed"),
-                                      ),
-                                      fontSize: "13px",
-                                      fontWeight: derive(
-                                        thread,
-                                        (t) => (t.shouldGiveUp
-                                          ? "600"
-                                          : "normal"),
-                                      ),
-                                    }}
-                                  >
-                                    Give Up
-                                  </button>
-                                </div>
-                              </div>,
-                            ),
-                          );
-                        })()}
+                                        hiddenThreads,
+                                      })}
+                                      disabled={derive(
+                                        expectResponseLabelId,
+                                        (id) => !id,
+                                      )}
+                                      style={{
+                                        padding: "8px 16px",
+                                        backgroundColor: derive(
+                                          thread,
+                                          (t) =>
+                                            t.shouldGiveUp
+                                              ? "#f97316"
+                                              : "transparent",
+                                        ),
+                                        color: derive(
+                                          thread,
+                                          (t) =>
+                                            t.shouldGiveUp
+                                              ? "white"
+                                              : "#f97316",
+                                        ),
+                                        border: derive(
+                                          thread,
+                                          (t) =>
+                                            t.shouldGiveUp
+                                              ? "none"
+                                              : "1px solid #f97316",
+                                        ),
+                                        borderRadius: "6px",
+                                        cursor: derive(
+                                          expectResponseLabelId,
+                                          (id) =>
+                                            id ? "pointer" : "not-allowed",
+                                        ),
+                                        fontSize: "13px",
+                                        fontWeight: derive(
+                                          thread,
+                                          (t) =>
+                                            t.shouldGiveUp ? "600" : "normal",
+                                        ),
+                                      }}
+                                    >
+                                      Give Up
+                                    </button>
+                                  </div>
+                                </div>,
+                              ),
+                            );
+                          })(),
+                        )}
                       </div>
                     </div>
                   );
                 })}
               </ct-vstack>,
             )}
-
-            {/* Confirmation dialog removed for now - send happens directly from thread card */}
           </ct-vstack>
         </ct-vscroll>
       </ct-screen>

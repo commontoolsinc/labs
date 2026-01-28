@@ -28,6 +28,7 @@ import {
   NAME,
   pattern,
   UI,
+  type VNode,
   Writable,
 } from "commontools";
 import { GmailSendClient } from "../util/gmail-send-client.ts";
@@ -80,6 +81,7 @@ interface Input {
 
 /** Gmail email sender with confirmation dialog. #gmailSender */
 interface Output {
+  [UI]: VNode;
   draft: EmailDraft;
   result: SendResult | null;
 }
