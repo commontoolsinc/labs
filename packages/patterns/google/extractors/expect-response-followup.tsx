@@ -459,9 +459,9 @@ const _confirmAndSend = handler<
         },
       });
     } finally {
-      // Remove from sending
+      // Remove from sending - use the stored value from earlier to avoid reactive loop
       sendingThreads.set(
-        sendingThreads.get().filter((id) => id !== threadId),
+        currentSending.filter((id) => id !== threadId),
       );
     }
   },
