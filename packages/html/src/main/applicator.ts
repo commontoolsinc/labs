@@ -79,7 +79,7 @@ export class DomApplicator {
    * Apply a batch of VDOM operations.
    */
   applyBatch(batch: VDomBatch): void {
-    const startTime = performance.now();
+    logger.timeStart("apply-batch");
     const opCount = batch.ops.length;
 
     for (const op of batch.ops) {
@@ -96,10 +96,10 @@ export class DomApplicator {
       this.rootNodeId = batch.rootId;
     }
 
-    const elapsed = performance.now() - startTime;
+    const elapsed = logger.timeEnd("apply-batch");
     logger.debug("apply-batch", () => [
-      `Applied ${opCount} ops in ${elapsed.toFixed(2)}ms`,
-      `(${(elapsed / opCount).toFixed(3)}ms/op)`,
+      `Applied ${opCount} ops in ${elapsed?.toFixed(2)}ms`,
+      `(${((elapsed ?? 0) / opCount).toFixed(3)}ms/op)`,
       `nodes=${this.nodes.size}`,
     ]);
   }
@@ -199,7 +199,7 @@ export class DomApplicator {
    * Dispose of all tracked nodes and listeners.
    */
   dispose(): void {
-    const startTime = performance.now();
+    logger.timeStart("dispose");
     const nodeCount = this.nodes.size;
     const listenerCount = this.eventListeners.size;
 
@@ -227,10 +227,10 @@ export class DomApplicator {
     this.nodeChildren.clear();
     this.rootNodeId = null;
 
-    const elapsed = performance.now() - startTime;
+    const elapsed = logger.timeEnd("dispose");
     logger.debug("dispose", () => [
       `Disposed ${nodeCount} nodes, ${listenerCount} listeners in ${
-        elapsed.toFixed(2)
+        elapsed?.toFixed(2)
       }ms`,
     ]);
   }
@@ -382,7 +382,7 @@ export class DomApplicator {
     const node = this.nodes.get(nodeId);
     if (!node) return;
 
-    const startTime = performance.now();
+    logger.timeStart("remove-node", String(nodeId));
 
     // Recursively clean up descendants first (O(n) via parent/children tracking)
     const descendantCount = this.cleanupDescendants(nodeId);
@@ -412,11 +412,11 @@ export class DomApplicator {
     // Remove from tracking
     this.nodes.delete(nodeId);
 
+    const elapsed = logger.timeEnd("remove-node", String(nodeId));
     if (descendantCount > 0) {
-      const elapsed = performance.now() - startTime;
       logger.debug("remove-node", () => [
         `Removed node ${nodeId} with ${descendantCount} descendants in ${
-          elapsed.toFixed(2)
+          elapsed?.toFixed(2)
         }ms`,
       ]);
     }

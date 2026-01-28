@@ -110,18 +110,19 @@ export class VDomRenderer {
     this.applicator.setContainer(container);
 
     // Request the worker to start rendering
-    const startTime = performance.now();
+    logger.timeStart("mount", String(this.mountId));
     try {
       const response = await this.connection.mountVDom(this.mountId, cellRef);
       this.rootNodeId = response.rootId;
 
-      const elapsed = performance.now() - startTime;
+      const elapsed = logger.timeEnd("mount", String(this.mountId));
       logger.debug("render-mount", () => [
-        `Mounted VDOM ${this.mountId} in ${elapsed.toFixed(2)}ms`,
+        `Mounted VDOM ${this.mountId} in ${elapsed?.toFixed(2)}ms`,
         `rootId=${response.rootId}`,
       ]);
     } catch (error) {
       // Reset state on failure so the renderer can be reused
+      logger.timeEnd("mount", String(this.mountId));
       this.mountId = null;
       this.containerElement = null;
       throw error;
@@ -141,8 +142,8 @@ export class VDomRenderer {
       return;
     }
 
-    const startTime = performance.now();
     const mountId = this.mountId;
+    logger.timeStart("unmount", String(mountId));
     this.mountId = null;
 
     // Request the worker to stop rendering
@@ -159,9 +160,9 @@ export class VDomRenderer {
 
     this.containerElement = null;
 
-    const elapsed = performance.now() - startTime;
+    const elapsed = logger.timeEnd("unmount", String(mountId));
     logger.debug("stop-rendering", () => [
-      `Stopped VDOM ${mountId} in ${elapsed.toFixed(2)}ms`,
+      `Stopped VDOM ${mountId} in ${elapsed?.toFixed(2)}ms`,
     ]);
   }
 
@@ -199,7 +200,7 @@ export class VDomRenderer {
       return;
     }
 
-    const startTime = performance.now();
+    logger.timeStart("batch", String(notification.batchId));
     try {
       // Apply the batch to the DOM
       // Children are inserted directly into the container (CONTAINER_NODE_ID)
@@ -214,13 +215,14 @@ export class VDomRenderer {
         this.rootNodeId = notification.rootId;
       }
 
-      const elapsed = performance.now() - startTime;
+      const elapsed = logger.timeEnd("batch", String(notification.batchId));
       logger.debug("vdom-batch", () => [
         `Batch ${notification.batchId}: ${notification.ops.length} ops in ${
-          elapsed.toFixed(2)
+          elapsed?.toFixed(2)
         }ms`,
       ]);
     } catch (error) {
+      logger.timeEnd("batch", String(notification.batchId));
       this.onError?.(
         error instanceof Error ? error : new Error(String(error)),
       );
