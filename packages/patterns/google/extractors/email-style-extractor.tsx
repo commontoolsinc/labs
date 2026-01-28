@@ -154,6 +154,7 @@ const updateWorkEmail = handler<
 /** Personal email writing style extracted from sent emails. #emailStyle */
 interface PatternOutput {
   style: EmailStyle | null;
+  stylePrompt: string;
   emailsAnalyzed: number;
   lastAnalyzedAt: string;
   isAnalyzing: boolean;
@@ -278,9 +279,32 @@ Extract the writing style patterns from these emails.`;
     const analyzedCount = derive(emailsAnalyzedCount, (c: number) => c);
     const analyzedAt = derive(lastAnalyzedAt, (ts: string) => ts);
 
+    // Pre-built prompt string any consumer can drop into an LLM call
+    const stylePrompt = derive(style, (s) => {
+      if (!s?.summary) return "";
+      const greetings = (s.greetingPatterns || []).join(", ");
+      const closings = (s.closingPatterns || []).join(", ");
+      const examples = (s.examplePhrases || []).join("; ");
+      return `Writing style guidance:
+- Tone: ${s.overallTone}
+- Formality: ${s.formalityLevel}
+- Greeting patterns: ${greetings}
+- Closing patterns: ${closings}
+- Sentence style: ${s.sentenceStyle}
+- Punctuation habits: ${s.punctuationHabits}
+- Vocabulary: ${s.vocabularyNotes}
+- Signature: ${s.signatureBlock || "(none)"}
+- Example phrases: ${examples}
+
+Summary: ${s.summary}
+
+Write as if the user wrote it themselves, matching their natural voice.`;
+    });
+
     return {
       [NAME]: "Email Style Extractor",
       style,
+      stylePrompt,
       emailsAnalyzed: emailsAnalyzedCount,
       lastAnalyzedAt,
       isAnalyzing,

@@ -607,12 +607,15 @@ export default pattern<PatternInput, PatternOutput>(() => {
   // Wish for email style data from the email-style-extractor pattern.
   // Returns undefined if the style extractor isn't deployed — drafts gracefully
   // fall back to the generic professional tone.
-  const emailStyleWish = wish<{ style: EmailStyleData | null }>({
+  const emailStyleWish = wish<{
+    style: EmailStyleData | null;
+    stylePrompt: string;
+  }>({
     query: "#emailStyle",
   });
-  const emailStyle = derive(
+  const emailStylePrompt = derive(
     emailStyleWish.result,
-    (r) => r?.style ?? null,
+    (r) => r?.stylePrompt ?? "",
   );
 
   // ==========================================================================
@@ -741,10 +744,10 @@ export default pattern<PatternInput, PatternOutput>(() => {
   // NOTE: When prompt is falsy/undefined, generateText should skip the API call
   // Build style-aware system prompt
   const draftSystemPrompt = derive(
-    emailStyle,
-    (s) =>
-      s?.summary
-        ? `You are a helpful assistant that drafts follow-up emails matching the user's personal writing style. Style summary: ${s.summary}`
+    emailStylePrompt,
+    (prompt) =>
+      prompt
+        ? `You are a helpful assistant that drafts follow-up emails matching the user's personal writing style.\n\n${prompt}`
         : "You are a helpful assistant that drafts professional follow-up emails.",
   );
 
@@ -780,34 +783,10 @@ export default pattern<PatternInput, PatternOutput>(() => {
       );
       const pingCount = Number(currentThread.pingCount) || 0;
 
-      // Build style guidance section
-      const styleData = emailStyle;
-      let styleGuidance: string;
-      if (styleData?.summary) {
-        const greetings = Array.from(styleData.greetingPatterns || []).join(
-          ", ",
-        );
-        const closings = Array.from(styleData.closingPatterns || []).join(
-          ", ",
-        );
-        const examples = Array.from(styleData.examplePhrases || []).join(
-          "; ",
-        );
-        styleGuidance = `
-Writing style guidance:
-- Tone: ${styleData.overallTone}
-- Formality: ${styleData.formalityLevel}
-- Greeting patterns: ${greetings}
-- Closing patterns: ${closings}
-- Sentence style: ${styleData.sentenceStyle}
-- Punctuation habits: ${styleData.punctuationHabits}
-- Example phrases: ${examples}
-
-Write the follow-up as if the user wrote it themselves, matching their natural voice.`;
-      } else {
-        styleGuidance =
-          "Keep it professional and friendly. Reference the original subject matter.";
-      }
+      // Use pre-built style prompt from the extractor, or fall back to generic
+      const styleGuidance = emailStylePrompt
+        ? emailStylePrompt
+        : "Keep it professional and friendly. Reference the original subject matter.";
 
       return `Based on this email thread, draft a brief, polite follow-up email asking for an update.
 ${styleGuidance}
