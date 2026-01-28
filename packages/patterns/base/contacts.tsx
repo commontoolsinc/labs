@@ -18,22 +18,12 @@ import {
   Writable,
 } from "commontools";
 
+// Import shared types
+import type { ContactCharm, FamilyMember, Person } from "./contact-types.tsx";
+
 // Import patterns (they return charms with [UI])
-import PersonPattern, { type Person } from "./person.tsx";
-import FamilyMemberPattern, { type FamilyMember } from "./family-member.tsx";
-
-// ============================================================================
-// Charm Types - What we store in the contacts array
-// ============================================================================
-
-// A contact charm has [NAME], [UI], and either person or member data
-interface ContactCharm {
-  [NAME]: string;
-  [UI]: VNode;
-  // The actual data lives inside the charm - either person or member
-  person?: Person;
-  member?: FamilyMember;
-}
+import PersonPattern from "./person.tsx";
+import FamilyMemberPattern from "./family-member.tsx";
 
 // ============================================================================
 // Input/Output Schemas

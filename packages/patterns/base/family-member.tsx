@@ -19,20 +19,14 @@ import {
   Writable,
 } from "commontools";
 
-// Import PersonLike from the canonical person pattern
-import type { PersonLike } from "./person.tsx";
+import type {
+  ContactCharm,
+  FamilyMember,
+  PersonLike,
+} from "./contact-types.tsx";
 
-// ============================================================================
-// FamilyMember Type - Extends PersonLike with family-specific fields
-// ============================================================================
-
-export interface FamilyMember extends PersonLike {
-  firstName: string;
-  lastName: string;
-  relationship: Default<string, "">;
-  birthday: Default<string, "">; // ISO date string (YYYY-MM-DD)
-  dietaryRestrictions: Default<string[], []>;
-}
+// Re-export for backwards compatibility
+export type { FamilyMember } from "./contact-types.tsx";
 
 // ============================================================================
 // Constants
@@ -74,8 +68,7 @@ interface Input {
     >
   >;
   // Optional: reactive source of sibling contacts for sameAs linking.
-  // Typed as unknown[] because the container's charm type can't be imported here.
-  sameAs?: Writable<unknown[]>;
+  sameAs?: Writable<ContactCharm[]>;
 }
 
 interface Output {
@@ -159,9 +152,8 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
     const selfLast = member.key("lastName").get();
 
     // Extract PersonLike from each sibling charm (person or member field)
-    const extractPerson = (item: unknown): PersonLike | undefined => {
-      const c = item as { person?: PersonLike; member?: PersonLike };
-      return c.person ?? c.member;
+    const extractPerson = (item: ContactCharm): PersonLike | undefined => {
+      return item.person ?? item.member;
     };
 
     return all
