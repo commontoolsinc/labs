@@ -166,7 +166,7 @@ export interface IStorageProvider {
    * @param batch - Batch of entity uri & values to send.
    * @returns Promise that resolves when the value is sent.
    */
-  send<T = any>(
+  send<T extends StorableValue = any>(
     batch: { uri: URI; value: StorageValue<T> }[],
   ): Promise<Result<Unit, Error>>;
 
@@ -196,7 +196,7 @@ export interface IStorageProvider {
    * @param uri - uri of the entity to get the value for.
    * @returns Value or undefined if the value is not in storage.
    */
-  get<T = any>(uri: URI): OptImmutableStorageValue<T>;
+  get<T extends StorableValue = any>(uri: URI): OptImmutableStorageValue<T>;
 
   /**
    * Subscribe to storage updates.
@@ -205,7 +205,7 @@ export interface IStorageProvider {
    * @param callback - Callback function.
    * @returns Cancel function to stop the subscription.
    */
-  sink<T = any>(
+  sink<T extends StorableValue = any>(
     uri: URI,
     callback: (value: ImmutableStorageValue<T>) => void,
   ): Cancel;
