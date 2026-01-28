@@ -343,7 +343,7 @@ const updateDraft = handler<
 /**
  * Prepare to send follow-up (show confirmation)
  */
-const prepareToSend = handler<
+const _prepareToSend = handler<
   unknown,
   { pendingSend: Writable<string | null>; threadId: string }
 >((_event, { pendingSend, threadId }) => {
@@ -361,9 +361,9 @@ const _cancelSend = handler<
 });
 
 /**
- * Confirm and send follow-up email
+ * Send follow-up email
  */
-const _confirmAndSend = handler<
+const sendFollowUp = handler<
   unknown,
   {
     auth: Writable<Auth>;
@@ -819,6 +819,28 @@ Write only the email body, no subject line or greeting line (the greeting will b
     system:
       "You are a helpful assistant that drafts professional follow-up emails.",
     model: "anthropic:claude-sonnet-4-5",
+  });
+
+  // Auto-save LLM draft to drafts Writable when generation completes
+  // This ensures the draft is available for the send handler
+  const _autoSaveLlmDraft = computed(() => {
+    const threadId = generatingDraftFor.get();
+    const result = draftLlmResult.result;
+    const isPending = draftLlmResult.pending;
+
+    // Only save when generation completes with a result
+    if (!isPending && result && threadId) {
+      const current = drafts.get();
+      // Idempotent check: only mutate if value changed
+      if (current[threadId] !== result) {
+        drafts.set({
+          ...current,
+          [threadId]: result,
+        });
+      }
+    }
+
+    return null;
   });
 
   // ==========================================================================
@@ -1469,9 +1491,14 @@ Write only the email body, no subject line or greeting line (the greeting will b
                                 >
                                   <button
                                     type="button"
-                                    onClick={prepareToSend({
+                                    onClick={sendFollowUp({
+                                      auth,
                                       pendingSend,
-                                      threadId: uiThreadId,
+                                      threadMetadata,
+                                      drafts,
+                                      sendingThreads,
+                                      sendResults,
+                                      thread,
                                     })}
                                     disabled={isSending}
                                     style={{
