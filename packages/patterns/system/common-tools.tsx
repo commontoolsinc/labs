@@ -305,12 +305,7 @@ export const updateProfile = pattern<
     if (!cell) return { success: false, message: "Profile not available" };
 
     // Set the new summary text
-    if (typeof cell.set === "function") {
-      cell.set(summary);
-    } else {
-      // If it's not a writable, try direct assignment
-      (cell as any) = summary;
-    }
+    cell.set(summary);
 
     return {
       success: true,
