@@ -91,3 +91,13 @@ export {
   formatErrorForLog,
   formatUserMessage,
 } from "./error-display.ts";
+
+// Import hooks
+export {
+  createImportHook,
+  createResolveHook,
+  ESMCache,
+  type ImportHookConfig,
+  isExternalSpecifier,
+  resetImportCounter,
+} from "./import-hooks.ts";
