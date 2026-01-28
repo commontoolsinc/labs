@@ -30,18 +30,18 @@ interface Relationship {
   label: Default<string, "">;
 }
 
-interface Input {
+interface ContactBookInput {
   contacts: Writable<Default<Contact[], []>>;
   relationships: Writable<Default<Relationship[], []>>;
 }
 
-interface Output {
+interface ContactBookOutput {
   contacts: Contact[];
   relationships: Relationship[];
   onAddContact: Stream<void>;
 }
 
-export default pattern<Input, Output>(({ contacts, relationships }) => {
+export default pattern<ContactBookInput, ContactBookOutput>(({ contacts, relationships }) => {
   const searchQuery = Writable.of("");
 
   const contactCount = computed(() => contacts.get().length);

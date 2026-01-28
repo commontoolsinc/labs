@@ -18,11 +18,11 @@ export interface TodoItem {
   done: Default<boolean, false>;
 }
 
-interface Input {
+interface TodoListInput {
   items?: Writable<Default<TodoItem[], []>>;
 }
 
-interface Output {
+interface TodoListOutput {
   [NAME]: string;
   [UI]: VNode;
   items: TodoItem[];
@@ -33,7 +33,7 @@ interface Output {
 
 // ===== Pattern =====
 
-export default pattern<Input, Output>(({ items }) => {
+export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
   // Pattern-body actions - preferred for single-use handlers that close over
   // this pattern's state.
   const addItem = action(({ title }: { title: string }) => {

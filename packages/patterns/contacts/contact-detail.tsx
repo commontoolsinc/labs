@@ -12,16 +12,16 @@ export interface Contact {
   createdAt: number;
 }
 
-interface Input {
+interface ContactDetailInput {
   contact: Writable<Contact>;
 }
 
 /** #contact #person */
-interface Output {
+interface ContactDetailOutput {
   contact: Contact;
 }
 
-export default pattern<Input, Output>(({ contact }) => {
+export default pattern<ContactDetailInput, ContactDetailOutput>(({ contact }) => {
   return {
     [NAME]: computed(() => `Contact: ${contact.key("name").get()}`),
     [UI]: (

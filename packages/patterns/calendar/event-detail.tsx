@@ -1,23 +1,55 @@
 /// <cts-enable />
-import { computed, Default, NAME, pattern, UI, Writable } from "commontools";
+import {
+  action,
+  computed,
+  Default,
+  NAME,
+  pattern,
+  Stream,
+  UI,
+  type VNode,
+  Writable,
+} from "commontools";
 
-interface Event {
+export interface Event {
   title: Writable<string>;
   date: Writable<string>;
   time: Writable<Default<string, "">>;
   notes: Writable<Default<string, "">>;
 }
 
-interface Input {
+interface EventDetailInput {
   event: Event;
 }
 
 /** #event */
-interface Output {
+interface EventDetailOutput {
+  [NAME]: string;
+  [UI]: VNode;
   event: Event;
+  setTitle: Stream<{ title: string }>;
+  setDate: Stream<{ date: string }>;
+  setTime: Stream<{ time: string }>;
+  setNotes: Stream<{ notes: string }>;
 }
 
-export default pattern<Input, Output>(({ event }) => {
+export default pattern<EventDetailInput, EventDetailOutput>(({ event }) => {
+  const setTitle = action(({ title }: { title: string }) => {
+    event.title.set(title);
+  });
+
+  const setDate = action(({ date }: { date: string }) => {
+    event.date.set(date);
+  });
+
+  const setTime = action(({ time }: { time: string }) => {
+    event.time.set(time);
+  });
+
+  const setNotes = action(({ notes }: { notes: string }) => {
+    event.notes.set(notes);
+  });
+
   return {
     [NAME]: computed(() => `Event: ${event.title}`),
     [UI]: (
@@ -72,5 +104,9 @@ export default pattern<Input, Output>(({ event }) => {
       </ct-screen>
     ),
     event,
+    setTitle,
+    setDate,
+    setTime,
+    setNotes,
   };
 });

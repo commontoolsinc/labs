@@ -1,6 +1,6 @@
 /// <cts-enable />
 import { action, computed, NAME, pattern, UI, Writable } from "commontools";
-import type { Habit, Input, Output } from "./schemas.tsx";
+import type { Habit, HabitTrackerInput, HabitTrackerOutput } from "./schemas.tsx";
 
 // Re-export for consumers
 export type { Habit, HabitLog } from "./schemas.tsx";
@@ -18,7 +18,7 @@ const getDateDaysAgo = (daysAgo: number): string => {
   return date.toISOString().split("T")[0];
 };
 
-export default pattern<Input, Output>(({ habits, logs }) => {
+export default pattern<HabitTrackerInput, HabitTrackerOutput>(({ habits, logs }) => {
   const todayDate = getTodayDate();
   const newHabitName = Writable.of("");
   const newHabitIcon = Writable.of("✓");

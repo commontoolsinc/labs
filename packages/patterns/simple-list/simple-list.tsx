@@ -51,11 +51,11 @@ export interface SimpleListItem {
   done: Default<boolean, false>;
 }
 
-export interface SimpleListModuleInput {
+export interface SimpleListInput {
   items?: Writable<Default<SimpleListItem[], []>>;
 }
 
-interface SimpleListModuleOutput {
+interface SimpleListOutput {
   [NAME]: string;
   [UI]: VNode;
   items: SimpleListItem[];
@@ -67,8 +67,8 @@ interface SimpleListModuleOutput {
 
 // ===== The Pattern =====
 export const SimpleListModule = pattern<
-  SimpleListModuleInput,
-  SimpleListModuleOutput
+  SimpleListInput,
+  SimpleListOutput
 >(({ items }) => {
   // Pattern-body actions - preferred for single-use handlers
   const toggleIndent = action(({ index }: { index: number }) => {
