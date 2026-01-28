@@ -346,13 +346,12 @@ export class WorkerReconciler {
       );
     }
 
-    // Handle Cell<VNode>
+    // Handle Cell<VNode> - this path should be unreachable in practice
+    // since Cell children go through renderChild → renderCellChild
     if (isCell(node)) {
-      return this.renderCellNode(
-        ctx,
-        node as Cell<WorkerVNode>,
-        visited,
-        addCancel,
+      throw new Error(
+        "Unexpected Cell in renderNode - this code path was thought to be unreachable. " +
+          "Please report this issue.",
       );
     }
 
@@ -396,95 +395,6 @@ export class WorkerReconciler {
     }
 
     return state;
-  }
-
-  /**
-   * Render a Cell<VNode> with reactive updates.
-   */
-  private renderCellNode(
-    ctx: ReconcileContext,
-    cell: Cell<WorkerVNode>,
-    visited: Set<object>,
-    addCancel: (c: Cancel) => void,
-  ): NodeState | null {
-    // Create a wrapper element for reactive content
-    const wrapperId = ctx.nextNodeId();
-    this.queueOps([
-      {
-        op: "create-element",
-        nodeId: wrapperId,
-        tagName: "ct-internal-fill-element",
-      },
-    ]);
-
-    const wrapperState: NodeState = {
-      nodeId: wrapperId,
-      tagName: "ct-internal-fill-element",
-      cancel: () => {},
-      children: new Map(),
-      propSubscriptions: new Map(),
-      eventHandlers: new Map(),
-    };
-
-    let currentChild: NodeState | null = null;
-    let childCancel: Cancel | undefined;
-
-    let currentSlot: string | null = null;
-
-    addCancel(
-      cell.sink((resolvedNode) => {
-        // Clean up previous child
-        if (childCancel) {
-          childCancel();
-          childCancel = undefined;
-        }
-        if (currentChild) {
-          this.queueOps([{ op: "remove-node", nodeId: currentChild.nodeId }]);
-          currentChild = null;
-        }
-
-        if (!resolvedNode) return;
-
-        // Propagate slot attribute from child to wrapper for Shadow DOM slot distribution
-        const childSlot = this.extractSlotFromNode(resolvedNode);
-        if (childSlot !== currentSlot) {
-          if (childSlot) {
-            this.queueOps([
-              {
-                op: "set-prop",
-                nodeId: wrapperId,
-                key: "slot",
-                value: childSlot,
-              },
-            ]);
-          } else if (currentSlot) {
-            this.queueOps([{
-              op: "remove-prop",
-              nodeId: wrapperId,
-              key: "slot",
-            }]);
-          }
-          currentSlot = childSlot;
-        }
-
-        // Render new child
-        const childState = this.renderNode(ctx, resolvedNode, new Set(visited));
-        if (childState) {
-          this.queueOps([
-            {
-              op: "insert-child",
-              parentId: wrapperId,
-              childId: childState.nodeId,
-              beforeId: null,
-            },
-          ]);
-          currentChild = childState;
-          childCancel = childState.cancel;
-        }
-      }),
-    );
-
-    return wrapperState;
   }
 
   /**
@@ -1119,43 +1029,6 @@ export class WorkerReconciler {
       }
     }
     return String(value);
-  }
-
-  /**
-   * Extract the slot attribute from a render node if present.
-   * This is used to propagate slot attributes to wrapper elements
-   * for proper Shadow DOM slot distribution.
-   */
-  private extractSlotFromNode(node: unknown): string | null {
-    if (!node || typeof node !== "object") return null;
-
-    // Check for VNode with slot prop
-    if (isWorkerVNode(node) && node.props) {
-      const props = node.props;
-      if (isCell(props)) {
-        // If props is a Cell, we can't synchronously extract slot
-        // This is a limitation - slot won't be propagated for Cell props
-        return null;
-      }
-      if (typeof props === "object" && "slot" in props) {
-        const slot = (props as Record<string, unknown>).slot;
-        if (typeof slot === "string") return slot;
-        if (isCell(slot)) {
-          // Try to get current value synchronously
-          const value = slot.get();
-          if (typeof value === "string") return value;
-        }
-      }
-    }
-
-    // Check for objects with [UI] - follow the chain to find the actual node
-    // deno-lint-ignore no-explicit-any
-    if (UI in node && (node as any)[UI]) {
-      // deno-lint-ignore no-explicit-any
-      return this.extractSlotFromNode((node as any)[UI]);
-    }
-
-    return null;
   }
 }
 
