@@ -64,6 +64,10 @@ interface Input {
         relationship: "";
         birthday: "";
         dietaryRestrictions: [];
+        notes: "";
+        tags: [];
+        allergies: [];
+        giftIdeas: [];
       }
     >
   >;
@@ -93,6 +97,30 @@ const updateDietaryRestrictions = handler<
   });
 });
 
+const updateTags = handler<
+  { detail: { tags: string[] } },
+  { member: Writable<FamilyMember> }
+>(({ detail }, { member }) => {
+  const current = member.get();
+  member.set({ ...current, tags: detail?.tags ?? [] });
+});
+
+const updateAllergies = handler<
+  { detail: { tags: string[] } },
+  { member: Writable<FamilyMember> }
+>(({ detail }, { member }) => {
+  const current = member.get();
+  member.set({ ...current, allergies: detail?.tags ?? [] });
+});
+
+const updateGiftIdeas = handler<
+  { detail: { tags: string[] } },
+  { member: Writable<FamilyMember> }
+>(({ detail }, { member }) => {
+  const current = member.get();
+  member.set({ ...current, giftIdeas: detail?.tags ?? [] });
+});
+
 // sameAs handlers
 const selectSameAs = handler<
   { detail: { data?: PersonLike } },
@@ -117,6 +145,44 @@ const togglePicker = handler<unknown, { showPicker: Writable<boolean> }>(
     showPicker.set(!showPicker.get());
   },
 );
+
+const toggleSection = handler<unknown, { section: Writable<boolean> }>(
+  (_event, { section }) => {
+    section.set(!section.get());
+  },
+);
+
+// ============================================================================
+// UI Helpers
+// ============================================================================
+
+function sectionHeader(
+  label: string,
+  expanded: Writable<boolean>,
+  count?: () => number,
+) {
+  return (
+    <ct-hstack
+      style={{
+        justifyContent: "space-between",
+        alignItems: "center",
+        cursor: "pointer",
+        paddingTop: "8px",
+        borderTop: "1px solid #e5e7eb",
+      }}
+      onClick={toggleSection({ section: expanded })}
+    >
+      <label style={{ fontSize: "12px", color: "#6b7280", fontWeight: "600" }}>
+        {computed(() => {
+          const arrow = expanded.get() ? "▾" : "▸";
+          const c = count ? count() : 0;
+          const suffix = count && c > 0 ? ` (${c})` : "";
+          return `${arrow} ${label}${suffix}`;
+        })}
+      </label>
+    </ct-hstack>
+  );
+}
 
 // ============================================================================
 // Pattern
@@ -154,6 +220,12 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
   // State: whether the sameAs picker is expanded
   const showPicker = Writable.of(false);
 
+  // Section expansion state
+  const showFamilyInfo = Writable.of(true);
+  const showHealth = Writable.of(false);
+  const showGifts = Writable.of(false);
+  const showNotes = Writable.of(false);
+
   // Computed: autocomplete items from reactive sibling source, filtering self
   const sameAsItems = computed(() => {
     if (!sameAs) return [];
@@ -184,6 +256,7 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
     [UI]: (
       <ct-screen>
         <ct-vstack style={{ gap: "16px", padding: "16px" }}>
+          {/* Basic Info - always visible */}
           <ct-hstack style={{ gap: "8px" }}>
             <ct-vstack style={{ gap: "4px", flex: 1 }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
@@ -205,32 +278,106 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
             </ct-vstack>
           </ct-hstack>
 
+          {/* Tags */}
           <ct-vstack style={{ gap: "4px" }}>
-            <label style={{ fontSize: "12px", color: "#6b7280" }}>
-              Relationship
-            </label>
-            <ct-select
-              $value={member.key("relationship")}
-              items={RELATIONSHIP_OPTIONS}
-            />
-          </ct-vstack>
-
-          <ct-vstack style={{ gap: "4px" }}>
-            <label style={{ fontSize: "12px", color: "#6b7280" }}>
-              Birthday
-            </label>
-            <ct-input $value={member.key("birthday")} type="date" />
-          </ct-vstack>
-
-          <ct-vstack style={{ gap: "4px" }}>
-            <label style={{ fontSize: "12px", color: "#6b7280" }}>
-              Dietary Restrictions
-            </label>
+            <label style={{ fontSize: "12px", color: "#6b7280" }}>Tags</label>
             <ct-tags
-              tags={member.key("dietaryRestrictions")}
-              onct-change={updateDietaryRestrictions({ member })}
+              tags={member.key("tags")}
+              onct-change={updateTags({ member })}
             />
           </ct-vstack>
+
+          {/* Family Info Section */}
+          {sectionHeader("Family Info", showFamilyInfo)}
+          {computed(() => {
+            if (!showFamilyInfo.get()) return null;
+            return (
+              <ct-vstack style={{ gap: "8px" }}>
+                <ct-vstack style={{ gap: "4px" }}>
+                  <label style={{ fontSize: "12px", color: "#6b7280" }}>
+                    Relationship
+                  </label>
+                  <ct-select
+                    $value={member.key("relationship")}
+                    items={RELATIONSHIP_OPTIONS}
+                  />
+                </ct-vstack>
+                <ct-vstack style={{ gap: "4px" }}>
+                  <label style={{ fontSize: "12px", color: "#6b7280" }}>
+                    Birthday
+                  </label>
+                  <ct-input $value={member.key("birthday")} type="date" />
+                </ct-vstack>
+              </ct-vstack>
+            );
+          })}
+
+          {/* Health & Diet Section */}
+          {sectionHeader(
+            "Health & Diet",
+            showHealth,
+            () =>
+              (member.key("dietaryRestrictions").get() || []).length +
+              (member.key("allergies").get() || []).length,
+          )}
+          {computed(() => {
+            if (!showHealth.get()) return null;
+            return (
+              <ct-vstack style={{ gap: "8px" }}>
+                <ct-vstack style={{ gap: "4px" }}>
+                  <label style={{ fontSize: "12px", color: "#6b7280" }}>
+                    Dietary Restrictions
+                  </label>
+                  <ct-tags
+                    tags={member.key("dietaryRestrictions")}
+                    onct-change={updateDietaryRestrictions({ member })}
+                  />
+                </ct-vstack>
+                <ct-vstack style={{ gap: "4px" }}>
+                  <label style={{ fontSize: "12px", color: "#6b7280" }}>
+                    Allergies
+                  </label>
+                  <ct-tags
+                    tags={member.key("allergies")}
+                    onct-change={updateAllergies({ member })}
+                  />
+                </ct-vstack>
+              </ct-vstack>
+            );
+          })}
+
+          {/* Gift Ideas Section */}
+          {sectionHeader(
+            "Gift Ideas",
+            showGifts,
+            () => (member.key("giftIdeas").get() || []).length,
+          )}
+          {computed(() => {
+            if (!showGifts.get()) return null;
+            return (
+              <ct-vstack style={{ gap: "4px" }}>
+                <ct-tags
+                  tags={member.key("giftIdeas")}
+                  onct-change={updateGiftIdeas({ member })}
+                />
+              </ct-vstack>
+            );
+          })}
+
+          {/* Notes Section */}
+          {sectionHeader("Notes", showNotes)}
+          {computed(() => {
+            if (!showNotes.get()) return null;
+            return (
+              <ct-vstack style={{ gap: "4px" }}>
+                <ct-input
+                  $value={member.key("notes")}
+                  placeholder="Notes about this family member..."
+                  multiple
+                />
+              </ct-vstack>
+            );
+          })}
 
           {/* sameAs Section - collapsed by default, only if candidates exist */}
           {computed(() => {
