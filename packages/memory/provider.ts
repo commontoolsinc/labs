@@ -173,7 +173,13 @@ class MemoryProviderSession<
   schemaChannels: Map<JobId, SchemaSubscription> = new Map();
   // Mapping from fact key to since value of the last fact sent to the client
   lastRevision: Map<string, number> = new Map();
-  // Shared schema tracker for all subscriptions - tracks which docs were scanned with which schemas
+  // Shared schema tracker for all subscriptions
+  // Tracks which docs were scanned with which schemas
+  // This serves as a watch list, to tell which documents we need to be
+  // notified when they change. It also serves as a cache to prevent us
+  // from re-running a query or part of a query when the underlying docs
+  // haven't changed. In this cache role, it lets us know that we already
+  // have the current information.
   sharedSchemaTracker: MapSet<string, SchemaPathSelector> = new MapSet(
     deepEqual,
   );
@@ -387,7 +393,7 @@ class MemoryProviderSession<
         });
       }
       case "/memory/transact": {
-        logger.info(
+        logger.debug(
           "server-transact",
           () => [
             "Received transaction:",
@@ -586,10 +592,8 @@ class MemoryProviderSession<
   private findAffectedDocsForWildcard<Space extends MemorySpace>(
     changedDocs: Set<string>,
     invocation: SchemaQuery<Space>,
-  ): Array<{ docKey: string; schemas: Set<SchemaPathSelector> }> {
-    const affected: Array<
-      { docKey: string; schemas: Set<SchemaPathSelector> }
-    > = [];
+  ): Map<string, Set<SchemaPathSelector>> {
+    const affected = new Map<string, Set<SchemaPathSelector>>();
     const selectSchema = invocation.args.selectSchema;
 
     // Get the wildcard selector's type patterns
@@ -610,14 +614,14 @@ class MemoryProviderSession<
 
     // Match changed docs against type patterns
     for (const docKey of changedDocs) {
-      const slashIndex = docKey.indexOf("/");
-      if (slashIndex === -1) continue;
-      const docType = docKey.slice(slashIndex + 1);
+      const parsedKey = this.parseDocKey(docKey);
+      if (parsedKey === undefined) continue;
+      const { id: _, type } = parsedKey;
 
       // Check if this type matches a wildcard pattern
-      const schemas = typeSchemas.get(docType) ?? typeSchemas.get("_");
+      const schemas = typeSchemas.get(type) ?? typeSchemas.get("_");
       if (schemas && schemas.size > 0) {
-        affected.push({ docKey, schemas: new Set(schemas) });
+        affected.set(docKey, new Set(schemas));
       }
     }
 
@@ -643,7 +647,7 @@ class MemoryProviderSession<
     }
 
     // Extract changed document keys from transaction
-    const changedDocs = this.extractChangedDocKeys(transaction);
+    const changedDocs = this.extractChangedDocKeys(space, transaction);
     if (changedDocs.size === 0) {
       return [];
     }
@@ -659,16 +663,18 @@ class MemoryProviderSession<
     const spaceSession = mountResult.ok as unknown as SpaceSession<Space>;
 
     // Find affected docs using the shared schemaTracker (for non-wildcard)
-    const sharedAffectedDocs = this.findAffectedDocs(
-      changedDocs,
-      this.sharedSchemaTracker,
-    );
+    const sharedAffectedDocs = new Map<string, Set<SchemaPathSelector>>();
+    for (const docKey of changedDocs) {
+      const existingSelectors = this.sharedSchemaTracker.get(docKey);
+      if (existingSelectors !== undefined) {
+        sharedAffectedDocs.set(docKey, new Set(existingSelectors));
+      }
+    }
 
     // Process shared affected docs
     const { newFacts } = this.processIncrementalUpdate(
       spaceSession,
       sharedAffectedDocs,
-      space,
     );
 
     // Add facts from wildcard subscriptions
@@ -678,11 +684,10 @@ class MemoryProviderSession<
           changedDocs,
           subscription.invocation,
         );
-        if (wildcardDocs.length > 0) {
+        if (wildcardDocs.size > 0) {
           const wildcardResult = this.processIncrementalUpdate(
             spaceSession,
             wildcardDocs,
-            space,
           );
           for (const [key, fact] of wildcardResult.newFacts) {
             newFacts.set(key, fact);
@@ -698,36 +703,17 @@ class MemoryProviderSession<
    * Extract document keys (id/type format) from a transaction's changes.
    */
   private extractChangedDocKeys<Space extends MemorySpace>(
+    space: MemorySpace,
     transaction: Transaction<Space>,
   ): Set<string> {
     const changedDocs = new Set<string>();
     for (const fact of SelectionBuilder.iterate(transaction.args.changes)) {
       if (fact.value !== true) {
         // Format matches what schemaTracker uses: "id/type" (from BaseObjectManager.toKey)
-        changedDocs.add(`${fact.of}/${fact.the}`);
+        changedDocs.add(`${space}/${fact.of}/${fact.the}`);
       }
     }
     return changedDocs;
-  }
-
-  /**
-   * Find docs in changedDocs that are tracked by the subscription's schemaTracker.
-   * Returns list of (docKey, schemas) pairs.
-   */
-  private findAffectedDocs(
-    changedDocs: Set<string>,
-    schemaTracker: MapSet<string, SchemaPathSelector>,
-  ): Array<{ docKey: string; schemas: Set<SchemaPathSelector> }> {
-    const affected: Array<
-      { docKey: string; schemas: Set<SchemaPathSelector> }
-    > = [];
-    for (const docKey of changedDocs) {
-      const schemas = schemaTracker.get(docKey);
-      if (schemas && schemas.size > 0) {
-        affected.push({ docKey, schemas: new Set(schemas) });
-      }
-    }
-    return affected;
   }
 
   /**
@@ -737,62 +723,59 @@ class MemoryProviderSession<
    */
   private processIncrementalUpdate<Space extends MemorySpace>(
     spaceSession: SpaceSession<Space>,
-    affectedDocs: Array<{ docKey: string; schemas: Set<SchemaPathSelector> }>,
-    space: Space,
+    affectedDocs: Map<string, Set<SchemaPathSelector>>,
   ): { newFacts: Map<string, Revision<Fact>> } {
     const newFacts = new Map<string, Revision<Fact>>();
     // Note: classification is not used here since we're processing across all subscriptions
     // TODO(ubik2,seefeld): Make this a per-session classification
-    const classification = undefined;
+    const classification = ["public", "secret"];
 
-    // Collect all unique docKeys that need to be fetched
-    // Start with the initially affected docs
-    const docsToFetch = new Set<string>(affectedDocs.map((d) => d.docKey));
-
-    // First pass: Remove all affected (docKey, schema) pairs from schemaTracker.
-    // This allows the traverser to re-traverse them and discover any new links.
-    // We do this in a separate pass so that if doc A links to doc B, and both
-    // are affected, we don't re-traverse B while evaluating A only to remove
-    // and re-evaluate B again.
-    const toReEvaluate: Array<
-      { docId: string; docType: string; schema: SchemaPathSelector }
-    > = [];
-    for (const { docKey, schemas } of affectedDocs) {
-      const { docId, docType } = this.parseDocKey(docKey);
-      if (docId === null) continue;
-
-      for (const schema of schemas) {
-        this.sharedSchemaTracker.deleteValue(docKey, schema);
-        toReEvaluate.push({ docId, docType, schema });
+    // Purge these docs from the tracker -- we want to re-evaluate the queries
+    const staleSchemaTracker = new Map<string, Set<SchemaPathSelector>>();
+    for (const [docKey, _schemaSelectors] of affectedDocs) {
+      const existingSchemas = this.sharedSchemaTracker.get(docKey);
+      if (existingSchemas !== undefined) {
+        this.sharedSchemaTracker.delete(docKey);
+        staleSchemaTracker.set(docKey, existingSchemas);
       }
     }
 
-    // Second pass: Re-evaluate each affected doc with its schema
+    // Check which docs we're watching that didn't just change, so we don't
+    // have to reload them to see if we should send them
+    const existingDocs = new Set<string>();
+    for (const [key, _value] of this.sharedSchemaTracker) {
+      existingDocs.add(key);
+    }
+
+    // Evaluate each affected doc with each of its schemas
     // evaluateDocumentLinks does a full traversal and finds all linked documents
-    for (const { docId, docType, schema } of toReEvaluate) {
-      const result = evaluateDocumentLinks(
-        spaceSession,
-        { id: docId, type: docType },
-        schema,
-        classification,
-        this.sharedSchemaTracker,
-      );
-      // Collect newly discovered docs to fetch
-      if (result !== null) {
-        for (const { docKey: newDocKey } of result.newLinks) {
-          docsToFetch.add(newDocKey);
-        }
+    for (const [docKey, schemaSelectors] of affectedDocs) {
+      const address = this.parseDocKey(docKey);
+      if (address === undefined) continue;
+      for (const schemaSelector of schemaSelectors) {
+        evaluateDocumentLinks(
+          spaceSession,
+          address,
+          schemaSelector,
+          classification,
+          this.sharedSchemaTracker,
+        );
       }
     }
 
     // Fetch each unique doc once and add to results
-    for (const docKey of docsToFetch) {
-      const { docId, docType } = this.parseDocKey(docKey);
-      if (docId === null) continue;
+    for (const [docKey, _value] of this.sharedSchemaTracker) {
+      // Don't bother with anything we already tracked
+      if (existingDocs.has(docKey)) {
+        continue;
+      }
+
+      const address = this.parseDocKey(docKey);
+      if (address === undefined) continue;
 
       const fact = selectFact(spaceSession, {
-        of: docId as `${string}:${string}`,
-        the: docType as `${string}/${string}`,
+        of: address.id,
+        the: address.type,
       });
 
       if (!fact || fact.is === undefined) {
@@ -800,8 +783,10 @@ class MemoryProviderSession<
         continue;
       }
 
-      const address = this.formatAddress(space, fact);
-      newFacts.set(address, {
+      // The format of this key doesn't really matter
+      // this uses the watch:// format, but we could use the docKey
+      const factKey = this.formatAddress(spaceSession.subject, fact);
+      newFacts.set(factKey, {
         of: fact.of,
         the: fact.the,
         cause: causeFromString(fact.cause),
@@ -813,19 +798,21 @@ class MemoryProviderSession<
     return { newFacts };
   }
 
-  /** Parse docKey (format "id/type") back to id and type */
+  /** Parse docKey (format "space/id/type") back to space, id, and type */
   private parseDocKey(
     docKey: string,
-  ): { docId: string | null; docType: string } {
-    // Note: type can contain slashes (e.g., "application/json"), so we split on the FIRST slash
-    // The id is always in the form "of:HASH" which doesn't contain slashes
-    const slashIndex = docKey.indexOf("/");
-    if (slashIndex === -1) {
-      return { docId: null, docType: "" };
+  ): { space: MemorySpace; id: Memory.URI; type: Memory.MIME } | undefined {
+    // Parse docKey back to space, id, and type (format is "space/id/type")
+    // Note: type can contain slashes (e.g., "application/json")
+    const pattern = new RegExp("([^/]+)/([^/]+)/(.+)");
+    const match = pattern.exec(docKey);
+    if (match === null) {
+      return undefined;
     }
     return {
-      docId: docKey.slice(0, slashIndex),
-      docType: docKey.slice(slashIndex + 1),
+      space: match[1] as MemorySpace,
+      id: match[2] as Memory.URI,
+      type: match[3] as Memory.MIME,
     };
   }
 

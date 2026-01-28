@@ -507,12 +507,18 @@ export class ContextualFlowControl {
    *
    * Nonetheless, it's very convenient to have a schema without knowing, so we
    * provide this method and use it.
+   *
+   * The additionalPropertiesDefault lets you change the behavior when there is
+   * an object with an empty properties map and no additional properties.
+   * The JSON-Schema spec would default this to true, but we often want to
+   * use it to exclude properties that we don't care about without failing.
    */
   schemaAtPath(
     schema: JSONSchema,
     path: readonly string[],
     rootSchema?: JSONSchema,
     extraClassifications?: Set<string>,
+    additionalPropertiesDefault = true,
   ): JSONSchema {
     const joined = (extraClassifications !== undefined)
       ? new Set<string>(extraClassifications)
@@ -540,6 +546,7 @@ export class ContextualFlowControl {
             path.slice(index),
             rootSchema,
             extraClassifications,
+            additionalPropertiesDefault,
           );
           if (subSchema === false) {
             continue;
@@ -592,12 +599,21 @@ export class ContextualFlowControl {
           }
         } else if (cursor.additionalProperties !== undefined) {
           cursor = cursor.additionalProperties;
+        } else if (
+          cursor.properties && Object.keys(cursor.properties).length === 0
+        ) {
+          cursor = additionalPropertiesDefault;
         } else { // no additionalProperties field is the same as having one that is true
           cursor = true;
         }
-      } else if (cursor.type === "array" && cursor.items) {
+      } else if (cursor.type === "array") {
         if (isArrayIndexPropertyName(part)) {
-          cursor = cursor.items;
+          const index = Number(part);
+          if (cursor.prefixItems && index < cursor.prefixItems.length) {
+            cursor = cursor.prefixItems[index];
+          } else {
+            cursor = cursor.items ?? true;
+          }
         } else {
           return false;
         }
@@ -675,12 +691,19 @@ export class ContextualFlowControl {
       return true;
     }
     return isObject(schema) &&
-      Object.keys(schema).every((k) => this.isInternalSchemaKey(k));
+      Object.keys(schema).every((k) =>
+        this.isInternalSchemaKey(k) || k === "default"
+      );
   }
 
   // We don't need to check ID and ID_FIELD, since they won't be included
   // in Object.keys return values.
   static isInternalSchemaKey(key: string): boolean {
-    return key === "ifc" || key === "asCell" || key === "asStream";
+    return key === "ifc" || key === "asCell" || key === "asStream" ||
+      key === "asOpaque";
+  }
+
+  static isFalseSchema(schema: JSONSchema): boolean {
+    return schema === false || (isObject(schema) && schema["not"] === true);
   }
 }

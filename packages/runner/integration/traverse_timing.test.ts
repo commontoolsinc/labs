@@ -1,14 +1,16 @@
 import { JSONObject, JSONValue } from "@commontools/api";
-import { MIME } from "@commontools/memory/interface";
+import { MemorySpace, MIME } from "@commontools/memory/interface";
 import { SchemaPathSelector, URI } from "../src/storage/interface.ts";
 import {
   BaseMemoryAddress,
-  BaseObjectManager,
   IAttestation,
+  ManagedStorageTransaction,
+  ObjectStorageManager,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
 
 import data from "./traverse_timing_test_data.json" with { type: "json" };
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 
 const docAddress: BaseMemoryAddress = {
   id: "of:baedreibl64qzbhgkvpuxbfc657ugjeyidc62hixjybt5dpci2ddkkhs26m",
@@ -16,7 +18,7 @@ const docAddress: BaseMemoryAddress = {
 };
 
 const selector: SchemaPathSelector = {
-  "path": [],
+  "path": ["value"],
   "schemaContext": {
     "schema": {
       "type": "object",
@@ -65,16 +67,13 @@ type SimpleRevision<Is extends JSONValue = JSONValue> = {
   since: number;
 };
 
-class TestObjectManager
-  extends BaseObjectManager<BaseMemoryAddress, JSONValue | undefined> {
+class TestObjectManager implements ObjectStorageManager {
+  private readValues = new Map<string, IAttestation>();
   // Cache our read labels, and any docs we can't read
   public missingDocs = new Map<string, BaseMemoryAddress>();
   public store = new Map<string, SimpleRevision>();
   public dbStore = new Map<string, string>();
   public useStringStore = true;
-  constructor() {
-    super();
-  }
 
   getReadDocs(): Iterable<IAttestation> {
     return this.readValues.values();
@@ -102,7 +101,7 @@ class TestObjectManager
   }
 
   // Returns null if there is no matching fact
-  override load(address: BaseMemoryAddress): IAttestation | null {
+  load(address: BaseMemoryAddress): IAttestation | null {
     // Normally, we won't have data links, but in this dataset, we do.
     // Decode that here, just so we can follow the links (which are missing,
     // because I captured the data returned from the server, and the server
@@ -116,7 +115,7 @@ class TestObjectManager
       };
       return valueEntry;
     }
-    const key = this.toKey(address);
+    const key = `${address.id}/${address.type}`;
     if (this.readValues.has(key)) {
       return this.readValues.get(key)!;
     }
@@ -141,8 +140,9 @@ class TestObjectManager
       const [[type, caused]] = Object.entries(attrs as Record<string, unknown>);
       const [[_, revision]] = Object.entries(caused as Record<string, unknown>);
       const address: BaseMemoryAddress = { id: uri as URI, type: type as MIME };
-      this.store.set(this.toKey(address), revision as SimpleRevision);
-      this.dbStore.set(this.toKey(address), JSON.stringify(revision));
+      const key = `${address.id}/${address.type}`;
+      this.store.set(key, revision as SimpleRevision);
+      this.dbStore.set(key, JSON.stringify(revision));
     }
   }
 
@@ -160,10 +160,16 @@ function initTest(objectManager: TestObjectManager, data: unknown) {
 // Main test function
 function runTest(objectManager: TestObjectManager) {
   objectManager.resetTraverseState();
-  const traverser = new SchemaObjectTraverser(objectManager, selector);
+  const managedTx = new ManagedStorageTransaction(objectManager);
+  const tx = new ExtendedStorageTransaction(managedTx);
+  const traverser = new SchemaObjectTraverser(tx, selector);
   const doc = objectManager.load(docAddress)!;
-  const factValue: IAttestation = {
-    address: { ...doc.address, path: [...doc.address.path, "value"] },
+  const factValue = {
+    address: {
+      ...doc.address,
+      space: "did:null:null" as MemorySpace,
+      path: [...doc.address.path, "value"],
+    },
     value: (doc.value as JSONObject).value,
   };
   traverser.traverse(factValue);

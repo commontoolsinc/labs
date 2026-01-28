@@ -443,10 +443,14 @@ export class SelectorTracker<T = Result<Unit, Error>> {
           }
         }
         const subPath = newAddress.path.slice(existingAddress.path.length);
+        // We need to set the additionalPropertiesDefault, so we don't think
+        // `true` is a subset of `{type: "object", properties: {}}`
         const subSchema = cfc.schemaAtPath(
           existingSchema,
           subPath,
           existingRootSchema,
+          undefined,
+          false,
         );
         // Basic matching -- we may not recognize some supersets
         // If the subSchema has ifc flags, but the new schema does not, the

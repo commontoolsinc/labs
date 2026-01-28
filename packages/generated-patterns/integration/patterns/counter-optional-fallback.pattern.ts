@@ -2,18 +2,18 @@
 import { Cell, Default, handler, lift, recipe, str } from "commontools";
 
 interface OptionalFallbackArgs {
-  value?: number;
+  value: Default<number | null, null>;
   defaultValue: Default<number, 10>;
 }
 
 const bumpWithFallback = handler(
   (
     event: { amount?: number } | undefined,
-    context: { value: Cell<number>; defaultValue: Cell<number> },
+    context: { value: Cell<number | null>; defaultValue: Cell<number> },
   ) => {
     const amount = typeof event?.amount === "number" ? event.amount : 1;
-    const currentRaw = context.value.get();
-    const fallback = context.defaultValue.get();
+    const currentRaw = context?.value?.get();
+    const fallback = context?.defaultValue?.get();
     const base = typeof currentRaw === "number"
       ? currentRaw
       : typeof fallback === "number"
@@ -23,7 +23,7 @@ const bumpWithFallback = handler(
   },
 );
 
-const liftSafeDefault = lift((fallback: number | undefined) =>
+const liftSafeDefault = lift((fallback: number | null) =>
   typeof fallback === "number" ? fallback : 10
 );
 

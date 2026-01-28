@@ -13,14 +13,14 @@ export type MentionableCharm = {
   [NAME]?: string;
   isHidden?: boolean;
   isMentionable?: boolean;
-  mentioned: MentionableCharm[];
-  backlinks: MentionableCharm[];
+  mentioned?: MentionableCharm[];
+  backlinks?: MentionableCharm[];
   mentionable?: MentionableCharm[] | { get?: () => MentionableCharm[] };
 };
 
-export type WriteableBacklinks = {
-  mentioned: WriteableBacklinks[];
-  backlinks: Writable<WriteableBacklinks[]>;
+export type WritableBacklinks = {
+  mentioned?: WritableBacklinks[];
+  backlinks?: Writable<WritableBacklinks[]>;
 };
 
 type Input = {
@@ -32,7 +32,7 @@ type Output = {
 };
 
 const computeIndex = lift<
-  { allCharms: WriteableBacklinks[] },
+  { allCharms: WritableBacklinks[] | undefined },
   void
 >(
   ({ allCharms }) => {
@@ -102,9 +102,7 @@ const computeMentionable = lift<
 });
 
 const BacklinksIndex = pattern<Input, Output>(({ allCharms }) => {
-  computeIndex({
-    allCharms,
-  });
+  computeIndex({ allCharms } as { allCharms: WritableBacklinks[] });
 
   // Compute mentionable list from allCharms reactively
   const mentionable = computeMentionable({ allCharms });

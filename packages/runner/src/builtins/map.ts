@@ -77,7 +77,8 @@ export function map(
           op: { asCell: true },
           params: { type: "object" },
         },
-        required: ["list", "op"],
+        // TODO(@ubik2): removed "list", since we handle that below
+        required: ["op"],
         additionalProperties: false,
       } as const satisfies JSONSchema,
     ).withTx(tx).get();

@@ -10,6 +10,7 @@ import {
 } from "../src/index.ts";
 import {
   CompoundCycleTracker,
+  ManagedStorageTransaction,
   MapSet,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
@@ -25,6 +26,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
 import { StoreObjectManager } from "../src/storage/query.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -37,7 +39,7 @@ describe("Query", () => {
     string,
     Revision<State>
   >();
-  let manager: StoreObjectManager;
+  let emulatedStorageTx: IExtendedStorageTransaction;
   let tracker: CompoundCycleTracker<JSONValue, SchemaContext | undefined>;
 
   beforeEach(() => {
@@ -49,7 +51,9 @@ describe("Query", () => {
       storageManager,
     });
     tx = runtime.edit();
-    manager = new StoreObjectManager(store);
+    const manager = new StoreObjectManager(store);
+    const managerTx = new ManagedStorageTransaction(manager);
+    emulatedStorageTx = new ExtendedStorageTransaction(managerTx);
     tracker = new CompoundCycleTracker<JSONValue, SchemaContext | undefined>();
   });
 
@@ -122,32 +126,37 @@ describe("Query", () => {
     };
     const schemaTracker = new MapSet<string, SchemaPathSelector>();
     const traverser = new SchemaObjectTraverser(
-      manager,
-      { path: [], schemaContext: schemaContext },
+      emulatedStorageTx,
+      { path: ["value"], schemaContext: schemaContext },
       tracker,
       schemaTracker,
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
-      address: { id: assert2.of, type: assert2.the, path: ["value"] },
+      address: {
+        space: "did:null:null",
+        id: assert2.of,
+        type: assert2.the,
+        path: ["value"],
+      },
       value: (assert2.is as JSONObject).value,
     });
     const selectorSet1 = schemaTracker.get(
-      `of:${entityId1["/"]}/application/json`,
+      `did:null:null/of:${entityId1["/"]}/application/json`,
     );
     const selectorSet2 = schemaTracker.get(
-      `of:${entityId2["/"]}/application/json`,
+      `did:null:null/of:${entityId2["/"]}/application/json`,
     );
     expect(selectorSet1?.size).toBe(1);
     expect(selectorSet2?.size).toBe(1);
     const [selector1] = selectorSet1!.values();
     const [selector2] = selectorSet2!.values();
     expect(selector2).toEqual({
-      path: [],
+      path: ["value"],
       schemaContext: schemaContext,
     });
     expect(selector1).toEqual({
-      path: ["employees", "0", "fullName"],
+      path: ["value", "employees", "0", "fullName"],
       schemaContext: {
         schema: schemaContext.schema.properties.name,
         rootSchema: true,
@@ -208,32 +217,37 @@ describe("Query", () => {
     };
     const schemaTracker = new MapSet<string, SchemaPathSelector>();
     const traverser = new SchemaObjectTraverser(
-      manager,
-      { path: [], schemaContext: schemaContext },
+      emulatedStorageTx,
+      { path: ["value"], schemaContext: schemaContext },
       tracker,
       schemaTracker,
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
-      address: { id: assert2.of, type: assert2.the, path: ["value"] },
+      address: {
+        space: "did:null:null",
+        id: assert2.of,
+        type: assert2.the,
+        path: ["value"],
+      },
       value: (assert2.is as JSONObject).value,
     });
     const selectorSet1 = schemaTracker.get(
-      `of:${entityId1["/"]}/application/json`,
+      `did:null:null/of:${entityId1["/"]}/application/json`,
     );
     const selectorSet2 = schemaTracker.get(
-      `of:${entityId2["/"]}/application/json`,
+      `did:null:null/of:${entityId2["/"]}/application/json`,
     );
     expect(selectorSet1?.size).toBe(1);
     expect(selectorSet2?.size).toBe(1);
     const [selector1] = selectorSet1!.values();
     const [selector2] = selectorSet2!.values();
     expect(selector2).toEqual({
-      path: [],
+      path: ["value"],
       schemaContext: schemaContext,
     });
     expect(selector1).toEqual({
-      path: ["employees", "0", "name"],
+      path: ["value", "employees", "0", "name"],
       schemaContext: {
         schema: true,
         rootSchema: true,
@@ -287,26 +301,31 @@ describe("Query", () => {
     };
     const schemaTracker = new MapSet<string, SchemaPathSelector>();
     const traverser = new SchemaObjectTraverser(
-      manager,
-      { path: [], schemaContext: schemaContext },
+      emulatedStorageTx,
+      { path: ["value"], schemaContext: schemaContext },
       tracker,
       schemaTracker,
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
-      address: { id: assert1.of, type: assert1.the, path: ["value"] },
+      address: {
+        space: "did:null:null",
+        id: assert1.of,
+        type: assert1.the,
+        path: ["value"],
+      },
       value: assert1.is.value,
     });
     const selectorSet1 = schemaTracker.get(
-      `of:${entityId1["/"]}/application/json`,
+      `did:null:null/of:${entityId1["/"]}/application/json`,
     );
     expect(selectorSet1?.size).toBe(2);
     expect(selectorSet1).toContainEqual({
-      path: [],
+      path: ["value"],
       schemaContext: schemaContext,
     });
     expect(selectorSet1).toContainEqual({
-      path: ["name"],
+      path: ["value", "name"],
       schemaContext: schemaContext,
     });
   });
@@ -393,14 +412,15 @@ describe("Query", () => {
     };
     const schemaTracker = new MapSet<string, SchemaPathSelector>(deepEqual);
     const traverser = new SchemaObjectTraverser(
-      manager,
-      { path: [], schemaContext },
+      emulatedStorageTx,
+      { path: ["value"], schemaContext },
       tracker,
       schemaTracker,
     );
 
     const result = traverser.traverse({
       address: {
+        space: "did:null:null",
         id: testCell1.sourceURI,
         type: "application/json",
         path: ["value"],
@@ -413,22 +433,22 @@ describe("Query", () => {
     // Our matching selectors for both entries should each have one entry for
     // the top level schema, and one entry for the schema at `self`.
     const selectors1 = schemaTracker.get(
-      `${testCell1.sourceURI}/application/json`,
+      `did:null:null/${testCell1.sourceURI}/application/json`,
     );
     expect(selectors1).not.toBeUndefined();
     expect(selectors1?.size).toBe(2);
     expect(selectors1).toContainEqual({
-      path: [],
+      path: ["value"],
       schemaContext,
     });
 
     const selectors2 = schemaTracker.get(
-      `${testCell2.sourceURI}/application/json`,
+      `did:null:null/${testCell2.sourceURI}/application/json`,
     );
     expect(selectors2).not.toBeUndefined();
     expect(selectors2?.size).toBe(2);
     expect(selectors2).toContainEqual({
-      path: [],
+      path: ["value"],
       schemaContext,
     });
   });
@@ -471,7 +491,7 @@ describe("Query", () => {
 
     const schema = { "type": "string" } as const satisfies JSONSchema;
     const selector = {
-      path: ["employees", "0", "address", "street"],
+      path: ["value", "employees", "0", "address", "street"],
       schemaContext: {
         schema: schema,
         rootSchema: schema,
@@ -492,28 +512,33 @@ describe("Query", () => {
 
     const schemaTracker = new MapSet<string, SchemaPathSelector>();
     const traverser = new SchemaObjectTraverser(
-      manager,
+      emulatedStorageTx,
       selector,
       tracker,
       schemaTracker,
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
-      address: { id: assert2.of, type: assert2.the, path: ["value"] },
+      address: {
+        space: "did:null:null",
+        id: assert2.of,
+        type: assert2.the,
+        path: ["value"],
+      },
       value: (assert2.is as JSONObject).value,
     });
     const selectorSet1 = schemaTracker.get(
-      `of:${entityId1["/"]}/application/json`,
+      `did:null:null/of:${entityId1["/"]}/application/json`,
     );
     const selectorSet2 = schemaTracker.get(
-      `of:${entityId2["/"]}/application/json`,
+      `did:null:null/of:${entityId2["/"]}/application/json`,
     );
     expect(selectorSet1?.size).toBe(1);
     expect(selectorSet2?.size).toBe(1);
     const [selector1] = selectorSet1!.values();
     const [selector2] = selectorSet2!.values();
     expect(selector1).toEqual({
-      path: ["home", "street"],
+      path: ["value", "home", "street"],
       schemaContext: {
         schema: schema, // {"type": "string"}
         rootSchema: schema,

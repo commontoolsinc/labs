@@ -237,12 +237,17 @@ function handlerInternal<E, T>(
     // the actual inputs, so they'll be available as `this`
     bind: (inputs: Opaque<StripCell<T>>) => factory(inputs),
     toJSON: () => moduleToJSON(module),
-    ...(schema !== undefined ? { argumentSchema: schema } : {}),
-    ...(writableProxy ? { writableProxy: true } : {}),
+    ...(schema !== undefined && { argumentSchema: schema }),
+    ...(writableProxy && { writableProxy: true }),
   };
 
   const factory = Object.assign((props: Opaque<StripCell<T>>): Stream<E> => {
-    const eventStream = stream<E>(eventSchema);
+    // If the event schema is false, we actually set it to true here, since
+    // otherwise we won't think it needs to be handled. Ditto for state.
+    // TODO(@ubik2): I should be able to remove this workaround, but the stream
+    // handler wasn't being triggered. This is a temporary workaround.
+    const flexibleEventSchema = eventSchema ? eventSchema : true as JSONSchema;
+    const eventStream = stream<E>(flexibleEventSchema);
 
     // Set stream marker (cast to E as stream is typed for the events it accepts)
     const node: NodeRef = {

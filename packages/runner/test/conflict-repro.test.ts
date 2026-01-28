@@ -74,7 +74,7 @@ describe("Conflict Reproduction", () => {
           items: { type: "object", properties: { id: { type: "string" } } },
           asCell: true,
         },
-        sequence: { type: "number", asCell: true },
+        sequence: { asCell: true },
       },
       required: ["items", "sequence"],
     }, (_event, context) => {
@@ -147,7 +147,7 @@ describe("Conflict Reproduction", () => {
           items: { type: "object", properties: { id: { type: "string" } } },
           asCell: true,
         },
-        sequence: { type: "number", asCell: true },
+        sequence: { asCell: true },
       },
       required: ["items", "sequence"],
     }, (_event, context) => {

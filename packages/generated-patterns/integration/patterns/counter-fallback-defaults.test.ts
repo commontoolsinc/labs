@@ -2,12 +2,12 @@ import { describe, it } from "@std/testing/bdd";
 import { runPatternScenario } from "../pattern-harness.ts";
 import type { PatternIntegrationScenario } from "../pattern-harness.ts";
 
-const sparseSlots: (number | undefined)[] = [];
+const sparseSlots: (number | null)[] = [];
 sparseSlots[0] = 4;
 sparseSlots[2] = 8;
 
 export const counterFallbackDefaultsScenario: PatternIntegrationScenario<
-  { slots?: (number | undefined)[]; fallback?: number; expectedLength?: number }
+  { slots?: (number | null)[]; fallback?: number; expectedLength?: number }
 > = {
   name: "counter fills sparse slots with fallback values",
   module: new URL(

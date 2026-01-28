@@ -3055,6 +3055,46 @@ describe("toCell and toOpaqueRef hooks", () => {
       const updatedItems = c.get().items;
       expect(updatedItems[0].name).toBe("updated");
     });
+
+    it("should maintain the same link with array elements", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+              },
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const c = runtime.getCell<{ items: { name: string }[] }>(
+        space,
+        "hook-getcelllink-array",
+        schema,
+        tx,
+      );
+      c.set({ items: [{ name: "first" }, { name: "second" }] });
+
+      const itemValue = c.key("items").key(0).get();
+      const itemCell = c.key("items").key(0);
+      const linkedCell = (itemValue as any)[toCell]();
+      expect(linkedCell.getAsNormalizedFullLink()).toEqual(
+        itemCell.getAsNormalizedFullLink(),
+      );
+
+      expect(isCell(linkedCell)).toBe(true);
+      const linkedResult = linkedCell.get();
+      expect(linkedResult.name).toBe("first");
+
+      linkedCell.set({ name: "updated" });
+      const updatedItems = c.get().items;
+      expect(updatedItems[0].name).toBe("updated");
+    });
   });
 
   describe("Recipe integration", () => {
@@ -3154,6 +3194,27 @@ describe("toCell and toOpaqueRef hooks", () => {
       expect(toCell in result).toBe(true);
     });
 
+    it("top level defaults work for cells with undefined value", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          value: { type: "number", default: 10 },
+        },
+        default: { value: 100 },
+      } as const satisfies JSONSchema;
+
+      const c = runtime.getCell<{ value?: number }>(
+        space,
+        "hook-schema-default",
+        schema,
+        tx,
+      );
+
+      const result = c.get();
+      expect(result.value).toBe(100);
+      expect(toCell in result).toBe(true);
+    });
+
     it("should add hooks to default values from schema", () => {
       const schema = {
         type: "object",
@@ -3173,6 +3234,61 @@ describe("toCell and toOpaqueRef hooks", () => {
       const result = c.get();
       expect(result.value).toBe(100);
       expect(toCell in result).toBe(true);
+    });
+
+    it("defaults for missing properties", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          name: { type: "string", default: "Bob" },
+          address: {
+            type: "object",
+            properties: {
+              street: { type: "string", default: "234 Street" },
+              city: { type: "string", default: "Citysville" },
+            },
+            default: {
+              street: "123 Street",
+              city: "Townsville",
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const c = runtime.getCell<
+        { name?: string; address?: { street?: string; city?: string } }
+      >(
+        space,
+        "hook-schema-default",
+        schema,
+        tx,
+      );
+      c.set({});
+
+      let result = c.get();
+      expect(result.name).toBe("Bob");
+      expect(result.address).toEqualIgnoringSymbols({
+        street: "123 Street",
+        city: "Townsville",
+      });
+
+      c.set({ name: "Ted" });
+      result = c.get();
+      expect(result.name).toBe("Ted");
+      // address missing, so we get the default for the address property
+      expect(result.address).toEqualIgnoringSymbols({
+        street: "123 Street",
+        city: "Townsville",
+      });
+
+      c.set({ name: "Ted", address: { street: "123 Avenue" } });
+      result = c.get();
+      expect(result.name).toBe("Ted");
+      // address present, but city missing, so we get the default for city
+      expect(result.address).toEqualIgnoringSymbols({
+        street: "123 Avenue",
+        city: "Citysville",
+      });
     });
 
     it("should not double-wrap asCell properties", () => {

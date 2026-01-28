@@ -6,14 +6,15 @@ import {
 } from "@commontools/runner";
 import type { StorableDatum } from "./interface.ts";
 import {
-  BaseMemoryAddress,
-  BaseObjectManager,
+  type BaseMemoryAddress,
   CompoundCycleTracker,
   DefaultSchemaSelector,
   getAtPath,
   type IAttestation,
   loadSource,
+  ManagedStorageTransaction,
   MapSet,
+  type ObjectStorageManager,
   type PointerCycleTracker,
   SchemaObjectTraverser,
 } from "@commontools/runner/traverse";
@@ -30,7 +31,7 @@ import type {
   MIME,
   SchemaQuery,
 } from "./interface.ts";
-import { SelectAllString } from "./schema.ts";
+import { SchemaNone, SelectAllString } from "./schema.ts";
 import {
   getChange,
   getRevision,
@@ -42,7 +43,7 @@ import {
 import {
   collectClassifications,
   type FactSelectionValue,
-  FactSelector,
+  type FactSelector,
   getClassifications,
   getLabel,
   getLabels,
@@ -53,6 +54,8 @@ import {
   type Session as SpaceStoreSession,
   toSelection,
 } from "./space.ts";
+import { ExtendedStorageTransaction } from "../runner/src/storage/extended-storage-transaction.ts";
+import { IMemorySpaceAttestation } from "../runner/src/storage/interface.ts";
 
 export type * from "./interface.ts";
 
@@ -65,10 +68,8 @@ const logger = getLogger("space-schema", {
 // class that traverses the docs doesn't need to know the implementation.
 // It also lets us use one system on the server (where we have the sqlite db)
 // and another system on the client.
-export class ServerObjectManager extends BaseObjectManager<
-  BaseMemoryAddress,
-  Immutable<StorableDatum> | undefined
-> {
+export class ServerObjectManager implements ObjectStorageManager {
+  private readValues = new Map<string, IAttestation>();
   // Cache our read labels, and any docs we can't read
   private readLabels = new Map<Entity, SelectedFact | undefined>();
   // Mapping from factKey to object with cause and since
@@ -82,7 +83,6 @@ export class ServerObjectManager extends BaseObjectManager<
     private session: SpaceStoreSession<MemorySpace>,
     private providedClassifications: Set<string>,
   ) {
-    super();
   }
 
   /**
@@ -92,8 +92,8 @@ export class ServerObjectManager extends BaseObjectManager<
    * @returns an IAttestation with the value for the specified doc,
    * null if there is no matching fact, or undefined if there is a retraction.
    */
-  override load(address: BaseMemoryAddress): IAttestation | null {
-    const key = this.toKey(address);
+  load(address: BaseMemoryAddress): IAttestation | null {
+    const key = `${address.id}/${address.type}`;
     if (this.readValues.has(key)) {
       return this.readValues.get(key)!;
     } else if (this.restrictedValues.has(key)) {
@@ -129,10 +129,7 @@ export class ServerObjectManager extends BaseObjectManager<
         }
       }
       // Any entry in readValues should also have an entry in factDetails
-      this.factDetails.set(this.toKey(address), {
-        cause: fact.cause,
-        since: fact.since,
-      });
+      this.factDetails.set(key, { cause: fact.cause, since: fact.since });
       this.readValues.set(key, valueEntry);
       return valueEntry;
     }
@@ -143,12 +140,9 @@ export class ServerObjectManager extends BaseObjectManager<
     return this.readValues.values();
   }
 
-  getLabels(): Iterable<[Entity, SelectedFact | undefined]> {
-    return this.readLabels.entries();
-  }
-
   getDetails(address: BaseMemoryAddress) {
-    return this.factDetails.get(this.toKey(address));
+    const key = `${address.id}/${address.type}`;
+    return this.factDetails.get(key);
   }
 }
 
@@ -179,6 +173,7 @@ export const selectSchema = <Space extends MemorySpace>(
 
   const includedFacts: FactSelection = {}; // we'll store all the raw facts we accesed here
   // First, collect all the potentially relevant facts (without dereferencing pointers)
+  // The value in these selectorEntry objects doesn't have the "value" in path yet.
   for (
     const selectorEntry of iterateSelector(selectSchema, DefaultSchemaSelector)
   ) {
@@ -192,15 +187,22 @@ export const selectSchema = <Space extends MemorySpace>(
     for (const entry of matchingFacts) {
       // The top level facts we accessed should be included
       addToSelection(includedFacts, entry, entry.cause, entry.since);
-
+      // These selectorEntry objects in SchemaQuery have their path relative
+      // to the value, but our traversal wants them to be relative to the
+      // fact.is, so adjust the paths.
+      const selector = {
+        ...selectorEntry.value,
+        path: ["value", ...selectorEntry.value.path],
+      };
       // Then filter the facts by the associated schemas, which will dereference
       // pointers as we walk through the structure.
       loadFactsForDoc(
         manager,
         entry,
-        selectorEntry.value,
+        selector,
         tracker,
         cfc,
+        session.subject,
         schemaTracker,
       );
 
@@ -249,10 +251,16 @@ export const selectSchema = <Space extends MemorySpace>(
     ) {
       // Track all specifically-queried entities in schemaTracker so incremental
       // updates can detect changes to them, even if they don't have data yet
-      const docKey = `${factSelector.of}/${factSelector.the}`;
-      if (!schemaTracker.has(docKey)) {
-        schemaTracker.add(docKey, factSelector.value);
-      }
+      const docKey =
+        `${session.subject}/${factSelector.of}/${factSelector.the}`;
+      // These selectorEntry objects in SchemaQuery have their path relative
+      // to the value, but our traversal wants them to be relative to the
+      // fact.is, so adjust the paths.
+      const selector = {
+        ...factSelector.value,
+        path: ["value", ...factSelector.value.path],
+      };
+      schemaTracker.add(docKey, selector);
 
       if (!getRevision(includedFacts, factSelector.of, factSelector.the)) {
         setEmptyObj(includedFacts, factSelector.of, factSelector.the);
@@ -267,30 +275,24 @@ export const selectSchema = <Space extends MemorySpace>(
   return { facts: includedFacts, schemaTracker };
 };
 
-export interface EvaluateLinksResult {
-  schemaTracker: MapSet<string, SchemaPathSelector>;
-  /** Newly discovered doc+schema pairs that weren't already in the tracker */
-  newLinks: Array<{ docKey: string; schema: SchemaPathSelector }>;
-}
-
 /**
  * Evaluates a single document with a schema and returns the links it contains.
  * Used for incremental subscription updates - when a document changes, we re-evaluate
- * just that document to find what links it now has.
+ * that document (and reachable documents) to find what links it now has.
  *
  * @param session - The space store session
- * @param docAddress - The document to evaluate (id and type)
- * @param schema - The schema to apply
+ * @param address - The document to evaluate (space, id, and type)
+ * @param schemaSelector - The schema to apply
  * @param classification - Classification claims for access control
- * @returns An object with the schemaTracker and newly discovered links, or null if doc not found
+ * @returns The updated schemaTracker
  */
 export function evaluateDocumentLinks<Space extends MemorySpace>(
   session: SpaceStoreSession<Space>,
-  docAddress: { id: string; type: string },
-  schema: SchemaPathSelector,
-  classification?: string[],
-  existingSchemaTracker?: MapSet<string, SchemaPathSelector>,
-): EvaluateLinksResult | null {
+  address: { space: MemorySpace; id: Entity; type: MIME },
+  schemaSelector: SchemaPathSelector,
+  classification: string[],
+  schemaTracker: MapSet<string, SchemaPathSelector>,
+): MapSet<string, SchemaPathSelector> {
   const providedClassifications = new Set<string>(classification);
   const manager = new ServerObjectManager(session, providedClassifications);
   const tracker = new CompoundCycleTracker<
@@ -298,22 +300,15 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
     SchemaContext | undefined
   >();
   const cfc = new ContextualFlowControl();
-  // Use existing tracker if provided - enables early termination for already-tracked docs
-  const schemaTracker = existingSchemaTracker ??
-    new MapSet<string, SchemaPathSelector>(deepEqual);
-
-  // Collect newly discovered links during traversal
-  const newLinks: Array<{ docKey: string; schema: SchemaPathSelector }> = [];
 
   // Load the document
-  const address = {
-    id: docAddress.id as Entity,
-    type: docAddress.type as MIME,
-    path: [] as string[],
-  };
   const fact = manager.load(address);
   if (fact === null || fact.value === undefined) {
-    return null;
+    // If the fact doesn't exist, we still want to add it to the
+    // schemaTracker, so we get updates when the fact is added.
+    const factKey = `${address.space}/${address.id}/${address.type}`;
+    schemaTracker.add(factKey, schemaSelector);
+    return schemaTracker;
   }
 
   // Create the IAttestation with cause/since (we don't need these for link evaluation)
@@ -327,56 +322,63 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
   loadFactsForDoc(
     manager,
     attestation,
-    schema,
+    schemaSelector,
     tracker,
     cfc,
+    session.subject,
     schemaTracker,
-    newLinks,
   );
 
-  return { schemaTracker, newLinks };
+  return schemaTracker;
 }
 
 // The fact passed in is the IAttestation for the top level 'is', so path
 // is empty.
+// The selector should typically have a path starting with value
 function loadFactsForDoc(
   manager: ServerObjectManager,
   fact: IAttestation,
   selector: SchemaPathSelector,
   tracker: PointerCycleTracker,
   cfc: ContextualFlowControl,
+  space: MemorySpace,
   schemaTracker: MapSet<string, SchemaPathSelector>,
-  newLinks?: Array<{ docKey: string; schema: SchemaPathSelector }>,
 ) {
-  const factKey = manager.toKey(fact.address);
+  // A query without a schema context is the same as a query with the minimal schema
+  // This will match the specified document, but no linked documents
+  if (selector.schemaContext === undefined) {
+    selector = { ...selector, schemaContext: SchemaNone };
+  }
 
   // If this doc+schema pair is already tracked, we've already traversed its links
   // so we can skip the entire traversal (early termination optimization)
+  const factKey = `${space}/${fact.address.id}/${fact.address.type}`;
   if (schemaTracker.hasValue(factKey, selector)) {
     return;
   }
 
   // Track this doc+schema pair and record it as newly discovered
   schemaTracker.add(factKey, selector);
-  if (newLinks !== undefined) {
-    newLinks.push({ docKey: factKey, schema: selector });
-  }
 
   if (isObject(fact.value)) {
-    if (selector.schemaContext !== undefined) {
-      const factValue: IAttestation = {
-        address: { ...fact.address, path: [...fact.address.path, "value"] },
-        value: (fact.value as Immutable<JSONObject>).value,
+    const managedTx = new ManagedStorageTransaction(manager);
+    const tx = new ExtendedStorageTransaction(managedTx);
+    if (!deepEqual(selector.schemaContext, SchemaNone)) {
+      const factValue: IMemorySpaceAttestation = {
+        address: { ...fact.address, space: space },
+        value: (fact.value as Immutable<JSONObject>),
       };
+      if (fact.address.path.length > 0) {
+        throw new Error("Invalid fact.address.path (must be empty)");
+      }
       const [newDoc, newSelector] = getAtPath(
-        manager,
+        tx,
         factValue,
         selector.path,
         tracker,
         cfc,
         schemaTracker,
         selector,
-        newLinks,
       );
       if (newDoc.value === undefined) {
         return;
@@ -384,11 +386,12 @@ function loadFactsForDoc(
       // We've provided a schema context for this, so traverse it
       // Pass newLinks to collect any newly discovered docs during traversal
       const traverser = new SchemaObjectTraverser(
-        manager,
+        tx,
         newSelector!,
         tracker,
         schemaTracker,
-        newLinks,
+        undefined,
+        undefined,
       );
       // We don't actually use the return value here, but we've built up
       // a list of all the documents we need to watch.
@@ -397,10 +400,15 @@ function loadFactsForDoc(
       // If we didn't provide a schema context, we still want the selected
       // object in our manager, so load it directly.
       manager.load(fact.address);
-      // Note: already tracked at top of function
     }
     // Also load any source links and recipes
-    loadSource(manager, fact, new Set<string>(), schemaTracker, newLinks);
+    const fullAddress = { ...fact.address, space: space };
+    loadSource(
+      tx,
+      { address: fullAddress, value: fact.value },
+      new Set<string>(),
+      schemaTracker,
+    );
   }
 }
 

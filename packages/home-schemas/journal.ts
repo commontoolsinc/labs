@@ -45,7 +45,8 @@ export const journalEntrySchema = {
       enum: journalEventTypes as unknown as string[],
     },
     // Live cell reference (may update over time)
-    subject: { not: true, asCell: true },
+    // we use empty properties to validate, but avoid including children
+    subject: { type: "object", properties: {}, asCell: true },
     // Frozen snapshot at entry time
     snapshot: journalSnapshotSchema,
     // LLM-generated narrative prose

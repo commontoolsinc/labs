@@ -978,6 +978,12 @@ export interface IAttestation {
   readonly value?: StorableDatum;
 }
 
+// An IAttestation where the address is an IMemorySpaceAddress
+export interface IMemorySpaceAttestation {
+  readonly address: IMemorySpaceAddress;
+  readonly value?: StorableDatum;
+}
+
 // Re-export transaction wrapper utilities from implementation
 export {
   createChildCellTransaction,

@@ -1,22 +1,22 @@
-import type {
-  Revision,
-  State,
-  StorableValue,
-} from "@commontools/memory/interface";
+import type { Revision, State } from "@commontools/memory/interface";
 
 import {
   type BaseMemoryAddress,
-  BaseObjectManager,
   IAttestation,
+  ObjectStorageManager,
 } from "../traverse.ts";
 
-export abstract class ClientObjectManager
-  extends BaseObjectManager<BaseMemoryAddress, StorableValue> {
+/**
+ * Object Manager backed by a store map.
+ *
+ * The keys for the store map are of the form: `${address.id}/${address.type}`
+ */
+export class StoreObjectManager implements ObjectStorageManager {
+  private readValues = new Map<string, IAttestation>();
   // Cache our read labels, and any docs we can't read
   public missingDocs = new Map<string, BaseMemoryAddress>();
 
-  constructor() {
-    super();
+  constructor(private store = new Map<string, Revision<State>>()) {
   }
 
   getReadDocs(): Iterable<IAttestation> {
@@ -26,26 +26,17 @@ export abstract class ClientObjectManager
   getMissingDocs(): Iterable<BaseMemoryAddress> {
     return this.missingDocs.values();
   }
-}
-
-// Object Manager backed by a store map
-export class StoreObjectManager extends ClientObjectManager {
-  constructor(
-    private store: Map<string, Revision<State>>,
-  ) {
-    super();
-  }
 
   // Returns null if there is no matching fact
-  override load(address: BaseMemoryAddress): IAttestation | null {
-    const key = this.toKey(address);
+  load(address: BaseMemoryAddress): IAttestation | null {
+    const key = `${address.id}/${address.type}`;
     if (this.readValues.has(key)) {
       return this.readValues.get(key)!;
     }
     // we should only have one match
     if (this.store.has(key)) {
       const storeValue = this.store.get(key);
-      const rv = { address: { path: [], ...address }, value: storeValue?.is };
+      const rv = { address: { ...address, path: [] }, value: storeValue?.is };
       this.readValues.set(key, rv);
       return rv;
     } else {

@@ -250,6 +250,7 @@ describe("runRecipe", () => {
     });
     const resultValue2 = await result.pull();
     expect(resultValue2).toEqual({ result: undefined });
+    // We don't run the action if the arguments fail to validate
     expect(ran).toBe(false);
   });
 

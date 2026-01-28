@@ -3,24 +3,41 @@ import { expect } from "@std/expect";
 import { refer } from "merkle-reference/json";
 import type {
   Entity,
+  JSONValue,
   Revision,
+  SchemaContext,
+  SchemaPathSelector,
   State,
   URI,
 } from "@commontools/memory/interface";
 import {
   CompoundCycleTracker,
   getAtPath,
+  ManagedStorageTransaction,
   MapSet,
-  type PointerCycleTracker,
+  PointerCycleTracker,
   SchemaObjectTraverser,
-  type SchemaPathSelector,
 } from "../src/traverse.ts";
 import { StoreObjectManager } from "../src/storage/query.ts";
-import type { JSONSchema, JSONValue } from "../src/builder/types.ts";
-import type { Immutable } from "@commontools/utils/types";
-import { ContextualFlowControl } from "../src/cfc.ts";
-import type { SchemaContext } from "@commontools/memory/interface";
-import { deepEqual } from "@commontools/utils/deep-equal";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
+import { Immutable } from "@commontools/utils/types";
+import { ContextualFlowControl, deepEqual } from "@commontools/runner";
+import {
+  IMemorySpaceAddress,
+  IMemorySpaceAttestation,
+} from "../src/storage/interface.ts";
+
+// Helper function to get the SchemaObjectTraverser backed by a store map
+function getTraverser(
+  store: Map<string, Revision<State>>,
+  selector: SchemaPathSelector,
+): SchemaObjectTraverser<JSONValue> {
+  const manager = new StoreObjectManager(store);
+  const managedTx = new ManagedStorageTransaction(manager);
+  const tx = new ExtendedStorageTransaction(managedTx);
+  return new SchemaObjectTraverser(tx, selector);
+}
 
 describe("SchemaObjectTraverser.traverseDAG", () => {
   it("follows legacy cell links when traversing", () => {
@@ -84,13 +101,15 @@ describe("SchemaObjectTraverser.traverseDAG", () => {
     );
 
     const manager = new StoreObjectManager(store);
-    const traverser = new SchemaObjectTraverser(manager, {
-      path: [],
+    const managedTx = new ManagedStorageTransaction(manager);
+    const tx = new ExtendedStorageTransaction(managedTx);
+    const traverser = new SchemaObjectTraverser(tx, {
+      path: ["value"],
       schemaContext: { schema: true, rootSchema: true },
     });
 
     const result = traverser.traverse({
-      address: { id: doc2Uri, type, path: ["value"] },
+      address: { space: "did:null:null", id: doc2Uri, type, path: ["value"] },
       value: doc2Value,
     });
 
@@ -149,14 +168,13 @@ describe("SchemaObjectTraverser array traversal", () => {
       items: { type: "number" },
     } as const satisfies JSONSchema;
 
-    const manager = new StoreObjectManager(store);
-    const traverser = new SchemaObjectTraverser(manager, {
-      path: [],
+    const traverser = getTraverser(store, {
+      path: ["value"],
       schemaContext: { schema, rootSchema: schema },
     });
 
     const result = traverser.traverse({
-      address: { id: docUri, type, path: ["value"] },
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
 
@@ -189,18 +207,276 @@ describe("SchemaObjectTraverser array traversal", () => {
       items: false,
     } as const satisfies JSONSchema;
 
-    const manager = new StoreObjectManager(store);
-    const traverser = new SchemaObjectTraverser(manager, {
-      path: [],
+    const traverser = getTraverser(store, {
+      path: ["value"],
       schemaContext: { schema, rootSchema: schema },
     });
 
     const result = traverser.traverse({
-      address: { id: docUri, type, path: ["value"] },
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
 
     expect(result).toBeUndefined();
+  });
+
+  describe("SchemaObjectTraverser getAtPath", () => {
+    // Some helper functions
+    function makeLink(id: URI, path: string[], redirect: boolean) {
+      return {
+        "/": {
+          "link@1": {
+            path: path,
+            id: id,
+            space: "did:null:null",
+            ...(redirect && { overwrite: "redirect" }),
+          },
+        },
+      };
+    }
+    function makeRevision(id: URI, value: JSONValue): Revision<State> {
+      return {
+        the: "application/json",
+        of: id,
+        is: { value: value },
+        cause: refer({ the: "applicaton/json", of: id }),
+        since: 1,
+      };
+    }
+
+    it("returns proper redirect data", () => {
+      // A[foo] => B[foo] -> C[foo] => D[foo]
+      // Some helper functions
+      function makeLink(id: URI, path: string[], redirect: boolean) {
+        return {
+          "/": {
+            "link@1": {
+              path: path,
+              id: id,
+              space: "did:null:null",
+              ...(redirect && { overwrite: "redirect" }),
+            },
+          },
+        };
+      }
+      function makeRevision(id: URI, value: JSONValue): Revision<State> {
+        return {
+          the: "application/json",
+          of: id,
+          is: { value: value },
+          cause: refer({ the: "applicaton/json", of: id }),
+          since: 1,
+        };
+      }
+
+      const store = new Map<string, Revision<State>>();
+      const revD = makeRevision("of:doc-item-d", { foo: { text: "hello" } });
+      const revC = makeRevision("of:doc-item-c", {
+        foo: makeLink("of:doc-item-d", ["foo"], true),
+      });
+      const revB = makeRevision("of:doc-item-b", {
+        foo: makeLink("of:doc-item-c", ["foo"], false),
+      });
+      const revA = makeRevision("of:doc-item-a", {
+        foo: makeLink("of:doc-item-b", ["foo"], true),
+      });
+      for (const docRevision of [revA, revB, revC, revD]) {
+        store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+      }
+
+      const manager = new StoreObjectManager(store);
+      const managedTx = new ManagedStorageTransaction(manager);
+      const tx = new ExtendedStorageTransaction(managedTx);
+      const tracker = new CompoundCycleTracker<
+        Immutable<JSONValue>,
+        SchemaContext | undefined
+      >();
+      const cfc = new ContextualFlowControl();
+      const schemaTracker = new MapSet<string, SchemaPathSelector>();
+      const docAFoo = {
+        address: {
+          id: revA.of,
+          type: revA.the,
+          path: ["value", "foo"],
+          space: "did:null:null",
+        } as IMemorySpaceAddress,
+        value: (revA.is as any).value.foo as JSONValue,
+      };
+      const docASelector = {
+        path: ["value", "foo"],
+        schemaContext: { schema: true, rootSchema: true },
+      };
+      const [curDoc, _selector1] = getAtPath(
+        tx,
+        docAFoo,
+        [],
+        tracker,
+        cfc,
+        schemaTracker,
+        docASelector,
+      );
+      const [redirDoc, _selector2] = getAtPath(
+        tx,
+        docAFoo,
+        [],
+        tracker,
+        cfc,
+        schemaTracker,
+        docASelector,
+        false,
+        "writeRedirect",
+      );
+      expect(curDoc.address.id).toBe(revD.of);
+      expect(curDoc.address.path).toEqual(["value", "foo"]);
+      expect(redirDoc.address.id).toBe(revB.of);
+      expect(redirDoc.address.path).toEqual(["value", "foo"]);
+    });
+
+    it("returns proper redirect data when redirect is outside of link", () => {
+      // A[current] => B[foo]
+      // B -> C
+      // we return C[foo] here, because there is no B[foo].
+      const store = new Map<string, Revision<State>>();
+      const revC = makeRevision("of:doc-item-c", { foo: { label: "first" } });
+      const revB = makeRevision(
+        "of:doc-item-b",
+        makeLink("of:doc-item-c", [], false),
+      );
+      const revA = makeRevision("of:doc-item-a", {
+        current: makeLink("of:doc-item-b", ["foo"], true),
+      });
+      for (const docRevision of [revA, revB, revC]) {
+        store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+      }
+
+      const manager = new StoreObjectManager(store);
+      const managedTx = new ManagedStorageTransaction(manager);
+      const tx = new ExtendedStorageTransaction(managedTx);
+      const tracker = new CompoundCycleTracker<
+        Immutable<JSONValue>,
+        SchemaContext | undefined
+      >();
+      const cfc = new ContextualFlowControl();
+      const schemaTracker = new MapSet<string, SchemaPathSelector>();
+      const docACurrent = {
+        address: {
+          id: revA.of,
+          type: revA.the,
+          path: ["value", "current"],
+          space: "did:null:null",
+        } as IMemorySpaceAddress,
+        value: (revA.is as any).value.current as JSONValue,
+      };
+      const docASelector = {
+        path: ["value", "current"],
+        schemaContext: { schema: true, rootSchema: true },
+      };
+      const [curDoc, _selector1] = getAtPath(
+        tx,
+        docACurrent,
+        [],
+        tracker,
+        cfc,
+        schemaTracker,
+        docASelector,
+      );
+      const [redirDoc, _selector2] = getAtPath(
+        tx,
+        docACurrent,
+        [],
+        tracker,
+        cfc,
+        schemaTracker,
+        docASelector,
+        false,
+        "writeRedirect",
+      );
+      expect(curDoc.address.id).toBe(revC.of);
+      expect(curDoc.address.path).toEqual(["value", "foo"]);
+      expect(redirDoc.address.id).toBe(revC.of);
+      expect(redirDoc.address.path).toEqual(["value", "foo"]);
+    });
+
+    it("returns proper redirect data when redirect is outside of link but then there's another redir", () => {
+      // A[current] => B[foo]
+      // B -> C
+      // C[foo] => D[foo]
+      // Redirect should be D[foo]
+      const store = new Map<string, Revision<State>>();
+      const revD = makeRevision("of:doc-item-d", { foo: { label: "first" } });
+      const revC = makeRevision("of:doc-item-c", {
+        foo: makeLink("of:doc-item-d", ["foo"], true),
+      });
+      const revB = makeRevision(
+        "of:doc-item-b",
+        makeLink("of:doc-item-c", [], false),
+      );
+      const revA = makeRevision("of:doc-item-a", {
+        current: makeLink("of:doc-item-b", ["foo"], true),
+      });
+      for (const docRevision of [revA, revB, revC, revD]) {
+        store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+      }
+
+      const manager = new StoreObjectManager(store);
+      const managedTx = new ManagedStorageTransaction(manager);
+      const tx = new ExtendedStorageTransaction(managedTx);
+      const tracker = new CompoundCycleTracker<
+        Immutable<JSONValue>,
+        SchemaContext | undefined
+      >();
+      const cfc = new ContextualFlowControl();
+      const schemaTracker = new MapSet<string, SchemaPathSelector>();
+      const docACurrent = {
+        address: {
+          id: revA.of,
+          type: revA.the,
+          path: ["value", "current"],
+          space: "did:null:null",
+        } as IMemorySpaceAddress,
+        value: (revA.is as any).value.current as JSONValue,
+      };
+      const docASelector = {
+        path: ["value", "current"],
+        schemaContext: { schema: true, rootSchema: true },
+      };
+      const [curDoc, _selector1] = getAtPath(
+        tx,
+        docACurrent,
+        [],
+        tracker,
+        cfc,
+        schemaTracker,
+        docASelector,
+      );
+      const [redirDoc, redirDocSelector] = getAtPath(
+        tx,
+        docACurrent,
+        [],
+        tracker,
+        cfc,
+        schemaTracker,
+        docASelector,
+        false,
+        "writeRedirect",
+      );
+      // we should also be able to get the value starting at the redir doc
+      const [curDoc2, _selector3] = getAtPath(
+        tx,
+        redirDoc,
+        [],
+        tracker,
+        cfc,
+        schemaTracker,
+        redirDocSelector,
+      );
+      expect(curDoc.address.id).toBe(revD.of);
+      expect(curDoc.address.path).toEqual(["value", "foo"]);
+      expect(redirDoc.address.id).toBe(revD.of);
+      expect(redirDoc.address.path).toEqual(["value", "foo"]);
+      expect(curDoc2.address.id).toBe(revD.of);
+      expect(curDoc2.address.path).toEqual(["value", "foo"]);
+    });
   });
 });
 
@@ -224,6 +500,8 @@ describe("getAtPath array index validation", () => {
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
 
     const manager = new StoreObjectManager(store);
+    const managedTx = new ManagedStorageTransaction(manager);
+    const tx = new ExtendedStorageTransaction(managedTx);
     const tracker: PointerCycleTracker = new CompoundCycleTracker<
       Immutable<JSONValue>,
       SchemaContext | undefined
@@ -231,14 +509,14 @@ describe("getAtPath array index validation", () => {
     const cfc = new ContextualFlowControl();
     const schemaTracker = new MapSet<string, SchemaPathSelector>(deepEqual);
 
-    const doc = {
-      address: { id: docUri, type, path: ["value"] },
+    const doc: IMemorySpaceAttestation = {
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     };
 
     // Navigate with invalid index "01"
     const [result1] = getAtPath(
-      manager,
+      tx,
       doc,
       ["01"],
       tracker,
@@ -248,7 +526,7 @@ describe("getAtPath array index validation", () => {
 
     // Navigate with valid index "1"
     const [result2] = getAtPath(
-      manager,
+      tx,
       doc,
       ["1"],
       tracker,
@@ -288,14 +566,13 @@ describe("SchemaObjectTraverser boolean type handling", () => {
       items: { type: "boolean" },
     } as const satisfies JSONSchema;
 
-    const manager = new StoreObjectManager(store);
-    const traverser = new SchemaObjectTraverser(manager, {
-      path: [],
+    const traverser = getTraverser(store, {
+      path: ["value"],
       schemaContext: { schema, rootSchema: schema },
     });
 
     const result = traverser.traverse({
-      address: { id: docUri, type, path: ["value"] },
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
 
@@ -324,14 +601,13 @@ describe("SchemaObjectTraverser boolean type handling", () => {
       type: "string",
     } as const satisfies JSONSchema;
 
-    const manager = new StoreObjectManager(store);
-    const traverser = new SchemaObjectTraverser(manager, {
-      path: [],
+    const traverser = getTraverser(store, {
+      path: ["value"],
       schemaContext: { schema, rootSchema: schema },
     });
 
     const result = traverser.traverse({
-      address: { id: docUri, type, path: ["value"] },
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
 
@@ -366,14 +642,13 @@ describe("SchemaObjectTraverser anyOf/oneOf handling", () => {
       ],
     } as JSONSchema;
 
-    const manager = new StoreObjectManager(store);
-    const traverser = new SchemaObjectTraverser(manager, {
-      path: [],
+    const traverser = getTraverser(store, {
+      path: ["value"],
       schemaContext: { schema, rootSchema: schema },
     });
 
     const result = traverser.traverse({
-      address: { id: docUri, type, path: ["value"] },
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
 
@@ -415,14 +690,13 @@ describe("SchemaObjectTraverser anyOf/oneOf handling", () => {
       },
     } as JSONSchema;
 
-    const manager = new StoreObjectManager(store);
-    const traverser = new SchemaObjectTraverser(manager, {
-      path: [],
+    const traverser = getTraverser(store, {
+      path: ["value"],
       schemaContext: { schema, rootSchema: schema },
     });
 
     const result = traverser.traverse({
-      address: { id: docUri, type, path: ["value"] },
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
 
@@ -464,14 +738,13 @@ describe("SchemaObjectTraverser anyOf/oneOf handling", () => {
       },
     } as JSONSchema;
 
-    const manager = new StoreObjectManager(store);
-    const traverser = new SchemaObjectTraverser(manager, {
-      path: [],
+    const traverser = getTraverser(store, {
+      path: ["value"],
       schemaContext: { schema, rootSchema: schema },
     });
 
     const result = traverser.traverse({
-      address: { id: docUri, type, path: ["value"] },
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     });
 
