@@ -150,5 +150,5 @@ function createDevCommand(cmdName: string): Command<any> {
     .action(devAction);
 }
 
-export const dev = createDevCommand("dev");
 export const check = createDevCommand("check");
+export const dev = createDevCommand("dev").hidden();
