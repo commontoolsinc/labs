@@ -39,6 +39,7 @@ import { RecipeManager } from "./recipe-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
+import { CompartmentManager } from "./sandbox/compartment-manager.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import { toURI } from "./uri-utils.ts";
 import { isDeno } from "@commontools/utils/env";
@@ -77,6 +78,12 @@ export interface RuntimeOptions {
   navigateCallback?: NavigateCallback;
   debug?: boolean;
   telemetry?: RuntimeTelemetry;
+  /**
+   * Whether to enable SES sandboxing for pattern execution.
+   * When enabled, patterns run in isolated SES Compartments.
+   * Default: false (uses eval-based execution)
+   */
+  sesEnabled?: boolean;
 }
 
 /**
@@ -131,6 +138,7 @@ export class Runtime {
   readonly telemetry: RuntimeTelemetry;
   readonly apiUrl: URL;
   readonly userIdentityDID: DID;
+  readonly compartmentManager: CompartmentManager;
   private defaultFrame?: Frame;
 
   constructor(options: RuntimeOptions) {
@@ -144,6 +152,12 @@ export class Runtime {
 
     // Create harness first (no dependencies on other services)
     this.harness = new Engine(this);
+
+    // Create compartment manager for SES sandboxing
+    this.compartmentManager = new CompartmentManager({
+      enabled: options.sesEnabled ?? false,
+      debug: options.debug ?? false,
+    });
 
     this.storageManager = options.storageManager;
     this.userIdentityDID = options.storageManager.as.did() as DID;

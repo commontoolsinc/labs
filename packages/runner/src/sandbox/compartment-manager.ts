@@ -67,11 +67,32 @@ interface CompartmentInstance {
  */
 export class CompartmentManager {
   private static lockdownApplied = false;
+  private static lockdownPromise: Promise<void> | undefined;
   private readonly patternCompartments = new Map<string, PatternCompartment>();
   private readonly config: SandboxConfig;
 
   constructor(config?: Partial<SandboxConfig>) {
     this.config = resolveSandboxConfig(config);
+  }
+
+  /**
+   * Check if SES lockdown has been applied and the manager is ready for sync operations.
+   */
+  isReady(): boolean {
+    return CompartmentManager.lockdownApplied;
+  }
+
+  /**
+   * Initialize the compartment manager by applying SES lockdown.
+   * Call this early in your application lifecycle before running patterns.
+   *
+   * This method is idempotent - calling it multiple times is safe.
+   */
+  async initialize(): Promise<void> {
+    if (!this.config.enabled) {
+      return;
+    }
+    await this.ensureLockdown();
   }
 
   /**
@@ -247,6 +268,32 @@ export class CompartmentManager {
     // Ensure lockdown is applied
     await this.ensureLockdown();
 
+    return this.evaluateStringSync(code);
+  }
+
+  /**
+   * Synchronously evaluate a string of JavaScript code in a fresh compartment.
+   * Requires lockdown to be already applied (call initialize() first).
+   *
+   * @param code - The JavaScript code to evaluate
+   * @returns The result of evaluation
+   * @throws SandboxSecurityError if lockdown hasn't been applied
+   */
+  evaluateStringSync(code: string): unknown {
+    if (!this.config.enabled) {
+      throw new SandboxSecurityError(
+        "SES sandboxing is disabled. Enable it with SES_ENABLED=true",
+      );
+    }
+
+    if (!CompartmentManager.lockdownApplied) {
+      throw new SandboxSecurityError(
+        "SES lockdown not applied. Call initialize() before using sync evaluation.",
+        undefined,
+        "evaluateStringSync",
+      );
+    }
+
     try {
       // Create minimal globals for string evaluation
       const globals = createRuntimeGlobals(
@@ -267,7 +314,7 @@ export class CompartmentManager {
       throw new SandboxSecurityError(
         `Failed to evaluate code: ${message}`,
         undefined,
-        "evaluateString",
+        "evaluateStringSync",
       );
     }
   }
