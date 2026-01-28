@@ -1,9 +1,11 @@
 /// <cts-enable />
 import {
+  action,
   computed,
   Default,
   NAME,
   pattern,
+  Stream,
   UI,
   type VNode,
   Writable,
@@ -40,6 +42,10 @@ interface ReadingItemDetailOutput {
   notes: string;
   addedAt: number;
   finishedAt: number | null;
+  // Actions to update properties
+  setStatus: Stream<{ status: ItemStatus }>;
+  setRating: Stream<{ rating: number | null }>;
+  setNotes: Stream<{ notes: string }>;
 }
 
 // Re-export the Output type as ReadingItemPiece for use in collections
@@ -49,6 +55,21 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
   (
     { title, author, url, type, status, rating, notes, addedAt, finishedAt },
   ) => {
+    // Actions to modify properties
+    const setStatus = action(({ status: newStatus }: { status: ItemStatus }) => {
+      status.set(newStatus);
+    });
+
+    const setRating = action(
+      ({ rating: newRating }: { rating: number | null }) => {
+        rating.set(newRating);
+      },
+    );
+
+    const setNotes = action(({ notes: newNotes }: { notes: string }) => {
+      notes.set(newNotes);
+    });
+
     return {
       [NAME]: computed(() => `Reading: ${title.get() || "New Item"}`),
       [UI]: (
@@ -164,6 +185,9 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
       notes,
       addedAt,
       finishedAt,
+      setStatus,
+      setRating,
+      setNotes,
     };
   },
 );

@@ -31,8 +31,18 @@ interface ReadingListOutput {
   [UI]: VNode;
   items: ReadingItemPiece[];
   totalCount: number;
+  currentFilter: ItemStatus | "all";
+  filteredItems: ReadingItemPiece[];
+  filteredCount: number;
   addItem: Stream<{ title: string; author: string; type: ItemType }>;
   removeItem: Stream<{ item: ReadingItemPiece }>;
+  setFilter: Stream<{ status: ItemStatus | "all" }>;
+  updateItem: Stream<{
+    item: ReadingItemPiece;
+    status?: ItemStatus;
+    rating?: number | null;
+    notes?: string;
+  }>;
 }
 
 const TYPE_EMOJI: Record<ItemType, string> = {
@@ -89,19 +99,48 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
     }
   });
 
+  const setFilter = action(({ status }: { status: ItemStatus | "all" }) => {
+    filterStatus.set(status);
+  });
+
+  const updateItem = action(
+    ({
+      item,
+      status,
+      rating,
+      notes,
+    }: {
+      item: ReadingItemPiece;
+      status?: ItemStatus;
+      rating?: number | null;
+      notes?: string;
+    }) => {
+      // Use the item's actions to update properties
+      if (status !== undefined) item.setStatus.send({ status });
+      if (rating !== undefined) item.setRating.send({ rating });
+      if (notes !== undefined) item.setNotes.send({ notes });
+    },
+  );
+
   // Computed values
   const totalCount = computed(() => items.get().length);
 
-  // For empty state display
-  const hasNoFilteredItems = computed(() => {
+  const filteredItems = computed((): ReadingItemPiece[] => {
     const status = filterStatus.get();
     const allItems = items.get();
     if (status === "all") {
-      return allItems.length === 0;
+      return [...allItems];
     }
-    return allItems.filter((item) => item && item.status === status).length ===
-      0;
+    return allItems.filter((item) => item && item.status === status);
   });
+
+  const filteredCount = computed(() => filteredItems.length);
+
+  // For empty state display
+  const hasNoFilteredItems = computed(() => filteredCount === 0);
+
+  // Expose current filter as a computed (read-only)
+  const currentFilter = computed(() => filterStatus.get());
 
   return {
     [NAME]: computed(() => `Reading List (${items.get().length})`),
@@ -126,13 +165,7 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
         <ct-vscroll flex showScrollbar fadeEdges>
           <ct-vstack gap="2" style="padding: 1rem;">
             {computed(() => {
-              const status = filterStatus.get();
-              const allItems = items.get();
-              const filtered = status === "all"
-                ? allItems
-                : allItems.filter((item) => item && item.status === status);
-
-              return filtered.map((item) => (
+              return filteredItems.map((item: ReadingItemPiece) => (
                 <ct-card>
                   <ct-hstack gap="2" align="center">
                     <span style="font-size: 1.5rem;">
@@ -229,7 +262,12 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
     ),
     items,
     totalCount,
+    currentFilter,
+    filteredItems,
+    filteredCount,
     addItem,
     removeItem,
+    setFilter,
+    updateItem,
   };
 });
