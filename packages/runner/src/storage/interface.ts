@@ -80,9 +80,8 @@ export interface StorageValue<T extends StorableValue = StorableValue> {
 }
 
 /** Immutable version of `StorageValue<T>`. */
-export type ImmutableStorageValue<T extends StorableValue = any> = Immutable<
-  StorageValue<T>
->;
+export type ImmutableStorageValue<T extends StorableValue = StorableValue> =
+  Immutable<StorageValue<T>>;
 
 /** Optional immutable version of `StorageValue<T>`. */
 export type OptImmutableStorageValue<T extends StorableValue = StorableValue> =

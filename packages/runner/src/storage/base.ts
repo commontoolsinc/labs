@@ -52,10 +52,12 @@ export abstract class BaseStorageProvider implements IStorageProvider {
       );
     }
     const listeners = this.subscribers.get(uri)!;
-    listeners.add(callback);
+    // Cast needed: Set stores generic callbacks, callers get typed APIs.
+    // Safe because all stored values are StorableValue at runtime.
+    listeners.add(callback as (value: ImmutableStorageValue) => void);
 
     return () => {
-      listeners.delete(callback);
+      listeners.delete(callback as (value: ImmutableStorageValue) => void);
       if (listeners.size === 0) this.subscribers.delete(uri);
     };
   }
