@@ -15,6 +15,7 @@
 import {
   type Cancel,
   type Cell,
+  convertCellsToLinks,
   isCell,
   isStream,
   type Stream,
@@ -642,55 +643,8 @@ export class WorkerReconciler {
     ) {
       return this.styleObjectToCssString(value as Record<string, unknown>);
     }
-    return this.sanitizeForIpc(value);
-  }
-
-  /**
-   * Sanitize a value for IPC transmission via postMessage.
-   * Converts non-serializable values to serializable equivalents.
-   */
-  // deno-lint-ignore no-explicit-any
-  private sanitizeForIpc(value: unknown): any {
-    // Primitives are safe
-    if (value === null || value === undefined) return value;
-    if (
-      typeof value === "string" || typeof value === "number" ||
-      typeof value === "boolean"
-    ) {
-      return value;
-    }
-
-    // Functions cannot be serialized
-    if (typeof value === "function") {
-      return undefined;
-    }
-
-    // Cells should be resolved before reaching here, but handle gracefully
-    if (isCell(value)) {
-      console.warn(
-        "[WorkerReconciler] Cell found in prop value, converting to cellRef",
-      );
-      return { $cellRef: value.getAsNormalizedFullLink() };
-    }
-
-    // Arrays - recursively sanitize
-    if (Array.isArray(value)) {
-      return value.map((item) => this.sanitizeForIpc(item));
-    }
-
-    // Objects - recursively sanitize, skip symbols and functions
-    if (typeof value === "object") {
-      const result: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(value)) {
-        const sanitized = this.sanitizeForIpc(v);
-        if (sanitized !== undefined) {
-          result[k] = sanitized;
-        }
-      }
-      return result;
-    }
-
-    return value;
+    // Use convertCellsToLinks to handle Cells, circular refs, and non-JSON values
+    return convertCellsToLinks(value);
   }
 
   /**
