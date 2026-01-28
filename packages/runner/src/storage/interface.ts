@@ -209,7 +209,7 @@ export interface IStorageProvider {
    * @param callback - Callback function.
    * @returns Cancel function to stop the subscription.
    */
-  sink<T extends StorableValue = any>(
+  sink<T extends StorableValue = StorableValue>(
     uri: URI,
     callback: (value: ImmutableStorageValue<T>) => void,
   ): Cancel;

@@ -7,7 +7,11 @@
 
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "../src/storage/cache.ts";
-import type { SchemaContext, URI } from "@commontools/memory/interface";
+import type {
+  SchemaContext,
+  StorableObject,
+  URI,
+} from "@commontools/memory/interface";
 import { env } from "@commontools/integration";
 const { API_URL } = env;
 
@@ -58,7 +62,7 @@ Deno.test({
     };
     const testSelector = { path: [], schemaContext: testSchemaContext };
 
-    interface UpdateValue {
+    interface UpdateValue extends StorableObject {
       value: number;
       timestamp: string;
     }
@@ -80,13 +84,13 @@ Deno.test({
     const uri: URI = `of:${TEST_DOC_ID}`;
     // Listen for updates on the test-reconnection-counter document
     // Note: this is not the schema subscription, its just a client-side listener
-    provider1.sink(uri, (value) => {
+    provider1.sink<UpdateValue>(uri, (value) => {
       updateCount1++;
       updates1.push(value.value);
       console.log(`Provider1 Update #${updateCount1}:`, value.value);
     });
 
-    provider3.sink(uri, (value) => {
+    provider3.sink<UpdateValue>(uri, (value) => {
       updateCount3++;
       updates3.push(value.value);
       console.log(`Provider3 Update #${updateCount3}:`, value.value);
