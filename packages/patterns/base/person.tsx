@@ -22,32 +22,10 @@ import {
   type Writable,
 } from "commontools";
 
-// ============================================================================
-// PersonLike - Schelling point for person data (structural type)
-// ============================================================================
+import type { ContactCharm, Person, PersonLike } from "./contact-types.tsx";
 
-/**
- * Minimal interface for person-like items.
- * Defined locally in patterns, not in core API - works via duck typing.
- * Any object with { firstName, lastName } satisfies PersonLike.
- */
-export interface PersonLike {
-  firstName: string;
-  lastName: string;
-  /** Optional link to same entity in another context (e.g., work vs personal) */
-  sameAs?: PersonLike;
-}
-
-// ============================================================================
-// Person Type - Extends PersonLike with optional contact fields
-// ============================================================================
-
-export interface Person extends PersonLike {
-  firstName: string;
-  lastName: string;
-  email: Default<string, "">;
-  phone: Default<string, "">;
-}
+// Re-export for backwards compatibility
+export type { ContactCharm, Person, PersonLike } from "./contact-types.tsx";
 
 // ============================================================================
 // Handlers
@@ -77,8 +55,7 @@ interface Input {
     Default<Person, { firstName: ""; lastName: ""; email: ""; phone: "" }>
   >;
   // Optional: reactive source of sibling contacts for sameAs linking.
-  // Typed as unknown[] because the container's charm type can't be imported here.
-  sameAs?: Writable<unknown[]>;
+  sameAs?: Writable<ContactCharm[]>;
 }
 
 interface Output {
@@ -124,9 +101,8 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
     const selfLast = person.key("lastName").get();
 
     // Extract PersonLike from each sibling charm (person or member field)
-    const extractPerson = (item: unknown): PersonLike | undefined => {
-      const c = item as { person?: PersonLike; member?: PersonLike };
-      return c.person ?? c.member;
+    const extractPerson = (item: ContactCharm): PersonLike | undefined => {
+      return item.person ?? item.member;
     };
 
     return all
