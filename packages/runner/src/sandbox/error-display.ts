@@ -7,7 +7,6 @@
 
 import type { ClassifiedFrame } from "./frame-classifier.ts";
 import type { MappedError } from "./error-mapping.ts";
-import { isDebugEnabled } from "./config.ts";
 
 /**
  * Display options for error formatting.
@@ -15,7 +14,7 @@ import { isDebugEnabled } from "./config.ts";
 export interface ErrorDisplayOptions {
   /**
    * Whether to show full stack traces (debug mode).
-   * Default: uses COMMON_TOOLS_DEBUG environment variable.
+   * Default: false.
    */
   readonly verbose?: boolean;
 
@@ -61,7 +60,7 @@ export function formatError(
   mappedError: MappedError,
   options: ErrorDisplayOptions = {},
 ): string {
-  const verbose = options.verbose ?? isDebugEnabled();
+  const verbose = options.verbose ?? false;
   const colors = options.colors ?? false;
   const maxFrames = options.maxFrames ?? (verbose ? Infinity : 10);
   const showFrameTypes = options.showFrameTypes ?? verbose;
@@ -164,9 +163,9 @@ function getTypeColor(type: ClassifiedFrame["type"]): string {
  */
 export function formatErrorForConsole(mappedError: MappedError): string {
   return formatError(mappedError, {
-    verbose: isDebugEnabled(),
+    verbose: false,
     colors: true,
-    maxFrames: isDebugEnabled() ? Infinity : 5,
+    maxFrames: 5,
   });
 }
 

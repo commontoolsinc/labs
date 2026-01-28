@@ -16,13 +16,9 @@ export {
 
 // Configuration
 export {
-  COMMON_TOOLS_DEBUG_ENV,
   getDefaultLockdownOptions,
   getDefaultSandboxConfig,
-  isDebugEnabled,
-  isSESEnabled,
   resolveSandboxConfig,
-  SES_ENABLED_ENV,
 } from "./config.ts";
 
 // Runtime globals

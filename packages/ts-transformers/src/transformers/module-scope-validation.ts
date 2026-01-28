@@ -13,6 +13,8 @@ const ALLOWED_MODULE_SCOPE_CALLS = new Set([
   "recipe",
   "lift",
   "handler",
+  "schema",
+  "toSchema",
   "Object.freeze",
   "harden",
 ]);
@@ -207,29 +209,15 @@ export class ModuleScopeValidationTransformer extends Transformer {
       return;
     }
 
-    // Call expressions need validation
+    // Call expressions in const initializers are allowed — the binding is
+    // immutable so there's no mutable state concern. Only IIFEs are rejected.
     if (ts.isCallExpression(initializer)) {
-      // Check for IIFE
       if (this.isIIFE(initializer)) {
         context.reportDiagnostic({
           node: initializer,
           type: "module-scope-iife" as ModuleScopeValidationDiagnostic,
           message:
             `SES sandboxing: Immediately Invoked Function Expressions (IIFEs) are not allowed at module scope.`,
-          severity: "error",
-        });
-        return;
-      }
-
-      // Check if it's an allowed call
-      if (!this.isAllowedModuleScopeCall(initializer, context, checker)) {
-        const calleeName = this.getCalleeName(initializer);
-        context.reportDiagnostic({
-          node: initializer,
-          type:
-            "module-scope-disallowed-call" as ModuleScopeValidationDiagnostic,
-          message:
-            `SES sandboxing: Call to '${calleeName}' is not allowed at module scope. Only pattern, recipe, lift, handler, Object.freeze, and harden calls are permitted.`,
           severity: "error",
         });
       }

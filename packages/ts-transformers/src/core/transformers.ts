@@ -32,15 +32,6 @@ export interface TransformationOptions {
    * If provided, diagnostics are pushed to this array in addition to the local context.
    */
   readonly diagnosticsCollector?: TransformationDiagnostic[];
-  /**
-   * Enable SES (Secure ECMAScript) sandboxing validation.
-   * When true, validates module-scope statements for SES compartment safety:
-   * - Only const declarations at module scope
-   * - Only allowlisted calls (pattern, recipe, lift, handler, Object.freeze, harden)
-   * - No IIFEs or await at module scope
-   * Default: false (disabled for backwards compatibility)
-   */
-  readonly sesValidation?: boolean;
 }
 
 export type DiagnosticSeverity = "error" | "warning";
