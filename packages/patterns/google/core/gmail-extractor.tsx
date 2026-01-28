@@ -312,16 +312,27 @@ function interpolateTemplate(template: string, email: Email): string {
  * ```
  */
 export function trackAnalyses<T>(analyses: AnalysisItem<T>[]) {
-  const pendingCount = computed(
-    () => analyses?.filter((a) => a?.analysis?.pending)?.length || 0,
-  );
-  const completedCount = computed(
-    () =>
-      analyses?.filter(
-        (a) =>
-          a?.analysis?.pending === false && a?.analysis?.result !== undefined,
-      ).length || 0,
-  );
+  // Use index access since analyses may be a reactive mapped array
+  // (from .map() on a reactive cell) which doesn't support .filter()
+  const pendingCount = computed(() => {
+    const len = analyses?.length || 0;
+    let count = 0;
+    for (let i = 0; i < len; i++) {
+      if (analyses[i]?.analysis?.pending) count++;
+    }
+    return count;
+  });
+  const completedCount = computed(() => {
+    const len = analyses?.length || 0;
+    let count = 0;
+    for (let i = 0; i < len; i++) {
+      const a = analyses[i];
+      if (a?.analysis?.pending === false && a?.analysis?.result !== undefined) {
+        count++;
+      }
+    }
+    return count;
+  });
   return { pendingCount, completedCount };
 }
 
@@ -430,9 +441,8 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
   const isConnected = gmailImporter.isReady;
 
   // Auto-detect whether to run analysis based on presence of extraction config
-  const shouldRunAnalysis = computed(() => {
-    return !!(extraction?.promptTemplate?.trim() && extraction?.schema);
-  });
+  const shouldRunAnalysis =
+    !!(extraction?.promptTemplate?.trim() && extraction?.schema);
 
   // Reactive LLM analysis - analyze each email (only if extraction is provided)
   // Note: consumers can access result via item.analysis.result or item.result
@@ -476,17 +486,29 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
       error: unknown;
     }>);
 
-  // Compute pending/completed counts directly (rawAnalyses is a reactive mapped array)
-  const pendingCount = computed(
-    () => rawAnalyses?.filter((a) => a?.analysis?.pending)?.length || 0,
-  );
-  const completedCount = computed(
-    () =>
-      rawAnalyses?.filter(
-        (a) =>
-          a?.analysis?.pending === false && a?.analysis?.result !== undefined,
-      ).length || 0,
-  );
+  // Compute pending/completed counts using index access (rawAnalyses from .map()
+  // is a reactive mapped array that doesn't support .filter() directly)
+  const pendingCount = computed(() => {
+    if (!shouldRunAnalysis) return 0;
+    const len = rawAnalyses?.length || 0;
+    let count = 0;
+    for (let i = 0; i < len; i++) {
+      if (rawAnalyses[i]?.analysis?.pending) count++;
+    }
+    return count;
+  });
+  const completedCount = computed(() => {
+    if (!shouldRunAnalysis) return 0;
+    const len = rawAnalyses?.length || 0;
+    let count = 0;
+    for (let i = 0; i < len; i++) {
+      const a = rawAnalyses[i];
+      if (a?.analysis?.pending === false && a?.analysis?.result !== undefined) {
+        count++;
+      }
+    }
+    return count;
+  });
 
   // Note: Handler operations removed - they were unused and the authForHandlers wrapper
   // was an anti-pattern (Writable.of + computed side effect).
