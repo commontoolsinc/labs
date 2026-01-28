@@ -244,26 +244,34 @@ Extract the writing style patterns from these emails.`;
       model: "anthropic:claude-sonnet-4-5",
     });
 
+    // Track last saved result reference to avoid redundant writes
+    let lastSavedResult: unknown = null;
+
     // Auto-save LLM result to persistent Writable
     const _autoSaveStyle = computed(() => {
       const result = styleResult.result;
       const isPending = styleResult.pending;
 
-      if (!isPending && result) {
-        const current = savedStyle.get();
-        // Only update if result changed (avoid loops)
-        if (JSON.stringify(current) !== JSON.stringify(result)) {
-          savedStyle.set(result as EmailStyle);
-          lastAnalyzedAt.set(new Date().toISOString());
-          const emails = allEmails || [];
-          emailsAnalyzedCount.set(emails.length);
-        }
+      if (!isPending && result && result !== lastSavedResult) {
+        lastSavedResult = result;
+        savedStyle.set(result as EmailStyle);
+        lastAnalyzedAt.set(new Date().toISOString());
+        const emails = allEmails || [];
+        emailsAnalyzedCount.set(emails.length);
       }
 
       return null;
     });
 
     const isAnalyzing = computed(() => !!styleResult.pending);
+
+    // Unwrap savedStyle once so derive calls in the UI infer clean types.
+    // The explicit param type is needed because derive infers Cell<T> for Writable<T>.
+    const style = derive(
+      savedStyle,
+      (s: EmailStyle | null) => s,
+    );
+    const hasStyle = derive(style, (s) => !!s);
 
     // ========================================================================
     // UI
@@ -278,7 +286,7 @@ Extract the writing style patterns from these emails.`;
 
     return {
       [NAME]: "Email Style Extractor",
-      style: savedStyle,
+      style,
       emailsAnalyzed: emailsAnalyzedCount,
       lastAnalyzedAt,
       isAnalyzing,
@@ -384,9 +392,11 @@ Extract the writing style patterns from these emails.`;
                         <span style={{ color: "#6366f1" }}>
                           Analyzing style...
                         </span>,
-                        derive(lastAnalyzedAt, (ts: string) =>
+                        derive(lastAnalyzedAt, (ts) =>
                           ts
-                            ? `Last analyzed: ${new Date(ts).toLocaleString()}`
+                            ? `Last analyzed: ${
+                              new Date(String(ts)).toLocaleString()
+                            }`
                             : ""),
                       )}
                     </span>
@@ -459,8 +469,7 @@ Extract the writing style patterns from these emails.`;
 
               {/* Extracted style card */}
               {ifElse(
-                derive(savedStyle, (s: EmailStyle | null) =>
-                  !!s),
+                hasStyle,
                 <div
                   style={{
                     padding: "16px",
@@ -492,7 +501,7 @@ Extract the writing style patterns from these emails.`;
                       lineHeight: "1.5",
                     }}
                   >
-                    {derive(savedStyle, (s: EmailStyle | null) =>
+                    {derive(style, (s) =>
                       s?.summary || "")}
                   </div>
 
@@ -516,7 +525,7 @@ Extract the writing style patterns from these emails.`;
                         Tone
                       </div>
                       <div style={{ color: "#111827" }}>
-                        {derive(savedStyle, (s: EmailStyle | null) =>
+                        {derive(style, (s) =>
                           s?.overallTone || "")}
                       </div>
                     </div>
@@ -533,7 +542,7 @@ Extract the writing style patterns from these emails.`;
                         Formality
                       </div>
                       <div style={{ color: "#111827" }}>
-                        {derive(savedStyle, (s: EmailStyle | null) =>
+                        {derive(style, (s) =>
                           s?.formalityLevel || "")}
                       </div>
                     </div>
@@ -550,7 +559,7 @@ Extract the writing style patterns from these emails.`;
                         Sentence Style
                       </div>
                       <div style={{ color: "#111827" }}>
-                        {derive(savedStyle, (s: EmailStyle | null) =>
+                        {derive(style, (s) =>
                           s?.sentenceStyle || "")}
                       </div>
                     </div>
@@ -567,8 +576,7 @@ Extract the writing style patterns from these emails.`;
                         Punctuation
                       </div>
                       <div style={{ color: "#111827" }}>
-                        {derive(savedStyle, (s: EmailStyle | null) =>
-                          s?.punctuationHabits || "")}
+                        {derive(style, (s) => s?.punctuationHabits || "")}
                       </div>
                     </div>
 
@@ -584,8 +592,7 @@ Extract the writing style patterns from these emails.`;
                         Vocabulary
                       </div>
                       <div style={{ color: "#111827" }}>
-                        {derive(savedStyle, (s: EmailStyle | null) =>
-                          s?.vocabularyNotes || "")}
+                        {derive(style, (s) => s?.vocabularyNotes || "")}
                       </div>
                     </div>
 
@@ -629,11 +636,8 @@ Extract the writing style patterns from these emails.`;
                       >
                         Greetings
                       </div>
-                      {derive(savedStyle, (s: EmailStyle | null) =>
-                        (s?.greetingPatterns || []).map((
-                          g: string,
-                          i: number,
-                        ) => (
+                      {derive(style, (s) =>
+                        (s?.greetingPatterns || []).map((g, i) => (
                           <span
                             key={i}
                             style={{
@@ -661,11 +665,8 @@ Extract the writing style patterns from these emails.`;
                       >
                         Closings
                       </div>
-                      {derive(savedStyle, (s: EmailStyle | null) =>
-                        (s?.closingPatterns || []).map((
-                          c: string,
-                          i: number,
-                        ) => (
+                      {derive(style, (s) =>
+                        (s?.closingPatterns || []).map((c, i) => (
                           <span
                             key={i}
                             style={{
@@ -697,11 +698,8 @@ Extract the writing style patterns from these emails.`;
                     >
                       Example Phrases
                     </div>
-                    {derive(savedStyle, (s: EmailStyle | null) =>
-                      (s?.examplePhrases || []).map((
-                        phrase: string,
-                        i: number,
-                      ) => (
+                    {derive(style, (s) =>
+                      (s?.examplePhrases || []).map((phrase, i) => (
                         <div
                           key={i}
                           style={{
@@ -739,8 +737,10 @@ Extract the writing style patterns from these emails.`;
                       )}
                     </span>
                     <span>
-                      {derive(lastAnalyzedAt, (ts: string) =>
-                        ts ? `Last: ${new Date(ts).toLocaleString()}` : "")}
+                      {derive(lastAnalyzedAt, (ts) =>
+                        ts
+                          ? `Last: ${new Date(String(ts)).toLocaleString()}`
+                          : "")}
                     </span>
                   </div>
                 </div>,

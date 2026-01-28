@@ -610,6 +610,10 @@ export default pattern<PatternInput, PatternOutput>(() => {
   const emailStyleWish = wish<{ style: EmailStyleData | null }>({
     query: "#emailStyle",
   });
+  const emailStyle = derive(
+    emailStyleWish.result,
+    (r) => r?.style ?? null,
+  );
 
   // ==========================================================================
   // GMAIL EXTRACTOR
@@ -736,13 +740,13 @@ export default pattern<PatternInput, PatternOutput>(() => {
   // Uses computed prompt that builds from the selected thread's data
   // NOTE: When prompt is falsy/undefined, generateText should skip the API call
   // Build style-aware system prompt
-  const draftSystemPrompt = computed((): string => {
-    const styleData = emailStyleWish?.result?.style;
-    if (styleData?.summary) {
-      return `You are a helpful assistant that drafts follow-up emails matching the user's personal writing style. Style summary: ${styleData.summary}`;
-    }
-    return "You are a helpful assistant that drafts professional follow-up emails.";
-  });
+  const draftSystemPrompt = derive(
+    emailStyle,
+    (s) =>
+      s?.summary
+        ? `You are a helpful assistant that drafts follow-up emails matching the user's personal writing style. Style summary: ${s.summary}`
+        : "You are a helpful assistant that drafts professional follow-up emails.",
+  );
 
   const draftLlmResult = generateText({
     prompt: computed((): string | undefined => {
@@ -777,7 +781,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
       const pingCount = Number(currentThread.pingCount) || 0;
 
       // Build style guidance section
-      const styleData = emailStyleWish?.result?.style;
+      const styleData = emailStyle;
       let styleGuidance: string;
       if (styleData?.summary) {
         const greetings = Array.from(styleData.greetingPatterns || []).join(
