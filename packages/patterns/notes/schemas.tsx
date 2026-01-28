@@ -52,6 +52,18 @@ export interface NotebookData {
   isHidden?: boolean;
 }
 
+/**
+ * A notebook cell with writable notes array.
+ * Used when we need to add notes to a notebook accessed via cell operations.
+ */
+export interface NotebookCell {
+  [NAME]?: string;
+  title?: string;
+  notes: Writable<NoteData[]>;
+  isNotebook?: boolean;
+  isHidden?: boolean;
+}
+
 // ===== Input Types =====
 
 export interface NoteInput {
