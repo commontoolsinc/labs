@@ -23,12 +23,12 @@ interface Output {
 
 export default pattern<Input, Output>(({ contact }) => {
   return {
-    [NAME]: computed(() => `Contact: ${contact.get().name}`),
+    [NAME]: computed(() => `Contact: ${contact.key("name").get()}`),
     [UI]: (
       <ct-screen>
         <ct-vstack slot="header">
           <ct-heading level={4}>
-            {contact.get().name || "New Contact"}
+            {contact.key("name") || "New Contact"}
           </ct-heading>
         </ct-vstack>
 

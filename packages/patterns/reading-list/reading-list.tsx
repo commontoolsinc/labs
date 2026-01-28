@@ -1,0 +1,273 @@
+/// <cts-enable />
+import {
+  action,
+  computed,
+  Default,
+  equals,
+  NAME,
+  navigateTo,
+  pattern,
+  Stream,
+  UI,
+  type VNode,
+  Writable,
+} from "commontools";
+
+import ReadingItemDetail, {
+  type ItemStatus,
+  type ItemType,
+  type ReadingItemPiece,
+} from "./reading-item-detail.tsx";
+
+// Re-export types for consumers and tests
+export type { ItemStatus, ItemType, ReadingItemPiece };
+
+interface ReadingListInput {
+  items?: Writable<Default<ReadingItemPiece[], []>>;
+}
+
+interface ReadingListOutput {
+  [NAME]: string;
+  [UI]: VNode;
+  items: ReadingItemPiece[];
+  totalCount: number;
+  currentFilter: ItemStatus | "all";
+  filteredItems: ReadingItemPiece[];
+  filteredCount: number;
+  addItem: Stream<{ title: string; author: string; type: ItemType }>;
+  removeItem: Stream<{ item: ReadingItemPiece }>;
+  setFilter: Stream<{ status: ItemStatus | "all" }>;
+  updateItem: Stream<{
+    item: ReadingItemPiece;
+    status?: ItemStatus;
+    rating?: number | null;
+    notes?: string;
+  }>;
+}
+
+const TYPE_EMOJI: Record<ItemType, string> = {
+  book: "📚",
+  article: "📄",
+  paper: "📑",
+  video: "🎬",
+};
+
+// Pure helper functions - can be called directly in JSX
+const getTypeEmoji = (t: ItemType): string => TYPE_EMOJI[t] || "📄";
+
+const renderStars = (rating: number | null): string => {
+  if (!rating) return "";
+  return "★".repeat(rating) + "☆".repeat(5 - rating);
+};
+
+export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
+  const filterStatus = Writable.of<ItemStatus | "all">("all");
+  const newTitle = Writable.of("");
+  const newAuthor = Writable.of("");
+  const newType = Writable.of<ItemType>("article");
+
+  // Pattern-body actions - preferred for single-use handlers
+  const addItem = action(
+    (
+      { title, author, type }: {
+        title: string;
+        author: string;
+        type: ItemType;
+      },
+    ) => {
+      const trimmedTitle = title.trim();
+      if (trimmedTitle) {
+        // Create a new ReadingItemDetail piece and store its reference
+        const newItemPiece = ReadingItemDetail({
+          title: trimmedTitle,
+          author: author.trim(),
+          type,
+          addedAt: Date.now(),
+        });
+        items.push(newItemPiece);
+        newTitle.set("");
+        newAuthor.set("");
+      }
+    },
+  );
+
+  const removeItem = action(({ item }: { item: ReadingItemPiece }) => {
+    const current = items.get();
+    const index = current.findIndex((el) => equals(item, el));
+    if (index >= 0) {
+      items.set(current.toSpliced(index, 1));
+    }
+  });
+
+  const setFilter = action(({ status }: { status: ItemStatus | "all" }) => {
+    filterStatus.set(status);
+  });
+
+  const updateItem = action(
+    ({
+      item,
+      status,
+      rating,
+      notes,
+    }: {
+      item: ReadingItemPiece;
+      status?: ItemStatus;
+      rating?: number | null;
+      notes?: string;
+    }) => {
+      // Use the item's actions to update properties
+      if (status !== undefined) item.setStatus.send({ status });
+      if (rating !== undefined) item.setRating.send({ rating });
+      if (notes !== undefined) item.setNotes.send({ notes });
+    },
+  );
+
+  // Computed values
+  const totalCount = computed(() => items.get().length);
+
+  const filteredItems = computed((): ReadingItemPiece[] => {
+    const status = filterStatus.get();
+    const allItems = items.get();
+    if (status === "all") {
+      return [...allItems];
+    }
+    return allItems.filter((item) => item && item.status === status);
+  });
+
+  const filteredCount = computed(() => filteredItems.length);
+
+  // For empty state display
+  const hasNoFilteredItems = computed(() => filteredCount === 0);
+
+  // Expose current filter as a computed (read-only)
+  const currentFilter = computed(() => filterStatus.get());
+
+  return {
+    [NAME]: computed(() => `Reading List (${items.get().length})`),
+    [UI]: (
+      <ct-screen>
+        <ct-vstack slot="header" gap="2">
+          <ct-hstack justify="between" align="center">
+            <ct-heading level={4}>Reading List ({totalCount})</ct-heading>
+          </ct-hstack>
+
+          <ct-tabs $value={filterStatus}>
+            <ct-tab-list>
+              <ct-tab value="all">All</ct-tab>
+              <ct-tab value="want">Want</ct-tab>
+              <ct-tab value="reading">Reading</ct-tab>
+              <ct-tab value="finished">Done</ct-tab>
+              <ct-tab value="abandoned">Dropped</ct-tab>
+            </ct-tab-list>
+          </ct-tabs>
+        </ct-vstack>
+
+        <ct-vscroll flex showScrollbar fadeEdges>
+          <ct-vstack gap="2" style="padding: 1rem;">
+            {computed(() => {
+              return filteredItems.map((item: ReadingItemPiece) => (
+                <ct-card>
+                  <ct-hstack gap="2" align="center">
+                    <span style="font-size: 1.5rem;">
+                      {getTypeEmoji(item.type)}
+                    </span>
+                    <ct-vstack gap="0" style="flex: 1;">
+                      <span style="font-weight: 500;">
+                        {item.title || "(untitled)"}
+                      </span>
+                      {item.author && (
+                        <span style="font-size: 0.875rem; color: var(--ct-color-gray-500);">
+                          by {item.author}
+                        </span>
+                      )}
+                      <ct-hstack gap="2" align="center">
+                        <span style="font-size: 0.75rem; color: var(--ct-color-gray-400);">
+                          {item.status}
+                        </span>
+                        {renderStars(item.rating) && (
+                          <span style="font-size: 0.75rem; color: var(--ct-color-warning-500);">
+                            {renderStars(item.rating)}
+                          </span>
+                        )}
+                      </ct-hstack>
+                      {item.notes && (
+                        <span style="font-size: 0.75rem; color: var(--ct-color-gray-500); font-style: italic; margin-top: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
+                          {item.notes}
+                        </span>
+                      )}
+                    </ct-vstack>
+                    <ct-button
+                      variant="secondary"
+                      onClick={() => navigateTo(item)}
+                    >
+                      Edit
+                    </ct-button>
+                    <ct-button
+                      variant="ghost"
+                      onClick={() => removeItem.send({ item })}
+                    >
+                      ×
+                    </ct-button>
+                  </ct-hstack>
+                </ct-card>
+              ));
+            })}
+
+            {hasNoFilteredItems
+              ? (
+                <div style="text-align: center; color: var(--ct-color-gray-500); padding: 2rem;">
+                  No items yet. Add something to read!
+                </div>
+              )
+              : null}
+          </ct-vstack>
+        </ct-vscroll>
+
+        <ct-vstack slot="footer" gap="2" style="padding: 1rem;">
+          <ct-hstack gap="2">
+            <ct-input
+              $value={newTitle}
+              placeholder="Title..."
+              style="flex: 1;"
+            />
+            <ct-input
+              $value={newAuthor}
+              placeholder="Author..."
+              style="width: 150px;"
+            />
+            <ct-select
+              $value={newType}
+              items={[
+                { label: "📄 Article", value: "article" },
+                { label: "📚 Book", value: "book" },
+                { label: "📑 Paper", value: "paper" },
+                { label: "🎬 Video", value: "video" },
+              ]}
+              style="width: 120px;"
+            />
+            <ct-button
+              variant="primary"
+              onClick={() =>
+                addItem.send({
+                  title: newTitle.get(),
+                  author: newAuthor.get(),
+                  type: newType.get(),
+                })}
+            >
+              Add
+            </ct-button>
+          </ct-hstack>
+        </ct-vstack>
+      </ct-screen>
+    ),
+    items,
+    totalCount,
+    currentFilter,
+    filteredItems,
+    filteredCount,
+    addItem,
+    removeItem,
+    setFilter,
+    updateItem,
+  };
+});
