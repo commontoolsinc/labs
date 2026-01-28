@@ -1,5 +1,6 @@
 /// <cts-enable />
 import {
+  action,
   computed,
   type Default,
   generateText,
@@ -21,6 +22,7 @@ import {
   generateId,
   type MentionablePiece,
   type MinimalPiece,
+  type NotebookCell,
   type NotebookPiece,
   type NoteInput,
 } from "./schemas.tsx";
@@ -45,40 +47,20 @@ interface NoteOutput {
   embeddedUI: VNode;
 }
 
-const _updateTitle = handler<
-  { detail: { value: string } },
-  { title: Writable<string> }
->(
-  (event, state) => {
-    state.title.set(event.detail?.value ?? "");
-  },
-);
+// ===== Module-scope handlers (reused with different bindings) =====
 
-const _updateContent = handler<
-  { detail: { value: string } },
-  { content: Writable<string> }
->(
-  (event, state) => {
-    state.content.set(event.detail?.value ?? "");
-  },
-);
-
+// Used in ct-code-editor - no state binding needed, just forwards event
 const handlePieceLinkClick = handler<
-  {
-    detail: {
-      piece: Writable<MentionablePiece>;
-    };
-  },
+  { detail: { piece: Writable<MentionablePiece> } },
   Record<string, never>
->(({ detail }, _) => {
-  return navigateTo(detail.piece);
-});
+>(({ detail }) => navigateTo(detail.piece));
 
+// Used in ct-code-editor - binds mentionable and allPieces
 const handleNewBacklink = handler<
   {
     detail: {
       text: string;
-      pieceId: any;
+      pieceId: unknown;
       piece: Writable<MentionablePiece>;
       navigate: boolean;
     };
@@ -88,9 +70,7 @@ const handleNewBacklink = handler<
     allPieces: Writable<MinimalPiece[]>;
   }
 >(({ detail }, { mentionable, allPieces }) => {
-  console.log("new piece", detail.text, detail.pieceId);
-
-  // Push to allPieces so it appears in default-app (this was the missing piece!)
+  // Push to allPieces so it appears in default-app
   allPieces.push(detail.piece);
 
   if (detail.navigate) {
@@ -100,99 +80,7 @@ const handleNewBacklink = handler<
   }
 });
 
-/** This edits the content */
-const handleEditContent = handler<
-  { detail: { value: string }; result?: Writable<string> },
-  { content: Writable<string> }
->(
-  ({ detail, result }, { content }) => {
-    content.set(detail.value);
-    result?.set("test!");
-  },
-);
-
-const handlePieceLinkClicked = handler<
-  void,
-  { piece: Writable<MentionablePiece> }
->(
-  (_, { piece }) => {
-    return navigateTo(piece);
-  },
-);
-
-// Handler to start editing title
-const startEditingTitle = handler<
-  Record<string, never>,
-  { isEditingTitle: Writable<boolean> }
->((_, { isEditingTitle }) => {
-  isEditingTitle.set(true);
-});
-
-// Handler to stop editing title
-const stopEditingTitle = handler<
-  Record<string, never>,
-  { isEditingTitle: Writable<boolean> }
->((_, { isEditingTitle }) => {
-  isEditingTitle.set(false);
-});
-
-// Handler for keydown on title input (Enter to save)
-const handleTitleKeydown = handler<
-  { key?: string },
-  { isEditingTitle: Writable<boolean> }
->((event, { isEditingTitle }) => {
-  if (event?.key === "Enter") {
-    isEditingTitle.set(false);
-  }
-});
-
-// Toggle dropdown menu
-const toggleMenu = handler<void, { menuOpen: Writable<boolean> }>(
-  (_, { menuOpen }) => menuOpen.set(!menuOpen.get()),
-);
-
-// Close dropdown menu
-const closeMenu = handler<void, { menuOpen: Writable<boolean> }>(
-  (_, { menuOpen }) => menuOpen.set(false),
-);
-
-// Create new note (adds to parent notebook if present)
-const createNewNote = handler<
-  void,
-  {
-    allPieces: Writable<MinimalPiece[]>;
-    parentNotebook: Writable<NotebookPiece | null>;
-  }
->((_, { allPieces, parentNotebook }) => {
-  const notebook = parentNotebook?.get?.();
-
-  const note = Note({
-    title: "New Note",
-    content: "",
-    noteId: generateId(),
-    isHidden: !!notebook, // Hide from default-app if in a notebook
-    parentNotebook: notebook ?? undefined, // Set parent for back navigation
-  });
-  allPieces.push(note);
-
-  // Add to parent notebook using Cell.key() pattern
-  if (notebook) {
-    const piecesList = allPieces.get();
-    const nbName = (notebook as any)?.[NAME];
-    const nbIndex = piecesList.findIndex((c: any) =>
-      (c as any)?.[NAME] === nbName
-    );
-    if (nbIndex >= 0) {
-      const notebookCell = allPieces.key(nbIndex);
-      const notesCell = notebookCell.key("notes");
-      notesCell.push(note);
-    }
-  }
-
-  return navigateTo(note);
-});
-
-// Menu: Navigate to a notebook
+// Used in .map() over notebooks - binds different notebook each time
 const menuGoToNotebook = handler<
   void,
   { menuOpen: Writable<boolean>; notebook: Writable<MinimalPiece> }
@@ -201,57 +89,39 @@ const menuGoToNotebook = handler<
   return navigateTo(notebook);
 });
 
-// Navigate to parent notebook
-const goToParent = handler<Record<string, never>, { self: any }>(
-  (_, { self }) => {
-    const p = (self as any).parentNotebook;
-    if (p) navigateTo(p);
-  },
+// Used in .map() over backlinks - binds different piece each time
+const handleBacklinkClick = handler<
+  void,
+  { piece: Writable<MentionablePiece> }
+>(
+  (_, { piece }) => navigateTo(piece),
 );
 
-// Handler that creates NoteMd dynamically when clicked (not during pattern construction)
-// This avoids the sub-recipe serialization issue with $pattern
-const goToViewer = handler<
-  void,
-  {
-    title: Writable<string>;
-    content: Writable<string>;
-    backlinks: Writable<MentionablePiece[]>;
-    noteId: Writable<string>;
-    self: any;
-  }
->((_, state) => {
-  return navigateTo(
-    NoteMd({
-      note: {
-        title: state.title,
-        content: state.content,
-        backlinks: state.backlinks,
-        noteId: state.noteId,
-      },
-      // Pass direct reference to source note for Edit button
-      sourceNoteRef: state.self,
-      // Pass content Writable for checkbox updates
-      content: state.content,
-    }),
-  );
+// Navigate to parent notebook - binds self to access parentNotebook
+const goToParentHandler = handler<
+  Record<string, never>,
+  { self: { parentNotebook?: unknown } }
+>((_, { self }) => {
+  const p = self?.parentNotebook;
+  if (p) navigateTo(p);
 });
 
+// ===== Utility functions =====
+
+// Type guard for notebook cells (mentionable items that have isNotebook and notes)
+const isNotebookCell = (item: unknown): item is NotebookCell => {
+  const maybe = item as { isNotebook?: boolean; notes?: unknown };
+  return !!maybe.isNotebook && !!maybe.notes;
+};
+
 // Grep function for patternTool - filters content lines by query
-const grepFn = (
-  { query, content }: { query: string; content: string },
-) => {
-  return computed(() => {
-    return content.split("\n").filter((c) => c.includes(query));
-  });
+const grepFn = ({ query, content }: { query: string; content: string }) => {
+  return computed(() => content.split("\n").filter((c) => c.includes(query)));
 };
 
 // Translate function for patternTool - translates content to specified language
 const translateFn = (
-  { language, content }: {
-    language: string;
-    content: string;
-  },
+  { language, content }: { language: string; content: string },
 ) => {
   const genResult = generateText({
     system: computed(() => `Translate the content to ${language}.`),
@@ -265,36 +135,18 @@ const translateFn = (
   });
 };
 
-// Menu: All Notes (find existing only - can't create due to circular imports)
-const menuAllNotebooks = handler<
-  void,
-  { menuOpen: Writable<boolean>; allPieces: Writable<MinimalPiece[]> }
->((_, { menuOpen, allPieces }) => {
-  menuOpen.set(false);
-  const pieces = allPieces.get();
-  const existing = pieces.find((piece: any) => {
-    const name = piece?.[NAME];
-    return typeof name === "string" && name.startsWith("All Notes");
-  });
-  if (existing) {
-    return navigateTo(existing);
-  }
-  // Can't create NotesImportExport here due to circular imports
-  // User should create it from default-app first
-});
+// ===== Pattern =====
 
 const Note = pattern<NoteInput, NoteOutput>(
-  (
-    {
-      title,
-      content,
-      isHidden,
-      noteId,
-      linkPattern,
-      parentNotebook: parentNotebookProp,
-      [SELF]: self,
-    },
-  ) => {
+  ({
+    title,
+    content,
+    isHidden,
+    noteId,
+    linkPattern,
+    parentNotebook: parentNotebookProp,
+    [SELF]: self,
+  }) => {
     const { allPieces } =
       wish<{ allPieces: MinimalPiece[] }>({ query: "#default" }).result;
     const mentionable = wish<Default<MentionablePiece[], []>>(
@@ -303,14 +155,114 @@ const Note = pattern<NoteInput, NoteOutput>(
     const _recentPieces = wish<MinimalPiece[]>({ query: "#recent" }).result;
     const mentioned = Writable.of<MentionablePiece[]>([]);
 
-    // Dropdown menu state
+    // UI state
     const menuOpen = Writable.of(false);
+    const isEditingTitle = Writable.of(false);
 
-    // State for inline title editing
-    const isEditingTitle = Writable.of<boolean>(false);
+    // Backlinks - populated by backlinks-index.tsx
+    const backlinks = Writable.of<MentionablePiece[]>([]);
 
-    // LAZY: Only filter notebooks when menu is open (dropdown needs them)
-    // This avoids O(n) filter on every allPieces change for every note
+    // ===== Computed values =====
+
+    // Parent notebook: use direct reference (set when navigating from notebook)
+    const parentNotebook = computed(() => {
+      const selfParent = (self as any)?.parentNotebook;
+      if (selfParent) return selfParent;
+      if (parentNotebookProp) return parentNotebookProp;
+      return null;
+    });
+
+    // Find the parent notebook in mentionable (for adding notes to it)
+    // mentionable is a superset that includes notebooks with their notes arrays
+    const parentNotebookCell = computed((): NotebookCell | null => {
+      const notebook = parentNotebookProp;
+      if (!notebook) return null;
+
+      const nbName = notebook[NAME];
+      const found = mentionable.find((c) => c[NAME] === nbName);
+      if (!found || !isNotebookCell(found)) return null;
+
+      return found;
+    });
+
+    // ===== Actions =====
+
+    const toggleMenu = action(() => menuOpen.set(!menuOpen.get()));
+    const closeMenu = action(() => menuOpen.set(false));
+
+    const startEditingTitle = action(() => isEditingTitle.set(true));
+    const stopEditingTitle = action(() => isEditingTitle.set(false));
+
+    const handleTitleKeydown = action((event: { key?: string }) => {
+      if (event?.key === "Enter") {
+        isEditingTitle.set(false);
+      }
+    });
+
+    const goToParent = goToParentHandler({ self });
+
+    const goToViewer = action(() => {
+      return navigateTo(
+        NoteMd({
+          note: {
+            title,
+            content,
+            backlinks,
+            noteId,
+          },
+          sourceNoteRef: self,
+          content,
+        }),
+      );
+    });
+
+    // Create new note action - closes over allPieces and parentNotebookProp
+    const createNewNote = action(() => {
+      const notebook = parentNotebookProp;
+      const notebookCell = parentNotebookCell;
+
+      const note = Note({
+        title: "New Note",
+        content: "",
+        noteId: generateId(),
+        isHidden: !!notebook,
+        parentNotebook: notebook,
+      });
+      allPieces.push(note as any); // Required for persistence
+
+      // Add to parent notebook if we have a reference to it
+      if (notebookCell) {
+        notebookCell.notes.push(note);
+      }
+
+      return navigateTo(note);
+    });
+
+    const menuAllNotebooks = action(() => {
+      menuOpen.set(false);
+      const existing = allPieces.find((piece: any) => {
+        const name = piece?.[NAME];
+        return typeof name === "string" && name.startsWith("All Notes");
+      });
+      if (existing) {
+        return navigateTo(existing);
+      }
+    });
+
+    // Exported stream for external content editing
+    const editContent = action(
+      (
+        { detail, result }: {
+          detail: { value: string };
+          result?: Writable<string>;
+        },
+      ) => {
+        content.set(detail.value);
+        result?.set("test!");
+      },
+    );
+
+    // LAZY: Only filter notebooks when menu is open
     const notebooks = computed(() => {
       if (!menuOpen.get()) return [];
       return allPieces.filter((piece: any) => {
@@ -329,13 +281,11 @@ const Note = pattern<NoteInput, NoteOutput>(
     });
 
     // LAZY: Only compute which notebooks contain this note when menu is open
-    // This avoids O(n*m) computation on every allPieces change
     const containingNotebookNames = computed(() => {
-      // Only compute when menu is actually open
       if (!menuOpen.get()) return [];
 
-      const myId = noteId; // CTS handles Cell unwrapping
-      if (!myId) return []; // Can't match if we have no noteId
+      const myId = noteId;
+      if (!myId) return [];
       const result: string[] = [];
       for (const nb of notebooks) {
         const nbNotes = (nb as any)?.notes ?? [];
@@ -350,33 +300,15 @@ const Note = pattern<NoteInput, NoteOutput>(
       return result;
     });
 
-    // Parent notebook: use direct reference (set when navigating from notebook)
-    // No expensive fallback - if parentNotebook isn't set, it's null
-    const parentNotebook = computed(() => {
-      // Read from self.parentNotebook for reactive updates when navigating
-      const selfParent = (self as any)?.parentNotebook;
-      if (selfParent) return selfParent;
-
-      // If parent was passed explicitly as prop, use it
-      if (parentNotebookProp) return parentNotebookProp;
-
-      // No expensive fallback - just return null if not set
-      return null;
-    });
-
-    // populated in backlinks-index.tsx
-    const backlinks = Writable.of<MentionablePiece[]>([]);
-
-    // Use provided linkPattern or default to creating new Notes
-    // linkPattern is a Writable<string> - access reactively, not as raw string
+    // Link pattern for wiki-links
     const patternJson = computed(() => {
-      // deno-lint-ignore no-explicit-any
       const lpValue = (linkPattern as any)?.get?.() ?? linkPattern;
       const custom = typeof lpValue === "string" ? lpValue.trim() : "";
       return custom || JSON.stringify(Note);
     });
 
-    // Editor component - used in both full UI and embeddedUI
+    // ===== UI =====
+
     const editorUI = (
       <ct-code-editor
         $value={content}
@@ -405,15 +337,14 @@ const Note = pattern<NoteInput, NoteOutput>(
               borderBottom: "1px solid var(--ct-color-border, #e5e5e7)",
             }}
           >
-            {/* Parent notebook chip - shows where we navigated from */}
+            {/* Parent notebook chip */}
             <ct-hstack
               gap="2"
               align="center"
               style={{
-                display: computed(() => {
-                  const p = (self as any).parentNotebook;
-                  return p ? "flex" : "none";
-                }),
+                display: computed(() =>
+                  (self as any).parentNotebook ? "flex" : "none"
+                ),
                 marginBottom: "4px",
               }}
             >
@@ -431,14 +362,11 @@ const Note = pattern<NoteInput, NoteOutput>(
                   return p?.[NAME] ?? p?.title ?? "Notebook";
                 })}
                 interactive
-                onct-click={goToParent({ self })}
+                onct-click={goToParent}
               />
             </ct-hstack>
 
-            <ct-hstack
-              gap="3"
-              style={{ alignItems: "center" }}
-            >
+            <ct-hstack gap="3" style={{ alignItems: "center" }}>
               {/* Editable Title - click to edit */}
               <div
                 style={{
@@ -450,7 +378,7 @@ const Note = pattern<NoteInput, NoteOutput>(
                   cursor: "pointer",
                   flex: 1,
                 }}
-                onClick={startEditingTitle({ isEditingTitle })}
+                onClick={startEditingTitle}
               >
                 <span
                   style={{ margin: 0, fontSize: "15px", fontWeight: "600" }}
@@ -471,21 +399,15 @@ const Note = pattern<NoteInput, NoteOutput>(
                   $value={title}
                   placeholder="Note title..."
                   style={{ flex: 1 }}
-                  onct-blur={stopEditingTitle({ isEditingTitle })}
-                  onct-keydown={handleTitleKeydown({ isEditingTitle })}
+                  onct-blur={stopEditingTitle}
+                  onct-keydown={handleTitleKeydown}
                 />
               </div>
 
               {/* View Mode button */}
               <ct-button
                 variant="ghost"
-                onClick={goToViewer({
-                  title,
-                  content,
-                  backlinks,
-                  noteId,
-                  self,
-                })}
+                onClick={goToViewer}
                 style={{
                   alignItems: "center",
                   padding: "6px 12px",
@@ -500,7 +422,7 @@ const Note = pattern<NoteInput, NoteOutput>(
               {/* New Note button */}
               <ct-button
                 variant="ghost"
-                onClick={createNewNote({ allPieces, parentNotebook })}
+                onClick={createNewNote}
                 style={{
                   alignItems: "center",
                   padding: "6px 12px",
@@ -515,7 +437,7 @@ const Note = pattern<NoteInput, NoteOutput>(
 
               <ct-button
                 variant="ghost"
-                onClick={toggleMenu({ menuOpen })}
+                onClick={toggleMenu}
                 style={{
                   alignItems: "center",
                   padding: "8px 16px",
@@ -526,9 +448,9 @@ const Note = pattern<NoteInput, NoteOutput>(
                 Notebooks {"\u25BE"}
               </ct-button>
 
-              {/* Backdrop to close menu when clicking outside */}
+              {/* Backdrop to close menu */}
               <div
-                onClick={closeMenu({ menuOpen })}
+                onClick={closeMenu}
                 style={{
                   display: computed(() => (menuOpen.get() ? "block" : "none")),
                   position: "fixed",
@@ -554,7 +476,6 @@ const Note = pattern<NoteInput, NoteOutput>(
                   padding: "4px",
                 }}
               >
-                {/* List of notebooks with ✓ for membership */}
                 {notebooks.map((notebook) => (
                   <ct-button
                     variant="ghost"
@@ -575,7 +496,7 @@ const Note = pattern<NoteInput, NoteOutput>(
                 {/* Divider + All Notes - only show if All Notes piece exists */}
                 <div
                   style={{
-                    display: computed(() => allNotesPiece ? "block" : "none"),
+                    display: computed(() => (allNotesPiece ? "block" : "none")),
                     height: "1px",
                     background: "var(--ct-color-border, #e5e5e7)",
                     margin: "4px 8px",
@@ -584,9 +505,9 @@ const Note = pattern<NoteInput, NoteOutput>(
 
                 <ct-button
                   variant="ghost"
-                  onClick={menuAllNotebooks({ menuOpen, allPieces })}
+                  onClick={menuAllNotebooks}
                   style={{
-                    display: computed(() => allNotesPiece ? "flex" : "none"),
+                    display: computed(() => (allNotesPiece ? "flex" : "none")),
                     justifyContent: "flex-start",
                   }}
                 >
@@ -600,9 +521,7 @@ const Note = pattern<NoteInput, NoteOutput>(
 
           <ct-hstack slot="footer">
             {backlinks?.map((piece) => (
-              <ct-button
-                onClick={handlePieceLinkClicked({ piece })}
-              >
+              <ct-button onClick={handleBacklinkClick({ piece })}>
                 {piece?.[NAME]}
               </ct-button>
             ))}
@@ -618,8 +537,7 @@ const Note = pattern<NoteInput, NoteOutput>(
       noteId,
       grep: patternTool(grepFn, { content }),
       translate: patternTool(translateFn, { content }),
-      editContent: handleEditContent({ content }),
-      // Minimal UI for embedding in containers (e.g., Record modules)
+      editContent,
       embeddedUI: editorUI,
     };
   },
