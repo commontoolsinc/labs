@@ -5,9 +5,11 @@
  * Comprehensive tests for the calendar pattern:
  * - Initial state (empty event list)
  * - Adding events via action
- * - Adding multiple events, verify ordering
- * - Removing events via action
- * - Empty title rejection
+ * - Verifying event fields (title, date, time)
+ * - Adding multiple events, verify count
+ * - Empty/whitespace title rejection
+ * - Update notes via piece action
+ * - Removing events
  *
  * Run: deno task ct test packages/patterns/calendar/calendar.test.tsx --verbose
  */
@@ -55,6 +57,17 @@ export default pattern(() => {
   });
 
   // ==========================================================================
+  // Actions - Modifying Event via Piece Action
+  // ==========================================================================
+
+  const action_update_notes = action(() => {
+    const evts = cal.events;
+    if (evts && evts[0]) {
+      evts[0].setNotes.send({ notes: "Discuss Q2 roadmap" });
+    }
+  });
+
+  // ==========================================================================
   // Actions - Removing Events
   // ==========================================================================
 
@@ -79,12 +92,42 @@ export default pattern(() => {
   const assert_first_title = computed(
     () => cal.events[0]?.title === "Team Meeting",
   );
+  const assert_first_date = computed(
+    () => cal.events[0]?.date === "2025-03-15",
+  );
+  const assert_first_time = computed(
+    () => cal.events[0]?.time === "10:00",
+  );
 
   const assert_has_two = computed(() => cal.events.length === 2);
   const assert_has_three = computed(() => cal.events.length === 3);
 
   // Still three after empty/whitespace attempts
   const assert_still_three = computed(() => cal.events.length === 3);
+
+  // ==========================================================================
+  // Assertions - Sorting
+  // ==========================================================================
+
+  // Events added: Team Meeting (03-15 10:00), Lunch (03-15 12:00), Kickoff (03-10 09:00)
+  // Sorted order should be: Kickoff (03-10), Team Meeting (03-15 10:00), Lunch (03-15 12:00)
+  const assert_sorted_first_is_kickoff = computed(
+    () => cal.sortedEvents[0]?.title === "Kickoff",
+  );
+  const assert_sorted_second_is_meeting = computed(
+    () => cal.sortedEvents[1]?.title === "Team Meeting",
+  );
+  const assert_sorted_third_is_lunch = computed(
+    () => cal.sortedEvents[2]?.title === "Lunch",
+  );
+
+  // ==========================================================================
+  // Assertions - After Notes Update
+  // ==========================================================================
+
+  const assert_notes_updated = computed(
+    () => cal.events[0]?.notes === "Discuss Q2 roadmap",
+  );
 
   // ==========================================================================
   // Assertions - After Removing
@@ -106,6 +149,8 @@ export default pattern(() => {
       { action: action_add_event },
       { assertion: assert_has_one },
       { assertion: assert_first_title },
+      { assertion: assert_first_date },
+      { assertion: assert_first_time },
 
       { action: action_add_second },
       { assertion: assert_has_two },
@@ -113,11 +158,20 @@ export default pattern(() => {
       { action: action_add_earlier_date },
       { assertion: assert_has_three },
 
+      // === Sorting: earliest date first, then by time ===
+      { assertion: assert_sorted_first_is_kickoff },
+      { assertion: assert_sorted_second_is_meeting },
+      { assertion: assert_sorted_third_is_lunch },
+
       // === Empty/whitespace rejected ===
       { action: action_add_empty },
       { assertion: assert_still_three },
       { action: action_add_whitespace },
       { assertion: assert_still_three },
+
+      // === Update notes via piece action ===
+      { action: action_update_notes },
+      { assertion: assert_notes_updated },
 
       // === Remove events ===
       { action: action_remove_first },

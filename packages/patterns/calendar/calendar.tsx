@@ -13,22 +13,23 @@ import {
   Writable,
 } from "commontools";
 
-import EventDetail, { type Event } from "./event-detail.tsx";
+import EventDetail, { type EventPiece } from "./event-detail.tsx";
 
 // Re-export for consumers and tests
-export type { Event };
+export type { EventPiece };
 
 interface CalendarInput {
-  events?: Writable<Default<Event[], []>>;
+  events?: Writable<Default<EventPiece[], []>>;
 }
 
 interface CalendarOutput {
   [NAME]: string;
   [UI]: VNode;
-  events: Event[];
+  events: EventPiece[];
+  sortedEvents: EventPiece[];
   todayDate: string;
   addEvent: Stream<{ title: string; date: string; time: string }>;
-  removeEvent: Stream<{ event: Event }>;
+  removeEvent: Stream<{ event: EventPiece }>;
 }
 
 const getTodayDate = (): string => {
@@ -58,14 +59,14 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
 
   const eventCount = computed(() => events.get().length);
 
-  const sortedEvents = computed((): Event[] => {
+  const sortedEvents = computed((): EventPiece[] => {
     const all = events.get();
     if (!Array.isArray(all)) return [];
     return [...all].sort((a, b) => {
-      const aDate = a.date.get();
-      const bDate = b.date.get();
+      const aDate = a.date;
+      const bDate = b.date;
       if (aDate !== bDate) return aDate.localeCompare(bDate);
-      return (a.time.get() || "").localeCompare(b.time.get() || "");
+      return (a.time || "").localeCompare(b.time || "");
     });
   });
 
@@ -73,14 +74,14 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
     ({ title, date, time }: { title: string; date: string; time: string }) => {
       const trimmed = title.trim();
       if (trimmed && date) {
-        events.push({ title: trimmed, date, time, notes: "" });
+        events.push(EventDetail({ title: trimmed, date, time }));
         newTitle.set("");
         newTime.set("");
       }
     },
   );
 
-  const removeEvent = action(({ event }: { event: Event }) => {
+  const removeEvent = action(({ event }: { event: EventPiece }) => {
     const current = events.get();
     const idx = current.findIndex((e) => equals(event, e));
     if (idx >= 0) {
@@ -115,7 +116,7 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
 
               let lastDate = "";
               return sorted.flatMap((event) => {
-                const date = event.date.get();
+                const date = event.date;
                 const items = [];
 
                 if (date !== lastDate) {
@@ -149,22 +150,29 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
                 }
 
                 items.push(
-                  <ct-card
-                    style="cursor: pointer;"
-                    onClick={() => {
-                      const detail = EventDetail({ event });
-                      return navigateTo(detail);
-                    }}
-                  >
+                  <ct-card>
                     <ct-hstack gap="2" align="center">
                       {event.time && (
                         <span style="font-size: 0.875rem; color: var(--ct-color-gray-500); min-width: 50px;">
                           {event.time}
                         </span>
                       )}
-                      <span style="flex: 1; font-weight: 500;">
-                        {event.title || "(untitled)"}
-                      </span>
+                      <ct-vstack gap="0" style="flex: 1;">
+                        <span style="font-weight: 500;">
+                          {event.title || "(untitled)"}
+                        </span>
+                        {event.notes && (
+                          <span style="font-size: 0.75rem; color: var(--ct-color-gray-500); font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;">
+                            {event.notes}
+                          </span>
+                        )}
+                      </ct-vstack>
+                      <ct-button
+                        variant="secondary"
+                        onClick={() => navigateTo(event)}
+                      >
+                        Edit
+                      </ct-button>
                       <ct-button
                         variant="ghost"
                         onClick={() => removeEvent.send({ event })}
@@ -206,6 +214,7 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
       </ct-screen>
     ),
     events,
+    sortedEvents,
     todayDate,
     addEvent,
     removeEvent,
