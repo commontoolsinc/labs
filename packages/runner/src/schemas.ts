@@ -28,6 +28,7 @@ export const vdomSchema = {
               {
                 type: "array",
                 items: { $ref: "#/$defs/vdomNode", asCell: true },
+                asCell: true,
               },
             ],
           },

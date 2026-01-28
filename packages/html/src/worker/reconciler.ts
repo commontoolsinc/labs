@@ -788,7 +788,7 @@ export class WorkerReconciler {
   ): void {
     // Normalize to array
     const newChildren = Array.isArray(childrenValue)
-      ? childrenValue.flat()
+      ? childrenValue
       : childrenValue
       ? [childrenValue]
       : [];

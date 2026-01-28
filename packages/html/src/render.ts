@@ -266,12 +266,12 @@ const bindChildren = (
   // Mapping from stable key to its rendered node and cancel function.
   let keyedChildren: KeyedChildren = new Map();
 
-  // When the children array changes, diff its flattened values against what we previously rendered.
+  // When the children array changes, diff its values against what we previously rendered.
   const updateChildren = (
     childrenArr: RenderNode | RenderNode[] | undefined | null,
   ) => {
     const newChildren = Array.isArray(childrenArr)
-      ? childrenArr.flat()
+      ? childrenArr
       : childrenArr
       ? [childrenArr]
       : [];
