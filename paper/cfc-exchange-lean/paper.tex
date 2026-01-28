@@ -145,8 +145,9 @@ This paper presents CFC as a complete IFC system and highlights what is novel ab
 
 \paragraph{Reading map.}
 The motivating example is in Section~\ref{sec:gmail}. The label core and exchange model are in
-Sections~\ref{sec:label-core} and~\ref{sec:exchange}. The runtime and structured-data story are in
-Sections~\ref{sec:runtime} and~\ref{sec:structured}. The Lean formalization is in
+Sections~\ref{sec:label-core} and~\ref{sec:exchange}. The runtime and implementation are in
+Sections~\ref{sec:runtime} and~\ref{sec:impl}. Structured-data transitions are in
+Section~\ref{sec:structured}. The Lean formalization is in
 Section~\ref{sec:lean}. Related work is in Section~\ref{sec:related}.
 
 \section{Motivating Example: Gmail OAuth}\label{sec:gmail}
@@ -331,6 +332,47 @@ boundary where policies apply.
 The Lean code models intents and commit points in a small form:
 \texttt{formal/Cfc/Intent.lean}, \texttt{formal/Cfc/CommitPoint.lean}, and proofs in
 \texttt{formal/Cfc/Proofs/Intent.lean} and \texttt{formal/Cfc/Proofs/CommitPoint.lean}.
+
+\section{Implementation Overview}\label{sec:impl}
+
+We assume an implementation of CFC in a production-oriented reactive runtime (e.g., a TypeScript
+runtime embedded in an application framework). The central engineering goal is to keep the trusted
+computing base small: untrusted handlers never directly ``change labels'' or ``declassify''; they
+only compute outputs, and the runtime derives and verifies labels.
+
+\paragraph{Trusted components.}
+A typical CFC implementation consists of:
+\begin{itemize}
+  \item a \textbf{label engine} that represents labels, performs CNF joins and integrity meets, and
+        maintains a conservative approximation of \texttt{pcConfidentiality} for each handler;
+  \item a \textbf{schema/transition engine} that walks output schemas, derives labels according to
+        transition annotations, and verifies evidence for claimed transitions (exact copy checks,
+        projection checks, collection membership constraints, etc.);
+  \item a \textbf{policy engine} that stores and verifies policy records and evaluates exchange rules
+        at boundaries, using integrity evidence supplied by the runtime (user intent, authorization,
+        endorsed transformations);
+  \item \textbf{boundary adapters} (network, storage, UI) that perform access checks and apply
+        exchange rules immediately before egress or side effects.
+\end{itemize}
+
+\paragraph{Evidence sources.}
+Several CFC mechanisms rely on evidence that is hard to spoof from untrusted code:
+\begin{itemize}
+  \item \textbf{Content addressing / references:} exact-copy and projection checks compare
+        \emph{references} (content hashes, stable object IDs, or cryptographic commitments) rather
+        than trusting application-provided equality.
+  \item \textbf{UI-backed integrity:} user gestures are tied to a canonical UI snapshot digest, so a
+        handler cannot claim ``the user clicked X'' without the platform supplying the gesture and
+        snapshot evidence.
+  \item \textbf{Endorsed transformations:} integrity-preserving transforms are permitted only when
+        the runtime can match the executing code to an endorsed registry entry (e.g., by hashing the
+        code or referencing a signed module identity).
+\end{itemize}
+
+\paragraph{Why this scales.}
+The transition system and exchange rules are designed so that most complexity is \emph{data-driven}:
+policies and transition declarations live in schemas and policy records, while the trusted runtime
+implements a small number of generic checks and label combinators.
 
 \section{Structured Data: Schema-Driven Label Transitions}\label{sec:structured}
 
