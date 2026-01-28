@@ -430,9 +430,8 @@ function GmailExtractor<T = unknown>(input: GmailExtractorInput) {
   const isConnected = gmailImporter.isReady;
 
   // Auto-detect whether to run analysis based on presence of extraction config
-  const shouldRunAnalysis = computed(() => {
-    return !!(extraction?.promptTemplate?.trim() && extraction?.schema);
-  });
+  const shouldRunAnalysis =
+    !!(extraction?.promptTemplate?.trim() && extraction?.schema);
 
   // Reactive LLM analysis - analyze each email (only if extraction is provided)
   // Note: consumers can access result via item.analysis.result or item.result
