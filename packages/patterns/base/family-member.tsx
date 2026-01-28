@@ -19,8 +19,8 @@ import {
   Writable,
 } from "commontools";
 
-// Import PersonLike from the canonical person pattern
-import type { PersonLike } from "./person.tsx";
+// Import PersonLike and sibling types from the canonical person pattern
+import type { PersonLike, PersonSiblingCharm } from "./person.tsx";
 
 // ============================================================================
 // FamilyMember Type - Extends PersonLike with family-specific fields
@@ -73,6 +73,9 @@ interface Input {
       }
     >
   >;
+  // Optional: reactive sibling source from container for sameAs linking
+  // Uses unknown[] to accept any container's charm type at runtime
+  siblingSource?: Writable<unknown[]>;
 }
 
 interface Output {
@@ -97,11 +100,27 @@ const updateDietaryRestrictions = handler<
   });
 });
 
+// sameAs handlers
+const setSameAs = handler<
+  unknown,
+  { member: Writable<FamilyMember>; linkedPerson: PersonLike }
+>((_event, { member, linkedPerson }) => {
+  const current = member.get();
+  member.set({ ...current, sameAs: linkedPerson });
+});
+
+const clearSameAs = handler<unknown, { member: Writable<FamilyMember> }>(
+  (_event, { member }) => {
+    const current = member.get();
+    member.set({ ...current, sameAs: undefined });
+  },
+);
+
 // ============================================================================
 // Pattern
 // ============================================================================
 
-export default pattern<Input, Output>(({ member }) => {
+export default pattern<Input, Output>(({ member, siblingSource }) => {
   // Computed display name showing name and relationship
   const displayName = computed(() => {
     const first = member.key("firstName").get();
@@ -117,6 +136,67 @@ export default pattern<Input, Output>(({ member }) => {
     if (name) return name;
     return "Family Member";
   });
+
+  // Computed: current sameAs link display
+  const sameAsDisplay = computed(() => {
+    const linked = member.key("sameAs").get();
+    if (!linked) return null;
+    const first = linked.firstName || "";
+    const last = linked.lastName || "";
+    if (first && last) return `${first} ${last}`;
+    if (first) return first;
+    if (last) return last;
+    return "Unknown";
+  });
+
+  // Computed: filter out self from siblings and extract linkable persons
+  const linkableSiblings = computed(() => {
+    if (!siblingSource) return [];
+
+    const allSiblings = siblingSource.get();
+    if (!allSiblings || allSiblings.length === 0) return [];
+
+    const selfFirst = member.key("firstName").get();
+    const selfLast = member.key("lastName").get();
+
+    const result: Array<{ name: string; linkedPerson: PersonLike }> = [];
+
+    for (const item of allSiblings) {
+      // Cast to expected shape at runtime
+      const sib = item as PersonSiblingCharm;
+      const sibPerson = sib.person;
+      const sibMember = sib.member;
+
+      let firstName = "";
+      let lastName = "";
+      let linkedPerson: PersonLike | undefined;
+
+      if (sibPerson) {
+        firstName = sibPerson.firstName || "";
+        lastName = sibPerson.lastName || "";
+        linkedPerson = sibPerson;
+      } else if (sibMember) {
+        firstName = sibMember.firstName || "";
+        lastName = sibMember.lastName || "";
+        linkedPerson = sibMember as PersonLike;
+      }
+
+      // Skip self
+      if (firstName === selfFirst && lastName === selfLast) continue;
+      if (!linkedPerson) continue;
+
+      let name = "Person";
+      if (firstName && lastName) name = `${firstName} ${lastName}`;
+      else if (firstName) name = firstName;
+      else if (lastName) name = lastName;
+
+      result.push({ name, linkedPerson });
+    }
+
+    return result;
+  });
+
+  const hasSiblings = computed(() => linkableSiblings.length > 0);
 
   return {
     [NAME]: displayName,
@@ -170,6 +250,65 @@ export default pattern<Input, Output>(({ member }) => {
               onct-change={updateDietaryRestrictions({ member })}
             />
           </ct-vstack>
+
+          {/* sameAs Section - only show if siblings available */}
+          {computed(() => {
+            if (!hasSiblings) return null;
+
+            return (
+              <ct-vstack
+                style={{
+                  gap: "8px",
+                  paddingTop: "8px",
+                  borderTop: "1px solid #e5e7eb",
+                }}
+              >
+                <label style={{ fontSize: "12px", color: "#6b7280" }}>
+                  Same As (link to another contact)
+                </label>
+
+                {computed(() => {
+                  const linkedName = sameAsDisplay;
+                  if (linkedName) {
+                    return (
+                      <ct-hstack style={{ gap: "8px", alignItems: "center" }}>
+                        <span style={{ fontSize: "14px" }}>
+                          Linked to: {linkedName}
+                        </span>
+                        <ct-button
+                          variant="ghost"
+                          size="sm"
+                          onClick={clearSameAs({ member })}
+                        >
+                          ×
+                        </ct-button>
+                      </ct-hstack>
+                    );
+                  }
+
+                  const siblings: Array<
+                    { name: string; linkedPerson: PersonLike }
+                  > = linkableSiblings;
+                  return (
+                    <ct-hstack style={{ gap: "4px", flexWrap: "wrap" }}>
+                      {siblings.map((sib) => (
+                        <ct-button
+                          variant="outline"
+                          size="sm"
+                          onClick={setSameAs({
+                            member,
+                            linkedPerson: sib.linkedPerson,
+                          })}
+                        >
+                          {sib.name}
+                        </ct-button>
+                      ))}
+                    </ct-hstack>
+                  );
+                })}
+              </ct-vstack>
+            );
+          })}
         </ct-vstack>
       </ct-screen>
     ),
