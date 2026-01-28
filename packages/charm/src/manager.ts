@@ -894,7 +894,7 @@ export class CharmManager {
       let targetInputCell = targetCell.withTx(tx);
       if (targetIsCharm) {
         // For charms, target fields are in the source cell's argument
-        const sourceCell = targetCell.getSourceCell(processSchema);
+        const sourceCell = targetInputCell.getSourceCell(processSchema);
         if (!sourceCell) {
           throw new Error("Target charm has no source cell");
         }
