@@ -331,12 +331,13 @@ verifiable.
 
 The spec defines a transition schema language that includes (among others):
 \begin{itemize}
-  \item \texttt{passthroughOf}: output node is a reference-preserving view of input node;
-  \item \texttt{projectionOf}: output node is a projection of input node (with scoping constraints);
-  \item \texttt{exactCopyOf}: output is byte-for-byte identical to input (verified);
-  \item \texttt{transformOf}: output is computed by a transformation with endorsed registry evidence;
-  \item \texttt{collection}: output collection relates to input collection (subset/filter/permute) and
-        may introduce selection-decision taint.
+  \item \texttt{passThrough}: output node preserves a reference to an input node (label follows reference);
+  \item \texttt{projection}: output node is a projection of an input node (with scoped integrity);
+  \item \texttt{exactCopyOf}: output is byte-for-byte identical to an input path (verified);
+  \item \texttt{combinedFrom}/\texttt{combinationType}: output combines multiple inputs by join or endorsed transformation;
+  \item \texttt{collection}: output collection relates to an input collection (subset/filter/permute/length-preserved)
+        and may introduce selection-decision taint;
+  \item \texttt{recomposeProjections}: output recomposes multiple verified projections from the same source.
 \end{itemize}
 
 Each transition has a \emph{verification} rule (evidence check) and a \emph{propagation} rule (how to
