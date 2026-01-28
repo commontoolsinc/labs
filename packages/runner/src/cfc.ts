@@ -507,10 +507,10 @@ export class ContextualFlowControl {
    *
    * Nonetheless, it's very convenient to have a schema without knowing, so we
    * provide this method and use it.
-   * 
+   *
    * The additionalPropertiesDefault lets you change the behavior when there is
    * an object with an empty properties map and no additional properties.
-   * The JSON-Schema spec would default this to true, but we often want to 
+   * The JSON-Schema spec would default this to true, but we often want to
    * use it to exclude properties that we don't care about without failing.
    */
   schemaAtPath(
@@ -518,7 +518,7 @@ export class ContextualFlowControl {
     path: readonly string[],
     rootSchema?: JSONSchema,
     extraClassifications?: Set<string>,
-    additionalPropertiesDefault = true
+    additionalPropertiesDefault = true,
   ): JSONSchema {
     const joined = (extraClassifications !== undefined)
       ? new Set<string>(extraClassifications)
@@ -598,7 +598,9 @@ export class ContextualFlowControl {
           }
         } else if (cursor.additionalProperties !== undefined) {
           cursor = cursor.additionalProperties;
-        } else if (cursor.properties && Object.keys(cursor.properties).length === 0) {
+        } else if (
+          cursor.properties && Object.keys(cursor.properties).length === 0
+        ) {
           cursor = additionalPropertiesDefault;
         } else { // no additionalProperties field is the same as having one that is true
           cursor = true;
