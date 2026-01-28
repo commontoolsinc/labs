@@ -9,7 +9,7 @@ export const BGCharmEntrySchema = {
   type: "object",
   properties: {
     space: { type: "string" },
-    charmId: { type: "string" },
+    pieceId: { type: "string" },
     integration: { type: "string" },
     createdAt: { type: "number" },
     updatedAt: { type: "number" },
@@ -19,7 +19,7 @@ export const BGCharmEntrySchema = {
   },
   required: [
     "space",
-    "charmId",
+    "pieceId",
     "integration",
     "createdAt",
     "updatedAt",

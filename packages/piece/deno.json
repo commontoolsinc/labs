@@ -1,5 +1,5 @@
 {
-  "name": "@commontools/charm",
+  "name": "@commontools/piece",
   "tasks": {
     "test": "deno test --allow-env --allow-ffi --allow-read --allow-write"
   },

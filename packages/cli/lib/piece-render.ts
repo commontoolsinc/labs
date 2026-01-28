@@ -2,7 +2,7 @@ import { render } from "@commontools/html/client";
 import { UI } from "@commontools/runner";
 import { rendererVDOMSchema } from "@commontools/runner/schemas";
 import { loadManager } from "./piece.ts";
-import { CharmsController } from "@commontools/charm/ops";
+import { PiecesController } from "@commontools/piece/ops";
 import type { PieceConfig } from "./piece.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { MockDoc } from "../../html/src/mock-doc.ts";
@@ -31,7 +31,7 @@ export async function renderPiece(
 
   // 2. Get piece controller to access the Cell
   const manager = await loadManager(config);
-  const charms = new CharmsController(manager);
+  const charms = new PiecesController(manager);
   const charm = await charms.get(config.piece, options.start ?? true);
   const cell = charm.getCell().asSchema({
     type: "object",

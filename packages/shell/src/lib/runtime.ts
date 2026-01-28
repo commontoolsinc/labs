@@ -157,8 +157,8 @@ export class RuntimeInternals extends EventTarget {
 
   #onConsole = (e: RuntimeClientEvents["console"][0]) => {
     const { metadata, method, args } = e;
-    if (metadata?.charmId) {
-      console.log(`Charm(${metadata.charmId}) [${method}]:`, ...args);
+    if (metadata?.pieceId) {
+      console.log(`Charm(${metadata.pieceId}) [${method}]:`, ...args);
     } else {
       console.log(`Console [${method}]:`, ...args);
     }
@@ -166,16 +166,16 @@ export class RuntimeInternals extends EventTarget {
 
   #onNavigateRequest = (e: RuntimeClientEvents["navigaterequest"][0]) => {
     const { cell } = e;
-    const charmId = cell.id();
-    logger.log("navigate", `Navigating to charm: ${charmId}`);
+    const pieceId = cell.id();
+    logger.log("navigate", `Navigating to charm: ${pieceId}`);
 
     if (cell.space() === this.#space && this.#spaceName) {
       navigate({
         spaceName: this.#spaceName,
-        charmId,
+        pieceId,
       });
     } else {
-      navigate({ spaceDid: cell.space(), charmId: cell.id() });
+      navigate({ spaceDid: cell.space(), pieceId: cell.id() });
     }
   };
 
@@ -261,7 +261,7 @@ export class RuntimeInternals extends EventTarget {
       spaceName: session.spaceName,
     });
 
-    // Wait for CharmManager to sync
+    // Wait for PieceManager to sync
     await client.synced();
 
     return new RuntimeInternals(

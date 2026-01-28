@@ -20,12 +20,12 @@ import {
   setPieceRecipe,
   SpaceConfig,
 } from "../lib/piece.ts";
-import { CharmsController } from "@commontools/charm/ops";
+import { PiecesController } from "@commontools/piece/ops";
 import { renderPiece } from "../lib/piece-render.ts";
 import { render, safeStringify } from "../lib/render.ts";
 import { decode } from "@commontools/utils/encoding";
 import { absPath } from "../lib/utils.ts";
-import { parsePath } from "@commontools/charm/ops";
+import { parsePath } from "@commontools/piece/ops";
 import { UI } from "@commontools/runner";
 
 // Hint system: print helpful next-step suggestions after operations
@@ -176,7 +176,7 @@ export const piece = new Command()
   .action(async (options) => {
     const pieceConfig = parsePieceOptions(options);
     const manager = await loadManager(pieceConfig);
-    const charms = new CharmsController(manager);
+    const charms = new PiecesController(manager);
     // Start in this transient runtime, wait, then stop and exit
     const charm = await charms.get(pieceConfig.piece, true);
     await charm.getCell().pull();

@@ -1,4 +1,4 @@
-export { charmId, CharmManager, getRecipeIdFromCharm } from "./manager.ts";
+export { getRecipeIdFromPiece, pieceId, PieceManager } from "./manager.ts";
 export {
   addFavorite,
   getHomeFavorites,
@@ -15,7 +15,7 @@ export {
   type JournalSnapshot,
   searchJournalByTag,
 } from "./journal.ts";
-export { searchCharms } from "./search.ts";
+export { searchPieces } from "./search.ts";
 export {
   castNewRecipe,
   compileAndRunRecipe,
@@ -31,11 +31,11 @@ export {
 } from "./iframe/static.ts";
 export {
   addGithubRecipe,
-  castSpellAsCharm,
-  createDataCharm,
-  fixItCharm,
-  modifyCharm,
-  renameCharm,
+  castSpellAsPiece,
+  createDataPiece,
+  fixItPiece,
+  modifyPiece,
+  renamePiece,
 } from "./commands.ts";
 export {
   buildFullRecipe,

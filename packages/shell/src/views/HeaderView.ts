@@ -139,7 +139,7 @@ export class XHeaderView extends BaseView {
   charmTitle?: string;
 
   @property({ attribute: false })
-  charmId?: string;
+  pieceId?: string;
 
   @property({ attribute: false })
   spaceName?: string;
@@ -226,13 +226,13 @@ export class XHeaderView extends BaseView {
           .spaceName}</x-charm-link>
       `
       : null;
-    const charmLink = this.charmId && this.spaceName
+    const charmLink = this.pieceId && this.spaceName
       ? html`
         <x-charm-link
           id="header-charm-link"
-          .charmId="${this.charmId}"
+          .pieceId="${this.pieceId}"
           .spaceName="${this.spaceName}"
-        >${this.charmTitle || this.charmId}</x-charm-link>
+        >${this.charmTitle || this.pieceId}</x-charm-link>
       `
       : null;
     const reloadIcon = this.isViewingDefaultPattern && this.isLoggedIn
@@ -281,10 +281,10 @@ export class XHeaderView extends BaseView {
               >
                 ${this.showSidebar ? "⏵" : "⏴"}
               </x-button>
-              ${this.charmId
+              ${this.pieceId
                 ? html`
                   <x-favorite-button
-                    .charmId="${this.charmId}"
+                    .pieceId="${this.pieceId}"
                     .rt="${this.rt}"
                   ></x-favorite-button>
                 `

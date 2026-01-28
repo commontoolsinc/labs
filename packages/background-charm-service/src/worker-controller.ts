@@ -105,7 +105,7 @@ export class WorkerController extends EventTarget {
       throw new Error("Worker not ready.");
     }
     return await this.exec(WorkerIPCMessageType.Run, {
-      charmId: bg.get().charmId,
+      pieceId: bg.get().pieceId,
     });
   }
 

@@ -6,7 +6,7 @@ import {
   RuntimeProgram,
   TYPE,
 } from "@commontools/runner";
-import { charmId, CharmManager } from "../manager.ts";
+import { pieceId, PieceManager } from "../manager.ts";
 import { nameSchema, processSchema } from "@commontools/runner/schemas";
 import { CellPath, compileProgram, resolveCellPath } from "./utils.ts";
 import { injectUserCode } from "../iframe/static.ts";
@@ -16,18 +16,18 @@ import {
   IFrameRecipe,
 } from "../iframe/recipe.ts";
 
-interface CharmCellIo {
+interface PieceCellIo {
   get(path?: CellPath): Promise<unknown>;
   set(value: unknown, path?: CellPath): Promise<void>;
   getCell(): Promise<Cell<unknown>>;
 }
 
-type CharmPropIoType = "result" | "input";
+type PiecePropIoType = "result" | "input";
 
-class CharmPropIo implements CharmCellIo {
-  #cc: CharmController;
-  #type: CharmPropIoType;
-  constructor(cc: CharmController, type: CharmPropIoType) {
+class PiecePropIo implements PieceCellIo {
+  #cc: PieceController;
+  #type: PiecePropIoType;
+  constructor(cc: PieceController, type: PiecePropIoType) {
     this.#cc = cc;
     this.#type = type;
   }
@@ -71,24 +71,24 @@ class CharmPropIo implements CharmCellIo {
   }
 }
 
-export class CharmController<T = unknown> {
+export class PieceController<T = unknown> {
   #cell: Cell<T>;
-  #manager: CharmManager;
+  #manager: PieceManager;
   readonly id: string;
 
-  input: CharmCellIo;
-  result: CharmCellIo;
+  input: PieceCellIo;
+  result: PieceCellIo;
 
-  constructor(manager: CharmManager, cell: Cell<T>) {
-    const id = charmId(cell);
+  constructor(manager: PieceManager, cell: Cell<T>) {
+    const id = pieceId(cell);
     if (!id) {
       throw new Error("Could not get an ID from a Cell<Charm>");
     }
     this.id = id;
     this.#manager = manager;
     this.#cell = cell;
-    this.input = new CharmPropIo(this, "input");
-    this.result = new CharmPropIo(this, "result");
+    this.input = new PiecePropIo(this, "input");
+    this.result = new PiecePropIo(this, "result");
   }
 
   name(): string | undefined {
@@ -106,7 +106,7 @@ export class CharmController<T = unknown> {
   }
 
   async getRecipe(): Promise<Recipe> {
-    const recipeId = getRecipeIdFromCharm(this.#cell);
+    const recipeId = getRecipeIdFromPiece(this.#cell);
     const runtime = this.#manager.runtime;
     const recipe = await runtime.recipeManager.loadRecipe(
       recipeId,
@@ -116,7 +116,7 @@ export class CharmController<T = unknown> {
   }
 
   async getRecipeMeta(): Promise<RecipeMeta> {
-    const recipeId = getRecipeIdFromCharm(this.#cell);
+    const recipeId = getRecipeIdFromPiece(this.#cell);
     const space = this.#manager.getSpace();
     // Ensure the recipe is loaded first - this populates the metadata
     await this.#manager.runtime.recipeManager.loadRecipe(recipeId, space);
@@ -149,34 +149,34 @@ export class CharmController<T = unknown> {
     await execute(this.#manager, this.id, recipe);
   }
 
-  async readingFrom(): Promise<CharmController[]> {
+  async readingFrom(): Promise<PieceController[]> {
     const cells = await this.#manager.getReadingFrom(this.#cell);
-    return cells.map((cell) => new CharmController(this.#manager, cell));
+    return cells.map((cell) => new PieceController(this.#manager, cell));
   }
 
-  async readBy(): Promise<CharmController[]> {
+  async readBy(): Promise<PieceController[]> {
     const cells = await this.#manager.getReadByCharms(this.#cell);
-    return cells.map((cell) => new CharmController(this.#manager, cell));
+    return cells.map((cell) => new PieceController(this.#manager, cell));
   }
 
-  manager(): CharmManager {
+  manager(): PieceManager {
     return this.#manager;
   }
 }
 
 async function execute(
-  manager: CharmManager,
-  charmId: string,
+  manager: PieceManager,
+  pieceId: string,
   recipe: Recipe,
   input?: object,
   options?: { start?: boolean },
 ): Promise<void> {
-  await manager.runWithRecipe(recipe, charmId, input, options);
+  await manager.runWithRecipe(recipe, pieceId, input, options);
   await manager.runtime.idle();
   await manager.synced();
 }
 
-export const getRecipeIdFromCharm = (charm: Cell<unknown>): string => {
+export const getRecipeIdFromPiece = (charm: Cell<unknown>): string => {
   const sourceCell = charm.getSourceCell(processSchema);
   if (!sourceCell) throw new Error("charm missing source cell");
   return sourceCell.get()?.[TYPE];

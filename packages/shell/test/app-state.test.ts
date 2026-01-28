@@ -88,7 +88,7 @@ describe("AppState", () => {
       type: "set-view",
       view: {
         spaceName: SPACE_NAME,
-        charmId: "example",
+        pieceId: "example",
       },
     });
 

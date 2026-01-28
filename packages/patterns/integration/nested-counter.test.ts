@@ -1,5 +1,5 @@
 import { env, Page, waitFor } from "@commontools/integration";
-import { CharmController, CharmsController } from "@commontools/charm/ops";
+import { PieceController, PiecesController } from "@commontools/piece/ops";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -14,13 +14,13 @@ describe("nested counter integration test", () => {
   shell.bindLifecycle();
 
   let identity: Identity;
-  let cc: CharmsController;
-  let charm: CharmController;
+  let cc: PiecesController;
+  let charm: PieceController;
   let charmSinkCancel: (() => void) | undefined;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
-    cc = await CharmsController.initialize({
+    cc = await PiecesController.initialize({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
@@ -58,7 +58,7 @@ describe("nested counter integration test", () => {
       frontendUrl: FRONTEND_URL,
       view: {
         spaceName: SPACE_NAME,
-        charmId: charm.id,
+        pieceId: charm.id,
       },
       identity,
     });
@@ -113,7 +113,7 @@ describe("nested counter integration test", () => {
       frontendUrl: FRONTEND_URL,
       view: {
         spaceName: SPACE_NAME,
-        charmId: charm.id,
+        pieceId: charm.id,
       },
       identity,
     });

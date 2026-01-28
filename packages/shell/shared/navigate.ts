@@ -130,7 +130,7 @@ function mapNavigationView(
     view.spaceDid === currentSpaceDID
   ) {
     return {
-      ...("charmId" in view ? { charmId: view.charmId } : undefined),
+      ...("pieceId" in view ? { pieceId: view.pieceId } : undefined),
       spaceName: currentSpaceName,
     };
   }

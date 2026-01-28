@@ -42,7 +42,7 @@ import {
 } from "../query-result-proxy.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 
-// Avoid importing from @commontools/charm to prevent circular deps in tests
+// Avoid importing from @commontools/piece to prevent circular deps in tests
 
 const logger = getLogger("llm-dialog", {
   enabled: false,
@@ -97,7 +97,7 @@ function normalizeInputSchema(schemaLike: unknown): JSONSchema {
 }
 
 /**
- * Resolve a charm's result schema similarly to CharmManager.#getResultSchema:
+ * Resolve a charm's result schema similarly to PieceManager.#getResultSchema:
  * - Prefer a non-empty recipe.resultSchema if recipe is loaded
  * - Otherwise derive a simple object schema from the current value
  */

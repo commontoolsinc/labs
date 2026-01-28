@@ -5,7 +5,7 @@ import {
 } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
 import type { JSONSchema } from "@commontools/runner";
-import { WorkflowForm, WorkflowType } from "@commontools/charm";
+import { WorkflowForm, WorkflowType } from "@commontools/piece";
 import { llmPrompt } from "../index.ts";
 import { DEFAULT_MODEL_NAME, extractTextFromLLMResponse } from "../types.ts";
 

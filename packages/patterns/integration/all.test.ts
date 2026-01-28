@@ -1,5 +1,5 @@
 import { env } from "@commontools/integration";
-import { CharmsController } from "@commontools/charm/ops";
+import { PiecesController } from "@commontools/piece/ops";
 import { describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert } from "@std/assert";
@@ -23,11 +23,11 @@ describe("Compile all recipes", () => {
       // Heap monitoring for bisection experiments (CT-1148)
       const heapBefore = Deno.memoryUsage().heapUsed;
 
-      // Create a fresh CharmsController per test to prevent memory accumulation
+      // Create a fresh PiecesController per test to prevent memory accumulation
       // The RecipeManager caches compiled recipes indefinitely, so we need a
-      // fresh Runtime (via CharmsController) each time to avoid OOM in CI
+      // fresh Runtime (via PiecesController) each time to avoid OOM in CI
       const identity = await Identity.generate();
-      const cc = await CharmsController.initialize({
+      const cc = await PiecesController.initialize({
         spaceName: SPACE_NAME,
         apiUrl: new URL(API_URL),
         identity: identity,

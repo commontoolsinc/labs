@@ -135,7 +135,7 @@ export class ShellIntegration {
   }
 
   // Navigates to the URL represented by `frontendUrl`,
-  // `spaceName`, and `charmId`. Waits for state to settle
+  // `spaceName`, and `pieceId`. Waits for state to settle
   // reflecting these properties.
   //
   // If `identity` provided, logs in with the identity

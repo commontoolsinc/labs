@@ -1,6 +1,6 @@
 import { DID, Identity, type Session } from "@commontools/identity";
-import { CharmManager } from "@commontools/charm";
-import { CharmsController } from "@commontools/charm/ops";
+import { PieceManager } from "@commontools/piece";
+import { PiecesController } from "@commontools/piece/ops";
 import {
   getLoggerCountsBreakdown,
   getTimingStatsBreakdown,
@@ -81,8 +81,8 @@ import type { VDomOp } from "../protocol/types.ts";
 
 export class RuntimeProcessor {
   private runtime: Runtime;
-  private charmManager: CharmManager;
-  private cc: CharmsController;
+  private charmManager: PieceManager;
+  private cc: PiecesController;
   private space: DID;
   private identity: Identity;
   private _isDisposed = false;
@@ -100,8 +100,8 @@ export class RuntimeProcessor {
 
   private constructor(
     runtime: Runtime,
-    charmManager: CharmManager,
-    cc: CharmsController,
+    charmManager: PieceManager,
+    cc: PiecesController,
     space: DID,
     identity: Identity,
     telemetry: RuntimeTelemetry,
@@ -140,7 +140,7 @@ export class RuntimeProcessor {
       address: new URL("/api/storage/memory", data.apiUrl),
     });
 
-    let charmManager: CharmManager | undefined = undefined;
+    let charmManager: PieceManager | undefined = undefined;
     const runtime = new Runtime({
       apiUrl: apiUrlObj,
       storageManager,
@@ -189,7 +189,7 @@ export class RuntimeProcessor {
           self.postMessage({
             type: NotificationType.ErrorReport,
             message: error.message,
-            pageId: error.charmId,
+            pageId: error.pieceId,
             space: error.space,
             recipeId: error.recipeId,
             spellId: error.spellId,
@@ -203,9 +203,9 @@ export class RuntimeProcessor {
       throw new Error(`Could not connect to "${data.apiUrl}"`);
     }
 
-    charmManager = new CharmManager(session, runtime);
+    charmManager = new PieceManager(session, runtime);
     await charmManager.synced();
-    const cc = new CharmsController(charmManager);
+    const cc = new PiecesController(charmManager);
 
     return new RuntimeProcessor(
       runtime,
@@ -371,14 +371,14 @@ export class RuntimeProcessor {
       };
     }
 
-    // Pattern doesn't exist - create it via home space CharmController
+    // Pattern doesn't exist - create it via home space PieceController
     const homeSession: Session = {
       as: this.identity,
       space: this.runtime.userIdentityDID,
     };
-    const homeManager = new CharmManager(homeSession, this.runtime);
+    const homeManager = new PieceManager(homeSession, this.runtime);
     await homeManager.synced();
-    const homeCC = new CharmsController(homeManager);
+    const homeCC = new PiecesController(homeManager);
 
     const homePattern = await homeCC.ensureDefaultPattern();
 
@@ -568,7 +568,7 @@ export class RuntimeProcessor {
   };
 
   private static async trackRecentCharm(
-    charmManager: CharmManager,
+    charmManager: PieceManager,
     target: unknown,
   ): Promise<void> {
     const defaultPattern = await charmManager.getDefaultPattern();

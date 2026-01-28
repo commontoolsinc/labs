@@ -10,8 +10,8 @@ import {
   VNode,
 } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
-import { charmId, CharmManager, extractUserCode } from "@commontools/charm";
-import { CharmsController } from "@commontools/charm/ops";
+import { extractUserCode, pieceId, PieceManager } from "@commontools/piece";
+import { PiecesController } from "@commontools/piece/ops";
 import { dirname, join } from "@std/path";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { setLLMUrl } from "@commontools/llm";
@@ -42,11 +42,11 @@ async function makeSession(config: SpaceConfig): Promise<Session> {
   }
 }
 
-export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
+export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
   setLLMUrl(config.apiUrl);
   const session = await makeSession(config);
   // Use a const ref object so we can assign later while keeping const binding
-  const charmManagerRef: { current?: CharmManager } = {};
+  const charmManagerRef: { current?: PieceManager } = {};
   const runtime = new Runtime({
     apiUrl: new URL(config.apiUrl),
     storageManager: StorageManager.open({
@@ -56,7 +56,7 @@ export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
     }),
     navigateCallback: (target) => {
       try {
-        const id = charmId(target);
+        const id = pieceId(target);
         if (!id) {
           console.error("navigateTo: target missing piece id");
           return;
@@ -69,7 +69,7 @@ export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
             const mgr = charmManagerRef.current!;
             const charmsCell = await mgr.getCharms();
             const list = charmsCell.get();
-            const exists = list.some((c) => charmId(c) === id);
+            const exists = list.some((c) => pieceId(c) === id);
             if (!exists) {
               await mgr.add([target]);
             }
@@ -89,14 +89,14 @@ export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
     throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
   }
 
-  const charmManager = new CharmManager(session, runtime);
+  const charmManager = new PieceManager(session, runtime);
   charmManagerRef.current = charmManager;
   await charmManager.synced();
   return charmManager;
 }
 
 async function getProgramFromFile(
-  manager: CharmManager,
+  manager: PieceManager,
   entry: EntryConfig,
 ): Promise<RuntimeProgram> {
   const program: RuntimeProgram = await manager.runtime.harness.resolve(
@@ -113,7 +113,7 @@ export async function listPieces(
   config: SpaceConfig,
 ): Promise<{ id: string; name?: string; recipeName?: string }[]> {
   const manager = await loadManager(config);
-  const charms = new CharmsController(manager);
+  const charms = new PiecesController(manager);
   const allCharms = await charms.getAllCharms();
   return Promise.all(
     allCharms.map(async (charm) => {
@@ -133,7 +133,7 @@ export async function newPiece(
   options?: { start?: boolean },
 ): Promise<string> {
   const manager = await loadManager(config);
-  const charms = new CharmsController(manager);
+  const charms = new PiecesController(manager);
 
   // Try to ensure default pattern, but don't fail the entire operation
   try {
@@ -164,7 +164,7 @@ export async function setPieceRecipe(
   entry: EntryConfig,
 ): Promise<void> {
   const manager = await loadManager(config);
-  const charms = new CharmsController(manager);
+  const charms = new PiecesController(manager);
   const charm = await charms.get(config.piece, false);
   if (entry.mainPath.endsWith(".iframe.js")) {
     await charm.setIframeRecipe(entry.mainPath);
@@ -179,7 +179,7 @@ export async function savePieceRecipe(
 ): Promise<void> {
   await ensureDir(outPath);
   const manager = await loadManager(config);
-  const charms = new CharmsController(manager);
+  const charms = new PiecesController(manager);
   const charm = await charms.get(config.piece, false);
   const meta = await charm.getRecipeMeta();
   const iframeRecipe = await charm.getIframeRecipe();
@@ -217,7 +217,7 @@ export async function applyPieceInput(
   input: object,
 ) {
   const manager = await loadManager(config);
-  const charms = new CharmsController(manager);
+  const charms = new PiecesController(manager);
   const charm = await charms.get(config.piece, false);
   await charm.setInput(input);
 }
@@ -234,7 +234,7 @@ export async function linkPieces(
 
   // Ensure default pattern exists (best effort)
   try {
-    const charms = new CharmsController(manager);
+    const charms = new PiecesController(manager);
     await charms.ensureDefaultPattern();
   } catch (error) {
     // Non-fatal, log and continue
@@ -424,7 +424,7 @@ export async function inspectPiece(
   readBy: Array<{ id: string; name?: string }>;
 }> {
   const manager = await loadManager(config);
-  const charms = new CharmsController(manager);
+  const charms = new PiecesController(manager);
   const charm = await charms.get(config.piece, false);
 
   const id = charm.id;
@@ -490,7 +490,7 @@ export async function getCellValue(
   options?: { input?: boolean },
 ): Promise<unknown> {
   const manager = await loadManager(config);
-  const charms = new CharmsController(manager);
+  const charms = new PiecesController(manager);
   const charm = await charms.get(config.piece, false);
   if (options?.input) {
     return await charm.input.get(path);
@@ -506,7 +506,7 @@ export async function setCellValue(
   options?: { input?: boolean },
 ): Promise<void> {
   const manager = await loadManager(config);
-  const charms = new CharmsController(manager);
+  const charms = new PiecesController(manager);
   const charm = await charms.get(config.piece, false);
   if (options?.input) {
     await charm.input.set(value, path);
@@ -524,7 +524,7 @@ export async function callPieceHandler<T = any>(
   args: T,
 ): Promise<void> {
   const manager = await loadManager(config);
-  const charms = new CharmsController(manager);
+  const charms = new PiecesController(manager);
 
   // Ensure default pattern exists (best effort)
   try {
@@ -573,7 +573,7 @@ export async function removePiece(
   config: PieceConfig,
 ): Promise<void> {
   const manager = await loadManager(config);
-  const charms = new CharmsController(manager);
+  const charms = new PiecesController(manager);
   const removed = await charms.remove(config.piece);
 
   if (!removed) {

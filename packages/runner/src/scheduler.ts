@@ -1890,7 +1890,7 @@ export class Scheduler {
     this.filterStats = { filtered: 0, executed: 0 };
   }
   private handleError(error: Error, action: any) {
-    const { charmId, spellId, recipeId, space } = getCharmMetadataFromFrame(
+    const { pieceId, spellId, recipeId, space } = getCharmMetadataFromFrame(
       (error as Error & { frame?: Frame }).frame,
     );
 
@@ -1901,7 +1901,7 @@ export class Scheduler {
 
     const errorWithContext = error as ErrorWithContext;
     errorWithContext.action = action;
-    if (charmId) errorWithContext.charmId = charmId;
+    if (pieceId) errorWithContext.pieceId = pieceId;
     if (spellId) errorWithContext.spellId = spellId;
     if (recipeId) errorWithContext.recipeId = recipeId;
     if (space) errorWithContext.space = space as MemorySpace;
@@ -2601,7 +2601,7 @@ function getCharmMetadataFromFrame(frame?: Frame): {
   spellId?: string;
   recipeId?: string;
   space?: string;
-  charmId?: string;
+  pieceId?: string;
 } {
   // TODO(seefeld): This is a rather hacky way to get the context, based on the
   // unsafe_binding pattern. Once we replace that mechanism, let's add nicer
@@ -2627,7 +2627,7 @@ function getCharmMetadataFromFrame(frame?: Frame): {
   result.spellId = spellCell?.getAsNormalizedFullLink().id;
   const resultCell = source.get()?.resultRef;
   result.space = source.space;
-  result.charmId = JSON.parse(
+  result.pieceId = JSON.parse(
     JSON.stringify(resultCell?.entityId ?? {}),
   )["/"];
   return result;

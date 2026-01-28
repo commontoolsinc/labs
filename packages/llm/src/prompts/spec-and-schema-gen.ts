@@ -2,7 +2,7 @@ import { hydratePrompt, llmPrompt, parseTagFromResponse } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
 import { DEFAULT_MODEL_NAME, extractTextFromLLMResponse } from "../types.ts";
 import type { JSONSchema, JSONSchemaMutable } from "@commontools/runner";
-import { WorkflowForm } from "@commontools/charm";
+import { WorkflowForm } from "@commontools/piece";
 import { JSONSchemaObj } from "@commontools/api";
 import { isObject } from "@commontools/utils/types";
 

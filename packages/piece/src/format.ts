@@ -1,6 +1,6 @@
 import { Module, NAME, Recipe } from "@commontools/runner";
 import { nameSchema } from "@commontools/runner/schemas";
-import { CharmManager } from "./manager.ts";
+import { PieceManager } from "./manager.ts";
 import { Cell } from "@commontools/runner";
 
 /**
@@ -35,7 +35,7 @@ function toCamelCase(input: string): string {
 
 export async function formatPromptWithMentions(
   prompt: string,
-  charmManager: CharmManager,
+  charmManager: PieceManager,
 ): Promise<
   {
     text: string;
@@ -121,7 +121,7 @@ async function processNode(
     };
     mentionIndices: Record<string, number>;
   },
-  charmManager?: CharmManager,
+  charmManager?: PieceManager,
   currentList: { type: string | null; level: number } = {
     type: null,
     level: 0,
@@ -230,7 +230,7 @@ async function processNode(
 // Function to parse Slate document and extract mention references
 export async function parseComposerDocument(
   serializedDocument: string,
-  charmManager?: CharmManager,
+  charmManager?: PieceManager,
 ): Promise<{
   text: string;
   mentions: string[];

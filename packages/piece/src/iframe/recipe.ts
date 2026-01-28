@@ -1,5 +1,5 @@
 import { Cell, type JSONSchema, type Runtime } from "@commontools/runner";
-import { getRecipeIdFromCharm } from "../manager.ts";
+import { getRecipeIdFromPiece } from "../manager.ts";
 
 export type IFrameRecipe = {
   src: string;
@@ -71,7 +71,7 @@ export const getIframeRecipe = (
   src?: string;
   iframe?: IFrameRecipe;
 } => {
-  const recipeId = getRecipeIdFromCharm(charm);
+  const recipeId = getRecipeIdFromPiece(charm);
   if (!recipeId) {
     console.warn("No recipeId found for charm", charm.entityId);
     return { recipeId, src: "", iframe: undefined };

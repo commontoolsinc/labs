@@ -33,27 +33,27 @@ export class FavoritesManager {
 
   /**
    * Add a charm to favorites.
-   * @param charmId - The entity ID of the charm to add
+   * @param pieceId - The entity ID of the charm to add
    * @param tag - Optional tag/category for the favorite
    * @param spaceName - Optional human-readable name of the space
    */
   async addFavorite(
-    charmId: string,
+    pieceId: string,
     tag?: string,
     spaceName?: string,
   ): Promise<void> {
     const handler = await this.#getHandler("addFavorite");
-    const charmCellRef = this.#createCharmRef(charmId);
+    const charmCellRef = this.#createCharmRef(pieceId);
     await handler.send({ charm: charmCellRef, tag: tag || "", spaceName });
   }
 
   /**
    * Remove a charm from favorites.
-   * @param charmId - The entity ID of the charm to remove
+   * @param pieceId - The entity ID of the charm to remove
    */
-  async removeFavorite(charmId: string): Promise<void> {
+  async removeFavorite(pieceId: string): Promise<void> {
     const handler = await this.#getHandler("removeFavorite");
-    const charmCellRef = this.#createCharmRef(charmId);
+    const charmCellRef = this.#createCharmRef(pieceId);
     await handler.send({ charm: charmCellRef });
   }
 
@@ -167,11 +167,11 @@ export class FavoritesManager {
 
   /**
    * Create a CellRef for a charm in the current space.
-   * @param charmId - The entity ID of the charm
+   * @param pieceId - The entity ID of the charm
    */
-  #createCharmRef(charmId: string): CellRef {
+  #createCharmRef(pieceId: string): CellRef {
     return {
-      id: `of:${charmId}`,
+      id: `of:${pieceId}`,
       space: this.#currentSpaceDID,
       path: [],
       type: "application/json",

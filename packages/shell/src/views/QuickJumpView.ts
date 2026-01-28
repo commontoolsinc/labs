@@ -240,7 +240,7 @@ export class XQuickJumpView extends BaseView {
   private navigateTo(id: string) {
     const spaceName = this.rt?.spaceName();
     if (!spaceName) return;
-    navigate({ spaceName, charmId: id });
+    navigate({ spaceName, pieceId: id });
     this.close();
   }
 

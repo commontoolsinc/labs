@@ -91,7 +91,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   // TODO(unused)
-  // Currently unused in shell, but a CharmManager-like layer
+  // Currently unused in shell, but a PieceManager-like layer
   // could be built using this
   async getCell<T>(
     space: DID,
@@ -217,7 +217,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   /**
-   * Wait for the CharmManager to be synced with storage.
+   * Wait for the PieceManager to be synced with storage.
    */
   async synced(): Promise<void> {
     await this.#conn.request<RequestType.PageSynced>({

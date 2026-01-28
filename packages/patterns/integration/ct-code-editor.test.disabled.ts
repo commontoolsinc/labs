@@ -11,7 +11,7 @@
  * - Cell echo fires → hash compared → if match, skip update → cursor stays
  */
 import { env, Page, waitFor } from "@commontools/integration";
-import { CharmController, CharmsController } from "@commontools/charm/ops";
+import { PieceController, PiecesController } from "@commontools/piece/ops";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -30,12 +30,12 @@ describe("ct-code-editor cursor stability", () => {
   shell.bindLifecycle();
 
   let identity: Identity;
-  let cc: CharmsController;
-  let charm: CharmController;
+  let cc: PiecesController;
+  let charm: PieceController;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
-    cc = await CharmsController.initialize({
+    cc = await PiecesController.initialize({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
@@ -61,7 +61,7 @@ describe("ct-code-editor cursor stability", () => {
       frontendUrl: FRONTEND_URL,
       view: {
         spaceName: SPACE_NAME,
-        charmId: charm.id,
+        pieceId: charm.id,
       },
       identity,
     });
@@ -1360,7 +1360,7 @@ describe("ct-code-editor cursor stability", () => {
  */
 async function resetEditorState(
   page: Page,
-  charmController: CharmController,
+  charmController: PieceController,
 ): Promise<void> {
   // Clear editor using annotation to avoid triggering typing timestamp
   await clearEditor(page);

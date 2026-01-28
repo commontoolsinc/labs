@@ -3,16 +3,16 @@ import { expect } from "@std/expect";
 import { Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { createSession, Identity } from "@commontools/identity";
-import { CharmManager } from "../src/manager.ts";
-import { CharmsController } from "../src/ops/charms-controller.ts";
+import { PieceManager } from "../src/manager.ts";
+import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase("test default pattern");
 
-describe("CharmsController.ensureDefaultPattern", () => {
+describe("PiecesController.ensureDefaultPattern", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: CharmManager;
-  let controller: CharmsController;
+  let manager: PieceManager;
+  let controller: PiecesController;
 
   beforeEach(async () => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -26,9 +26,9 @@ describe("CharmsController.ensureDefaultPattern", () => {
       identity: signer,
       spaceName: "test-space-" + crypto.randomUUID(),
     });
-    manager = new CharmManager(session, runtime);
+    manager = new PieceManager(session, runtime);
     await manager.synced();
-    controller = new CharmsController(manager);
+    controller = new PiecesController(manager);
   });
 
   afterEach(async () => {
@@ -99,11 +99,11 @@ describe("CharmsController.ensureDefaultPattern", () => {
   });
 });
 
-describe("CharmsController.recreateDefaultPattern", () => {
+describe("PiecesController.recreateDefaultPattern", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: CharmManager;
-  let controller: CharmsController;
+  let manager: PieceManager;
+  let controller: PiecesController;
 
   beforeEach(async () => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -117,9 +117,9 @@ describe("CharmsController.recreateDefaultPattern", () => {
       identity: signer,
       spaceName: "test-space-" + crypto.randomUUID(),
     });
-    manager = new CharmManager(session, runtime);
+    manager = new PieceManager(session, runtime);
     await manager.synced();
-    controller = new CharmsController(manager);
+    controller = new PiecesController(manager);
   });
 
   afterEach(async () => {

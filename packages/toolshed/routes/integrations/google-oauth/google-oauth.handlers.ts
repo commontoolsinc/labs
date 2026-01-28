@@ -213,7 +213,7 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
 
         await setBGCharm({
           space,
-          charmId: integrationCharmId,
+          pieceId: integrationCharmId,
           integration: "google",
           runtime,
         });
@@ -370,7 +370,7 @@ export const backgroundIntegration: AppRouteHandler<
 
     await setBGCharm({
       space: payload.space,
-      charmId: payload.charmId,
+      pieceId: payload.pieceId,
       integration: payload.integration,
       runtime,
     });

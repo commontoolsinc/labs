@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert } from "@std/assert";
 import { Identity } from "@commontools/identity";
-import { CharmsController } from "@commontools/charm/ops";
+import { PiecesController } from "@commontools/piece/ops";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -16,13 +16,13 @@ describe("instantiate-recipe integration test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  let charmId: string;
+  let pieceId: string;
   let identity: Identity;
-  let cc: CharmsController;
+  let cc: PiecesController;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
-    cc = await CharmsController.initialize({
+    cc = await PiecesController.initialize({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
@@ -38,7 +38,7 @@ describe("instantiate-recipe integration test", () => {
       ),
       { start: false },
     );
-    charmId = charm.id;
+    pieceId = charm.id;
   });
 
   afterAll(async () => {
@@ -55,7 +55,7 @@ describe("instantiate-recipe integration test", () => {
         frontendUrl: FRONTEND_URL,
         view: {
           spaceName: SPACE_NAME,
-          charmId,
+          pieceId,
         },
         identity,
       });

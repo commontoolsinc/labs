@@ -1,7 +1,7 @@
 #!/usr/bin/env -S deno run --allow-read --allow-net --allow-env
 // Load .env file
 import { parseArgs } from "@std/cli/parse-args";
-import { CharmManager, compileRecipe } from "@commontools/charm";
+import { compileRecipe, PieceManager } from "@commontools/piece";
 import {
   getEntityId,
   isStream,
@@ -20,7 +20,7 @@ import { isRecord } from "@commontools/utils/types";
 const {
   spaceName,
   spaceDID,
-  charmId,
+  pieceId,
   recipeFile,
   cause,
   input,
@@ -31,7 +31,7 @@ const {
   string: [
     "spaceName",
     "spaceDID",
-    "charmId",
+    "pieceId",
     "recipeFile",
     "cause",
     "input",
@@ -99,7 +99,7 @@ async function main() {
     }),
     blobbyServerUrl: toolshedUrl,
   });
-  const charmManager = new CharmManager(session, runtime);
+  const charmManager = new PieceManager(session, runtime);
   await charmManager.ready;
   const charms = charmManager.getCharms();
   charms.sink((charms) => {
@@ -109,14 +109,14 @@ async function main() {
     );
   });
 
-  if (charmId) {
-    const charm = await charmManager.get(charmId);
+  if (pieceId) {
+    const charm = await charmManager.get(pieceId);
     if (quit) {
       if (!charm) {
-        console.error("charm not found:", charmId);
+        console.error("charm not found:", pieceId);
         Deno.exit(1);
       }
-      console.log("charm:", charmId);
+      console.log("charm:", pieceId);
       console.log("charm:", JSON.stringify(charm.asSchema().get(), null, 2));
       console.log(
         "sourceCell:",
@@ -125,7 +125,7 @@ async function main() {
       Deno.exit(0);
     }
     charm?.sink((value) => {
-      console.log("charm:", charmId, value);
+      console.log("charm:", pieceId, value);
     });
   }
 

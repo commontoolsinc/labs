@@ -3,14 +3,14 @@ import { expect } from "@std/expect";
 import { Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { createSession, Identity } from "@commontools/identity";
-import { CharmManager } from "../src/manager.ts";
+import { PieceManager } from "../src/manager.ts";
 
 const signer = await Identity.fromPassphrase("test link reactivity");
 
-describe("CharmManager.link() reactivity", () => {
+describe("PieceManager.link() reactivity", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: CharmManager;
+  let manager: PieceManager;
 
   beforeEach(async () => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -23,7 +23,7 @@ describe("CharmManager.link() reactivity", () => {
       identity: signer,
       spaceName: "test-space-" + crypto.randomUUID(),
     });
-    manager = new CharmManager(session, runtime);
+    manager = new PieceManager(session, runtime);
     await manager.synced();
   });
 

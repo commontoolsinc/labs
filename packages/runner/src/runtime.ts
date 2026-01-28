@@ -59,7 +59,7 @@ export type ConsoleHandler = (
 
 export type ErrorWithContext = Error & {
   action: Action;
-  charmId: string;
+  pieceId: string;
   space: MemorySpace;
   recipeId: string;
   spellId: string | undefined;

@@ -4,7 +4,7 @@ import { isObject, isRecord } from "@commontools/utils/types";
 
 /**
  * These tests focus on the core functionality used by our charm reference detection
- * without requiring the full CharmManager setup
+ * without requiring the full PieceManager setup
  */
 describe("Reference detection core functionality", () => {
   // Test detection of object structures similar to cell links

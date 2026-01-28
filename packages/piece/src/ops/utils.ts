@@ -1,5 +1,5 @@
 import { Cell, RuntimeProgram } from "@commontools/runner";
-import { CharmManager } from "../manager.ts";
+import { PieceManager } from "../manager.ts";
 import { compileRecipe } from "../iterate.ts";
 
 export type CellPath = (string | number)[];
@@ -20,7 +20,7 @@ export function parsePath(path: string): CellPath {
 }
 
 export async function compileProgram(
-  manager: CharmManager,
+  manager: PieceManager,
   program: RuntimeProgram | string,
 ) {
   const recipe = await compileRecipe(

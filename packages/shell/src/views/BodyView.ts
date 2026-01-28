@@ -130,7 +130,7 @@ export class XBodyView extends BaseView {
       `
       : this.activePattern
       ? html`
-        <ct-charm slot="main" .charmId="${this.activePattern.id()}">
+        <ct-charm slot="main" .pieceId="${this.activePattern.id()}">
           <ct-render .cell="${this.activePattern.cell()}"></ct-render>
         </ct-charm>
       `

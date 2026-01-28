@@ -7,36 +7,36 @@ import {
 } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { type NameSchema, nameSchema } from "@commontools/runner/schemas";
-import { CharmManager } from "../index.ts";
-import { CharmController } from "./charm-controller.ts";
+import { PieceManager } from "../index.ts";
+import { PieceController } from "./piece-controller.ts";
 import { compileProgram } from "./utils.ts";
 import { createSession, Identity } from "@commontools/identity";
 import { HttpProgramResolver } from "@commontools/js-compiler";
 import { ACLManager } from "./acl-manager.ts";
 
-export interface CreateCharmOptions {
+export interface CreatePieceOptions {
   input?: object;
   start?: boolean;
 }
 
-export class CharmsController<T = unknown> {
-  #manager: CharmManager;
+export class PiecesController<T = unknown> {
+  #manager: PieceManager;
   #disposed = false;
 
-  constructor(manager: CharmManager) {
+  constructor(manager: PieceManager) {
     this.#manager = manager;
   }
 
-  manager(): CharmManager {
+  manager(): PieceManager {
     this.disposeCheck();
     return this.#manager;
   }
 
   async create<U = T>(
     program: RuntimeProgram | string,
-    options: CreateCharmOptions = {},
+    options: CreatePieceOptions = {},
     cause: string | undefined = undefined,
-  ): Promise<CharmController<U>> {
+  ): Promise<PieceController<U>> {
     this.disposeCheck();
     const recipe = await compileProgram(this.#manager, program);
     const charm = await this.#manager.runPersistent<U>(
@@ -48,41 +48,41 @@ export class CharmsController<T = unknown> {
     );
     await this.#manager.runtime.idle();
     await this.#manager.synced();
-    return new CharmController<U>(this.#manager, charm);
+    return new PieceController<U>(this.#manager, charm);
   }
 
   async get<S extends JSONSchema = JSONSchema>(
-    charmId: string,
+    pieceId: string,
     runIt: boolean,
     schema: S,
-  ): Promise<CharmController<Schema<S>>>;
+  ): Promise<PieceController<Schema<S>>>;
   async get<T = unknown>(
-    charmId: string,
+    pieceId: string,
     runIt?: boolean,
     schema?: JSONSchema,
-  ): Promise<CharmController<T>>;
+  ): Promise<PieceController<T>>;
   async get(
-    charmId: string,
+    pieceId: string,
     runIt: boolean = false,
     schema?: JSONSchema,
-  ): Promise<CharmController> {
+  ): Promise<PieceController> {
     this.disposeCheck();
-    const cell = await (await this.#manager.get(charmId, runIt, schema)).sync();
-    return new CharmController(this.#manager, cell);
+    const cell = await (await this.#manager.get(pieceId, runIt, schema)).sync();
+    return new PieceController(this.#manager, cell);
   }
 
   async getAllCharms() {
     this.disposeCheck();
     const charmsCell = await this.#manager.getCharms();
     const charms = charmsCell.get();
-    return charms.map((charm) => new CharmController(this.#manager, charm));
+    return charms.map((charm) => new PieceController(this.#manager, charm));
   }
 
-  async remove(charmId: string): Promise<boolean> {
+  async remove(pieceId: string): Promise<boolean> {
     this.disposeCheck();
     const charm = this.#manager.runtime.getCellFromEntityId(
       this.#manager.getSpace(),
-      { "/": charmId },
+      { "/": pieceId },
     );
     const removed = await this.#manager.remove(charm);
     // Ensure full synchronization
@@ -93,14 +93,14 @@ export class CharmsController<T = unknown> {
     return removed;
   }
 
-  async start(charmId: string): Promise<void> {
+  async start(pieceId: string): Promise<void> {
     this.disposeCheck();
-    await this.#manager.startCharm(charmId);
+    await this.#manager.startCharm(pieceId);
   }
 
-  async stop(charmId: string): Promise<void> {
+  async stop(pieceId: string): Promise<void> {
     this.disposeCheck();
-    await this.#manager.stopCharm(charmId);
+    await this.#manager.stopCharm(pieceId);
   }
 
   async dispose() {
@@ -111,7 +111,7 @@ export class CharmsController<T = unknown> {
 
   private disposeCheck() {
     if (this.#disposed) {
-      throw new Error("CharmsController has been disposed.");
+      throw new Error("PiecesController has been disposed.");
     }
   }
 
@@ -119,7 +119,7 @@ export class CharmsController<T = unknown> {
     apiUrl: URL;
     identity: Identity;
     spaceName: string;
-  }): Promise<CharmsController> {
+  }): Promise<PiecesController> {
     const session = await createSession({ identity, spaceName });
     const runtime = new Runtime({
       apiUrl: new URL(apiUrl),
@@ -130,9 +130,9 @@ export class CharmsController<T = unknown> {
       }),
     });
 
-    const manager = new CharmManager(session, runtime);
+    const manager = new PieceManager(session, runtime);
     await manager.synced();
-    return new CharmsController(manager);
+    return new PiecesController(manager);
   }
 
   acl(): ACLManager {
@@ -146,7 +146,7 @@ export class CharmsController<T = unknown> {
    *
    * @returns The newly created default pattern charm
    */
-  async recreateDefaultPattern(): Promise<CharmController<NameSchema>> {
+  async recreateDefaultPattern(): Promise<PieceController<NameSchema>> {
     this.disposeCheck();
 
     // Stop and unlink the existing default pattern first (before any operations that might fail)
@@ -221,7 +221,7 @@ export class CharmsController<T = unknown> {
     await this.#manager.runtime.idle();
     await this.#manager.synced();
 
-    return new CharmController<NameSchema>(this.#manager, finalPattern);
+    return new PieceController<NameSchema>(this.#manager, finalPattern);
   }
 
   /**
@@ -236,13 +236,13 @@ export class CharmsController<T = unknown> {
    *
    * @returns The default pattern charm, either existing or newly created
    */
-  async ensureDefaultPattern(): Promise<CharmController<NameSchema>> {
+  async ensureDefaultPattern(): Promise<PieceController<NameSchema>> {
     this.disposeCheck();
 
     // Fast path: check if pattern already exists (outside transaction)
     const existingPattern = await this.#manager.getDefaultPattern();
     if (existingPattern) {
-      return new CharmController<NameSchema>(this.#manager, existingPattern);
+      return new PieceController<NameSchema>(this.#manager, existingPattern);
     }
 
     // Determine which pattern to use based on space type
@@ -321,6 +321,6 @@ export class CharmsController<T = unknown> {
     await this.#manager.runtime.idle();
     await this.#manager.synced();
 
-    return new CharmController<NameSchema>(this.#manager, finalPattern);
+    return new PieceController<NameSchema>(this.#manager, finalPattern);
   }
 }

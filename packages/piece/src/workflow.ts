@@ -10,7 +10,7 @@
  */
 
 import { Cell, type JSONSchema, NAME, Runtime } from "@commontools/runner";
-import { CharmManager } from "./manager.ts";
+import { PieceManager } from "./manager.ts";
 import { classifyWorkflow, generateWorkflowPlan } from "@commontools/llm";
 import { iterate } from "./iterate.ts";
 import { getIframeRecipe } from "./iframe/recipe.ts";
@@ -18,7 +18,7 @@ import { extractUserCode } from "./iframe/static.ts";
 import { formatPromptWithMentions } from "./format.ts";
 import { castNewRecipe } from "./iterate.ts";
 import { applyDefaults, GenerationOptions } from "@commontools/llm";
-import { CharmSearchResult, searchCharms } from "./search.ts";
+import { PieceSearchResult, searchPieces } from "./search.ts";
 import { console } from "./conditional-console.ts";
 import { isRecord } from "@commontools/utils/types";
 
@@ -128,7 +128,7 @@ export interface ProcessedPrompt {
 export async function classifyIntent(
   form: WorkflowForm,
 ): Promise<IntentClassificationResult> {
-  // Process the input for @mentions if a CharmManager is provided
+  // Process the input for @mentions if a PieceManager is provided
   // Extract context from the current charm if available
   let existingSpec: string | undefined;
   let existingSchema: JSONSchema | undefined;
@@ -233,7 +233,7 @@ export async function generatePlan(
     }),
   );
 
-  const { charms } = await searchCharms(
+  const { charms } = await searchPieces(
     form.input.processedInput,
     form.meta.charmManager,
   );
@@ -269,7 +269,7 @@ export interface WorkflowForm {
   plan: {
     features?: string[];
     description?: string;
-    charms?: CharmSearchResult[];
+    charms?: PieceSearchResult[];
   } | null;
 
   generation: {
@@ -278,7 +278,7 @@ export interface WorkflowForm {
 
   // Metadata and workflow state
   meta: {
-    charmManager: CharmManager;
+    charmManager: PieceManager;
     permittedWorkflows?: WorkflowType[];
     generationId?: string;
     model?: string;
@@ -305,7 +305,7 @@ export function createWorkflowForm(
     input: string;
     charm?: Cell<unknown>;
     generationId?: string;
-    charmManager: CharmManager;
+    charmManager: PieceManager;
     permittedWorkflows?: WorkflowType[];
   } & GenerationOptions,
 ): WorkflowForm {
@@ -349,7 +349,7 @@ export function createWorkflowForm(
  * @returns The processed workflow form with mentions processed and references updated
  */
 export async function processInputSection(
-  charmManager: CharmManager,
+  charmManager: PieceManager,
   form: WorkflowForm,
 ): Promise<WorkflowForm> {
   const newForm = { ...form };
@@ -359,7 +359,7 @@ export async function processInputSection(
     throw new Error("Input is empty");
   }
 
-  // Process mentions if CharmManager is provided
+  // Process mentions if PieceManager is provided
   let processedInput = form.input.rawInput;
   const references = { ...form.input.references };
 
@@ -447,7 +447,7 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
   const newForm = { ...form };
 
   if (!newForm.meta.charmManager) {
-    throw new Error("CharmManager is required for code generation");
+    throw new Error("PieceManager is required for code generation");
   }
 
   let charm: Cell<unknown>;
@@ -527,7 +527,7 @@ export type ProcessWorkflowOptions = {
  */
 export async function processWorkflow(
   input: string,
-  charmManager: CharmManager,
+  charmManager: PieceManager,
   options: ProcessWorkflowOptions,
 ): Promise<WorkflowForm> {
   console.groupCollapsed("processWorkflow");
@@ -743,7 +743,7 @@ ${userPrompt}
  * focusing only on fixing issues in the implementation.
  */
 export function executeFixWorkflow(
-  charmManager: CharmManager,
+  charmManager: PieceManager,
   form: WorkflowForm,
 ): Promise<{ cell: Cell<unknown>; llmRequestId?: string }> {
   console.log("Executing FIX workflow");
@@ -769,7 +769,7 @@ export function executeFixWorkflow(
  * or enhance functionality while maintaining compatibility.
  */
 export function executeEditWorkflow(
-  charmManager: CharmManager,
+  charmManager: PieceManager,
   form: WorkflowForm,
 ): Promise<{ cell: Cell<unknown>; llmRequestId?: string }> {
   console.log("Executing EDIT workflow");
@@ -817,7 +817,7 @@ function toCamelCase(input: string): string {
  * data from multiple existing charms.
  */
 export function executeImagineWorkflow(
-  charmManager: CharmManager,
+  charmManager: PieceManager,
   form: WorkflowForm,
 ): Promise<{ cell: Cell<unknown>; llmRequestId?: string }> {
   console.log("Executing IMAGINE workflow");

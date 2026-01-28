@@ -6,12 +6,12 @@ import { getIframeRecipe } from "./iframe/recipe.ts";
 import { extractUserCode, injectUserCode } from "./iframe/static.ts";
 import { WorkflowForm } from "./index.ts";
 import { compileAndRunRecipe, generateNewRecipeVersion } from "./iterate.ts";
-import { CharmManager } from "./manager.ts";
+import { PieceManager } from "./manager.ts";
 import { nameSchema } from "@commontools/runner/schemas";
 import { processWorkflow, ProcessWorkflowOptions } from "./workflow.ts";
 
-export const castSpellAsCharm = async (
-  charmManager: CharmManager,
+export const castSpellAsPiece = async (
+  charmManager: PieceManager,
   recipeKey: string,
   argument: Cell<unknown>,
 ) => {
@@ -31,8 +31,8 @@ export const castSpellAsCharm = async (
   return null;
 };
 
-export const createDataCharm = (
-  charmManager: CharmManager,
+export const createDataPiece = (
+  charmManager: PieceManager,
   data: Record<string, unknown>,
   schema?: JSONSchema,
   name?: string,
@@ -70,8 +70,8 @@ export const createDataCharm = (
   );
 };
 
-export async function fixItCharm(
-  charmManager: CharmManager,
+export async function fixItPiece(
+  charmManager: PieceManager,
   charm: Cell<unknown>,
   error: Error,
   model = DEFAULT_MODEL_NAME,
@@ -108,17 +108,17 @@ export async function fixItCharm(
   );
 }
 
-export async function renameCharm(
-  charmManager: CharmManager,
-  charmId: string,
+export async function renamePiece(
+  charmManager: PieceManager,
+  pieceId: string,
   newName: string,
 ): Promise<void> {
-  const charm = await charmManager.get(charmId, false, nameSchema);
+  const charm = await charmManager.get(pieceId, false, nameSchema);
   charm.key(NAME).set(newName);
 }
 
 export async function addGithubRecipe(
-  charmManager: CharmManager,
+  charmManager: PieceManager,
   filename: string,
   spec: string,
   runOptions: unknown,
@@ -145,7 +145,7 @@ export async function addGithubRecipe(
  * The prompt will be processed for mentions and the current charm will be included in the context.
  * The workflow (edit, rework, fix) will be automatically determined based on the prompt.
  *
- * @param charmManager The CharmManager instance
+ * @param charmManager The PieceManager instance
  * @param promptText The user's input describing what they want to do
  * @param currentCharm The charm being modified
  * @param model Optional LLM model to use
@@ -153,8 +153,8 @@ export async function addGithubRecipe(
  * @param previewPlan Optional: Pass through a pre-generated plan
  * @returns A new or modified charm
  */
-export async function modifyCharm(
-  charmManager: CharmManager,
+export async function modifyPiece(
+  charmManager: PieceManager,
   promptText: string,
   currentCharm: Cell<unknown>,
   prefill?: Partial<WorkflowForm>,

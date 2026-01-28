@@ -10,7 +10,7 @@ import { Identity, Session } from "@commontools/identity";
 import { env } from "@commontools/integration";
 import { StorageManager } from "../src/storage/cache.ts";
 import { Runtime, Stream } from "../src/index.ts";
-import { CharmManager, compileRecipe } from "@commontools/charm";
+import { compileRecipe, PieceManager } from "@commontools/piece";
 
 (Error as any).stackTraceLimit = 100;
 
@@ -52,7 +52,7 @@ async function runTest() {
   });
 
   // Create charm manager for the specified space
-  const charmManager = new CharmManager(session, runtime);
+  const charmManager = new PieceManager(session, runtime);
   await charmManager.ready;
 
   // Read the recipe file content

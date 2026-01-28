@@ -11,7 +11,7 @@ import {
   type Runtime,
   type RuntimeProgram,
 } from "@commontools/runner";
-import { CharmManager } from "./manager.ts";
+import { PieceManager } from "./manager.ts";
 import { charmSourceCellSchema } from "@commontools/runner/schemas";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
@@ -105,7 +105,7 @@ export const genSrc = async (
  * This is a core function used by various workflows
  */
 export async function iterate(
-  charmManager: CharmManager,
+  charmManager: PieceManager,
   charm: Cell<unknown>,
   plan: WorkflowForm["plan"],
   options?: GenerationOptions,
@@ -151,7 +151,7 @@ export function extractTitle(src: string, defaultTitle: string): string {
 }
 
 export const generateNewRecipeVersion = async (
-  charmManager: CharmManager,
+  charmManager: PieceManager,
   parent: Cell<unknown>,
   newRecipe:
     & Pick<IFrameRecipe, "src" | "spec">
@@ -504,7 +504,7 @@ async function twoPhaseCodeGeneration(
  * @returns A new recipe cell
  */
 export async function castNewRecipe(
-  charmManager: CharmManager,
+  charmManager: PieceManager,
   form: WorkflowForm,
 ): Promise<{ cell: Cell<unknown>; llmRequestId?: string }> {
   console.log("Processing form:", form);
@@ -579,7 +579,7 @@ export async function compileRecipe(
 }
 
 export async function compileAndRunRecipe(
-  charmManager: CharmManager,
+  charmManager: PieceManager,
   recipeSrc: string,
   spec: string,
   runOptions: unknown,

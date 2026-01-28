@@ -34,7 +34,7 @@ ensureNotRenderThread();
  * @param charm - The charm to extract ID from
  * @returns The charm ID string, or undefined if no ID is found
  */
-export function charmId(charm: Cell<unknown>): string | undefined {
+export function pieceId(charm: Cell<unknown>): string | undefined {
   const id = charm.entityId;
   if (!id) return undefined;
   const idValue = id["/"];
@@ -54,7 +54,7 @@ function filterOutCell(
   );
 }
 
-export class CharmManager {
+export class PieceManager {
   private space: MemorySpace;
 
   private spaceCell: Cell<SpaceCellContents>;
@@ -81,8 +81,8 @@ export class CharmManager {
 
     // Note: allCharms and recentCharms are now managed by the default pattern,
     // not directly on the space cell. The space cell only contains a link to defaultPattern.
-    // Default pattern creation is handled by CharmsController.ensureDefaultPattern()
-    // which is called by CLI/shell entry points. CharmManager doesn't auto-create it.
+    // Default pattern creation is handled by PiecesController.ensureDefaultPattern()
+    // which is called by CLI/shell entry points. PieceManager doesn't auto-create it.
     this.ready = syncSpaceCellContents.then(() => {});
   }
 
@@ -480,8 +480,8 @@ export class CharmManager {
 
     if (!charm) return result;
 
-    const charmId = getEntityId(charm);
-    if (!charmId) return result;
+    const pieceId = getEntityId(charm);
+    if (!pieceId) return result;
 
     const resolvedCharm = charm.resolveAsCell();
 
@@ -753,17 +753,17 @@ export class CharmManager {
   }
 
   // Consistently return the `Cell<Charm>` of charm with
-  // id `charmId`, applies the provided `recipe` (which may be
+  // id `pieceId`, applies the provided `recipe` (which may be
   // its current recipe -- useful when we are only updating inputs),
   // and optionally applies `inputs` if provided.
   async runWithRecipe(
     recipe: Recipe | Module,
-    charmId: string,
+    pieceId: string,
     inputs?: object,
     options?: { start?: boolean },
   ): Promise<Cell<unknown>> {
     const charm = this.runtime.getCellFromEntityId(this.space, {
-      "/": charmId,
+      "/": pieceId,
     });
     await charm.sync();
     const start = options?.start ?? true;
@@ -915,14 +915,14 @@ export class CharmManager {
   }
 }
 
-export const getRecipeIdFromCharm = (charm: Cell<unknown>): string => {
+export const getRecipeIdFromPiece = (charm: Cell<unknown>): string => {
   const sourceCell = charm.getSourceCell(processSchema);
   if (!sourceCell) throw new Error("charm missing source cell");
   return sourceCell.get()?.[TYPE]!;
 };
 
 async function getCellByIdOrCharm(
-  manager: CharmManager,
+  manager: PieceManager,
   cellId: string,
   label: string,
   options?: { start?: boolean },
@@ -944,7 +944,7 @@ async function getCellByIdOrCharm(
       const charmsCell = await manager.getCharms();
       const charms = charmsCell.get();
       const isActuallyCharm = charms.some((charm: Cell<unknown>) => {
-        const id = charmId(charm);
+        const id = pieceId(charm);
         // If we can't get the charm ID, it's not a valid charm
         if (!id) return false;
         return id === cellId;

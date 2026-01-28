@@ -1,20 +1,20 @@
-import { charmId, CharmManager, DEFAULT_MODEL } from "@commontools/charm";
+import { DEFAULT_MODEL, pieceId, PieceManager } from "@commontools/piece";
 import { nameSchema } from "@commontools/runner/schemas";
 import { Cell, NAME } from "@commontools/runner";
 import { extractTextFromLLMResponse, LLMClient } from "@commontools/llm";
 import { isObject } from "@commontools/utils/types";
 
-export type CharmSearchResult = {
+export type PieceSearchResult = {
   charm: Cell<unknown>;
   name: string;
   reason: string;
 };
 
-export async function searchCharms(
+export async function searchPieces(
   input: string,
-  charmManager: CharmManager,
+  charmManager: PieceManager,
 ): Promise<{
-  charms: CharmSearchResult[];
+  charms: PieceSearchResult[];
   thinking: string;
 }> {
   try {
@@ -29,11 +29,11 @@ export async function searchCharms(
           const recipe = await charmManager.syncRecipe(charm);
 
           return {
-            title: title + ` (#${charmId(charm)!.slice(-4)})`,
+            title: title + ` (#${pieceId(charm)!.slice(-4)})`,
             description: isObject(recipe.argumentSchema)
               ? recipe.argumentSchema.description
               : undefined,
-            id: charmId(charm)!,
+            id: pieceId(charm)!,
             value: charm.entityId!,
           };
         } catch (error) {
@@ -42,7 +42,7 @@ export async function searchCharms(
           return {
             title: "Error loading charm",
             description: "Failed to load charm details",
-            id: charm.entityId ? charmId(charm)! : "unknown",
+            id: charm.entityId ? pieceId(charm)! : "unknown",
             value: charm.entityId || "unknown",
           };
         }
@@ -101,12 +101,12 @@ export async function searchCharms(
     }[] = [];
     if (charmMatches) {
       for (const match of charmMatches) {
-        const charmId = match[1];
+        const pieceId = match[1];
         const charmName = match[2];
         const reason = match[3].trim();
 
         // Find the original charm data from results
-        const originalCharm = await charmManager.get(charmId);
+        const originalCharm = await charmManager.get(pieceId);
 
         if (originalCharm) {
           selectedCharms.push({

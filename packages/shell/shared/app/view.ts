@@ -6,10 +6,10 @@ export type AppView = {
   builtin: AppBuiltInView;
 } | {
   spaceName: string;
-  charmId?: string;
+  pieceId?: string;
 } | {
   spaceDid: DID;
-  charmId?: string;
+  pieceId?: string;
 };
 
 export function isAppBuiltInView(view: unknown): view is AppBuiltInView {
@@ -42,12 +42,12 @@ export function appViewToUrlPath(view: AppView): `/${string}` {
         return `/`;
     }
   } else if ("spaceName" in view) {
-    return "charmId" in view
-      ? `/${view.spaceName}/${view.charmId}`
+    return "pieceId" in view
+      ? `/${view.spaceName}/${view.pieceId}`
       : `/${view.spaceName}`;
   } else if ("spaceDid" in view) {
-    return "charmId" in view
-      ? `/${view.spaceDid}/${view.charmId}`
+    return "pieceId" in view
+      ? `/${view.spaceDid}/${view.pieceId}`
       : `/${view.spaceDid}`;
   }
   return `/`;
@@ -56,14 +56,14 @@ export function appViewToUrlPath(view: AppView): `/${string}` {
 export function urlToAppView(url: URL): AppView {
   const segments = url.pathname.split("/");
   segments.shift(); // shift off the pathnames' prefix "/";
-  const [first, charmId] = [segments[0], segments[1]];
+  const [first, pieceId] = [segments[0], segments[1]];
 
   if (!first) {
     return { builtin: "home" };
   }
   if (isDID(first)) {
-    return charmId ? { spaceDid: first, charmId } : { spaceDid: first };
+    return pieceId ? { spaceDid: first, pieceId } : { spaceDid: first };
   } else {
-    return charmId ? { spaceName: first, charmId } : { spaceName: first };
+    return pieceId ? { spaceName: first, pieceId } : { spaceName: first };
   }
 }

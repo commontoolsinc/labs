@@ -875,7 +875,7 @@ describe("Recipe Runner", () => {
     expect(spellId).toBeDefined();
     expect(lastError?.spellId).toBe(spellId);
     expect(lastError?.space).toBe(space);
-    expect(lastError?.charmId).toBe(
+    expect(lastError?.pieceId).toBe(
       JSON.parse(JSON.stringify(charm.entityId))["/"],
     );
 
@@ -955,7 +955,7 @@ describe("Recipe Runner", () => {
     expect(recipeId).toBeDefined();
     expect(lastError?.recipeId).toBe(recipeId);
     expect(lastError?.space).toBe(space);
-    expect(lastError?.charmId).toBe(
+    expect(lastError?.pieceId).toBe(
       JSON.parse(JSON.stringify(charm.entityId))["/"],
     );
 

@@ -3,7 +3,7 @@ import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { assert } from "@std/assert";
 import { Identity } from "@commontools/identity";
-import { CharmsController } from "@commontools/charm/ops";
+import { PiecesController } from "@commontools/piece/ops";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { join } from "@std/path";
 
@@ -18,7 +18,7 @@ describe("google calendar importer e2e", () => {
   shell.bindLifecycle();
 
   let identity: Identity;
-  let cc: CharmsController;
+  let cc: PiecesController;
   let googleAuthCharmId: string;
   let calendarImporterCharmId: string;
 
@@ -26,8 +26,8 @@ describe("google calendar importer e2e", () => {
     // 1. Generate identity
     identity = await Identity.generate({ implementation: "noble" });
 
-    // 2. Initialize CharmsController
-    cc = await CharmsController.initialize({
+    // 2. Initialize PiecesController
+    cc = await PiecesController.initialize({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity,
@@ -77,7 +77,7 @@ describe("google calendar importer e2e", () => {
     console.log("Navigating to Google Auth charm...");
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      view: { spaceName: SPACE_NAME, charmId: googleAuthCharmId },
+      view: { spaceName: SPACE_NAME, pieceId: googleAuthCharmId },
       identity,
     });
 
@@ -146,7 +146,7 @@ describe("google calendar importer e2e", () => {
     console.log("Navigating to Calendar Importer...");
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      view: { spaceName: SPACE_NAME, charmId: calendarImporterCharmId },
+      view: { spaceName: SPACE_NAME, pieceId: calendarImporterCharmId },
       identity,
     });
 
