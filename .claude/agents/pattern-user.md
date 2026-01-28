@@ -1,6 +1,6 @@
 ---
 name: pattern-user
-description: Deploys patterns and debugs running charms via ct CLI.
+description: Deploys patterns and debugs running pieces via ct CLI.
 tools: Skill, Bash, Glob, Grep, Read, Edit, Write, AskUserQuestion
 model: sonnet
 hooks:
@@ -31,24 +31,24 @@ Load `Skill("ct")` first for ct CLI documentation.
 deno task ct check main.tsx --no-run
 
 # Deploy to toolshed (this is how you "run" it)
-API_URL=<url> deno task ct charm new main.tsx --identity <key_path>
+API_URL=<url> deno task ct piece new main.tsx --identity <key_path>
 
-# Update existing charm
-API_URL=<url> deno task ct charm setsrc main.tsx --charm <charm_id> --identity <key_path>
+# Update existing piece
+API_URL=<url> deno task ct piece setsrc main.tsx --piece <piece_id> --identity <key_path>
 
 # Inspect state / call handler
-API_URL=<url> deno task ct charm inspect --charm <charm_id> --identity <key_path>
-API_URL=<url> deno task ct charm call <handler> --charm <charm_id> --identity <key_path>
+API_URL=<url> deno task ct piece inspect --piece <piece_id> --identity <key_path>
+API_URL=<url> deno task ct piece call <handler> --piece <piece_id> --identity <key_path>
 ```
 
 ## Deploy Flow
 
 1. **Ask for config** (key, API URL, space)
 2. **Check compilation** (`ct check --no-run`)
-3. **Deploy** (`ct charm new`) — this gives you a charm ID and URL
+3. **Deploy** (`ct piece new`) — this gives you a piece ID and URL
 4. **Give user the link** to test in browser
 5. **Debug** with `inspect` and `call` as needed
 
 ## Done When
 
-Charm deployed, user has link to test.
+Piece deployed, user has link to test.

@@ -29,8 +29,8 @@ export interface SpaceConfig {
   identity: string;
 }
 
-export interface CharmConfig extends SpaceConfig {
-  charm: string;
+export interface PieceConfig extends SpaceConfig {
+  piece: string;
 }
 
 async function makeSession(config: SpaceConfig): Promise<Session> {
@@ -58,12 +58,12 @@ export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
       try {
         const id = charmId(target);
         if (!id) {
-          console.error("navigateTo: target missing charm id");
+          console.error("navigateTo: target missing piece id");
           return;
         }
         // Emit greppable line immediately so scripts can capture without waiting
-        console.log(`navigateTo new charm id ${id}`);
-        // Best-effort: ensure charm is present in list
+        console.log(`navigateTo new piece id ${id}`);
+        // Best-effort: ensure piece is present in list
         runtime.storageManager.synced().then(async () => {
           try {
             const mgr = charmManagerRef.current!;
@@ -108,8 +108,8 @@ async function getProgramFromFile(
   return program;
 }
 
-// Returns an array of metadata about charms to display.
-export async function listCharms(
+// Returns an array of metadata about pieces to display.
+export async function listPieces(
   config: SpaceConfig,
 ): Promise<{ id: string; name?: string; recipeName?: string }[]> {
   const manager = await loadManager(config);
@@ -126,8 +126,8 @@ export async function listCharms(
   );
 }
 
-// Creates a new charm from source code and optional input.
-export async function newCharm(
+// Creates a new piece from source code and optional input.
+export async function newPiece(
   config: SpaceConfig,
   entry: EntryConfig,
   options?: { start?: boolean },
@@ -153,19 +153,19 @@ export async function newCharm(
   const program = await getProgramFromFile(manager, entry);
   const charm = await charms.create(program, options);
 
-  // Explicitly add the charm to the space's allCharms list
+  // Explicitly add the piece to the space's allCharms list
   await manager.add([charm.getCell()]);
 
   return charm.id;
 }
 
-export async function setCharmRecipe(
-  config: CharmConfig,
+export async function setPieceRecipe(
+  config: PieceConfig,
   entry: EntryConfig,
 ): Promise<void> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm, false);
+  const charm = await charms.get(config.piece, false);
   if (entry.mainPath.endsWith(".iframe.js")) {
     await charm.setIframeRecipe(entry.mainPath);
   } else {
@@ -173,21 +173,21 @@ export async function setCharmRecipe(
   }
 }
 
-export async function saveCharmRecipe(
-  config: CharmConfig,
+export async function savePieceRecipe(
+  config: PieceConfig,
   outPath: string,
 ): Promise<void> {
   await ensureDir(outPath);
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm, false);
+  const charm = await charms.get(config.piece, false);
   const meta = await charm.getRecipeMeta();
   const iframeRecipe = await charm.getIframeRecipe();
 
   if (iframeRecipe) {
     const userCode = extractUserCode(iframeRecipe.src);
     if (!userCode) {
-      throw new Error(`No user code found in iframe recipe "${config.charm}".`);
+      throw new Error(`No user code found in iframe recipe "${config.piece}".`);
     }
     await Deno.writeTextFile(
       join(outPath, "main.iframe.js"),
@@ -207,26 +207,26 @@ export async function saveCharmRecipe(
     }
   } else {
     throw new Error(
-      `Charm "${config.charm}" does not contain a recipe source.`,
+      `Piece "${config.piece}" does not contain a recipe source.`,
     );
   }
 }
 
-export async function applyCharmInput(
-  config: CharmConfig,
+export async function applyPieceInput(
+  config: PieceConfig,
   input: object,
 ) {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm, false);
+  const charm = await charms.get(config.piece, false);
   await charm.setInput(input);
 }
 
-export async function linkCharms(
+export async function linkPieces(
   config: SpaceConfig,
-  sourceCharmId: string,
+  sourcePieceId: string,
   sourcePath: (string | number)[],
-  targetCharmId: string,
+  targetPieceId: string,
   targetPath: (string | number)[],
   options?: { start?: boolean },
 ): Promise<void> {
@@ -246,27 +246,27 @@ export async function linkCharms(
   }
 
   await manager.link(
-    sourceCharmId,
+    sourcePieceId,
     sourcePath,
-    targetCharmId,
+    targetPieceId,
     targetPath,
     options,
   );
 }
 
-// Constants for charm mapping
+// Constants for piece mapping
 const SHORT_ID_LENGTH = 8;
 
-// Types for charm mapping
-export interface CharmConnection {
+// Types for piece mapping
+export interface PieceConnection {
   name: string;
   readingFrom: string[];
   readBy: string[];
 }
 
-export type CharmConnectionMap = Map<string, CharmConnection>;
+export type PieceConnectionMap = Map<string, PieceConnection>;
 
-// Helper functions for charm mapping
+// Helper functions for piece mapping
 function createShortId(id: string): string {
   if (id.length <= SHORT_ID_LENGTH * 2 + 3) {
     return id; // Don't truncate if it's already short enough
@@ -276,16 +276,16 @@ function createShortId(id: string): string {
   return `${start}...${end}`;
 }
 
-function createCharmConnection(
-  charm: { id: string; name?: string },
+function createPieceConnection(
+  piece: { id: string; name?: string },
   details?: {
     name?: string;
     readingFrom: Array<{ id: string }>;
     readBy: Array<{ id: string }>;
   },
-): CharmConnection {
+): PieceConnection {
   return {
-    name: details?.name || charm.name || createShortId(charm.id),
+    name: details?.name || piece.name || createShortId(piece.id),
     readingFrom: details?.readingFrom.map((c) => c.id) || [],
     readBy: details?.readBy.map((c) => c.id) || [],
   };
@@ -293,44 +293,44 @@ function createCharmConnection(
 
 async function buildConnectionMap(
   config: SpaceConfig,
-): Promise<CharmConnectionMap> {
-  const charms = await listCharms(config);
-  const connections: CharmConnectionMap = new Map();
+): Promise<PieceConnectionMap> {
+  const pieces = await listPieces(config);
+  const connections: PieceConnectionMap = new Map();
 
-  for (const charm of charms) {
-    const charmConfig: CharmConfig = { ...config, charm: charm.id };
+  for (const piece of pieces) {
+    const pieceConfig: PieceConfig = { ...config, piece: piece.id };
     try {
-      const details = await inspectCharm(charmConfig);
-      connections.set(charm.id, createCharmConnection(charm, details));
+      const details = await inspectPiece(pieceConfig);
+      connections.set(piece.id, createPieceConnection(piece, details));
     } catch (error) {
-      // Skip charms that can't be inspected, but include them with no connections
+      // Skip pieces that can't be inspected, but include them with no connections
       console.error(
-        `Warning: Could not inspect charm ${charm.id}: ${
+        `Warning: Could not inspect piece ${piece.id}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      connections.set(charm.id, createCharmConnection(charm));
+      connections.set(piece.id, createPieceConnection(piece));
     }
   }
 
   return connections;
 }
 
-function generateAsciiMap(connections: CharmConnectionMap): string {
+function generateAsciiMap(connections: PieceConnectionMap): string {
   if (connections.size === 0) {
-    return "No charms found in space.";
+    return "No pieces found in space.";
   }
 
-  let output = "=== Charm Space Map ===\n\n";
+  let output = "=== Piece Space Map ===\n\n";
 
-  // Sort charms by connection count for better visualization
-  const sortedCharms = Array.from(connections.entries()).sort(
+  // Sort pieces by connection count for better visualization
+  const sortedPieces = Array.from(connections.entries()).sort(
     ([, a], [, b]) =>
       (b.readingFrom.length + b.readBy.length) -
       (a.readingFrom.length + a.readBy.length),
   );
 
-  for (const [id, info] of sortedCharms) {
+  for (const [id, info] of sortedPieces) {
     const shortId = createShortId(id);
     output += `📦 ${info.name} [${shortId}]\n`;
 
@@ -362,8 +362,8 @@ function generateAsciiMap(connections: CharmConnectionMap): string {
   return output;
 }
 
-function generateDotMap(connections: CharmConnectionMap): string {
-  let dot = "digraph CharmSpace {\n";
+function generateDotMap(connections: PieceConnectionMap): string {
+  let dot = "digraph PieceSpace {\n";
   dot += "  rankdir=LR;\n";
   dot += "  node [shape=box];\n\n";
 
@@ -391,7 +391,7 @@ export enum MapFormat {
 }
 
 export function formatSpaceMap(
-  connections: CharmConnectionMap,
+  connections: PieceConnectionMap,
   format: MapFormat,
 ): string {
   switch (format) {
@@ -412,8 +412,8 @@ export async function generateSpaceMap(
   return formatSpaceMap(connections, format);
 }
 
-export async function inspectCharm(
-  config: CharmConfig,
+export async function inspectPiece(
+  config: PieceConfig,
 ): Promise<{
   id: string;
   name?: string;
@@ -425,7 +425,7 @@ export async function inspectCharm(
 }> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm, false);
+  const charm = await charms.get(config.piece, false);
 
   const id = charm.id;
   const name = charm.name();
@@ -452,10 +452,10 @@ export async function inspectCharm(
   };
 }
 
-export async function getCharmView(
-  config: CharmConfig,
+export async function getPieceView(
+  config: PieceConfig,
 ): Promise<unknown> {
-  const data = await inspectCharm(config) as any;
+  const data = await inspectPiece(config) as any;
   return data.result?.[UI] as VNode;
 }
 
@@ -485,13 +485,13 @@ export function formatViewTree(view: unknown): string {
 }
 
 export async function getCellValue(
-  config: CharmConfig,
+  config: PieceConfig,
   path: (string | number)[],
   options?: { input?: boolean },
 ): Promise<unknown> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm, false);
+  const charm = await charms.get(config.piece, false);
   if (options?.input) {
     return await charm.input.get(path);
   } else {
@@ -500,14 +500,14 @@ export async function getCellValue(
 }
 
 export async function setCellValue(
-  config: CharmConfig,
+  config: PieceConfig,
   path: (string | number)[],
   value: unknown,
   options?: { input?: boolean },
 ): Promise<void> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm, false);
+  const charm = await charms.get(config.piece, false);
   if (options?.input) {
     await charm.input.set(value, path);
   } else {
@@ -516,10 +516,10 @@ export async function setCellValue(
 }
 
 /**
- * Calls a handler within a charm by sending an event to its stream.
+ * Calls a handler within a piece by sending an event to its stream.
  */
-export async function callCharmHandler<T = any>(
-  config: CharmConfig,
+export async function callPieceHandler<T = any>(
+  config: PieceConfig,
   handlerName: string,
   args: T,
 ): Promise<void> {
@@ -538,7 +538,7 @@ export async function callCharmHandler<T = any>(
     );
   }
 
-  const charm = await charms.get(config.charm, true);
+  const charm = await charms.get(config.piece, true);
 
   // Get the cell and traverse to the handler using .key()
   const cell = charm.getCell().asSchema({
@@ -567,17 +567,17 @@ export async function callCharmHandler<T = any>(
 }
 
 /**
- * Removes a charm from the space.
+ * Removes a piece from the space.
  */
-export async function removeCharm(
-  config: CharmConfig,
+export async function removePiece(
+  config: PieceConfig,
 ): Promise<void> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const removed = await charms.remove(config.charm);
+  const removed = await charms.remove(config.piece);
 
   if (!removed) {
-    throw new Error(`Charm "${config.charm}" not found`);
+    throw new Error(`Piece "${config.piece}" not found`);
   }
 }
 

@@ -1,14 +1,14 @@
 import { render } from "@commontools/html/client";
 import { UI } from "@commontools/runner";
 import { rendererVDOMSchema } from "@commontools/runner/schemas";
-import { loadManager } from "./charm.ts";
+import { loadManager } from "./piece.ts";
 import { CharmsController } from "@commontools/charm/ops";
-import type { CharmConfig } from "./charm.ts";
+import type { PieceConfig } from "./piece.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { MockDoc } from "../../html/src/mock-doc.ts";
 import { CellHandle, VNode } from "@commontools/runtime-client";
 
-const logger = getLogger("charm-render", { level: "info", enabled: false });
+const logger = getLogger("piece-render", { level: "info", enabled: false });
 
 export interface RenderOptions {
   watch?: boolean;
@@ -17,11 +17,11 @@ export interface RenderOptions {
 }
 
 /**
- * Renders a charm's UI to HTML using htmlparser2.
+ * Renders a piece's UI to HTML using htmlparser2.
  * Supports both static and reactive rendering with --watch mode.
  */
-export async function renderCharm(
-  config: CharmConfig,
+export async function renderPiece(
+  config: PieceConfig,
   options: RenderOptions = {},
 ): Promise<string | (() => void)> {
   const mock = new MockDoc(
@@ -29,10 +29,10 @@ export async function renderCharm(
   );
   const { document, renderOptions } = mock;
 
-  // 2. Get charm controller to access the Cell
+  // 2. Get piece controller to access the Cell
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
-  const charm = await charms.get(config.charm, options.start ?? true);
+  const charm = await charms.get(config.piece, options.start ?? true);
   const cell = charm.getCell().asSchema({
     type: "object",
     properties: {
@@ -41,10 +41,10 @@ export async function renderCharm(
     required: [UI],
   });
 
-  // Check if charm has UI
+  // Check if piece has UI
   const staticValue = cell.get();
   if (!staticValue?.[UI]) {
-    throw new Error(`Charm ${config.charm} has no UI`);
+    throw new Error(`Piece ${config.piece} has no UI`);
   }
 
   // 3. Get the root container
@@ -71,7 +71,7 @@ export async function renderCharm(
         manager.runtime.idle().then(() => {
           const html = container.innerHTML;
           logger.info(
-            "charm-render",
+            "piece-render",
             () => `[Update ${updateCount}] UI changed`,
           );
           if (options.onUpdate) {
