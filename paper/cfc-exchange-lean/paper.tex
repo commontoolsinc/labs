@@ -343,6 +343,200 @@ Each transition has a \emph{verification} rule (evidence check) and a \emph{prop
 compute the output label). The verification step prevents untrusted code from claiming transitions
 it did not actually perform.
 
+\subsection{Propagation and Verification Algorithms}\label{sec:transitions-algorithms}
+
+This section summarizes the (trusted) runtime algorithms from Chapter 8 that make the transition
+story concrete. The spec presents these in TypeScript-like pseudocode; we include an abridged but
+structurally faithful version here so the paper is self-contained.
+
+\paragraph{Design constraint.}
+The runtime must account for both \emph{content confidentiality} (what the data contains) and
+\emph{flow-path confidentiality} (what the existence/routing of data reveals). The propagation
+algorithm takes an explicit \texttt{pcConfidentiality} input that conservatively summarizes the
+confidentiality of decisions the handler can make (e.g., branch conditions, selection predicates).
+
+\paragraph{Propagation.}
+\begin{lstlisting}[language={},caption={Spec algorithm (abridged): schema-driven label propagation.}]
+function propagateLabels(handler, inputLabels, pcConfidentiality, outputValue, outputSchema) {
+  const outputLabels = new Map();
+  const pendingRecompositions = []; // second pass (needs part labels)
+
+  for (const [path, schema] of walkSchema(outputSchema)) {
+    const ifc = schema.ifc;
+
+    if (ifc?.passThrough) {
+      outputLabels.set(path, inputLabels.get(ifc.passThrough.from));
+
+    } else if (ifc?.projection) {
+      const srcLbl = inputLabels.get(ifc.projection.from);
+      outputLabels.set(path, {
+        confidentiality: srcLbl.confidentiality,
+        integrity: scopeIntegrity(srcLbl.integrity, ifc.projection.path)
+      });
+
+    } else if (ifc?.collection) {
+      // Container label at `path` + member labels at `${path}/${i}`.
+      // Subset/filtered/permutation re-use member labels by reference.
+      // Length-preserved keeps container constraints but member labels may change.
+      const outMembers = getValueAtPath(outputValue, path);
+      const src = ifc.collection.sourceCollection
+        ?? ifc.collection.subsetOf
+        ?? ifc.collection.filteredFrom
+        ?? ifc.collection.permutationOf;
+
+      const inMembers = getValueAtPath(handler.input, src);
+      const inContainer = inputLabels.get(src);
+      const inMemberLabels = inMembers.map((_, i) => inputLabels.get(`${src}/${i}`));
+
+      if (ifc.collection.lengthPreserved) {
+        // Checked: length equal; members may be transformed.
+        if (inMembers.length !== outMembers.length) throw Error("lengthPreserved violation");
+        outputLabels.set(path, {
+          confidentiality: [...inContainer.confidentiality],
+          integrity: [
+            ...stripCollectionIntegrity(inContainer.integrity),
+            { type: "LengthPreserved", source: refer(inMembers) },
+            ...(ifc.collection.addedCollectionIntegrity ?? [])
+          ]
+        });
+      } else {
+        const kind =
+          ifc.collection.subsetOf ? "subset" :
+          ifc.collection.filteredFrom ? "filtered" :
+          ifc.collection.permutationOf ? "permutation" :
+          null;
+        const { outputContainerLabel, outputMemberLabels } =
+          propagateCollectionConstraint(
+            kind, inContainer, inMembers, inMemberLabels, outMembers,
+            { sourceRef: refer(inMembers), predicate: ifc.collection.predicate }
+          );
+        outputLabels.set(path, outputContainerLabel);
+        outMembers.forEach((_, i) => outputLabels.set(`${path}/${i}`, outputMemberLabels[i]));
+      }
+
+    } else if (ifc?.recomposeProjections) {
+      pendingRecompositions.push({ path, schema });
+      continue;
+
+    } else if (ifc?.exactCopyOf) {
+      // Checked: output value equals input value (by reference/content-address).
+      const inV = getValueAtPath(handler.input, ifc.exactCopyOf);
+      const outV = getValueAtPath(outputValue, path);
+      if (!refer(inV).equals(refer(outV))) throw Error("exactCopyOf violation");
+      outputLabels.set(path, inputLabels.get(ifc.exactCopyOf));
+
+    } else if (ifc?.combinedFrom) {
+      // Combination join: conf is CNF-join; integrity is meet.
+      const srcLs = ifc.combinedFrom.map(p => inputLabels.get(p));
+      outputLabels.set(path, {
+        confidentiality: concatClauses(srcLs.map(l => l.confidentiality)),
+        integrity: intersectAtoms(srcLs.map(l => l.integrity))
+      });
+
+    } else {
+      // Default: conservative transformed label.
+      outputLabels.set(path, deriveTransformedLabel(inputLabels, handler));
+    }
+
+    // Post-processing applied to the derived label at `path`:
+    // (i) append flow-path confidentiality (PC), and (ii) add explicit integrity atoms.
+    const outLbl = outputLabels.get(path);
+    outLbl.confidentiality = [...outLbl.confidentiality, ...pcConfidentiality];
+    if (ifc?.addedIntegrity) outLbl.integrity = [...outLbl.integrity, ...ifc.addedIntegrity];
+  }
+
+  // Second pass: checked recomposition, once part labels exist.
+  for (const pending of pendingRecompositions) {
+    const { from, baseIntegrityType, parts } = pending.schema.ifc.recomposeProjections;
+    if (!verifyRecomposeProjections(...)) throw Error("recomposeProjections violation");
+    const partLabels = parts.map(p => outputLabels.get(p.outputPath));
+    outputLabels.set(pending.path,
+      recomposeFromProjections(partLabels, refer(getValueAtPath(handler.input, from)), baseIntegrityType));
+  }
+
+  return outputLabels;
+}
+\end{lstlisting}
+
+\paragraph{Verification.}
+Propagation is not trusted by itself; the boundary also checks the handler output against the
+schema's claims. The verification routine (Chapter 8.10) has two roles:
+(i) ensure confidentiality does not decrease (monotonicity), and
+(ii) ensure integrity claims are backed by concrete evidence (exact copy checks, endorsed
+transformation registries, collection membership constraints, etc.).
+
+\begin{lstlisting}[language={},caption={Spec algorithm (abridged): transition verification at boundaries.}]
+function verifyTransition(handler, inputLabels, outputLabels, outputValue, schema) {
+  for (const [path, outLbl] of outputLabels) {
+    const ifc = getSchemaAtPath(schema, path).ifc;
+
+    // Confidentiality must not be reduced.
+    if (!isConfidentialityMonotone(inputLabels, outLbl.confidentiality)) return false;
+
+    // Integrity-preserving claims must be verified.
+    if (ifc?.exactCopyOf) {
+      const inV = getValueAtPath(handler.input, ifc.exactCopyOf);
+      const outV = getValueAtPath(outputValue, path);
+      if (!refer(inV).equals(refer(outV))) return false;
+    }
+    if (ifc?.projection) {
+      const src = getValueAtPath(handler.input, ifc.projection.from);
+      const expected = getValueAtPath(src, ifc.projection.path);
+      const outV = getValueAtPath(outputValue, path);
+      if (!refer(expected).equals(refer(outV))) return false;
+    }
+    if (ifc?.transformation?.preservesIntegrity?.length) {
+      const measuredCodeHash = refer(handler.code).toString();
+      if (!verifyEndorsedTransformation(getEndorsedTransformerRegistry(), measuredCodeHash, ifc.transformation).valid)
+        return false;
+    }
+
+    // Collection constraints are checked and violations reject output.
+    if (ifc?.collection?.subsetOf)        if (!verifySubset(ifc.collection.subsetOf, path, handler)) return false;
+    if (ifc?.collection?.permutationOf)   if (!verifyPermutation(ifc.collection.permutationOf, path, handler)) return false;
+    if (ifc?.collection?.filteredFrom)    if (!verifyFilteredFrom(ifc.collection.filteredFrom, path, handler)) return false;
+    if (ifc?.collection?.lengthPreserved) if (!verifyLengthPreserved(ifc.collection.sourceCollection, path, handler)) return false;
+
+    // Safe recomposition is a checked transition.
+    if (ifc?.recomposeProjections) if (!verifyRecomposeProjections(...)) return false;
+  }
+  return true;
+}
+\end{lstlisting}
+
+\subsection{Key Preservation Lemmas (Informal)}\label{sec:transitions-lemmas}
+
+The purpose of the transition language is to support local reasoning: complex end-to-end scenarios
+should be reducible to a small set of building blocks with clear preservation properties.
+The Lean development proves a proof-oriented subset of these claims for the modeled transitions
+(\texttt{formal/Cfc/LabelTransitions.lean}, \texttt{formal/Cfc/Collection.lean} and proofs).
+
+\begin{theorem}[Confidentiality monotonicity is enforced]\label{thm:conf-monotone}
+If \texttt{verifyTransition} accepts an output, then no output path has confidentiality that is
+strictly weaker than the confidentiality justified by the inputs and the runtime's conservative
+\texttt{pcConfidentiality} approximation.
+\end{theorem}
+
+\begin{theorem}[Exact-copy and projection integrity are sound]\label{thm:copy-proj-sound}
+If an output path is annotated as \texttt{exactCopyOf} an input path (or as a projection of a source
+field) and verification succeeds, then reusing the input label (or a scoped variant of its
+integrity) is justified because the output value is provably the same referenced value.
+\end{theorem}
+
+\begin{theorem}[Collection member labels are preserved by reference]\label{thm:collection-preserve}
+For \texttt{subsetOf}/\texttt{filteredFrom}/\texttt{permutationOf}, if verification succeeds then
+every output element reference comes from the input collection, so the runtime may reuse the
+corresponding input member labels. Membership/selection leakage is represented by tainting the
+\emph{container} path label (rather than rewriting each member label).
+\end{theorem}
+
+\begin{theorem}[Recomposition restores whole-object integrity only when checked]\label{thm:recompose}
+If \texttt{verifyRecomposeProjections} succeeds for parts that all originate from the same structured
+source reference, then \texttt{recomposeFromProjections} may add back a whole-object integrity atom
+scoped to that common source. Without this check, recomposition could incorrectly claim whole-object
+integrity for a mixed-source object.
+\end{theorem}
+
 \subsection{Projection Scoping and ``Same Measurement'' Groups}\label{sec:projection}
 
 Projection scoping addresses the common pattern where multiple fields are correlated and should be
