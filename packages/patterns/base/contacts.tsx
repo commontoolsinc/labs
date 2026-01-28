@@ -69,8 +69,11 @@ const addPerson = handler<
     email: "",
     phone: "",
   });
-  // Instantiate the pattern
-  const charm = PersonPattern({ person: personData });
+  // Instantiate the pattern with siblingSource for sameAs linking
+  const charm = PersonPattern({
+    person: personData,
+    siblingSource: contacts,
+  });
   contacts.push(charm as ContactCharm);
   selectedIndex.set(contacts.get().length - 1);
 });
@@ -90,8 +93,11 @@ const addFamilyMember = handler<
     birthday: "",
     dietaryRestrictions: [],
   });
-  // Instantiate the pattern
-  const charm = FamilyMemberPattern({ member: memberData });
+  // Instantiate the pattern with siblingSource for sameAs linking
+  const charm = FamilyMemberPattern({
+    member: memberData,
+    siblingSource: contacts,
+  });
   contacts.push(charm as ContactCharm);
   selectedIndex.set(contacts.get().length - 1);
 });
