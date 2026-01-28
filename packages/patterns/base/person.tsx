@@ -19,7 +19,7 @@ import {
   pattern,
   UI,
   type VNode,
-  Writable,
+  type Writable,
 } from "commontools";
 
 // ============================================================================
@@ -50,19 +50,6 @@ export interface Person extends PersonLike {
 }
 
 // ============================================================================
-// Sibling Charm Type - for container integration
-// ============================================================================
-
-/**
- * When used in a container like Contacts, sibling charms can be passed
- * for sameAs linking. The container stores charms with person/member data.
- */
-export interface PersonSiblingCharm {
-  person?: Person;
-  member?: { firstName: string; lastName: string }; // FamilyMember-like
-}
-
-// ============================================================================
 // Handlers
 // ============================================================================
 
@@ -89,9 +76,8 @@ interface Input {
   person: Writable<
     Default<Person, { firstName: ""; lastName: ""; email: ""; phone: "" }>
   >;
-  // Optional: reactive sibling source from container (pattern filters itself out)
-  // Uses unknown[] to accept any container's charm type at runtime
-  siblingSource?: Writable<unknown[]>;
+  // Optional: pre-extracted PersonLike data from container for sameAs linking
+  sameAs?: PersonLike[];
 }
 
 interface Output {
@@ -104,7 +90,7 @@ interface Output {
 // Pattern
 // ============================================================================
 
-export default pattern<Input, Output>(({ person, siblingSource }) => {
+export default pattern<Input, Output>(({ person, sameAs }) => {
   // Computed display name from first + last name
   const displayName = computed(() => {
     const first = person.key("firstName").get();
@@ -127,55 +113,21 @@ export default pattern<Input, Output>(({ person, siblingSource }) => {
     return "Unknown";
   });
 
-  // Computed: filter out self from siblings and extract linkable persons
-  // All property access happens inside computed() to avoid reactive context errors
+  // Computed: filter out self from siblings for sameAs picker
   const linkableSiblings = computed(() => {
-    if (!siblingSource) return [];
-
-    // Unwrap the reactive sibling source
-    const allSiblings = siblingSource.get();
-    if (!allSiblings || allSiblings.length === 0) return [];
+    if (!sameAs || sameAs.length === 0) return [];
 
     const selfFirst = person.key("firstName").get();
     const selfLast = person.key("lastName").get();
 
-    const result: Array<{ name: string; linkedPerson: PersonLike }> = [];
-
-    for (const item of allSiblings) {
-      // Cast to expected shape at runtime
-      const sib = item as PersonSiblingCharm;
-      // Extract person data from sibling charm
-      const sibPerson = sib.person;
-      const sibMember = sib.member;
-
-      let firstName = "";
-      let lastName = "";
-      let linkedPerson: PersonLike | undefined;
-
-      if (sibPerson) {
-        firstName = sibPerson.firstName || "";
-        lastName = sibPerson.lastName || "";
-        linkedPerson = sibPerson;
-      } else if (sibMember) {
-        firstName = sibMember.firstName || "";
-        lastName = sibMember.lastName || "";
-        linkedPerson = sibMember as PersonLike;
-      }
-
-      // Skip self (compare by name since we don't have identity)
-      if (firstName === selfFirst && lastName === selfLast) continue;
-      if (!linkedPerson) continue;
-
-      // Build display name
-      let name = "Person";
-      if (firstName && lastName) name = `${firstName} ${lastName}`;
-      else if (firstName) name = firstName;
-      else if (lastName) name = lastName;
-
-      result.push({ name, linkedPerson });
-    }
-
-    return result;
+    return sameAs
+      .filter((s) => !(s.firstName === selfFirst && s.lastName === selfLast))
+      .map((s) => {
+        const name = s.firstName && s.lastName
+          ? `${s.firstName} ${s.lastName}`
+          : s.firstName || s.lastName || "Person";
+        return { name, linkedPerson: s as PersonLike };
+      });
   });
 
   // Computed: whether we have siblings to link to

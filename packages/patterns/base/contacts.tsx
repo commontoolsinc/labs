@@ -19,7 +19,7 @@ import {
 } from "commontools";
 
 // Import patterns (they return charms with [UI])
-import PersonPattern, { type Person } from "./person.tsx";
+import PersonPattern, { type Person, type PersonLike } from "./person.tsx";
 import FamilyMemberPattern, { type FamilyMember } from "./family-member.tsx";
 
 // ============================================================================
@@ -69,10 +69,15 @@ const addPerson = handler<
     email: "",
     phone: "",
   });
-  // Instantiate the pattern with siblingSource for sameAs linking
+  // Extract sameAs candidates from contacts
+  const sameAsCandidates: PersonLike[] = contacts.get().flatMap((c) => {
+    if (c.person) return [c.person as PersonLike];
+    if (c.member) return [c.member as PersonLike];
+    return [];
+  });
   const charm = PersonPattern({
     person: personData,
-    siblingSource: contacts,
+    sameAs: sameAsCandidates,
   });
   contacts.push(charm as ContactCharm);
   selectedIndex.set(contacts.get().length - 1);
@@ -93,10 +98,15 @@ const addFamilyMember = handler<
     birthday: "",
     dietaryRestrictions: [],
   });
-  // Instantiate the pattern with siblingSource for sameAs linking
+  // Extract sameAs candidates from contacts
+  const sameAsCandidates: PersonLike[] = contacts.get().flatMap((c) => {
+    if (c.person) return [c.person as PersonLike];
+    if (c.member) return [c.member as PersonLike];
+    return [];
+  });
   const charm = FamilyMemberPattern({
     member: memberData,
-    siblingSource: contacts,
+    sameAs: sameAsCandidates,
   });
   contacts.push(charm as ContactCharm);
   selectedIndex.set(contacts.get().length - 1);
