@@ -28,7 +28,7 @@ export const h: HFunction = Object.assign(
     if (typeof name === "function") {
       return name({
         ...(props ?? {}),
-        children,
+        children: children.flat(),
       });
     } else {
       props ??= {};
@@ -53,7 +53,7 @@ export const h: HFunction = Object.assign(
           );
         }
       });
-      return { type: "vnode", name, props, children };
+      return { type: "vnode", name, props, children: children.flat() };
     }
   },
   {
