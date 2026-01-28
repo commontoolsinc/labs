@@ -463,6 +463,47 @@ Deno.test("DomApplicator - mountInto", async (t) => {
   });
 });
 
+Deno.test("DomApplicator - setContainer", async (t) => {
+  await t.step("registers container element with CONTAINER_NODE_ID (0)", () => {
+    const doc = createMockDocument();
+    const applicator = createDomApplicator({
+      document: doc,
+      runtimeClient: createMockRuntimeClient(),
+      onEvent: () => {},
+    });
+
+    const container = doc.createElement("section") as unknown as HTMLElement;
+    applicator.setContainer(container);
+
+    // Verify container is registered with ID 0
+    assertEquals(applicator.getNode(0), container);
+  });
+
+  await t.step("allows inserting children directly into container", () => {
+    const doc = createMockDocument();
+    const applicator = createDomApplicator({
+      document: doc,
+      runtimeClient: createMockRuntimeClient(),
+      onEvent: () => {},
+    });
+
+    const container = doc.createElement("section") as unknown as HTMLElement;
+    applicator.setContainer(container);
+
+    // Insert a child directly into the container (node 0)
+    applicator.applyBatch({
+      batchId: 1,
+      ops: [
+        { op: "create-element", nodeId: 1, tagName: "div" },
+        { op: "insert-child", parentId: 0, childId: 1, beforeId: null },
+      ],
+    });
+
+    assertEquals((container as any).childNodes.length, 1);
+    assertEquals((container as any).childNodes[0].tagName, "DIV");
+  });
+});
+
 Deno.test("DomApplicator - dispose", async (t) => {
   await t.step("cleans up all nodes and listeners", () => {
     const doc = createMockDocument();

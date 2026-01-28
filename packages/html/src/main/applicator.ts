@@ -18,6 +18,12 @@ import { CellHandle } from "@commontools/runtime-client";
 import { setPropDefault, type SetPropHandler } from "../render-utils.ts";
 
 /**
+ * Reserved node ID for the container element.
+ * Must match the value in worker/reconciler.ts.
+ */
+export const CONTAINER_NODE_ID = 0;
+
+/**
  * Options for creating a DOM applicator.
  */
 export interface DomApplicatorOptions {
@@ -153,7 +159,17 @@ export class DomApplicator {
   }
 
   /**
+   * Register the container element.
+   * The container is where rendered content will be inserted.
+   * Must be called before applying any batches.
+   */
+  setContainer(container: HTMLElement): void {
+    this.nodes.set(CONTAINER_NODE_ID, container);
+  }
+
+  /**
    * Mount the rendered tree into a parent element.
+   * @deprecated Use setContainer instead - content is now inserted directly.
    */
   mountInto(parent: HTMLElement, rootId: number): void {
     const root = this.nodes.get(rootId);

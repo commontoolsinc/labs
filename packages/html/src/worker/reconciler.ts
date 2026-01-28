@@ -42,6 +42,12 @@ import {
 } from "../render-utils.ts";
 
 /**
+ * Reserved node ID for the container element.
+ * The main thread registers the actual container DOM element with this ID.
+ */
+export const CONTAINER_NODE_ID = 0;
+
+/**
  * Main reconciler class for worker-side VDOM rendering.
  */
 export class WorkerReconciler {
@@ -53,7 +59,8 @@ export class WorkerReconciler {
   private pendingOps: VDomOp[] = [];
   private flushScheduled = false;
 
-  private rootNodeId: number | null = null;
+  // Track the actual root child node (not the container)
+  private rootChildId: number | null = null;
   private rootCancel: Cancel | null = null;
 
   private readonly onOps: (ops: VDomOp[]) => void;
@@ -82,6 +89,7 @@ export class WorkerReconciler {
 
   /**
    * Mount a VDOM tree, starting the reconciliation process.
+   * Children are inserted directly into the container (CONTAINER_NODE_ID).
    *
    * @param vnode - The root VNode, Cell<VNode>, or Cell<unknown> to mount
    * @returns A cancel function to unmount the tree
@@ -94,18 +102,10 @@ export class WorkerReconciler {
     const ctx = this.createContext();
     const [cancel, addCancel] = useCancelGroup();
 
-    // Create a root wrapper element - this is what gets mounted into the container
-    const rootId = ctx.nextNodeId();
-    this.rootNodeId = rootId;
-
-    // Emit the root element creation
-    this.queueOps([
-      { op: "create-element", nodeId: rootId, tagName: "ct-vdom-root" },
-    ]);
-
     // Handle Cell<VNode> at the root
     if (isCell(vnode)) {
-      const wrapperState = this.createWrapperState(ctx, rootId);
+      // Create a wrapper state that tracks the current child in the container
+      const wrapperState = this.createWrapperState(ctx, CONTAINER_NODE_ID);
 
       addCancel(
         vnode.sink((resolvedVnode: unknown) => {
@@ -124,16 +124,19 @@ export class WorkerReconciler {
             wrapperState,
             resolvedVnode as WorkerRenderNode,
           );
+          // Track the root child for cleanup
+          this.rootChildId = wrapperState.currentChild?.nodeId ?? null;
         }),
       );
     } else {
-      // Static VNode - render directly
+      // Static VNode - render directly into container
       const state = this.renderNode(ctx, vnode, new Set());
       if (state) {
+        this.rootChildId = state.nodeId;
         this.queueOps([
           {
             op: "insert-child",
-            parentId: rootId,
+            parentId: CONTAINER_NODE_ID,
             childId: state.nodeId,
             beforeId: null,
           },
@@ -173,9 +176,9 @@ export class WorkerReconciler {
       this.rootCancel();
       this.rootCancel = null;
     }
-    if (this.rootNodeId !== null) {
-      this.queueOps([{ op: "remove-node", nodeId: this.rootNodeId }]);
-      this.rootNodeId = null;
+    if (this.rootChildId !== null) {
+      this.queueOps([{ op: "remove-node", nodeId: this.rootChildId }]);
+      this.rootChildId = null;
     }
     this.flushOps();
   }
@@ -197,10 +200,10 @@ export class WorkerReconciler {
   }
 
   /**
-   * Get the root node ID.
+   * Get the root child node ID (the actual rendered content).
    */
   getRootNodeId(): number | null {
-    return this.rootNodeId;
+    return this.rootChildId;
   }
 
   // ============== Private Methods ==============

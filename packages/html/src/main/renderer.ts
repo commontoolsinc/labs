@@ -104,6 +104,9 @@ export class VDomRenderer {
     this.containerElement = container;
     this.mountId = nextMountId++;
 
+    // Register container so the worker can insert children directly into it
+    this.applicator.setContainer(container);
+
     // Request the worker to start rendering
     const response = await this.connection.mountVDom(this.mountId, cellRef);
     this.rootNodeId = response.rootId;
@@ -176,21 +179,16 @@ export class VDomRenderer {
 
     try {
       // Apply the batch to the DOM
+      // Children are inserted directly into the container (CONTAINER_NODE_ID)
       this.applicator.applyBatch({
         batchId: notification.batchId,
         ops: notification.ops,
         rootId: notification.rootId,
       });
 
-      // Track root node ID if provided
+      // Track root node ID if provided (for cleanup)
       if (notification.rootId !== undefined) {
-        const isNewRoot = this.rootNodeId !== notification.rootId;
         this.rootNodeId = notification.rootId;
-
-        // If we have a container and this is a new root, mount it
-        if (isNewRoot && this.containerElement) {
-          this.applicator.mountInto(this.containerElement, this.rootNodeId);
-        }
       }
     } catch (error) {
       this.onError?.(
