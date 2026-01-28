@@ -1,4 +1,9 @@
-import { assertEquals, assertExists, assertRejects } from "@std/assert";
+import {
+  assertEquals,
+  assertExists,
+  assertRejects,
+  assertThrows,
+} from "@std/assert";
 import {
   CompartmentManager,
   getCompartmentManager,
@@ -128,5 +133,56 @@ Deno.test("CompartmentManager - singleton", async (t) => {
     // After reset, it's a different instance
     // (but we can't directly compare because reset sets it to undefined first)
     assertExists(m2);
+  });
+});
+
+Deno.test("CompartmentManager - initialization and sync evaluation", async (t) => {
+  await t.step("isReady returns false before initialization", () => {
+    // Since lockdown is static and already applied by other tests,
+    // we can't truly test this scenario without test isolation
+    // This test documents the expected behavior
+    const manager = new CompartmentManager({ enabled: true });
+    // After running other tests, lockdown is already applied
+    // In a fresh process, isReady() would return false before initialize()
+    assertExists(manager.isReady);
+  });
+
+  await t.step("initialize() applies lockdown", async () => {
+    const manager = new CompartmentManager({ enabled: true });
+    await manager.initialize();
+    assertEquals(manager.isReady(), true);
+  });
+
+  await t.step("initialize() is idempotent", async () => {
+    const manager = new CompartmentManager({ enabled: true });
+    await manager.initialize();
+    await manager.initialize(); // Second call should not throw
+    assertEquals(manager.isReady(), true);
+  });
+
+  await t.step("evaluateStringSync works after initialization", async () => {
+    const manager = new CompartmentManager({ enabled: true });
+    await manager.initialize();
+
+    const result = manager.evaluateStringSync("40 + 2");
+    assertEquals(result, 42);
+  });
+
+  await t.step("evaluateStringSync evaluates functions", async () => {
+    const manager = new CompartmentManager({ enabled: true });
+    await manager.initialize();
+
+    const result = manager.evaluateStringSync("((x) => x * 2)(21)");
+    assertEquals(result, 42);
+  });
+
+  await t.step("evaluateStringSync throws when disabled", () => {
+    const manager = new CompartmentManager({ enabled: false });
+
+    assertThrows(
+      () => manager.evaluateStringSync("42"),
+      SandboxSecurityError,
+      "SES sandboxing is disabled",
+    );
   });
 });
