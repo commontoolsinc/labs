@@ -164,6 +164,31 @@ type ChatOutput = {
 };
 ```
 
+## `examples/profile-aware-writer.tsx`
+
+Example pattern demonstrating how to use the `#profile` wish to personalize LLM
+output. Fetches the user's profile summary and injects it into the system prompt
+for personalized text generation.
+
+**Keywords:** profile, wish, generateText, llm, personalization
+
+### Input Schema
+
+```ts
+type Input = {
+  topic?: Writable<Default<string, "">>;
+};
+```
+
+### Output Schema
+
+```ts
+type Output = {
+  topic: string;
+  response: BuiltInLLMContent;
+};
+```
+
 ## `notes/voice-note.tsx`
 
 Record voice notes with automatic transcription and note history. Hold the

@@ -282,3 +282,36 @@ export const listPatternIndex = pattern<ListPatternIndexInput>(
     return ifElse(computed(() => pending || !result), undefined, { result });
   },
 );
+
+/**
+ * `updateProfile({ summary: "new profile text" })` - Updates the user's profile summary
+ *
+ * Allows the LLM to remember things about the user by updating their profile text.
+ */
+type UpdateProfileInput = {
+  /** New profile summary text to set */
+  summary: string;
+};
+
+export const updateProfile = pattern<
+  UpdateProfileInput,
+  { success: boolean; message: string }
+>(({ summary }) => {
+  // Wish for the profile cell (which is the summary string cell)
+  const profileCell = wish<Writable<string>>({ query: "#profile" });
+
+  const result = computed(() => {
+    const cell = profileCell.result;
+    if (!cell) return { success: false, message: "Profile not available" };
+
+    // Set the new summary text
+    cell.set(summary);
+
+    return {
+      success: true,
+      message: "Profile updated successfully",
+    };
+  });
+
+  return result;
+});

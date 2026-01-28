@@ -20,6 +20,7 @@ import {
   navigateToPattern,
   readWebpage,
   searchWeb,
+  updateProfile,
 } from "./common-tools.tsx";
 import { MentionableCharm } from "./backlinks-index.tsx";
 
@@ -91,9 +92,31 @@ export default pattern<OmniboxFABInput>(
     const mentionable = wish<MentionableCharm[]>("#mentionable");
     const recentCharms = wish<MentionableCharm[]>("#recent");
 
+    const profile = wish<string>({ query: "#profile" });
+
+    const profileContext = computed(() => {
+      const profileText = profile.result;
+      return profileText
+        ? `\n\n--- User Context ---\n${profileText}\n---\n`
+        : "";
+    });
+
+    const systemPrompt = computed(() => {
+      const profileSection = profileContext;
+      return `You are a polite but efficient assistant. Think Star Trek computer - helpful and professional without unnecessary conversation. Let your actions speak for themselves.
+${profileSection}
+Tool usage priority:
+- For patterns: listPatternIndex first
+- For existing pages/notes/content: listRecent or listMentionable to identify what they're referencing
+- Attach relevant items to conversation after instantiation/retrieval if they support ongoing tasks
+- Remove attachments when no longer relevant
+- Search web only as last resort when nothing exists in the space
+
+Be matter-of-fact. Prefer action to explanation.`;
+    });
+
     const omnibot = Chatbot({
-      system:
-        "You are a polite but efficient assistant. Think Star Trek computer - helpful and professional without unnecessary conversation. Let your actions speak for themselves.\n\nTool usage priority:\n- For patterns: listPatternIndex first\n- For existing pages/notes/content: listRecent or listMentionable to identify what they're referencing\n- Attach relevant items to conversation after instantiation/retrieval if they support ongoing tasks\n- Remove attachments when no longer relevant\n- Search web only as last resort when nothing exists in the space\n\nBe matter-of-fact. Prefer action to explanation.",
+      system: systemPrompt,
       tools: {
         searchWeb: {
           pattern: searchWeb,
@@ -110,6 +133,7 @@ export default pattern<OmniboxFABInput>(
         wishAndNavigate: patternTool(wishTool),
         listMentionable: patternTool(listMentionable, { mentionable }),
         listRecent: patternTool(listRecent, { recentCharms }),
+        updateProfile: patternTool(updateProfile),
       },
     });
 

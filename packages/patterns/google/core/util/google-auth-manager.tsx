@@ -1033,7 +1033,7 @@ export const GoogleAuthManager = pattern<
   },
 );
 
-// Export as default for ct dev
+// Export as default for ct check
 export default GoogleAuthManager;
 
 // Backward-compatible export for existing code that uses createGoogleAuth()

@@ -249,6 +249,25 @@ function resolveBase(
         pathPrefix: ["defaultPattern", "learned"],
       }];
     }
+    case "#profile": {
+      // Profile returns just the summary text (the textual profile)
+      const userDID = ctx.runtime.userIdentityDID;
+      if (!userDID) {
+        throw new WishError("User identity DID not available for #profile");
+      }
+
+      // First resolve to the learned cell, then access summary
+      // This ensures the intermediate cell is resolved before accessing nested property
+      const learnedCell = ctx.runtime.getHomeSpaceCell(ctx.tx)
+        .key("defaultPattern")
+        .key("learned")
+        .resolveAsCell();
+
+      return [{
+        cell: learnedCell,
+        pathPrefix: ["summary"],
+      }];
+    }
     default: {
       // Check if it's a well-known target
       const resolution = WISH_TARGETS[parsed.key];
