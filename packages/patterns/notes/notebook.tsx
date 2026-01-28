@@ -2,7 +2,6 @@
 import {
   action,
   computed,
-  type Default,
   equals,
   handler,
   NAME,
@@ -17,71 +16,27 @@ import {
 } from "commontools";
 
 import Note from "./note.tsx";
+import {
+  generateId,
+  getPieceName,
+  type MentionablePiece,
+  type MinimalPiece,
+  type NotebookPiece,
+  type NotebookInput,
+  type NotePiece,
+} from "./schemas.tsx";
 
-// Type for backlinks (inline to work around CLI path resolution bug)
-type MentionablePiece = {
-  [NAME]?: string;
-  isHidden?: boolean;
-  mentioned: MentionablePiece[];
-  backlinks: MentionablePiece[];
-};
+// ===== Output Type =====
 
-// Simple random ID generator (crypto.randomUUID not available in pattern env)
-const generateId = () =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
-
-type NotePiece = {
-  [NAME]?: string;
-  title?: string;
-  content?: string;
-  isHidden?: boolean;
-  noteId?: string;
-};
-
-type MinimalPiece = {
-  [NAME]?: string;
-};
-
-// Helper to safely get notes array from a notebook (handles Cell/Writable or plain array)
-function _getNotebookNotesArray(notebook: unknown): unknown[] {
-  const notes = (notebook as any)?.notes;
-  if (!notes) return [];
-  // Check if it's a Cell/Writable with .get() method
-  if (typeof notes.get === "function") {
-    return notes.get() ?? [];
-  }
-  // Plain array
-  return Array.isArray(notes) ? notes : [];
-}
-
-// Helper to get a comparable name from a piece (handles both local and wish({ query: "#default" }) pieces)
-function getPieceName(piece: unknown): string {
-  // First try [NAME] (works for wish({ query: "#default" }) pieces)
-  const symbolName = (piece as any)?.[NAME];
-  if (typeof symbolName === "string") return symbolName;
-  // Fallback to title (works for local pieces)
-  const titleProp = (piece as any)?.title;
-  if (typeof titleProp === "string") return titleProp;
-  return "";
-}
-
-interface Input {
-  title?: Default<string, "Notebook">;
-  notes?: Writable<Default<NotePiece[], []>>;
-  isNotebook?: Default<boolean, true>; // Marker for identification through proxy
-  isHidden?: Default<boolean, false>; // Hide from default-app piece list when nested
-  parentNotebook?: any; // Reference to parent notebook (set on navigation for back link)
-}
-
-interface Output {
-  [NAME]?: string;
-  [UI]?: VNode;
+interface NotebookOutput {
+  [NAME]: string;
+  [UI]: VNode;
   title: string;
   notes: NotePiece[];
   noteCount: number;
   isNotebook: boolean;
   isHidden: boolean;
-  parentNotebook: any; // Reference to parent notebook (reactive)
+  parentNotebook: NotebookPiece | null;
   backlinks: MentionablePiece[];
   // LLM-callable streams for omnibot integration
   createNote: Stream<{ title: string; content: string }>;
@@ -342,7 +297,11 @@ const handleDropOntoCurrentNotebook = handler<
 const handleDropOntoNotebook = handler<
   { detail: { sourceCell: Writable<unknown> } },
   {
-    targetNotebook: Writable<{ notes?: unknown[]; isNotebook?: boolean }>;
+    targetNotebook: Writable<{
+      title?: string;
+      notes?: unknown[];
+      isNotebook?: boolean;
+    }>;
     currentNotes: Writable<NotePiece[]>;
     selectedNoteIndices: Writable<number[]>;
     notebooks: Writable<NotebookPiece[]>;
@@ -637,11 +596,6 @@ const _duplicateSelectedNotes = handler<
   notes.push(...copies);
   selectedNoteIndices.set([]);
 });
-
-type NotebookPiece = {
-  [NAME]?: string;
-  notes?: NotePiece[];
-};
 
 // Handler to permanently delete selected notes from the space
 const deleteSelectedNotes = handler<
@@ -1138,7 +1092,7 @@ const handleCreateNotebook = handler<
   return newNotebook;
 });
 
-const Notebook = pattern<Input, Output>(
+const Notebook = pattern<NotebookInput, NotebookOutput>(
   ({ title, notes, isNotebook, isHidden, parentNotebook, [SELF]: self }) => {
     const { allPieces } = wish<{ allPieces: Writable<NotePiece[]> }>(
       { query: "#default" },
