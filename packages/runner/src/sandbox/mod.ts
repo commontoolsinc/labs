@@ -49,3 +49,15 @@ export {
   type SandboxConfig,
   SandboxSecurityError,
 } from "./types.ts";
+
+// Execution wrapper
+export {
+  type ExecutionWrapperOptions,
+  getErrorMessage,
+  isPatternExecutionError,
+  PatternExecutionError,
+  type SourceLocation,
+  wrapAsyncExecution,
+  wrapExecution,
+  type WrappedFunction,
+} from "./execution-wrapper.ts";
