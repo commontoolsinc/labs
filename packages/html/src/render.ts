@@ -26,7 +26,7 @@ import {
   stringifyText,
   styleObjectToCssString,
 } from "./render-utils.ts";
-import { vdomSchema } from "@commontools/runner/schemas";
+import { rendererVDOMSchema } from "@commontools/runner/schemas";
 import { VDomRenderer } from "./main/renderer.ts";
 //import { animate } from "./debug-element.ts";
 
@@ -141,7 +141,7 @@ function renderLegacy(
 
   if (isCellHandle(view)) {
     rootCell = view as CellHandle<VNode>;
-    view = view.asSchema(vdomSchema) as CellHandle<VNode>;
+    view = view.asSchema(rendererVDOMSchema) as CellHandle<VNode>;
   }
 
   const optionsWithCell = rootCell ? { ...options, rootCell } : options;

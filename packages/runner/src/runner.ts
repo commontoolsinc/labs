@@ -1,7 +1,7 @@
 import { refer } from "merkle-reference/json";
 import { getLogger } from "@commontools/utils/logger";
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
-import { vdomSchema } from "./schemas.ts";
+import { rendererVDOMSchema } from "./schemas.ts";
 import type {
   JSONValue,
   StorableDatum,
@@ -910,7 +910,7 @@ export class Runner {
       (!isRecord(recipe.resultSchema) ||
         !recipe.resultSchema.properties?.[UI])
     ) {
-      cells.push(resultCell.key(UI).asSchema(vdomSchema));
+      cells.push(resultCell.key(UI).asSchema(rendererVDOMSchema));
     }
 
     await Promise.all(cells.map((c) => c.sync()));

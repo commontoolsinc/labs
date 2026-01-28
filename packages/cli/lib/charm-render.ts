@@ -1,6 +1,6 @@
 import { render } from "@commontools/html/client";
 import { UI } from "@commontools/runner";
-import { vdomSchema } from "@commontools/runner/schemas";
+import { rendererVDOMSchema } from "@commontools/runner/schemas";
 import { loadManager } from "./charm.ts";
 import { CharmsController } from "@commontools/charm/ops";
 import type { CharmConfig } from "./charm.ts";
@@ -36,7 +36,7 @@ export async function renderCharm(
   const cell = charm.getCell().asSchema({
     type: "object",
     properties: {
-      [UI]: vdomSchema,
+      [UI]: rendererVDOMSchema,
     },
     required: [UI],
   });

@@ -19,7 +19,7 @@ import {
 import {
   NameSchema,
   nameSchema,
-  vdomSchema,
+  rendererVDOMSchema,
 } from "@commontools/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
 import {
@@ -689,10 +689,10 @@ export class RuntimeProcessor {
       this.handleVDomUnmount({ type: RequestType.VDomUnmount, mountId });
     }
 
-    // Get the cell from the runtime and apply vdomSchema
+    // Get the cell from the runtime and apply rendererVDOMSchema
     // The schema has a [UI] property definition that handles VDOM unwrapping
     const rawCell = getCell(this.runtime, cellRef);
-    const cell = rawCell.asSchema(vdomSchema);
+    const cell = rawCell.asSchema(rendererVDOMSchema);
 
     // Create a reconciler that sends ops to the main thread
     const reconciler = new WorkerReconciler({

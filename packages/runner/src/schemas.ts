@@ -6,7 +6,7 @@
 
 import { JSONSchema, NAME, type Schema, TYPE, UI } from "./shared.ts";
 
-export const vdomSchema = {
+export const rendererVDOMSchema = {
   $defs: {
     vdomNode: {
       type: "object",
@@ -21,16 +21,16 @@ export const vdomSchema = {
           type: "array",
           items: {
             anyOf: [
-              { $ref: "#/$defs/vdomNode", asCell: true },
-              { type: "string", asCell: true },
-              { type: "number", asCell: true },
-              { type: "boolean", asCell: true },
+              { $ref: "#/$defs/vdomNode" },
+              { type: "string" },
+              { type: "number" },
+              { type: "boolean" },
               {
                 type: "array",
                 items: { $ref: "#/$defs/vdomNode", asCell: true },
-                asCell: true,
               },
             ],
+            asCell: true,
           },
           asCell: true,
         },
@@ -51,7 +51,7 @@ export type NameSchema = Schema<typeof nameSchema>;
 
 export const uiSchema = {
   type: "object",
-  properties: { [UI]: vdomSchema },
+  properties: { [UI]: rendererVDOMSchema },
   required: [UI],
 } as const satisfies JSONSchema;
 
