@@ -19,7 +19,6 @@
  */
 import {
   computed,
-  Default,
   derive,
   generateObject,
   handler,
@@ -141,13 +140,16 @@ const triggerReanalyze = handler<
   reanalyzeFlag.set(Date.now());
 });
 
+const updateWorkEmail = handler<
+  { target: { value: string } },
+  { workEmail: Writable<string> }
+>(({ target }, { workEmail }) => {
+  workEmail.set(target.value);
+});
+
 // =============================================================================
 // PATTERN
 // =============================================================================
-
-interface PatternInput {
-  workEmail?: Writable<Default<string, "">>;
-}
 
 /** Personal email writing style extracted from sent emails. #emailStyle */
 interface PatternOutput {
@@ -157,13 +159,13 @@ interface PatternOutput {
   isAnalyzing: boolean;
 }
 
-export default pattern<PatternInput, PatternOutput>(
-  ({ workEmail: workEmailInput }) => {
+export default pattern<Record<PropertyKey, never>, PatternOutput>(
+  () => {
     // ========================================================================
     // STATE
     // ========================================================================
 
-    const workEmail = workEmailInput ?? Writable.of("").for("workEmail");
+    const workEmail = Writable.of("").for("workEmail");
     const savedStyle = Writable.of<EmailStyle | null>(null).for("savedStyle");
     const lastAnalyzedAt = Writable.of("").for("lastAnalyzedAt");
     const emailsAnalyzedCount = Writable.of(0).for("emailsAnalyzedCount");
@@ -255,9 +257,10 @@ Extract the writing style patterns from these emails.`;
       if (!isPending && result && result !== lastSavedResult) {
         lastSavedResult = result;
         savedStyle.set(result as EmailStyle);
-        lastAnalyzedAt.set(new Date().toISOString());
+        const now = new Date().toISOString();
+        lastAnalyzedAt.set(now);
         const emails = allEmails || [];
-        emailsAnalyzedCount.set(emails.length);
+        emailsAnalyzedCount.set(Number(emails.length) || 0);
       }
 
       return null;
@@ -265,24 +268,15 @@ Extract the writing style patterns from these emails.`;
 
     const isAnalyzing = computed(() => !!styleResult.pending);
 
-    // Unwrap savedStyle once so derive calls in the UI infer clean types.
+    // Unwrap Writables once so derive calls in the UI get plain values.
     // The explicit param type is needed because derive infers Cell<T> for Writable<T>.
     const style = derive(
       savedStyle,
       (s: EmailStyle | null) => s,
     );
     const hasStyle = derive(style, (s) => !!s);
-
-    // ========================================================================
-    // UI
-    // ========================================================================
-
-    const updateWorkEmail = handler<
-      { target: { value: string } },
-      { workEmail: Writable<string> }
-    >(({ target }, { workEmail }) => {
-      workEmail.set(target.value);
-    });
+    const analyzedCount = derive(emailsAnalyzedCount, (c: number) => c);
+    const analyzedAt = derive(lastAnalyzedAt, (ts: string) => ts);
 
     return {
       [NAME]: "Email Style Extractor",
@@ -392,11 +386,9 @@ Extract the writing style patterns from these emails.`;
                         <span style={{ color: "#6366f1" }}>
                           Analyzing style...
                         </span>,
-                        derive(lastAnalyzedAt, (ts) =>
+                        derive(analyzedAt, (ts) =>
                           ts
-                            ? `Last analyzed: ${
-                              new Date(String(ts)).toLocaleString()
-                            }`
+                            ? `Last analyzed: ${new Date(ts).toLocaleString()}`
                             : ""),
                       )}
                     </span>
@@ -731,16 +723,14 @@ Extract the writing style patterns from these emails.`;
                   >
                     <span>
                       {derive(
-                        emailsAnalyzedCount,
+                        analyzedCount,
                         (c) =>
                           `${c} emails analyzed`,
                       )}
                     </span>
                     <span>
-                      {derive(lastAnalyzedAt, (ts) =>
-                        ts
-                          ? `Last: ${new Date(String(ts)).toLocaleString()}`
-                          : "")}
+                      {derive(analyzedAt, (ts) =>
+                        ts ? `Last: ${new Date(ts).toLocaleString()}` : "")}
                     </span>
                   </div>
                 </div>,
