@@ -296,236 +296,270 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
             />
           </ct-vstack>
 
-          {/* Contact Info Section */}
-          {sectionHeader("Contact Info", showContactInfo)}
-          {computed(() => {
-            if (!showContactInfo.get()) return null;
-            return (
-              <ct-vstack style={{ gap: "8px" }}>
-                <ct-vstack style={{ gap: "4px" }}>
-                  <label style={{ fontSize: "12px", color: "#6b7280" }}>
-                    Email
-                  </label>
-                  <ct-input
-                    $value={person.key("email")}
-                    placeholder="Email"
-                    type="email"
-                  />
+          {
+            /* Contact Info Section
+           * WORKAROUND: Each computed() must be the sole reactive child of its
+           * parent element. Multiple computed() siblings break rendering.
+           * Wrap each sectionHeader+computed pair in a <div>.
+           */
+          }
+          <div>
+            {sectionHeader("Contact Info", showContactInfo)}
+            {computed(() => {
+              if (!showContactInfo.get()) return null;
+              return (
+                <ct-vstack style={{ gap: "8px" }}>
+                  <ct-vstack style={{ gap: "4px" }}>
+                    <label style={{ fontSize: "12px", color: "#6b7280" }}>
+                      Email
+                    </label>
+                    <ct-input
+                      $value={person.key("email")}
+                      placeholder="Email"
+                      type="email"
+                    />
+                  </ct-vstack>
+                  <ct-vstack style={{ gap: "4px" }}>
+                    <label style={{ fontSize: "12px", color: "#6b7280" }}>
+                      Phone
+                    </label>
+                    <ct-input
+                      $value={person.key("phone")}
+                      placeholder="Phone"
+                      type="tel"
+                    />
+                  </ct-vstack>
                 </ct-vstack>
-                <ct-vstack style={{ gap: "4px" }}>
-                  <label style={{ fontSize: "12px", color: "#6b7280" }}>
-                    Phone
-                  </label>
-                  <ct-input
-                    $value={person.key("phone")}
-                    placeholder="Phone"
-                    type="tel"
-                  />
-                </ct-vstack>
-              </ct-vstack>
-            );
-          })}
+              );
+            })}
+          </div>
 
           {/* Addresses Section */}
-          {sectionHeader(
-            "Addresses",
-            showAddresses,
-            () => (person.key("addresses").get() || []).length,
-          )}
-          {computed(() => {
-            if (!showAddresses.get()) return null;
-            const addresses = person.key("addresses").get() || [];
-            return (
-              <ct-vstack style={{ gap: "8px" }}>
-                {addresses.map((_addr, i) => (
-                  <ct-card>
-                    <ct-vstack style={{ gap: "4px" }}>
-                      <ct-hstack
-                        style={{
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                        }}
-                      >
-                        <ct-select
-                          $value={person.key("addresses").key(i).key("label")}
-                          items={ADDRESS_LABEL_OPTIONS}
-                        />
-                        <ct-button
-                          variant="ghost"
-                          size="sm"
-                          onClick={removeAddress({ person, index: i })}
+          <div>
+            {sectionHeader(
+              "Addresses",
+              showAddresses,
+              () => (person.key("addresses").get() || []).length,
+            )}
+            {computed(() => {
+              if (!showAddresses.get()) return null;
+              const addresses = person.key("addresses").get() || [];
+              return (
+                <ct-vstack style={{ gap: "8px" }}>
+                  {addresses.map((_addr, i) => (
+                    <ct-card>
+                      <ct-vstack style={{ gap: "4px" }}>
+                        <ct-hstack
+                          style={{
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                          }}
                         >
-                          ×
-                        </ct-button>
-                      </ct-hstack>
-                      <ct-input
-                        $value={person.key("addresses").key(i).key("street")}
-                        placeholder="Street"
-                      />
-                      <ct-hstack style={{ gap: "4px" }}>
+                          <ct-select
+                            $value={person
+                              .key("addresses")
+                              .key(i)
+                              .key("label")}
+                            items={ADDRESS_LABEL_OPTIONS}
+                          />
+                          <ct-button
+                            variant="ghost"
+                            size="sm"
+                            onClick={removeAddress({ person, index: i })}
+                          >
+                            ×
+                          </ct-button>
+                        </ct-hstack>
                         <ct-input
-                          $value={person.key("addresses").key(i).key("city")}
-                          placeholder="City"
-                          style={{ flex: "1" }}
+                          $value={person
+                            .key("addresses")
+                            .key(i)
+                            .key("street")}
+                          placeholder="Street"
                         />
+                        <ct-hstack style={{ gap: "4px" }}>
+                          <ct-input
+                            $value={person
+                              .key("addresses")
+                              .key(i)
+                              .key("city")}
+                            placeholder="City"
+                            style={{ flex: "1" }}
+                          />
+                          <ct-input
+                            $value={person
+                              .key("addresses")
+                              .key(i)
+                              .key("state")}
+                            placeholder="State"
+                            style={{ width: "60px" }}
+                          />
+                          <ct-input
+                            $value={person.key("addresses").key(i).key("zip")}
+                            placeholder="Zip"
+                            style={{ width: "80px" }}
+                          />
+                        </ct-hstack>
                         <ct-input
-                          $value={person.key("addresses").key(i).key("state")}
-                          placeholder="State"
-                          style={{ width: "60px" }}
+                          $value={person
+                            .key("addresses")
+                            .key(i)
+                            .key("country")}
+                          placeholder="Country"
                         />
-                        <ct-input
-                          $value={person.key("addresses").key(i).key("zip")}
-                          placeholder="Zip"
-                          style={{ width: "80px" }}
-                        />
-                      </ct-hstack>
-                      <ct-input
-                        $value={person.key("addresses").key(i).key("country")}
-                        placeholder="Country"
-                      />
-                    </ct-vstack>
-                  </ct-card>
-                ))}
-                <ct-button
-                  variant="ghost"
-                  size="sm"
-                  onClick={addAddress({ person })}
-                >
-                  + Add Address
-                </ct-button>
-              </ct-vstack>
-            );
-          })}
+                      </ct-vstack>
+                    </ct-card>
+                  ))}
+                  <ct-button
+                    variant="ghost"
+                    size="sm"
+                    onClick={addAddress({ person })}
+                  >
+                    + Add Address
+                  </ct-button>
+                </ct-vstack>
+              );
+            })}
+          </div>
 
           {/* Social Profiles Section */}
-          {sectionHeader(
-            "Social Profiles",
-            showSocial,
-            () => (person.key("socialProfiles").get() || []).length,
-          )}
-          {computed(() => {
-            if (!showSocial.get()) return null;
-            const profiles = person.key("socialProfiles").get() || [];
-            return (
-              <ct-vstack style={{ gap: "8px" }}>
-                {profiles.map((_profile, i) => (
-                  <ct-hstack style={{ gap: "4px", alignItems: "center" }}>
-                    <ct-select
-                      $value={person
-                        .key("socialProfiles")
-                        .key(i)
-                        .key("platform")}
-                      items={SOCIAL_PLATFORM_OPTIONS}
-                    />
-                    <ct-input
-                      $value={person.key("socialProfiles").key(i).key("url")}
-                      placeholder="URL"
-                      style={{ flex: "1" }}
-                    />
-                    <ct-button
-                      variant="ghost"
-                      size="sm"
-                      onClick={removeSocialProfile({ person, index: i })}
-                    >
-                      ×
-                    </ct-button>
-                  </ct-hstack>
-                ))}
-                <ct-button
-                  variant="ghost"
-                  size="sm"
-                  onClick={addSocialProfile({ person })}
-                >
-                  + Add Profile
-                </ct-button>
-              </ct-vstack>
-            );
-          })}
+          <div>
+            {sectionHeader(
+              "Social Profiles",
+              showSocial,
+              () => (person.key("socialProfiles").get() || []).length,
+            )}
+            {computed(() => {
+              if (!showSocial.get()) return null;
+              const profiles = person.key("socialProfiles").get() || [];
+              return (
+                <ct-vstack style={{ gap: "8px" }}>
+                  {profiles.map((_profile, i) => (
+                    <ct-hstack style={{ gap: "4px", alignItems: "center" }}>
+                      <ct-select
+                        $value={person
+                          .key("socialProfiles")
+                          .key(i)
+                          .key("platform")}
+                        items={SOCIAL_PLATFORM_OPTIONS}
+                      />
+                      <ct-input
+                        $value={person
+                          .key("socialProfiles")
+                          .key(i)
+                          .key("url")}
+                        placeholder="URL"
+                        style={{ flex: "1" }}
+                      />
+                      <ct-button
+                        variant="ghost"
+                        size="sm"
+                        onClick={removeSocialProfile({ person, index: i })}
+                      >
+                        ×
+                      </ct-button>
+                    </ct-hstack>
+                  ))}
+                  <ct-button
+                    variant="ghost"
+                    size="sm"
+                    onClick={addSocialProfile({ person })}
+                  >
+                    + Add Profile
+                  </ct-button>
+                </ct-vstack>
+              );
+            })}
+          </div>
 
           {/* Notes Section */}
-          {sectionHeader("Notes", showNotes)}
-          {computed(() => {
-            if (!showNotes.get()) return null;
-            return (
-              <ct-vstack style={{ gap: "4px" }}>
-                <ct-input
-                  $value={person.key("notes")}
-                  placeholder="Notes about this person..."
-                  multiple
-                />
-              </ct-vstack>
-            );
-          })}
-
-          {/* sameAs Section - collapsed by default, only if candidates exist */}
-          {computed(() => {
-            if (!hasSameAsCandidates) return null;
-
-            const linkedName = sameAsDisplay;
-
-            // If linked, show compact display
-            if (linkedName) {
+          <div>
+            {sectionHeader("Notes", showNotes)}
+            {computed(() => {
+              if (!showNotes.get()) return null;
               return (
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "4px",
-                    paddingTop: "8px",
-                    borderTop: "1px solid #e5e7eb",
-                    fontSize: "12px",
-                    color: "#6b7280",
-                  }}
-                >
-                  <span>Same as: {linkedName}</span>
-                  <span
-                    style={{ cursor: "pointer", fontSize: "14px" }}
-                    onClick={clearSameAs({ person })}
-                  >
-                    ×
-                  </span>
-                </div>
-              );
-            }
-
-            // If picker is open, show autocomplete
-            if (showPicker.get()) {
-              return (
-                <ct-vstack
-                  style={{
-                    gap: "4px",
-                    paddingTop: "8px",
-                    borderTop: "1px solid #e5e7eb",
-                  }}
-                >
-                  <ct-autocomplete
-                    items={sameAsItems}
-                    placeholder="Search contacts..."
-                    onct-select={selectSameAs({ person, showPicker })}
+                <ct-vstack style={{ gap: "4px" }}>
+                  <ct-input
+                    $value={person.key("notes")}
+                    placeholder="Notes about this person..."
+                    multiple
                   />
                 </ct-vstack>
               );
-            }
+            })}
+          </div>
 
-            // Collapsed: small link to expand
-            return (
-              <ct-hstack
-                style={{
-                  paddingTop: "8px",
-                  borderTop: "1px solid #e5e7eb",
-                }}
-              >
-                <ct-button
-                  variant="ghost"
-                  size="sm"
-                  onClick={togglePicker({ showPicker })}
-                  style={{ fontSize: "12px", color: "#6b7280" }}
+          {/* sameAs Section - collapsed by default, only if candidates exist */}
+          <div>
+            {computed(() => {
+              if (!hasSameAsCandidates) return null;
+
+              const linkedName = sameAsDisplay;
+
+              // If linked, show compact display
+              if (linkedName) {
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px",
+                      paddingTop: "8px",
+                      borderTop: "1px solid #e5e7eb",
+                      fontSize: "12px",
+                      color: "#6b7280",
+                    }}
+                  >
+                    <span>Same as: {linkedName}</span>
+                    <span
+                      style={{ cursor: "pointer", fontSize: "14px" }}
+                      onClick={clearSameAs({ person })}
+                    >
+                      ×
+                    </span>
+                  </div>
+                );
+              }
+
+              // If picker is open, show autocomplete
+              if (showPicker.get()) {
+                return (
+                  <ct-vstack
+                    style={{
+                      gap: "4px",
+                      paddingTop: "8px",
+                      borderTop: "1px solid #e5e7eb",
+                    }}
+                  >
+                    <ct-autocomplete
+                      items={sameAsItems}
+                      placeholder="Search contacts..."
+                      onct-select={selectSameAs({ person, showPicker })}
+                    />
+                  </ct-vstack>
+                );
+              }
+
+              // Collapsed: small link to expand
+              return (
+                <ct-hstack
+                  style={{
+                    paddingTop: "8px",
+                    borderTop: "1px solid #e5e7eb",
+                  }}
                 >
-                  Link to another contact...
-                </ct-button>
-              </ct-hstack>
-            );
-          })}
+                  <ct-button
+                    variant="ghost"
+                    size="sm"
+                    onClick={togglePicker({ showPicker })}
+                    style={{ fontSize: "12px", color: "#6b7280" }}
+                  >
+                    Link to another contact...
+                  </ct-button>
+                </ct-hstack>
+              );
+            })}
+          </div>
         </ct-vstack>
       </ct-screen>
     ),

@@ -287,167 +287,183 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
             />
           </ct-vstack>
 
-          {/* Family Info Section */}
-          {sectionHeader("Family Info", showFamilyInfo)}
-          {computed(() => {
-            if (!showFamilyInfo.get()) return null;
-            return (
-              <ct-vstack style={{ gap: "8px" }}>
-                <ct-vstack style={{ gap: "4px" }}>
-                  <label style={{ fontSize: "12px", color: "#6b7280" }}>
-                    Relationship
-                  </label>
-                  <ct-select
-                    $value={member.key("relationship")}
-                    items={RELATIONSHIP_OPTIONS}
-                  />
+          {
+            /* Family Info Section
+           * WORKAROUND: Each computed() must be the sole reactive child of its
+           * parent element. Multiple computed() siblings break rendering.
+           * Wrap each sectionHeader+computed pair in a <div>.
+           */
+          }
+          <div>
+            {sectionHeader("Family Info", showFamilyInfo)}
+            {computed(() => {
+              if (!showFamilyInfo.get()) return null;
+              return (
+                <ct-vstack style={{ gap: "8px" }}>
+                  <ct-vstack style={{ gap: "4px" }}>
+                    <label style={{ fontSize: "12px", color: "#6b7280" }}>
+                      Relationship
+                    </label>
+                    <ct-select
+                      $value={member.key("relationship")}
+                      items={RELATIONSHIP_OPTIONS}
+                    />
+                  </ct-vstack>
+                  <ct-vstack style={{ gap: "4px" }}>
+                    <label style={{ fontSize: "12px", color: "#6b7280" }}>
+                      Birthday
+                    </label>
+                    <ct-input $value={member.key("birthday")} type="date" />
+                  </ct-vstack>
                 </ct-vstack>
-                <ct-vstack style={{ gap: "4px" }}>
-                  <label style={{ fontSize: "12px", color: "#6b7280" }}>
-                    Birthday
-                  </label>
-                  <ct-input $value={member.key("birthday")} type="date" />
-                </ct-vstack>
-              </ct-vstack>
-            );
-          })}
+              );
+            })}
+          </div>
 
           {/* Health & Diet Section */}
-          {sectionHeader(
-            "Health & Diet",
-            showHealth,
-            () =>
-              (member.key("dietaryRestrictions").get() || []).length +
-              (member.key("allergies").get() || []).length,
-          )}
-          {computed(() => {
-            if (!showHealth.get()) return null;
-            return (
-              <ct-vstack style={{ gap: "8px" }}>
-                <ct-vstack style={{ gap: "4px" }}>
-                  <label style={{ fontSize: "12px", color: "#6b7280" }}>
-                    Dietary Restrictions
-                  </label>
-                  <ct-tags
-                    tags={member.key("dietaryRestrictions")}
-                    onct-change={updateDietaryRestrictions({ member })}
-                  />
+          <div>
+            {sectionHeader(
+              "Health & Diet",
+              showHealth,
+              () =>
+                (member.key("dietaryRestrictions").get() || []).length +
+                (member.key("allergies").get() || []).length,
+            )}
+            {computed(() => {
+              if (!showHealth.get()) return null;
+              return (
+                <ct-vstack style={{ gap: "8px" }}>
+                  <ct-vstack style={{ gap: "4px" }}>
+                    <label style={{ fontSize: "12px", color: "#6b7280" }}>
+                      Dietary Restrictions
+                    </label>
+                    <ct-tags
+                      tags={member.key("dietaryRestrictions")}
+                      onct-change={updateDietaryRestrictions({ member })}
+                    />
+                  </ct-vstack>
+                  <ct-vstack style={{ gap: "4px" }}>
+                    <label style={{ fontSize: "12px", color: "#6b7280" }}>
+                      Allergies
+                    </label>
+                    <ct-tags
+                      tags={member.key("allergies")}
+                      onct-change={updateAllergies({ member })}
+                    />
+                  </ct-vstack>
                 </ct-vstack>
-                <ct-vstack style={{ gap: "4px" }}>
-                  <label style={{ fontSize: "12px", color: "#6b7280" }}>
-                    Allergies
-                  </label>
-                  <ct-tags
-                    tags={member.key("allergies")}
-                    onct-change={updateAllergies({ member })}
-                  />
-                </ct-vstack>
-              </ct-vstack>
-            );
-          })}
+              );
+            })}
+          </div>
 
           {/* Gift Ideas Section */}
-          {sectionHeader(
-            "Gift Ideas",
-            showGifts,
-            () => (member.key("giftIdeas").get() || []).length,
-          )}
-          {computed(() => {
-            if (!showGifts.get()) return null;
-            return (
-              <ct-vstack style={{ gap: "4px" }}>
-                <ct-tags
-                  tags={member.key("giftIdeas")}
-                  onct-change={updateGiftIdeas({ member })}
-                />
-              </ct-vstack>
-            );
-          })}
-
-          {/* Notes Section */}
-          {sectionHeader("Notes", showNotes)}
-          {computed(() => {
-            if (!showNotes.get()) return null;
-            return (
-              <ct-vstack style={{ gap: "4px" }}>
-                <ct-input
-                  $value={member.key("notes")}
-                  placeholder="Notes about this family member..."
-                  multiple
-                />
-              </ct-vstack>
-            );
-          })}
-
-          {/* sameAs Section - collapsed by default, only if candidates exist */}
-          {computed(() => {
-            if (!hasSameAsCandidates) return null;
-
-            const linkedName = sameAsDisplay;
-
-            // If linked, show compact display
-            if (linkedName) {
+          <div>
+            {sectionHeader(
+              "Gift Ideas",
+              showGifts,
+              () => (member.key("giftIdeas").get() || []).length,
+            )}
+            {computed(() => {
+              if (!showGifts.get()) return null;
               return (
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "4px",
-                    paddingTop: "8px",
-                    borderTop: "1px solid #e5e7eb",
-                    fontSize: "12px",
-                    color: "#6b7280",
-                  }}
-                >
-                  <span>Same as: {linkedName}</span>
-                  <span
-                    style={{ cursor: "pointer", fontSize: "14px" }}
-                    onClick={clearSameAs({ member })}
-                  >
-                    ×
-                  </span>
-                </div>
-              );
-            }
-
-            // If picker is open, show autocomplete
-            if (showPicker.get()) {
-              return (
-                <ct-vstack
-                  style={{
-                    gap: "4px",
-                    paddingTop: "8px",
-                    borderTop: "1px solid #e5e7eb",
-                  }}
-                >
-                  <ct-autocomplete
-                    items={sameAsItems}
-                    placeholder="Search contacts..."
-                    onct-select={selectSameAs({ member, showPicker })}
+                <ct-vstack style={{ gap: "4px" }}>
+                  <ct-tags
+                    tags={member.key("giftIdeas")}
+                    onct-change={updateGiftIdeas({ member })}
                   />
                 </ct-vstack>
               );
-            }
+            })}
+          </div>
 
-            // Collapsed: small link to expand
-            return (
-              <ct-hstack
-                style={{
-                  paddingTop: "8px",
-                  borderTop: "1px solid #e5e7eb",
-                }}
-              >
-                <ct-button
-                  variant="ghost"
-                  size="sm"
-                  onClick={togglePicker({ showPicker })}
-                  style={{ fontSize: "12px", color: "#6b7280" }}
+          {/* Notes Section */}
+          <div>
+            {sectionHeader("Notes", showNotes)}
+            {computed(() => {
+              if (!showNotes.get()) return null;
+              return (
+                <ct-vstack style={{ gap: "4px" }}>
+                  <ct-input
+                    $value={member.key("notes")}
+                    placeholder="Notes about this family member..."
+                    multiple
+                  />
+                </ct-vstack>
+              );
+            })}
+          </div>
+
+          {/* sameAs Section - collapsed by default, only if candidates exist */}
+          <div>
+            {computed(() => {
+              if (!hasSameAsCandidates) return null;
+
+              const linkedName = sameAsDisplay;
+
+              // If linked, show compact display
+              if (linkedName) {
+                return (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px",
+                      paddingTop: "8px",
+                      borderTop: "1px solid #e5e7eb",
+                      fontSize: "12px",
+                      color: "#6b7280",
+                    }}
+                  >
+                    <span>Same as: {linkedName}</span>
+                    <span
+                      style={{ cursor: "pointer", fontSize: "14px" }}
+                      onClick={clearSameAs({ member })}
+                    >
+                      ×
+                    </span>
+                  </div>
+                );
+              }
+
+              // If picker is open, show autocomplete
+              if (showPicker.get()) {
+                return (
+                  <ct-vstack
+                    style={{
+                      gap: "4px",
+                      paddingTop: "8px",
+                      borderTop: "1px solid #e5e7eb",
+                    }}
+                  >
+                    <ct-autocomplete
+                      items={sameAsItems}
+                      placeholder="Search contacts..."
+                      onct-select={selectSameAs({ member, showPicker })}
+                    />
+                  </ct-vstack>
+                );
+              }
+
+              // Collapsed: small link to expand
+              return (
+                <ct-hstack
+                  style={{
+                    paddingTop: "8px",
+                    borderTop: "1px solid #e5e7eb",
+                  }}
                 >
-                  Link to another contact...
-                </ct-button>
-              </ct-hstack>
-            );
-          })}
+                  <ct-button
+                    variant="ghost"
+                    size="sm"
+                    onClick={togglePicker({ showPicker })}
+                    style={{ fontSize: "12px", color: "#6b7280" }}
+                  >
+                    Link to another contact...
+                  </ct-button>
+                </ct-hstack>
+              );
+            })}
+          </div>
         </ct-vstack>
       </ct-screen>
     ),
