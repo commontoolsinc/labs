@@ -20,6 +20,11 @@ export interface TransformOptions {
   logger?: (message: string) => void;
   typeCheck?: boolean;
   precomputedDiagnostics?: ts.Diagnostic[];
+  /**
+   * Enable SES (Secure ECMAScript) sandboxing validation.
+   * When true, validates module-scope statements for SES compartment safety.
+   */
+  sesValidation?: boolean;
 }
 
 export interface BatchTypeCheckResult {
@@ -513,7 +518,11 @@ export async function transformFiles(
     }
   }
 
-  const pipeline = new CommonToolsTransformerPipeline({ mode, logger });
+  const pipeline = new CommonToolsTransformerPipeline({
+    mode,
+    logger,
+    sesValidation: options.sesValidation,
+  });
 
   const out: Record<string, string> = {};
   for (const fileName of Object.keys(files)) {
@@ -749,7 +758,11 @@ export async function validateFiles(
   const rootFiles = [...Object.keys(files), ...typeDefFiles];
 
   const program = ts.createProgram(rootFiles, compilerOptions, host);
-  const pipeline = new CommonToolsTransformerPipeline({ mode, logger });
+  const pipeline = new CommonToolsTransformerPipeline({
+    mode,
+    logger,
+    sesValidation: options.sesValidation,
+  });
 
   const outputs: Record<string, string> = {};
   for (const fileName of Object.keys(files)) {

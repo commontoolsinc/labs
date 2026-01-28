@@ -1,5 +1,7 @@
 import {
   CastValidationTransformer,
+  ExportAnnotationTransformer,
+  ModuleScopeValidationTransformer,
   OpaqueGetValidationTransformer,
   OpaqueRefJSXTransformer,
   PatternContextValidationTransformer,
@@ -31,18 +33,29 @@ export class CommonToolsTransformerPipeline extends Pipeline {
       diagnosticsCollector: [],
     };
 
-    super([
+    // Build the transformer list based on options
+    const transformers = [
       // Validation transformers run first to catch errors early
       new CastValidationTransformer(sharedOps),
       new OpaqueGetValidationTransformer(sharedOps),
       new PatternContextValidationTransformer(sharedOps),
+      // SES validation (optional, enabled via sesValidation option)
+      ...(options.sesValidation
+        ? [new ModuleScopeValidationTransformer(sharedOps)]
+        : []),
       // Then the regular transformation pipeline
       new OpaqueRefJSXTransformer(sharedOps),
       new ComputedTransformer(sharedOps),
       new ClosureTransformer(sharedOps),
       new SchemaInjectionTransformer(sharedOps),
       new SchemaGeneratorTransformer(sharedOps),
-    ]);
+      // Export annotation (SES, runs at the end to add __exportName)
+      ...(options.sesValidation
+        ? [new ExportAnnotationTransformer(sharedOps)]
+        : []),
+    ];
+
+    super(transformers);
 
     // Store reference to shared collector
     // Note: We need to access it after construction, so we store the array reference

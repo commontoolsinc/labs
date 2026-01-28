@@ -1,0 +1,51 @@
+/**
+ * SES (Secure ECMAScript) Sandboxing for pattern execution.
+ *
+ * This module provides secure compartmentalized execution for patterns,
+ * preventing closure state leakage, global pollution, and prototype tampering.
+ *
+ * @module
+ */
+
+// Core manager
+export {
+  CompartmentManager,
+  getCompartmentManager,
+  resetCompartmentManager,
+} from "./compartment-manager.ts";
+
+// Configuration
+export {
+  COMMON_TOOLS_DEBUG_ENV,
+  getDefaultLockdownOptions,
+  getDefaultSandboxConfig,
+  isDebugEnabled,
+  isSESEnabled,
+  resolveSandboxConfig,
+  SES_ENABLED_ENV,
+} from "./config.ts";
+
+// Runtime globals
+export {
+  createMinimalGlobals,
+  createRuntimeGlobals,
+} from "./runtime-globals.ts";
+
+// Console
+export {
+  createSandboxedConsole,
+  createSilentConsole,
+  type SandboxedConsoleOptions,
+} from "./sandboxed-console.ts";
+
+// Types
+export {
+  CompartmentInitializationError,
+  type FrozenExport,
+  type LockdownOptions,
+  type PatternCompartment,
+  type PatternCompartmentConfig,
+  type RuntimeGlobals,
+  type SandboxConfig,
+  SandboxSecurityError,
+} from "./types.ts";

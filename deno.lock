@@ -123,6 +123,7 @@
     "npm:pino@^9.6.0": "9.14.0",
     "npm:plaid@36": "36.0.0",
     "npm:quickjs-emscripten-core@*": "0.31.0",
+    "npm:ses@1.10.0": "1.10.0",
     "npm:source-map-js@^1.2.1": "1.2.1",
     "npm:stoker@^1.4.2": "1.4.3_@hono+zod-openapi@0.18.4__hono@4.10.5__zod@3.25.76_hono@4.10.5_zod@3.25.76",
     "npm:turndown@^7.1.2": "7.2.2",
@@ -581,6 +582,9 @@
         "style-mod",
         "w3c-keyname"
       ]
+    },
+    "@endo/env-options@1.1.11": {
+      "integrity": "sha512-p9OnAPsdqoX4YJsE98e3NBVhIr2iW9gNZxHhAI2/Ul5TdRfoOViItzHzTqrgUVopw6XxA1u1uS6CykLMDUxarA=="
     },
     "@esbuild/aix-ppc64@0.25.12": {
       "integrity": "sha512-Hhmwd6CInZ3dwpuGTF8fJG6yoWmsToE+vYgD4nytZVxcu1ulHpUQRAB1UJ8+N1Am3Mz4+xOByoQoSZf4D+CpkA==",
@@ -1694,6 +1698,12 @@
     },
     "secure-json-parse@4.1.0": {
       "integrity": "sha512-l4KnYfEyqYJxDwlNVyRfO2E4NTHfMKAWdUuA8J0yve2Dz/E/PdBepY03RvyJpssIpRFwJoCD55wA+mEDs6ByWA=="
+    },
+    "ses@1.10.0": {
+      "integrity": "sha512-HXmJbNEgY/4hsQfaz5dna39vVKNyvlElRmJYk+bjTqSXSElT0Hr6NKwWVg4j0TxP6IuHp/PNMoWJKIRXzmLbAQ==",
+      "dependencies": [
+        "@endo/env-options"
+      ]
     },
     "sonic-boom@4.2.0": {
       "integrity": "sha512-INb7TM37/mAcsGmc9hyyI6+QR3rR1zVRu36B0NeGXKnOOLiZOfER5SA+N7X7k3yUYRzLWafduTDvJAfDswwEww==",
