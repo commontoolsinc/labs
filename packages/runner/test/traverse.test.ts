@@ -135,6 +135,95 @@ describe("SchemaObjectTraverser.traverseDAG", () => {
   });
 });
 
+describe("SchemaObjectTraverser undefined handling", () => {
+  // These tests document current behavior where arrays and objects handle
+  // undefined elements/properties differently:
+  // - Arrays: if any element is undefined, the entire result becomes undefined
+  // - Objects: undefined values are assigned directly to properties
+  // This asymmetry may be unintentional - see traverse.ts lines 594-598 vs 674-677
+
+  it("returns undefined when array contains link to non-existent doc", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-with-array" as URI;
+    const docEntity = docUri as Entity;
+    const missingUri = "of:missing-doc" as URI;
+
+    // Array with a link to a non-existent document
+    const docValue = [
+      "present",
+      { "/": missingUri }, // link to missing doc
+      "also-present",
+    ];
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+    // Note: missingUri is NOT in the store
+
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schemaContext: { schema: true, rootSchema: true },
+    });
+
+    const result = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // Current behavior: entire array result becomes undefined
+    expect(result).toBeUndefined();
+  });
+
+  it("nests undefined when object contains link to non-existent doc", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-with-object" as URI;
+    const docEntity = docUri as Entity;
+    const missingUri = "of:missing-doc" as URI;
+
+    // Object with a link to a non-existent document
+    const docValue = {
+      present: "here",
+      missing: { "/": missingUri }, // link to missing doc
+      alsoPresent: "also here",
+    };
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+    // Note: missingUri is NOT in the store
+
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schemaContext: { schema: true, rootSchema: true },
+    });
+
+    const result = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // Current behavior: undefined gets nested in the object
+    // (This is asymmetric with array behavior above)
+    expect(result).toEqual({
+      present: "here",
+      missing: undefined,
+      alsoPresent: "also here",
+    });
+  });
+});
+
 describe("SchemaObjectTraverser array traversal", () => {
   it("uses prefixItems schemas for indexed items", () => {
     const store = new Map<string, Revision<State>>();
