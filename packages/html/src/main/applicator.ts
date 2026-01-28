@@ -218,7 +218,11 @@ export class DomApplicator {
     // Remove all nodes except the container (it's owned by the caller)
     for (const [nodeId, node] of this.nodes) {
       if (nodeId === CONTAINER_NODE_ID) continue;
-      if (node.parentNode) {
+      if (
+        node.parentNode &&
+        typeof (node.parentNode as ParentNode & { removeChild?: unknown })
+            .removeChild === "function"
+      ) {
         node.parentNode.removeChild(node);
       }
     }
