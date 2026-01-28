@@ -30,7 +30,9 @@ import FamilyMemberPattern, { type FamilyMember } from "./family-member.tsx";
 interface ContactCharm {
   [NAME]: string;
   [UI]: VNode;
-  // The actual data lives inside the charm
+  // The actual data lives inside the charm - either person or member
+  person?: Person;
+  member?: FamilyMember;
 }
 
 // ============================================================================
@@ -55,7 +57,10 @@ interface Output {
 
 const addPerson = handler<
   unknown,
-  { contacts: Writable<ContactCharm[]>; selectedIndex: Writable<number> }
+  {
+    contacts: Writable<ContactCharm[]>;
+    selectedIndex: Writable<number>;
+  }
 >((_event, { contacts, selectedIndex }) => {
   // Create writable data for the person
   const personData = Writable.of<Person>({
@@ -64,7 +69,7 @@ const addPerson = handler<
     email: "",
     phone: "",
   });
-  // Instantiate the pattern - this returns a charm with [UI]
+  // Instantiate the pattern
   const charm = PersonPattern({ person: personData });
   contacts.push(charm as ContactCharm);
   selectedIndex.set(contacts.get().length - 1);
@@ -72,7 +77,10 @@ const addPerson = handler<
 
 const addFamilyMember = handler<
   unknown,
-  { contacts: Writable<ContactCharm[]>; selectedIndex: Writable<number> }
+  {
+    contacts: Writable<ContactCharm[]>;
+    selectedIndex: Writable<number>;
+  }
 >((_event, { contacts, selectedIndex }) => {
   // Create writable data for the family member
   const memberData = Writable.of<FamilyMember>({
@@ -82,7 +90,7 @@ const addFamilyMember = handler<
     birthday: "",
     dietaryRestrictions: [],
   });
-  // Instantiate the pattern - this returns a charm with [UI]
+  // Instantiate the pattern
   const charm = FamilyMemberPattern({ member: memberData });
   contacts.push(charm as ContactCharm);
   selectedIndex.set(contacts.get().length - 1);
