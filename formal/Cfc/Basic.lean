@@ -12,6 +12,7 @@ gets compiled as part of the library.
 
 import Cfc.Atom
 import Cfc.Label
+import Cfc.Contamination
 import Cfc.Store
 import Cfc.Opaque
 import Cfc.WriteAuthority
@@ -42,4 +43,5 @@ import Cfc.Proofs.Store
 import Cfc.Proofs.Opaque
 import Cfc.Proofs.WriteAuthority
 import Cfc.Proofs.Collection
+import Cfc.Proofs.Contamination
 import Cfc.Proofs.LabelTransitionExamples
