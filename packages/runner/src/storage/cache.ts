@@ -1740,7 +1740,7 @@ class ProviderConnection implements IStorageProvider {
     }
   }
 
-  sink<T extends StorableValue = any>(
+  sink<T extends StorableValue = StorableValue>(
     uri: URI,
     callback: (value: ImmutableStorageValue<T>) => void,
   ) {
@@ -1755,11 +1755,13 @@ class ProviderConnection implements IStorageProvider {
     return this.provider.synced();
   }
 
-  get<T extends StorableValue = any>(uri: URI): OptImmutableStorageValue<T> {
+  get<T extends StorableValue = StorableValue>(
+    uri: URI,
+  ): OptImmutableStorageValue<T> {
     return this.provider.get(uri);
   }
 
-  send<T extends StorableValue = any>(
+  send<T extends StorableValue = StorableValue>(
     batch: { uri: URI; value: StorageValue<T> }[],
   ) {
     return this.provider.send(batch);
@@ -1846,7 +1848,7 @@ export class Provider implements IStorageProvider {
     }
   }
 
-  sink<T extends StorableValue = any>(
+  sink<T extends StorableValue = StorableValue>(
     uri: URI,
     callback: (value: ImmutableStorageValue<T>) => void,
   ): Cancel {
@@ -1903,7 +1905,9 @@ export class Provider implements IStorageProvider {
     ]) as unknown as Promise<void>;
   }
 
-  get<T extends StorableValue = any>(uri: URI): OptImmutableStorageValue<T> {
+  get<T extends StorableValue = StorableValue>(
+    uri: URI,
+  ): OptImmutableStorageValue<T> {
     const entity = this.workspace.get({ id: uri, type: this.the });
 
     return entity?.is as OptImmutableStorageValue<T>;
@@ -1911,7 +1915,7 @@ export class Provider implements IStorageProvider {
 
   // This is mostly just used by tests and tools, since the transactions will
   // directly commit their results.
-  async send<T extends StorableValue = any>(
+  async send<T extends StorableValue = StorableValue>(
     batch: { uri: URI; value: StorageValue<T> }[],
   ): Promise<
     Result<Unit, PushError>
