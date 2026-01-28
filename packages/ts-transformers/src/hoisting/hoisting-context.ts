@@ -177,6 +177,138 @@ export class HoistingContext {
 }
 
 /**
+ * Checks if a callback function references module-scope symbols
+ * (imports, module-scope consts, module-scope functions).
+ *
+ * Callbacks that reference module-scope symbols must be hoisted to
+ * module scope for SES compartment safety, so they become frozen
+ * module-level declarations rather than closures over module bindings.
+ *
+ * @param callback - The callback function to analyze
+ * @param checker - TypeScript type checker
+ * @returns True if the callback references module-scope symbols and needs hoisting
+ */
+export function referencesModuleScopeSymbols(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  const paramNames = new Set<string>();
+  for (const param of callback.parameters) {
+    collectBindingNames(param.name, paramNames);
+  }
+
+  const localNames = new Set<string>();
+  let hasModuleScopeRef = false;
+
+  const visit = (node: ts.Node): void => {
+    if (hasModuleScopeRef) return;
+
+    if (ts.isVariableDeclaration(node)) {
+      collectBindingNames(node.name, localNames);
+    }
+
+    if (ts.isIdentifier(node)) {
+      if (isPropertyName(node)) return;
+
+      const name = node.text;
+      if (paramNames.has(name) || localNames.has(name)) return;
+
+      const symbol = checker.getSymbolAtLocation(node);
+      if (symbol) {
+        const declarations = symbol.getDeclarations();
+        if (declarations && declarations.length > 0) {
+          const decl = declarations[0]!;
+          const declPos = decl.getStart();
+          const callbackStart = callback.getStart();
+          const callbackEnd = callback.getEnd();
+
+          if (declPos < callbackStart || declPos > callbackEnd) {
+            if (isModuleScopeDeclaration(decl)) {
+              hasModuleScopeRef = true;
+            }
+          }
+        }
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(callback.body);
+  return hasModuleScopeRef;
+}
+
+/**
+ * Module specifiers that are provided as compartment globals and
+ * don't need hoisting (they're always available in the sandbox).
+ */
+const RUNTIME_PROVIDED_MODULES = new Set([
+  "commontools",
+  "@commontools/common",
+  "@commontools/ui",
+]);
+
+/**
+ * Check if a declaration is at module scope (import, module-scope const/function).
+ * Excludes imports from runtime-provided modules (commontools, etc.)
+ * since those are available as compartment globals.
+ */
+function isModuleScopeDeclaration(declaration: ts.Declaration): boolean {
+  if (
+    ts.isImportSpecifier(declaration) ||
+    ts.isImportClause(declaration) ||
+    ts.isNamespaceImport(declaration)
+  ) {
+    // Check if this import is from a runtime-provided module
+    const importDecl = findImportDeclaration(declaration);
+    if (importDecl) {
+      const moduleSpecifier = importDecl.moduleSpecifier;
+      if (ts.isStringLiteral(moduleSpecifier)) {
+        if (RUNTIME_PROVIDED_MODULES.has(moduleSpecifier.text)) {
+          return false; // Runtime-provided, no hoisting needed
+        }
+      }
+    }
+    return true;
+  }
+
+  if (ts.isVariableDeclaration(declaration)) {
+    const varStatement = declaration.parent?.parent;
+    if (
+      varStatement &&
+      ts.isVariableStatement(varStatement) &&
+      ts.isSourceFile(varStatement.parent)
+    ) {
+      return true;
+    }
+  }
+
+  if (ts.isFunctionDeclaration(declaration)) {
+    if (declaration.parent && ts.isSourceFile(declaration.parent)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Walk up the AST from an import specifier/clause to find the ImportDeclaration.
+ */
+function findImportDeclaration(
+  node: ts.Declaration,
+): ts.ImportDeclaration | undefined {
+  let current: ts.Node | undefined = node;
+  while (current) {
+    if (ts.isImportDeclaration(current)) {
+      return current;
+    }
+    current = current.parent;
+  }
+  return undefined;
+}
+
+/**
  * Checks if a callback function is "self-contained" - meaning it has no
  * references to external variables that would require closure capture.
  *

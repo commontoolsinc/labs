@@ -10,6 +10,7 @@ import {
 } from "./transformers/mod.ts";
 import { ClosureTransformer } from "./closures/transformer.ts";
 import { ComputedTransformer } from "./computed/transformer.ts";
+import { HoistingTransformer } from "./hoisting/mod.ts";
 import {
   Pipeline,
   TransformationDiagnostic,
@@ -49,6 +50,9 @@ export class CommonToolsTransformerPipeline extends Pipeline {
       new ClosureTransformer(sharedOps),
       new SchemaInjectionTransformer(sharedOps),
       new SchemaGeneratorTransformer(sharedOps),
+      // Hoisting: moves builder calls referencing module-scope symbols to module scope
+      // Runs after all schema transformers so schemas are already injected
+      new HoistingTransformer(sharedOps),
       // Export annotation (SES, runs at the end to add __exportName)
       ...(options.sesValidation
         ? [new ExportAnnotationTransformer(sharedOps)]
