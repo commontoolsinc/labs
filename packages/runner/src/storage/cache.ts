@@ -450,7 +450,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
           subPath,
           existingRootSchema,
           undefined,
-          false
+          false,
         );
         // Basic matching -- we may not recognize some supersets
         // If the subSchema has ifc flags, but the new schema does not, the
