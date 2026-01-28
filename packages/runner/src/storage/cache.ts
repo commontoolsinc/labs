@@ -1,5 +1,8 @@
 import { fromString, refer } from "@commontools/memory/reference";
-import type { StorableDatum } from "@commontools/memory/interface";
+import type {
+  StorableDatum,
+  StorableValue,
+} from "@commontools/memory/interface";
 import type {
   CauseString,
   Changes as MemoryChanges,
@@ -1737,7 +1740,7 @@ class ProviderConnection implements IStorageProvider {
     }
   }
 
-  sink<T = any>(
+  sink<T extends StorableValue = StorableValue>(
     uri: URI,
     callback: (value: ImmutableStorageValue<T>) => void,
   ) {
@@ -1752,11 +1755,13 @@ class ProviderConnection implements IStorageProvider {
     return this.provider.synced();
   }
 
-  get<T = any>(uri: URI): OptImmutableStorageValue<T> {
+  get<T extends StorableValue = StorableValue>(
+    uri: URI,
+  ): OptImmutableStorageValue<T> {
     return this.provider.get(uri);
   }
 
-  send<T = any>(
+  send<T extends StorableValue = StorableValue>(
     batch: { uri: URI; value: StorageValue<T> }[],
   ) {
     return this.provider.send(batch);
@@ -1843,7 +1848,7 @@ export class Provider implements IStorageProvider {
     }
   }
 
-  sink<T = any>(
+  sink<T extends StorableValue = StorableValue>(
     uri: URI,
     callback: (value: ImmutableStorageValue<T>) => void,
   ): Cancel {
@@ -1900,7 +1905,9 @@ export class Provider implements IStorageProvider {
     ]) as unknown as Promise<void>;
   }
 
-  get<T = any>(uri: URI): OptImmutableStorageValue<T> {
+  get<T extends StorableValue = StorableValue>(
+    uri: URI,
+  ): OptImmutableStorageValue<T> {
     const entity = this.workspace.get({ id: uri, type: this.the });
 
     return entity?.is as OptImmutableStorageValue<T>;
@@ -1908,7 +1915,7 @@ export class Provider implements IStorageProvider {
 
   // This is mostly just used by tests and tools, since the transactions will
   // directly commit their results.
-  async send<T = any>(
+  async send<T extends StorableValue = StorableValue>(
     batch: { uri: URI; value: StorageValue<T> }[],
   ): Promise<
     Result<Unit, PushError>

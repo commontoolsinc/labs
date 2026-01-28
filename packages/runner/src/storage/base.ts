@@ -1,6 +1,7 @@
 import type {
   Result,
   SchemaPathSelector,
+  StorableValue,
   Unit,
   URI,
 } from "@commontools/memory/interface";
@@ -14,14 +15,16 @@ import {
 export type { Result, Unit };
 
 export abstract class BaseStorageProvider implements IStorageProvider {
+  // Uses `any` because callbacks may expect different specific types,
+  // but all receive StorableValue at runtime.
   protected subscribers = new Map<
     string,
-    Set<(value: ImmutableStorageValue) => void>
+    Set<(value: ImmutableStorageValue<any>) => void>
   >();
   protected waitingForSync = new Map<string, Promise<void>>();
   protected waitingForSyncResolvers = new Map<string, () => void>();
 
-  abstract send<T = any>(
+  abstract send<T extends StorableValue = StorableValue>(
     batch: { uri: URI; value: StorageValue<T> }[],
   ): Promise<
     { ok: object; error?: undefined } | { ok?: undefined; error: Error }
@@ -36,16 +39,18 @@ export abstract class BaseStorageProvider implements IStorageProvider {
 
   abstract synced(): Promise<void>;
 
-  abstract get<T = any>(uri: URI): OptImmutableStorageValue<T>;
+  abstract get<T extends StorableValue = StorableValue>(
+    uri: URI,
+  ): OptImmutableStorageValue<T>;
 
-  sink<T = any>(
+  sink<T extends StorableValue = StorableValue>(
     uri: URI,
     callback: (value: ImmutableStorageValue<T>) => void,
   ): Cancel {
     if (!this.subscribers.has(uri)) {
       this.subscribers.set(
         uri,
-        new Set<(value: ImmutableStorageValue) => void>(),
+        new Set<(value: ImmutableStorageValue<any>) => void>(),
       );
     }
     const listeners = this.subscribers.get(uri)!;
