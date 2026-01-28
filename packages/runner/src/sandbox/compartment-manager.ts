@@ -112,10 +112,32 @@ export class CompartmentManager {
     }
 
     // Dynamically import SES
-    await import("npm:ses@1.10.0");
+    await import("npm:ses@1.14.0");
 
     // Apply lockdown with configured options
     const options = getDefaultLockdownOptions(this.config.debug);
+
+    // Pre-remove configurable intrinsics that SES would warn about.
+    // If SES starts warning about NEW intrinsics, those warnings will
+    // surface and we should add them here.
+    // deno-lint-ignore no-explicit-any
+    const g = globalThis as any;
+    delete g.Math?.f16round;
+
+    // Symbol.metadata is not configurable so SES can't remove it and
+    // logs a warning via console.error. Filter that known warning.
+    // Any NEW intrinsic warnings will still surface since we only
+    // suppress the specific Symbol%.metadata message.
+    const origError = console.error;
+    console.error = (...args: unknown[]) => {
+      const msg = args.map(String).join(" ");
+      if (
+        msg.includes("Removing unpermitted intrinsics") ||
+        msg.includes("Removing intrinsics") ||
+        msg.includes("Symbol%.metadata")
+      ) return;
+      origError.apply(console, args);
+    };
 
     try {
       lockdown(options);
@@ -133,6 +155,8 @@ export class CompartmentManager {
       } else {
         throw error;
       }
+    } finally {
+      console.error = origError;
     }
   }
 
