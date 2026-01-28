@@ -135,14 +135,13 @@ describe("SchemaObjectTraverser.traverseDAG", () => {
   });
 });
 
-describe("SchemaObjectTraverser undefined handling", () => {
-  // These tests document current behavior where arrays and objects handle
-  // undefined elements/properties differently:
-  // - Arrays: if any element is undefined, the entire result becomes undefined
-  // - Objects: undefined values are assigned directly to properties
-  // This asymmetry may be unintentional - see traverse.ts lines 594-598 vs 674-677
+describe("SchemaObjectTraverser missing value handling", () => {
+  // Missing values are handled consistently with other value transforms
+  // (toJSON, toStorableValue, etc.):
+  // - Arrays: null is inserted for missing elements
+  // - Objects: undefined is assigned for missing properties
 
-  it("returns undefined when array contains link to non-existent doc", () => {
+  it("uses null for missing array elements", () => {
     const store = new Map<string, Revision<State>>();
     const type = "application/json" as const;
     const docUri = "of:doc-with-array" as URI;
@@ -176,11 +175,11 @@ describe("SchemaObjectTraverser undefined handling", () => {
       value: docValue,
     });
 
-    // Current behavior: entire array result becomes undefined
-    expect(result).toBeUndefined();
+    // Missing elements become null (consistent with toJSON, toStorableValue, etc.)
+    expect(result).toEqual(["present", null, "also-present"]);
   });
 
-  it("nests undefined when object contains link to non-existent doc", () => {
+  it("uses undefined for missing object properties", () => {
     const store = new Map<string, Revision<State>>();
     const type = "application/json" as const;
     const docUri = "of:doc-with-object" as URI;
@@ -214,8 +213,7 @@ describe("SchemaObjectTraverser undefined handling", () => {
       value: docValue,
     });
 
-    // Current behavior: undefined gets nested in the object
-    // (This is asymmetric with array behavior above)
+    // Missing properties become undefined
     expect(result).toEqual({
       present: "here",
       missing: undefined,

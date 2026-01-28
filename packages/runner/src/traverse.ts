@@ -592,10 +592,9 @@ export abstract class BaseObjectTraverser {
       // We copy the contents of our result into newValue so that if we have a
       // cycle, we can return newValue before we actually finish populating it.
       for (const v of entries) {
-        if (v === undefined) {
-          return undefined;
-        }
-        newValue.push(v as StorableDatum);
+        // Use null for missing/undefined elements (consistent with other value
+        // transforms in this system, e.g. toJSON and toStorableValue)
+        newValue.push(v === undefined ? null : v as StorableDatum);
       }
       // Our link is based on the last link in the chain and not the first.
       const newLink = getNormalizedLink(doc.address, true, true);
