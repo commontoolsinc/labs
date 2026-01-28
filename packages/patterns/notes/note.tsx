@@ -22,7 +22,6 @@ import {
   generateId,
   type MentionablePiece,
   type MinimalPiece,
-  type NotebookCell,
   type NotebookPiece,
   type NoteInput,
 } from "./schemas.tsx";
@@ -108,12 +107,6 @@ const goToParentHandler = handler<
 
 // ===== Utility functions =====
 
-// Type guard for notebook cells (mentionable items that have isNotebook and notes)
-const isNotebookCell = (item: unknown): item is NotebookCell => {
-  const maybe = item as { isNotebook?: boolean; notes?: unknown };
-  return !!maybe.isNotebook && !!maybe.notes;
-};
-
 // Grep function for patternTool - filters content lines by query
 const grepFn = ({ query, content }: { query: string; content: string }) => {
   return computed(() => content.split("\n").filter((c) => c.includes(query)));
@@ -172,19 +165,6 @@ const Note = pattern<NoteInput, NoteOutput>(
       return null;
     });
 
-    // Find the parent notebook in mentionable (for adding notes to it)
-    // mentionable is a superset that includes notebooks with their notes arrays
-    const parentNotebookCell = computed((): NotebookCell | null => {
-      const notebook = parentNotebookProp;
-      if (!notebook) return null;
-
-      const nbName = notebook[NAME];
-      const found = mentionable.find((c) => c[NAME] === nbName);
-      if (!found || !isNotebookCell(found)) return null;
-
-      return found;
-    });
-
     // ===== Actions =====
 
     const toggleMenu = action(() => menuOpen.set(!menuOpen.get()));
@@ -219,7 +199,6 @@ const Note = pattern<NoteInput, NoteOutput>(
     // Create new note action - closes over allPieces and parentNotebookProp
     const createNewNote = action(() => {
       const notebook = parentNotebookProp;
-      const notebookCell = parentNotebookCell;
 
       const note = Note({
         title: "New Note",
@@ -230,9 +209,13 @@ const Note = pattern<NoteInput, NoteOutput>(
       });
       allPieces.push(note as any); // Required for persistence
 
-      // Add to parent notebook if we have a reference to it
-      if (notebookCell) {
-        notebookCell.notes.push(note);
+      // Add to parent notebook if we can find it in mentionable
+      if (notebook) {
+        const nbName = notebook[NAME];
+        const found = mentionable.find((c) => c[NAME] === nbName) as any;
+        if (found?.isNotebook && found?.notes) {
+          found.notes.push(note);
+        }
       }
 
       return navigateTo(note);
@@ -251,14 +234,8 @@ const Note = pattern<NoteInput, NoteOutput>(
 
     // Exported stream for external content editing
     const editContent = action(
-      (
-        { detail, result }: {
-          detail: { value: string };
-          result?: Writable<string>;
-        },
-      ) => {
+      ({ detail }: { detail: { value: string } }) => {
         content.set(detail.value);
-        result?.set("test!");
       },
     );
 
