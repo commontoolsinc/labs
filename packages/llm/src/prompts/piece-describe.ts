@@ -4,7 +4,7 @@ import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { extractTextFromLLMResponse } from "../types.ts";
 
 const SYSTEM_PROMPT = llmPrompt(
-  "charm-describe-system",
+  "piece-describe-system",
   `
 You are tasked with generating a concise, one-sentence description of a web application based on its specification, code, and schema. Your goal is to capture the essence of what the app does in a clear and informative manner.
 
@@ -46,7 +46,7 @@ Provide your one-sentence description inside <description> tags.
  * @param model - The model to use to generate the description. (default: "anthropic:claude-sonnet-4-5")
  * @returns The generated description.
  */
-export async function describeCharm(
+export async function describePiece(
   spec: string,
   code: string,
   schema: string,
@@ -60,7 +60,7 @@ export async function describeCharm(
     SCHEMA: schema,
   });
   const prompt = llmPrompt(
-    "charm-describe-user",
+    "piece-describe-user",
     `Describe the functionality of this app in a single sentence`,
   );
   const response = await new LLMClient().sendRequest({
@@ -74,7 +74,7 @@ export async function describeCharm(
       },
     ],
     metadata: {
-      context: "charm-describe",
+      context: "piece-describe",
       systemPrompt: system.version,
       userPrompt: prompt.version,
       space,

@@ -80,7 +80,7 @@ interface TaskAnalysis {
 }
 
 // Note type from wish
-type NoteCharm = {
+type NotePiece = {
   [NAME]?: string;
   content?: string;
   title?: string;
@@ -182,7 +182,7 @@ const executeEditNote = handler<
     taskCurrentLabelId: Writable<string>;
     hiddenTasks: Writable<string[]>;
     processingTasks: Writable<string[]>;
-    allCharms: Writable<NoteCharm[]>;
+    allPieces: Writable<NotePiece[]>;
   }
 >(
   (
@@ -195,7 +195,7 @@ const executeEditNote = handler<
       taskCurrentLabelId,
       hiddenTasks,
       processingTasks,
-      allCharms,
+      allPieces,
     },
   ) => {
     const labelId = taskCurrentLabelId.get();
@@ -210,20 +210,20 @@ const executeEditNote = handler<
 
     try {
       // Find the target note
-      const charms = allCharms.get() || [];
-      const targetNoteIndex = charms.findIndex((charm: NoteCharm) => {
-        const name = charm?.[NAME] || "";
+      const pieces = allPieces.get() || [];
+      const targetNoteIndex = pieces.findIndex((piece: NotePiece) => {
+        const name = piece?.[NAME] || "";
         // Notes are named "📝 Title", extract title for matching
         const titleFromName = name.replace(/^📝\s*/, "").trim();
         return (
           titleFromName.toLowerCase() === noteTitle.toLowerCase() ||
-          (charm as any)?.title?.toLowerCase() === noteTitle.toLowerCase()
+          (piece as any)?.title?.toLowerCase() === noteTitle.toLowerCase()
         );
       });
 
       if (targetNoteIndex >= 0) {
         // Get the note cell and update content
-        const noteCell = allCharms.key(targetNoteIndex);
+        const noteCell = allPieces.key(targetNoteIndex);
         const contentCell = noteCell.key("content");
         const currentContent = contentCell.get() || "";
 
@@ -271,7 +271,7 @@ const executeCreateNote = handler<
     taskCurrentLabelId: Writable<string>;
     hiddenTasks: Writable<string[]>;
     processingTasks: Writable<string[]>;
-    allCharms: Writable<NoteCharm[]>;
+    allPieces: Writable<NotePiece[]>;
   }
 >(
   (
@@ -284,7 +284,7 @@ const executeCreateNote = handler<
       taskCurrentLabelId,
       hiddenTasks,
       processingTasks,
-      allCharms,
+      allPieces,
     },
   ) => {
     const labelId = taskCurrentLabelId.get();
@@ -305,8 +305,8 @@ const executeCreateNote = handler<
         isHidden: false,
       });
 
-      // Add to allCharms
-      allCharms.push(newNote);
+      // Add to allPieces
+      allPieces.push(newNote);
 
       if (DEBUG_TASKS) {
         console.log("[EmailTaskEngine] Created new note:", title);
@@ -456,8 +456,8 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   const processingTasks = Writable.of<string[]>([]).for("processingTasks");
   const sortNewestFirst = Writable.of(true).for("sortNewestFirst");
 
-  // Get all charms for note discovery
-  const { allCharms } = wish<{ allCharms: NoteCharm[] }>("#default");
+  // Get all pieces for note discovery
+  const { allPieces } = wish<{ allPieces: NotePiece[] }>("#default");
 
   // Use createGoogleAuth for scopes that include gmailModify
   const {
@@ -527,16 +527,16 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
 
   // Get available notes for the LLM context
   const availableNotes = computed(() => {
-    const charms = allCharms || [];
-    return charms
-      .filter((charm: NoteCharm) => {
-        const name = charm?.[NAME];
+    const pieces = allPieces || [];
+    return pieces
+      .filter((piece: NotePiece) => {
+        const name = piece?.[NAME];
         return typeof name === "string" && name.startsWith("📝");
       })
-      .map((charm: NoteCharm) => {
-        const name = charm?.[NAME] || "";
+      .map((piece: NotePiece) => {
+        const name = piece?.[NAME] || "";
         const title = name.replace(/^📝\s*/, "").trim();
-        const content = (charm as any)?.content || "";
+        const content = (piece as any)?.content || "";
         return {
           title,
           contentPreview: truncateText(content, 200),
@@ -847,7 +847,7 @@ Respond with the most appropriate action.`;
                           taskCurrentLabelId,
                           hiddenTasks,
                           processingTasks,
-                          allCharms,
+                          allPieces,
                         });
                       } else if (result?.actionType === "create-note") {
                         return executeCreateNote({
@@ -858,7 +858,7 @@ Respond with the most appropriate action.`;
                           taskCurrentLabelId,
                           hiddenTasks,
                           processingTasks,
-                          allCharms,
+                          allPieces,
                         });
                       }
                       return null;

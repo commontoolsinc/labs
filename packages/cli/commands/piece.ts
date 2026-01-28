@@ -176,12 +176,12 @@ export const piece = new Command()
   .action(async (options) => {
     const pieceConfig = parsePieceOptions(options);
     const manager = await loadManager(pieceConfig);
-    const charms = new PiecesController(manager);
+    const pieces = new PiecesController(manager);
     // Start in this transient runtime, wait, then stop and exit
-    const charm = await charms.get(pieceConfig.piece, true);
-    await charm.getCell().pull();
+    const piece = await pieces.get(pieceConfig.piece, true);
+    await piece.getCell().pull();
     await manager.synced();
-    await charms.stop(pieceConfig.piece);
+    await pieces.stop(pieceConfig.piece);
     render(`Stepped piece ${pieceConfig.piece}`);
   })
   /* piece apply */
@@ -427,7 +427,7 @@ Recipe: ${pieceData.recipeName || "<no recipe name>"}
     "link",
     `Link a field from one piece to another for reactive data flow.
 
-WELL-KNOWN IDS: System-level data (like allCharms) can be linked using
+WELL-KNOWN IDS: System-level data (like allPieces) can be linked using
 well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
   )
   .usage(spaceUsage)
@@ -440,8 +440,8 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     `Link deep nested field including array access.`,
   )
   .example(
-    `ct piece link ${EX_ID} ${EX_COMP} baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye bafypiece1/allCharms`,
-    `Link well-known "allCharms" list to a piece field.`,
+    `ct piece link ${EX_ID} ${EX_COMP} baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye bafypiece1/allPieces`,
+    `Link well-known "allPieces" list to a piece field.`,
   )
   .arguments("<source:string> <target:string>")
   .option("--no-start", "Only link without starting the pieces")

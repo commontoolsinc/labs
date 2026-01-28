@@ -27,7 +27,7 @@ describe("instantiate-recipe integration test", () => {
       apiUrl: new URL(API_URL),
       identity: identity,
     });
-    const charm = await cc.create(
+    const piece = await cc.create(
       await Deno.readTextFile(
         join(
           import.meta.dirname!,
@@ -38,7 +38,7 @@ describe("instantiate-recipe integration test", () => {
       ),
       { start: false },
     );
-    pieceId = charm.id;
+    pieceId = piece.id;
   });
 
   afterAll(async () => {
@@ -60,7 +60,7 @@ describe("instantiate-recipe integration test", () => {
         identity,
       });
 
-      // Wait for charm to load by waiting for first interactive element
+      // Wait for piece to load by waiting for first interactive element
       await page.waitForSelector("[data-ct-input]", { strategy: "pierce" });
 
       // Store the current URL before any action

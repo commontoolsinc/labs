@@ -1,5 +1,5 @@
 /**
- * Workflow module - Contains the core workflow processing pipeline for charm operations
+ * Workflow module - Contains the core workflow processing pipeline for piece operations
  *
  * This module defines:
  * 1. Workflow types (Fix, Edit, Imagine)
@@ -61,7 +61,7 @@ export const WORKFLOWS: Record<WorkflowType, WorkflowConfig> = {
   imagine: {
     name: "imagine",
     label: "IMAGINE",
-    description: "Create a new charm with a potentially different data schema",
+    description: "Create a new piece with a potentially different data schema",
     updateSpec: true,
     updateSchema: true,
     allowsDataReferences: true,
@@ -105,7 +105,7 @@ export interface ParsedMention {
   originalText: string;
   startIndex: number;
   endIndex: number;
-  charm: Cell<unknown>;
+  piece: Cell<unknown>;
 }
 
 /**
@@ -113,7 +113,7 @@ export interface ParsedMention {
  */
 export interface ProcessedPrompt {
   text: string; // Processed text with mentions replaced by readable names
-  mentions: Record<string, Cell<unknown>>; // Map of mention IDs to charm cells
+  mentions: Record<string, Cell<unknown>>; // Map of mention IDs to piece cells
 }
 
 /**
@@ -129,15 +129,15 @@ export async function classifyIntent(
   form: WorkflowForm,
 ): Promise<IntentClassificationResult> {
   // Process the input for @mentions if a PieceManager is provided
-  // Extract context from the current charm if available
+  // Extract context from the current piece if available
   let existingSpec: string | undefined;
   let existingSchema: JSONSchema | undefined;
   let _existingCode: string | undefined;
 
-  if (form.input.existingCharm) {
+  if (form.input.existingPiece) {
     const { spec, schema, code } = extractContext(
-      form.input.existingCharm,
-      form.meta.charmManager.runtime,
+      form.input.existingPiece,
+      form.meta.pieceManager.runtime,
     );
     existingSpec = spec;
     existingSchema = schema;
@@ -150,7 +150,7 @@ export async function classifyIntent(
       workflowType: "imagine",
       confidence: 1.0,
       reasoning:
-        "Automatically classified as 'imagine' because there is nothing to refer to (either no current charm or no iframe recipe).",
+        "Automatically classified as 'imagine' because there is nothing to refer to (either no current piece or no iframe recipe).",
     };
   }
 
@@ -164,13 +164,13 @@ export async function classifyIntent(
   };
 }
 
-function extractContext(charm: Cell<unknown>, runtime: Runtime) {
+function extractContext(piece: Cell<unknown>, runtime: Runtime) {
   let spec: string | undefined;
   let schema: JSONSchema | undefined;
   let code: string | undefined;
 
   try {
-    const iframeRecipe = getIframeRecipe(charm, runtime);
+    const iframeRecipe = getIframeRecipe(piece, runtime);
     if (
       iframeRecipe && iframeRecipe.iframe
     ) {
@@ -180,7 +180,7 @@ function extractContext(charm: Cell<unknown>, runtime: Runtime) {
         undefined;
     }
   } catch {
-    console.info("Failed to extract context from charm");
+    console.info("Failed to extract context from piece");
   }
 
   return {
@@ -202,15 +202,15 @@ function extractContext(charm: Cell<unknown>, runtime: Runtime) {
 export async function generatePlan(
   form: WorkflowForm,
 ): Promise<WorkflowForm["plan"]> {
-  // Extract context from the current charm if available
+  // Extract context from the current piece if available
   let existingSpec: string | undefined;
   let existingSchema: JSONSchema | undefined;
   let existingCode: string | undefined;
 
-  if (form.input.existingCharm) {
+  if (form.input.existingPiece) {
     const { spec, schema, code } = extractContext(
-      form.input.existingCharm,
-      form.meta.charmManager.runtime,
+      form.input.existingPiece,
+      form.meta.pieceManager.runtime,
     );
     existingSpec = spec;
     existingSchema = schema;
@@ -233,15 +233,15 @@ export async function generatePlan(
     }),
   );
 
-  const { charms } = await searchPieces(
+  const { pieces } = await searchPieces(
     form.input.processedInput,
-    form.meta.charmManager,
+    form.meta.pieceManager,
   );
 
   return {
     description: result.autocompletion,
     features: result.features,
-    charms,
+    pieces,
   };
 }
 
@@ -254,7 +254,7 @@ export interface WorkflowForm {
   input: {
     rawInput: string;
     processedInput: string;
-    existingCharm?: Cell<unknown>;
+    existingPiece?: Cell<unknown>;
     references: Record<string, Cell<unknown>>;
   };
 
@@ -269,16 +269,16 @@ export interface WorkflowForm {
   plan: {
     features?: string[];
     description?: string;
-    charms?: PieceSearchResult[];
+    pieces?: PieceSearchResult[];
   } | null;
 
   generation: {
-    charm: Cell<unknown>;
+    piece: Cell<unknown>;
   } | null;
 
   // Metadata and workflow state
   meta: {
-    charmManager: PieceManager;
+    pieceManager: PieceManager;
     permittedWorkflows?: WorkflowType[];
     generationId?: string;
     model?: string;
@@ -293,9 +293,9 @@ export interface WorkflowForm {
  *
  * @param input The user's input text
  * @param modelId Optional model ID
- * @param charm Optional existing charm
+ * @param piece Optional existing piece
  * @param generationId Optional generation ID
- * @param charmManager The charm manager instance
+ * @param pieceManager The piece manager instance
  * @param cache Optional flag to enable/disable LLM cache
  * @param permittedWorkflows Optional list of allowed workflow types
  * @returns A new workflow form object
@@ -303,18 +303,18 @@ export interface WorkflowForm {
 export function createWorkflowForm(
   options: {
     input: string;
-    charm?: Cell<unknown>;
+    piece?: Cell<unknown>;
     generationId?: string;
-    charmManager: PieceManager;
+    pieceManager: PieceManager;
     permittedWorkflows?: WorkflowType[];
   } & GenerationOptions,
 ): WorkflowForm {
   const {
     input,
     model,
-    charm,
+    piece,
     generationId,
-    charmManager,
+    pieceManager,
     cache,
     permittedWorkflows,
   } = applyDefaults(options);
@@ -324,7 +324,7 @@ export function createWorkflowForm(
       rawInput: input,
       processedInput: "",
       references: {},
-      existingCharm: charm,
+      existingPiece: piece,
     },
     classification: null,
     plan: null,
@@ -334,7 +334,7 @@ export function createWorkflowForm(
       model,
       generationId: generationId ?? crypto.randomUUID(),
       cache,
-      charmManager,
+      pieceManager,
       permittedWorkflows,
     },
   };
@@ -344,12 +344,12 @@ export function createWorkflowForm(
  * Process the input part of the workflow form
  * Handles mentions, references, and sets up the processedInput
  *
- * @param charmManager The charm manager
+ * @param pieceManager The piece manager
  * @param form The workflow form
  * @returns The processed workflow form with mentions processed and references updated
  */
 export async function processInputSection(
-  charmManager: PieceManager,
+  pieceManager: PieceManager,
   form: WorkflowForm,
 ): Promise<WorkflowForm> {
   const newForm = { ...form };
@@ -366,14 +366,14 @@ export async function processInputSection(
   try {
     const { text, sources } = await formatPromptWithMentions(
       form.input.rawInput,
-      charmManager,
+      pieceManager,
     );
     processedInput = text;
 
-    // Merge mentioned charms into references
-    for (const [mentionId, charm] of Object.entries(sources)) {
+    // Merge mentioned pieces into references
+    for (const [mentionId, piece] of Object.entries(sources)) {
       if (!references[mentionId]) {
-        references[mentionId] = charm.cell;
+        references[mentionId] = piece.cell;
       }
     }
   } catch (error) {
@@ -382,7 +382,7 @@ export async function processInputSection(
 
   newForm.input.processedInput = processedInput;
   newForm.input.references = references;
-  newForm.meta.charmManager = charmManager;
+  newForm.meta.pieceManager = pieceManager;
 
   return newForm;
 }
@@ -437,7 +437,7 @@ export async function fillPlanningSection(
 
 /**
  * Generate code based on a filled workflow form
- * This is the final step that actually creates a charm
+ * This is the final step that actually creates a piece
  */
 export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
   if (!form.classification || !form.plan) {
@@ -446,43 +446,43 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
 
   const newForm = { ...form };
 
-  if (!newForm.meta.charmManager) {
+  if (!newForm.meta.pieceManager) {
     throw new Error("PieceManager is required for code generation");
   }
 
-  let charm: Cell<unknown>;
+  let piece: Cell<unknown>;
   let llmRequestId: string | undefined;
 
   // Execute the appropriate workflow based on the classification
   switch (form.classification.workflowType) {
     case "fix": {
-      if (!form.input.existingCharm) {
-        throw new Error("Fix workflow requires an existing charm");
+      if (!form.input.existingPiece) {
+        throw new Error("Fix workflow requires an existing piece");
       }
       const res = await executeFixWorkflow(
-        newForm.meta.charmManager,
+        newForm.meta.pieceManager,
         form,
       );
-      charm = res.cell;
+      piece = res.cell;
       llmRequestId = res.llmRequestId;
       break;
     }
     case "edit": {
-      if (!form.input.existingCharm) {
-        throw new Error("Edit workflow requires an existing charm");
+      if (!form.input.existingPiece) {
+        throw new Error("Edit workflow requires an existing piece");
       }
       const res = await executeEditWorkflow(
-        newForm.meta.charmManager,
+        newForm.meta.pieceManager,
         form,
       );
-      charm = res.cell;
+      piece = res.cell;
       llmRequestId = res.llmRequestId;
       break;
     }
     case "imagine":
     case "imagine-single-phase": {
-      const res = await executeImagineWorkflow(newForm.meta.charmManager, form);
-      charm = res.cell;
+      const res = await executeImagineWorkflow(newForm.meta.pieceManager, form);
+      piece = res.cell;
       llmRequestId = res.llmRequestId;
       break;
     }
@@ -492,9 +492,9 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
       );
   }
 
-  // Update the form with the generated charm
+  // Update the form with the generated piece
   newForm.generation = {
-    charm,
+    piece,
   };
 
   // Mark the form as complete
@@ -508,7 +508,7 @@ export async function generateCode(form: WorkflowForm): Promise<WorkflowForm> {
 
 export type ProcessWorkflowOptions = {
   dryRun?: boolean;
-  existingCharm?: Cell<unknown>;
+  existingPiece?: Cell<unknown>;
   prefill?: Partial<WorkflowForm>;
   model?: string;
   onProgress?: (form: WorkflowForm) => void;
@@ -527,7 +527,7 @@ export type ProcessWorkflowOptions = {
  */
 export async function processWorkflow(
   input: string,
-  charmManager: PieceManager,
+  pieceManager: PieceManager,
   options: ProcessWorkflowOptions,
 ): Promise<WorkflowForm> {
   console.groupCollapsed("processWorkflow");
@@ -542,10 +542,10 @@ export async function processWorkflow(
   // Create a new form or use prefilled form
   let form = createWorkflowForm({
     input,
-    charm: options.existingCharm,
+    piece: options.existingPiece,
     model: options.model,
     cache: options.cache,
-    charmManager,
+    pieceManager,
     permittedWorkflows: options.permittedWorkflows,
   });
   console.log("creating form", form);
@@ -577,7 +577,7 @@ export async function processWorkflow(
     ) {
       console.log("processing input...");
       const stepStartTime = performance.now();
-      form = await processInputSection(charmManager, form);
+      form = await processInputSection(pieceManager, form);
       timings.processInput = performance.now() - stepStartTime;
       options.onProgress?.(form);
       console.log("processed input!", form);
@@ -642,7 +642,7 @@ export async function processWorkflow(
     checkCancellation();
 
     // Step 4: Generation (if not a dry run and not already generated)
-    if (!options.dryRun && !form.generation?.charm) {
+    if (!options.dryRun && !form.generation?.piece) {
       console.log("generating code");
       globalThis.dispatchEvent(
         new CustomEvent("job-update", {
@@ -650,7 +650,7 @@ export async function processWorkflow(
             type: "job-update",
             jobId: form.meta.generationId,
             title: form.input.processedInput,
-            status: `Generating charm ${form.meta.model}...`,
+            status: `Generating piece ${form.meta.model}...`,
           },
         }),
       );
@@ -680,7 +680,7 @@ export async function processWorkflow(
           llmRequestId: form.meta.llmRequestId,
           title: form.input.processedInput,
           status: "Completed successfully",
-          result: form.generation?.charm,
+          result: form.generation?.piece,
         },
       }),
     );
@@ -743,18 +743,18 @@ ${userPrompt}
  * focusing only on fixing issues in the implementation.
  */
 export function executeFixWorkflow(
-  charmManager: PieceManager,
+  pieceManager: PieceManager,
   form: WorkflowForm,
 ): Promise<{ cell: Cell<unknown>; llmRequestId?: string }> {
   console.log("Executing FIX workflow");
 
   return iterate(
-    charmManager,
-    form.input.existingCharm!,
+    pieceManager,
+    form.input.existingPiece!,
     form.plan,
     {
       model: form.meta.model,
-      space: form.meta.charmManager.getSpaceName(),
+      space: form.meta.pieceManager.getSpaceName(),
       cache: form.meta.cache,
       generationId: form.meta.generationId,
     },
@@ -769,18 +769,18 @@ export function executeFixWorkflow(
  * or enhance functionality while maintaining compatibility.
  */
 export function executeEditWorkflow(
-  charmManager: PieceManager,
+  pieceManager: PieceManager,
   form: WorkflowForm,
 ): Promise<{ cell: Cell<unknown>; llmRequestId?: string }> {
   console.log("Executing EDIT workflow");
 
   return iterate(
-    charmManager,
-    form.input.existingCharm!,
+    pieceManager,
+    form.input.existingPiece!,
     form.plan,
     {
       model: form.meta.model,
-      space: form.meta.charmManager.getSpaceName(),
+      space: form.meta.pieceManager.getSpaceName(),
       cache: form.meta.cache,
       generationId: form.meta.generationId,
     },
@@ -792,7 +792,7 @@ export function executeEditWorkflow(
  */
 function toCamelCase(input: string): string {
   // Handle empty string case
-  if (!input) return "currentCharm";
+  if (!input) return "currentPiece";
 
   // Split the input string by non-alphanumeric characters
   return input
@@ -812,17 +812,17 @@ function toCamelCase(input: string): string {
 /**
  * Execute the Imagine workflow
  *
- * The Imagine workflow creates a new charm with potentially different
+ * The Imagine workflow creates a new piece with potentially different
  * schema, allowing for more significant changes or combinations of
- * data from multiple existing charms.
+ * data from multiple existing pieces.
  */
 export function executeImagineWorkflow(
-  charmManager: PieceManager,
+  pieceManager: PieceManager,
   form: WorkflowForm,
 ): Promise<{ cell: Cell<unknown>; llmRequestId?: string }> {
   console.log("Executing IMAGINE workflow");
 
-  // Process references - this allows the new charm to access data from multiple sources
+  // Process references - this allows the new piece to access data from multiple sources
   let allReferences: Record<string, Cell<unknown>> = {};
 
   // Add all external references first with validation
@@ -839,11 +839,11 @@ export function executeImagineWorkflow(
       try {
         // Create a valid camelCase identifier
         const cellData = cell.get();
-        const charmName =
+        const pieceName =
           (isRecord(cellData) && "NAME" in cellData && cellData["NAME"])
             ? cellData["NAME"]
             : id;
-        const camelCaseId = toCamelCase(charmName as string);
+        const camelCaseId = toCamelCase(pieceName as string);
 
         // Make sure the ID is unique
         let uniqueId = camelCaseId;
@@ -860,17 +860,17 @@ export function executeImagineWorkflow(
     }
   }
 
-  // Add current charm if available
+  // Add current piece if available
   if (
-    form.input.existingCharm
+    form.input.existingPiece
   ) {
     try {
-      const charmData = form.input.existingCharm.get();
-      const charmName = isRecord(charmData) && NAME in charmData &&
-          typeof charmData[NAME] === "string"
-        ? charmData[NAME]
-        : "currentCharm";
-      const camelCaseId = toCamelCase(charmName);
+      const pieceData = form.input.existingPiece.get();
+      const pieceName = isRecord(pieceData) && NAME in pieceData &&
+          typeof pieceData[NAME] === "string"
+        ? pieceData[NAME]
+        : "currentPiece";
+      const camelCaseId = toCamelCase(pieceName);
 
       // Make sure the ID is unique
       let uniqueId = camelCaseId;
@@ -881,22 +881,22 @@ export function executeImagineWorkflow(
 
       // HACK: avoid nesting for a single self reference
       if (Object.keys(allReferences).length === 0) {
-        allReferences = form.input.existingCharm as unknown as Record<
+        allReferences = form.input.existingPiece as unknown as Record<
           string,
           Cell<unknown>
         >;
       } else {
-        allReferences[uniqueId] = form.input.existingCharm;
+        allReferences[uniqueId] = form.input.existingPiece;
       }
 
-      console.log(`Added current charm as "${uniqueId}"`);
+      console.log(`Added current piece as "${uniqueId}"`);
 
-      // Remove any generic "currentCharm" entry
-      if (allReferences["currentCharm"]) {
-        delete allReferences["currentCharm"];
+      // Remove any generic "currentPiece" entry
+      if (allReferences["currentPiece"]) {
+        delete allReferences["currentPiece"];
       }
     } catch (error) {
-      console.error(`Error processing current charm:`, error);
+      console.error(`Error processing current piece:`, error);
     }
   }
 
@@ -904,7 +904,7 @@ export function executeImagineWorkflow(
 
   // Cast a new recipe with references, spec, and schema
   return castNewRecipe(
-    charmManager,
+    pieceManager,
     form,
   );
 }

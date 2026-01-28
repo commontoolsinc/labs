@@ -11,18 +11,18 @@ import { nameSchema } from "@commontools/runner/schemas";
 import { processWorkflow, ProcessWorkflowOptions } from "./workflow.ts";
 
 export const castSpellAsPiece = async (
-  charmManager: PieceManager,
+  pieceManager: PieceManager,
   recipeKey: string,
   argument: Cell<unknown>,
 ) => {
   if (recipeKey && argument) {
     console.log("Syncing...");
     const recipeId = recipeKey.replace("spell-", "");
-    const recipe = await charmManager.syncRecipeById(recipeId);
+    const recipe = await pieceManager.syncRecipeById(recipeId);
     if (!recipe) return;
 
     console.log("Casting...");
-    return await charmManager.runPersistent(
+    return await pieceManager.runPersistent(
       recipe,
       argument,
     );
@@ -32,7 +32,7 @@ export const castSpellAsPiece = async (
 };
 
 export const createDataPiece = (
-  charmManager: PieceManager,
+  pieceManager: PieceManager,
   data: Record<string, unknown>,
   schema?: JSONSchema,
   name?: string,
@@ -63,7 +63,7 @@ export const createDataPiece = (
   }));`;
 
   return compileAndRunRecipe(
-    charmManager,
+    pieceManager,
     dataRecipeSrc,
     name ?? "Data Import",
     data,
@@ -71,14 +71,14 @@ export const createDataPiece = (
 };
 
 export async function fixItPiece(
-  charmManager: PieceManager,
-  charm: Cell<unknown>,
+  pieceManager: PieceManager,
+  piece: Cell<unknown>,
   error: Error,
   model = DEFAULT_MODEL_NAME,
 ): Promise<Cell<unknown>> {
-  const iframeRecipe = getIframeRecipe(charm, charmManager.runtime);
+  const iframeRecipe = getIframeRecipe(piece, pieceManager.runtime);
   if (!iframeRecipe.iframe) {
-    throw new Error("Fixit only works for iframe charms");
+    throw new Error("Fixit only works for iframe pieces");
   }
 
   // Extract just the user code portion instead of using the full source
@@ -102,23 +102,23 @@ export async function fixItPiece(
   const fixedFullCode = injectUserCode(fixedUserCode);
 
   return generateNewRecipeVersion(
-    charmManager,
-    charm,
+    pieceManager,
+    piece,
     { src: fixedFullCode, spec: iframeRecipe.iframe.spec },
   );
 }
 
 export async function renamePiece(
-  charmManager: PieceManager,
+  pieceManager: PieceManager,
   pieceId: string,
   newName: string,
 ): Promise<void> {
-  const charm = await charmManager.get(pieceId, false, nameSchema);
-  charm.key(NAME).set(newName);
+  const piece = await pieceManager.get(pieceId, false, nameSchema);
+  piece.key(NAME).set(newName);
 }
 
 export async function addGithubRecipe(
-  charmManager: PieceManager,
+  pieceManager: PieceManager,
   filename: string,
   spec: string,
   runOptions: unknown,
@@ -133,7 +133,7 @@ export async function addGithubRecipe(
   }
   const src = await response.text();
   return await compileAndRunRecipe(
-    charmManager,
+    pieceManager,
     src,
     spec,
     runOptions,
@@ -141,28 +141,28 @@ export async function addGithubRecipe(
 }
 
 /**
- * Modify a charm with the given prompt. This replaces the separate Etherate/Extend functionality.
- * The prompt will be processed for mentions and the current charm will be included in the context.
+ * Modify a piece with the given prompt. This replaces the separate Etherate/Extend functionality.
+ * The prompt will be processed for mentions and the current piece will be included in the context.
  * The workflow (edit, rework, fix) will be automatically determined based on the prompt.
  *
- * @param charmManager The PieceManager instance
+ * @param pieceManager The PieceManager instance
  * @param promptText The user's input describing what they want to do
- * @param currentCharm The charm being modified
+ * @param currentPiece The piece being modified
  * @param model Optional LLM model to use
  * @param workflowType Optional: Allow specifying workflow type (will be overridden to "rework" if references exist)
  * @param previewPlan Optional: Pass through a pre-generated plan
- * @returns A new or modified charm
+ * @returns A new or modified piece
  */
 export async function modifyPiece(
-  charmManager: PieceManager,
+  pieceManager: PieceManager,
   promptText: string,
-  currentCharm: Cell<unknown>,
+  currentPiece: Cell<unknown>,
   prefill?: Partial<WorkflowForm>,
   model?: string,
 ): Promise<Cell<unknown>> {
-  // Include the current charm in the context
+  // Include the current piece in the context
   const context: ProcessWorkflowOptions = {
-    existingCharm: currentCharm,
+    existingPiece: currentPiece,
     prefill,
     model,
     permittedWorkflows: ["edit"], // only edit is allowed here
@@ -170,13 +170,13 @@ export async function modifyPiece(
 
   const form = await processWorkflow(
     promptText,
-    charmManager,
+    pieceManager,
     context,
   );
 
   if (!form.generation) {
-    throw new Error("Modify charm failed");
+    throw new Error("Modify piece failed");
   }
 
-  return form.generation?.charm;
+  return form.generation?.piece;
 }

@@ -83,7 +83,7 @@ export interface RuntimeOptions {
  * For these schema, we use type object with empty properties, so that we
  * will fetch the objects and consider them valid, but will not walk into
  * their properties on the server traversal, so we don't need to return every
- * reachable object from these charms.
+ * reachable object from these pieces.
  * @see SchemaObjectTraverser.traverseObjectWithSchema for more detail.
  */
 export const spaceCellSchema: JSONSchema = {

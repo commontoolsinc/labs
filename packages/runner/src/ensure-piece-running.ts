@@ -4,20 +4,20 @@ import type { Cell } from "./cell.ts";
 import { type NormalizedFullLink, parseLink } from "./link-utils.ts";
 import type { Runtime } from "./runtime.ts";
 
-const logger = getLogger("ensure-charm-running", {
+const logger = getLogger("ensure-piece-running", {
   enabled: false,
   level: "debug",
 });
 
 /**
- * Ensures the charm responsible for a given storage location is running.
+ * Ensures the piece responsible for a given storage location is running.
  *
- * Note: We don't track which charms we've already started because calling
- * runtime.runSynced() on an already-running charm is idempotent - it simply
+ * Note: We don't track which pieces we've already started because calling
+ * runtime.runSynced() on an already-running piece is idempotent - it simply
  * returns without doing anything. This keeps the code simple and stateless.
  *
  * This function traverses the source cell chain to find the root process cell,
- * then starts the charm if it's not already running.
+ * then starts the piece if it's not already running.
  *
  * The traversal logic:
  * 1. Start with the cell at the cellLink location
@@ -25,13 +25,13 @@ const logger = getLogger("ensure-charm-running", {
  *    through linked cells to find the process cell)
  * 3. Once there's no source cell, look at resultRef in the resulting document
  * 4. If resultRef is a link, that's the result cell - call runtime.runSynced()
- *    on it to start the charm
+ *    on it to start the piece
  *
  * @param runtime - The runtime instance
  * @param cellLink - The location that received an event or should be current
- * @returns Promise<boolean> - true if a charm was started, false otherwise
+ * @returns Promise<boolean> - true if a piece was started, false otherwise
  */
-export async function ensureCharmRunning(
+export async function ensurePieceRunning(
   runtime: Runtime,
   cellLink: NormalizedFullLink,
 ): Promise<boolean> {
@@ -41,7 +41,7 @@ export async function ensureCharmRunning(
     try {
       // Get the cell at the event link location
       let currentCell: Cell<any> | undefined = runtime.getCellFromLink(
-        // We'll find the charm information at the root of what could be the
+        // We'll find the piece information at the root of what could be the
         // process cell already, hence remove the path:
         { ...cellLink, path: [] },
         undefined,
@@ -52,7 +52,7 @@ export async function ensureCharmRunning(
       // This follows links from derived cells back to the process cell
       let sourceCell = currentCell.getSourceCell();
       while (sourceCell) {
-        logger.debug("ensure-charm", () => [
+        logger.debug("ensure-piece", () => [
           `Following source cell from ${currentCell?.getAsNormalizedFullLink().id} to ${sourceCell?.getAsNormalizedFullLink().id}`,
         ]);
         currentCell = sourceCell;
@@ -64,7 +64,7 @@ export async function ensureCharmRunning(
       const processData = currentCell.getRaw();
 
       if (!processData || typeof processData !== "object") {
-        logger.debug("ensure-charm", () => [
+        logger.debug("ensure-piece", () => [
           `No process data found at ${currentCell.getAsNormalizedFullLink().id}`,
         ]);
         return false;
@@ -74,14 +74,14 @@ export async function ensureCharmRunning(
       const resultRef = (processData as Record<string, unknown>).resultRef;
 
       if (!recipeId) {
-        logger.debug("ensure-charm", () => [
+        logger.debug("ensure-piece", () => [
           `No recipe ID (TYPE) found in process cell`,
         ]);
         return false;
       }
 
       if (!resultRef) {
-        logger.debug("ensure-charm", () => [
+        logger.debug("ensure-piece", () => [
           `No resultRef found in process cell`,
         ]);
         return false;
@@ -91,7 +91,7 @@ export async function ensureCharmRunning(
       // Parse it and get the result cell
       const resultLink = parseLink(resultRef, currentCell);
       if (!resultLink) {
-        logger.debug("ensure-charm", () => [
+        logger.debug("ensure-piece", () => [
           `Invalid resultRef: ${resultRef}`,
         ]);
         return false;
@@ -99,7 +99,7 @@ export async function ensureCharmRunning(
 
       const resultCell = runtime.getCellFromLink(resultLink, undefined, tx);
 
-      // Commit the read transaction before starting the charm
+      // Commit the read transaction before starting the piece
       await tx.commit();
 
       // Load the recipe
@@ -109,21 +109,21 @@ export async function ensureCharmRunning(
       );
 
       if (!recipe) {
-        logger.debug("ensure-charm", () => [
+        logger.debug("ensure-piece", () => [
           `Failed to load recipe: ${recipeId}`,
         ]);
         return false;
       }
 
-      logger.debug("ensure-charm", () => [
-        `Starting charm with recipe ${recipeId} for result cell ${resultCell.getAsNormalizedFullLink().id}`,
+      logger.debug("ensure-piece", () => [
+        `Starting piece with recipe ${recipeId} for result cell ${resultCell.getAsNormalizedFullLink().id}`,
       ]);
 
-      // Start the charm - this will register event handlers
+      // Start the piece - this will register event handlers
       await runtime.runSynced(resultCell, recipe);
 
-      logger.debug("ensure-charm", () => [
-        `Charm started successfully`,
+      logger.debug("ensure-piece", () => [
+        `Piece started successfully`,
       ]);
 
       return true;
@@ -137,7 +137,7 @@ export async function ensureCharmRunning(
       throw error;
     }
   } catch (error) {
-    logger.error("ensure-charm", "Error ensuring charm is running:", error);
+    logger.error("ensure-piece", "Error ensuring piece is running:", error);
     return false;
   }
 }

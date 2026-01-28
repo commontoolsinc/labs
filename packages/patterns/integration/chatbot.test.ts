@@ -31,7 +31,7 @@ describe("Chat pattern test", () => {
         apiUrl: new URL(API_URL),
         identity: identity,
       });
-      const charm = await cc.create(
+      const piece = await cc.create(
         await Deno.readTextFile(
           join(
             import.meta.dirname!,
@@ -41,7 +41,7 @@ describe("Chat pattern test", () => {
         ),
         { start: false },
       );
-      pieceId = charm.id;
+      pieceId = piece.id;
     });
 
     afterAll(async () => {
@@ -50,7 +50,7 @@ describe("Chat pattern test", () => {
   }
 
   it({
-    name: "should load the Chat test charm and display initial UI",
+    name: "should load the Chat test piece and display initial UI",
     ignore,
     fn: async () => {
       const page = shell.page();

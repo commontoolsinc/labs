@@ -81,7 +81,7 @@ import type { VDomOp } from "../protocol/types.ts";
 
 export class RuntimeProcessor {
   private runtime: Runtime;
-  private charmManager: PieceManager;
+  private pieceManager: PieceManager;
   private cc: PiecesController;
   private space: DID;
   private identity: Identity;
@@ -100,14 +100,14 @@ export class RuntimeProcessor {
 
   private constructor(
     runtime: Runtime,
-    charmManager: PieceManager,
+    pieceManager: PieceManager,
     cc: PiecesController,
     space: DID,
     identity: Identity,
     telemetry: RuntimeTelemetry,
   ) {
     this.runtime = runtime;
-    this.charmManager = charmManager;
+    this.pieceManager = pieceManager;
     this.cc = cc;
     this.space = space;
     this.identity = identity;
@@ -140,7 +140,7 @@ export class RuntimeProcessor {
       address: new URL("/api/storage/memory", data.apiUrl),
     });
 
-    let charmManager: PieceManager | undefined = undefined;
+    let pieceManager: PieceManager | undefined = undefined;
     const runtime = new Runtime({
       apiUrl: apiUrlObj,
       storageManager,
@@ -158,18 +158,18 @@ export class RuntimeProcessor {
 
       navigateCallback: (target) => {
         const link = parseLink(target.getAsLink()) as NormalizedFullLink;
-        // Add to the space's charm list here if it's from the
+        // Add to the space's piece list here if it's from the
         // same space.
         if (link.space !== space) {
-          console.warn("Navigating cross-space, not adding to charms list.");
+          console.warn("Navigating cross-space, not adding to pieces list.");
         } else {
-          charmManager!.add([target]);
+          pieceManager!.add([target]);
 
           // Track as recently used (async, fire-and-forget)
-          RuntimeProcessor.trackRecentCharm(charmManager!, target).catch(
+          RuntimeProcessor.trackRecentPiece(pieceManager!, target).catch(
             (e: unknown) => {
               console.error(
-                "[RuntimeProcessor] Failed to track recent charm:",
+                "[RuntimeProcessor] Failed to track recent piece:",
                 {
                   error: e instanceof Error ? e.message : e,
                 },
@@ -203,13 +203,13 @@ export class RuntimeProcessor {
       throw new Error(`Could not connect to "${data.apiUrl}"`);
     }
 
-    charmManager = new PieceManager(session, runtime);
-    await charmManager.synced();
-    const cc = new PiecesController(charmManager);
+    pieceManager = new PieceManager(session, runtime);
+    await pieceManager.synced();
+    const cc = new PiecesController(pieceManager);
 
     return new RuntimeProcessor(
       runtime,
-      charmManager,
+      pieceManager,
       cc,
       space,
       identity,
@@ -391,7 +391,7 @@ export class RuntimeProcessor {
     await this.runtime.idle();
   }
 
-  async handleCharmCreate(
+  async handlePieceCreate(
     request: PageCreateRequest,
   ): Promise<PageResponse> {
     let program: Program | undefined;
@@ -405,30 +405,30 @@ export class RuntimeProcessor {
       throw new Error("Invalid source.");
     }
 
-    const charm = await this.cc.create<NameSchema>(program, {
+    const piece = await this.cc.create<NameSchema>(program, {
       input: request.argument as object | undefined,
       start: request.run ?? true,
     }, request.cause);
     return {
-      page: createPageRef(charm.getCell()),
+      page: createPageRef(piece.getCell()),
     };
   }
 
   async handleGetSpaceRootPattern(
     _: PatternGetSpaceRoot,
   ): Promise<PageResponse> {
-    const charm = await this.cc.ensureDefaultPattern();
+    const piece = await this.cc.ensureDefaultPattern();
     return {
-      page: createPageRef(charm.getCell()),
+      page: createPageRef(piece.getCell()),
     };
   }
 
   async handleRecreateSpaceRootPattern(
     _: RecreateSpaceRootPatternRequest,
   ): Promise<PageResponse> {
-    const charm = await this.cc.recreateDefaultPattern();
+    const piece = await this.cc.recreateDefaultPattern();
     return {
-      page: createPageRef(charm.getCell()),
+      page: createPageRef(piece.getCell()),
     };
   }
 
@@ -476,14 +476,14 @@ export class RuntimeProcessor {
   }
 
   async handlePageGetAll(): Promise<CellResponse> {
-    const charmsCell = await this.charmManager.getCharms();
+    const piecesCell = await this.pieceManager.getPieces();
     return {
-      cell: createCellRef(charmsCell),
+      cell: createCellRef(piecesCell),
     };
   }
 
   async handlePageSynced(): Promise<void> {
-    await this.charmManager.synced();
+    await this.pieceManager.synced();
   }
 
   getGraphSnapshot(_: GetGraphSnapshotRequest): GraphSnapshotResponse {
@@ -567,11 +567,11 @@ export class RuntimeProcessor {
     });
   };
 
-  private static async trackRecentCharm(
-    charmManager: PieceManager,
+  private static async trackRecentPiece(
+    pieceManager: PieceManager,
     target: unknown,
   ): Promise<void> {
-    const defaultPattern = await charmManager.getDefaultPattern();
+    const defaultPattern = await pieceManager.getDefaultPattern();
     if (!defaultPattern) return;
 
     const cell = defaultPattern.asSchema({
@@ -582,7 +582,7 @@ export class RuntimeProcessor {
       required: ["trackRecent"],
     });
     const handler = cell.key("trackRecent");
-    handler.send({ charm: target });
+    handler.send({ piece: target });
   }
 
   async handleRequest(
@@ -612,7 +612,7 @@ export class RuntimeProcessor {
       case RequestType.Idle:
         return await this.handleIdle();
       case RequestType.PageCreate:
-        return await this.handleCharmCreate(
+        return await this.handlePieceCreate(
           request,
         );
       case RequestType.GetSpaceRootPattern:

@@ -63,14 +63,14 @@ describe("PiecesController.ensureDefaultPattern", () => {
     // This test verifies that linkDefaultPattern works correctly
     // Note: Creating an actual working pattern requires the pattern server
 
-    // Create a mock charm cell
-    const mockCharmCell = runtime.getImmutableCell(
+    // Create a mock piece cell
+    const mockPieceCell = runtime.getImmutableCell(
       manager.getSpace(),
       { name: "MockDefaultPattern" },
     );
 
     // Link it as the default pattern
-    await manager.linkDefaultPattern(mockCharmCell);
+    await manager.linkDefaultPattern(mockPieceCell);
 
     // Verify the link exists by checking the space cell directly
     const spaceCell = runtime.getCell(
@@ -145,12 +145,12 @@ describe("PiecesController.recreateDefaultPattern", () => {
   });
 
   it("should unlink existing defaultPattern before creating new one", async () => {
-    // Create a mock charm cell and link it as the default pattern
-    const mockCharmCell = runtime.getImmutableCell(
+    // Create a mock piece cell and link it as the default pattern
+    const mockPieceCell = runtime.getImmutableCell(
       manager.getSpace(),
       { name: "MockDefaultPattern" },
     );
-    await manager.linkDefaultPattern(mockCharmCell);
+    await manager.linkDefaultPattern(mockPieceCell);
 
     // Verify it's linked by checking the space cell directly
     const spaceCell = runtime.getCell(

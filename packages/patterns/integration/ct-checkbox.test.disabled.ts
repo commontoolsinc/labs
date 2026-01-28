@@ -28,7 +28,7 @@ testComponents.forEach(({ name, file }) => {
         apiUrl: new URL(API_URL),
         identity: identity,
       });
-      const charm = await cc.create(
+      const piece = await cc.create(
         await Deno.readTextFile(
           join(
             import.meta.dirname!,
@@ -38,7 +38,7 @@ testComponents.forEach(({ name, file }) => {
         ),
         { start: false },
       );
-      pieceId = charm.id;
+      pieceId = piece.id;
 
       // Add permissions for ANYONE in the first test
       await cc.acl().set(ANYONE_USER, "WRITE");
@@ -48,7 +48,7 @@ testComponents.forEach(({ name, file }) => {
       if (cc) await cc.dispose();
     });
 
-    it(`should load the ${name} charm`, async () => {
+    it(`should load the ${name} piece`, async () => {
       const page = shell.page();
       await shell.goto({
         frontendUrl: FRONTEND_URL,

@@ -13,101 +13,101 @@ import {
   Writable,
 } from "commontools";
 
-type Charm = {
+type Piece = {
   [NAME]: string;
   [UI]: string;
   [key: string]: any;
 };
 
 // Define interfaces for type safety
-interface AddCharmState {
-  charm: any;
-  cellRef: Writable<Charm[]>;
+interface AddPieceState {
+  piece: any;
+  cellRef: Writable<Piece[]>;
   isInitialized: Writable<boolean>;
 }
-const AddCharmSchema = toSchema<AddCharmState>();
+const AddPieceSchema = toSchema<AddPieceState>();
 
-// Simple charm that will be instantiated multiple times
+// Simple piece that will be instantiated multiple times
 const SimpleRecipe = recipe<{ id: string }>(({ id }) => ({
   [NAME]: computed(() => `SimpleRecipe: ${id}`),
   [UI]: <div>Simple Recipe id {id}</div>,
 }));
 
-// Lift that adds a charm to the array and navigates to it.
+// Lift that adds a piece to the array and navigates to it.
 // The isInitialized flag prevents duplicate additions:
 // - Without it: lift runs → adds to array → array changes → lift runs again → duplicate
 // - With it: lift runs once → sets isInitialized → subsequent runs skip
-const addCharmAndNavigate = lift(
-  AddCharmSchema,
+const addPieceAndNavigate = lift(
+  AddPieceSchema,
   undefined,
-  ({ charm, cellRef, isInitialized }) => {
+  ({ piece, cellRef, isInitialized }) => {
     if (!isInitialized.get()) {
       if (cellRef) {
-        cellRef.push(charm);
+        cellRef.push(piece);
         isInitialized.set(true);
-        return navigateTo(charm);
+        return navigateTo(piece);
       } else {
-        console.log("addCharmAndNavigate undefined cellRef");
+        console.log("addPieceAndNavigate undefined cellRef");
       }
     }
     return undefined;
   },
 );
 
-// Handler that creates a new charm instance and adds it to the array.
+// Handler that creates a new piece instance and adds it to the array.
 // Each invocation creates its own isInitialized cell for tracking.
-const createSimpleRecipe = handler<unknown, { cellRef: Writable<Charm[]> }>(
+const createSimpleRecipe = handler<unknown, { cellRef: Writable<Piece[]> }>(
   (_, { cellRef }) => {
-    // Create isInitialized cell for this charm addition
+    // Create isInitialized cell for this piece addition
     const isInitialized = Writable.of(false);
 
     // Create a random 5-digit ID
     const randomId = Math.floor(10000 + Math.random() * 90000).toString();
 
-    // Create the charm with unique ID
-    const charm = SimpleRecipe({ id: randomId });
+    // Create the piece with unique ID
+    const piece = SimpleRecipe({ id: randomId });
 
-    // Store the charm in the array and navigate
-    return addCharmAndNavigate({ charm, cellRef, isInitialized });
+    // Store the piece in the array and navigate
+    return addPieceAndNavigate({ piece, cellRef, isInitialized });
   },
 );
 
-// Handler to navigate to a specific charm from the list
-const goToCharm = handler<unknown, { charm: Charm }>(
-  (_, { charm }) => {
-    console.log("goToCharm clicked");
-    return navigateTo(charm);
+// Handler to navigate to a specific piece from the list
+const goToPiece = handler<unknown, { piece: Piece }>(
+  (_, { piece }) => {
+    console.log("goToPiece clicked");
+    return navigateTo(piece);
   },
 );
 
 // Recipe input/output type
 type RecipeInOutput = {
-  cellRef: Default<Charm[], []>;
+  cellRef: Default<Piece[], []>;
 };
 
-// Main recipe that manages an array of charm references
+// Main recipe that manages an array of piece references
 export default recipe<RecipeInOutput, RecipeInOutput>(
-  "Charms Launcher",
+  "Pieces Launcher",
   ({ cellRef }) => {
     return {
-      [NAME]: "Charms Launcher",
+      [NAME]: "Pieces Launcher",
       [UI]: (
         <div>
-          <h3>Stored Charms:</h3>
+          <h3>Stored Pieces:</h3>
           {ifElse(
             !cellRef?.length,
-            <div>No charms created yet</div>,
+            <div>No pieces created yet</div>,
             <ul>
-              {cellRef.map((charm: any, index: number) => (
+              {cellRef.map((piece: any, index: number) => (
                 <li>
                   <ct-button
-                    onClick={goToCharm({ charm })}
+                    onClick={goToPiece({ piece })}
                   >
-                    Go to Charm {computed(() => index + 1)}
+                    Go to Piece {computed(() => index + 1)}
                   </ct-button>
                   <span>
-                    Charm {computed(() => index + 1)}:{" "}
-                    {charm[NAME] || "Unnamed"}
+                    Piece {computed(() => index + 1)}:{" "}
+                    {piece[NAME] || "Unnamed"}
                   </span>
                 </li>
               ))}
@@ -117,7 +117,7 @@ export default recipe<RecipeInOutput, RecipeInOutput>(
           <ct-button
             onClick={createSimpleRecipe({ cellRef })}
           >
-            Create New Charm
+            Create New Piece
           </ct-button>
         </div>
       ),

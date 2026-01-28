@@ -111,7 +111,7 @@ Create an interactive React component that fulfills the user's request. Focus on
 - For form handling, use \`onClick\` handlers instead of \`onSubmit\`
 </code_structure>
 
-<charm_api>
+<piece_api>
 - **useReactiveCell(keyPath: string[])** - Persistent data storage with reactive updates
 - **generateText({ system, messages })** - Generate text via Large Language Model
 - **generateObject({ system, messages })** - Generate JSON object via Large Language Model
@@ -145,7 +145,7 @@ Create an interactive React component that fulfills the user's request. Focus on
     }
     \`\`\`
   </use_reactive_cell>
-</charm_api>
+</piece_api>
 
 <importing_libraries>
 - Request additional libraries in \`onLoad\` by returning an array of module names
@@ -158,7 +158,7 @@ Create an interactive React component that fulfills the user's request. Focus on
 ${security()}
 </security>
 
-<schema description="The pre-generated schema this Charm operates on.">
+<schema description="The pre-generated schema this Piece operates on.">
 {{SCHEMA}}
 </schema>
 

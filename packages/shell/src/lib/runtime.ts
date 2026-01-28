@@ -102,9 +102,9 @@ export class RuntimeInternals extends EventTarget {
     return page;
   }
 
-  getCharmsListCell<T>(): Promise<CellHandle<T[]>> {
+  getPiecesListCell<T>(): Promise<CellHandle<T[]>> {
     this.#check();
-    return this.#client.getCharmsListCell<T>();
+    return this.#client.getPiecesListCell<T>();
   }
 
   getSpaceRootPattern(): Promise<PageHandle<NameSchema>> {

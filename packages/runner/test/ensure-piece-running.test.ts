@@ -5,12 +5,12 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type Recipe, TYPE } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { ensureCharmRunning } from "../src/ensure-charm-running.ts";
+import { ensurePieceRunning } from "../src/ensure-piece-running.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("ensureCharmRunning", () => {
+describe("ensurePieceRunning", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -31,7 +31,7 @@ describe("ensureCharmRunning", () => {
   });
 
   it("should return false for cells without process cell structure", async () => {
-    // Create a cell that has no charm structure (no process cell, no recipe)
+    // Create a cell that has no piece structure (no process cell, no recipe)
     const orphanCell = runtime.getCell<{ $stream: true }>(
       space,
       "orphan-cell-test",
@@ -43,8 +43,8 @@ describe("ensureCharmRunning", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    // ensureCharmRunning should return false - no charm to start
-    const result = await ensureCharmRunning(
+    // ensurePieceRunning should return false - no piece to start
+    const result = await ensurePieceRunning(
       runtime,
       orphanCell.getAsNormalizedFullLink(),
     );
@@ -81,8 +81,8 @@ describe("ensureCharmRunning", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    // ensureCharmRunning should return false - no TYPE means no recipe
-    const result = await ensureCharmRunning(
+    // ensurePieceRunning should return false - no TYPE means no recipe
+    const result = await ensurePieceRunning(
       runtime,
       resultCell.getAsNormalizedFullLink(),
     );
@@ -129,8 +129,8 @@ describe("ensureCharmRunning", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    // ensureCharmRunning should return false - no resultRef
-    const result = await ensureCharmRunning(
+    // ensurePieceRunning should return false - no resultRef
+    const result = await ensurePieceRunning(
       runtime,
       resultCell.getAsNormalizedFullLink(),
     );
@@ -138,7 +138,7 @@ describe("ensureCharmRunning", () => {
     expect(result).toBe(false);
   });
 
-  it("should start a charm with valid process cell structure", async () => {
+  it("should start a piece with valid process cell structure", async () => {
     // Create a simple recipe
     let recipeRan = false;
     const recipe: Recipe = {
@@ -173,7 +173,7 @@ describe("ensureCharmRunning", () => {
     // Create result cell
     const resultCell = runtime.getCell(
       space,
-      "valid-charm-test-result",
+      "valid-piece-test-result",
       undefined,
       tx,
     );
@@ -181,7 +181,7 @@ describe("ensureCharmRunning", () => {
     // Create process cell
     const processCell = runtime.getCell(
       space,
-      "valid-charm-test-process",
+      "valid-piece-test-process",
       undefined,
       tx,
     );
@@ -204,15 +204,15 @@ describe("ensureCharmRunning", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    // ensureCharmRunning should return true and start the charm
-    const result = await ensureCharmRunning(
+    // ensurePieceRunning should return true and start the piece
+    const result = await ensurePieceRunning(
       runtime,
       resultCell.getAsNormalizedFullLink(),
     );
 
     expect(result).toBe(true);
 
-    // Wait for the charm to run
+    // Wait for the piece to run
     await resultCell.pull();
 
     expect(recipeRan).toBe(true);
@@ -268,8 +268,8 @@ describe("ensureCharmRunning", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    // First call should return true (charm started)
-    const result1 = await ensureCharmRunning(
+    // First call should return true (piece started)
+    const result1 = await ensurePieceRunning(
       runtime,
       resultCell.getAsNormalizedFullLink(),
     );
@@ -277,19 +277,19 @@ describe("ensureCharmRunning", () => {
 
     await resultCell.pull();
 
-    // Second call should also return true - ensureCharmRunning doesn't track
-    // previous calls because runtime.runSynced() is idempotent for already-running charms
-    const result2 = await ensureCharmRunning(
+    // Second call should also return true - ensurePieceRunning doesn't track
+    // previous calls because runtime.runSynced() is idempotent for already-running pieces
+    const result2 = await ensurePieceRunning(
       runtime,
       resultCell.getAsNormalizedFullLink(),
     );
     expect(result2).toBe(true);
 
-    // The charm's lift should only have run once because runSynced is idempotent
+    // The piece's lift should only have run once because runSynced is idempotent
     expect(startCount).toBe(1);
   });
 
-  it("should restart a stopped charm when called again", async () => {
+  it("should restart a stopped piece when called again", async () => {
     // Create a simple recipe that tracks how many times it starts
     let startCount = 0;
     const recipe: Recipe = {
@@ -339,8 +339,8 @@ describe("ensureCharmRunning", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    // First call should start the charm
-    const result1 = await ensureCharmRunning(
+    // First call should start the piece
+    const result1 = await ensurePieceRunning(
       runtime,
       resultCell.getAsNormalizedFullLink(),
     );
@@ -349,11 +349,11 @@ describe("ensureCharmRunning", () => {
     await resultCell.pull();
     expect(startCount).toBe(1);
 
-    // Stop the charm
+    // Stop the piece
     runtime.runner.stop(resultCell);
 
-    // Call again - should restart the charm since it was stopped
-    const result2 = await ensureCharmRunning(
+    // Call again - should restart the piece since it was stopped
+    const result2 = await ensurePieceRunning(
       runtime,
       resultCell.getAsNormalizedFullLink(),
     );
@@ -361,12 +361,12 @@ describe("ensureCharmRunning", () => {
 
     await resultCell.pull();
 
-    // The charm's lift should have run twice now (once for each start)
+    // The piece's lift should have run twice now (once for each start)
     expect(startCount).toBe(2);
   });
 
-  it("should handle events for cells without associated charms gracefully", async () => {
-    // Create a cell that has no charm structure
+  it("should handle events for cells without associated pieces gracefully", async () => {
+    // Create a cell that has no piece structure
     const orphanCell = runtime.getCell<{ $stream: true }>(
       space,
       "orphan-event-cell-test",
@@ -414,7 +414,7 @@ describe("queueEvent with auto-start", () => {
     await storageManager?.close();
   });
 
-  it("should start charm when event sent to result cell path, but not retry if no handler", async () => {
+  it("should start piece when event sent to result cell path, but not retry if no handler", async () => {
     // Create a recipe with a reactive lift (to prove it starts) but NO event handler
     let liftRunCount = 0;
 
@@ -443,7 +443,7 @@ describe("queueEvent with auto-start", () => {
       },
       nodes: [
         {
-          // This lift will run when the charm starts, proving the charm started
+          // This lift will run when the piece starts, proving the piece started
           module: {
             type: "javascript",
             implementation: (value: number) => {
@@ -501,29 +501,29 @@ describe("queueEvent with auto-start", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    // Verify charm is not running yet
+    // Verify piece is not running yet
     expect(liftRunCount).toBe(0);
 
     // Send an event to the result cell's events path
-    // ensureCharmRunning will:
+    // ensurePieceRunning will:
     // 1. Get cell at resultCell (with path removed)
     // 2. Follow getSourceCell() to find processCell
     // 3. Find TYPE and resultRef in processCell
-    // 4. Start the charm
+    // 4. Start the piece
     const eventsLink = resultCell.key("events").getAsNormalizedFullLink();
     runtime.scheduler.queueEvent(eventsLink, { type: "click" });
 
     // Wait for processing
     await resultCell.pull();
 
-    // The charm should have been started (lift ran)
+    // The piece should have been started (lift ran)
     expect(liftRunCount).toBe(1);
 
     // The result should show the lift's output
     expect(resultCell.getAsQueryResult()).toMatchObject({ doubled: 10 });
 
-    // Send another event - ensureCharmRunning may be called again but
-    // runSynced is idempotent so the charm won't restart
+    // Send another event - ensurePieceRunning may be called again but
+    // runSynced is idempotent so the piece won't restart
     runtime.scheduler.queueEvent(eventsLink, { type: "click" });
 
     await runtime.idle();
@@ -534,7 +534,7 @@ describe("queueEvent with auto-start", () => {
     expect(liftRunCount).toBe(1);
   });
 
-  it("should start charm and process event when handler is defined", async () => {
+  it("should start piece and process event when handler is defined", async () => {
     // Create a recipe with a handler that reads from the stream
     let liftRunCount = 0;
     let handlerRunCount = 0;
@@ -568,7 +568,7 @@ describe("queueEvent with auto-start", () => {
       },
       nodes: [
         {
-          // This lift will run when the charm starts
+          // This lift will run when the piece starts
           module: {
             type: "javascript",
             implementation: (value: number) => {
@@ -653,11 +653,11 @@ describe("queueEvent with auto-start", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    // Verify charm is not running yet
+    // Verify piece is not running yet
     expect(liftRunCount).toBe(0);
     expect(handlerRunCount).toBe(0);
 
-    // Send an event - should start charm and process the event
+    // Send an event - should start piece and process the event
     // The handler is registered for the internal/events path on process cell
     const eventsLink = processCell.key("internal").key("events")
       .getAsNormalizedFullLink();
@@ -668,7 +668,7 @@ describe("queueEvent with auto-start", () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     await runtime.idle();
 
-    // The charm should have been started
+    // The piece should have been started
     expect(liftRunCount).toBe(1);
 
     // The handler should have been called
@@ -689,7 +689,7 @@ describe("queueEvent with auto-start", () => {
       { type: "click", x: 20 },
     ]);
 
-    // Lift should still only have run once (charm only started once)
+    // Lift should still only have run once (piece only started once)
     expect(liftRunCount).toBe(1);
   });
 });

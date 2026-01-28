@@ -404,7 +404,7 @@ describe("Recipe Runner", () => {
     expect(values).toContainEqual([1, 1, 0]);
 
     // Next is the first logger called again when counter changes, since this
-    // is now a long running charmlet:
+    // is now a long running piecelet:
     expect(values).toContainEqual([3, 1, 0]);
 
     expect(values).toContainEqual([3, 2, 0]);
@@ -842,30 +842,30 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const charmCell = runtime.getCell<{ result: number; updater: any }>(
+    const pieceCell = runtime.getCell<{ result: number; updater: any }>(
       space,
       "failed handlers should be ignored",
       undefined,
       tx,
     );
-    const charm = runtime.run(tx, divRecipe, { result: 1 }, charmCell);
+    const piece = runtime.run(tx, divRecipe, { result: 1 }, pieceCell);
     tx.commit();
 
-    await charm.pull();
+    await piece.pull();
 
-    charm.key("updater").send({ divisor: 5, dividend: 1 });
-    let value = await charm.pull();
+    piece.key("updater").send({ divisor: 5, dividend: 1 });
+    let value = await piece.pull();
     expect(errors).toBe(0);
 
     expect(value).toMatchObject({ result: 5 });
 
-    charm.key("updater").send({ divisor: 10, dividend: 0 });
-    value = await charm.pull();
+    piece.key("updater").send({ divisor: 10, dividend: 0 });
+    value = await piece.pull();
     expect(errors).toBe(1);
     expect(value).toMatchObject({ result: 5 });
 
     // Cast to any to avoid type checking
-    const sourceCellValue = charm.getSourceCell()?.getRaw() as any;
+    const sourceCellValue = piece.getSourceCell()?.getRaw() as any;
     const recipeId = sourceCellValue?.[TYPE];
     expect(recipeId).toBeDefined();
     expect(lastError?.recipeId).toBe(recipeId);
@@ -876,13 +876,13 @@ describe("Recipe Runner", () => {
     expect(lastError?.spellId).toBe(spellId);
     expect(lastError?.space).toBe(space);
     expect(lastError?.pieceId).toBe(
-      JSON.parse(JSON.stringify(charm.entityId))["/"],
+      JSON.parse(JSON.stringify(piece.entityId))["/"],
     );
 
     // NOTE(ja): this test is really important after a handler
     // fails the entire system crashes!!!!
-    charm.key("updater").send({ divisor: 10, dividend: 5 });
-    value = await charm.pull();
+    piece.key("updater").send({ divisor: 10, dividend: 5 });
+    value = await piece.pull();
     expect(value).toMatchObject({ result: 2 });
   });
 
@@ -925,20 +925,20 @@ describe("Recipe Runner", () => {
     await dividend.pull();
     tx = runtime.edit();
 
-    const charmCell = runtime.getCell<{ result: number }>(
+    const pieceCell = runtime.getCell<{ result: number }>(
       space,
       "failed lifted handlers should be ignored",
       undefined,
       tx,
     );
-    const charm = runtime.run(tx, divRecipe, {
+    const piece = runtime.run(tx, divRecipe, {
       divisor: 10,
       dividend,
-    }, charmCell);
+    }, pieceCell);
     tx.commit();
     tx = runtime.edit();
 
-    let value = await charm.pull();
+    let value = await piece.pull();
 
     expect(errors).toBe(0);
     expect(value).toMatchObject({ result: 10 });
@@ -947,16 +947,16 @@ describe("Recipe Runner", () => {
     tx.commit();
     tx = runtime.edit();
 
-    value = await charm.pull();
+    value = await piece.pull();
     expect(errors).toBe(1);
     expect(value).toMatchObject({ result: 10 });
 
-    const recipeId = charm.getSourceCell()?.get()?.[TYPE];
+    const recipeId = piece.getSourceCell()?.get()?.[TYPE];
     expect(recipeId).toBeDefined();
     expect(lastError?.recipeId).toBe(recipeId);
     expect(lastError?.space).toBe(space);
     expect(lastError?.pieceId).toBe(
-      JSON.parse(JSON.stringify(charm.entityId))["/"],
+      JSON.parse(JSON.stringify(piece.entityId))["/"],
     );
 
     // Make sure it recovers:
@@ -964,9 +964,9 @@ describe("Recipe Runner", () => {
     tx.commit();
     tx = runtime.edit();
 
-    value = await charm.pull();
-    expect((charm.getRaw() as any).result.$alias.cell).toEqual(
-      charm.getSourceCell()?.entityId,
+    value = await piece.pull();
+    expect((piece.getRaw() as any).result.$alias.cell).toEqual(
+      piece.getSourceCell()?.entityId,
     );
     expect(value).toMatchObject({ result: 5 });
   });
@@ -1044,19 +1044,19 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const charmCell = runtime.getCell<{ result: number; updater: any }>(
+    const pieceCell = runtime.getCell<{ result: number; updater: any }>(
       space,
       "idle should wait for slow async handlers",
       undefined,
       tx,
     );
-    const charm = runtime.run(tx, slowHandlerRecipe, { result: 0 }, charmCell);
+    const piece = runtime.run(tx, slowHandlerRecipe, { result: 0 }, pieceCell);
     tx.commit();
 
-    await charm.pull();
+    await piece.pull();
 
     // Trigger the handler
-    charm.key("updater").send({ value: 5 });
+    piece.key("updater").send({ value: 5 });
 
     // Give a small delay to start the handler but not enough to complete
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -1064,7 +1064,7 @@ describe("Recipe Runner", () => {
     expect(timeoutCalled).toBe(false);
 
     // Now pull should wait for the handler's promise to resolve
-    const value = await charm.pull();
+    const value = await piece.pull();
     expect(timeoutCalled).toBe(true);
     expect(value).toMatchObject({ result: 10 });
   });
@@ -1101,21 +1101,21 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const charmCell = runtime.getCell<{ result: number; updater: any }>(
+    const pieceCell = runtime.getCell<{ result: number; updater: any }>(
       space,
       "idle should not wait for deliberately async handlers",
       undefined,
       tx,
     );
-    const charm = runtime.run(tx, slowHandlerRecipe, { result: 0 }, charmCell);
+    const piece = runtime.run(tx, slowHandlerRecipe, { result: 0 }, pieceCell);
     tx.commit();
 
-    await charm.pull();
+    await piece.pull();
 
     // Trigger the handler
-    charm.key("updater").send({ value: 5 });
+    piece.key("updater").send({ value: 5 });
 
-    await charm.pull();
+    await piece.pull();
     expect(handlerCalled).toBe(true);
     expect(timeoutCalled).toBe(false);
 
@@ -1123,7 +1123,7 @@ describe("Recipe Runner", () => {
     await timeoutPromise;
     expect(timeoutCalled).toBe(true);
     expect(caughtErrorTryingToSetResult).toBeDefined();
-    const value = await charm.pull();
+    const value = await piece.pull();
     expect(value?.result).toBe(0); // No change
   });
 
@@ -1287,11 +1287,11 @@ describe("Recipe Runner", () => {
 
   it("should allow sending cells to an event handler", async () => {
     const addToList = handler(
-      // == { charm: Cell<any> }
+      // == { piece: Cell<any> }
       {
         type: "object",
-        properties: { charm: { type: "object", asCell: true } },
-        required: ["charm"],
+        properties: { piece: { type: "object", asCell: true } },
+        required: ["piece"],
       },
       // == { list: Cell<any>[] }
       {
@@ -1305,8 +1305,8 @@ describe("Recipe Runner", () => {
         },
         required: ["list"],
       },
-      ({ charm }, { list }) => {
-        list.push(charm);
+      ({ piece }, { list }) => {
+        list.push(piece);
       },
     );
 
@@ -1324,23 +1324,23 @@ describe("Recipe Runner", () => {
       tx,
     );
 
-    const charmCell = runtime.getCell(
+    const pieceCell = runtime.getCell(
       space,
       "should allow sending cells to an event handler",
       listRecipe.resultSchema,
       tx,
     );
 
-    const charm = runtime.run(tx, listRecipe, { list: [] }, charmCell);
+    const piece = runtime.run(tx, listRecipe, { list: [] }, pieceCell);
     tx.commit();
 
-    await charm.pull();
+    await piece.pull();
 
-    charm.key("stream").send({ charm: testCell });
-    await charm.pull();
+    piece.key("stream").send({ piece: testCell });
+    await piece.pull();
 
     // Add schema so we get the entry as a cell and can compare the two
-    const listCell = charm.key("list").asSchema({
+    const listCell = piece.key("list").asSchema({
       type: "array",
       items: { type: "object", asCell: true },
     });
@@ -1390,7 +1390,7 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const charmCell = runtime.getCell<
+    const pieceCell = runtime.getCell<
       { expandChat: boolean; text: string; stream: any }
     >(
       space,
@@ -1399,27 +1399,27 @@ describe("Recipe Runner", () => {
       tx,
     );
 
-    const charm = runtime.run(
+    const piece = runtime.run(
       tx,
       ifElseRecipe,
       { expandChat: true },
-      charmCell,
+      pieceCell,
     );
 
     tx.commit();
 
-    await charm.pull();
+    await piece.pull();
 
     // Toggle
-    charm.key("stream").send({ expandChat: true });
-    await charm.pull();
+    piece.key("stream").send({ expandChat: true });
+    await piece.pull();
 
-    expect(charm.key("text").get()).toEqual("A");
+    expect(piece.key("text").get()).toEqual("A");
 
-    charm.key("stream").send({ expandChat: false });
-    await charm.pull();
+    piece.key("stream").send({ expandChat: false });
+    await piece.pull();
 
-    expect(charm.key("text").get()).toEqual("b");
+    expect(piece.key("text").get()).toEqual("b");
   });
 
   it("ifElse selects the correct branch based on condition", async () => {
@@ -1442,7 +1442,7 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const charmCell = runtime.getCell<
+    const pieceCell = runtime.getCell<
       {
         condition: boolean;
         trueValue: string;
@@ -1457,38 +1457,38 @@ describe("Recipe Runner", () => {
     );
 
     // Start with condition = true
-    const charm = runtime.run(
+    const piece = runtime.run(
       tx,
       ifElseRecipe,
       { condition: true, trueValue: "A", falseValue: "B" },
-      charmCell,
+      pieceCell,
     );
 
     tx.commit();
-    await charm.pull();
+    await piece.pull();
 
     // With condition=true, ifElse should select trueValue
-    expect(charm.key("text").get()).toEqual("A");
+    expect(piece.key("text").get()).toEqual("A");
 
     // Now switch condition to false
     tx = runtime.edit();
-    charm.withTx(tx).key("condition").set(false);
+    piece.withTx(tx).key("condition").set(false);
     tx.commit();
-    await charm.pull();
+    await piece.pull();
 
     // With condition=false, ifElse should select falseValue
-    expect(charm.key("text").get()).toEqual("B");
+    expect(piece.key("text").get()).toEqual("B");
 
     // Change the falseValue and verify it updates
     tx = runtime.edit();
-    charm.withTx(tx).key("falseValue").set("C");
+    piece.withTx(tx).key("falseValue").set("C");
     tx.commit();
-    await charm.pull();
+    await piece.pull();
 
-    expect(charm.key("text").get()).toEqual("C");
+    expect(piece.key("text").get()).toEqual("C");
   });
 
-  it("should allow Cell<Array>.push of newly created charms", async () => {
+  it("should allow Cell<Array>.push of newly created pieces", async () => {
     const InnerSchema = {
       type: "object",
       properties: {
@@ -1532,9 +1532,9 @@ describe("Recipe Runner", () => {
       required: ["add", "list"],
     } as const satisfies JSONSchema;
 
-    const charmCell = runtime.getCell<Schema<typeof OutputWithHandler>>(
+    const pieceCell = runtime.getCell<Schema<typeof OutputWithHandler>>(
       space,
-      "should allow Cell<Array>.push of newly created charms",
+      "should allow Cell<Array>.push of newly created pieces",
       OutputWithHandler,
       tx,
     );
@@ -1564,14 +1564,14 @@ describe("Recipe Runner", () => {
       OutputWithHandler,
     );
 
-    runtime.run(tx, outerPattern, {}, charmCell);
+    runtime.run(tx, outerPattern, {}, pieceCell);
     tx.commit();
 
-    await charmCell.pull();
+    await pieceCell.pull();
 
     tx = runtime.edit();
 
-    const result = charmCell.withTx(tx).get();
+    const result = pieceCell.withTx(tx).get();
     expect(isCell(result.list)).toBe(true);
     expect(result.list.get()).toEqual([]);
     expect(isStream(result.add)).toBe(true);
@@ -1579,10 +1579,10 @@ describe("Recipe Runner", () => {
     result.add.withTx(tx).send({ text: "hello" });
     tx.commit();
 
-    await charmCell.pull();
+    await pieceCell.pull();
 
     tx = runtime.edit();
-    const result2 = charmCell.withTx(tx).get();
+    const result2 = pieceCell.withTx(tx).get();
     expect(result2.list.get()).toEqual([{ text: "hello" }]);
   });
 

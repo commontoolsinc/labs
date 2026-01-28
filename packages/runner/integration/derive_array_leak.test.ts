@@ -103,9 +103,9 @@ async function runTest() {
     storageManager,
   });
 
-  // Create charm manager for the specified space
-  const charmManager = new PieceManager(session, runtime);
-  await charmManager.ready;
+  // Create piece manager for the specified space
+  const pieceManager = new PieceManager(session, runtime);
+  await pieceManager.ready;
 
   // Read the recipe file content
   const recipeContent = await Deno.readTextFile(
@@ -120,7 +120,7 @@ async function runTest() {
   );
   console.log("Recipe compiled successfully");
 
-  const charm = (await charmManager.runPersistent(recipe, {})).asSchema({
+  const piece = (await pieceManager.runPersistent(recipe, {})).asSchema({
     type: "object",
     properties: {
       value: { type: "number" },
@@ -130,7 +130,7 @@ async function runTest() {
     },
     required: ["value", "increment"],
   });
-  console.log("Charm created:", charm.entityId);
+  console.log("Piece created:", piece.entityId);
 
   // Wait for initial state
   await runtime.idle();
@@ -143,24 +143,24 @@ async function runTest() {
   // Measure baseline server memory (where the leak occurs)
   const serverMemoryBeforeMB = await getServerMemoryMB();
   console.log(`Baseline server memory: ${serverMemoryBeforeMB.toFixed(1)} MB`);
-  console.log(`Initial counter value: ${charm.get().value}`);
+  console.log(`Initial counter value: ${piece.get().value}`);
 
   // Trigger the leak by incrementing
   // The handler increments INCREMENTS_PER_CLICK times per click
   console.log(
     `Clicking increment (${INCREMENTS_PER_CLICK} increments total)...`,
   );
-  const incrementStream = charm.key("increment");
+  const incrementStream = piece.key("increment");
   incrementStream.send({});
 
   // Wait for all updates to complete
   console.log("Waiting for runtime to finish...");
   await runtime.idle();
   await runtime.storageManager.synced();
-  console.log(`Final counter value: ${charm.get().value}`);
+  console.log(`Final counter value: ${piece.get().value}`);
 
   // Verify the counter actually incremented
-  const finalValue = charm.get().value;
+  const finalValue = piece.get().value;
   const expectedValue = INCREMENTS_PER_CLICK;
   if (finalValue !== expectedValue) {
     console.warn(

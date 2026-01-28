@@ -140,15 +140,15 @@ function resolveBase(
         cell: getSpaceCell(ctx),
         pathPrefix: ["defaultPattern", "backlinksIndex", "mentionable"],
       }];
-    case "#allCharms":
+    case "#allPieces":
       return [{
         cell: getSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "allCharms"],
+        pathPrefix: ["defaultPattern", "allPieces"],
       }];
     case "#recent":
       return [{
         cell: getSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "recentCharms"],
+        pathPrefix: ["defaultPattern", "recentPieces"],
       }];
     case "#favorites": {
       // Favorites always come from the HOME space (user identity DID)

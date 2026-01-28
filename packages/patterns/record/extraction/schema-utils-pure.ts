@@ -5,7 +5,7 @@
  * This module can be imported in tests without pulling in the commontools runtime.
  */
 
-import type { SubCharmEntry } from "../types.ts";
+import type { SubPieceEntry } from "../types.ts";
 
 /**
  * Safely extract a value from a Cell-like object or return the value directly.
@@ -68,43 +68,43 @@ export function isInternalModule(type: string): boolean {
 }
 
 /**
- * Type-safe helper to extract resultSchema from a pattern/charm.
+ * Type-safe helper to extract resultSchema from a pattern/piece.
  *
  * Pattern outputs implement the Recipe interface which includes resultSchema.
  * This helper safely extracts it with proper type checking.
  *
- * @param charm - The charm/pattern instance (usually stored as `unknown`)
+ * @param piece - The piece/pattern instance (usually stored as `unknown`)
  * @returns The resultSchema if available, undefined otherwise
  */
-export function getResultSchema(charm: unknown): JSONSchema | undefined {
+export function getResultSchema(piece: unknown): JSONSchema | undefined {
   if (
-    charm &&
-    typeof charm === "object" &&
-    "resultSchema" in charm &&
-    charm.resultSchema &&
-    typeof charm.resultSchema === "object"
+    piece &&
+    typeof piece === "object" &&
+    "resultSchema" in piece &&
+    piece.resultSchema &&
+    typeof piece.resultSchema === "object"
   ) {
-    return charm.resultSchema as JSONSchema;
+    return piece.resultSchema as JSONSchema;
   }
   return undefined;
 }
 
 /**
- * Build a combined extraction schema from all sub-charms using stored schemas only.
+ * Build a combined extraction schema from all sub-pieces using stored schemas only.
  *
  * This pure version only uses entry.schema - no registry fallback.
  * For production use with fallback, use buildExtractionSchema from schema-utils.ts.
  *
- * @param subCharms - Array of sub-charm entries from the Record
- * @returns Combined JSON Schema with properties from all sub-charms
+ * @param subPieces - Array of sub-piece entries from the Record
+ * @returns Combined JSON Schema with properties from all sub-pieces
  */
 export function buildExtractionSchemaPure(
-  subCharms: readonly SubCharmEntry[],
+  subPieces: readonly SubPieceEntry[],
 ): JSONSchema {
   const properties: Record<string, JSONSchema> = {};
   const fieldOwners: Record<string, string> = {}; // Track which module defines each field
 
-  for (const entry of subCharms) {
+  for (const entry of subPieces) {
     // Skip internal/controller modules that don't have extractable data
     if (isInternalModule(entry.type)) continue;
 
@@ -141,18 +141,18 @@ export function buildExtractionSchemaPure(
  *
  * This pure version only uses entry.schema - no registry fallback.
  *
- * @param parentSubCharms - Object with get() method returning sub-charm entries
- * @returns Combined JSON Schema with properties from all sub-charms
+ * @param parentSubPieces - Object with get() method returning sub-piece entries
+ * @returns Combined JSON Schema with properties from all sub-pieces
  */
 export function buildExtractionSchemaFromCellPure(
   // deno-lint-ignore no-explicit-any
-  parentSubCharms: { get?: () => SubCharmEntry[] | null | undefined } | any,
+  parentSubPieces: { get?: () => SubPieceEntry[] | null | undefined } | any,
 ): JSONSchema {
   const properties: Record<string, JSONSchema> = {};
   const fieldOwners: Record<string, string> = {}; // Track which module defines each field
-  const subCharms = parentSubCharms.get?.() ?? [];
+  const subPieces = parentSubPieces.get?.() ?? [];
 
-  for (const entry of subCharms) {
+  for (const entry of subPieces) {
     // Skip internal/controller modules
     if (isInternalModule(entry.type)) continue;
 
@@ -185,20 +185,20 @@ export function buildExtractionSchemaFromCellPure(
 }
 
 /**
- * Get the field-to-type mapping from sub-charm schemas (stored schemas only).
+ * Get the field-to-type mapping from sub-piece schemas (stored schemas only).
  *
  * Creates a reverse mapping from field names to their owning module types.
  * This pure version only uses entry.schema - no registry fallback.
  *
- * @param subCharms - Array of sub-charm entries from the Record
+ * @param subPieces - Array of sub-piece entries from the Record
  * @returns Map of field names to module types
  */
 export function getFieldToTypeMappingPure(
-  subCharms: readonly SubCharmEntry[],
+  subPieces: readonly SubPieceEntry[],
 ): Record<string, string> {
   const fieldToType: Record<string, string> = {};
 
-  for (const entry of subCharms) {
+  for (const entry of subPieces) {
     // Skip internal modules
     if (isInternalModule(entry.type)) continue;
 

@@ -1,15 +1,15 @@
 /**
  * Schema utilities for LLM extraction.
  *
- * Provides dynamic schema discovery using schema stored on SubCharmEntry at creation time.
- * When sub-charms are created, their resultSchema is captured and stored alongside the charm.
+ * Provides dynamic schema discovery using schema stored on SubPieceEntry at creation time.
+ * When sub-pieces are created, their resultSchema is captured and stored alongside the piece.
  * This enables extraction to work with any module type without a manual registry.
  *
  * Falls back to manual registry for legacy entries that don't have stored schema.
  */
 
 import type { Writable } from "commontools";
-import type { SubCharmEntry } from "../types.ts";
+import type { SubPieceEntry } from "../types.ts";
 import type { JSONSchema } from "./schema-utils-pure.ts";
 
 // Registry import for fallback - only used for legacy entries without stored schema.
@@ -25,9 +25,9 @@ export type { JSONSchema };
 export { getResultSchema, isInternalModule };
 
 /**
- * Get schema for a sub-charm from the manual registry.
+ * Get schema for a sub-piece from the manual registry.
  *
- * @param type - The sub-charm type (e.g., "contact", "social")
+ * @param type - The sub-piece type (e.g., "contact", "social")
  * @returns The schema for this type, or undefined if not available
  */
 export function getSchemaForType(type: string): JSONSchema | undefined {
@@ -42,20 +42,20 @@ export function getSchemaForType(type: string): JSONSchema | undefined {
 }
 
 /**
- * Build a combined extraction schema from all sub-charms.
+ * Build a combined extraction schema from all sub-pieces.
  *
  * Uses stored schema (entry.schema) first, falls back to registry.
  *
- * @param subCharms - Array of sub-charm entries from the Record
- * @returns Combined JSON Schema with properties from all sub-charms
+ * @param subPieces - Array of sub-piece entries from the Record
+ * @returns Combined JSON Schema with properties from all sub-pieces
  */
 export function buildExtractionSchema(
-  subCharms: readonly SubCharmEntry[],
+  subPieces: readonly SubPieceEntry[],
 ): JSONSchema {
   const properties: Record<string, JSONSchema> = {};
   const fieldOwners: Record<string, string> = {}; // Track which module defines each field
 
-  for (const entry of subCharms) {
+  for (const entry of subPieces) {
     // Skip internal/controller modules that don't have extractable data
     if (isInternalModule(entry.type)) continue;
 
@@ -118,23 +118,23 @@ export function buildExtractionSchema(
 }
 
 /**
- * Build extraction schema dynamically using stored schema from SubCharmEntry.
+ * Build extraction schema dynamically using stored schema from SubPieceEntry.
  *
  * Uses entry.schema (captured at creation time via pattern.resultSchema) for
  * dynamic discovery. Falls back to registry for legacy entries without stored schema.
  *
- * @param parentSubCharms - The Cell containing sub-charm entries
- * @returns Combined JSON Schema with properties from all sub-charms
+ * @param parentSubPieces - The Cell containing sub-piece entries
+ * @returns Combined JSON Schema with properties from all sub-pieces
  */
 export function buildExtractionSchemaFromCell(
   // deno-lint-ignore no-explicit-any
-  parentSubCharms: Writable<SubCharmEntry[]> | any,
+  parentSubPieces: Writable<SubPieceEntry[]> | any,
 ): JSONSchema {
   const properties: Record<string, JSONSchema> = {};
   const fieldOwners: Record<string, string> = {}; // Track which module defines each field
-  const subCharms = parentSubCharms.get?.() ?? [];
+  const subPieces = parentSubPieces.get?.() ?? [];
 
-  for (const entry of subCharms) {
+  for (const entry of subPieces) {
     // Skip internal/controller modules
     if (isInternalModule(entry.type)) continue;
 
@@ -197,20 +197,20 @@ export function buildExtractionSchemaFromCell(
 }
 
 /**
- * Get the field-to-type mapping from sub-charm schemas.
+ * Get the field-to-type mapping from sub-piece schemas.
  *
  * Creates a reverse mapping from field names to their owning module types.
  * Uses stored schema first, falls back to registry.
  *
- * @param subCharms - Array of sub-charm entries from the Record
+ * @param subPieces - Array of sub-piece entries from the Record
  * @returns Map of field names to module types
  */
 export function getFieldToTypeMapping(
-  subCharms: readonly SubCharmEntry[],
+  subPieces: readonly SubPieceEntry[],
 ): Record<string, string> {
   const fieldToType: Record<string, string> = {};
 
-  for (const entry of subCharms) {
+  for (const entry of subPieces) {
     // Skip internal modules
     if (isInternalModule(entry.type)) continue;
 

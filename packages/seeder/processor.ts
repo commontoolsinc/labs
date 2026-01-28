@@ -118,7 +118,7 @@ export class Processor {
           },
         });
 
-        const charm = form.generation?.charm;
+        const charm = form.generation?.piece;
         if (charm) {
           const id = charm.entityId;
           if (id) {
@@ -140,7 +140,7 @@ export class Processor {
         }
         const charm = await this.charmManager.get(prevCharmId);
         const form = await processWorkflow(prompt, this.charmManager, {
-          existingCharm: charm,
+          existingPiece: charm,
           cache: this.cache,
           model: this.model,
           prefill: {
@@ -152,9 +152,9 @@ export class Processor {
           },
         });
 
-        const newCharm = form.generation?.charm;
-        if (newCharm) {
-          const id = newCharm.entityId;
+        const newPiece = form.generation?.piece;
+        if (newPiece) {
+          const id = newPiece.entityId;
           if (id) {
             return this.verify({ id: id["/"], prompt, name: this.name });
           }

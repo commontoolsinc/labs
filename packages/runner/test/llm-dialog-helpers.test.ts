@@ -75,7 +75,7 @@ Deno.test("parseTargetString uses fallback space for standard link format", () =
 });
 
 Deno.test("parseTargetString errors on human name", () => {
-  expect(() => parseLLMFriendlyLink("CharmName/foo/bar", "did:test:123"))
+  expect(() => parseLLMFriendlyLink("PieceName/foo/bar", "did:test:123"))
     .toThrow("must include");
 });
 
@@ -95,15 +95,15 @@ Deno.test("extractStringField returns value from string input", () => {
 
 Deno.test("extractStringField returns value from object field", () => {
   const value = extractStringField(
-    { charm: "Charm" },
-    "charm",
-    "Charm",
+    { piece: "Piece" },
+    "piece",
+    "Piece",
   );
-  assertEquals(value, "Charm");
+  assertEquals(value, "Piece");
 });
 
 Deno.test("extractStringField throws on missing field", () => {
-  assertThrows(() => extractStringField({ wrong: "Charm" }, "charm", "Charm"));
+  assertThrows(() => extractStringField({ wrong: "Piece" }, "piece", "Piece"));
 });
 
 Deno.test("extractRunArguments prioritizes nested args object", () => {

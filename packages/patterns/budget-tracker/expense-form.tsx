@@ -30,7 +30,7 @@ interface Input {
 
 interface Output {
   // Don't re-export shared cells - parent owns them
-  // Handlers typed as Stream<T> for cross-charm communication
+  // Handlers typed as Stream<T> for cross-piece communication
   addExpense: Stream<{
     description: string;
     amount: number;

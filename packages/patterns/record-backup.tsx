@@ -26,8 +26,8 @@ import {
   Writable,
 } from "commontools";
 
-import { createSubCharm, getDefinition } from "./record/registry.ts";
-import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
+import { createSubPiece, getDefinition } from "./record/registry.ts";
+import type { SubPieceEntry, TrashedSubPieceEntry } from "./record/types.ts";
 import Record from "./record.tsx";
 import Note from "./notes/note.tsx";
 
@@ -84,13 +84,13 @@ interface Output {
   importResult: ImportResult | null;
 }
 
-// ===== Type for Record charm =====
+// ===== Type for Record piece =====
 
-interface RecordCharm {
+interface RecordPiece {
   "#record"?: boolean;
   title?: string;
-  subCharms?: SubCharmEntry[];
-  trashedSubCharms?: TrashedSubCharmEntry[];
+  subPieces?: SubPieceEntry[];
+  trashedSubPieces?: TrashedSubPieceEntry[];
 }
 
 // ===== Data Extraction =====
@@ -134,15 +134,15 @@ function coerceDataTypes(
  * Also coerces types to match schema (e.g., string "1986" → number 1986)
  */
 function extractModuleData(
-  charm: unknown,
+  piece: unknown,
   type: string,
 ): Record<string, unknown> {
   const def = getDefinition(type);
   if (!def?.fieldMapping) return {};
 
-  // Validate charm is an object
-  if (charm == null || typeof charm !== "object") {
-    console.warn(`Invalid charm for type "${type}": expected object`);
+  // Validate piece is an object
+  if (piece == null || typeof piece !== "object") {
+    console.warn(`Invalid piece for type "${type}": expected object`);
     return {};
   }
 
@@ -150,7 +150,7 @@ function extractModuleData(
   for (const field of def.fieldMapping) {
     try {
       // deno-lint-ignore no-explicit-any
-      const value = (charm as any)?.[field];
+      const value = (piece as any)?.[field];
       if (value !== undefined) {
         // Unwrap Cell values if needed, with error handling
         // deno-lint-ignore no-explicit-any
@@ -171,10 +171,10 @@ function extractModuleData(
  * Build export data from all Records in the space
  */
 const buildExportData = lift(
-  ({ allCharms }: { allCharms: RecordCharm[] }): ExportData => {
+  ({ allPieces }: { allPieces: RecordPiece[] }): ExportData => {
     // Filter to only Record patterns
-    const records = (allCharms || []).filter(
-      (charm) => charm?.["#record"] === true,
+    const records = (allPieces || []).filter(
+      (piece) => piece?.["#record"] === true,
     );
 
     const exportedRecords: ExportedRecord[] = records.map((record, index) => {
@@ -182,34 +182,34 @@ const buildExportData = lift(
       const title = record?.title || "(Untitled Record)";
 
       // Extract active modules
-      const subCharms = record?.subCharms || [];
-      const modules: ExportedModule[] = subCharms
-        .filter((entry: SubCharmEntry) => {
-          // Guard against undefined entries or missing charm
-          if (!entry || !entry.type || entry.charm == null) return false;
+      const subPieces = record?.subPieces || [];
+      const modules: ExportedModule[] = subPieces
+        .filter((entry: SubPieceEntry) => {
+          // Guard against undefined entries or missing piece
+          if (!entry || !entry.type || entry.piece == null) return false;
           const def = getDefinition(entry.type);
           // Skip internal modules (like type-picker)
           return def && !def.internal;
         })
-        .map((entry: SubCharmEntry) => ({
+        .map((entry: SubPieceEntry) => ({
           type: entry.type,
           pinned: entry.pinned,
-          data: extractModuleData(entry.charm, entry.type),
+          data: extractModuleData(entry.piece, entry.type),
         }));
 
       // Extract trashed modules
-      const trashedSubCharms = record?.trashedSubCharms || [];
-      const trashedModules: ExportedTrashedModule[] = trashedSubCharms
-        .filter((entry: TrashedSubCharmEntry) => {
-          // Guard against undefined entries or missing charm
-          if (!entry || !entry.type || entry.charm == null) return false;
+      const trashedSubPieces = record?.trashedSubPieces || [];
+      const trashedModules: ExportedTrashedModule[] = trashedSubPieces
+        .filter((entry: TrashedSubPieceEntry) => {
+          // Guard against undefined entries or missing piece
+          if (!entry || !entry.type || entry.piece == null) return false;
           const def = getDefinition(entry.type);
           return def && !def.internal;
         })
-        .map((entry: TrashedSubCharmEntry) => ({
+        .map((entry: TrashedSubPieceEntry) => ({
           type: entry.type,
           pinned: entry.pinned,
-          data: extractModuleData(entry.charm, entry.type),
+          data: extractModuleData(entry.piece, entry.type),
           trashedAt: entry.trashedAt,
         }));
 
@@ -361,7 +361,7 @@ function parseImportJson(jsonText: string): {
 
 /**
  * Create a module from imported data
- * Returns the charm instance or null if type is unknown
+ * Returns the piece instance or null if type is unknown
  * Throws if module creation fails
  */
 function createModuleFromData(
@@ -404,11 +404,11 @@ function createModuleFromData(
   const coercedData = coerceDataTypes(type, data);
 
   // Create module with imported data
-  const charm = createSubCharm(type, coercedData);
-  if (!charm) {
-    throw new Error(`createSubCharm for "${type}" returned null/undefined`);
+  const piece = createSubPiece(type, coercedData);
+  if (!piece) {
+    throw new Error(`createSubPiece for "${type}" returned null/undefined`);
   }
-  return charm;
+  return piece;
 }
 
 /**
@@ -418,10 +418,10 @@ const importRecords = handler<
   Record<string, never>,
   {
     importJson: Writable<string>;
-    allCharms: Writable<RecordCharm[]>;
+    allPieces: Writable<RecordPiece[]>;
     importResult: Writable<ImportResult | null>;
   }
->((_, { importJson, allCharms, importResult }) => {
+>((_, { importJson, allPieces, importResult }) => {
   const jsonText = importJson.get();
   const parseResult = parseImportJson(jsonText);
 
@@ -456,17 +456,17 @@ const importRecords = handler<
   for (const recordData of exportData.records) {
     try {
       // Create modules for this record
-      const subCharms: SubCharmEntry[] = [];
+      const subPieces: SubPieceEntry[] = [];
 
       for (const moduleData of recordData.modules) {
         try {
-          const charm = createModuleFromData(
+          const piece = createModuleFromData(
             moduleData.type,
             moduleData.data,
             recordPatternJson,
           );
 
-          if (charm === null) {
+          if (piece === null) {
             // Unknown module type - skip with warning
             result.errors.push({
               record: recordData.title,
@@ -477,10 +477,10 @@ const importRecords = handler<
             continue;
           }
 
-          subCharms.push({
+          subPieces.push({
             type: moduleData.type,
             pinned: moduleData.pinned,
-            charm,
+            piece,
           });
         } catch (e) {
           result.errors.push({
@@ -493,17 +493,17 @@ const importRecords = handler<
       }
 
       // Create trashed modules
-      const trashedSubCharms: TrashedSubCharmEntry[] = [];
+      const trashedSubPieces: TrashedSubPieceEntry[] = [];
 
       for (const moduleData of recordData.trashedModules) {
         try {
-          const charm = createModuleFromData(
+          const piece = createModuleFromData(
             moduleData.type,
             moduleData.data,
             recordPatternJson,
           );
 
-          if (charm === null) {
+          if (piece === null) {
             result.errors.push({
               record: recordData.title,
               module: `${moduleData.type} (trashed)`,
@@ -513,10 +513,10 @@ const importRecords = handler<
             continue;
           }
 
-          trashedSubCharms.push({
+          trashedSubPieces.push({
             type: moduleData.type,
             pinned: moduleData.pinned,
-            charm,
+            piece,
             trashedAt: moduleData.trashedAt,
           });
         } catch (e) {
@@ -533,12 +533,12 @@ const importRecords = handler<
       // deno-lint-ignore no-explicit-any
       const record = (Record as any)({
         title: recordData.title,
-        subCharms: subCharms,
-        trashedSubCharms: trashedSubCharms,
+        subPieces: subPieces,
+        trashedSubPieces: trashedSubPieces,
       });
 
-      // Push to allCharms to persist
-      allCharms.push(record as RecordCharm);
+      // Push to allPieces to persist
+      allPieces.push(record as RecordPiece);
       createdRecords.push(record);
       result.imported++;
     } catch (e) {
@@ -606,11 +606,11 @@ const handleFileUpload = handler<
 // ===== The Pattern =====
 
 export default pattern<Input, Output>(({ importJson }) => {
-  // Get all charms in the space
-  const { allCharms } = wish<{ allCharms: RecordCharm[] }>("#default");
+  // Get all pieces in the space
+  const { allPieces } = wish<{ allPieces: RecordPiece[] }>("#default");
 
   // Build export data
-  const exportData = buildExportData({ allCharms });
+  const exportData = buildExportData({ allPieces });
   const exportedJson = formatExportJson({ exportData });
   const recordCount = countRecords({ exportData });
 
@@ -722,7 +722,7 @@ export default pattern<Input, Output>(({ importJson }) => {
                 <ct-button
                   onClick={importRecords({
                     importJson,
-                    allCharms,
+                    allPieces,
                     importResult,
                   })}
                   variant="primary"

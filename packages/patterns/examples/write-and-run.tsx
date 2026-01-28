@@ -202,7 +202,7 @@ export default pattern<Input, Output>(({ prompt }) => {
     ),
     prompt,
     generatedCode: generated.result,
-    compiledCharm: compiled.result,
+    compiledPiece: compiled.result,
     error: compiled.error,
   };
 });

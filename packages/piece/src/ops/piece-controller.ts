@@ -82,7 +82,7 @@ export class PieceController<T = unknown> {
   constructor(manager: PieceManager, cell: Cell<T>) {
     const id = pieceId(cell);
     if (!id) {
-      throw new Error("Could not get an ID from a Cell<Charm>");
+      throw new Error("Could not get an ID from a Cell<Piece>");
     }
     this.id = id;
     this.#manager = manager;
@@ -123,7 +123,7 @@ export class PieceController<T = unknown> {
     return this.#manager.runtime.recipeManager.loadRecipeMeta(recipeId, space);
   }
 
-  // Returns an `IFrameRecipe` for the charm, or `undefined`
+  // Returns an `IFrameRecipe` for the piece, or `undefined`
   // if not an iframe recipe.
   getIframeRecipe(): IFrameRecipe | undefined {
     return getIframeRecipe(this.#cell, this.#manager.runtime).iframe;
@@ -134,12 +134,12 @@ export class PieceController<T = unknown> {
     await execute(this.#manager, this.id, recipe);
   }
 
-  // Update charm's recipe with usercode for an iframe recipe.
+  // Update piece's recipe with usercode for an iframe recipe.
   // Throws if recipe is not an iframe recipe.
   async setIframeRecipe(src: string): Promise<void> {
     const iframeRecipe = getIframeRecipe(this.#cell, this.#manager.runtime);
     if (!iframeRecipe.iframe) {
-      throw new Error(`Expected charm "${this.id}" to be an iframe recipe.`);
+      throw new Error(`Expected piece "${this.id}" to be an iframe recipe.`);
     }
     iframeRecipe.iframe.src = injectUserCode(src);
     const recipe = await compileProgram(
@@ -155,7 +155,7 @@ export class PieceController<T = unknown> {
   }
 
   async readBy(): Promise<PieceController[]> {
-    const cells = await this.#manager.getReadByCharms(this.#cell);
+    const cells = await this.#manager.getReadByPieces(this.#cell);
     return cells.map((cell) => new PieceController(this.#manager, cell));
   }
 
@@ -176,8 +176,8 @@ async function execute(
   await manager.synced();
 }
 
-export const getRecipeIdFromPiece = (charm: Cell<unknown>): string => {
-  const sourceCell = charm.getSourceCell(processSchema);
-  if (!sourceCell) throw new Error("charm missing source cell");
+export const getRecipeIdFromPiece = (piece: Cell<unknown>): string => {
+  const sourceCell = piece.getSourceCell(processSchema);
+  if (!sourceCell) throw new Error("piece missing source cell");
   return sourceCell.get()?.[TYPE];
 };

@@ -106,7 +106,7 @@ export class XQuickJumpView extends BaseView {
       if (!rt) return undefined;
       await rt.synced();
 
-      const charmsListCell = await rt.getCharmsListCell();
+      const charmsListCell = await rt.getPiecesListCell();
       await charmsListCell.sync();
 
       const charmsList = charmsListCell.get() as any[];

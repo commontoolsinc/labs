@@ -99,8 +99,8 @@ async function generateNarrative(
   const prompt =
     `Generate a brief journal entry (1-2 sentences) describing this user action.
 
-Event: User ${eventDescriptions[eventType]} a charm
-Charm name: ${snapshot.name || "unnamed"}
+Event: User ${eventDescriptions[eventType]} a piece
+Piece name: ${snapshot.name || "unnamed"}
 ${
       snapshot.valueExcerpt
         ? `Content preview: ${snapshot.valueExcerpt.slice(0, 100)}`
@@ -134,7 +134,7 @@ Write in past tense, personal style, like a thoughtful journal entry. Focus on t
   } catch (error) {
     console.error("Failed to generate journal narrative:", error);
     // Fallback to a simple description
-    return `${eventDescriptions[eventType]} "${snapshot.name || "a charm"}"`;
+    return `${eventDescriptions[eventType]} "${snapshot.name || "a piece"}"`;
   }
 }
 

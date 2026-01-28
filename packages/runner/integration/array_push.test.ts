@@ -2,7 +2,7 @@
 
 /**
  * as integration test, we make sure we can write 100 element array and get it back
- * as client performance test, we can use this script to create a charm and see how
+ * as client performance test, we can use this script to create a piece and see how
  * fast the client can render 100 mapped elements, which often ends up creating a
  * lot of vdom nodes
  */
@@ -51,9 +51,9 @@ async function runTest() {
     storageManager,
   });
 
-  // Create charm manager for the specified space
-  const charmManager = new PieceManager(session, runtime);
-  await charmManager.ready;
+  // Create piece manager for the specified space
+  const pieceManager = new PieceManager(session, runtime);
+  await pieceManager.ready;
 
   // Read the recipe file content
   const recipeContent = await Deno.readTextFile(
@@ -73,7 +73,7 @@ async function runTest() {
   );
   console.log("Recipe compiled successfully");
 
-  const charm = (await charmManager.runPersistent(recipe, {})).asSchema({
+  const piece = (await pieceManager.runPersistent(recipe, {})).asSchema({
     type: "object",
     properties: {
       my_numbers_array: {
@@ -107,17 +107,17 @@ async function runTest() {
       "pushObjectsHandler",
     ],
   });
-  console.log("Result charm ID:", charm.entityId);
-  console.log("Result charm schema:", charm.schema);
+  console.log("Result piece ID:", piece.entityId);
+  console.log("Result piece schema:", piece.schema);
 
   // Wait so we can load the page on the browser
   // await new Promise((resolve) => setTimeout(resolve, 10000));
 
   // Get the handler stream and send some numbers
-  const pushNumbersHandlerStream = charm.key(
+  const pushNumbersHandlerStream = piece.key(
     "pushNumbersHandler",
   ) as unknown as Stream<{ value: number }>;
-  const pushObjectsHandlerStream = charm.key(
+  const pushObjectsHandlerStream = piece.key(
     "pushObjectsHandler",
   ) as unknown as Stream<{ value: { count: number } }>;
 
@@ -142,8 +142,8 @@ async function runTest() {
   console.log("Storage synced");
 
   // Now we should have all elements
-  const actualNumbersElements = charm.get().my_numbers_array.length;
-  const actualObjectsElements = charm.get().my_objects_array.length;
+  const actualNumbersElements = piece.get().my_numbers_array.length;
+  const actualObjectsElements = piece.get().my_objects_array.length;
   if (
     actualNumbersElements === TOTAL_COUNT &&
     actualObjectsElements === TOTAL_COUNT
@@ -153,33 +153,33 @@ async function runTest() {
     console.error(
       `Test failed - expected ${TOTAL_COUNT} but got ${actualNumbersElements} numbers and ${actualObjectsElements} objects`,
     );
-    console.log("Array contents (numbers):", charm.get().my_numbers_array);
-    console.log("Array contents (objects):", charm.get().my_objects_array);
+    console.log("Array contents (numbers):", piece.get().my_numbers_array);
+    console.log("Array contents (objects):", piece.get().my_objects_array);
     throw new Error(
       `Expected ${TOTAL_COUNT} numbers and ${TOTAL_COUNT} objects but got ${actualNumbersElements} numbers and ${actualObjectsElements} objects`,
     );
   }
 
   if (
-    JSON.stringify(charm.get().my_numbers_array) ===
+    JSON.stringify(piece.get().my_numbers_array) ===
       JSON.stringify(expectedNumbers)
   ) {
     console.log("Numbers array is as expected");
   } else {
     console.log("Numbers array is not as expected");
     console.log("Expected:", expectedNumbers);
-    console.log("Actual:", charm.get().my_numbers_array);
+    console.log("Actual:", piece.get().my_numbers_array);
     throw new Error("Numbers array is not as expected");
   }
   if (
-    JSON.stringify(charm.get().my_objects_array) ===
+    JSON.stringify(piece.get().my_objects_array) ===
       JSON.stringify(expectedObjects)
   ) {
     console.log("Objects array is as expected");
   } else {
     console.log("Objects array is not as expected");
     console.log("Expected:", expectedObjects);
-    console.log("Actual:", charm.get().my_objects_array);
+    console.log("Actual:", piece.get().my_objects_array);
     throw new Error("Objects array is not as expected");
   }
 

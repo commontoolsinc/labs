@@ -62,7 +62,7 @@ function parseIframeRecipe(source: string): IFrameRecipe {
 }
 
 export const getIframeRecipe = (
-  charm: Cell<unknown>,
+  piece: Cell<unknown>,
   runtime: Runtime,
 ): {
   recipeId: string;
@@ -71,9 +71,9 @@ export const getIframeRecipe = (
   src?: string;
   iframe?: IFrameRecipe;
 } => {
-  const recipeId = getRecipeIdFromPiece(charm);
+  const recipeId = getRecipeIdFromPiece(piece);
   if (!recipeId) {
-    console.warn("No recipeId found for charm", charm.entityId);
+    console.warn("No recipeId found for piece", piece.entityId);
     return { recipeId, src: "", iframe: undefined };
   }
   const meta = runtime.recipeManager.getRecipeMeta({ recipeId });

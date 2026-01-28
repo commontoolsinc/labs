@@ -13,9 +13,9 @@
  * - Conditional previewUI that only shows when there are relevant changes
  *
  * Usage:
- * 1. Deploy a google-auth charm and complete OAuth
+ * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct charm link google-auth/auth calendar-change-detector/overrideAuth
+ * 3. Link: ct piece link google-auth/auth calendar-change-detector/overrideAuth
  */
 import { computed, JSONSchema, NAME, pattern, UI } from "commontools";
 import type { Schema } from "commontools/schema";

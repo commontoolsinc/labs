@@ -205,10 +205,10 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   /**
-   * Get the charms list cell.
-   * Subscribe to this cell to get reactive updates of all charms in the space.
+   * Get the pieces list cell.
+   * Subscribe to this cell to get reactive updates of all pieces in the space.
    */
-  async getCharmsListCell<T>(): Promise<CellHandle<T[]>> {
+  async getPiecesListCell<T>(): Promise<CellHandle<T[]>> {
     const response = await this.#conn.request<RequestType.PageGetAll>({
       type: RequestType.PageGetAll,
     });

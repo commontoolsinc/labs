@@ -97,7 +97,7 @@ function normalizeInputSchema(schemaLike: unknown): JSONSchema {
 }
 
 /**
- * Resolve a charm's result schema similarly to PieceManager.#getResultSchema:
+ * Resolve a piece's result schema similarly to PieceManager.#getResultSchema:
  * - Prefer a non-empty recipe.resultSchema if recipe is loaded
  * - Otherwise derive a simple object schema from the current value
  */
@@ -114,9 +114,9 @@ function getCellSchema(
   return { schema: buildMinimalSchemaFromValue(cell) };
 }
 
-function buildMinimalSchemaFromValue(charm: Cell<any>): JSONSchema | undefined {
+function buildMinimalSchemaFromValue(piece: Cell<any>): JSONSchema | undefined {
   try {
-    const resultValue = charm.asSchema().get();
+    const resultValue = piece.asSchema().get();
     if (resultValue && typeof resultValue === "object") {
       const keys = Object.keys(resultValue).filter((k) => !k.startsWith("$"));
       if (keys.length > 0) {
@@ -455,10 +455,10 @@ type LegacyToolEntry = {
   cell: Cell<Schema<typeof LLMToolSchema>>;
 };
 
-type CharmToolEntry = {
+type PieceToolEntry = {
   name: string;
-  charm: Cell<any>;
-  charmName: string;
+  piece: Cell<any>;
+  pieceName: string;
   handle: string; // e.g., "/of:bafyabc123"
 };
 
@@ -469,22 +469,22 @@ type ToolCatalog = {
 
 function collectToolEntries(
   toolsCell: Cell<Record<string, Schema<typeof LLMToolSchema>>>,
-): { legacy: LegacyToolEntry[]; charms: CharmToolEntry[] } {
+): { legacy: LegacyToolEntry[]; pieces: PieceToolEntry[] } {
   const tools = toolsCell.get() ?? {};
   const legacy: LegacyToolEntry[] = [];
-  const charms: CharmToolEntry[] = [];
+  const pieces: PieceToolEntry[] = [];
 
   for (const [name, tool] of Object.entries(tools)) {
-    if (tool?.charm?.get?.()) {
-      const charm: Cell<any> = tool.charm;
-      const charmValue = charm.get();
-      const charmName = String(charmValue?.[NAME] ?? name);
+    if (tool?.piece?.get?.()) {
+      const piece: Cell<any> = tool.piece;
+      const pieceValue = piece.get();
+      const pieceName = String(pieceValue?.[NAME] ?? name);
 
       // Extract handle from link
-      const link = charm.getAsNormalizedFullLink();
+      const link = piece.getAsNormalizedFullLink();
       const handle = link.id; // Keep the "/of:..." format as the internal handle
 
-      charms.push({ name, charm, charmName, handle });
+      pieces.push({ name, piece, pieceName, handle });
       continue;
     }
 
@@ -497,7 +497,7 @@ function collectToolEntries(
     });
   }
 
-  return { legacy, charms };
+  return { legacy, pieces };
 }
 
 const READ_TOOL_NAME = "read";
@@ -687,8 +687,8 @@ function extractRunArguments(input: unknown): Record<string, any> {
 }
 
 /**
- * Flattens tools by extracting handlers from charm-based tools.
- * Converts { charm: ... } entries into individual handler entries.
+ * Flattens tools by extracting handlers from piece-based tools.
+ * Converts { piece: ... } entries into individual handler entries.
  *
  * @param toolsCell - Cell containing the tools
  * @param toolHandlers - Optional map to populate with handler references for invocation
@@ -705,7 +705,7 @@ function flattenTools(
     internal?: {
       kind: ToolKind;
       path: string[];
-      charmName: string;
+      pieceName: string;
       handle?: string;
     };
   }
@@ -1090,7 +1090,7 @@ type ResolvedToolCall =
     pattern?: Readonly<Recipe>;
     handler?: Stream<any>;
     extraParams?: Record<string, unknown>;
-    charm?: Cell<any>;
+    piece?: Cell<any>;
   };
 
 function resolveToolCall(
@@ -1194,7 +1194,7 @@ function resolveToolCall(
     const cellRef = runtime.getCellFromLink(link);
 
     if (name === SCHEMA_TOOL_NAME) {
-      const charmName = extractStringField(
+      const pieceName = extractStringField(
         toolCallPart.input,
         "path",
         "/of:bafyabc123/path",
@@ -1202,7 +1202,7 @@ function resolveToolCall(
       return {
         type: "schema",
         cellRef,
-        call: { id, name, input: { charm: charmName } },
+        call: { id, name, input: { piece: pieceName } },
       };
     }
 
@@ -2100,7 +2100,7 @@ Links are universal identifiers that point to cells. They use the format:
 \`\`\`
 
 Where:
-- \`of:bafyabc123\` is the handle/ID of the root entity (charm, pattern instance, etc.)
+- \`of:bafyabc123\` is the handle/ID of the root entity (piece, pattern instance, etc.)
 - \`/path/to/cell\` is the path within that entity to a specific cell
 
 ## Tool Composition
@@ -2125,7 +2125,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
 
   const listRecentHint =
     "\n\nIf the user's request is unclear or you need context about what they're referring to, " +
-    "call listRecent() to see recently viewed charms.";
+    "call listRecent() to see recently viewed pieces.";
 
   const augmentedSystem = (system ?? "") + linkModelDocs + cellsDocs +
     listRecentHint;
@@ -2136,7 +2136,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
     maxTokens: maxTokens,
     stream: true,
     model: model ?? DEFAULT_MODEL_NAME,
-    metadata: { context: "charm" },
+    metadata: { context: "piece" },
     cache: true,
     tools: toolCatalog.llmTools,
   };

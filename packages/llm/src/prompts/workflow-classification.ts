@@ -22,7 +22,7 @@ Based on the user's request, classify it into one of the following workflows:
 
 User's request: "{{ INPUT }}"
 
-Current Charm Context:
+Current Piece Context:
 {{ CONTEXT }}
 
 Please analyze this request and respond in the following format:
@@ -37,26 +37,26 @@ Please analyze this request and respond in the following format:
 export const AUTOCOMPLETE_INTENT_PROMPT = llmPrompt(
   "autocomplete-intent",
   `
-  This is Common Tools. Our system uses the concept of a \`Charm\`, a bundle of data + UI + functionality that can be composed, remixed and reused. Charms are smaller than apps, closer to a screen or panel of a web app, but can be networked together into complex systems. Charms communicate using a reactive graph database, any changes to referenced data automatically propagate. The 'behavior' of a Charm is defined by a Recipe, a data flow graph where the nodes are functions.
+  This is Common Tools. Our system uses the concept of a \`Piece\`, a bundle of data + UI + functionality that can be composed, remixed and reused. Pieces are smaller than apps, closer to a screen or panel of a web app, but can be networked together into complex systems. Pieces communicate using a reactive graph database, any changes to referenced data automatically propagate. The 'behavior' of a Piece is defined by a Recipe, a data flow graph where the nodes are functions.
 
   Users will come to you with intentions, requests and vague ideas of their needs. Your task is to 'autocomplete' their thought, using your knowledge of the Common Tools system.
 
   Your Capabilities:
 
-  1. generate a charm
-      - generate a spec, implementation plan and code for a charm that meets the user's requirements
+  1. generate a piece
+      - generate a spec, implementation plan and code for a piece that meets the user's requirements
   2. search for and cast existing spells from the spellbook
-      - a spell can be 'cast' on an existing charm to change its behavior, but re-use the data
-  3. connect referenced data to a new charm
-      - multiple charms can be
-  4. edit an existing charm
+      - a spell can be 'cast' on an existing piece to change its behavior, but re-use the data
+  3. connect referenced data to a new piece
+      - multiple pieces can be
+  4. edit an existing piece
       - code and schema can be modified independently
       - the user may ask you to fix bugs, add features or tweak the overall concept slightly
-  5. navigate to an existing charm
+  5. navigate to an existing piece
       - sometimes, the user will ask for something that already exists, and you should be able to find it quickly
 
   Generate an 'autocompletion' of the user's request, in terms of the system capabilities. No dot points. Work with the user's voice, do not say 'I' or 'me'. It's a joint project with the user.
-  Do not generate code or plan the project. e.g. "I need to buy groceries" -> "Make a 🛒 grocery list and determine 📍 where to buy everything". "Emails from my boss" -> "Find 📧 emails from a particular sender 👩‍💼 (boss)". "Plan a party" -> "Create an 💃 event charm with a 📋 guest list, 🗺️ location, date, time and 👩‍🎤 theme."
+  Do not generate code or plan the project. e.g. "I need to buy groceries" -> "Make a 🛒 grocery list and determine 📍 where to buy everything". "Emails from my boss" -> "Find 📧 emails from a particular sender 👩‍💼 (boss)". "Plan a party" -> "Create an 💃 event piece with a 📋 guest list, 🗺️ location, date, time and 👩‍🎤 theme."
   Return your just the autocompletion between <autocomplete></autocomplete> tags.
 
   User's request: ({{WORKFLOW_TYPE}}) "{{ INPUT }}"`,
@@ -73,9 +73,9 @@ The user's request has been classified as a {{ WORKFLOW_TYPE }} operation.
 
 User's request: "{{ INPUT }}"
 
-<current-charm-context>
+<current-piece-context>
 {{ CONTEXT }}
-</current-charm-context>
+</current-piece-context>
 
 Based on the workflow type, follow these guidelines:
 
@@ -92,10 +92,10 @@ Based on the workflow type, follow these guidelines:
   * CODE: Modify implementation while maintaining backward compatibility
 
 - IMAGINE workflow:
-  * PURPOSE: Create new functionality, possibly using existing charms as sources
+  * PURPOSE: Create new functionality, possibly using existing pieces as sources
   * SPEC: Write a fresh specification, possibly referencing existing ones
   * SCHEMA: Will receive combined input schema, generate output schemas
-  * CODE: Create a new implementation that may use data from other charms
+  * CODE: Create a new implementation that may use data from other pieces
 
 Please create a medium-detail plan with BOTH a step-by-step execution plan AND a clear specification.
 Always include all XML tags in your response and ensure JSON schemas are correctly formatted.
@@ -111,9 +111,9 @@ Respond in the following format:
 
 (include ~1 paragraph)
 <specification>
-A clear description of what the charm does, its purpose, and functionality.
+A clear description of what the piece does, its purpose, and functionality.
 Include a clear explanation of how it works and what problems it solves.
-For EDIT and IMAGINE, explain how it builds upon or differs from the existing charm.
+For EDIT and IMAGINE, explain how it builds upon or differs from the existing piece.
 </specification>
 
 <data_model>
@@ -122,7 +122,7 @@ e.g add(title, description) -> TodoItem(title, description, completed)
 edit(item: TodoItem, { description, title, completed }) -> TodoItem(title, description, completed)
 delete(item: TodoItem) -> void
 
-Include how this charm uses any referenced data.
+Include how this piece uses any referenced data.
 </data_model>
 
 DO NOT GENERATE A SCHEMA.
@@ -130,15 +130,15 @@ DO NOT GENERATE A SCHEMA.
 );
 
 /**
- * Generate the context section for a charm
+ * Generate the context section for a piece
  */
-function generateCharmContext(
+function generatePieceContext(
   existingSpec?: string,
   existingSchema?: JSONSchema,
   existingCode?: string,
 ): string {
   if (!existingSpec && !existingSchema && !existingCode) {
-    return "No existing charm context available.";
+    return "No existing piece context available.";
   }
 
   let context = "";
@@ -196,7 +196,7 @@ export async function classifyWorkflow(
     existingCode,
   } = options || {};
 
-  const context = generateCharmContext(
+  const context = generatePieceContext(
     existingSpec,
     existingSchema,
     existingCode,
@@ -259,7 +259,7 @@ export async function classifyWorkflow(
       generationId: form.meta.generationId,
       systemPrompt: systemPrompt.version,
       userPrompt: prompt.version,
-      space: form.meta.charmManager.getSpaceName(),
+      space: form.meta.pieceManager.getSpaceName(),
     },
   });
 
@@ -354,7 +354,7 @@ export async function generateWorkflowPlan(
   autocompletion: string;
   features: string[];
 }> {
-  const context = generateCharmContext(
+  const context = generatePieceContext(
     options?.existingSpec,
     options?.existingSchema,
     options?.existingCode,
@@ -378,7 +378,7 @@ export async function generateWorkflowPlan(
       context: "workflow",
       workflow: form.classification.workflowType.toLowerCase(),
       generationId: form.meta.generationId,
-      space: form.meta.charmManager.getSpaceName(),
+      space: form.meta.pieceManager.getSpaceName(),
       systemPrompt: system.version,
     },
   });

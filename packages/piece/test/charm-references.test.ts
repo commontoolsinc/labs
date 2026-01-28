@@ -9,32 +9,32 @@ type MockDoc = {
 };
 
 // Create a mock environment for testing reference detection
-describe("Charm reference detection", () => {
+describe("Piece reference detection", () => {
   // Test the core logic of direct reference finding without maybeGetCellLink
   it("should find all direct references in an argument structure", () => {
     // Create mock data with multiple references
     const mockData = {
-      charm1Id: { "/": "charm-1-id" },
-      charm2Id: { "/": "charm-2-id" },
+      piece1Id: { "/": "piece-1-id" },
+      piece2Id: { "/": "piece-2-id" },
     };
 
     // Create a value that references two different entity IDs
     const valueWithMultipleRefs = {
       firstRef: {
-        cell: mockData.charm1Id,
+        cell: mockData.piece1Id,
         path: [],
       },
       secondRef: {
-        cell: mockData.charm2Id,
+        cell: mockData.piece2Id,
         path: [],
       },
       nestedRefs: {
         a: {
-          cell: mockData.charm1Id,
+          cell: mockData.piece1Id,
           path: [],
         },
         b: {
-          cell: mockData.charm2Id,
+          cell: mockData.piece2Id,
           path: [],
         },
       },
@@ -86,7 +86,7 @@ describe("Charm reference detection", () => {
       foundRefs.map((ref) => ref["/"]).join(", "),
     );
 
-    // We should find both charm1Id and charm2Id
+    // We should find both piece1Id and piece2Id
     assertEquals(
       foundRefs.length,
       2,
@@ -94,48 +94,48 @@ describe("Charm reference detection", () => {
     );
 
     // Verify we found both specific references
-    const foundCharm1 = foundRefs.some((ref) =>
-      ref["/"] === mockData.charm1Id["/"]
+    const foundPiece1 = foundRefs.some((ref) =>
+      ref["/"] === mockData.piece1Id["/"]
     );
-    const foundCharm2 = foundRefs.some((ref) =>
-      ref["/"] === mockData.charm2Id["/"]
+    const foundPiece2 = foundRefs.some((ref) =>
+      ref["/"] === mockData.piece2Id["/"]
     );
 
-    assertEquals(foundCharm1, true, "Should find reference to charm1");
-    assertEquals(foundCharm2, true, "Should find reference to charm2");
+    assertEquals(foundPiece1, true, "Should find reference to piece1");
+    assertEquals(foundPiece2, true, "Should find reference to piece2");
   });
 
   // Test specifically the issue where only one reference is found when there are multiple
   it("should find multiple references in argument data that matches the reported issue", () => {
-    // Mock the scenario where a charm's argument refers to two other charms
-    const mockCharm1Id = { "/": "charm-1-id" };
-    const mockCharm2Id = { "/": "charm-2-id" };
+    // Mock the scenario where a piece's argument refers to two other pieces
+    const mockPiece1Id = { "/": "piece-1-id" };
+    const mockPiece2Id = { "/": "piece-2-id" };
 
     // Create a realistic argument cell structure that might be causing the issue
     // This simulates a more realistic structure based on your description of the problem
     const argumentData = {
       // This is a more realistic structure that might be found in an actual argument cell
-      // with references to result cells of other charms
-      firstCharmRef: {
+      // with references to result cells of other pieces
+      firstPieceRef: {
         $alias: {
-          cell: mockCharm1Id,
+          cell: mockPiece1Id,
           path: ["result"],
         },
       },
-      secondCharmRef: {
+      secondPieceRef: {
         $alias: {
-          cell: mockCharm2Id,
+          cell: mockPiece2Id,
           path: ["result"],
         },
       },
       // Alternative format - direct references
       directRefs: {
-        firstCharm: {
-          cell: mockCharm1Id,
+        firstPiece: {
+          cell: mockPiece1Id,
           path: ["result"],
         },
-        secondCharm: {
-          cell: mockCharm2Id,
+        secondPiece: {
+          cell: mockPiece2Id,
           path: ["result"],
         },
       },
@@ -189,7 +189,7 @@ describe("Charm reference detection", () => {
     // Find all references using our custom logic
     const foundReferences = findAllReferences(argumentData);
 
-    // We should find both charm references
+    // We should find both piece references
     console.log(
       `Found ${foundReferences.length} references:`,
       foundReferences.map((ref) => ref["/"]).join(", "),
@@ -198,19 +198,19 @@ describe("Charm reference detection", () => {
     assertEquals(
       foundReferences.length,
       2,
-      "Should find both charm references in the argument data",
+      "Should find both piece references in the argument data",
     );
 
-    // Check that we specifically found both charm IDs
-    const foundCharm1 = foundReferences.some((ref) =>
-      ref["/"] === mockCharm1Id["/"]
+    // Check that we specifically found both piece IDs
+    const foundPiece1 = foundReferences.some((ref) =>
+      ref["/"] === mockPiece1Id["/"]
     );
-    const foundCharm2 = foundReferences.some((ref) =>
-      ref["/"] === mockCharm2Id["/"]
+    const foundPiece2 = foundReferences.some((ref) =>
+      ref["/"] === mockPiece2Id["/"]
     );
 
-    assertEquals(foundCharm1, true, "Should find reference to charm1");
-    assertEquals(foundCharm2, true, "Should find reference to charm2");
+    assertEquals(foundPiece1, true, "Should find reference to piece1");
+    assertEquals(foundPiece2, true, "Should find reference to piece2");
 
     // Now let's simulate what happens in the actual getReadingFrom method
     console.log("Reference structure to examine:");
@@ -223,36 +223,36 @@ describe("Charm reference detection", () => {
   // Test for n-depth reference detection
   it("should follow sourceCell chains to find deeply nested references", () => {
     // Mock test data
-    const mockCharm1Id = { "/": "charm-1-source" };
-    const mockCharm2Id = { "/": "charm-2-intermediate" };
-    const mockCharm3Id = { "/": "charm-3-target" };
+    const mockPiece1Id = { "/": "piece-1-source" };
+    const mockPiece2Id = { "/": "piece-2-intermediate" };
+    const mockPiece3Id = { "/": "piece-3-target" };
 
     // Create a chain of references where:
-    // - charm1 references charm2 via a sourceCell
-    // - charm2 references charm3 via resultRef
-    const charm2WithResultRef = {
-      // This is the intermediate charm data
+    // - piece1 references piece2 via a sourceCell
+    // - piece2 references piece3 via resultRef
+    const piece2WithResultRef = {
+      // This is the intermediate piece data
       resultRef: {
-        cell: mockCharm3Id,
+        cell: mockPiece3Id,
         path: [],
       },
     };
 
     // Mock sourceCell with get and getEntityId methods
     const mockSourceCell = {
-      get: () => charm2WithResultRef,
-      getEntityId: () => mockCharm2Id,
+      get: () => piece2WithResultRef,
+      getEntityId: () => mockPiece2Id,
     };
 
-    const charm1WithSourceCell = {
-      // This is the source charm with a sourceCell reference
+    const piece1WithSourceCell = {
+      // This is the source piece with a sourceCell reference
       sourceCell: mockSourceCell,
     };
 
     // Create mock doc with get and getEntityId methods
     const mockDoc = {
-      get: () => charm1WithSourceCell,
-      getEntityId: () => mockCharm1Id,
+      get: () => piece1WithSourceCell,
+      getEntityId: () => mockPiece1Id,
     };
 
     // Test our ability to follow this chain
@@ -305,10 +305,10 @@ describe("Charm reference detection", () => {
       unknown
     >;
 
-    // Verify we found the final target (charm3)
+    // Verify we found the final target (piece3)
     assertEquals(
       ultimateRef["/"],
-      mockCharm3Id["/"],
+      mockPiece3Id["/"],
       "Should find the final reference through the sourceCell -> resultRef chain",
     );
   });

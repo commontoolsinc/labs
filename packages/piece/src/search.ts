@@ -5,80 +5,80 @@ import { extractTextFromLLMResponse, LLMClient } from "@commontools/llm";
 import { isObject } from "@commontools/utils/types";
 
 export type PieceSearchResult = {
-  charm: Cell<unknown>;
+  piece: Cell<unknown>;
   name: string;
   reason: string;
 };
 
 export async function searchPieces(
   input: string,
-  charmManager: PieceManager,
+  pieceManager: PieceManager,
 ): Promise<{
-  charms: PieceSearchResult[];
+  pieces: PieceSearchResult[];
   thinking: string;
 }> {
   try {
-    const charmsCell = await charmManager.getCharms();
-    await charmManager.sync(charmsCell);
+    const piecesCell = await pieceManager.getPieces();
+    await pieceManager.sync(piecesCell);
     const results = await Promise.all(
-      charmsCell.get().map(async (charm: Cell<unknown>) => {
+      piecesCell.get().map(async (piece: Cell<unknown>) => {
         try {
-          const data = charm.asSchema(nameSchema).get();
+          const data = piece.asSchema(nameSchema).get();
           const title = data?.[NAME] ?? "Untitled";
 
-          const recipe = await charmManager.syncRecipe(charm);
+          const recipe = await pieceManager.syncRecipe(piece);
 
           return {
-            title: title + ` (#${pieceId(charm)!.slice(-4)})`,
+            title: title + ` (#${pieceId(piece)!.slice(-4)})`,
             description: isObject(recipe.argumentSchema)
               ? recipe.argumentSchema.description
               : undefined,
-            id: pieceId(charm)!,
-            value: charm.entityId!,
+            id: pieceId(piece)!,
+            value: piece.entityId!,
           };
         } catch (error) {
-          console.error(`Error processing charm:`, error);
+          console.error(`Error processing piece:`, error);
           // Return a minimal viable object to keep the array intact
           return {
-            title: "Error loading charm",
-            description: "Failed to load charm details",
-            id: charm.entityId ? pieceId(charm)! : "unknown",
-            value: charm.entityId || "unknown",
+            title: "Error loading piece",
+            description: "Failed to load piece details",
+            id: piece.entityId ? pieceId(piece)! : "unknown",
+            value: piece.entityId || "unknown",
           };
         }
       }),
     );
 
-    // Early return if no charms are found
+    // Early return if no pieces are found
     if (!results.length) {
-      console.warn("No charms are available to search through.");
+      console.warn("No pieces are available to search through.");
       return {
-        thinking: "No charms are available to search through.",
-        charms: [],
+        thinking: "No pieces are available to search through.",
+        pieces: [],
       };
     }
 
     const response = await new LLMClient().sendRequest({
       system:
-        `Pick up to the 3 most appropriate (if any) charms from the list that match the user's request:
-      <charms>
+        `Pick up to the 3 most appropriate (if any) pieces from the list that match the user's request:
+      <pieces>
         ${
           results.map((result) =>
-            `<charm id="${result.id}">
+            `<piece id="${result.id}">
           <title>${result.title}</title>
           <description>${result.description}</description>
-        </charm>`
+        </piece>`
           ).join("\n          ")
         }
-      </charms>
+      </pieces>
 
-      When responding, you may include a terse paragraph of your reasoning within a <thinking> tag, then return a list of charms using <charm id="" name="...">Reason it's appropriate</charm> in the text.`,
+      When responding, you may include a terse paragraph of your reasoning within a <thinking> tag, then return a list of pieces using <piece id="" name="...">Reason it's appropriate</piece> in the text.`,
       messages: [{ role: "user", content: input }],
       model: DEFAULT_MODEL,
       cache: false,
       metadata: {
         context: "workflow",
-        workflow: "search-charms",
+        workflow: "search-pieces",
         generationId: crypto.randomUUID(),
       },
     });
@@ -89,29 +89,29 @@ export async function searchPieces(
     );
     const thinking = thinkingMatch ? thinkingMatch[1].trim() : "";
 
-    // Parse all charm tags
-    const charmMatches = extractTextFromLLMResponse(response).matchAll(
-      /<charm id="([^"]+)" name="([^"]+)">([\s\S]*?)<\/charm>/g,
+    // Parse all piece tags
+    const pieceMatches = extractTextFromLLMResponse(response).matchAll(
+      /<piece id="([^"]+)" name="([^"]+)">([\s\S]*?)<\/piece>/g,
     );
 
-    const selectedCharms: {
-      charm: Cell<unknown>;
+    const selectedPieces: {
+      piece: Cell<unknown>;
       name: string;
       reason: string;
     }[] = [];
-    if (charmMatches) {
-      for (const match of charmMatches) {
+    if (pieceMatches) {
+      for (const match of pieceMatches) {
         const pieceId = match[1];
-        const charmName = match[2];
+        const pieceName = match[2];
         const reason = match[3].trim();
 
-        // Find the original charm data from results
-        const originalCharm = await charmManager.get(pieceId);
+        // Find the original piece data from results
+        const originalPiece = await pieceManager.get(pieceId);
 
-        if (originalCharm) {
-          selectedCharms.push({
-            charm: originalCharm,
-            name: charmName,
+        if (originalPiece) {
+          selectedPieces.push({
+            piece: originalPiece,
+            name: pieceName,
             reason,
           });
         }
@@ -120,19 +120,19 @@ export async function searchPieces(
 
     return {
       thinking,
-      charms: selectedCharms,
+      pieces: selectedPieces,
     };
   } catch (error: unknown) {
     console.error(
-      "Search charms error:",
+      "Search pieces error:",
       (isObject(error) && "message" in error)
         ? error.message
         : JSON.stringify(error),
     );
 
     return {
-      thinking: "An error occurred while searching for charms.",
-      charms: [],
+      thinking: "An error occurred while searching for pieces.",
+      pieces: [],
     };
   }
 }

@@ -35,14 +35,14 @@ describe("Chat Note pattern test", () => {
       await page.goto(`${FRONTEND_URL}/${SPACE_NAME}`);
       await sleep(3000); // Wait for space initialization
 
-      // Create the chat-note charm
-      const charm = await cc.create(
+      // Create the chat-note piece
+      const piece = await cc.create(
         await Deno.readTextFile(
           join(import.meta.dirname!, "..", "experimental", "chat-note.tsx"),
         ),
         { start: true },
       );
-      pieceId = charm.id;
+      pieceId = piece.id;
     });
 
     afterAll(async () => {
@@ -51,7 +51,7 @@ describe("Chat Note pattern test", () => {
   }
 
   it({
-    name: "should load the chat-note charm and display initial UI",
+    name: "should load the chat-note piece and display initial UI",
     ignore,
     fn: async () => {
       const page = shell.page();

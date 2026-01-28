@@ -31,9 +31,9 @@ export async function renderPiece(
 
   // 2. Get piece controller to access the Cell
   const manager = await loadManager(config);
-  const charms = new PiecesController(manager);
-  const charm = await charms.get(config.piece, options.start ?? true);
-  const cell = charm.getCell().asSchema({
+  const pieces = new PiecesController(manager);
+  const piece = await pieces.get(config.piece, options.start ?? true);
+  const cell = piece.getCell().asSchema({
     type: "object",
     properties: {
       [UI]: rendererVDOMSchema,

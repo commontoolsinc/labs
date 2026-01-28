@@ -3,7 +3,7 @@ import { describe, it } from "@std/testing/bdd";
 import { isObject, isRecord } from "@commontools/utils/types";
 
 /**
- * These tests focus on the core functionality used by our charm reference detection
+ * These tests focus on the core functionality used by our piece reference detection
  * without requiring the full PieceManager setup
  */
 describe("Reference detection core functionality", () => {

@@ -99,33 +99,33 @@ async function main() {
     }),
     blobbyServerUrl: toolshedUrl,
   });
-  const charmManager = new PieceManager(session, runtime);
-  await charmManager.ready;
-  const charms = charmManager.getCharms();
-  charms.sink((charms) => {
+  const pieceManager = new PieceManager(session, runtime);
+  await pieceManager.ready;
+  const pieces = pieceManager.getPieces();
+  pieces.sink((pieces) => {
     console.log(
-      "all charms:",
-      charms.map((c) => getEntityId(c)?.["/"]),
+      "all pieces:",
+      pieces.map((c) => getEntityId(c)?.["/"]),
     );
   });
 
   if (pieceId) {
-    const charm = await charmManager.get(pieceId);
+    const piece = await pieceManager.get(pieceId);
     if (quit) {
-      if (!charm) {
-        console.error("charm not found:", pieceId);
+      if (!piece) {
+        console.error("piece not found:", pieceId);
         Deno.exit(1);
       }
-      console.log("charm:", pieceId);
-      console.log("charm:", JSON.stringify(charm.asSchema().get(), null, 2));
+      console.log("piece:", pieceId);
+      console.log("piece:", JSON.stringify(piece.asSchema().get(), null, 2));
       console.log(
         "sourceCell:",
-        JSON.stringify(charm.getSourceCell()?.get(), null, 2),
+        JSON.stringify(piece.getSourceCell()?.get(), null, 2),
       );
       Deno.exit(0);
     }
-    charm?.sink((value) => {
-      console.log("charm:", pieceId, value);
+    piece?.sink((value) => {
+      console.log("piece:", pieceId, value);
     });
   }
 
@@ -201,16 +201,16 @@ async function main() {
         runtime,
         space,
       );
-      const charm = await charmManager.runPersistent(
+      const piece = await pieceManager.runPersistent(
         recipe,
         inputValue,
         cause,
       );
-      const charmWithSchema = (await charmManager.get(charm))!;
-      charmWithSchema.sink((value) => {
-        console.log("running charm:", getEntityId(charm), value);
+      const pieceWithSchema = (await pieceManager.get(piece))!;
+      pieceWithSchema.sink((value) => {
+        console.log("running piece:", getEntityId(piece), value);
       });
-      const updater = charmWithSchema.get()?.updater;
+      const updater = pieceWithSchema.get()?.updater;
       if (isStream(updater)) {
         console.log("running updater");
         updater.send({ newValues: ["test"] });
@@ -219,8 +219,8 @@ async function main() {
         await runtime.idle();
         await runtime.storageManager.synced();
         // This console.log is load bearing for the integration tests. This is
-        // how the integration tests get the charm ID.
-        console.log("created charm: ", getEntityId(charm)!["/"]);
+        // how the integration tests get the piece ID.
+        console.log("created piece: ", getEntityId(piece)!["/"]);
         Deno.exit(0);
       }
     } catch (error) {

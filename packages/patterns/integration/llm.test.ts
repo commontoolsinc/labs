@@ -31,7 +31,7 @@ describe("LLM pattern test", () => {
         apiUrl: new URL(API_URL),
         identity: identity,
       });
-      const charm = await cc.create(
+      const piece = await cc.create(
         await Deno.readTextFile(
           join(
             import.meta.dirname!,
@@ -42,7 +42,7 @@ describe("LLM pattern test", () => {
         ),
         { start: false },
       );
-      pieceId = charm.id;
+      pieceId = piece.id;
     });
 
     afterAll(async () => {
@@ -51,7 +51,7 @@ describe("LLM pattern test", () => {
   }
 
   it({
-    name: "should load the LLM test charm and display initial UI",
+    name: "should load the LLM test piece and display initial UI",
     ignore,
     fn: async () => {
       const page = shell.page();

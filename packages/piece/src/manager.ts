@@ -21,36 +21,36 @@ import { type Session } from "@commontools/identity";
 import { isRecord } from "@commontools/utils/types";
 import { ensureNotRenderThread } from "@commontools/utils/env";
 import {
-  charmListSchema,
-  charmSourceCellSchema,
   NameSchema,
   nameSchema,
+  pieceListSchema,
+  pieceSourceCellSchema,
   processSchema,
 } from "@commontools/runner/schemas";
 ensureNotRenderThread();
 
 /**
- * Extracts the ID from a charm.
- * @param charm - The charm to extract ID from
- * @returns The charm ID string, or undefined if no ID is found
+ * Extracts the ID from a piece.
+ * @param piece - The piece to extract ID from
+ * @returns The piece ID string, or undefined if no ID is found
  */
-export function pieceId(charm: Cell<unknown>): string | undefined {
-  const id = charm.entityId;
+export function pieceId(piece: Cell<unknown>): string | undefined {
+  const id = piece.entityId;
   if (!id) return undefined;
   const idValue = id["/"];
   return typeof idValue === "string" ? idValue : undefined;
 }
 
 /**
- * Filters an array of charms by removing any that match the target cell
+ * Filters an array of pieces by removing any that match the target cell
  */
 function filterOutCell(
   list: Cell<Cell<unknown>[]>,
   target: Cell<unknown>,
 ): Cell<unknown>[] {
   const resolvedTarget = target.resolveAsCell();
-  return list.get().filter((charm) =>
-    !charm.resolveAsCell().equals(resolvedTarget)
+  return list.get().filter((piece) =>
+    !piece.resolveAsCell().equals(resolvedTarget)
   );
 }
 
@@ -60,7 +60,7 @@ export class PieceManager {
   private spaceCell: Cell<SpaceCellContents>;
 
   /**
-   * Promise resolved when the charm manager is ready.
+   * Promise resolved when the piece manager is ready.
    */
   ready: Promise<void>;
 
@@ -79,7 +79,7 @@ export class PieceManager {
 
     const syncSpaceCellContents = Promise.resolve(this.spaceCell.sync());
 
-    // Note: allCharms and recentCharms are now managed by the default pattern,
+    // Note: allPieces and recentPieces are now managed by the default pattern,
     // not directly on the space cell. The space cell only contains a link to defaultPattern.
     // Default pattern creation is handled by PiecesController.ensureDefaultPattern()
     // which is called by CLI/shell entry points. PieceManager doesn't auto-create it.
@@ -147,51 +147,51 @@ export class PieceManager {
   }
 
   /**
-   * Get the cell containing the list of all charms in this space.
-   * Reads from the default pattern's allCharms export.
+   * Get the cell containing the list of all pieces in this space.
+   * Reads from the default pattern's allPieces export.
    */
-  async getCharms(): Promise<Cell<Cell<unknown>[]>> {
+  async getPieces(): Promise<Cell<Cell<unknown>[]>> {
     const defaultPattern = await this.getDefaultPattern();
     if (!defaultPattern) {
       // Return empty array cell if no default pattern
-      return this.runtime.getCell(this.space, "empty-charms", charmListSchema);
+      return this.runtime.getCell(this.space, "empty-pieces", pieceListSchema);
     }
 
     const cell = defaultPattern.asSchema({
       type: "object",
       properties: {
-        allCharms: charmListSchema,
+        allPieces: pieceListSchema,
       },
     });
-    const charmsCell = cell.key("allCharms") as Cell<Cell<unknown>[]>;
-    await this.syncCharms(charmsCell);
-    return charmsCell;
+    const piecesCell = cell.key("allPieces") as Cell<Cell<unknown>[]>;
+    await this.syncPieces(piecesCell);
+    return piecesCell;
   }
 
-  async add(newCharms: Cell<unknown>[]): Promise<void> {
+  async add(newPieces: Cell<unknown>[]): Promise<void> {
     const defaultPattern = await this.getDefaultPattern();
     if (!defaultPattern) {
-      throw new Error("Cannot add charms: default pattern not available");
+      throw new Error("Cannot add pieces: default pattern not available");
     }
 
     const cell = defaultPattern.asSchema({
       type: "object",
       properties: {
-        addCharm: { asStream: true },
+        addPiece: { asStream: true },
       },
     });
 
-    const addCharmHandler = cell.key("addCharm").get();
-    if (!isStream(addCharmHandler)) {
+    const addPieceHandler = cell.key("addPiece").get();
+    if (!isStream(addPieceHandler)) {
       throw new Error(
-        "Cannot add charms: addCharm handler not found on default pattern",
+        "Cannot add pieces: addPiece handler not found on default pattern",
       );
     }
 
-    // Send each charm and wait for transaction commit
-    for (const charm of newCharms) {
+    // Send each piece and wait for transaction commit
+    for (const piece of newPieces) {
       await new Promise<void>((resolve) => {
-        addCharmHandler.send({ charm }, () => resolve());
+        addPieceHandler.send({ piece }, () => resolve());
       });
     }
 
@@ -199,13 +199,13 @@ export class PieceManager {
     await this.synced();
   }
 
-  syncCharms(cell: Cell<Cell<unknown>[]>) {
+  syncPieces(cell: Cell<Cell<unknown>[]>) {
     // TODO(@ubik2) We use elevated permissions here temporarily.
-    // Our request for the charm list will walk the schema tree, and that will
-    // take us into classified data of charms. If that happens, we still want
+    // Our request for the piece list will walk the schema tree, and that will
+    // take us into classified data of pieces. If that happens, we still want
     // this bit to work, so we elevate this request.
     const privilegedSchema = {
-      ...charmListSchema,
+      ...pieceListSchema,
       ifc: { classification: [Classification.Secret] },
     } as const satisfies JSONSchema;
     return cell.asSchema(privilegedSchema).sync();
@@ -226,70 +226,70 @@ export class PieceManager {
     runIt: boolean = false,
     asSchema?: JSONSchema,
   ): Promise<Cell<T>> {
-    // Get the charm cell
-    const charm: Cell<unknown> = isCell(id)
+    // Get the piece cell
+    const piece: Cell<unknown> = isCell(id)
       ? id
       : this.runtime.getCellFromEntityId(this.space, { "/": id });
 
     if (runIt) {
       // start() handles sync, recipe loading, and running
       // It's idempotent - no effect if already running
-      await this.runtime.start(charm);
+      await this.runtime.start(piece);
     } else {
       // Just sync the cell if not running
-      await charm.sync();
+      await piece.sync();
     }
 
     // If caller provided a schema, use it
     if (asSchema) {
-      return charm.asSchema<T>(asSchema);
+      return piece.asSchema<T>(asSchema);
     }
 
     // Otherwise, get result cell with schema from processCell.resultRef
     // The resultRef was created with includeSchema: true during setup
-    const processCell = charm.getSourceCell();
+    const processCell = piece.getSourceCell();
     if (processCell) {
       const resultRefCell = processCell.key("resultRef").resolveAsCell();
       if (resultRefCell?.schema) {
-        return charm.asSchema<T>(resultRefCell.schema);
+        return piece.asSchema<T>(resultRefCell.schema);
       }
     }
 
-    // Fallback: return charm without schema
-    return charm as Cell<T>;
+    // Fallback: return piece without schema
+    return piece as Cell<T>;
   }
 
-  getLineage(charm: Cell<unknown>) {
-    return charm.getSourceCell(charmSourceCellSchema)?.key("lineage").get() ??
+  getLineage(piece: Cell<unknown>) {
+    return piece.getSourceCell(pieceSourceCellSchema)?.key("lineage").get() ??
       [];
   }
 
-  getLLMTrace(charm: Cell<unknown>): string | undefined {
-    return charm.getSourceCell(charmSourceCellSchema)?.key("llmRequestId")
+  getLLMTrace(piece: Cell<unknown>): string | undefined {
+    return piece.getSourceCell(pieceSourceCellSchema)?.key("llmRequestId")
       .get() ?? undefined;
   }
 
   /**
-   * Find all charms that the given charm reads data from via aliases or links.
-   * This identifies dependencies that the charm has on other charms.
-   * @param charm The charm to check
-   * @returns Array of charms that are read from
+   * Find all pieces that the given piece reads data from via aliases or links.
+   * This identifies dependencies that the piece has on other pieces.
+   * @param piece The piece to check
+   * @returns Array of pieces that are read from
    */
-  async getReadingFrom(charm: Cell<unknown>): Promise<Cell<unknown>[]> {
-    // Get all charms that might be referenced
-    const charmsCell = await this.getCharms();
-    const allCharms = charmsCell.get();
+  async getReadingFrom(piece: Cell<unknown>): Promise<Cell<unknown>[]> {
+    // Get all pieces that might be referenced
+    const piecesCell = await this.getPieces();
+    const allPieces = piecesCell.get();
     const result: Cell<unknown>[] = [];
     const seenEntityIds = new Set<string>(); // Track entities we've already processed
     const maxDepth = 10; // Prevent infinite recursion
     const maxResults = 50; // Prevent too many results from overwhelming the UI
-    const resolvedCharm = charm.resolveAsCell();
+    const resolvedPiece = piece.resolveAsCell();
 
-    if (!charm) return result;
+    if (!piece) return result;
 
     try {
-      // Get the argument data - this is where references to other charms are stored
-      const argumentCell = await this.getArgument(charm);
+      // Get the argument data - this is where references to other pieces are stored
+      const argumentCell = await this.getArgument(piece);
       if (!argumentCell) return result;
 
       // Get the raw argument value
@@ -302,8 +302,8 @@ export class PieceManager {
         return result;
       }
 
-      // Helper function to add a matching charm to the result
-      const addMatchingCharm = (docId: EntityId) => {
+      // Helper function to add a matching piece to the result
+      const addMatchingPiece = (docId: EntityId) => {
         if (!docId || !docId["/"]) return;
 
         const entityIdStr = typeof docId["/"] === "string"
@@ -314,21 +314,21 @@ export class PieceManager {
         if (seenEntityIds.has(entityIdStr)) return;
         seenEntityIds.add(entityIdStr);
 
-        // Find matching charm by entity ID
-        const matchingCharm = allCharms.find((c) => {
+        // Find matching piece by entity ID
+        const matchingPiece = allPieces.find((c) => {
           const cId = getEntityId(c);
           return cId && docId["/"] === cId["/"];
         });
 
-        if (matchingCharm) {
-          const resolvedMatching = matchingCharm.resolveAsCell();
-          const isNotSelf = !resolvedMatching.equals(resolvedCharm);
+        if (matchingPiece) {
+          const resolvedMatching = matchingPiece.resolveAsCell();
+          const isNotSelf = !resolvedMatching.equals(resolvedPiece);
           const notAlreadyInResult = !result.some((c) =>
             c.resolveAsCell().equals(resolvedMatching)
           );
 
           if (isNotSelf && notAlreadyInResult && result.length < maxResults) {
-            result.push(matchingCharm);
+            result.push(matchingPiece);
           }
         }
       };
@@ -394,7 +394,7 @@ export class PieceManager {
           if (isLink(value)) {
             const link = parseLink(value, parent);
             if (link.id) {
-              addMatchingCharm(getEntityId(link.id)!);
+              addMatchingPiece(getEntityId(link.id)!);
             }
 
             const sourceRefId = followSourceToResultRef(
@@ -402,7 +402,7 @@ export class PieceManager {
               new Set(),
               0,
             );
-            if (sourceRefId) addMatchingCharm(sourceRefId);
+            if (sourceRefId) addMatchingPiece(sourceRefId);
           } else if (Array.isArray(value)) {
             // Safe recursive processing of arrays
             for (let i = 0; i < value.length; i++) {
@@ -456,7 +456,7 @@ export class PieceManager {
         );
       }
     } catch (error) {
-      console.debug("Error finding references in charm arguments:", error);
+      console.debug("Error finding references in piece arguments:", error);
       // Don't throw the error - return an empty result instead
     }
 
@@ -464,47 +464,47 @@ export class PieceManager {
   }
 
   /**
-   * Find all charms that read data from the given charm via aliases or links.
-   * This identifies which charms depend on this charm.
-   * @param charm The charm to check
-   * @returns Array of charms that read from this charm
+   * Find all pieces that read data from the given piece via aliases or links.
+   * This identifies which pieces depend on this piece.
+   * @param piece The piece to check
+   * @returns Array of pieces that read from this piece
    */
-  async getReadByCharms(charm: Cell<unknown>): Promise<Cell<unknown>[]> {
-    // Get all charms to check
-    const charmsCell = await this.getCharms();
-    const allCharms = charmsCell.get();
+  async getReadByPieces(piece: Cell<unknown>): Promise<Cell<unknown>[]> {
+    // Get all pieces to check
+    const piecesCell = await this.getPieces();
+    const allPieces = piecesCell.get();
     const result: Cell<unknown>[] = [];
     const seenEntityIds = new Set<string>(); // Track entities we've already processed
     const maxDepth = 10; // Prevent infinite recursion
     const maxResults = 50; // Prevent too many results from overwhelming the UI
 
-    if (!charm) return result;
+    if (!piece) return result;
 
-    const pieceId = getEntityId(charm);
+    const pieceId = getEntityId(piece);
     if (!pieceId) return result;
 
-    const resolvedCharm = charm.resolveAsCell();
+    const resolvedPiece = piece.resolveAsCell();
 
-    // Helper function to add a matching charm to the result
-    const addReadingCharm = (otherCharm: Cell<unknown>) => {
-      const otherCharmId = getEntityId(otherCharm);
-      if (!otherCharmId || !otherCharmId["/"]) return;
+    // Helper function to add a matching piece to the result
+    const addReadingPiece = (otherPiece: Cell<unknown>) => {
+      const otherPieceId = getEntityId(otherPiece);
+      if (!otherPieceId || !otherPieceId["/"]) return;
 
-      const entityIdStr = typeof otherCharmId["/"] === "string"
-        ? otherCharmId["/"]
-        : JSON.stringify(otherCharmId["/"]);
+      const entityIdStr = typeof otherPieceId["/"] === "string"
+        ? otherPieceId["/"]
+        : JSON.stringify(otherPieceId["/"]);
 
       // Skip if we've already processed this entity
       if (seenEntityIds.has(entityIdStr)) return;
       seenEntityIds.add(entityIdStr);
 
-      const resolvedOther = otherCharm.resolveAsCell();
+      const resolvedOther = otherPiece.resolveAsCell();
       const notAlreadyInResult = !result.some((c) =>
         c.resolveAsCell().equals(resolvedOther)
       );
 
       if (notAlreadyInResult && result.length < maxResults) {
-        result.push(otherCharm);
+        result.push(otherPiece);
       }
     };
 
@@ -537,7 +537,7 @@ export class PieceManager {
       return cellURI; // Return the current document's ID if no further references
     };
 
-    // Helper to check if a document refers to our target charm
+    // Helper to check if a document refers to our target piece
     const checkRefersToTarget = (
       value: unknown,
       parent: Cell<unknown>,
@@ -556,7 +556,7 @@ export class PieceManager {
             const link = parseLink(value, parent);
 
             // Check if the cell link's doc is our target
-            if (link.id === charm.sourceURI) return true;
+            if (link.id === piece.sourceURI) return true;
 
             // Check if cell link's source chain leads to our target
             const sourceResultRefURI = followSourceToResultRef(
@@ -564,7 +564,7 @@ export class PieceManager {
               new Set(),
               0,
             );
-            if (sourceResultRefURI === charm.sourceURI) return true;
+            if (sourceResultRefURI === piece.sourceURI) return true;
           } catch (err) {
             console.debug(
               "Error handling cell link in checkRefersToTarget:",
@@ -621,18 +621,18 @@ export class PieceManager {
       return false;
     };
 
-    // Check each charm to see if it references this charm
-    for (const otherCharm of allCharms) {
-      if (otherCharm.resolveAsCell().equals(resolvedCharm)) continue; // Skip self
+    // Check each piece to see if it references this piece
+    for (const otherPiece of allPieces) {
+      if (otherPiece.resolveAsCell().equals(resolvedPiece)) continue; // Skip self
 
-      if (checkRefersToTarget(otherCharm, otherCharm, new Set(), 0)) {
-        addReadingCharm(otherCharm);
-        continue; // Skip additional checks for this charm
+      if (checkRefersToTarget(otherPiece, otherPiece, new Set(), 0)) {
+        addReadingPiece(otherPiece);
+        continue; // Skip additional checks for this piece
       }
 
       // Also specifically check the argument data where references are commonly found
       try {
-        const argumentCell = await this.getArgument(otherCharm);
+        const argumentCell = await this.getArgument(otherPiece);
         if (argumentCell) {
           const argumentValue = argumentCell.getRaw();
 
@@ -646,12 +646,12 @@ export class PieceManager {
                 0,
               )
             ) {
-              addReadingCharm(otherCharm);
+              addReadingPiece(otherPiece);
             }
           }
         }
       } catch (_) {
-        // Error checking argument references for charm
+        // Error checking argument references for piece
       }
     }
 
@@ -675,11 +675,11 @@ export class PieceManager {
 
   // Return Cell with argument content, loading the recipe if needed.
   async getArgument<T = unknown>(
-    charm: Cell<unknown | T>,
+    piece: Cell<unknown | T>,
   ): Promise<Cell<T>> {
-    const source = charm.getSourceCell(processSchema);
+    const source = piece.getSourceCell(processSchema);
     const recipeId = source?.get()?.[TYPE]!;
-    if (!recipeId) throw new Error("charm missing recipe ID");
+    if (!recipeId) throw new Error("piece missing recipe ID");
     const recipe = await this.runtime.recipeManager.loadRecipe(
       recipeId,
       this.space,
@@ -688,41 +688,41 @@ export class PieceManager {
   }
 
   getResult<T = unknown>(
-    charm: Cell<T>,
+    piece: Cell<T>,
   ): Cell<T> {
     // Get result cell with schema from processCell.resultRef
-    const processCell = charm.getSourceCell();
+    const processCell = piece.getSourceCell();
     if (processCell) {
       const resultRefCell = processCell.key("resultRef").resolveAsCell();
       if (resultRefCell?.schema) {
-        return charm.asSchema<T>(resultRefCell.schema);
+        return piece.asSchema<T>(resultRefCell.schema);
       }
     }
-    // Fallback: return charm without schema
-    return charm;
+    // Fallback: return piece without schema
+    return piece;
   }
 
-  // note: removing a charm doesn't clean up the charm's cells
-  async remove(charm: Cell<unknown>) {
-    const charmsCell = await this.getCharms();
-    await this.syncCharms(charmsCell);
+  // note: removing a piece doesn't clean up the piece's cells
+  async remove(piece: Cell<unknown>) {
+    const piecesCell = await this.getPieces();
+    await this.syncPieces(piecesCell);
 
     // Check if this is the default pattern and clear the link
     const defaultPattern = await this.getDefaultPattern();
     if (
       defaultPattern &&
-      charm.resolveAsCell().equals(defaultPattern.resolveAsCell())
+      piece.resolveAsCell().equals(defaultPattern.resolveAsCell())
     ) {
       await this.unlinkDefaultPattern();
     }
 
     const { ok } = await this.runtime.editWithRetry((tx) => {
-      const charms = charmsCell.withTx(tx);
+      const pieces = piecesCell.withTx(tx);
 
       // Remove from main list
-      const newCharms = filterOutCell(charms, charm);
-      if (newCharms.length !== charms.get().length) {
-        charms.set(newCharms);
+      const newPieces = filterOutCell(pieces, piece);
+      if (newPieces.length !== pieces.get().length) {
+        pieces.set(newPieces);
         return true;
       } else {
         return false;
@@ -740,19 +740,19 @@ export class PieceManager {
     options?: { start?: boolean },
   ): Promise<Cell<T>> {
     const start = options?.start ?? true;
-    const charm = await this.setupPersistent<T>(
+    const piece = await this.setupPersistent<T>(
       recipe,
       inputs,
       cause,
       llmRequestId,
     );
     if (start) {
-      await this.startCharm(charm);
+      await this.startPiece(piece);
     }
-    return charm;
+    return piece;
   }
 
-  // Consistently return the `Cell<Charm>` of charm with
+  // Consistently return the `Cell<Piece>` of piece with
   // id `pieceId`, applies the provided `recipe` (which may be
   // its current recipe -- useful when we are only updating inputs),
   // and optionally applies `inputs` if provided.
@@ -762,23 +762,23 @@ export class PieceManager {
     inputs?: object,
     options?: { start?: boolean },
   ): Promise<Cell<unknown>> {
-    const charm = this.runtime.getCellFromEntityId(this.space, {
+    const piece = this.runtime.getCellFromEntityId(this.space, {
       "/": pieceId,
     });
-    await charm.sync();
+    await piece.sync();
     const start = options?.start ?? true;
     if (start) {
-      await this.runtime.runSynced(charm, recipe, inputs);
+      await this.runtime.runSynced(piece, recipe, inputs);
     } else {
-      this.runtime.setup(undefined, recipe, inputs ?? {}, charm);
+      this.runtime.setup(undefined, recipe, inputs ?? {}, piece);
     }
-    await this.syncRecipe(charm);
+    await this.syncRecipe(piece);
 
-    return charm;
+    return piece;
   }
 
   /**
-   * Prepare a new charm by setting up its process/result cells and recipe
+   * Prepare a new piece by setting up its process/result cells and recipe
    * metadata without scheduling the recipe's nodes.
    */
   async setupPersistent<T = unknown>(
@@ -788,58 +788,58 @@ export class PieceManager {
     llmRequestId?: string,
   ): Promise<Cell<T>> {
     await this.runtime.idle();
-    const charm = this.runtime.getCell<T>(
+    const piece = this.runtime.getCell<T>(
       this.space,
       cause,
       recipe.resultSchema,
     );
-    this.runtime.setup(undefined, recipe, inputs ?? {}, charm);
-    await this.syncRecipe(charm);
+    this.runtime.setup(undefined, recipe, inputs ?? {}, piece);
+    await this.syncRecipe(piece);
 
     if (llmRequestId) {
       this.runtime.editWithRetry((tx) => {
-        charm.getSourceCell(charmSourceCellSchema)?.key("llmRequestId")
+        piece.getSourceCell(pieceSourceCellSchema)?.key("llmRequestId")
           .withTx(tx)
           .set(llmRequestId);
       });
     }
 
-    return charm;
+    return piece;
   }
 
-  /** Start scheduling and running a prepared charm. */
-  async startCharm<T = unknown>(charmOrId: string | Cell<T>): Promise<void> {
-    const charm = typeof charmOrId === "string"
-      ? await this.get<T>(charmOrId)
-      : charmOrId;
-    if (!charm) throw new Error("Charm not found");
-    await this.runtime.start(charm);
+  /** Start scheduling and running a prepared piece. */
+  async startPiece<T = unknown>(pieceOrId: string | Cell<T>): Promise<void> {
+    const piece = typeof pieceOrId === "string"
+      ? await this.get<T>(pieceOrId)
+      : pieceOrId;
+    if (!piece) throw new Error("Piece not found");
+    await this.runtime.start(piece);
     await this.runtime.idle();
     await this.synced();
   }
 
-  /** Stop a running charm (no-op if not running). */
-  async stopCharm<T = unknown>(charmOrId: string | Cell<T>): Promise<void> {
-    const charm = typeof charmOrId === "string"
-      ? await this.get<T>(charmOrId)
-      : charmOrId;
-    if (!charm) throw new Error("Charm not found");
-    this.runtime.runner.stop(charm);
+  /** Stop a running piece (no-op if not running). */
+  async stopPiece<T = unknown>(pieceOrId: string | Cell<T>): Promise<void> {
+    const piece = typeof pieceOrId === "string"
+      ? await this.get<T>(pieceOrId)
+      : pieceOrId;
+    if (!piece) throw new Error("Piece not found");
+    this.runtime.runner.stop(piece);
     await this.runtime.idle();
   }
 
   // FIXME(JA): this really really really needs to be revisited
-  async syncRecipe(charm: Cell<unknown>) {
-    await charm.sync();
+  async syncRecipe(piece: Cell<unknown>) {
+    await piece.sync();
 
     // When we subscribe to a doc, our subscription includes the doc's source,
     // so get that.
-    const sourceCell = charm.getSourceCell();
-    if (!sourceCell) throw new Error("charm missing source cell");
+    const sourceCell = piece.getSourceCell();
+    if (!sourceCell) throw new Error("piece missing source cell");
     await sourceCell.sync();
 
     const recipeId = sourceCell.get()?.[TYPE];
-    if (!recipeId) throw new Error("charm missing recipe ID");
+    if (!recipeId) throw new Error("piece missing recipe ID");
 
     return await this.syncRecipeById(recipeId);
   }
@@ -857,46 +857,46 @@ export class PieceManager {
     await entity.sync();
   }
 
-  // Returns the charm from our active charm list if it is present,
+  // Returns the piece from our active piece list if it is present,
   // or undefined if it is not
-  async getActiveCharm(charmCell: Cell<unknown>) {
-    const charmsCell = await this.getCharms();
-    const resolved = charmCell.resolveAsCell();
-    return charmsCell.get().find((charm) =>
-      charm.resolveAsCell().equals(resolved)
+  async getActivePiece(pieceCell: Cell<unknown>) {
+    const piecesCell = await this.getPieces();
+    const resolved = pieceCell.resolveAsCell();
+    return piecesCell.get().find((piece) =>
+      piece.resolveAsCell().equals(resolved)
     );
   }
 
   async link(
-    linkCharmId: string,
+    linkPieceId: string,
     linkPath: (string | number)[],
-    targetCharmId: string,
+    targetPieceId: string,
     targetPath: (string | number)[],
     options?: { start?: boolean },
   ): Promise<void> {
     let linkCell = this.runtime.getCellFromEntityId(this.space, {
-      "/": linkCharmId,
+      "/": linkPieceId,
     });
     await linkCell.sync();
     linkCell = linkCell.asSchemaFromLinks(); // Make sure we have the full schema
     linkCell = linkCell.key(...linkPath);
 
-    // Get target cell (charm or arbitrary cell)
-    const { cell: targetCell, isCharm: targetIsCharm } =
-      await getCellByIdOrCharm(
+    // Get target cell (piece or arbitrary cell)
+    const { cell: targetCell, isPiece: targetIsPiece } =
+      await getCellByIdOrPiece(
         this,
-        targetCharmId,
+        targetPieceId,
         "Target",
         options,
       );
 
     await this.runtime.editWithRetry((tx) => {
       let targetInputCell = targetCell.withTx(tx);
-      if (targetIsCharm) {
-        // For charms, target fields are in the source cell's argument
+      if (targetIsPiece) {
+        // For pieces, target fields are in the source cell's argument
         const sourceCell = targetInputCell.getSourceCell(processSchema);
         if (!sourceCell) {
-          throw new Error("Target charm has no source cell");
+          throw new Error("Target piece has no source cell");
         }
         targetInputCell = sourceCell.key("argument");
       }
@@ -915,44 +915,44 @@ export class PieceManager {
   }
 }
 
-export const getRecipeIdFromPiece = (charm: Cell<unknown>): string => {
-  const sourceCell = charm.getSourceCell(processSchema);
-  if (!sourceCell) throw new Error("charm missing source cell");
+export const getRecipeIdFromPiece = (piece: Cell<unknown>): string => {
+  const sourceCell = piece.getSourceCell(processSchema);
+  if (!sourceCell) throw new Error("piece missing source cell");
   return sourceCell.get()?.[TYPE]!;
 };
 
-async function getCellByIdOrCharm(
+async function getCellByIdOrPiece(
   manager: PieceManager,
   cellId: string,
   label: string,
   options?: { start?: boolean },
-): Promise<{ cell: Cell<unknown>; isCharm: boolean }> {
+): Promise<{ cell: Cell<unknown>; isPiece: boolean }> {
   const start = options?.start ?? true;
   try {
-    // Try to get as a charm first
-    const charm = await manager.get(cellId, start);
-    if (!charm) {
-      throw new Error(`Charm ${cellId} not found`);
+    // Try to get as a piece first
+    const piece = await manager.get(cellId, start);
+    if (!piece) {
+      throw new Error(`Piece ${cellId} not found`);
     }
-    return { cell: charm, isCharm: true };
+    return { cell: piece, isPiece: true };
   } catch (_) {
     // If manager.get() fails (e.g., "recipeId is required"), try as arbitrary cell ID
     try {
       const cell = await manager.getCellById({ "/": cellId });
 
-      // Check if this cell is actually a charm by looking at the charms list
-      const charmsCell = await manager.getCharms();
-      const charms = charmsCell.get();
-      const isActuallyCharm = charms.some((charm: Cell<unknown>) => {
-        const id = pieceId(charm);
-        // If we can't get the charm ID, it's not a valid charm
+      // Check if this cell is actually a piece by looking at the pieces list
+      const piecesCell = await manager.getPieces();
+      const pieces = piecesCell.get();
+      const isActuallyPiece = pieces.some((piece: Cell<unknown>) => {
+        const id = pieceId(piece);
+        // If we can't get the piece ID, it's not a valid piece
         if (!id) return false;
         return id === cellId;
       });
 
-      return { cell, isCharm: isActuallyCharm };
+      return { cell, isPiece: isActuallyPiece };
     } catch (_) {
-      throw new Error(`${label} "${cellId}" not found as charm or cell`);
+      throw new Error(`${label} "${cellId}" not found as piece or cell`);
     }
   }
 }

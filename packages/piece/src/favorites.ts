@@ -46,24 +46,24 @@ export function getHomeFavorites(runtime: Runtime): Cell<FavoriteList> {
 }
 
 /**
- * Add a charm to the user's favorites (in home space).
+ * Add a piece to the user's favorites (in home space).
  *
- * Syncs the charm before computing the tag to ensure schema is available.
+ * Syncs the piece before computing the tag to ensure schema is available.
  * wish.ts has a fallback for computing tags lazily if needed.
  */
 export async function addFavorite(
   runtime: Runtime,
-  charm: Cell<unknown>,
+  piece: Cell<unknown>,
 ): Promise<void> {
   const favorites = getHomeFavorites(runtime);
   await favorites.sync();
 
-  const resolvedCharm = charm.resolveAsCell();
+  const resolvedPiece = piece.resolveAsCell();
 
   // Sync to ensure schema is available for tag computation
-  await resolvedCharm.sync();
+  await resolvedPiece.sync();
 
-  const tag = getCellDescription(charm);
+  const tag = getCellDescription(piece);
 
   let wasAdded = false;
   await runtime.editWithRetry((tx) => {
@@ -72,10 +72,10 @@ export async function addFavorite(
 
     // Check if already favorited
     if (
-      current.some((entry) => entry.cell.resolveAsCell().equals(resolvedCharm))
+      current.some((entry) => entry.cell.resolveAsCell().equals(resolvedPiece))
     ) return;
 
-    favoritesWithTx.push({ cell: charm, tag });
+    favoritesWithTx.push({ cell: piece, tag });
     wasAdded = true;
   });
 
@@ -87,7 +87,7 @@ export async function addFavorite(
       await addJournalEntry(
         runtime,
         "charm:favorited",
-        charm,
+        piece,
         runtime.userIdentityDID,
       );
     } catch (err) {
@@ -97,12 +97,12 @@ export async function addFavorite(
 }
 
 /**
- * Remove a charm from the user's favorites (in home space)
- * @returns true if the charm was removed, false if it wasn't in favorites or tx failed
+ * Remove a piece from the user's favorites (in home space)
+ * @returns true if the piece was removed, false if it wasn't in favorites or tx failed
  */
 export async function removeFavorite(
   runtime: Runtime,
-  charm: Cell<unknown>,
+  piece: Cell<unknown>,
 ): Promise<boolean> {
   const favorites = getHomeFavorites(runtime);
   await favorites.sync();
@@ -110,7 +110,7 @@ export async function removeFavorite(
   let removed = false;
   const result = await runtime.editWithRetry((tx) => {
     const favoritesWithTx = favorites.withTx(tx);
-    const filtered = filterOutCell(favoritesWithTx, charm);
+    const filtered = filterOutCell(favoritesWithTx, piece);
     if (filtered.length !== favoritesWithTx.get().length) {
       favoritesWithTx.set(filtered);
       removed = true;
@@ -125,7 +125,7 @@ export async function removeFavorite(
       await addJournalEntry(
         runtime,
         "charm:unfavorited",
-        charm,
+        piece,
         runtime.userIdentityDID,
       );
     } catch (err) {
@@ -137,19 +137,19 @@ export async function removeFavorite(
 }
 
 /**
- * Check if a charm is in the user's favorites (in home space)
+ * Check if a piece is in the user's favorites (in home space)
  */
-export function isFavorite(runtime: Runtime, charm: Cell<unknown>): boolean {
+export function isFavorite(runtime: Runtime, piece: Cell<unknown>): boolean {
   try {
-    const resolvedCharm = charm.resolveAsCell();
+    const resolvedPiece = piece.resolveAsCell();
     const favorites = getHomeFavorites(runtime);
     const cached = favorites.get();
     return cached?.some((entry) =>
-      entry.cell.resolveAsCell().equals(resolvedCharm)
+      entry.cell.resolveAsCell().equals(resolvedPiece)
     ) ?? false;
   } catch (_error) {
     // If we can't access the home space (e.g., authorization error),
-    // assume the charm is not favorited rather than throwing
+    // assume the piece is not favorited rather than throwing
     return false;
   }
 }

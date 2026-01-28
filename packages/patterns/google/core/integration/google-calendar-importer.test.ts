@@ -19,8 +19,8 @@ describe("google calendar importer e2e", () => {
 
   let identity: Identity;
   let cc: PiecesController;
-  let googleAuthCharmId: string;
-  let calendarImporterCharmId: string;
+  let googleAuthPieceId: string;
+  let calendarImporterPieceId: string;
 
   beforeAll(async () => {
     // 1. Generate identity
@@ -43,8 +43,8 @@ describe("google calendar importer e2e", () => {
       .resolve(
         new FileSystemProgramResolver(googleAuthPath),
       );
-    const googleAuthCharm = await cc.create(googleAuthProgram, { start: true });
-    googleAuthCharmId = googleAuthCharm.id;
+    const googleAuthPiece = await cc.create(googleAuthProgram, { start: true });
+    googleAuthPieceId = googleAuthPiece.id;
 
     // 4. Deploy google-calendar-importer pattern
     const calendarPath = join(
@@ -56,13 +56,13 @@ describe("google calendar importer e2e", () => {
       .resolve(
         new FileSystemProgramResolver(calendarPath),
       );
-    const calendarCharm = await cc.create(calendarProgram, { start: true });
-    calendarImporterCharmId = calendarCharm.id;
+    const calendarPiece = await cc.create(calendarProgram, { start: true });
+    calendarImporterPieceId = calendarPiece.id;
 
     console.log(`\n=== TEST SETUP ===`);
     console.log(`Space: ${SPACE_NAME}`);
-    console.log(`Google Auth Charm: ${googleAuthCharmId}`);
-    console.log(`Calendar Importer Charm: ${calendarImporterCharmId}`);
+    console.log(`Google Auth Piece: ${googleAuthPieceId}`);
+    console.log(`Calendar Importer Piece: ${calendarImporterPieceId}`);
     console.log(`==================\n`);
   });
 
@@ -73,11 +73,11 @@ describe("google calendar importer e2e", () => {
   it("should complete Google OAuth flow and import calendar events", async () => {
     const page = shell.page();
 
-    // Step 1: Navigate to Google Auth charm
-    console.log("Navigating to Google Auth charm...");
+    // Step 1: Navigate to Google Auth piece
+    console.log("Navigating to Google Auth piece...");
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      view: { spaceName: SPACE_NAME, pieceId: googleAuthCharmId },
+      view: { spaceName: SPACE_NAME, pieceId: googleAuthPieceId },
       identity,
     });
 
@@ -146,7 +146,7 @@ describe("google calendar importer e2e", () => {
     console.log("Navigating to Calendar Importer...");
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      view: { spaceName: SPACE_NAME, pieceId: calendarImporterCharmId },
+      view: { spaceName: SPACE_NAME, pieceId: calendarImporterPieceId },
       identity,
     });
 

@@ -12,7 +12,7 @@ import {
   type RuntimeProgram,
 } from "@commontools/runner";
 import { PieceManager } from "./manager.ts";
-import { charmSourceCellSchema } from "@commontools/runner/schemas";
+import { pieceSourceCellSchema } from "@commontools/runner/schemas";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
 import {
@@ -32,7 +32,7 @@ import { StaticCache } from "@commontools/static";
 const llm = new LLMClient();
 
 /**
- * Generate source code for a charm based on its specification, schema, and optional existing source
+ * Generate source code for a piece based on its specification, schema, and optional existing source
  */
 export const genSrc = async (
   {
@@ -101,18 +101,18 @@ export const genSrc = async (
 };
 
 /**
- * Iterate on an existing charm by generating new source code based on a new specification
+ * Iterate on an existing piece by generating new source code based on a new specification
  * This is a core function used by various workflows
  */
 export async function iterate(
-  charmManager: PieceManager,
-  charm: Cell<unknown>,
+  pieceManager: PieceManager,
+  piece: Cell<unknown>,
   plan: WorkflowForm["plan"],
   options?: GenerationOptions,
 ): Promise<{ cell: Cell<unknown>; llmRequestId?: string }> {
   const optionsWithDefaults = applyDefaults(options);
   const { generationId } = optionsWithDefaults;
-  const { iframe } = getIframeRecipe(charm, charmManager.runtime);
+  const { iframe } = getIframeRecipe(piece, pieceManager.runtime);
 
   const prevSpec = iframe?.spec;
   if (plan?.description === undefined) {
@@ -126,13 +126,13 @@ export async function iterate(
     newSpec,
     schema: iframe?.argumentSchema || { type: "object" },
     steps: plan?.features,
-    staticCache: charmManager.runtime.staticCache,
+    staticCache: pieceManager.runtime.staticCache,
   }, optionsWithDefaults);
 
   return {
     cell: await generateNewRecipeVersion(
-      charmManager,
-      charm,
+      pieceManager,
+      piece,
       {
         src: newIFrameSrc,
         spec: newSpec,
@@ -151,7 +151,7 @@ export function extractTitle(src: string, defaultTitle: string): string {
 }
 
 export const generateNewRecipeVersion = async (
-  charmManager: PieceManager,
+  pieceManager: PieceManager,
   parent: Cell<unknown>,
   newRecipe:
     & Pick<IFrameRecipe, "src" | "spec">
@@ -159,14 +159,14 @@ export const generateNewRecipeVersion = async (
   generationId?: string,
   llmRequestId?: string,
 ) => {
-  const parentInfo = getIframeRecipe(parent, charmManager.runtime);
+  const parentInfo = getIframeRecipe(parent, pieceManager.runtime);
   if (!parentInfo.recipeId) {
-    throw new Error("No recipeId found for charm");
+    throw new Error("No recipeId found for piece");
   }
 
-  const parentRecipe = await charmManager.runtime.recipeManager.loadRecipe(
+  const parentRecipe = await pieceManager.runtime.recipeManager.loadRecipe(
     parentInfo.recipeId,
-    charmManager.getSpace(),
+    pieceManager.getSpace(),
   );
 
   const name = extractTitle(newRecipe.src, "<unknown>");
@@ -198,8 +198,8 @@ export const generateNewRecipeVersion = async (
   );
 
   // Pass the newSpec so it's properly persisted and can be displayed/edited
-  const newCharm = await compileAndRunRecipe(
-    charmManager,
+  const newPiece = await compileAndRunRecipe(
+    pieceManager,
     fullSrc,
     newRecipe.spec!,
     parent.getSourceCell()?.key("argument"),
@@ -207,18 +207,18 @@ export const generateNewRecipeVersion = async (
     llmRequestId,
   );
 
-  await newCharm.runtime.editWithRetry((tx) => {
-    newCharm.withTx(tx).getSourceCell(charmSourceCellSchema)?.key("lineage")
+  await newPiece.runtime.editWithRetry((tx) => {
+    newPiece.withTx(tx).getSourceCell(pieceSourceCellSchema)?.key("lineage")
       .push(
         {
-          charm: parent as Cell<{ [x: string]: unknown }>,
+          piece: parent as Cell<{ [x: string]: unknown }>,
           relation: "iterate",
           timestamp: Date.now(),
         },
       );
   });
 
-  return newCharm;
+  return newPiece;
 };
 
 // FIXME(ja): this should handle multiple depths and/or
@@ -466,12 +466,12 @@ async function twoPhaseCodeGeneration(
     newSpec,
     schema,
     steps: form.plan?.features,
-    staticCache: form.meta.charmManager.runtime.staticCache,
+    staticCache: form.meta.pieceManager.runtime.staticCache,
   }, {
     model: form.meta.model,
     generationId: form.meta.generationId,
     cache: form.meta.cache,
-    space: form.meta.charmManager.getSpaceName(),
+    space: form.meta.pieceManager.getSpaceName(),
   });
 
   const name = extractTitle(newIFrameSrc, title); // Use the generated title as fallback
@@ -498,13 +498,13 @@ async function twoPhaseCodeGeneration(
 /**
  * Cast a new recipe from a goal and data
  *
- * @param charmManager Charm manager representing the space this will be generated in
+ * @param pieceManager Piece manager representing the space this will be generated in
  * @param goal A user level goal for the new recipe, can reference specific data via `key`
  * @param data Data passed to the recipe, can be a combination of data and cells
  * @returns A new recipe cell
  */
 export async function castNewRecipe(
-  charmManager: PieceManager,
+  pieceManager: PieceManager,
   form: WorkflowForm,
 ): Promise<{ cell: Cell<unknown>; llmRequestId?: string }> {
   console.log("Processing form:", form);
@@ -516,7 +516,7 @@ export async function castNewRecipe(
   const existingSchema = createJsonSchema(
     scrubbed,
     false,
-    charmManager.runtime,
+    pieceManager.runtime,
   );
 
   // Prototype workflow: combine steps
@@ -525,7 +525,7 @@ export async function castNewRecipe(
       ? await singlePhaseCodeGeneration(form, existingSchema)
       : await twoPhaseCodeGeneration(form, existingSchema);
 
-  const input = turnCellsIntoWriteRedirects(scrubbed, charmManager.getSpace());
+  const input = turnCellsIntoWriteRedirects(scrubbed, pieceManager.getSpace());
 
   globalThis.dispatchEvent(
     new CustomEvent("job-update", {
@@ -539,7 +539,7 @@ export async function castNewRecipe(
 
   return {
     cell: await compileAndRunRecipe(
-      charmManager,
+      pieceManager,
       newRecipeSrc,
       newSpec,
       input,
@@ -579,7 +579,7 @@ export async function compileRecipe(
 }
 
 export async function compileAndRunRecipe(
-  charmManager: PieceManager,
+  pieceManager: PieceManager,
   recipeSrc: string,
   spec: string,
   runOptions: unknown,
@@ -589,15 +589,15 @@ export async function compileAndRunRecipe(
   const recipe = await compileRecipe(
     recipeSrc,
     spec,
-    charmManager.runtime,
-    charmManager.getSpace(),
+    pieceManager.runtime,
+    pieceManager.getSpace(),
     parents,
   );
   if (!recipe) {
     throw new Error("Failed to compile recipe");
   }
 
-  return await charmManager.runPersistent(
+  return await pieceManager.runPersistent(
     recipe,
     runOptions,
     undefined,

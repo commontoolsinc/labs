@@ -39,8 +39,8 @@ describe("Compile all recipes", () => {
           .resolve(
             new FileSystemProgramResolver(sourcePath),
           );
-        const charm = await cc!.create(program, { start: false });
-        assert(charm.id, `Received charm ID ${charm.id} for ${name}.`);
+        const piece = await cc!.create(program, { start: false });
+        assert(piece.id, `Received piece ID ${piece.id} for ${name}.`);
       } finally {
         // Dispose the entire controller to free all memory including recipe cache
         await cc.dispose();

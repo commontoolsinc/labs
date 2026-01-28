@@ -35,7 +35,7 @@ function toCamelCase(input: string): string {
 
 export async function formatPromptWithMentions(
   prompt: string,
-  charmManager: PieceManager,
+  pieceManager: PieceManager,
 ): Promise<
   {
     text: string;
@@ -47,7 +47,7 @@ export async function formatPromptWithMentions(
 > {
   const payload = await parseComposerDocument(
     prompt,
-    charmManager,
+    pieceManager,
   );
 
   // Create a mapping of IDs to source objects
@@ -63,13 +63,13 @@ export async function formatPromptWithMentions(
   if (payload.sources && Object.keys(payload.sources).length > 0) {
     // Add each source to the map
     Object.entries(payload.sources).forEach(([id, source]) => {
-      const shadowId = getCharmNameAsCamelCase(source.cell, sourcesMap);
+      const shadowId = getPieceNameAsCamelCase(source.cell, sourcesMap);
       sourcesMap[shadowId] = source;
 
       // Replace the markdown link mention with the ID
-      // Format: [character](charm://id)
+      // Format: [character](piece://id)
       processedText = processedText.replace(
-        new RegExp(`\\[(.*?)\\]\\(charm://${id}\\)`, "g"),
+        new RegExp(`\\[(.*?)\\]\\(piece://${id}\\)`, "g"),
         `\`${shadowId}\``,
       );
     });
@@ -81,16 +81,16 @@ export async function formatPromptWithMentions(
   };
 }
 
-export function getCharmNameAsCamelCase(
+export function getPieceNameAsCamelCase(
   cell: Cell<unknown>,
   usedKeys: Record<string, unknown>,
 ): string {
-  const charmName = toCamelCase(cell.asSchema(nameSchema).key(NAME).get());
+  const pieceName = toCamelCase(cell.asSchema(nameSchema).key(NAME).get());
 
-  let name = charmName;
+  let name = pieceName;
   let num = 0;
 
-  while (name in usedKeys) name = charmName + `${++num}`;
+  while (name in usedKeys) name = pieceName + `${++num}`;
 
   return name;
 }
@@ -121,7 +121,7 @@ async function processNode(
     };
     mentionIndices: Record<string, number>;
   },
-  charmManager?: PieceManager,
+  pieceManager?: PieceManager,
   currentList: { type: string | null; level: number } = {
     type: null,
     level: 0,
@@ -133,15 +133,15 @@ async function processNode(
       if (!state.mentionIndices[node.id]) {
         state.mentions.push(node.id);
 
-        // Create bibliography entry if charmManager is provided
+        // Create bibliography entry if pieceManager is provided
         const bibIndex = Object.keys(state.sources).length + 1;
 
-        if (charmManager) {
-          const charm = await charmManager.get(node.id);
-          if (charm) {
+        if (pieceManager) {
+          const piece = await pieceManager.get(node.id);
+          if (piece) {
             state.sources[node.id] = {
               name: node.character || `Reference ${bibIndex}`,
-              cell: charm,
+              cell: piece,
             };
 
             state.mentionIndices[node.id] = bibIndex;
@@ -150,7 +150,7 @@ async function processNode(
       }
 
       // Add reference in markdown format
-      state.fullText += `[${node.character}](charm://${node.id})`;
+      state.fullText += `[${node.character}](piece://${node.id})`;
     } else {
       // Handle mentions without explicit IDs (plain text mentions)
       state.fullText += `@${node.character}`;
@@ -198,7 +198,7 @@ async function processNode(
           await processNode(
             child,
             state,
-            charmManager,
+            pieceManager,
             {
               type: "bulleted-list",
               level: currentList.level + 1,
@@ -215,7 +215,7 @@ async function processNode(
 
     // Process children
     for (const child of node.children) {
-      await processNode(child, state, charmManager, currentList);
+      await processNode(child, state, pieceManager, currentList);
     }
 
     // Add appropriate line breaks after block elements
@@ -230,7 +230,7 @@ async function processNode(
 // Function to parse Slate document and extract mention references
 export async function parseComposerDocument(
   serializedDocument: string,
-  charmManager?: PieceManager,
+  pieceManager?: PieceManager,
 ): Promise<{
   text: string;
   mentions: string[];
@@ -278,7 +278,7 @@ export async function parseComposerDocument(
 
     // Process each node sequentially with await
     for (const node of document) {
-      await processNode(node, state, charmManager);
+      await processNode(node, state, pieceManager);
     }
 
     return {

@@ -12,7 +12,7 @@ export interface ParsedMention {
   originalText: string;
   startIndex: number;
   endIndex: number;
-  charm: Cell<unknown>;
+  piece: Cell<unknown>;
 }
 
 /**
@@ -20,5 +20,5 @@ export interface ParsedMention {
  */
 export interface ProcessedPrompt {
   text: string; // Processed text with mentions replaced by readable names
-  mentions: Record<string, Cell<unknown>>; // Map of mention IDs to charm cells
+  mentions: Record<string, Cell<unknown>>; // Map of mention IDs to piece cells
 }

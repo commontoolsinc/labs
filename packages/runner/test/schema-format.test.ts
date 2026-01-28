@@ -239,7 +239,7 @@ Deno.test("schemaToTypeString converts PatternToolResult to function syntax", ()
 });
 
 Deno.test("schemaToTypeString handles nested PatternToolResult in object", () => {
-  // Schema for a charm output with handler properties
+  // Schema for a piece output with handler properties
   const schema: any = {
     type: "object",
     properties: {

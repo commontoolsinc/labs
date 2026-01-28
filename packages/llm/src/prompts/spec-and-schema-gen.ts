@@ -312,14 +312,14 @@ Based on this goal and the existing schema, please provide a title, description,
       generationId: form.meta.generationId,
       systemPrompt: systemPrompt.version,
       userPrompt: userContent.version,
-      space: form.meta.charmManager.getSpaceName(),
+      space: form.meta.pieceManager.getSpaceName(),
     },
   });
 
   // Extract sections from the response
   const title =
     parseTagFromResponse(extractTextFromLLMResponse(response), "title") ||
-    "New Charm";
+    "New Piece";
   const description = parseTagFromResponse(
     extractTextFromLLMResponse(response),
     "description",
@@ -452,7 +452,7 @@ Based on this goal and the existing schema, please provide a title, description,
       generationId: form.meta.generationId,
       systemPrompt: systemPrompt.version,
       userPrompt: userContent.version,
-      space: form.meta.charmManager.getSpaceName(),
+      space: form.meta.pieceManager.getSpaceName(),
     },
     cache: form.meta.cache,
   });
@@ -460,7 +460,7 @@ Based on this goal and the existing schema, please provide a title, description,
   // Extract sections from the response
   const title =
     parseTagFromResponse(extractTextFromLLMResponse(response), "title") ||
-    "New Charm";
+    "New Piece";
   const description = parseTagFromResponse(
     extractTextFromLLMResponse(response),
     "description",

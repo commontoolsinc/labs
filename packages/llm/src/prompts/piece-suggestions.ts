@@ -1,13 +1,13 @@
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
 import JSON5 from "json5";
-import { describeCharm } from "./charm-describe.ts";
+import { describePiece } from "./piece-describe.ts";
 import { applyDefaults, llmPrompt } from "../index.ts";
 import { extractTextFromLLMResponse } from "../types.ts";
 import { GenerationOptions } from "../options.ts";
 
 const SYSTEM_PROMPT = llmPrompt(
-  "charm-suggestions-system",
+  "piece-suggestions-system",
   `
 You are tasked with generating prompt suggestions to iterate on web app functionality in new and interesting directions.
 
@@ -70,36 +70,36 @@ Remember to be creative and think outside the box while still maintaining releva
 `,
 );
 
-export interface CharmSuggestion {
+export interface PieceSuggestion {
   prompt: string;
   type: "aesthetic" | "creative" | "practical" | "feature" | "other";
 }
 
 /**
- * Generates charm suggestions from a spec, code, and schema.
+ * Generates piece suggestions from a spec, code, and schema.
  * @param spec - The spec of the web app.
  * @param code - The code of the web app.
  * @param schema - The schema of the web app.
- * @param count - The number of charm suggestions to generate. (default: 3)
- * @param model - The model to use to generate the charm suggestions. (default: "anthropic:claude-sonnet-4-5")
- * @returns The generated charm suggestions.
+ * @param count - The number of piece suggestions to generate. (default: 3)
+ * @param model - The model to use to generate the piece suggestions. (default: "anthropic:claude-sonnet-4-5")
+ * @returns The generated piece suggestions.
  */
-export async function generateCharmSuggestions(
+export async function generatePieceSuggestions(
   spec: string,
   code: string,
   schema: string,
   count: number = 3,
   options?: GenerationOptions,
-): Promise<CharmSuggestion[]> {
+): Promise<PieceSuggestion[]> {
   const optionsWithDefaults = applyDefaults(options);
   const { model, cache, space, generationId } = optionsWithDefaults;
 
   // FIXME(jake): Currently, whenever we iterate, we are overwriting
   // the entire spec, so we lose context of the original spec.
   //
-  // To work around this, we we first generate a description of the charm, and
+  // To work around this, we we first generate a description of the piece, and
   // then we'll use that as a stand-in for the spec.
-  const description = await describeCharm(
+  const description = await describePiece(
     spec,
     code,
     schema,
@@ -113,8 +113,8 @@ export async function generateCharmSuggestions(
   });
 
   const prompt = llmPrompt(
-    "charm-suggestions-user",
-    `Give me ${count} charm suggestions`,
+    "piece-suggestions-user",
+    `Give me ${count} piece suggestions`,
   );
 
   const response = await new LLMClient().sendRequest({
@@ -128,7 +128,7 @@ export async function generateCharmSuggestions(
       },
     ],
     metadata: {
-      context: "charm-suggestions",
+      context: "piece-suggestions",
       systemPrompt: system.version,
       userPrompt: prompt.version,
       space,

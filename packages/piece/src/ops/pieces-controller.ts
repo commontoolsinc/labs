@@ -39,7 +39,7 @@ export class PiecesController<T = unknown> {
   ): Promise<PieceController<U>> {
     this.disposeCheck();
     const recipe = await compileProgram(this.#manager, program);
-    const charm = await this.#manager.runPersistent<U>(
+    const piece = await this.#manager.runPersistent<U>(
       recipe,
       options.input,
       cause,
@@ -48,7 +48,7 @@ export class PiecesController<T = unknown> {
     );
     await this.#manager.runtime.idle();
     await this.#manager.synced();
-    return new PieceController<U>(this.#manager, charm);
+    return new PieceController<U>(this.#manager, piece);
   }
 
   async get<S extends JSONSchema = JSONSchema>(
@@ -71,20 +71,20 @@ export class PiecesController<T = unknown> {
     return new PieceController(this.#manager, cell);
   }
 
-  async getAllCharms() {
+  async getAllPieces() {
     this.disposeCheck();
-    const charmsCell = await this.#manager.getCharms();
-    const charms = charmsCell.get();
-    return charms.map((charm) => new PieceController(this.#manager, charm));
+    const piecesCell = await this.#manager.getPieces();
+    const pieces = piecesCell.get();
+    return pieces.map((piece) => new PieceController(this.#manager, piece));
   }
 
   async remove(pieceId: string): Promise<boolean> {
     this.disposeCheck();
-    const charm = this.#manager.runtime.getCellFromEntityId(
+    const piece = this.#manager.runtime.getCellFromEntityId(
       this.#manager.getSpace(),
       { "/": pieceId },
     );
-    const removed = await this.#manager.remove(charm);
+    const removed = await this.#manager.remove(piece);
     // Ensure full synchronization
     if (removed) {
       await this.#manager.runtime.idle();
@@ -95,12 +95,12 @@ export class PiecesController<T = unknown> {
 
   async start(pieceId: string): Promise<void> {
     this.disposeCheck();
-    await this.#manager.startCharm(pieceId);
+    await this.#manager.startPiece(pieceId);
   }
 
   async stop(pieceId: string): Promise<void> {
     this.disposeCheck();
-    await this.#manager.stopCharm(pieceId);
+    await this.#manager.stopPiece(pieceId);
   }
 
   async dispose() {
@@ -144,7 +144,7 @@ export class PiecesController<T = unknown> {
    * Stops and unlinks the existing default pattern, then creates a new one.
    * This is useful for resetting the space's default pattern state.
    *
-   * @returns The newly created default pattern charm
+   * @returns The newly created default pattern piece
    */
   async recreateDefaultPattern(): Promise<PieceController<NameSchema>> {
     this.disposeCheck();
@@ -171,7 +171,7 @@ export class PiecesController<T = unknown> {
         cause: `home-pattern-${Date.now()}`, // Unique cause to create new cell
       }
       : {
-        name: "DefaultCharmList",
+        name: "DefaultPieceList",
         urlPath: "/api/patterns/system/default-app.tsx",
         cause: `space-root-${Date.now()}`, // Unique cause to create new cell
       };
@@ -189,12 +189,12 @@ export class PiecesController<T = unknown> {
       program,
     );
 
-    // Create new charm cell
-    let charmCell: Cell<NameSchema>;
+    // Create new piece cell
+    let pieceCell: Cell<NameSchema>;
 
     await this.#manager.runtime.editWithRetry((tx) => {
-      // Create charm cell within this transaction
-      charmCell = this.#manager.runtime.getCell<NameSchema>(
+      // Create piece cell within this transaction
+      pieceCell = this.#manager.runtime.getCell<NameSchema>(
         this.#manager.getSpace(),
         patternConfig.cause,
         nameSchema,
@@ -202,12 +202,12 @@ export class PiecesController<T = unknown> {
       );
 
       // Run pattern setup within same transaction
-      this.#manager.runtime.run(tx, recipe, {}, charmCell);
+      this.#manager.runtime.run(tx, recipe, {}, pieceCell);
 
       // Link as default pattern within same transaction
       const spaceCellWithTx = this.#manager.getSpaceCellContents().withTx(tx);
       const defaultPatternCell = spaceCellWithTx.key("defaultPattern");
-      defaultPatternCell.set(charmCell.withTx(tx));
+      defaultPatternCell.set(pieceCell.withTx(tx));
     });
 
     // Fetch the final result
@@ -216,8 +216,8 @@ export class PiecesController<T = unknown> {
       throw new Error("Failed to create default pattern");
     }
 
-    // Start the charm
-    await this.#manager.startCharm(finalPattern);
+    // Start the piece
+    await this.#manager.startPiece(finalPattern);
     await this.#manager.runtime.idle();
     await this.#manager.synced();
 
@@ -234,7 +234,7 @@ export class PiecesController<T = unknown> {
    * simultaneously, the first successful commit wins and others gracefully
    * discover the existing pattern on retry.
    *
-   * @returns The default pattern charm, either existing or newly created
+   * @returns The default pattern piece, either existing or newly created
    */
   async ensureDefaultPattern(): Promise<PieceController<NameSchema>> {
     this.disposeCheck();
@@ -256,7 +256,7 @@ export class PiecesController<T = unknown> {
         cause: "home-pattern",
       }
       : {
-        name: "DefaultCharmList",
+        name: "DefaultPieceList",
         urlPath: "/api/patterns/system/default-app.tsx",
         cause: "space-root",
       };
@@ -279,7 +279,7 @@ export class PiecesController<T = unknown> {
     // - Reading defaultPattern inside the transaction creates an invariant
     // - If another process creates it first, the commit fails and retries
     // - On retry, we'll see the existing pattern and return early
-    let charmCell: Cell<NameSchema>;
+    let pieceCell: Cell<NameSchema>;
 
     await this.#manager.runtime.editWithRetry((tx) => {
       // Double-check pattern doesn't exist (read establishes invariant)
@@ -294,8 +294,8 @@ export class PiecesController<T = unknown> {
         return;
       }
 
-      // Create charm cell within this transaction
-      charmCell = this.#manager.runtime.getCell<NameSchema>(
+      // Create piece cell within this transaction
+      pieceCell = this.#manager.runtime.getCell<NameSchema>(
         this.#manager.getSpace(),
         patternConfig.cause,
         nameSchema,
@@ -303,10 +303,10 @@ export class PiecesController<T = unknown> {
       );
 
       // Run pattern setup within same transaction
-      this.#manager.runtime.run(tx, recipe, {}, charmCell);
+      this.#manager.runtime.run(tx, recipe, {}, pieceCell);
 
       // Link as default pattern within same transaction
-      defaultPatternCell.set(charmCell.withTx(tx));
+      defaultPatternCell.set(pieceCell.withTx(tx));
     });
 
     // After transaction commits, fetch the final result
@@ -316,8 +316,8 @@ export class PiecesController<T = unknown> {
       throw new Error("Failed to create or find default pattern");
     }
 
-    // Start the charm after successful creation/discovery
-    await this.#manager.startCharm(finalPattern);
+    // Start the piece after successful creation/discovery
+    await this.#manager.startPiece(finalPattern);
     await this.#manager.runtime.idle();
     await this.#manager.synced();
 
