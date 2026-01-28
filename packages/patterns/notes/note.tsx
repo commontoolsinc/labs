@@ -17,61 +17,33 @@ import {
   Writable,
 } from "commontools";
 import NoteMd from "./note-md.tsx";
+import {
+  generateId,
+  type MentionablePiece,
+  type MinimalPiece,
+  type NotebookPiece,
+  type NoteInput,
+} from "./schemas.tsx";
 
-// Type for backlinks (inline to work around CLI path resolution bug)
-type MentionablePiece = {
-  [NAME]?: string;
-  isHidden?: boolean;
-  mentioned: MentionablePiece[];
-  backlinks: MentionablePiece[];
-};
-
-// Simple random ID generator (crypto.randomUUID not available in pattern env)
-const generateId = () =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
-
-type MinimalPiece = {
-  [NAME]?: string;
-};
-
-type NotebookPiece = {
-  [NAME]?: string;
-  notes?: NotePiece[];
-};
-
-type NotePiece = {
-  [NAME]?: string;
-  noteId?: string;
-};
-
-type Input = {
-  title?: Writable<Default<string, "Untitled Note">>;
-  content?: Writable<Default<string, "">>;
-  isHidden?: Default<boolean, false>;
-  noteId?: Default<string, "">;
-  /** Pattern JSON for [[wiki-links]]. Defaults to creating new Notes. */
-  linkPattern?: Writable<Default<string, "">>;
-  /** Parent notebook reference (passed via SELF from notebook.tsx) */
-  parentNotebook?: any;
-};
+// ===== Output Type =====
 
 /** Represents a small #note a user took to remember some text. */
-type Output = {
-  [NAME]?: string;
+interface NoteOutput {
+  [NAME]: string;
   [UI]: VNode;
-  mentioned: Default<Array<MentionablePiece>, []>;
+  title: string;
+  content: string;
+  mentioned: Default<MentionablePiece[], []>;
   backlinks: MentionablePiece[];
-  parentNotebook: any; // Reference to parent notebook (set on navigation for back link)
-
-  content: Default<string, "">;
-  isHidden: Default<boolean, false>;
-  noteId: Default<string, "">;
+  parentNotebook: NotebookPiece | null;
+  isHidden: boolean;
+  noteId: string;
   grep: PatternToolResult<{ content: string }>;
   translate: PatternToolResult<{ content: string }>;
   editContent: Stream<{ detail: { value: string } }>;
   /** Minimal UI for embedding in containers like Record. Use via ct-render variant="embedded". */
   embeddedUI: VNode;
-};
+}
 
 const _updateTitle = handler<
   { detail: { value: string } },
@@ -311,7 +283,7 @@ const menuAllNotebooks = handler<
   // User should create it from default-app first
 });
 
-const Note = pattern<Input, Output>(
+const Note = pattern<NoteInput, NoteOutput>(
   (
     {
       title,
