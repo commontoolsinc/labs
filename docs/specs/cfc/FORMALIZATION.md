@@ -120,13 +120,24 @@ Trusted-runtime label propagation rules (schema-driven transitions):
   - `formal/Cfc/Proofs/Collection.lean`: key container/member preservation lemmas
   - `formal/Cfc/Proofs/LabelTransitionExamples.lean`: small regressions that exercise projection scoping,
     exactCopyOf rejection, and membership-vs-member separation
+- Store label monotonicity (8.12):
+  - `formal/Cfc/Store.lean`: CNF "more restrictive" relation + integrity weakening relation,
+    combined `canUpdateStoreLabel` predicate, and an access monotonicity theorem
+  - `formal/Cfc/Proofs/Store.lean`: regression examples (including expiration tightening)
+- Opaque inputs / blind passing (8.13):
+  - `formal/Cfc/Opaque.lean`: `OpaqueRef` + pass-through semantics (no content access in the model)
+  - `formal/Cfc/Proofs/Opaque.lean`: router-style example showing a decision output can be readable
+    while the opaque payload remains unreadable
+- Modification authorization / write authority (8.15):
+  - `formal/Cfc/WriteAuthority.lean`: handler identity, `writeAuthorizedBy`, schema union, and an
+    in-place `modify` primitive that preserves the authority set
+  - `formal/Cfc/Proofs/WriteAuthority.lean`: counter example and composition/stability lemmas
 
 ## What Is Not Yet Modeled (Gaps vs Spec)
 
 The Lean model does *not* currently include:
 - Full commit-point state machine (attempt tracking, deduplication, concurrency) and its integration
   with label transitions / side effects (Spec Sections 6/7; invariant 4)
-- Write-authority sets (`writeAuthorizedBy`) and stateful authorization (Spec 8.15)
 - Full policy record architecture (hash binding, fixpoint evaluation, targeting)
 - Full schema-driven propagation algorithm (Spec 8.9) beyond local transition primitives
 - Full transformation-integrity framework (Spec 8.7) beyond the minimal endorsed-transform allowlist
