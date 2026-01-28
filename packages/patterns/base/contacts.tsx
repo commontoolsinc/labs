@@ -79,8 +79,9 @@ const addPerson = handler<
     person: personData,
     sameAs: contacts,
   });
+  const newIndex = (contacts.get() || []).length;
   contacts.push(charm as ContactCharm);
-  selectedIndex.set((contacts.get() || []).length - 1);
+  selectedIndex.set(newIndex);
 });
 
 const addFamilyMember = handler<
@@ -105,8 +106,9 @@ const addFamilyMember = handler<
     member: memberData,
     sameAs: contacts,
   });
+  const newIndex = (contacts.get() || []).length;
   contacts.push(charm as ContactCharm);
-  selectedIndex.set((contacts.get() || []).length - 1);
+  selectedIndex.set(newIndex);
 });
 
 const removeContact = handler<
