@@ -56,9 +56,11 @@ export default pattern<ReadingItemDetailInput, ReadingItemDetailOutput>(
     { title, author, url, type, status, rating, notes, addedAt, finishedAt },
   ) => {
     // Actions to modify properties
-    const setStatus = action(({ status: newStatus }: { status: ItemStatus }) => {
-      status.set(newStatus);
-    });
+    const setStatus = action(
+      ({ status: newStatus }: { status: ItemStatus }) => {
+        status.set(newStatus);
+      },
+    );
 
     const setRating = action(
       ({ rating: newRating }: { rating: number | null }) => {

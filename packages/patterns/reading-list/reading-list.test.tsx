@@ -161,8 +161,12 @@ export default pattern(() => {
   // ==========================================================================
 
   const assert_initial_empty = computed(() => list.totalCount === 0);
-  const assert_initial_filter_all = computed(() => list.currentFilter === "all");
-  const assert_initial_filtered_empty = computed(() => list.filteredCount === 0);
+  const assert_initial_filter_all = computed(() =>
+    list.currentFilter === "all"
+  );
+  const assert_initial_filtered_empty = computed(() =>
+    list.filteredCount === 0
+  );
 
   // ==========================================================================
   // Assertions - After Adding Items
@@ -222,7 +226,8 @@ export default pattern(() => {
 
   const assert_book_has_rating = computed(() => list.items[1]?.rating === 5);
   const assert_article_has_notes = computed(() =>
-    list.items[0]?.notes === "Really insightful piece about reactive programming"
+    list.items[0]?.notes ===
+      "Really insightful piece about reactive programming"
   );
 
   // ==========================================================================
