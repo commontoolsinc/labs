@@ -76,8 +76,9 @@ interface Input {
   person: Writable<
     Default<Person, { firstName: ""; lastName: ""; email: ""; phone: "" }>
   >;
-  // Optional: pre-extracted PersonLike data from container for sameAs linking
-  sameAs?: PersonLike[];
+  // Optional: reactive source of sibling contacts for sameAs linking.
+  // Typed as unknown[] because the container's charm type can't be imported here.
+  sameAs?: Writable<unknown[]>;
 }
 
 interface Output {
@@ -113,21 +114,32 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
     return "Unknown";
   });
 
-  // Computed: filter out self from siblings for sameAs picker
+  // Computed: extract PersonLike data from reactive source, filter out self
   const linkableSiblings = computed(() => {
-    if (!sameAs || sameAs.length === 0) return [];
+    if (!sameAs) return [];
+    const all = sameAs.get();
+    if (!all || all.length === 0) return [];
 
     const selfFirst = person.key("firstName").get();
     const selfLast = person.key("lastName").get();
 
-    return sameAs
-      .filter((s) => !(s.firstName === selfFirst && s.lastName === selfLast))
-      .map((s) => {
-        const name = s.firstName && s.lastName
-          ? `${s.firstName} ${s.lastName}`
-          : s.firstName || s.lastName || "Person";
-        return { name, linkedPerson: s as PersonLike };
-      });
+    // Extract PersonLike from each sibling charm (person or member field)
+    const extractPerson = (item: unknown): PersonLike | undefined => {
+      const c = item as { person?: PersonLike; member?: PersonLike };
+      return c.person ?? c.member;
+    };
+
+    return all
+      .map(extractPerson)
+      .filter((p): p is PersonLike =>
+        !!p && !(p.firstName === selfFirst && p.lastName === selfLast)
+      )
+      .map((p) => ({
+        name: p.firstName && p.lastName
+          ? `${p.firstName} ${p.lastName}`
+          : p.firstName || p.lastName || "Person",
+        linkedPerson: p,
+      }));
   });
 
   // Computed: whether we have siblings to link to
