@@ -19,7 +19,7 @@ import {
   pattern,
   UI,
   type VNode,
-  type Writable,
+  Writable,
 } from "commontools";
 
 import type { ContactCharm, Person, PersonLike } from "./contact-types.tsx";
@@ -31,18 +31,27 @@ export type { ContactCharm, Person, PersonLike } from "./contact-types.tsx";
 // Handlers
 // ============================================================================
 
-const setSameAs = handler<
-  unknown,
-  { person: Writable<Person>; linkedPerson: PersonLike }
->((_event, { person, linkedPerson }) => {
+const selectSameAs = handler<
+  { detail: { data?: PersonLike } },
+  { person: Writable<Person>; showPicker: Writable<boolean> }
+>(({ detail }, { person, showPicker }) => {
+  const linked = detail?.data;
+  if (!linked) return;
   const current = person.get();
-  person.set({ ...current, sameAs: linkedPerson });
+  person.set({ ...current, sameAs: linked });
+  showPicker.set(false);
 });
 
 const clearSameAs = handler<unknown, { person: Writable<Person> }>(
   (_event, { person }) => {
     const current = person.get();
     person.set({ ...current, sameAs: undefined });
+  },
+);
+
+const togglePicker = handler<unknown, { showPicker: Writable<boolean> }>(
+  (_event, { showPicker }) => {
+    showPicker.set(!showPicker.get());
   },
 );
 
@@ -91,8 +100,11 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
     return "Unknown";
   });
 
-  // Computed: extract PersonLike data from reactive source, filter out self
-  const linkableSiblings = computed(() => {
+  // State: whether the sameAs picker is expanded
+  const showPicker = Writable.of(false);
+
+  // Computed: autocomplete items from reactive sibling source, filtering self
+  const sameAsItems = computed(() => {
     if (!sameAs) return [];
     const all = sameAs.get();
     if (!all || all.length === 0) return [];
@@ -100,26 +112,21 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
     const selfFirst = person.key("firstName").get();
     const selfLast = person.key("lastName").get();
 
-    // Extract PersonLike from each sibling charm (person or member field)
-    const extractPerson = (item: ContactCharm): PersonLike | undefined => {
-      return item.person ?? item.member;
-    };
-
-    return all
-      .map(extractPerson)
-      .filter((p): p is PersonLike =>
-        !!p && !(p.firstName === selfFirst && p.lastName === selfLast)
-      )
-      .map((p) => ({
-        name: p.firstName && p.lastName
-          ? `${p.firstName} ${p.lastName}`
-          : p.firstName || p.lastName || "Person",
-        linkedPerson: p,
-      }));
+    const result: Array<{ value: string; label: string; data: PersonLike }> =
+      [];
+    for (const c of all) {
+      const p = c.person ?? c.member;
+      if (!p) continue;
+      if (p.firstName === selfFirst && p.lastName === selfLast) continue;
+      const label = p.firstName && p.lastName
+        ? `${p.firstName} ${p.lastName}`
+        : p.firstName || p.lastName || "Person";
+      result.push({ value: label, label, data: p });
+    }
+    return result;
   });
 
-  // Computed: whether we have siblings to link to
-  const hasSiblings = computed(() => linkableSiblings.length > 0);
+  const hasSameAsCandidates = computed(() => sameAsItems.length > 0);
 
   return {
     [NAME]: displayName,
@@ -163,63 +170,73 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
             />
           </ct-vstack>
 
-          {/* sameAs Section - only show if siblings available */}
+          {/* sameAs Section - collapsed by default, only if candidates exist */}
           {computed(() => {
-            if (!hasSiblings) return null;
+            if (!hasSameAsCandidates) return null;
 
+            const linkedName = sameAsDisplay;
+
+            // If linked, show compact display
+            if (linkedName) {
+              return (
+                <ct-hstack
+                  style={{
+                    gap: "8px",
+                    alignItems: "center",
+                    paddingTop: "8px",
+                    borderTop: "1px solid #e5e7eb",
+                  }}
+                >
+                  <span style={{ fontSize: "12px", color: "#6b7280" }}>
+                    Same as: {linkedName}
+                  </span>
+                  <ct-button
+                    variant="ghost"
+                    size="sm"
+                    onClick={clearSameAs({ person })}
+                  >
+                    ×
+                  </ct-button>
+                </ct-hstack>
+              );
+            }
+
+            // If picker is open, show autocomplete
+            if (showPicker.get()) {
+              return (
+                <ct-vstack
+                  style={{
+                    gap: "4px",
+                    paddingTop: "8px",
+                    borderTop: "1px solid #e5e7eb",
+                  }}
+                >
+                  <ct-autocomplete
+                    items={sameAsItems}
+                    placeholder="Search contacts..."
+                    onct-select={selectSameAs({ person, showPicker })}
+                  />
+                </ct-vstack>
+              );
+            }
+
+            // Collapsed: small link to expand
             return (
-              <ct-vstack
+              <ct-hstack
                 style={{
-                  gap: "8px",
                   paddingTop: "8px",
                   borderTop: "1px solid #e5e7eb",
                 }}
               >
-                <label style={{ fontSize: "12px", color: "#6b7280" }}>
-                  Same As (link to another contact)
-                </label>
-
-                {computed(() => {
-                  const linkedName = sameAsDisplay;
-                  if (linkedName) {
-                    return (
-                      <ct-hstack style={{ gap: "8px", alignItems: "center" }}>
-                        <span style={{ fontSize: "14px" }}>
-                          Linked to: {linkedName}
-                        </span>
-                        <ct-button
-                          variant="ghost"
-                          size="sm"
-                          onClick={clearSameAs({ person })}
-                        >
-                          ×
-                        </ct-button>
-                      </ct-hstack>
-                    );
-                  }
-
-                  // Show sibling picker - linkableSiblings is computed plain data
-                  const siblings: Array<
-                    { name: string; linkedPerson: PersonLike }
-                  > = linkableSiblings;
-                  return (
-                    <ct-hstack style={{ gap: "4px", flexWrap: "wrap" }}>
-                      {siblings.map((sib) => (
-                        <ct-button
-                          variant="outline"
-                          size="sm"
-                          onClick={setSameAs({
-                            person,
-                            linkedPerson: sib.linkedPerson,
-                          })}
-                        >
-                          {sib.name}
-                        </ct-button>
-                      ))}
-                    </ct-hstack>
-                  );
-                })}
-              </ct-vstack>
+                <ct-button
+                  variant="ghost"
+                  size="sm"
+                  onClick={togglePicker({ showPicker })}
+                  style={{ fontSize: "12px", color: "#6b7280" }}
+                >
+                  Link to another contact...
+                </ct-button>
+              </ct-hstack>
             );
           })}
         </ct-vstack>
