@@ -12,6 +12,7 @@ gets compiled as part of the library.
 
 import Cfc.Atom
 import Cfc.Label
+import Cfc.Store
 import Cfc.LabelTransitions
 import Cfc.Access
 import Cfc.Link
@@ -35,5 +36,6 @@ import Cfc.Proofs.CommitPoint
 import Cfc.Proofs.Scenarios
 import Cfc.Proofs.GmailExample
 import Cfc.Proofs.LabelTransitions
+import Cfc.Proofs.Store
 import Cfc.Proofs.Collection
 import Cfc.Proofs.LabelTransitionExamples
