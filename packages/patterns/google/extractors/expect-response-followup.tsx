@@ -341,26 +341,6 @@ const updateDraft = handler<
 });
 
 /**
- * Prepare to send follow-up (show confirmation)
- */
-const _prepareToSend = handler<
-  unknown,
-  { pendingSend: Writable<string | null>; threadId: string }
->((_event, { pendingSend, threadId }) => {
-  pendingSend.set(threadId);
-});
-
-/**
- * Cancel send
- */
-const _cancelSend = handler<
-  unknown,
-  { pendingSend: Writable<string | null> }
->((_event, { pendingSend }) => {
-  pendingSend.set(null);
-});
-
-/**
  * Send follow-up email
  */
 const sendFollowUp = handler<
