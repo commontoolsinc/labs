@@ -24,8 +24,9 @@ import {
 import { getDefaultLockdownOptions, resolveSandboxConfig } from "./config.ts";
 import { createRuntimeGlobals } from "./runtime-globals.ts";
 import { createSilentConsole } from "./sandboxed-console.ts";
+import "npm:ses@1.14.0";
 
-// SES types (declared since we import dynamically)
+// SES adds lockdown, Compartment, harden to globalThis
 declare const lockdown: (options?: LockdownOptions) => void;
 declare const Compartment: new (
   globals?: object,
@@ -88,11 +89,11 @@ export class CompartmentManager {
    *
    * This method is idempotent - calling it multiple times is safe.
    */
-  async initialize(): Promise<void> {
+  initialize(): void {
     if (!this.config.enabled) {
       return;
     }
-    await this.ensureLockdown();
+    this.ensureLockdown();
   }
 
   /**
@@ -106,13 +107,10 @@ export class CompartmentManager {
    * Apply SES lockdown if not already applied.
    * This is called lazily on first compartment creation.
    */
-  private async ensureLockdown(): Promise<void> {
+  private ensureLockdown(): void {
     if (CompartmentManager.lockdownApplied) {
       return;
     }
-
-    // Dynamically import SES
-    await import("npm:ses@1.14.0");
 
     // Apply lockdown with configured options
     const options = getDefaultLockdownOptions(this.config.debug);
@@ -166,9 +164,9 @@ export class CompartmentManager {
    * @param config - Pattern configuration including source code
    * @returns The pattern compartment with frozen exports
    */
-  async loadPattern(
+  loadPattern(
     config: PatternCompartmentConfig,
-  ): Promise<PatternCompartment> {
+  ): PatternCompartment {
     if (!this.config.enabled) {
       throw new SandboxSecurityError(
         "SES sandboxing is disabled. Enable it with sesEnabled: true in RuntimeOptions",
@@ -182,7 +180,7 @@ export class CompartmentManager {
     }
 
     // Ensure lockdown is applied
-    await this.ensureLockdown();
+    this.ensureLockdown();
 
     try {
       // Create runtime globals for this pattern
@@ -282,7 +280,7 @@ export class CompartmentManager {
    * @param code - The JavaScript code to evaluate
    * @returns The result of evaluation
    */
-  async evaluateString(code: string): Promise<unknown> {
+  evaluateString(code: string): unknown {
     if (!this.config.enabled) {
       throw new SandboxSecurityError(
         "SES sandboxing is disabled. Enable it with sesEnabled: true in RuntimeOptions",
@@ -290,7 +288,7 @@ export class CompartmentManager {
     }
 
     // Ensure lockdown is applied
-    await this.ensureLockdown();
+    this.ensureLockdown();
 
     return this.evaluateStringSync(code);
   }
