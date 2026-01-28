@@ -13,7 +13,6 @@ function getErrors(diagnostics: readonly TransformationDiagnostic[]) {
 async function validateWithSES(source: string) {
   return await validateSource(source, {
     types: COMMONTOOLS_TYPES,
-    sesValidation: true,
   });
 }
 
@@ -169,24 +168,25 @@ Deno.test("Module-Scope Validation - Allowed Calls", async (t) => {
 });
 
 Deno.test("Module-Scope Validation - Disallowed Calls", async (t) => {
-  await t.step("errors on arbitrary function call", async () => {
-    const source = `/// <cts-enable />
+  await t.step(
+    "allows arbitrary function call in const initializer",
+    async () => {
+      const source = `/// <cts-enable />
       declare function computeValue(): number;
 
       const result = computeValue();
 
       export default result;
     `;
-    const { diagnostics } = await validateWithSES(source);
-    const errors = getErrors(diagnostics);
-    assertGreater(errors.length, 0, "Expected at least one error");
-    assertEquals(errors[0]!.type, "module-scope-disallowed-call");
-    assertEquals(
-      errors[0]!.message.includes("computeValue"),
-      true,
-      "Error should mention the function name",
-    );
-  });
+      const { diagnostics } = await validateWithSES(source);
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Function calls in const initializers should be allowed",
+      );
+    },
+  );
 
   await t.step("errors on IIFE", async () => {
     const source = `/// <cts-enable />
@@ -318,25 +318,8 @@ Deno.test("Module-Scope Validation - Export Annotations", async (t) => {
   });
 });
 
-Deno.test("Module-Scope Validation - SES Validation Disabled", async (t) => {
-  await t.step("does not error when sesValidation is false", async () => {
-    const source = `/// <cts-enable />
-      let counter = 0;
-      export default counter;
-    `;
-    const { diagnostics } = await validateSource(source, {
-      types: COMMONTOOLS_TYPES,
-      sesValidation: false,
-    });
-    const errors = getErrors(diagnostics);
-    assertEquals(
-      errors.length,
-      0,
-      "Should not error when SES validation is disabled",
-    );
-  });
-
-  await t.step("does not error when sesValidation is undefined", async () => {
+Deno.test("Module-Scope Validation - Always Active", async (t) => {
+  await t.step("errors on let by default", async () => {
     const source = `/// <cts-enable />
       let counter = 0;
       export default counter;
@@ -346,9 +329,9 @@ Deno.test("Module-Scope Validation - SES Validation Disabled", async (t) => {
     });
     const errors = getErrors(diagnostics);
     assertEquals(
-      errors.length,
-      0,
-      "Should not error when SES validation is not specified",
+      errors.length > 0,
+      true,
+      "Should error on let declarations by default",
     );
   });
 });

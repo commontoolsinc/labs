@@ -81,7 +81,7 @@ export interface RuntimeOptions {
   /**
    * Whether to enable SES sandboxing for pattern execution.
    * When enabled, patterns run in isolated SES Compartments.
-   * Default: false (uses eval-based execution)
+   * Default: true
    */
   sesEnabled?: boolean;
 }
@@ -155,7 +155,7 @@ export class Runtime {
 
     // Create compartment manager for SES sandboxing
     this.compartmentManager = new CompartmentManager({
-      enabled: options.sesEnabled ?? false,
+      enabled: options.sesEnabled ?? true,
       debug: options.debug ?? false,
     });
 

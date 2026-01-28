@@ -1,6 +1,5 @@
 import {
   CastValidationTransformer,
-  ExportAnnotationTransformer,
   ModuleScopeValidationTransformer,
   OpaqueGetValidationTransformer,
   OpaqueRefJSXTransformer,
@@ -40,10 +39,8 @@ export class CommonToolsTransformerPipeline extends Pipeline {
       new CastValidationTransformer(sharedOps),
       new OpaqueGetValidationTransformer(sharedOps),
       new PatternContextValidationTransformer(sharedOps),
-      // SES validation (optional, enabled via sesValidation option)
-      ...(options.sesValidation
-        ? [new ModuleScopeValidationTransformer(sharedOps)]
-        : []),
+      // SES validation: ensures module-scope statements are SES-safe
+      new ModuleScopeValidationTransformer(sharedOps),
       // Then the regular transformation pipeline
       new OpaqueRefJSXTransformer(sharedOps),
       new ComputedTransformer(sharedOps),
@@ -53,10 +50,6 @@ export class CommonToolsTransformerPipeline extends Pipeline {
       // Hoisting: moves builder calls referencing module-scope symbols to module scope
       // Runs after all schema transformers so schemas are already injected
       new HoistingTransformer(sharedOps),
-      // Export annotation (SES, runs at the end to add __exportName)
-      ...(options.sesValidation
-        ? [new ExportAnnotationTransformer(sharedOps)]
-        : []),
     ];
 
     super(transformers);

@@ -165,6 +165,8 @@ declare module "@commontools/api" {
     resultSchema?: JSONSchema;
     /** If true, this module is an effect (side-effectful) rather than a computation */
     isEffect?: boolean;
+    /** Runtime program info, set by exportsCallback for module-scope exports */
+    program?: RuntimeProgram;
   }
 }
 

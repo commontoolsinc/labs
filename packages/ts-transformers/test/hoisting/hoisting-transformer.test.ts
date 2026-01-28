@@ -136,20 +136,6 @@ export default function MyPattern(props: any) {
     assertEquals(output.includes("__derive_"), true);
   });
 
-  await t.step("adds __exportName annotation to hoisted declarations", () => {
-    const source = `
-import { derive } from "commontools";
-import { format } from "formatter";
-
-export default function MyPattern(props: any) {
-  const formatted = derive(props.value, (x: number) => format(x));
-  return { formatted };
-}
-`;
-    const output = transformWithHoisting(source);
-    assertEquals(output.includes("__exportName"), true);
-  });
-
   await t.step("does not hoist calls already at module scope", () => {
     const source = `
 import { lift } from "commontools";

@@ -115,7 +115,7 @@ export class CompartmentManager {
     await import("npm:ses@1.10.0");
 
     // Apply lockdown with configured options
-    const options = getDefaultLockdownOptions();
+    const options = getDefaultLockdownOptions(this.config.debug);
 
     try {
       lockdown(options);
@@ -147,7 +147,7 @@ export class CompartmentManager {
   ): Promise<PatternCompartment> {
     if (!this.config.enabled) {
       throw new SandboxSecurityError(
-        "SES sandboxing is disabled. Enable it with SES_ENABLED=true",
+        "SES sandboxing is disabled. Enable it with sesEnabled: true in RuntimeOptions",
       );
     }
 
@@ -261,7 +261,7 @@ export class CompartmentManager {
   async evaluateString(code: string): Promise<unknown> {
     if (!this.config.enabled) {
       throw new SandboxSecurityError(
-        "SES sandboxing is disabled. Enable it with SES_ENABLED=true",
+        "SES sandboxing is disabled. Enable it with sesEnabled: true in RuntimeOptions",
       );
     }
 
@@ -282,7 +282,7 @@ export class CompartmentManager {
   evaluateStringSync(code: string): unknown {
     if (!this.config.enabled) {
       throw new SandboxSecurityError(
-        "SES sandboxing is disabled. Enable it with SES_ENABLED=true",
+        "SES sandboxing is disabled. Enable it with sesEnabled: true in RuntimeOptions",
       );
     }
 
@@ -324,33 +324,14 @@ export class CompartmentManager {
    * Transforms ES module exports into an object we can retrieve.
    */
   private wrapSourceForExports(source: string): string {
-    // For now, we use a simple wrapper that expects the source to
-    // assign to a global __exports object. The transformer will
-    // need to add __exportName annotations that we can use.
-    //
-    // A more sophisticated approach would parse the AST and
-    // transform export statements.
+    // Wrap source so we can capture its exports.
+    // The runtime's engine.ts exportsByValue mechanism already discovers
+    // exports by iterating Object.entries(exports) from the compiled module,
+    // so we don't need __exportName annotations. This wrapper just ensures
+    // the source executes in a contained scope.
     return `
       (function() {
-        const __exports = {};
-
         ${source}
-
-        // Collect exports from __exportName annotations
-        for (const key of Object.keys(this)) {
-          const value = this[key];
-          if (value && typeof value === "object" && value.__exportName) {
-            __exports[value.__exportName] = value;
-          } else if (value && typeof value === "function" && value.__exportName) {
-            __exports[value.__exportName] = value;
-          }
-        }
-
-        // Also check for explicit assignments
-        if (typeof __pattern !== 'undefined') __exports.__pattern = __pattern;
-        if (typeof __recipe !== 'undefined') __exports.__recipe = __recipe;
-
-        return __exports;
       }).call({})
     `;
   }

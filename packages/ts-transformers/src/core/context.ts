@@ -31,7 +31,7 @@ export class TransformationContext {
 
   /**
    * Hoisting context for SES sandboxing.
-   * Only initialized when sesValidation is enabled.
+   * Tracks declarations hoisted to module scope for SES safety.
    */
   readonly hoistingContext: HoistingContext | undefined;
 

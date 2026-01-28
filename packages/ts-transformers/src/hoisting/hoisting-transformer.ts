@@ -148,20 +148,7 @@ export class HoistingTransformer extends Transformer {
         ),
       );
 
-      // Also add __exportName annotation for SES
-      const exportAnnotation = factory.createExpressionStatement(
-        factory.createBinaryExpression(
-          factory.createPropertyAccessExpression(
-            factory.createIdentifier(hoistedName),
-            factory.createIdentifier("__exportName"),
-          ),
-          factory.createToken(ts.SyntaxKind.EqualsToken),
-          factory.createStringLiteral(hoistedName),
-        ),
-      );
-
       hoistedStatements.push(hoistedDecl);
-      hoistedStatements.push(exportAnnotation);
 
       // Register in hoisting context for tracking
       hoistingContext.registerHoistedDeclaration(
