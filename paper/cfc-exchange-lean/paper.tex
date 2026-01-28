@@ -772,9 +772,12 @@ proofs that support the most security-critical claims, and it already catches su
 issues by forcing the boundary between ``untrusted transformation'' and ``trusted verification'' to
 be explicit.
 
-The most important next steps are: scaling the transition formalization to cover more of Chapter 8
-directly; modeling full policy evaluation (variable binding, fixpoint behavior); and strengthening
-the end-to-end connection between runtime egress enforcement and the mechanized core.
+The most important next steps are: extending the mechanized transition system to cover additional
+runtime features needed for end-to-end structured-data security (store-label monotonicity and schema
+evolution for persistent state; opaque inputs / blind passing; and write-authorization rules for
+in-place modifications); addressing contamination scoping (still an open problem for reactive
+pipelines); modeling full policy evaluation (variable binding and fixpoint behavior); and
+strengthening the end-to-end connection between runtime egress enforcement and the mechanized core.
 
 \bibliographystyle{plain}
 \bibliography{references}
