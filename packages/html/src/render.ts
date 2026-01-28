@@ -26,7 +26,7 @@ import {
   stringifyText,
   styleObjectToCssString,
 } from "./render-utils.ts";
-import { vdomSchema } from "@commontools/runner/schemas";
+import { rendererVDOMSchema } from "@commontools/runner/schemas";
 import { VDomRenderer } from "./main/renderer.ts";
 //import { animate } from "./debug-element.ts";
 
@@ -141,7 +141,7 @@ function renderLegacy(
 
   if (isCellHandle(view)) {
     rootCell = view as CellHandle<VNode>;
-    view = view.asSchema(vdomSchema) as CellHandle<VNode>;
+    view = view.asSchema(rendererVDOMSchema) as CellHandle<VNode>;
   }
 
   const optionsWithCell = rootCell ? { ...options, rootCell } : options;
@@ -266,12 +266,12 @@ const bindChildren = (
   // Mapping from stable key to its rendered node and cancel function.
   let keyedChildren: KeyedChildren = new Map();
 
-  // When the children array changes, diff its flattened values against what we previously rendered.
+  // When the children array changes, diff its values against what we previously rendered.
   const updateChildren = (
     childrenArr: RenderNode | RenderNode[] | undefined | null,
   ) => {
     const newChildren = Array.isArray(childrenArr)
-      ? childrenArr.flat()
+      ? childrenArr
       : childrenArr
       ? [childrenArr]
       : [];
