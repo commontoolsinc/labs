@@ -337,7 +337,10 @@ export class DomApplicator {
     const node = this.nodes.get(nodeId);
     if (!node) return;
 
-    // Remove event listeners
+    // Recursively clean up descendants first
+    this.cleanupDescendants(node);
+
+    // Remove event listeners for this node
     const listeners = this.eventListeners.get(nodeId);
     if (listeners) {
       for (const [eventType, listener] of listeners) {
@@ -353,6 +356,43 @@ export class DomApplicator {
 
     // Remove from tracking
     this.nodes.delete(nodeId);
+  }
+
+  /**
+   * Clean up tracked descendants of a node.
+   * Finds all tracked nodeIds that are descendants and removes them from tracking.
+   */
+  private cleanupDescendants(node: Node): void {
+    // Find all tracked nodeIds that are descendants of this node
+    const descendantIds: number[] = [];
+    for (const [nodeId, trackedNode] of this.nodes) {
+      if (
+        nodeId !== CONTAINER_NODE_ID && node.contains(trackedNode) &&
+        trackedNode !== node
+      ) {
+        descendantIds.push(nodeId);
+      }
+    }
+
+    // Clean up each descendant
+    for (const nodeId of descendantIds) {
+      // Remove event listeners
+      const listeners = this.eventListeners.get(nodeId);
+      if (listeners) {
+        const descendantNode = this.nodes.get(nodeId);
+        if (descendantNode) {
+          for (const [eventType, listener] of listeners) {
+            (descendantNode as EventTarget).removeEventListener(
+              eventType,
+              listener,
+            );
+          }
+        }
+        this.eventListeners.delete(nodeId);
+      }
+      // Remove from tracking
+      this.nodes.delete(nodeId);
+    }
   }
 
   private setAttrs(nodeId: number, attrs: Record<string, unknown>): void {

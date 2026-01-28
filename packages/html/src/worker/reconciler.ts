@@ -84,6 +84,9 @@ export class WorkerReconciler {
         this.handlers.set(id, handler);
         return id;
       },
+      unregisterHandler: (id) => {
+        this.handlers.delete(id);
+      },
       getHandler: (id) => this.handlers.get(id),
     };
   }
@@ -240,6 +243,27 @@ export class WorkerReconciler {
   }
 
   /**
+   * Clean up event handlers for a node and its descendants.
+   */
+  private cleanupNodeHandlers(state: NodeState | ChildNodeState): void {
+    // Clean up element state handlers if present
+    const elementState = "elementState" in state ? state.elementState : state;
+    if (elementState && "eventHandlers" in elementState) {
+      for (const handlerId of elementState.eventHandlers.values()) {
+        this.handlers.delete(handlerId);
+      }
+      elementState.eventHandlers.clear();
+
+      // Recursively clean up children
+      if (elementState.children) {
+        for (const child of elementState.children.values()) {
+          this.cleanupNodeHandlers(child);
+        }
+      }
+    }
+  }
+
+  /**
    * Create a wrapper state for reactive roots.
    */
   private createWrapperState(_ctx: ReconcileContext, nodeId: number): {
@@ -269,6 +293,7 @@ export class WorkerReconciler {
     // Clean up previous child
     if (wrapper.currentChild) {
       wrapper.cancel();
+      this.cleanupNodeHandlers(wrapper.currentChild);
       this.queueOps([{
         op: "remove-node",
         nodeId: wrapper.currentChild.nodeId,
@@ -799,6 +824,7 @@ export class WorkerReconciler {
     // Remove obsolete children
     for (const [_, oldState] of state.children) {
       oldState.cancel();
+      this.cleanupNodeHandlers(oldState);
       this.queueOps([{ op: "remove-node", nodeId: oldState.nodeId }]);
     }
 
@@ -887,6 +913,8 @@ export class WorkerReconciler {
             currentCancel();
             currentCancel = undefined;
           }
+          // Clean up event handlers before removing node
+          this.cleanupNodeHandlers(childState);
           this.queueOps([{ op: "remove-node", nodeId: childState.nodeId }]);
         }
 

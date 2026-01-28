@@ -108,8 +108,15 @@ export class VDomRenderer {
     this.applicator.setContainer(container);
 
     // Request the worker to start rendering
-    const response = await this.connection.mountVDom(this.mountId, cellRef);
-    this.rootNodeId = response.rootId;
+    try {
+      const response = await this.connection.mountVDom(this.mountId, cellRef);
+      this.rootNodeId = response.rootId;
+    } catch (error) {
+      // Reset state on failure so the renderer can be reused
+      this.mountId = null;
+      this.containerElement = null;
+      throw error;
+    }
 
     // Return a cancel function
     return async () => {

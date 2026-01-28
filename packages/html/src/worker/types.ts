@@ -118,6 +118,9 @@ export interface ReconcileContext {
   /** Register an event handler and get its ID */
   registerHandler: (handler: (event: unknown) => void) => number;
 
+  /** Unregister an event handler by ID */
+  unregisterHandler: (handlerId: number) => void;
+
   /** Get handler by ID for event dispatch */
   getHandler: (handlerId: number) => ((event: unknown) => void) | undefined;
 
