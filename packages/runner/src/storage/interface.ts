@@ -73,19 +73,16 @@ export type Labels = {
   classification?: string[];
 };
 
+/** Immutable storage value container. */
 export interface StorageValue<T extends StorableValue = StorableValue> {
-  value: T;
-  source?: EntityId;
-  labels?: Labels;
+  readonly value: Immutable<T>;
+  readonly source?: EntityId;
+  readonly labels?: Immutable<Labels>;
 }
 
-/** Immutable version of `StorageValue<T>`. */
-export type ImmutableStorageValue<T extends StorableValue = StorableValue> =
-  Immutable<StorageValue<T>>;
-
-/** Optional immutable version of `StorageValue<T>`. */
-export type OptImmutableStorageValue<T extends StorableValue = StorableValue> =
-  | ImmutableStorageValue<T>
+/** Optional `StorageValue<T>`. */
+export type OptStorageValue<T extends StorableValue = StorableValue> =
+  | StorageValue<T>
   | undefined;
 
 export interface IStorageManager extends IStorageSubscriptionCapability {
@@ -199,7 +196,7 @@ export interface IStorageProvider {
    */
   get<T extends StorableValue = StorableValue>(
     uri: URI,
-  ): OptImmutableStorageValue<T>;
+  ): OptStorageValue<T>;
 
   /**
    * Subscribe to storage updates.
@@ -210,7 +207,7 @@ export interface IStorageProvider {
    */
   sink<T extends StorableValue = StorableValue>(
     uri: URI,
-    callback: (value: ImmutableStorageValue<T>) => void,
+    callback: (value: StorageValue<T>) => void,
   ): Cancel;
 
   /**
