@@ -292,8 +292,7 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
                     </ct-button>
                   </ct-hstack>
 
-                  {/* The charm already has [UI], renderer extracts it */}
-                  {charm}
+                  <ct-render $cell={charm} />
                 </ct-vstack>
               );
             })}
