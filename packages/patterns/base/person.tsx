@@ -4,7 +4,8 @@
  *
  * This pattern serves as the schelling point for person-like data.
  * It implements the PersonLike interface ({ firstName, lastName }) and adds
- * optional contact fields (email, phone).
+ * optional contact fields (email, phone) plus rich detail fields
+ * (notes, tags, addresses, socialProfiles).
  *
  * Sub-types can extend Person or PersonLike to add domain-specific fields:
  * - FamilyMember adds: relationship, birthday, dietary restrictions
@@ -26,6 +27,28 @@ import type { ContactCharm, Person, PersonLike } from "./contact-types.tsx";
 
 // Re-export for backwards compatibility
 export type { ContactCharm, Person, PersonLike } from "./contact-types.tsx";
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+const SOCIAL_PLATFORM_OPTIONS = [
+  { value: "", label: "Select..." },
+  { value: "LinkedIn", label: "LinkedIn" },
+  { value: "Twitter", label: "Twitter" },
+  { value: "GitHub", label: "GitHub" },
+  { value: "Instagram", label: "Instagram" },
+  { value: "Facebook", label: "Facebook" },
+  { value: "Website", label: "Website" },
+  { value: "Other", label: "Other" },
+];
+
+const ADDRESS_LABEL_OPTIONS = [
+  { value: "", label: "Select..." },
+  { value: "Home", label: "Home" },
+  { value: "Work", label: "Work" },
+  { value: "Other", label: "Other" },
+];
 
 // ============================================================================
 // Handlers
@@ -55,13 +78,84 @@ const togglePicker = handler<unknown, { showPicker: Writable<boolean> }>(
   },
 );
 
+const toggleSection = handler<unknown, { section: Writable<boolean> }>(
+  (_event, { section }) => {
+    section.set(!section.get());
+  },
+);
+
+const updateTags = handler<
+  { detail: { tags: string[] } },
+  { person: Writable<Person> }
+>(({ detail }, { person }) => {
+  const current = person.get();
+  person.set({ ...current, tags: detail?.tags ?? [] });
+});
+
+const addAddress = handler<unknown, { person: Writable<Person> }>(
+  (_event, { person }) => {
+    const current = person.get();
+    const addresses = [...(current.addresses || [])];
+    addresses.push({
+      label: "",
+      street: "",
+      city: "",
+      state: "",
+      zip: "",
+      country: "",
+    });
+    person.set({ ...current, addresses });
+  },
+);
+
+const removeAddress = handler<
+  unknown,
+  { person: Writable<Person>; index: number }
+>((_event, { person, index }) => {
+  const current = person.get();
+  const addresses = [...(current.addresses || [])];
+  addresses.splice(index, 1);
+  person.set({ ...current, addresses });
+});
+
+const addSocialProfile = handler<unknown, { person: Writable<Person> }>(
+  (_event, { person }) => {
+    const current = person.get();
+    const socialProfiles = [...(current.socialProfiles || [])];
+    socialProfiles.push({ platform: "", url: "" });
+    person.set({ ...current, socialProfiles });
+  },
+);
+
+const removeSocialProfile = handler<
+  unknown,
+  { person: Writable<Person>; index: number }
+>((_event, { person, index }) => {
+  const current = person.get();
+  const socialProfiles = [...(current.socialProfiles || [])];
+  socialProfiles.splice(index, 1);
+  person.set({ ...current, socialProfiles });
+});
+
 // ============================================================================
 // Input/Output Schemas
 // ============================================================================
 
 interface Input {
   person: Writable<
-    Default<Person, { firstName: ""; lastName: ""; email: ""; phone: "" }>
+    Default<
+      Person,
+      {
+        firstName: "";
+        lastName: "";
+        email: "";
+        phone: "";
+        notes: "";
+        tags: [];
+        addresses: [];
+        socialProfiles: [];
+      }
+    >
   >;
   // Optional: reactive source of sibling contacts for sameAs linking.
   sameAs?: Writable<ContactCharm[]>;
@@ -71,6 +165,38 @@ interface Output {
   [NAME]: string;
   [UI]: VNode;
   person: Person;
+}
+
+// ============================================================================
+// UI Helpers
+// ============================================================================
+
+function sectionHeader(
+  label: string,
+  expanded: Writable<boolean>,
+  count?: () => number,
+) {
+  return (
+    <ct-hstack
+      style={{
+        justifyContent: "space-between",
+        alignItems: "center",
+        cursor: "pointer",
+        paddingTop: "8px",
+        borderTop: "1px solid #e5e7eb",
+      }}
+      onClick={toggleSection({ section: expanded })}
+    >
+      <label style={{ fontSize: "12px", color: "#6b7280", fontWeight: "600" }}>
+        {computed(() => {
+          const arrow = expanded.get() ? "▾" : "▸";
+          const c = count ? count() : 0;
+          const suffix = count && c > 0 ? ` (${c})` : "";
+          return `${arrow} ${label}${suffix}`;
+        })}
+      </label>
+    </ct-hstack>
+  );
 }
 
 // ============================================================================
@@ -103,6 +229,12 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
   // State: whether the sameAs picker is expanded
   const showPicker = Writable.of(false);
 
+  // Section expansion state
+  const showContactInfo = Writable.of(true);
+  const showAddresses = Writable.of(false);
+  const showSocial = Writable.of(false);
+  const showNotes = Writable.of(false);
+
   // Computed: autocomplete items from reactive sibling source, filtering self
   const sameAsItems = computed(() => {
     if (!sameAs) return [];
@@ -133,6 +265,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
     [UI]: (
       <ct-screen>
         <ct-vstack style={{ gap: "16px", padding: "16px" }}>
+          {/* Basic Info - always visible */}
           <ct-hstack style={{ gap: "8px" }}>
             <ct-vstack style={{ gap: "4px", flex: 1 }}>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>
@@ -153,22 +286,176 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
               />
             </ct-vstack>
           </ct-hstack>
+
+          {/* Tags */}
           <ct-vstack style={{ gap: "4px" }}>
-            <label style={{ fontSize: "12px", color: "#6b7280" }}>Email</label>
-            <ct-input
-              $value={person.key("email")}
-              placeholder="Email"
-              type="email"
+            <label style={{ fontSize: "12px", color: "#6b7280" }}>Tags</label>
+            <ct-tags
+              tags={person.key("tags")}
+              onct-change={updateTags({ person })}
             />
           </ct-vstack>
-          <ct-vstack style={{ gap: "4px" }}>
-            <label style={{ fontSize: "12px", color: "#6b7280" }}>Phone</label>
-            <ct-input
-              $value={person.key("phone")}
-              placeholder="Phone"
-              type="tel"
-            />
-          </ct-vstack>
+
+          {/* Contact Info Section */}
+          {sectionHeader("Contact Info", showContactInfo)}
+          {computed(() => {
+            if (!showContactInfo.get()) return null;
+            return (
+              <ct-vstack style={{ gap: "8px" }}>
+                <ct-vstack style={{ gap: "4px" }}>
+                  <label style={{ fontSize: "12px", color: "#6b7280" }}>
+                    Email
+                  </label>
+                  <ct-input
+                    $value={person.key("email")}
+                    placeholder="Email"
+                    type="email"
+                  />
+                </ct-vstack>
+                <ct-vstack style={{ gap: "4px" }}>
+                  <label style={{ fontSize: "12px", color: "#6b7280" }}>
+                    Phone
+                  </label>
+                  <ct-input
+                    $value={person.key("phone")}
+                    placeholder="Phone"
+                    type="tel"
+                  />
+                </ct-vstack>
+              </ct-vstack>
+            );
+          })}
+
+          {/* Addresses Section */}
+          {sectionHeader(
+            "Addresses",
+            showAddresses,
+            () => (person.key("addresses").get() || []).length,
+          )}
+          {computed(() => {
+            if (!showAddresses.get()) return null;
+            const addresses = person.key("addresses").get() || [];
+            return (
+              <ct-vstack style={{ gap: "8px" }}>
+                {addresses.map((_addr, i) => (
+                  <ct-card>
+                    <ct-vstack style={{ gap: "4px" }}>
+                      <ct-hstack
+                        style={{
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                        }}
+                      >
+                        <ct-select
+                          $value={person.key("addresses").key(i).key("label")}
+                          items={ADDRESS_LABEL_OPTIONS}
+                        />
+                        <ct-button
+                          variant="ghost"
+                          size="sm"
+                          onClick={removeAddress({ person, index: i })}
+                        >
+                          ×
+                        </ct-button>
+                      </ct-hstack>
+                      <ct-input
+                        $value={person.key("addresses").key(i).key("street")}
+                        placeholder="Street"
+                      />
+                      <ct-hstack style={{ gap: "4px" }}>
+                        <ct-input
+                          $value={person.key("addresses").key(i).key("city")}
+                          placeholder="City"
+                          style={{ flex: "1" }}
+                        />
+                        <ct-input
+                          $value={person.key("addresses").key(i).key("state")}
+                          placeholder="State"
+                          style={{ width: "60px" }}
+                        />
+                        <ct-input
+                          $value={person.key("addresses").key(i).key("zip")}
+                          placeholder="Zip"
+                          style={{ width: "80px" }}
+                        />
+                      </ct-hstack>
+                      <ct-input
+                        $value={person.key("addresses").key(i).key("country")}
+                        placeholder="Country"
+                      />
+                    </ct-vstack>
+                  </ct-card>
+                ))}
+                <ct-button
+                  variant="ghost"
+                  size="sm"
+                  onClick={addAddress({ person })}
+                >
+                  + Add Address
+                </ct-button>
+              </ct-vstack>
+            );
+          })}
+
+          {/* Social Profiles Section */}
+          {sectionHeader(
+            "Social Profiles",
+            showSocial,
+            () => (person.key("socialProfiles").get() || []).length,
+          )}
+          {computed(() => {
+            if (!showSocial.get()) return null;
+            const profiles = person.key("socialProfiles").get() || [];
+            return (
+              <ct-vstack style={{ gap: "8px" }}>
+                {profiles.map((_profile, i) => (
+                  <ct-hstack style={{ gap: "4px", alignItems: "center" }}>
+                    <ct-select
+                      $value={person
+                        .key("socialProfiles")
+                        .key(i)
+                        .key("platform")}
+                      items={SOCIAL_PLATFORM_OPTIONS}
+                    />
+                    <ct-input
+                      $value={person.key("socialProfiles").key(i).key("url")}
+                      placeholder="URL"
+                      style={{ flex: "1" }}
+                    />
+                    <ct-button
+                      variant="ghost"
+                      size="sm"
+                      onClick={removeSocialProfile({ person, index: i })}
+                    >
+                      ×
+                    </ct-button>
+                  </ct-hstack>
+                ))}
+                <ct-button
+                  variant="ghost"
+                  size="sm"
+                  onClick={addSocialProfile({ person })}
+                >
+                  + Add Profile
+                </ct-button>
+              </ct-vstack>
+            );
+          })}
+
+          {/* Notes Section */}
+          {sectionHeader("Notes", showNotes)}
+          {computed(() => {
+            if (!showNotes.get()) return null;
+            return (
+              <ct-vstack style={{ gap: "4px" }}>
+                <ct-input
+                  $value={person.key("notes")}
+                  placeholder="Notes about this person..."
+                  multiple
+                />
+              </ct-vstack>
+            );
+          })}
 
           {/* sameAs Section - collapsed by default, only if candidates exist */}
           {computed(() => {

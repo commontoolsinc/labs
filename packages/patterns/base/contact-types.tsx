@@ -24,6 +24,24 @@ export interface PersonLike {
 }
 
 // ============================================================================
+// Address & SocialProfile - Structured sub-types
+// ============================================================================
+
+export interface Address {
+  label: Default<string, "">; // "Home", "Work", etc.
+  street: Default<string, "">;
+  city: Default<string, "">;
+  state: Default<string, "">;
+  zip: Default<string, "">;
+  country: Default<string, "">;
+}
+
+export interface SocialProfile {
+  platform: Default<string, "">; // "LinkedIn", "Twitter", etc.
+  url: Default<string, "">;
+}
+
+// ============================================================================
 // Person Type - Extends PersonLike with optional contact fields
 // ============================================================================
 
@@ -32,6 +50,10 @@ export interface Person extends PersonLike {
   lastName: string;
   email: Default<string, "">;
   phone: Default<string, "">;
+  notes: Default<string, "">;
+  tags: Default<string[], []>;
+  addresses: Default<Address[], []>;
+  socialProfiles: Default<SocialProfile[], []>;
 }
 
 // ============================================================================
@@ -44,6 +66,10 @@ export interface FamilyMember extends PersonLike {
   relationship: Default<string, "">;
   birthday: Default<string, "">; // ISO date string (YYYY-MM-DD)
   dietaryRestrictions: Default<string[], []>;
+  notes: Default<string, "">;
+  tags: Default<string[], []>;
+  allergies: Default<string[], []>;
+  giftIdeas: Default<string[], []>;
 }
 
 // ============================================================================
@@ -59,3 +85,15 @@ export interface ContactCharm {
   person?: Person;
   member?: FamilyMember;
 }
+
+// ============================================================================
+// ContactGroup - Manual grouping of contacts
+// ============================================================================
+
+export interface ContactGroup {
+  name: string;
+  contactIndices: Default<number[], []>; // indices into contacts[]
+}
+
+// Default export required by ct check infrastructure
+export default undefined;

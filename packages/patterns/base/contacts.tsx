@@ -4,6 +4,10 @@
  *
  * Architecture: Stores charm results (pattern outputs with [UI]), not raw data.
  * Pattern instantiation happens at insertion time in handlers.
+ *
+ * Features:
+ * - Manual groups: Create named groups and assign contacts to them
+ * - sameAs visual grouping: Contacts linked via sameAs appear indented under primary
  */
 import {
   action,
@@ -19,7 +23,12 @@ import {
 } from "commontools";
 
 // Import shared types
-import type { ContactCharm, FamilyMember, Person } from "./contact-types.tsx";
+import type {
+  ContactCharm,
+  ContactGroup,
+  FamilyMember,
+  Person,
+} from "./contact-types.tsx";
 
 // Import patterns (they return charms with [UI])
 import PersonPattern from "./person.tsx";
@@ -32,12 +41,14 @@ import FamilyMemberPattern from "./family-member.tsx";
 interface Input {
   // Store charm results, not raw data
   contacts: Writable<Default<ContactCharm[], []>>;
+  groups: Writable<Default<ContactGroup[], []>>;
 }
 
 interface Output {
   [NAME]: string;
   [UI]: VNode;
   contacts: ContactCharm[];
+  groups: ContactGroup[];
   count: number;
 }
 
@@ -52,12 +63,15 @@ const addPerson = handler<
     selectedIndex: Writable<number>;
   }
 >((_event, { contacts, selectedIndex }) => {
-  // Create writable data for the person
   const personData = Writable.of<Person>({
     firstName: "",
     lastName: "",
     email: "",
     phone: "",
+    notes: "",
+    tags: [],
+    addresses: [],
+    socialProfiles: [],
   });
   const charm = PersonPattern({
     person: personData,
@@ -74,13 +88,16 @@ const addFamilyMember = handler<
     selectedIndex: Writable<number>;
   }
 >((_event, { contacts, selectedIndex }) => {
-  // Create writable data for the family member
   const memberData = Writable.of<FamilyMember>({
     firstName: "",
     lastName: "",
     relationship: "",
     birthday: "",
     dietaryRestrictions: [],
+    notes: "",
+    tags: [],
+    allergies: [],
+    giftIdeas: [],
   });
   const charm = FamilyMemberPattern({
     member: memberData,
@@ -94,12 +111,24 @@ const removeContact = handler<
   unknown,
   {
     contacts: Writable<ContactCharm[]>;
+    groups: Writable<ContactGroup[]>;
     index: number;
     selectedIndex: Writable<number>;
   }
->((_event, { contacts, index, selectedIndex }) => {
+>((_event, { contacts, groups, index, selectedIndex }) => {
   const current = contacts.get();
   contacts.set(current.toSpliced(index, 1));
+
+  // Update group indices: remove references to deleted index, shift higher indices
+  const currentGroups = groups.get();
+  const updatedGroups = currentGroups.map((g) => ({
+    ...g,
+    contactIndices: (g.contactIndices || [])
+      .filter((i: number) => i !== index)
+      .map((i: number) => (i > index ? i - 1 : i)),
+  }));
+  groups.set(updatedGroups);
+
   const sel = selectedIndex.get();
   if (sel >= current.length - 1) {
     selectedIndex.set(Math.max(-1, current.length - 2));
@@ -115,13 +144,198 @@ const selectContact = handler<
   selectedIndex.set(index);
 });
 
+// Group handlers
+const addGroup = handler<
+  unknown,
+  { groups: Writable<ContactGroup[]> }
+>((_event, { groups }) => {
+  const current = groups.get();
+  groups.set([...current, { name: "New Group", contactIndices: [] }]);
+});
+
+const removeGroup = handler<
+  unknown,
+  { groups: Writable<ContactGroup[]>; groupIndex: number }
+>((_event, { groups, groupIndex }) => {
+  const current = groups.get();
+  groups.set(current.toSpliced(groupIndex, 1));
+});
+
+const removeContactFromGroup = handler<
+  unknown,
+  {
+    groups: Writable<ContactGroup[]>;
+    groupIndex: number;
+    contactIndex: number;
+  }
+>((_event, { groups, groupIndex, contactIndex }) => {
+  const current = groups.get();
+  const group = current[groupIndex];
+  const updated = [...current];
+  updated[groupIndex] = {
+    ...group,
+    contactIndices: (group.contactIndices || []).filter(
+      (i: number) => i !== contactIndex,
+    ),
+  };
+  groups.set(updated);
+});
+
+const toggleGroupExpanded = handler<
+  unknown,
+  { groupExpanded: Writable<Record<number, boolean>>; gi: number }
+>((_e, { groupExpanded: ge, gi: idx }) => {
+  const cur = ge.get();
+  ge.set({ ...cur, [idx]: cur[idx] === false ? true : false });
+});
+
+const toggleAddToGroup = handler<
+  unknown,
+  { addToGroupContact: Writable<number>; contactIndex: number }
+>((_e, { addToGroupContact: atg, contactIndex: idx }) => {
+  atg.set(atg.get() === idx ? -1 : idx);
+});
+
+const assignContactToGroup = handler<
+  unknown,
+  {
+    groups: Writable<ContactGroup[]>;
+    groupIndex: number;
+    contactIndex: number;
+    addToGroupContact: Writable<number>;
+  }
+>((
+  _e,
+  { groups: gs, groupIndex: gidx, contactIndex: cidx, addToGroupContact: atg },
+) => {
+  const cur = gs.get();
+  const grp = cur[gidx];
+  const idxs = grp.contactIndices || [];
+  if (idxs.includes(cidx)) return;
+  const upd = [...cur];
+  upd[gidx] = { ...grp, contactIndices: [...idxs, cidx] };
+  gs.set(upd);
+  atg.set(-1);
+});
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function computeClusters(
+  all: readonly ContactCharm[],
+): Map<number, number> {
+  const secondaryToParent = new Map<number, number>();
+  for (let i = 0; i < all.length; i++) {
+    const c = all[i];
+    const data = c.person ?? c.member;
+    if (!data?.sameAs) continue;
+    const linked = data.sameAs;
+    for (let j = 0; j < all.length; j++) {
+      if (j === i) continue;
+      const other = all[j];
+      const otherData = other.person ?? other.member;
+      if (!otherData) continue;
+      if (
+        otherData.firstName === linked.firstName &&
+        otherData.lastName === linked.lastName
+      ) {
+        secondaryToParent.set(i, j);
+        break;
+      }
+    }
+  }
+  return secondaryToParent;
+}
+
+// ============================================================================
+// UI Helpers
+// ============================================================================
+
+function contactCard(
+  charm: ContactCharm,
+  index: number,
+  selectedIndex: Writable<number>,
+  contacts: Writable<ContactCharm[]>,
+  groups: Writable<ContactGroup[]>,
+  indented?: boolean,
+) {
+  return (
+    <ct-card
+      style={computed(() => {
+        const base = selectedIndex.get() === index
+          ? "background: var(--ct-color-blue-50, #eff6ff); border: 1px solid var(--ct-color-blue-300, #93c5fd); cursor: pointer;"
+          : "cursor: pointer;";
+        return indented ? `${base} margin-left: 16px;` : base;
+      })}
+      onClick={selectContact({ selectedIndex, index })}
+    >
+      <ct-hstack style="gap: 8px; align-items: center;">
+        {indented
+          ? (
+            <span
+              style={{
+                fontSize: "12px",
+                color: "#9ca3af",
+                marginRight: "-4px",
+              }}
+            >
+              ↳
+            </span>
+          )
+          : null}
+        <span
+          style={{
+            width: "32px",
+            height: "32px",
+            borderRadius: "50%",
+            background: "#e5e7eb",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: "14px",
+            flexShrink: "0",
+          }}
+        >
+          {computed(() => {
+            const name = charm[NAME] || "";
+            const parts = name.split(" ");
+            if (parts.length >= 2) {
+              return (parts[0].charAt(0) + parts[1].charAt(0)).toUpperCase();
+            }
+            return name.charAt(0).toUpperCase() || "?";
+          })}
+        </span>
+
+        <span style={{ flex: "1" }}>{charm[NAME]}</span>
+
+        <ct-button
+          variant="ghost"
+          size="sm"
+          onClick={removeContact({
+            contacts,
+            groups,
+            index,
+            selectedIndex,
+          })}
+        >
+          ×
+        </ct-button>
+      </ct-hstack>
+    </ct-card>
+  );
+}
+
 // ============================================================================
 // Pattern
 // ============================================================================
 
-export default pattern<Input, Output>(({ contacts }) => {
+export default pattern<Input, Output>(({ contacts, groups }) => {
   const count = computed(() => contacts.get().length);
   const selectedIndex = Writable.of<number>(-1);
+
+  // Track which group sections are expanded
+  const groupExpanded = Writable.of<Record<number, boolean>>({});
 
   const openInNewView = action(() => {
     const idx = selectedIndex.get();
@@ -129,6 +343,9 @@ export default pattern<Input, Output>(({ contacts }) => {
     const charm = contacts.key(idx).get();
     return navigateTo(charm);
   });
+
+  // State for showing the "add to group" dropdown
+  const addToGroupContact = Writable.of<number>(-1);
 
   return {
     [NAME]: computed(() => `Contacts (${count})`),
@@ -150,6 +367,13 @@ export default pattern<Input, Output>(({ contacts }) => {
               >
                 + Family
               </ct-button>
+              <ct-button
+                variant="ghost"
+                size="sm"
+                onClick={addGroup({ groups })}
+              >
+                + Group
+              </ct-button>
             </ct-hstack>
           </ct-hstack>
         </ct-vstack>
@@ -170,56 +394,276 @@ export default pattern<Input, Output>(({ contacts }) => {
                     : null
                 )}
 
-                {contacts.map((charm, index) => (
-                  <ct-card
-                    style={computed(() =>
-                      selectedIndex.get() === index
-                        ? "background: var(--ct-color-blue-50, #eff6ff); border: 1px solid var(--ct-color-blue-300, #93c5fd); cursor: pointer;"
-                        : "cursor: pointer;"
-                    )}
-                    onClick={selectContact({ selectedIndex, index })}
-                  >
-                    <ct-hstack style="gap: 8px; align-items: center;">
-                      <span
-                        style={{
-                          width: "32px",
-                          height: "32px",
-                          borderRadius: "50%",
-                          background: "#e5e7eb",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: "14px",
-                          flexShrink: "0",
-                        }}
-                      >
-                        {computed(() => {
-                          const name = charm[NAME] || "";
-                          const parts = name.split(" ");
-                          if (parts.length >= 2) {
-                            return (parts[0].charAt(0) + parts[1].charAt(0))
-                              .toUpperCase();
-                          }
-                          return name.charAt(0).toUpperCase() || "?";
-                        })}
-                      </span>
+                {/* Render grouped contacts */}
+                {computed(() => {
+                  const all = contacts.get();
+                  const grps = groups.get();
+                  const clusters = computeClusters(all);
+                  const expanded = groupExpanded.get();
 
-                      <span style={{ flex: "1" }}>{charm[NAME]}</span>
+                  // Compute ungrouped indices
+                  const assigned = new Set<number>();
+                  for (const g of grps) {
+                    for (const idx of g.contactIndices || []) {
+                      assigned.add(idx);
+                    }
+                  }
+                  const ungrouped: number[] = [];
+                  for (let i = 0; i < all.length; i++) {
+                    if (!assigned.has(i)) ungrouped.push(i);
+                  }
 
-                      <ct-button
-                        variant="ghost"
-                        size="sm"
-                        onClick={removeContact({
-                          contacts,
-                          index,
-                          selectedIndex,
-                        })}
-                      >
-                        ×
-                      </ct-button>
-                    </ct-hstack>
-                  </ct-card>
-                ))}
+                  const sections: any[] = [];
+
+                  // Render each group
+                  for (let gi = 0; gi < grps.length; gi++) {
+                    const group = grps[gi];
+                    const isExpanded = expanded[gi] !== false; // default expanded
+
+                    sections.push(
+                      <ct-vstack style="gap: 2px;">
+                        <ct-hstack
+                          style="justify-content: space-between; align-items: center; padding: 4px 0; cursor: pointer;"
+                          onClick={toggleGroupExpanded({ groupExpanded, gi })}
+                        >
+                          <ct-hstack style="gap: 4px; align-items: center;">
+                            <span
+                              style={{
+                                fontSize: "10px",
+                                color: "#6b7280",
+                              }}
+                            >
+                              {isExpanded ? "▾" : "▸"}
+                            </span>
+                            <ct-input
+                              $value={groups.key(gi).key("name")}
+                              style={{
+                                fontSize: "12px",
+                                fontWeight: "600",
+                                border: "none",
+                                background: "transparent",
+                                padding: "0",
+                                color: "#374151",
+                              }}
+                            />
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                color: "#9ca3af",
+                              }}
+                            >
+                              ({(group.contactIndices || []).length})
+                            </span>
+                          </ct-hstack>
+                          <ct-button
+                            variant="ghost"
+                            size="sm"
+                            onClick={removeGroup({ groups, groupIndex: gi })}
+                          >
+                            ×
+                          </ct-button>
+                        </ct-hstack>
+
+                        {isExpanded
+                          ? (
+                            <ct-vstack style="gap: 2px;">
+                              {(group.contactIndices || []).map(
+                                (ci: number) => {
+                                  if (ci >= all.length) return null;
+                                  const charm = all[ci];
+                                  const isSecondary = clusters.has(ci);
+                                  return (
+                                    <ct-hstack style="gap: 2px; align-items: stretch;">
+                                      <div style={{ flex: "1" }}>
+                                        {contactCard(
+                                          charm,
+                                          ci,
+                                          selectedIndex,
+                                          contacts,
+                                          groups,
+                                          isSecondary,
+                                        )}
+                                      </div>
+                                      <ct-button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={removeContactFromGroup({
+                                          groups,
+                                          groupIndex: gi,
+                                          contactIndex: ci,
+                                        })}
+                                        style={{
+                                          fontSize: "10px",
+                                          color: "#9ca3af",
+                                          alignSelf: "center",
+                                        }}
+                                      >
+                                        ⊖
+                                      </ct-button>
+                                    </ct-hstack>
+                                  );
+                                },
+                              )}
+                            </ct-vstack>
+                          )
+                          : null}
+                      </ct-vstack>,
+                    );
+                  }
+
+                  // Render ungrouped section (with sameAs clustering)
+                  if (ungrouped.length > 0) {
+                    // Build sameAs tree: primary contacts first, then secondaries indented
+                    const primaries: number[] = [];
+                    const childrenOf = new Map<number, number[]>();
+
+                    for (const idx of ungrouped) {
+                      const parentIdx = clusters.get(idx);
+                      if (
+                        parentIdx !== undefined &&
+                        ungrouped.includes(parentIdx)
+                      ) {
+                        // This contact is secondary to another ungrouped contact
+                        const children = childrenOf.get(parentIdx) || [];
+                        children.push(idx);
+                        childrenOf.set(parentIdx, children);
+                      } else {
+                        primaries.push(idx);
+                      }
+                    }
+
+                    const ungroupedLabel = grps.length > 0
+                      ? (
+                        <span
+                          style={{
+                            fontSize: "12px",
+                            fontWeight: "600",
+                            color: "#6b7280",
+                            padding: "4px 0",
+                          }}
+                        >
+                          Ungrouped
+                        </span>
+                      )
+                      : null;
+
+                    const ungroupedCards: any[] = [];
+                    for (const idx of primaries) {
+                      const charm = all[idx];
+                      ungroupedCards.push(
+                        <ct-hstack style="gap: 2px; align-items: stretch;">
+                          <div style={{ flex: "1" }}>
+                            {contactCard(
+                              charm,
+                              idx,
+                              selectedIndex,
+                              contacts,
+                              groups,
+                            )}
+                          </div>
+                          {grps.length > 0
+                            ? (
+                              <ct-button
+                                variant="ghost"
+                                size="sm"
+                                onClick={toggleAddToGroup({
+                                  addToGroupContact,
+                                  contactIndex: idx,
+                                })}
+                                style={{
+                                  fontSize: "10px",
+                                  color: "#9ca3af",
+                                  alignSelf: "center",
+                                }}
+                              >
+                                ⊕
+                              </ct-button>
+                            )
+                            : null}
+                        </ct-hstack>,
+                      );
+
+                      // Show "add to group" picker if active for this contact
+                      if (addToGroupContact.get() === idx && grps.length > 0) {
+                        ungroupedCards.push(
+                          <ct-vstack
+                            style={{
+                              marginLeft: "16px",
+                              gap: "2px",
+                              padding: "4px",
+                              background: "#f9fafb",
+                              borderRadius: "4px",
+                            }}
+                          >
+                            {grps.map((_g: ContactGroup, gIdx: number) => (
+                              <ct-button
+                                variant="ghost"
+                                size="sm"
+                                onClick={assignContactToGroup({
+                                  groups,
+                                  groupIndex: gIdx,
+                                  contactIndex: idx,
+                                  addToGroupContact,
+                                })}
+                                style={{ fontSize: "11px", textAlign: "left" }}
+                              >
+                                {groups.key(gIdx).key("name")}
+                              </ct-button>
+                            ))}
+                          </ct-vstack>,
+                        );
+                      }
+
+                      // Render sameAs children indented
+                      const children = childrenOf.get(idx) || [];
+                      for (const childIdx of children) {
+                        const childCharm = all[childIdx];
+                        ungroupedCards.push(
+                          <ct-hstack style="gap: 2px; align-items: stretch;">
+                            <div style={{ flex: "1" }}>
+                              {contactCard(
+                                childCharm,
+                                childIdx,
+                                selectedIndex,
+                                contacts,
+                                groups,
+                                true,
+                              )}
+                            </div>
+                            {grps.length > 0
+                              ? (
+                                <ct-button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={toggleAddToGroup({
+                                    addToGroupContact,
+                                    contactIndex: childIdx,
+                                  })}
+                                  style={{
+                                    fontSize: "10px",
+                                    color: "#9ca3af",
+                                    alignSelf: "center",
+                                  }}
+                                >
+                                  ⊕
+                                </ct-button>
+                              )
+                              : null}
+                          </ct-hstack>,
+                        );
+                      }
+                    }
+
+                    sections.push(
+                      <ct-vstack style="gap: 2px;">
+                        {ungroupedLabel}
+                        {ungroupedCards}
+                      </ct-vstack>,
+                    );
+                  }
+
+                  return sections;
+                })}
               </ct-vstack>
             </ct-vscroll>
           </ct-resizable-panel>
@@ -264,6 +708,7 @@ export default pattern<Input, Output>(({ contacts }) => {
       </ct-screen>
     ),
     contacts,
+    groups,
     count,
   };
 });
