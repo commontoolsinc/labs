@@ -182,11 +182,17 @@ export function serializeEvent(event: Event): SerializedEvent {
   if ("detail" in event && (event as CustomEvent).detail !== undefined) {
     const detail = (event as CustomEvent).detail;
     try {
-      // Verify it can be JSON serialized (for structured clone)
-      JSON.stringify(detail);
-      serialized.detail = detail;
+      // Use JSON round-trip to get a clean JSON value
+      // This handles: functions (stringify returns undefined), symbols, circular refs
+      const jsonString = JSON.stringify(detail);
+      if (jsonString !== undefined) {
+        serialized.detail = JSON.parse(jsonString);
+      } else {
+        // Functions/symbols return undefined from stringify - convert to string
+        serialized.detail = String(detail);
+      }
     } catch {
-      // If not serializable, convert to string representation
+      // Circular refs or other errors - convert to string representation
       serialized.detail = String(detail);
     }
   }
