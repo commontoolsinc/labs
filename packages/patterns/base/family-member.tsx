@@ -19,8 +19,8 @@ import {
   Writable,
 } from "commontools";
 
-// Import PersonLike and sibling types from the canonical person pattern
-import type { PersonLike, PersonSiblingCharm } from "./person.tsx";
+// Import PersonLike from the canonical person pattern
+import type { PersonLike } from "./person.tsx";
 
 // ============================================================================
 // FamilyMember Type - Extends PersonLike with family-specific fields
@@ -73,9 +73,8 @@ interface Input {
       }
     >
   >;
-  // Optional: reactive sibling source from container for sameAs linking
-  // Uses unknown[] to accept any container's charm type at runtime
-  siblingSource?: Writable<unknown[]>;
+  // Optional: pre-extracted PersonLike data from container for sameAs linking
+  sameAs?: PersonLike[];
 }
 
 interface Output {
@@ -120,7 +119,7 @@ const clearSameAs = handler<unknown, { member: Writable<FamilyMember> }>(
 // Pattern
 // ============================================================================
 
-export default pattern<Input, Output>(({ member, siblingSource }) => {
+export default pattern<Input, Output>(({ member, sameAs }) => {
   // Computed display name showing name and relationship
   const displayName = computed(() => {
     const first = member.key("firstName").get();
@@ -149,51 +148,21 @@ export default pattern<Input, Output>(({ member, siblingSource }) => {
     return "Unknown";
   });
 
-  // Computed: filter out self from siblings and extract linkable persons
+  // Computed: filter out self from sameAs candidates for picker
   const linkableSiblings = computed(() => {
-    if (!siblingSource) return [];
-
-    const allSiblings = siblingSource.get();
-    if (!allSiblings || allSiblings.length === 0) return [];
+    if (!sameAs || sameAs.length === 0) return [];
 
     const selfFirst = member.key("firstName").get();
     const selfLast = member.key("lastName").get();
 
-    const result: Array<{ name: string; linkedPerson: PersonLike }> = [];
-
-    for (const item of allSiblings) {
-      // Cast to expected shape at runtime
-      const sib = item as PersonSiblingCharm;
-      const sibPerson = sib.person;
-      const sibMember = sib.member;
-
-      let firstName = "";
-      let lastName = "";
-      let linkedPerson: PersonLike | undefined;
-
-      if (sibPerson) {
-        firstName = sibPerson.firstName || "";
-        lastName = sibPerson.lastName || "";
-        linkedPerson = sibPerson;
-      } else if (sibMember) {
-        firstName = sibMember.firstName || "";
-        lastName = sibMember.lastName || "";
-        linkedPerson = sibMember as PersonLike;
-      }
-
-      // Skip self
-      if (firstName === selfFirst && lastName === selfLast) continue;
-      if (!linkedPerson) continue;
-
-      let name = "Person";
-      if (firstName && lastName) name = `${firstName} ${lastName}`;
-      else if (firstName) name = firstName;
-      else if (lastName) name = lastName;
-
-      result.push({ name, linkedPerson });
-    }
-
-    return result;
+    return sameAs
+      .filter((s) => !(s.firstName === selfFirst && s.lastName === selfLast))
+      .map((s) => {
+        const name = s.firstName && s.lastName
+          ? `${s.firstName} ${s.lastName}`
+          : s.firstName || s.lastName || "Person";
+        return { name, linkedPerson: s as PersonLike };
+      });
   });
 
   const hasSiblings = computed(() => linkableSiblings.length > 0);
