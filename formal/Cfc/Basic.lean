@@ -14,6 +14,7 @@ import Cfc.Atom
 import Cfc.Label
 import Cfc.Store
 import Cfc.Opaque
+import Cfc.WriteAuthority
 import Cfc.LabelTransitions
 import Cfc.Access
 import Cfc.Link
@@ -39,5 +40,6 @@ import Cfc.Proofs.GmailExample
 import Cfc.Proofs.LabelTransitions
 import Cfc.Proofs.Store
 import Cfc.Proofs.Opaque
+import Cfc.Proofs.WriteAuthority
 import Cfc.Proofs.Collection
 import Cfc.Proofs.LabelTransitionExamples
