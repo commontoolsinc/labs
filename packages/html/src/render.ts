@@ -120,6 +120,8 @@ function renderViaWorker(
     if (cancelAsync) {
       cancelAsync();
     }
+    // Dispose renderer to clean up event listeners and applicator
+    renderer.dispose();
   };
 }
 

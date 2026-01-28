@@ -178,9 +178,17 @@ export function serializeEvent(event: Event): SerializedEvent {
     }
   }
 
-  // Handle CustomEvent detail
+  // Handle CustomEvent detail - ensure it's JSON-serializable
   if ("detail" in event && (event as CustomEvent).detail !== undefined) {
-    serialized.detail = (event as CustomEvent).detail;
+    const detail = (event as CustomEvent).detail;
+    try {
+      // Verify it can be JSON serialized (for structured clone)
+      JSON.stringify(detail);
+      serialized.detail = detail;
+    } catch {
+      // If not serializable, convert to string representation
+      serialized.detail = String(detail);
+    }
   }
 
   return serialized;

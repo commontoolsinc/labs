@@ -182,8 +182,9 @@ export class DomApplicator {
    * Dispose of all tracked nodes and listeners.
    */
   dispose(): void {
-    // Remove all event listeners
+    // Remove all event listeners (skip container)
     for (const [nodeId, listeners] of this.eventListeners) {
+      if (nodeId === CONTAINER_NODE_ID) continue;
       const node = this.nodes.get(nodeId);
       if (node) {
         for (const [eventType, listener] of listeners) {
@@ -193,8 +194,9 @@ export class DomApplicator {
     }
     this.eventListeners.clear();
 
-    // Remove all nodes
-    for (const node of this.nodes.values()) {
+    // Remove all nodes except the container (it's owned by the caller)
+    for (const [nodeId, node] of this.nodes) {
+      if (nodeId === CONTAINER_NODE_ID) continue;
       if (node.parentNode) {
         node.parentNode.removeChild(node);
       }

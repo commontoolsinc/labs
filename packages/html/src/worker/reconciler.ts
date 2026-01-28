@@ -276,7 +276,6 @@ export class WorkerReconciler {
     }
 
     // Render new node - renderNode handles all render node types
-    const [cancel, _addCancel] = useCancelGroup();
     const state = this.renderNode(ctx, node, new Set());
 
     if (state) {
@@ -289,7 +288,8 @@ export class WorkerReconciler {
         },
       ]);
       wrapper.currentChild = state;
-      wrapper.cancel = cancel;
+      // Use the state's cancel function directly - it owns all child subscriptions
+      wrapper.cancel = state.cancel;
     }
   }
 
@@ -993,17 +993,13 @@ export class WorkerReconciler {
       };
     }
 
-    // Handle Cell<Cell<X>> - delegate to renderNode which handles Cells
+    // Cell<Cell<X>> shouldn't happen - Cell chains are resolved by runtime.
+    // If we hit this, it's likely a bug - throw to surface it.
     if (isCell(child)) {
-      const state = this.renderNode(ctx, child, new Set(visited));
-      if (!state) return null;
-
-      return {
-        nodeId: state.nodeId,
-        isText: false,
-        cancel: state.cancel,
-        elementState: state,
-      };
+      throw new Error(
+        "Unexpected Cell in renderChildContent - Cell chains should be resolved by runtime. " +
+          "Please report this issue.",
+      );
     }
 
     // Handle primitive values (text nodes)

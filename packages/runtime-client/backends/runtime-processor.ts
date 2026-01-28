@@ -227,6 +227,14 @@ export class RuntimeProcessor {
           cancel();
         }
         this.subscriptions.clear();
+
+        // Clean up VDOM mounts
+        for (const { reconciler, cancel } of this.vdomMounts.values()) {
+          cancel();
+          reconciler.unmount();
+        }
+        this.vdomMounts.clear();
+
         await this.runtime.storageManager.synced();
         await this.runtime.dispose();
       } catch (e) {
