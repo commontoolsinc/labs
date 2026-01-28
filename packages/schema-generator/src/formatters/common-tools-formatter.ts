@@ -221,8 +221,11 @@ export class CommonToolsFormatter implements TypeFormatter {
       const hint = context.schemaHints.get(context.typeNode);
       if (hint?.items === false) {
         isArrayPropertyOnlyAccess = true;
-        // Build items override with not:true and the appropriate wrapper semantic
-        const itemsOverride: Record<string, boolean> = { not: true };
+        // Build items override with object stub and the appropriate wrapper semantic
+        const itemsOverride: Record<string, unknown> = {
+          type: "object",
+          properties: {},
+        };
         if (wrapperKind === "Cell") {
           itemsOverride.asCell = true;
         } else if (wrapperKind === "OpaqueRef") {

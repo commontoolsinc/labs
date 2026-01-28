@@ -198,11 +198,9 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
     mentionable: index.mentionable,
   });
 
-  const charmCount = computed(() => visibleCharms.reduce((acc) => acc + 1, 0));
-
   return {
     backlinksIndex: index,
-    [NAME]: computed(() => `Space Home (${charmCount})`),
+    [NAME]: computed(() => `Space Home (${visibleCharms.length})`),
     [UI]: (
       <ct-screen>
         <ct-keybind

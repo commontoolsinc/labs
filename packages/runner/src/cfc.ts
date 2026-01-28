@@ -546,6 +546,7 @@ export class ContextualFlowControl {
             path.slice(index),
             rootSchema,
             extraClassifications,
+            additionalPropertiesDefault
           );
           if (subSchema === false) {
             continue;
