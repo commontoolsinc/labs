@@ -36,6 +36,7 @@ import {
   isInRestrictedReactiveContext,
   isInsideRestrictedContext,
   isInsideSafeCallbackWrapper,
+  isStandaloneFunctionDefinition,
 } from "../ast/mod.ts";
 import { isOpaqueRefType } from "./opaque-ref/opaque-ref.ts";
 
@@ -57,6 +58,11 @@ export class PatternContextValidationTransformer extends Transformer {
         ts.isFunctionDeclaration(node)
       ) {
         this.validateFunctionCreation(node, context, checker);
+
+        // Check for reactive operations in standalone functions
+        if (isStandaloneFunctionDefinition(node)) {
+          this.validateStandaloneFunction(node, context, checker);
+        }
       }
 
       // Check for optional chaining in reactive context
@@ -427,5 +433,160 @@ export class PatternContextValidationTransformer extends Transformer {
         node,
       });
     }
+  }
+
+  /**
+   * Validates that standalone functions don't use reactive operations like
+   * computed(), derive(), or .map() on CellLike types.
+   *
+   * Standalone functions cannot have their closures captured automatically.
+   * Users should either:
+   * - Move the reactive operation out of the standalone function
+   * - Use patternTool() which handles closure capture automatically
+   *
+   * Exception: Functions passed to patternTool() are handled by the
+   * patternTool transformer and don't need validation here.
+   */
+  private validateStandaloneFunction(
+    func: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
+    context: TransformationContext,
+    checker: ts.TypeChecker,
+  ): void {
+    // Skip if this function is passed to patternTool()
+    if (this.isPatternToolArgument(func)) {
+      return;
+    }
+
+    // Walk the function body looking for reactive operations
+    const visitBody = (node: ts.Node): void => {
+      // Skip nested function definitions - they have their own scope
+      if (
+        node !== func &&
+        (ts.isArrowFunction(node) ||
+          ts.isFunctionExpression(node) ||
+          ts.isFunctionDeclaration(node))
+      ) {
+        return;
+      }
+
+      if (ts.isCallExpression(node)) {
+        const callKind = detectCallKind(node, checker);
+
+        if (callKind) {
+          // Check for computed() calls
+          if (
+            callKind.kind === "builder" &&
+            callKind.builderName === "computed"
+          ) {
+            context.reportDiagnostic({
+              severity: "error",
+              type: "standalone-function:reactive-operation",
+              message:
+                `computed() is not allowed inside standalone functions. ` +
+                `Standalone functions cannot capture reactive closures. ` +
+                `Move the computed() call to the pattern body, or use patternTool() to enable automatic closure capture.`,
+              node,
+            });
+            return;
+          }
+
+          // Check for derive() calls
+          if (callKind.kind === "derive") {
+            context.reportDiagnostic({
+              severity: "error",
+              type: "standalone-function:reactive-operation",
+              message: `derive() is not allowed inside standalone functions. ` +
+                `Standalone functions cannot capture reactive closures. ` +
+                `Move the derive() call to the pattern body, or use patternTool() to enable automatic closure capture.`,
+              node,
+            });
+            return;
+          }
+
+          // Check for .map() on CellLike types
+          if (callKind.kind === "array-map") {
+            // Check if this is a map on a CellLike type (not a plain array)
+            if (ts.isPropertyAccessExpression(node.expression)) {
+              const receiverType = checker.getTypeAtLocation(
+                node.expression.expression,
+              );
+              if (this.isCellLikeType(receiverType, checker)) {
+                context.reportDiagnostic({
+                  severity: "error",
+                  type: "standalone-function:reactive-operation",
+                  message:
+                    `.map() on reactive types is not allowed inside standalone functions. ` +
+                    `Standalone functions cannot capture reactive closures. ` +
+                    `Move the .map() call to the pattern body, or use patternTool() to enable automatic closure capture.`,
+                  node,
+                });
+                return;
+              }
+            }
+          }
+        }
+      }
+
+      ts.forEachChild(node, visitBody);
+    };
+
+    if (func.body) {
+      visitBody(func.body);
+    }
+  }
+
+  /**
+   * Checks if a function is passed directly as an argument to patternTool().
+   * If so, the patternTool transformer will handle closure capture.
+   */
+  private isPatternToolArgument(
+    func: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
+  ): boolean {
+    // Function declarations can't be passed as arguments
+    if (ts.isFunctionDeclaration(func)) return false;
+
+    const parent = func.parent;
+    if (!parent || !ts.isCallExpression(parent)) return false;
+
+    // Check if this function is the first argument
+    if (parent.arguments[0] !== func) return false;
+
+    // Check if the call is to patternTool
+    const callee = parent.expression;
+    if (ts.isIdentifier(callee) && callee.text === "patternTool") {
+      return true;
+    }
+    if (
+      ts.isPropertyAccessExpression(callee) &&
+      callee.name.text === "patternTool"
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Checks if a type is a CellLike type (Cell, OpaqueRef, etc.)
+   * that would require reactive handling in .map() calls.
+   */
+  private isCellLikeType(type: ts.Type, checker: ts.TypeChecker): boolean {
+    // Check if it's an OpaqueRef type
+    if (isOpaqueRefType(type, checker)) {
+      return true;
+    }
+
+    // Check the type name for Cell-like types
+    const typeStr = checker.typeToString(type);
+    const cellLikePatterns = [
+      "Cell<",
+      "OpaqueCell<",
+      "Writable<",
+      "Stream<",
+      "OpaqueRef<",
+      "OpaqueRefMethods<",
+    ];
+
+    return cellLikePatterns.some((pattern) => typeStr.includes(pattern));
   }
 }
