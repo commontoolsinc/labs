@@ -26,6 +26,67 @@ import {
   type NotePiece,
 } from "./schemas.tsx";
 
+// ===== Shared Utility Functions =====
+
+/**
+ * Extract noteIds and titles from a list of items for tracking/removal.
+ * Notes have noteId, notebooks have title only.
+ */
+const collectItemIdentifiers = (
+  items: NotePiece[],
+): { noteIds: string[]; titles: string[] } => {
+  const noteIds: string[] = [];
+  const titles: string[] = [];
+  for (const item of items) {
+    const noteId = (item as any)?.noteId;
+    const title = (item as any)?.title;
+    if (noteId) {
+      noteIds.push(noteId);
+    } else if (title) {
+      titles.push(title);
+    }
+  }
+  return { noteIds, titles };
+};
+
+/**
+ * Create a predicate to check if an item should be removed based on noteId or title.
+ */
+const createRemovalPredicate = (
+  noteIds: string[],
+  titles: string[],
+): (n: any) => boolean => {
+  return (n: any) => {
+    if (n?.noteId && noteIds.includes(n.noteId)) return true;
+    if (!n?.noteId && n?.title && titles.includes(n.title)) return true;
+    return false;
+  };
+};
+
+/**
+ * Remove items matching the predicate from all notebooks' notes arrays.
+ * Optionally skip a target notebook (for move operations).
+ */
+const removeFromAllNotebooks = (
+  notebooks: Writable<NotebookPiece[]>,
+  shouldRemove: (n: any) => boolean,
+  skipIndex?: number,
+): void => {
+  const notebooksList = notebooks.get();
+  for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
+    if (skipIndex !== undefined && nbIdx === skipIndex) continue;
+
+    const nbCell = notebooks.key(nbIdx);
+    const nbNotesCell = nbCell.key("notes");
+    const nbNotes = nbNotesCell.get() ?? [];
+
+    const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
+    if (filtered.length !== nbNotes.length) {
+      nbNotesCell.set(filtered);
+    }
+  }
+};
+
 // ===== Output Type =====
 
 interface NotebookOutput {
@@ -50,10 +111,11 @@ interface NotebookOutput {
 
 // NOTE: showNewNoteModal and showNewNotebookModal converted to actions inside pattern
 
-// Handler to create note and navigate to it (unless "Create Another" was used)
-const createNoteAndOpen = handler<
+// Handler to create note - createAnother binding determines behavior
+const createNote = handler<
   void,
   {
+    createAnother: boolean;
     newNoteTitle: Writable<string>;
     showNewNotePrompt: Writable<boolean>;
     notes: Writable<NotePiece[]>;
@@ -64,6 +126,7 @@ const createNoteAndOpen = handler<
 >((
   _,
   {
+    createAnother,
     newNoteTitle,
     showNewNotePrompt,
     notes,
@@ -78,49 +141,25 @@ const createNoteAndOpen = handler<
     content: "",
     isHidden: true,
     noteId: generateId(),
-    parentNotebook: self, // Set parent at creation for back navigation
+    parentNotebook: self,
   });
   allPieces.push(newNote as any); // Required for persistence
   notes.push(newNote);
 
-  const shouldNavigate = !usedCreateAnotherNote.get();
-
-  // Reset modal state
-  showNewNotePrompt.set(false);
-  newNoteTitle.set("");
-  usedCreateAnotherNote.set(false);
-
-  // Only navigate if "Create Another" was never used in this session
-  if (shouldNavigate) {
-    return navigateTo(newNote);
+  if (createAnother) {
+    // Mark that "Create Another" was used, keep modal open
+    usedCreateAnotherNote.set(true);
+    newNoteTitle.set("");
+  } else {
+    // Close modal and navigate (unless "Create Another" was previously used)
+    const shouldNavigate = !usedCreateAnotherNote.get();
+    showNewNotePrompt.set(false);
+    newNoteTitle.set("");
+    usedCreateAnotherNote.set(false);
+    if (shouldNavigate) {
+      return navigateTo(newNote);
+    }
   }
-});
-
-// Handler to create note and stay in modal to create another
-const createNoteAndContinue = handler<
-  void,
-  {
-    newNoteTitle: Writable<string>;
-    notes: Writable<NotePiece[]>;
-    allPieces: Writable<NotePiece[]>;
-    usedCreateAnotherNote: Writable<boolean>;
-    self: any;
-  }
->((_, { newNoteTitle, notes, allPieces, usedCreateAnotherNote, self }) => {
-  const title = newNoteTitle.get() || "New Note";
-  const newNote = Note({
-    title,
-    content: "",
-    isHidden: true,
-    noteId: generateId(),
-    parentNotebook: self, // Set parent for back navigation
-  });
-  allPieces.push(newNote as any); // Required for persistence
-  notes.push(newNote);
-  // Mark that "Create Another" was used
-  usedCreateAnotherNote.set(true);
-  // Keep modal open, just clear the title for the next note
-  newNoteTitle.set("");
 });
 
 // NOTE: cancelNewNotePrompt converted to action inside pattern
@@ -141,25 +180,6 @@ const removeFromNotebook = handler<
   note.key("isHidden").set(false);
 });
 
-// Handler for dropping a piece onto this notebook
-const _handlePieceDrop = handler<
-  { detail: { sourceCell: Writable<NotePiece> } },
-  { notes: Writable<NotePiece[]> }
->((event, { notes }) => {
-  const sourceCell = event.detail.sourceCell;
-  const notesList = notes.get() ?? [];
-
-  // Prevent duplicates using Writable.equals
-  const alreadyExists = notesList.some((n) => equals(sourceCell, n as any));
-  if (alreadyExists) return;
-
-  // Hide from Pages list
-  sourceCell.key("isHidden").set(true);
-
-  // Add to notebook - push cell reference, not value, to maintain piece identity
-  notes.push(sourceCell);
-});
-
 // Handler for dropping items onto the current notebook's card
 // This MOVES the dropped notebook - removes from all other notebooks, adds here
 // Supports multi-item drag: if dragged item is in selection, moves ALL selected items
@@ -175,93 +195,38 @@ const handleDropOntoCurrentNotebook = handler<
   const notesList = notes.get();
   const selected = selectedNoteIndices.get();
 
-  // Check if dragged item is in the selection (from a sibling notebook drag)
-  // For sibling notebooks, we check if the dragged cell matches any selected item
+  // Check if dragged item is in the selection
   const draggedIndex = notesList.findIndex((n: any) => equals(sourceCell, n));
   const isDraggedInSelection = draggedIndex >= 0 &&
     selected.includes(draggedIndex);
 
   if (isDraggedInSelection && selected.length > 1) {
-    // Multi-item move: gather all selected items
+    // Multi-item move
     const itemsToMove = selected.map((idx) => notesList[idx]).filter(Boolean);
+    const { noteIds, titles } = collectItemIdentifiers(itemsToMove);
+    const shouldRemove = createRemovalPredicate(noteIds, titles);
 
-    // Track by noteId and title (like moveSelectedToNotebook)
-    const selectedNoteIds: string[] = [];
-    const selectedTitles: string[] = [];
-    for (const item of itemsToMove) {
-      const noteId = (item as any)?.noteId;
-      const title = (item as any)?.title;
-      if (noteId) {
-        selectedNoteIds.push(noteId);
-      } else if (title) {
-        selectedTitles.push(title);
-      }
-    }
-
-    const shouldRemove = (n: any) => {
-      if (n?.noteId && selectedNoteIds.includes(n.noteId)) return true;
-      if (!n?.noteId && n?.title && selectedTitles.includes(n.title)) {
-        return true;
-      }
-      return false;
-    };
-
-    // Remove from ALL other notebooks' notes arrays (move semantics)
-    const notebooksList = notebooks.get();
-    for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
-      const nbCell = notebooks.key(nbIdx);
-      const nbNotesCell = nbCell.key("notes");
-      const nbNotes = (nbNotesCell.get() as unknown[]) ?? [];
-
-      const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
-      if (filtered.length !== nbNotes.length) {
-        nbNotesCell.set(filtered as NotePiece[]);
-      }
-    }
+    // Remove from all notebooks
+    removeFromAllNotebooks(notebooks, shouldRemove);
 
     // Add all to this notebook (deduplicated)
     for (const item of itemsToMove) {
-      const alreadyExists = notesList.some((n) =>
-        equals(item as any, n as any)
-      );
-      if (!alreadyExists) {
+      if (!notesList.some((n) => equals(item as any, n as any))) {
         notes.push(item as any);
         (item as any).key?.("isHidden")?.set?.(true);
       }
     }
-
-    // Clear selection
     selectedNoteIndices.set([]);
   } else {
-    // Single-item move (existing logic)
+    // Single-item move
+    if (notesList.some((n) => equals(sourceCell, n as any))) return;
+
     const sourceTitle = (sourceCell as any).key("title").get();
+    const shouldRemove = (n: any) =>
+      n?.title === sourceTitle || equals(sourceCell, n as any);
 
-    // Prevent duplicates
-    const alreadyExists = notesList.some((n) => equals(sourceCell, n as any));
-    if (alreadyExists) return;
-
-    // Remove from ALL other notebooks' notes arrays (move semantics)
-    const notebooksList = notebooks.get();
-    for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
-      const nbCell = notebooks.key(nbIdx);
-      const nbNotesCell = nbCell.key("notes");
-      const nbNotes = (nbNotesCell.get() as unknown[]) ?? [];
-
-      // Find and remove by title or Writable.equals
-      const filtered = nbNotes.filter((n: any) => {
-        if (n?.title === sourceTitle) return false;
-        if (equals(sourceCell, n as any)) return false;
-        return true;
-      });
-      if (filtered.length !== nbNotes.length) {
-        nbNotesCell.set(filtered as NotePiece[]);
-      }
-    }
-
-    // Hide from default-app piece list
+    removeFromAllNotebooks(notebooks, shouldRemove);
     sourceCell.key("isHidden").set(true);
-
-    // Add to this notebook
     notes.push(sourceCell as any);
   }
 });
@@ -284,8 +249,7 @@ const handleDropOntoNotebook = handler<
   const sourceCell = event.detail.sourceCell;
 
   // Check if target is actually a notebook
-  const isTargetNotebook = targetNotebook.key("isNotebook").get();
-  if (!isTargetNotebook) return;
+  if (!targetNotebook.key("isNotebook").get()) return;
 
   const targetNotesCell = targetNotebook.key("notes");
   const targetNotesList = (targetNotesCell.get() as unknown[]) ?? [];
@@ -298,72 +262,35 @@ const handleDropOntoNotebook = handler<
     selected.includes(draggedIndex);
 
   if (isDraggedInSelection && selected.length > 1) {
-    // Multi-item move: gather all selected items
+    // Multi-item move
     const itemsToMove = selected.map((idx) => currentList[idx]).filter(Boolean);
-
-    // Track by noteId and title (like moveSelectedToNotebook)
-    const selectedNoteIds: string[] = [];
-    const selectedTitles: string[] = [];
-    for (const item of itemsToMove) {
-      const noteId = (item as any)?.noteId;
-      const title = (item as any)?.title;
-      if (noteId) {
-        selectedNoteIds.push(noteId);
-      } else if (title) {
-        selectedTitles.push(title);
-      }
-    }
-
-    const shouldRemove = (n: any) => {
-      if (n?.noteId && selectedNoteIds.includes(n.noteId)) return true;
-      if (!n?.noteId && n?.title && selectedTitles.includes(n.title)) {
-        return true;
-      }
-      return false;
-    };
+    const { noteIds, titles } = collectItemIdentifiers(itemsToMove);
+    const shouldRemove = createRemovalPredicate(noteIds, titles);
 
     // Add all to target (deduplicated)
     for (const item of itemsToMove) {
-      const alreadyInTarget = targetNotesList.some((n) =>
-        equals(item as any, n as any)
-      );
-      if (!alreadyInTarget) {
+      if (!targetNotesList.some((n) => equals(item as any, n as any))) {
         targetNotesCell.push(item);
         (item as any).key?.("isHidden")?.set?.(true);
       }
     }
 
-    // Remove from all notebooks EXCEPT the target (move semantics)
-    const notebooksList = notebooks.get();
+    // Find target notebook index to skip it during removal
     const targetTitle = targetNotebook.key("title").get();
-    for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
-      const nbCell = notebooks.key(nbIdx);
-      // Skip the target notebook - we just added items there
-      const nbTitle = nbCell.key("title").get();
-      if (nbTitle === targetTitle) continue;
+    const notebooksList = notebooks.get();
+    const targetIndex = notebooksList.findIndex(
+      (nb: any) => nb?.title === targetTitle,
+    );
 
-      const nbNotesCell = nbCell.key("notes");
-      const nbNotes = nbNotesCell.get() ?? [];
+    // Remove from all notebooks except target
+    removeFromAllNotebooks(notebooks, shouldRemove, targetIndex);
 
-      const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
-      if (filtered.length !== nbNotes.length) {
-        nbNotesCell.set(filtered);
-      }
-    }
-
-    // Remove from current notebook (which is different from target)
-    const filtered = currentList.filter((n: any) => !shouldRemove(n));
-    currentNotes.set(filtered);
-
-    // Clear selection
+    // Remove from current notebook
+    currentNotes.set(currentList.filter((n: any) => !shouldRemove(n)));
     selectedNoteIndices.set([]);
   } else {
-    // Single-item move (existing logic)
-    // Prevent duplicates in target
-    const alreadyInTarget = targetNotesList.some((n) =>
-      equals(sourceCell, n as any)
-    );
-    if (alreadyInTarget) return;
+    // Single-item move
+    if (targetNotesList.some((n) => equals(sourceCell, n as any))) return;
 
     // Remove from current notebook if present
     const indexInCurrent = currentList.findIndex((n: any) =>
@@ -375,19 +302,17 @@ const handleDropOntoNotebook = handler<
       currentNotes.set(copy);
     }
 
-    // Hide from default-app piece list
     sourceCell.key("isHidden").set(true);
-
-    // Add to target notebook
     targetNotesCell.push(sourceCell);
   }
 });
 
-// Create nested notebook and navigate to it (unless "Create Another" was used)
+// Create nested notebook - createAnother binding determines behavior
 // Note: Notebooks are created empty; a default note is created lazily when opened
-const createNestedNotebookAndOpen = handler<
+const createNestedNotebook = handler<
   void,
   {
+    createAnother: boolean;
     newNestedNotebookTitle: Writable<string>;
     showNewNestedNotebookPrompt: Writable<boolean>;
     notes: Writable<NotePiece[]>;
@@ -398,6 +323,7 @@ const createNestedNotebookAndOpen = handler<
 >((
   _,
   {
+    createAnother,
     newNestedNotebookTitle,
     showNewNestedNotebookPrompt,
     notes,
@@ -412,50 +338,23 @@ const createNestedNotebookAndOpen = handler<
     title,
     notes: [],
     isHidden: true,
-    parentNotebook: self,
+    parentNotebook: createAnother ? undefined : self,
   });
   allPieces.push(nb);
   notes.push(nb);
 
-  const shouldNavigate = !usedCreateAnotherNotebook.get();
-
-  // Reset modal state
-  showNewNestedNotebookPrompt.set(false);
-  newNestedNotebookTitle.set("");
-  usedCreateAnotherNotebook.set(false);
-
-  // Only navigate if "Create Another" was never used in this session
-  if (shouldNavigate) {
-    return navigateTo(nb);
+  if (createAnother) {
+    usedCreateAnotherNotebook.set(true);
+    newNestedNotebookTitle.set("");
+  } else {
+    const shouldNavigate = !usedCreateAnotherNotebook.get();
+    showNewNestedNotebookPrompt.set(false);
+    newNestedNotebookTitle.set("");
+    usedCreateAnotherNotebook.set(false);
+    if (shouldNavigate) {
+      return navigateTo(nb);
+    }
   }
-});
-
-// Create nested notebook and keep modal open for another
-// Note: Notebooks are created empty; a default note is created lazily when opened
-const createNestedNotebookAndContinue = handler<
-  void,
-  {
-    newNestedNotebookTitle: Writable<string>;
-    notes: Writable<NotePiece[]>;
-    allPieces: Writable<NotePiece[]>;
-    usedCreateAnotherNotebook: Writable<boolean>;
-  }
->((
-  _,
-  { newNestedNotebookTitle, notes, allPieces, usedCreateAnotherNotebook },
-) => {
-  const title = newNestedNotebookTitle.get() || "New Notebook";
-
-  const nb = Notebook({
-    title,
-    notes: [],
-    isHidden: true,
-  });
-  allPieces.push(nb);
-  notes.push(nb);
-  // Mark that "Create Another" was used
-  usedCreateAnotherNotebook.set(true);
-  newNestedNotebookTitle.set("");
 });
 
 // NOTE: cancelNewNestedNotebookPrompt converted to action inside pattern
@@ -495,36 +394,6 @@ const navigateToChild = handler<
 
 // NOTE: selectAllNotes and deselectAllNotes converted to actions inside pattern
 
-// Handler to duplicate selected notes
-const _duplicateSelectedNotes = handler<
-  Record<string, never>,
-  {
-    notes: Writable<NotePiece[]>;
-    allPieces: Writable<NotePiece[]>;
-    selectedNoteIndices: Writable<number[]>;
-  }
->((_, { notes, allPieces, selectedNoteIndices }) => {
-  const selected = selectedNoteIndices.get();
-  const notesList = notes.get();
-
-  // Collect copies first, then batch push (reduces N reactive cycles to 1)
-  const copies: NotePiece[] = [];
-  for (const idx of selected) {
-    const original = notesList[idx];
-    if (original) {
-      copies.push(Note({
-        title: (original.title ?? "Note") + " (Copy)",
-        content: original.content ?? "",
-        isHidden: true,
-        noteId: generateId(),
-      }));
-    }
-  }
-  allPieces.push(...copies); // Required for persistence
-  notes.push(...copies);
-  selectedNoteIndices.set([]);
-});
-
 // Handler to permanently delete selected notes from the space
 const deleteSelectedNotes = handler<
   Record<string, never>,
@@ -537,52 +406,19 @@ const deleteSelectedNotes = handler<
 >((_, { notes, selectedNoteIndices, allPieces, notebooks }) => {
   const selected = selectedNoteIndices.get();
   const notesList = notes.get();
-  const allPiecesList = allPieces.get();
-  const notebooksList = notebooks.get();
+  const itemsToDelete = selected.map((idx) => notesList[idx]).filter(Boolean);
 
-  // Collect noteIds and titles to delete (titles for notebooks which don't have noteId)
-  const noteIdsToDelete: string[] = [];
-  const titlesToDelete: string[] = [];
-  for (const idx of selected) {
-    const item = notesList[idx];
-    const noteId = (item as any)?.noteId;
-    const title = (item as any)?.title;
-    if (noteId) {
-      noteIdsToDelete.push(noteId);
-    } else if (title) {
-      // Notebooks don't have noteId, use title instead
-      titlesToDelete.push(title);
-    }
-  }
+  const { noteIds, titles } = collectItemIdentifiers(itemsToDelete);
+  const shouldDelete = createRemovalPredicate(noteIds, titles);
 
-  // Helper to check if item should be deleted
-  const shouldDelete = (n: any) => {
-    if (n?.noteId && noteIdsToDelete.includes(n.noteId)) return true;
-    if (!n?.noteId && n?.title && titlesToDelete.includes(n.title)) return true;
-    return false;
-  };
+  // Remove from all notebooks
+  removeFromAllNotebooks(notebooks, shouldDelete);
 
-  // Remove from all notebooks first (including this one)
-  for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
-    const nbCell = notebooks.key(nbIdx);
-    const nbNotesCell = nbCell.key("notes");
-    const nbNotes = nbNotesCell.get() ?? [];
-
-    const filtered = nbNotes.filter((n: any) => !shouldDelete(n));
-    if (filtered.length !== nbNotes.length) {
-      nbNotesCell.set(filtered);
-    }
-  }
-
-  // Also remove from this notebook's notes array
-  const filteredNotes = notesList.filter((n: any) => !shouldDelete(n));
-  notes.set(filteredNotes);
+  // Remove from this notebook's notes array
+  notes.set(notesList.filter((n: any) => !shouldDelete(n)));
 
   // Remove from allPieces (permanent delete)
-  const filteredPieces = allPiecesList.filter((piece: any) =>
-    !shouldDelete(piece)
-  );
-  allPieces.set(filteredPieces);
+  allPieces.set(allPieces.get().filter((piece: any) => !shouldDelete(piece)));
 
   selectedNoteIndices.set([]);
 });
@@ -666,11 +502,9 @@ const moveSelectedToNotebook = handler<
     pendingNotebookAction,
   },
 ) => {
-  // Handle both native select (target.value) and ct-select (detail.value)
   const value = event.target?.value ?? event.detail?.value ?? "";
   if (!value) return;
 
-  // Handle "new-*" - show prompt to get name from user
   if (value === "new") {
     pendingNotebookAction.set("move");
     showNewNotebookPrompt.set(true);
@@ -678,62 +512,27 @@ const moveSelectedToNotebook = handler<
     return;
   }
 
-  // Move to existing notebook
   const nbIndex = parseInt(value, 10);
   if (nbIndex < 0) return;
 
   const selected = selectedNoteIndices.get();
   const notesList = notes.get();
-  const notebooksList = notebooks.get();
-  const targetNotebookCell = notebooks.key(nbIndex);
-  const targetNotebookNotes = targetNotebookCell.key("notes");
+  const notesToMove = selected.map((idx) => notesList[idx]).filter(Boolean);
 
-  // Collect notes/notebooks and IDs/titles for removal
-  const selectedNoteIds: string[] = [];
-  const selectedTitles: string[] = []; // For notebooks (no noteId)
-  const notesToMove: NotePiece[] = [];
-  for (const idx of selected) {
-    const item = notesList[idx];
-    const noteId = (item as any)?.noteId;
-    const title = (item as any)?.title;
-    if (noteId) {
-      selectedNoteIds.push(noteId);
-    } else if (title) {
-      selectedTitles.push(title);
-    }
-    if (item) notesToMove.push(item);
-  }
+  const { noteIds, titles } = collectItemIdentifiers(notesToMove);
+  const shouldRemove = createRemovalPredicate(noteIds, titles);
 
-  // Helper to check if item should be removed
-  const shouldRemove = (n: any) => {
-    if (n?.noteId && selectedNoteIds.includes(n.noteId)) return true;
-    if (!n?.noteId && n?.title && selectedTitles.includes(n.title)) return true;
-    return false;
-  };
-
-  // Add to target notebook in one operation
+  // Add to target notebook
+  const targetNotebookNotes = notebooks.key(nbIndex).key("notes");
   (targetNotebookNotes as Writable<NotePiece[] | undefined>).push(
     ...notesToMove,
   );
 
-  // Remove from all notebooks
-  for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
-    // Don't remove from the target notebook we just added to
-    if (nbIdx === nbIndex) continue;
-
-    const nbCell = notebooks.key(nbIdx);
-    const nbNotesCell = nbCell.key("notes");
-    const nbNotes = nbNotesCell.get() ?? [];
-
-    const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
-    if (filtered.length !== nbNotes.length) {
-      nbNotesCell.set(filtered);
-    }
-  }
+  // Remove from all notebooks except target
+  removeFromAllNotebooks(notebooks, shouldRemove, nbIndex);
 
   // Remove from this notebook
-  const filtered = notesList.filter((n: any) => !shouldRemove(n));
-  notes.set(filtered);
+  notes.set(notesList.filter((n: any) => !shouldRemove(n)));
 
   selectedNoteIndices.set([]);
   selectedMoveNotebook.set("");
@@ -763,37 +562,13 @@ const createNotebookFromPrompt = handler<
   } = state;
 
   const name = newNotebookName.get().trim() || "New Notebook";
-  const action = pendingNotebookAction.get();
+  const actionType = pendingNotebookAction.get();
 
-  // Gather selected items and track by noteId (notes) or title (notebooks)
   const selected = selectedNoteIndices.get();
   const notesList = notes.get();
-  const selectedItems: NotePiece[] = [];
-  const selectedNoteIds: string[] = [];
-  const selectedTitles: string[] = []; // For notebooks (no noteId)
+  const selectedItems = selected.map((idx) => notesList[idx]).filter(Boolean);
 
-  for (const idx of selected) {
-    const item = notesList[idx];
-    if (item) {
-      selectedItems.push(item);
-      const noteId = (item as any)?.noteId;
-      const title = (item as any)?.title;
-      if (noteId) {
-        selectedNoteIds.push(noteId);
-      } else if (title) {
-        selectedTitles.push(title);
-      }
-    }
-  }
-
-  // Helper to check if item should be removed
-  const shouldRemove = (n: any) => {
-    if (n?.noteId && selectedNoteIds.includes(n.noteId)) return true;
-    if (!n?.noteId && n?.title && selectedTitles.includes(n.title)) return true;
-    return false;
-  };
-
-  // Create the notebook with items already included (hidden from default-app)
+  // Create the notebook with items included
   const newNotebook = Notebook({
     title: name,
     notes: selectedItems,
@@ -801,29 +576,22 @@ const createNotebookFromPrompt = handler<
   });
   allPieces.push(newNotebook);
 
-  if (action === "move") {
-    // For move: remove selected items from existing notebooks and this notebook
-    const notebooksList = notebooks.get();
+  if (actionType === "move") {
+    const { noteIds, titles } = collectItemIdentifiers(selectedItems);
+    const shouldRemove = createRemovalPredicate(noteIds, titles);
 
     // Remove from all existing notebooks
-    for (let nbIdx = 0; nbIdx < notebooksList.length; nbIdx++) {
-      const nbCell = notebooks.key(nbIdx);
-      const nbNotesCell = nbCell.key("notes");
-      const nbNotes = nbNotesCell.get() ?? [];
-      const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
-      if (filtered.length !== nbNotes.length) {
-        nbNotesCell.set(filtered);
-      }
-    }
+    removeFromAllNotebooks(notebooks, shouldRemove);
 
-    // Remove selected items from this notebook, then add new notebook
-    const filtered = notesList.filter((n: any) => !shouldRemove(n));
-    notes.set([...filtered, newNotebook]);
+    // Remove from this notebook, then add new notebook
+    notes.set([
+      ...notesList.filter((n: any) => !shouldRemove(n)),
+      newNotebook,
+    ]);
   } else {
     // For add: just add the new notebook as sibling
     notes.push(newNotebook);
   }
-  // For add: notes are already in the new notebook, no removal needed
 
   // Clean up state
   selectedNoteIndices.set([]);
@@ -834,36 +602,7 @@ const createNotebookFromPrompt = handler<
 
 // NOTE: cancelNewNotebookPrompt converted to action inside pattern
 
-// Handler to toggle visibility of all selected notes
-const _toggleSelectedVisibility = handler<
-  { detail: { checked: boolean } },
-  { notes: Writable<NotePiece[]>; selectedNoteIndices: Writable<number[]> }
->((event, { notes, selectedNoteIndices }) => {
-  const selected = selectedNoteIndices.get();
-  const makeVisible = event.detail?.checked ?? false;
-  for (const idx of selected) {
-    const noteCell = notes.key(idx);
-    if (noteCell) {
-      noteCell.key("isHidden").set(!makeVisible);
-    }
-  }
-  selectedNoteIndices.set([]);
-});
-
 // NOTE: startEditingTitle, stopEditingTitle, handleTitleKeydown converted to actions inside pattern
-
-// Handler to toggle preview expansion for a note
-const _togglePreviewExpansion = handler<
-  Record<string, never>,
-  { index: number; expandedPreviews: Writable<number[]> }
->((_, { index, expandedPreviews }) => {
-  const current = expandedPreviews.get();
-  if (current.includes(index)) {
-    expandedPreviews.set(current.filter((i) => i !== index));
-  } else {
-    expandedPreviews.set([...current, index]);
-  }
-});
 
 // Handler to toggle checkbox selection with shift-click support
 const toggleNoteCheckbox = handler<
@@ -1078,9 +817,6 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       }
     });
 
-    // State for expanded note previews (tracks which note indices have full content shown)
-    const _expandedPreviews = Writable.of<number[]>([]);
-
     // ===== Actions (close over notes, allPieces, self) =====
 
     // Action to duplicate selected notes
@@ -1201,16 +937,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
 
     // Computed items for ct-select dropdowns (notebooks + "New Notebook...")
     // ct-select has proper bidirectional DOM sync, unlike native <select>
-    const notebookAddItems = computed(() => [
-      ...notebooks.map((nb: any, idx: number) => ({
-        label: nb?.[NAME] ?? "Untitled",
-        value: String(idx),
-      })),
-      { label: "────────────", value: "_divider", disabled: true },
-      { label: "New Notebook...", value: "new" },
-    ]);
-
-    const notebookMoveItems = computed(() => [
+    const notebookSelectItems = computed(() => [
       ...notebooks.map((nb: any, idx: number) => ({
         label: nb?.[NAME] ?? "Untitled",
         value: String(idx),
@@ -1576,7 +1303,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                     <span style={{ flex: 1 }} />
                     <ct-select
                       $value={selectedAddNotebook}
-                      items={notebookAddItems}
+                      items={notebookSelectItems}
                       placeholder="Add to notebook..."
                       style={{ width: "160px" }}
                       onChange={addSelectedToNotebook({
@@ -1590,7 +1317,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                     />
                     <ct-select
                       $value={selectedMoveNotebook}
-                      items={notebookMoveItems}
+                      items={notebookSelectItems}
                       placeholder="Move to..."
                       style={{ width: "140px" }}
                       onChange={moveSelectedToNotebook({
@@ -1749,8 +1476,10 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
               </ct-button>
               <ct-button
                 variant="ghost"
-                onClick={createNoteAndContinue({
+                onClick={createNote({
+                  createAnother: true,
                   newNoteTitle,
+                  showNewNotePrompt,
                   notes,
                   allPieces,
                   usedCreateAnotherNote,
@@ -1761,7 +1490,8 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
               </ct-button>
               <ct-button
                 variant="primary"
-                onClick={createNoteAndOpen({
+                onClick={createNote({
+                  createAnother: false,
                   newNoteTitle,
                   showNewNotePrompt,
                   notes,
@@ -1800,18 +1530,22 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
               </ct-button>
               <ct-button
                 variant="ghost"
-                onClick={createNestedNotebookAndContinue({
+                onClick={createNestedNotebook({
+                  createAnother: true,
                   newNestedNotebookTitle,
+                  showNewNestedNotebookPrompt,
                   notes,
                   allPieces,
                   usedCreateAnotherNotebook,
+                  self,
                 })}
               >
                 Create Another
               </ct-button>
               <ct-button
                 variant="primary"
-                onClick={createNestedNotebookAndOpen({
+                onClick={createNestedNotebook({
+                  createAnother: false,
                   newNestedNotebookTitle,
                   showNewNestedNotebookPrompt,
                   notes,
