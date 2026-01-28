@@ -15,9 +15,11 @@ import {
 export type { Result, Unit };
 
 export abstract class BaseStorageProvider implements IStorageProvider {
+  // Uses `any` because callbacks may expect different specific types,
+  // but all receive StorableValue at runtime.
   protected subscribers = new Map<
     string,
-    Set<(value: ImmutableStorageValue) => void>
+    Set<(value: ImmutableStorageValue<any>) => void>
   >();
   protected waitingForSync = new Map<string, Promise<void>>();
   protected waitingForSyncResolvers = new Map<string, () => void>();
@@ -48,16 +50,14 @@ export abstract class BaseStorageProvider implements IStorageProvider {
     if (!this.subscribers.has(uri)) {
       this.subscribers.set(
         uri,
-        new Set<(value: ImmutableStorageValue) => void>(),
+        new Set<(value: ImmutableStorageValue<any>) => void>(),
       );
     }
     const listeners = this.subscribers.get(uri)!;
-    // Cast needed: Set stores generic callbacks, callers get typed APIs.
-    // Safe because all stored values are StorableValue at runtime.
-    listeners.add(callback as (value: ImmutableStorageValue) => void);
+    listeners.add(callback);
 
     return () => {
-      listeners.delete(callback as (value: ImmutableStorageValue) => void);
+      listeners.delete(callback);
       if (listeners.size === 0) this.subscribers.delete(uri);
     };
   }
