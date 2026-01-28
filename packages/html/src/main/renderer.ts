@@ -14,11 +14,10 @@ import type {
   VDomBatchNotification,
 } from "@commontools/runtime-client";
 import { DomApplicator } from "./applicator.ts";
-
-// Global mount ID counter
-let nextMountId = 1;
-
 import type { SetPropHandler } from "../render-utils.ts";
+import { getLogger } from "@commontools/utils/logger";
+
+const logger = getLogger("vdom-renderer", { enabled: false, level: "debug" });
 
 /**
  * Options for creating a VDomRenderer.
@@ -58,6 +57,9 @@ export interface VDomRendererOptions {
  * ```
  */
 export class VDomRenderer {
+  /** Instance counter for unique mount IDs across all renderer instances */
+  private static nextMountId = 1;
+
   private readonly applicator: DomApplicator;
   private readonly connection: RuntimeConnection;
   private readonly onError?: (error: Error) => void;
@@ -102,15 +104,22 @@ export class VDomRenderer {
     }
 
     this.containerElement = container;
-    this.mountId = nextMountId++;
+    this.mountId = VDomRenderer.nextMountId++;
 
     // Register container so the worker can insert children directly into it
     this.applicator.setContainer(container);
 
     // Request the worker to start rendering
+    const startTime = performance.now();
     try {
       const response = await this.connection.mountVDom(this.mountId, cellRef);
       this.rootNodeId = response.rootId;
+
+      const elapsed = performance.now() - startTime;
+      logger.debug("render-mount", () => [
+        `Mounted VDOM ${this.mountId} in ${elapsed.toFixed(2)}ms`,
+        `rootId=${response.rootId}`,
+      ]);
     } catch (error) {
       // Reset state on failure so the renderer can be reused
       this.mountId = null;
@@ -132,6 +141,7 @@ export class VDomRenderer {
       return;
     }
 
+    const startTime = performance.now();
     const mountId = this.mountId;
     this.mountId = null;
 
@@ -148,6 +158,11 @@ export class VDomRenderer {
     }
 
     this.containerElement = null;
+
+    const elapsed = performance.now() - startTime;
+    logger.debug("stop-rendering", () => [
+      `Stopped VDOM ${mountId} in ${elapsed.toFixed(2)}ms`,
+    ]);
   }
 
   /**
@@ -184,6 +199,7 @@ export class VDomRenderer {
       return;
     }
 
+    const startTime = performance.now();
     try {
       // Apply the batch to the DOM
       // Children are inserted directly into the container (CONTAINER_NODE_ID)
@@ -197,6 +213,13 @@ export class VDomRenderer {
       if (notification.rootId !== undefined) {
         this.rootNodeId = notification.rootId;
       }
+
+      const elapsed = performance.now() - startTime;
+      logger.debug("vdom-batch", () => [
+        `Batch ${notification.batchId}: ${notification.ops.length} ops in ${
+          elapsed.toFixed(2)
+        }ms`,
+      ]);
     } catch (error) {
       this.onError?.(
         error instanceof Error ? error : new Error(String(error)),

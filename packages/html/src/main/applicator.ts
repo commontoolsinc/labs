@@ -16,6 +16,9 @@ import type {
 import { serializeEvent } from "@commontools/runtime-client/vdom-worker/events";
 import { CellHandle } from "@commontools/runtime-client";
 import { setPropDefault, type SetPropHandler } from "../render-utils.ts";
+import { getLogger } from "@commontools/utils/logger";
+
+const logger = getLogger("vdom-applicator", { enabled: false, level: "debug" });
 
 /**
  * Reserved node ID for the container element.
@@ -52,6 +55,10 @@ export class DomApplicator {
     number,
     Map<string, EventListener>
   >();
+  /** Parent tracking: childId → parentId for O(1) descendant lookup */
+  private readonly nodeParents = new Map<number, number>();
+  /** Children tracking: parentId → Set<childId> for O(n) descendant cleanup */
+  private readonly nodeChildren = new Map<number, Set<number>>();
   private readonly document: Document;
   private readonly onEvent: (message: DomEventMessage) => void;
   private readonly runtimeClient: RuntimeClient;
@@ -72,6 +79,9 @@ export class DomApplicator {
    * Apply a batch of VDOM operations.
    */
   applyBatch(batch: VDomBatch): void {
+    const startTime = performance.now();
+    const opCount = batch.ops.length;
+
     for (const op of batch.ops) {
       try {
         this.applyOp(op);
@@ -85,6 +95,13 @@ export class DomApplicator {
     if (batch.rootId !== undefined) {
       this.rootNodeId = batch.rootId;
     }
+
+    const elapsed = performance.now() - startTime;
+    logger.debug("apply-batch", () => [
+      `Applied ${opCount} ops in ${elapsed.toFixed(2)}ms`,
+      `(${(elapsed / opCount).toFixed(3)}ms/op)`,
+      `nodes=${this.nodes.size}`,
+    ]);
   }
 
   /**
@@ -182,6 +199,10 @@ export class DomApplicator {
    * Dispose of all tracked nodes and listeners.
    */
   dispose(): void {
+    const startTime = performance.now();
+    const nodeCount = this.nodes.size;
+    const listenerCount = this.eventListeners.size;
+
     // Remove all event listeners (skip container)
     for (const [nodeId, listeners] of this.eventListeners) {
       if (nodeId === CONTAINER_NODE_ID) continue;
@@ -202,7 +223,16 @@ export class DomApplicator {
       }
     }
     this.nodes.clear();
+    this.nodeParents.clear();
+    this.nodeChildren.clear();
     this.rootNodeId = null;
+
+    const elapsed = performance.now() - startTime;
+    logger.debug("dispose", () => [
+      `Disposed ${nodeCount} nodes, ${listenerCount} listeners in ${
+        elapsed.toFixed(2)
+      }ms`,
+    ]);
   }
 
   // ============== Operation Implementations ==============
@@ -311,6 +341,21 @@ export class DomApplicator {
     const child = this.nodes.get(childId);
     if (!parent || !child) return;
 
+    // Update parent/children tracking
+    // Remove from old parent if any
+    const oldParentId = this.nodeParents.get(childId);
+    if (oldParentId !== undefined) {
+      this.nodeChildren.get(oldParentId)?.delete(childId);
+    }
+    // Add to new parent
+    this.nodeParents.set(childId, parentId);
+    let children = this.nodeChildren.get(parentId);
+    if (!children) {
+      children = new Set();
+      this.nodeChildren.set(parentId, children);
+    }
+    children.add(childId);
+
     const beforeNode = beforeId !== null
       ? this.nodes.get(beforeId) ?? null
       : null;
@@ -337,8 +382,10 @@ export class DomApplicator {
     const node = this.nodes.get(nodeId);
     if (!node) return;
 
-    // Recursively clean up descendants first
-    this.cleanupDescendants(node);
+    const startTime = performance.now();
+
+    // Recursively clean up descendants first (O(n) via parent/children tracking)
+    const descendantCount = this.cleanupDescendants(nodeId);
 
     // Remove event listeners for this node
     const listeners = this.eventListeners.get(nodeId);
@@ -354,45 +401,62 @@ export class DomApplicator {
       node.parentNode.removeChild(node);
     }
 
+    // Remove from parent tracking
+    const parentId = this.nodeParents.get(nodeId);
+    if (parentId !== undefined) {
+      this.nodeChildren.get(parentId)?.delete(nodeId);
+      this.nodeParents.delete(nodeId);
+    }
+    this.nodeChildren.delete(nodeId);
+
     // Remove from tracking
     this.nodes.delete(nodeId);
+
+    if (descendantCount > 0) {
+      const elapsed = performance.now() - startTime;
+      logger.debug("remove-node", () => [
+        `Removed node ${nodeId} with ${descendantCount} descendants in ${
+          elapsed.toFixed(2)
+        }ms`,
+      ]);
+    }
   }
 
   /**
-   * Clean up tracked descendants of a node.
-   * Finds all tracked nodeIds that are descendants and removes them from tracking.
+   * Clean up tracked descendants of a node using parent/children tracking.
+   * This is O(n) where n is the number of descendants, not O(n*m) like DOM traversal.
+   * @returns The number of descendants cleaned up
    */
-  private cleanupDescendants(node: Node): void {
-    // Find all tracked nodeIds that are descendants of this node
-    const descendantIds: number[] = [];
-    for (const [nodeId, trackedNode] of this.nodes) {
-      if (
-        nodeId !== CONTAINER_NODE_ID && node.contains(trackedNode) &&
-        trackedNode !== node
-      ) {
-        descendantIds.push(nodeId);
+  private cleanupDescendants(nodeId: number): number {
+    const children = this.nodeChildren.get(nodeId);
+    if (!children || children.size === 0) return 0;
+
+    let count = 0;
+    // Process children recursively (depth-first)
+    for (const childId of children) {
+      // Recurse first to clean up grandchildren
+      count += this.cleanupDescendants(childId);
+
+      // Clean up this child
+      const childNode = this.nodes.get(childId);
+
+      // Remove event listeners
+      const listeners = this.eventListeners.get(childId);
+      if (listeners && childNode) {
+        for (const [eventType, listener] of listeners) {
+          (childNode as EventTarget).removeEventListener(eventType, listener);
+        }
+        this.eventListeners.delete(childId);
       }
+
+      // Remove from tracking maps
+      this.nodes.delete(childId);
+      this.nodeParents.delete(childId);
+      this.nodeChildren.delete(childId);
+      count++;
     }
 
-    // Clean up each descendant
-    for (const nodeId of descendantIds) {
-      // Remove event listeners
-      const listeners = this.eventListeners.get(nodeId);
-      if (listeners) {
-        const descendantNode = this.nodes.get(nodeId);
-        if (descendantNode) {
-          for (const [eventType, listener] of listeners) {
-            (descendantNode as EventTarget).removeEventListener(
-              eventType,
-              listener,
-            );
-          }
-        }
-        this.eventListeners.delete(nodeId);
-      }
-      // Remove from tracking
-      this.nodes.delete(nodeId);
-    }
+    return count;
   }
 
   private setAttrs(nodeId: number, attrs: Record<string, unknown>): void {
