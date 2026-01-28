@@ -118,7 +118,7 @@ export class Engine extends EventTarget implements Harness {
     const sesEnabled = this.ctRuntime.compartmentManager.isEnabled();
     let runtime: EngineRuntime;
     if (sesEnabled) {
-      await this.ctRuntime.compartmentManager.initialize();
+      this.ctRuntime.compartmentManager.initialize();
       runtime = new SESRuntime();
     } else {
       runtime = new UnsafeEvalRuntime();
