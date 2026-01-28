@@ -100,28 +100,32 @@ function renderViaWorker(
   let cancelAsync: (() => Promise<void>) | null = null;
   let disposed = false;
 
-  renderer
+  const renderPromise = renderer
     .render(parent, cellRef)
     .then((cancel) => {
       if (disposed) {
         // Already cancelled before render completed
-        cancel();
+        cancel().catch(() => {});
       } else {
         cancelAsync = cancel;
       }
     })
     .catch((error) => {
-      options.onError?.(error);
+      if (!disposed) {
+        options.onError?.(error);
+      }
+      // Swallow errors after disposal — the connection may already be gone
     });
 
   // Return synchronous cancel function
   return () => {
     disposed = true;
     if (cancelAsync) {
-      cancelAsync();
+      cancelAsync().catch(() => {});
     }
-    // Dispose renderer to clean up event listeners and applicator
-    renderer.dispose();
+    // Dispose renderer to clean up event listeners and applicator.
+    // Also ensure the render promise doesn't leak unhandled rejections.
+    renderPromise.then(() => renderer.dispose().catch(() => {}));
   };
 }
 
