@@ -2,7 +2,9 @@ name: Lean CI
 
 on:
   push:
+    paths: ['formal/**']
   pull_request:
+    paths: ['formal/**']
   workflow_dispatch:
 
 jobs:
