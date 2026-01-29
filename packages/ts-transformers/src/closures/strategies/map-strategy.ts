@@ -7,7 +7,6 @@ import {
 } from "../../transformers/opaque-ref/opaque-ref.ts";
 import {
   getTypeAtLocationWithFallback,
-  hasArrayTypeArgument,
   isDeriveCall,
   isFunctionLikeExpression,
   isInsideSafeCallbackWrapper,
