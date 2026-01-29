@@ -183,26 +183,7 @@ const removeSocialProfile = handler<
 
 interface Input {
   person: Writable<
-    Default<
-      Person,
-      {
-        firstName: "";
-        lastName: "";
-        middleName: "";
-        nickname: "";
-        prefix: "";
-        suffix: "";
-        pronouns: "";
-        birthday: { month: 0; day: 0; year: 0 };
-        photo: "";
-        email: "";
-        phone: "";
-        notes: "";
-        tags: [];
-        addresses: [];
-        socialProfiles: [];
-      }
-    >
+    Default<Person, { firstName: ""; lastName: "" }>
   >;
   // Optional: reactive source of sibling contacts for sameAs linking.
   sameAs?: Writable<ContactCharm[]>;
@@ -434,9 +415,11 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
               />
             </ct-hstack>
             {computed(() => {
-              const month = person.key("birthday").key("month").get() || 0;
-              const day = person.key("birthday").key("day").get() || 0;
-              const year = person.key("birthday").key("year").get() || 0;
+              const month = Number(person.key("birthday").key("month").get()) ||
+                0;
+              const day = Number(person.key("birthday").key("day").get()) || 0;
+              const year = Number(person.key("birthday").key("year").get()) ||
+                0;
               if (month === 0 || day === 0) return null;
               const monthName = MONTH_NAMES[month] || "";
               const display = year > 0
