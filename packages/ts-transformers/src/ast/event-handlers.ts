@@ -12,7 +12,7 @@ export function isSafeEventHandlerCall(node: ts.CallExpression): boolean {
 }
 
 /** Maximum number of parameters for a function to be considered a handler */
-const MAX_HANDLER_PARAMS = 2;
+const MAX_HANDLER_PARAMS = 1;
 
 /**
  * Check if a return type is consistent with an event handler.
@@ -45,7 +45,7 @@ function isHandlerReturnType(type: ts.Type, checker: ts.TypeChecker): boolean {
 /**
  * Check if a function type represents an event handler signature.
  *
- * Heuristic: A handler is a function with 0-2 parameters that returns
+ * Heuristic: A handler is a function with 0-1 parameters that returns
  * void, undefined, boolean, or Promise<void|boolean>.
  *
  * This distinguishes handlers (which notify about events) from data
@@ -55,7 +55,7 @@ function isHandlerReturnType(type: ts.Type, checker: ts.TypeChecker): boolean {
  * Known limitations:
  * - May incorrectly identify predicates like `filter: (item) => boolean`
  *   as handlers (false positive)
- * - May miss handlers with 3+ parameters (false negative, rare in practice)
+ * - May miss handlers with 2+ parameters (false negative, rare in practice)
  */
 export function isEventHandlerType(
   type: ts.Type,
