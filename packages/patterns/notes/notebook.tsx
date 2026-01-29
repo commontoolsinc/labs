@@ -946,6 +946,52 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       { label: "New Notebook...", value: "new" },
     ]);
 
+    // ===== Pre-computed UI values =====
+
+    // Parent notebook display state
+    const hasParentNotebook = computed(() => !!(self as any).parentNotebook);
+    const parentNotebookLabel = computed(() => {
+      const p = (self as any).parentNotebook;
+      return p?.[NAME] ?? p?.title ?? "Parent";
+    });
+
+    // Title editing display states
+    const titleDisplayStyle = computed(() =>
+      isEditingTitle.get() ? "none" : "flex"
+    );
+    const titleInputDisplayStyle = computed(() =>
+      isEditingTitle.get() ? "flex" : "none"
+    );
+
+    // Notes list display
+    const notesListDisplay = computed(() => hasNotes ? "flex" : "none");
+    const emptyStateDisplay = computed(() => hasNotes ? "none" : "flex");
+    const selectAllDisplay = computed(() =>
+      notes.get().length > 1 ? "flex" : "none"
+    );
+
+    // Selection state display
+    const actionBarDisplay = computed(() => hasSelection ? "flex" : "none");
+
+    // Backlinks display
+    const backlinksDisplay = computed(() =>
+      backlinks.get().length > 0 ? "flex" : "none"
+    );
+
+    // All Notes button display
+    const allNotesButtonDisplay = computed(() =>
+      allNotesPiece ? "flex" : "none"
+    );
+
+    // ===== Shared UI Styles =====
+
+    const newButtonStyle = {
+      padding: "6px 12px",
+      display: "flex",
+      alignItems: "center",
+      gap: "4px",
+    };
+
     return {
       // Include 📓 marker in NAME for reliable identification through proxy
       [NAME]: computed(() => `📓 ${title} (${noteCount})`),
@@ -975,11 +1021,9 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                   gap="2"
                   align="center"
                   style={{
-                    display: computed(() => {
-                      // Read from output's parentNotebook cell for reactive updates after drag
-                      const p = (self as any).parentNotebook;
-                      return p ? "flex" : "none";
-                    }),
+                    display: computed(() =>
+                      hasParentNotebook ? "flex" : "none"
+                    ),
                   }}
                 >
                   <span
@@ -991,10 +1035,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                     In:
                   </span>
                   <ct-chip
-                    label={computed(() => {
-                      const p = (self as any).parentNotebook;
-                      return p?.[NAME] ?? p?.title ?? "Parent";
-                    })}
+                    label={parentNotebookLabel}
                     interactive
                     onct-click={goToParent({ self })}
                   />
@@ -1002,10 +1043,9 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                 {/* Spacer when no parent */}
                 <div
                   style={{
-                    display: computed(() => {
-                      const p = (self as any).parentNotebook;
-                      return p ? "none" : "block";
-                    }),
+                    display: computed(() =>
+                      hasParentNotebook ? "none" : "block"
+                    ),
                   }}
                 />
 
@@ -1016,7 +1056,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                     padding: "8px 16px",
                     fontSize: "16px",
                     borderRadius: "8px",
-                    display: computed(() => allNotesPiece ? "flex" : "none"),
+                    display: allNotesButtonDisplay,
                   }}
                 >
                   📁 All Notes
@@ -1049,9 +1089,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                       {/* Editable Title */}
                       <div
                         style={{
-                          display: computed(() =>
-                            isEditingTitle.get() ? "none" : "flex"
-                          ),
+                          display: titleDisplayStyle,
                           alignItems: "center",
                           gap: "8px",
                           cursor: "pointer",
@@ -1070,9 +1108,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                       </div>
                       <div
                         style={{
-                          display: computed(() =>
-                            isEditingTitle.get() ? "flex" : "none"
-                          ),
+                          display: titleInputDisplayStyle,
                           flex: 1,
                           marginRight: "12px",
                         }}
@@ -1097,12 +1133,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                           variant="ghost"
                           title="New Note"
                           onClick={showNewNoteModalAction}
-                          style={{
-                            padding: "6px 12px",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "4px",
-                          }}
+                          style={newButtonStyle}
                         >
                           <span style={{ fontSize: "14px" }}>📝</span>
                           <span style={{ fontSize: "13px", fontWeight: "500" }}>
@@ -1114,12 +1145,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                           variant="ghost"
                           title="New Notebook"
                           onClick={showNewNotebookModalAction}
-                          style={{
-                            padding: "6px 12px",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "4px",
-                          }}
+                          style={newButtonStyle}
                         >
                           <span style={{ fontSize: "14px" }}>📓</span>
                           <span style={{ fontSize: "13px", fontWeight: "500" }}>
@@ -1133,7 +1159,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                   {/* Empty state - shown when notebook has no notes, opens new note modal */}
                   <div
                     style={{
-                      display: computed(() => hasNotes ? "none" : "flex"),
+                      display: emptyStateDisplay,
                       flexDirection: "column",
                       alignItems: "center",
                       justifyContent: "center",
@@ -1162,7 +1188,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                   <ct-vstack
                     gap="0"
                     style={{
-                      display: computed(() => hasNotes ? "flex" : "none"),
+                      display: notesListDisplay,
                     }}
                   >
                     {/* Notes List - using ct-table like default-app for consistent spacing */}
@@ -1255,9 +1281,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                     {/* Select All footer - only show when more than 1 item */}
                     <div
                       style={{
-                        display: computed(() =>
-                          notes.get().length > 1 ? "flex" : "none"
-                        ),
+                        display: selectAllDisplay,
                         alignItems: "center",
                         padding: "4px 0",
                         fontSize: "13px",
@@ -1267,8 +1291,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                       {/* Checkbox column (32px + 4px padding) */}
                       <div style={{ width: "32px", padding: "0 4px" }}>
                         <ct-checkbox
-                          checked={computed(() =>
-                            notes.get().length > 0 &&
+                          checked={computed(() => notes.get().length > 0 &&
                             selectedNoteIndices.get().length ===
                               notes.get().length
                           )}
@@ -1290,7 +1313,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                     padding="3"
                     gap="3"
                     style={{
-                      display: computed(() => (hasSelection ? "flex" : "none")),
+                      display: actionBarDisplay,
                       background: "var(--ct-color-bg-secondary, #f5f5f7)",
                       borderRadius: "8px",
                       alignItems: "center",
@@ -1353,61 +1376,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                 </ct-vstack>
               </ct-card>
 
-              {
-                /* ================================================================
-                  SIBLINGS FEATURE DISABLED FOR PERFORMANCE
-                  See notebookRelationships computed for re-enabling instructions
-                  ================================================================
-              <ct-vstack
-                gap="2"
-                style={{
-                  display: computed(() =>
-                    _notebookRelationships.hasSiblings ? "flex" : "none"
-                  ),
-                  marginTop: "16px",
-                  paddingTop: "16px",
-                  borderTop: "1px solid var(--ct-color-border, #e5e5e7)",
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: "13px",
-                    fontWeight: "500",
-                    color: "var(--ct-color-text-secondary, #6e6e73)",
-                  }}
-                >
-                  Other notebooks:
-                </span>
-                <ct-vstack gap="1">
-                  {_notebookRelationships.siblings.map((notebook) => (
-                    <ct-drop-zone
-                      accept="note,notebook"
-                      onct-drop={handleDropOntoNotebook({
-                        targetNotebook: notebook as any,
-                        currentNotes: notes,
-                        selectedNoteIndices,
-                        notebooks,
-                      })}
-                    >
-                      <ct-drag-source $cell={notebook} type="sibling">
-                        <div
-                          style={{ cursor: "pointer" }}
-                          onClick={navigateToChild({ child: notebook, self })}
-                        >
-                          <ct-cell-context $cell={notebook}>
-                            <ct-chip
-                              label={notebook?.[NAME] ?? notebook?.title ?? "Untitled"}
-                              interactive
-                            />
-                          </ct-cell-context>
-                        </div>
-                      </ct-drag-source>
-                    </ct-drop-zone>
-                  ))}
-                </ct-vstack>
-              </ct-vstack>
-              */
-              }
+              {/* Siblings feature disabled for performance - see _notebookRelationships for re-enabling */}
             </ct-vstack>
           </div>
 
@@ -1565,9 +1534,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
             gap="2"
             padding="3"
             style={{
-              display: computed(() =>
-                backlinks.get().length > 0 ? "flex" : "none"
-              ),
+              display: backlinksDisplay,
               alignItems: "center",
               borderTop: "1px solid var(--ct-color-border, #e5e5e7)",
               flexWrap: "wrap",
