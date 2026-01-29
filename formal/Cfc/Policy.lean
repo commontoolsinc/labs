@@ -290,6 +290,17 @@ This mirrors the spec's `matchRuleWithTargetClause` returning all possible bindi
 structure RuleMatch where
   clauseIndex : Nat
   altIndex : Nat
+  /--
+  The atom that matched the rule's *target* pattern.
+
+  We store this explicitly (in addition to indices) because the evaluator applies many matches
+  sequentially. Some applications can remove alternatives/clauses, which shifts indices.
+  If we only kept `(clauseIndex, altIndex)`, a later match could accidentally refer to a
+  *different* atom than the one it originally matched.
+
+  Keeping `targetAtom` lets `applyRule` re-check that it is about to rewrite the intended atom.
+  -/
+  targetAtom : Atom
   bindings : Bindings
   deriving Repr
 
@@ -328,8 +339,45 @@ def matchRule (rule : ExchangeRule) (ℓ : Label) (availIntegrity : IntegLabel) 
         | some bs0 =>
             let confBs := matchAllSomewhere others confAtoms bs0
             let allBs := List.flatMap (fun bs1 => matchAllSomewhere rule.preInteg integAtoms bs1) confBs
-            allBs.map (fun bs => { clauseIndex := i, altIndex := j, bindings := bs })
+            allBs.map (fun bs => { clauseIndex := i, altIndex := j, targetAtom := a, bindings := bs })
       ) (confPositions ℓ.conf)
+
+/-!
+## Match ordering (avoid stale indices)
+
+`matchRule` returns matches as `(clauseIndex, altIndex, ...)` positions into the label's CNF.
+
+For *drop* rules (`postConf = []`), applying a match can:
+- remove an alternative from a clause (shifting later alternative indices), and/or
+- remove a clause entirely if it becomes empty (shifting later clause indices).
+
+So if we computed all matches once and then applied them in ascending order, later matches could
+target the wrong location.
+
+We fix this by applying drop-matches in **descending** index order:
+- higher clause indices first, and within a clause higher alternative indices first.
+
+This standard "delete from the back" trick ensures that earlier indices remain valid.
+Add-rules do not remove clauses/alternatives, so they do not need this treatment.
+-/
+
+def matchBeforeForDrop (m₁ m₂ : RuleMatch) : Bool :=
+  if m₁.clauseIndex = m₂.clauseIndex then
+    decide (m₁.altIndex > m₂.altIndex)
+  else
+    decide (m₁.clauseIndex > m₂.clauseIndex)
+
+def insertSortedForDrop (m : RuleMatch) : List RuleMatch → List RuleMatch
+  | [] => [m]
+  | x :: xs =>
+      if matchBeforeForDrop m x then
+        m :: x :: xs
+      else
+        x :: insertSortedForDrop m xs
+
+def sortMatchesForDrop : List RuleMatch → List RuleMatch
+  | [] => []
+  | m :: ms => insertSortedForDrop m (sortMatchesForDrop ms)
 
 /-!
 ## Applying a rule (local rewrite)
@@ -363,13 +411,22 @@ def applyRule (ℓ : Label) (m : RuleMatch) (rule : ExchangeRule) : Option Label
   | some clause =>
       if postConfAtoms = [] then
         -- Empty postcondition confidentiality means: drop the matched alternative.
-        let clause' := removeAt m.altIndex clause
-        let conf' :=
-          if clause' = [] then
-            removeAt m.clauseIndex ℓ.conf
-          else
-            updateAt m.clauseIndex (fun _ => clause') ℓ.conf
-        some { conf := conf', integ := addUniqueAll ℓ.integ addedInteg }
+        --
+        -- Important: we must ensure we are dropping the *same atom* that was matched.
+        -- Otherwise, stale indices (or duplicate matches) could drop an unrelated alternative.
+        match get? m.altIndex clause with
+        | none => some ℓ
+        | some aAt =>
+            if aAt = m.targetAtom then
+              let clause' := removeAt m.altIndex clause
+              let conf' :=
+                if clause' = [] then
+                  removeAt m.clauseIndex ℓ.conf
+                else
+                  updateAt m.clauseIndex (fun _ => clause') ℓ.conf
+              some { conf := conf', integ := addUniqueAll ℓ.integ addedInteg }
+            else
+              some ℓ
       else
         -- Nonempty postcondition confidentiality means: add those atoms as alternatives in the target clause.
         let clause' := postConfAtoms.foldl (fun c a => Exchange.clauseInsert a c) clause
@@ -399,7 +456,11 @@ def evalOnce (policies : List PolicyRecord) (boundaryIntegrity : IntegLabel) (�
   pols.foldl (fun acc pol =>
     pol.exchangeRules.foldl (fun acc2 rule =>
       let avail := Exchange.availIntegrity acc2 boundaryIntegrity;
-      let ms := matchRule rule acc2 avail;
+      let ms0 := matchRule rule acc2 avail;
+      -- For drop-rules, apply matches from the "back" so indices don't go stale as we delete.
+      let ms := match rule.postConf with
+        | [] => sortMatchesForDrop ms0
+        | _ :: _ => ms0
       ms.foldl (fun acc3 m =>
         match applyRule acc3 m rule with
         | some next => next

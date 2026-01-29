@@ -92,6 +92,57 @@ example :
     Policy.evalFixpoint 1 pols boundary (tokenLabel alice) = tokenLabel alice := by
   native_decide
 
+/-!
+## Regression 3: avoid "stale index" bugs when applying drop rules
+
+This regression targets a subtle but important implementation detail:
+
+`matchRule` returns matches using *indices* into the label's CNF:
+  - `clauseIndex` selects a clause in `label.conf`,
+  - `altIndex` selects an alternative (atom) within that clause.
+
+But drop rules (`postConf = []`) *remove* an alternative, and may remove the whole clause if it
+becomes empty. That shifts indices.
+
+If an evaluator computes all matches once and then applies them in ascending order, a later match
+can accidentally refer to a different clause than the one it originally matched.
+
+We guard against this in `Cfc.Policy` by:
+- applying drop-matches in descending index order (delete-from-the-back), and
+- re-checking that the atom at the target index is the one that was matched.
+
+The example below would be wrong with a naive ascending-order application:
+
+  Start: [ [PolicyP], [A], [B], [C] ]
+  If you drop clause 1 first, `B` becomes clause 1 and `C` becomes clause 2.
+  A later match that *intended* to drop `B` at clauseIndex=2 would instead drop `C`.
+
+With the fixed implementation, all three `[A]`, `[B]`, `[C]` clauses are dropped.
+-/
+
+def P : Atom :=
+  Atom.policy "P" "subject" "h"
+
+def dropAnyOtherRule : ExchangeRule :=
+  { name := "DropAnyOther"
+    preConf := [AtomPattern.other (Pat.var "X")] -- match `Atom.other n` for any `n`
+    preInteg := []
+    postConf := []  -- drop the matched alternative
+    postInteg := [] }
+
+def dropAnyOtherRecord : PolicyRecord :=
+  { principal := P
+    exchangeRules := [dropAnyOtherRule] }
+
+def staleIndexLabel : Label :=
+  { conf := [[P], [Atom.other "A"], [Atom.other "B"], [Atom.other "C"]]
+    integ := [] }
+
+example :
+    Policy.evalFixpoint 1 [dropAnyOtherRecord] [] staleIndexLabel =
+      { conf := [[P]], integ := [] } := by
+  native_decide
+
 end Policy
 end Proofs
 
