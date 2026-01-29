@@ -1255,7 +1255,7 @@ describe("runner utils", () => {
       runtime.setup(undefined, recipe, { input: 4 }, resultCell);
 
       // start() should execute synchronously when data is available
-      // The charm should be registered in cancels map immediately
+      // The piece should be registered in cancels map immediately
       runtime.start(resultCell);
       // Should be running now (check via runner.cancels having the key)
       expect(

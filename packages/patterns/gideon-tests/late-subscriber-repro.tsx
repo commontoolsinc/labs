@@ -18,7 +18,7 @@ import { NAME, pattern, UI, Writable } from "commontools";
  * subscription, copy the cached value from an existing subscriber to the new one.
  *
  * To test:
- * 1. Deploy this pattern with `charm new`
+ * 1. Deploy this pattern with `piece new`
  * 2. On initial page load, all "Interpolated" values should show their initial values
  * 3. Interacting with any component should update its interpolated value
  */

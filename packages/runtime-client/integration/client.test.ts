@@ -13,7 +13,7 @@ import {
   RuntimeClient,
   type VNode,
 } from "@commontools/runtime-client";
-import { vdomSchema } from "@commontools/runner/schemas";
+import { rendererVDOMSchema } from "@commontools/runner/schemas";
 import { assertEquals, assertExists } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 import { Program } from "@commontools/js-compiler";
@@ -374,11 +374,11 @@ describe("RuntimeClient", () => {
       const session = await createSession({ identity, spaceName });
       await using rt = await createRuntimeClient(session);
 
-      const charmsListCell = await rt.getCharmsListCell();
-      assertExists(charmsListCell);
+      const piecesListCell = await rt.getPiecesListCell();
+      assertExists(piecesListCell);
 
-      await charmsListCell.sync();
-      const link = charmsListCell.ref();
+      await piecesListCell.sync();
+      const link = piecesListCell.ref();
       assertExists(link);
     });
   });
@@ -506,7 +506,7 @@ export default pattern((_) => {
       const cell = page.cell();
       await cell.sync();
       const typedCell = cell as typeof cell & { key(k: "$UI"): typeof cell };
-      const uiCell = typedCell.key("$UI").asSchema(vdomSchema);
+      const uiCell = typedCell.key("$UI").asSchema(rendererVDOMSchema);
       await uiCell.sync();
 
       const mock = new MockDoc(

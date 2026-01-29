@@ -1,4 +1,4 @@
-// registry.ts - Sub-charm registry with type definitions and pattern constructors
+// registry.ts - Sub-piece registry with type definitions and pattern constructors
 // Now imports from peer patterns in packages/patterns/
 //
 // =============================================================================
@@ -6,13 +6,13 @@
 // =============================================================================
 // 1. Import the module and its metadata below
 // 2. Add it to SUB_CHARM_REGISTRY (around line 90)
-// 3. Add it to SubCharmType in ./types.ts
+// 3. Add it to SubPieceType in ./types.ts
 //
 // AI extraction schema is discovered dynamically from pattern.resultSchema
 // at creation time - no manual schema maintenance needed!
 // =============================================================================
 
-import type { SubCharmType } from "./types.ts";
+import type { SubPieceType } from "./types.ts";
 
 // Import metadata and patterns from peer patterns
 import {
@@ -94,12 +94,12 @@ import type { ModuleMetadata } from "../container-protocol.ts";
 // NOTE: TypePickerModule is imported directly in record.tsx to avoid circular dependency
 // and because it needs ContainerCoordinationContext
 
-// Type for pattern constructors - returns unknown since we store heterogeneous charm types
+// Type for pattern constructors - returns unknown since we store heterogeneous piece types
 // Now accepts optional initial values for import/restore functionality
 type PatternConstructor = (initialValues?: Record<string, unknown>) => unknown;
 
-export interface SubCharmDefinition {
-  type: SubCharmType;
+export interface SubPieceDefinition {
+  type: SubPieceType;
   label: string;
   icon: string;
   // Pattern constructor for creating instances (can accept initial values)
@@ -119,14 +119,14 @@ export interface SubCharmDefinition {
   extractionMode?: "single" | "array";
 }
 
-// Helper to create SubCharmDefinition from ModuleMetadata
+// Helper to create SubPieceDefinition from ModuleMetadata
 // The moduleFactory is the actual recipe function that accepts input
 function fromMetadata(
   meta: ModuleMetadata,
   moduleFactory: (input: Record<string, unknown>) => unknown,
-): SubCharmDefinition {
+): SubPieceDefinition {
   return {
-    type: meta.type as SubCharmType,
+    type: meta.type as SubPieceType,
     label: meta.label,
     icon: meta.icon,
     // createInstance now accepts optional initial values
@@ -142,9 +142,9 @@ function fromMetadata(
   };
 }
 
-// Static registry - defines available sub-charm types
+// Static registry - defines available sub-piece types
 // Now built from peer pattern metadata
-export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
+export const SUB_CHARM_REGISTRY: Record<string, SubPieceDefinition> = {
   // Notes is special - must be created in record.tsx with linkPattern
   notes: {
     type: "notes",
@@ -250,30 +250,30 @@ export const SUB_CHARM_REGISTRY: Record<string, SubCharmDefinition> = {
 };
 
 // Helper functions
-export function getAvailableTypes(): SubCharmDefinition[] {
+export function getAvailableTypes(): SubPieceDefinition[] {
   return Object.values(SUB_CHARM_REGISTRY);
 }
 
 // Get types available for "Add" dropdown (excludes internal modules like type-picker)
-export function getAddableTypes(): SubCharmDefinition[] {
+export function getAddableTypes(): SubPieceDefinition[] {
   return Object.values(SUB_CHARM_REGISTRY).filter((def) => !def.internal);
 }
 
 export function getDefinition(
-  type: SubCharmType | string,
-): SubCharmDefinition | undefined {
+  type: SubPieceType | string,
+): SubPieceDefinition | undefined {
   return SUB_CHARM_REGISTRY[type];
 }
 
-// Create a new sub-charm instance by type, optionally with initial values
+// Create a new sub-piece instance by type, optionally with initial values
 // Used for import/restore functionality
-export function createSubCharm(
+export function createSubPiece(
   type: string,
   initialValues?: Record<string, unknown>,
 ): unknown {
   const def = SUB_CHARM_REGISTRY[type];
   if (!def) {
-    throw new Error(`Unknown sub-charm type: ${type}`);
+    throw new Error(`Unknown sub-piece type: ${type}`);
   }
   return def.createInstance(initialValues);
 }
@@ -335,7 +335,7 @@ export function buildExtractionSchema(): {
   return { type: "object", properties };
 }
 
-// Phase 2: Get field to sub-charm type mapping
+// Phase 2: Get field to sub-piece type mapping
 export function getFieldToTypeMapping(): Record<string, string> {
   const fieldToType: Record<string, string> = {};
 

@@ -5,7 +5,7 @@ import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import "../components/OmniLayout.ts";
 import { CellHandle, PageHandle, VNode } from "@commontools/runtime-client";
-import { vdomSchema } from "@commontools/runner/schemas";
+import { rendererVDOMSchema } from "@commontools/runner/schemas";
 import type { JSONSchema } from "@commontools/runner/shared";
 
 type SubPages = {
@@ -20,7 +20,7 @@ const SubPagesSchema = {
     fabUI: { $ref: "#/$defs/vdomNode" },
   },
   $defs: {
-    ...vdomSchema.$defs,
+    ...rendererVDOMSchema.$defs,
   },
 } as const satisfies JSONSchema;
 
@@ -130,7 +130,7 @@ export class XBodyView extends BaseView {
       `
       : this.activePattern
       ? html`
-        <ct-charm slot="main" .charmId="${this.activePattern.id()}">
+        <ct-charm slot="main" .pieceId="${this.activePattern.id()}">
           <ct-render .cell="${this.activePattern.cell()}"></ct-render>
         </ct-charm>
       `
@@ -174,6 +174,6 @@ async function getSubPageCell(
     }
   }
   if (key in value && value[key]) {
-    return typedCell.key(key).asSchema<VNode>(vdomSchema);
+    return typedCell.key(key).asSchema<VNode>(rendererVDOMSchema);
   }
 }

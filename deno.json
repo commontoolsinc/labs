@@ -2,7 +2,7 @@
   "workspace": [
     "./packages/api",
     "./packages/background-charm-service",
-    "./packages/charm",
+    "./packages/piece",
     "./packages/cli",
     "./packages/deno-web-test",
     "./packages/felt",
@@ -111,8 +111,8 @@
   "imports": {
     "commontools": "./packages/api/index.ts",
     "commontools/schema": "./packages/api/schema.ts",
-    "core-js/proposals/explicit-resource-management": "https://esm.sh/core-js/proposals/explicit-resource-management",
-    "core-js/proposals/async-explicit-resource-management": "https://esm.sh/core-js/proposals/async-explicit-resource-management",
+    "core-js/proposals/explicit-resource-management": "https://esm.sh/core-js@3.46.0/proposals/explicit-resource-management",
+    "core-js/proposals/async-explicit-resource-management": "https://esm.sh/core-js@3.46.0/proposals/async-explicit-resource-management",
     "@astral/astral": "./packages/vendor-astral/mod.ts",
     "@cliffy/command": "jsr:@cliffy/command@^1.0.0-rc.8",
     "@std/assert": "jsr:@std/assert@^1",

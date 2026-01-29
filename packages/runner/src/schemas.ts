@@ -6,7 +6,7 @@
 
 import { JSONSchema, NAME, type Schema, TYPE, UI } from "./shared.ts";
 
-export const vdomSchema = {
+export const rendererVDOMSchema = {
   $defs: {
     vdomNode: {
       type: "object",
@@ -21,15 +21,17 @@ export const vdomSchema = {
           type: "array",
           items: {
             anyOf: [
-              { $ref: "#/$defs/vdomNode", asCell: true },
-              { type: "string", asCell: true },
-              { type: "number", asCell: true },
-              { type: "boolean", asCell: true },
+              { $ref: "#/$defs/vdomNode" },
+              { type: "string" },
+              { type: "number" },
+              { type: "boolean" },
+              { type: "null" },
               {
                 type: "array",
                 items: { $ref: "#/$defs/vdomNode", asCell: true },
               },
             ],
+            asCell: true,
           },
           asCell: true,
         },
@@ -50,38 +52,38 @@ export type NameSchema = Schema<typeof nameSchema>;
 
 export const uiSchema = {
   type: "object",
-  properties: { [UI]: vdomSchema },
+  properties: { [UI]: rendererVDOMSchema },
   required: [UI],
 } as const satisfies JSONSchema;
 
 export type UISchema = Schema<typeof uiSchema>;
 
 // We specify not true for the items, since we don't want to recursively load them
-export const charmListSchema = {
+export const pieceListSchema = {
   type: "array",
   items: { type: "object", properties: {}, asCell: true },
   default: [],
 } as const satisfies JSONSchema;
 
-export const charmLineageSchema = {
+export const pieceLineageSchema = {
   type: "object",
   properties: {
-    charm: { type: "object", properties: {}, asCell: true },
+    piece: { type: "object", properties: {}, asCell: true },
     relation: { type: "string" },
     timestamp: { type: "number" },
   },
-  required: ["charm", "relation", "timestamp"],
+  required: ["piece", "relation", "timestamp"],
 } as const satisfies JSONSchema;
-export type CharmLineage = Schema<typeof charmLineageSchema>;
+export type PieceLineage = Schema<typeof pieceLineageSchema>;
 
-export const charmSourceCellSchema = {
+export const pieceSourceCellSchema = {
   type: "object",
   properties: {
     [TYPE]: { type: "string" },
     spell: { type: "object" },
     lineage: {
       type: "array",
-      items: charmLineageSchema,
+      items: pieceLineageSchema,
       default: [],
     },
     llmRequestId: { type: "string" },

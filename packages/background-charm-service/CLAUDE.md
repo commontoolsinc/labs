@@ -48,7 +48,7 @@ Charms must be registered before they receive polling:
 curl -X POST http://localhost:8000/api/integrations/bg \
   -H "Content-Type: application/json" \
   -d '{
-    "charmId": "baedrei...",
+    "pieceId": "baedrei...",
     "space": "did:key:z6Mk...",
     "integration": "my-test"
   }'
@@ -113,7 +113,7 @@ Create a new file in `src/integrations/` named after your integration (e.g.,
 `myservice.ts`):
 
 ```typescript
-import { Charm } from "@commontools/charm";
+import { Charm } from "@commontools/piece";
 import { Cell } from "@commontools/runner";
 import type { DID } from "@commontools/identity";
 import { Integration, IntegrationCellConfig } from "../types.ts";
@@ -139,7 +139,7 @@ export class MyServiceIntegration implements Integration {
   }
 
   private async fetchMyServiceCharms(): Promise<
-    { space: DID; charmId: string }[]
+    { space: DID; pieceId: string }[]
   > {
     // Implementation
     return [];

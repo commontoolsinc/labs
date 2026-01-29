@@ -60,7 +60,7 @@ export type ExtractionPhase =
  * A source that can be scanned for extractable content
  */
 export interface ExtractableSource {
-  index: number; // Index in parentSubCharms array
+  index: number; // Index in parentSubPieces array
   type: "notes" | "text-import" | "photo";
   icon: string; // Emoji icon for display
   label: string; // Display label (filename or module name)

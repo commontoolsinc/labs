@@ -1,13 +1,13 @@
 /// <cts-enable />
 /**
- * Record Pattern v2 - True Sub-Charm Architecture
+ * Record Pattern v2 - True Sub-Piece Architecture
  *
- * A data-up meta-container where each module is its own sub-charm pattern.
+ * A data-up meta-container where each module is its own sub-piece pattern.
  * This enables:
  * - Adding new module types without code changes to Record
  * - User-defined custom modules (future)
  * - Modules that can exist independently
- * - @-reference specific modules by charm ID
+ * - @-reference specific modules by piece ID
  *
  * #record
  */
@@ -27,7 +27,7 @@ import {
   Writable,
 } from "commontools";
 import {
-  createSubCharm,
+  createSubPiece,
   getAddableTypes,
   getDefinition,
 } from "./record/registry.ts";
@@ -38,7 +38,7 @@ import { inferTypeFromModules } from "./record/template-registry.ts";
 import { TypePickerModule } from "./type-picker.tsx";
 import { ExtractorModule } from "./record/extraction/extractor-module.tsx";
 import { getResultSchema } from "./record/extraction/schema-utils.ts";
-import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
+import type { SubPieceEntry, TrashedSubPieceEntry } from "./record/types.ts";
 
 // ===== Standard Labels for Smart Defaults =====
 // When adding a second module of same type, pick next unused standard label
@@ -51,26 +51,26 @@ const STANDARD_LABELS: Record<string, string[]> = {
 // Helper to get next unused standard label for a module type
 function getNextUnusedLabel(
   type: string,
-  existingCharms: readonly SubCharmEntry[],
+  existingPieces: readonly SubPieceEntry[],
 ): string | undefined {
   const standards = STANDARD_LABELS[type];
   if (!standards || standards.length === 0) return undefined;
 
   // Collect labels already used by modules of this type
   const usedLabels = new Set<string>();
-  for (const entry of existingCharms) {
+  for (const entry of existingPieces) {
     if (entry.type === type) {
       try {
-        // Access the label field from the charm pattern output
+        // Access the label field from the piece pattern output
         // Property access is reactive - framework handles Cell unwrapping
         // deno-lint-ignore no-explicit-any
-        const charm = entry.charm as any;
-        const labelValue = charm?.label;
+        const piece = entry.piece as any;
+        const labelValue = piece?.label;
         if (typeof labelValue === "string" && labelValue) {
           usedLabels.add(labelValue);
         }
       } catch {
-        // Ignore errors from charms without label field
+        // Ignore errors from pieces without label field
       }
     }
   }
@@ -83,109 +83,109 @@ function getNextUnusedLabel(
 
 interface RecordInput {
   title?: Default<string, "">;
-  subCharms?: Default<SubCharmEntry[], []>;
-  trashedSubCharms?: Default<TrashedSubCharmEntry[], []>;
+  subPieces?: Default<SubPieceEntry[], []>;
+  trashedSubPieces?: Default<TrashedSubPieceEntry[], []>;
 }
 
 interface RecordOutput {
   title?: Default<string, "">;
-  subCharms?: Default<SubCharmEntry[], []>;
-  trashedSubCharms?: Default<TrashedSubCharmEntry[], []>;
-  /** Self-reference for sub-charms to access their parent Record */
+  subPieces?: Default<SubPieceEntry[], []>;
+  trashedSubPieces?: Default<TrashedSubPieceEntry[], []>;
+  /** Self-reference for sub-pieces to access their parent Record */
   parentRecord?: RecordOutput | null;
 }
 
 // ===== Auto-Initialize Notes + TypePicker (Two-Lift Pattern) =====
 // Based on chatbot-list-view.tsx pattern:
-// - Outer lift creates the charms and calls inner lift
-// - Inner lift receives charms as input and stores them
+// - Outer lift creates the pieces and calls inner lift
+// - Inner lift receives pieces as input and stores them
 // This works because the inner lift provides proper cause context
 //
 // TypePicker is a "controller module" - it receives parent Cells as input
-// so it can modify the parent's subCharms list when a template is selected.
+// so it can modify the parent's subPieces list when a template is selected.
 
-// Inner lift: stores the initial charms (receives charms as input)
-const storeInitialCharms = lift(
+// Inner lift: stores the initial pieces (receives pieces as input)
+const storeInitialPieces = lift(
   toSchema<{
-    notesCharm: unknown;
+    notesPiece: unknown;
     notesSchema: unknown;
-    typePickerCharm: unknown;
+    typePickerPiece: unknown;
     typePickerSchema: unknown;
-    subCharms: Writable<SubCharmEntry[]>;
+    subPieces: Writable<SubPieceEntry[]>;
     isInitialized: Writable<boolean>;
   }>(),
   undefined,
   ({
-    notesCharm,
+    notesPiece,
     notesSchema,
-    typePickerCharm,
+    typePickerPiece,
     typePickerSchema,
-    subCharms,
+    subPieces,
     isInitialized,
   }) => {
     if (!isInitialized.get()) {
-      subCharms.set([
-        { type: "notes", pinned: true, charm: notesCharm, schema: notesSchema },
+      subPieces.set([
+        { type: "notes", pinned: true, piece: notesPiece, schema: notesSchema },
         {
           type: "type-picker",
           pinned: false,
-          charm: typePickerCharm,
+          piece: typePickerPiece,
           schema: typePickerSchema,
         },
       ]);
       isInitialized.set(true);
-      return notesCharm; // Return notes charm as primary reference
+      return notesPiece; // Return notes piece as primary reference
     }
   },
 );
 
-// Outer lift: checks if empty, creates charms, calls inner lift
+// Outer lift: checks if empty, creates pieces, calls inner lift
 // TypePicker uses ContainerCoordinationContext protocol for parent access
 // Note: We receive recordPatternJson as input to avoid capturing Record before it's defined
 const initializeRecord = lift(
   toSchema<{
-    currentCharms: SubCharmEntry[]; // Unwrapped value, not Cell
-    subCharms: Writable<SubCharmEntry[]>;
-    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
+    currentPieces: SubPieceEntry[]; // Unwrapped value, not Cell
+    subPieces: Writable<SubPieceEntry[]>;
+    trashedSubPieces: Writable<TrashedSubPieceEntry[]>;
     isInitialized: Writable<boolean>;
     recordPatternJson: string; // Computed that returns Record JSON string
   }>(),
   undefined,
   (
     {
-      currentCharms,
-      subCharms,
-      trashedSubCharms,
+      currentPieces,
+      subPieces,
+      trashedSubPieces,
       isInitialized,
       recordPatternJson,
     },
   ) => {
-    if ((currentCharms || []).length === 0) {
+    if ((currentPieces || []).length === 0) {
       // Create Note as default module (rendered via ct-render variant="embedded")
-      // Pass recordPatternJson so [[wiki-links]] create Record charms instead of Note charms
-      const notesCharm = Note({ linkPattern: recordPatternJson });
+      // Pass recordPatternJson so [[wiki-links]] create Record pieces instead of Note pieces
+      const notesPiece = Note({ linkPattern: recordPatternJson });
 
       // Capture schema for dynamic discovery
-      const notesSchema = getResultSchema(notesCharm);
+      const notesSchema = getResultSchema(notesPiece);
 
       // TypePicker receives Cells as top-level props (CTS handles serialization correctly)
       // NOTE: Cells must be top-level, not nested in a context object!
       // deno-lint-ignore no-explicit-any
-      const typePickerCharm = TypePickerModule({
-        entries: subCharms,
-        trashedEntries: trashedSubCharms,
+      const typePickerPiece = TypePickerModule({
+        entries: subPieces,
+        trashedEntries: trashedSubPieces,
         linkPatternJson: recordPatternJson,
       } as any);
 
       // Capture schema for dynamic discovery
-      const typePickerSchema = getResultSchema(typePickerCharm);
+      const typePickerSchema = getResultSchema(typePickerPiece);
 
-      return storeInitialCharms({
-        notesCharm,
+      return storeInitialPieces({
+        notesPiece,
         notesSchema,
-        typePickerCharm,
+        typePickerPiece,
         typePickerSchema,
-        subCharms,
+        subPieces,
         isInitialized,
       });
     }
@@ -195,19 +195,19 @@ const initializeRecord = lift(
 // Helper to check if a module has settings UI
 const moduleHasSettings = lift(
   // deno-lint-ignore no-explicit-any
-  ({ charm }: { charm?: any }) => {
-    // Check if the charm exports a settingsUI
-    return !!charm?.settingsUI;
+  ({ piece }: { piece?: any }) => {
+    // Check if the piece exports a settingsUI
+    return !!piece?.settingsUI;
   },
 );
 
 // ===== Module-Scope Handlers (avoid closures, use references not indices) =====
 
-// Toggle pin state for a sub-charm - uses entry reference, not index
+// Toggle pin state for a sub-piece - uses entry reference, not index
 const togglePin = handler<
   unknown,
-  { subCharms: Writable<SubCharmEntry[]>; index: number }
->((_event, { subCharms: sc, index }) => {
+  { subPieces: Writable<SubPieceEntry[]>; index: number }
+>((_event, { subPieces: sc, index }) => {
   const current = sc.get() || [];
   const entry = current[index];
   if (!entry) return;
@@ -217,11 +217,11 @@ const togglePin = handler<
   sc.set(updated);
 });
 
-// Toggle collapsed state for a sub-charm - uses index for reliable lookup
+// Toggle collapsed state for a sub-piece - uses index for reliable lookup
 const toggleCollapsed = handler<
   unknown,
-  { subCharms: Writable<SubCharmEntry[]>; index: number }
->((_event, { subCharms: sc, index }) => {
+  { subPieces: Writable<SubPieceEntry[]>; index: number }
+>((_event, { subPieces: sc, index }) => {
   const current = sc.get() || [];
   const entry = current[index];
   if (!entry) return;
@@ -255,14 +255,14 @@ const closeExpanded = handler<
   expandedIndex.set(undefined);
 });
 
-// Add a new sub-charm
+// Add a new sub-piece
 // Note: Receives recordPatternJson to create Notes with correct wiki-link target
 // Note: Controller modules (extractor) also receive parent Cells and title
-const addSubCharm = handler<
+const addSubPiece = handler<
   { detail: { value: string } },
   {
-    subCharms: Writable<SubCharmEntry[]>;
-    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
+    subPieces: Writable<SubPieceEntry[]>;
+    trashedSubPieces: Writable<TrashedSubPieceEntry[]>;
     title: Writable<string>;
     selectedAddType: Writable<string>;
     recordPatternJson: string;
@@ -270,8 +270,8 @@ const addSubCharm = handler<
 >((
   { detail },
   {
-    subCharms: sc,
-    trashedSubCharms: trash,
+    subPieces: sc,
+    trashedSubPieces: trash,
     title,
     selectedAddType: sat,
     recordPatternJson,
@@ -280,7 +280,7 @@ const addSubCharm = handler<
   const type = detail?.value;
   if (!type) return;
 
-  // Create the sub-charm and add it (multiple modules of same type allowed)
+  // Create the sub-piece and add it (multiple modules of same type allowed)
   const current = sc.get() || [];
 
   // Get smart default label for modules that support it
@@ -288,37 +288,37 @@ const addSubCharm = handler<
   const initialValues = nextLabel ? { label: nextLabel } : undefined;
 
   // Special case: create Note (rendered via ct-render variant="embedded")
-  // Pass recordPatternJson so [[wiki-links]] create Record charms instead of Note charms
+  // Pass recordPatternJson so [[wiki-links]] create Record pieces instead of Note pieces
   // Special case: create ExtractorModule as controller with parent Cells and title
-  const charm = type === "notes"
+  const piece = type === "notes"
     ? Note({ linkPattern: recordPatternJson })
     : type === "extractor"
     ? ExtractorModule({
-      parentSubCharms: sc,
-      parentTrashedSubCharms: trash,
+      parentSubPieces: sc,
+      parentTrashedSubPieces: trash,
       parentTitle: title,
     } as any)
-    : createSubCharm(type, initialValues);
+    : createSubPiece(type, initialValues);
 
   // Capture schema at creation time for dynamic discovery
-  const schema = getResultSchema(charm);
+  const schema = getResultSchema(piece);
   sc.set([...current, {
     type,
     pinned: false,
     collapsed: false,
-    charm,
+    piece,
     schema,
   }]);
   sat.set("");
 });
 
-// Move sub-charm to trash (soft delete) - uses Cell.push() and Cell.remove()
+// Move sub-piece to trash (soft delete) - uses Cell.push() and Cell.remove()
 // Also adjusts expandedIndex to prevent stale index pointing to wrong module
-const trashSubCharm = handler<
+const trashSubPiece = handler<
   unknown,
   {
-    subCharms: Writable<SubCharmEntry[]>;
-    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
+    subPieces: Writable<SubPieceEntry[]>;
+    trashedSubPieces: Writable<TrashedSubPieceEntry[]>;
     expandedIndex: Writable<number | undefined>;
     settingsModuleIndex: Writable<number | undefined>;
     index: number;
@@ -326,8 +326,8 @@ const trashSubCharm = handler<
 >((
   _event,
   {
-    subCharms: sc,
-    trashedSubCharms: trash,
+    subPieces: sc,
+    trashedSubPieces: trash,
     expandedIndex,
     settingsModuleIndex,
     index,
@@ -370,15 +370,15 @@ const trashSubCharm = handler<
   }
 });
 
-// Restore sub-charm from trash - uses index for reliable lookup
-const restoreSubCharm = handler<
+// Restore sub-piece from trash - uses index for reliable lookup
+const restoreSubPiece = handler<
   unknown,
   {
-    subCharms: Writable<SubCharmEntry[]>;
-    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
+    subPieces: Writable<SubPieceEntry[]>;
+    trashedSubPieces: Writable<TrashedSubPieceEntry[]>;
     trashIndex: number;
   }
->((_event, { subCharms: sc, trashedSubCharms: trash, trashIndex }) => {
+>((_event, { subPieces: sc, trashedSubPieces: trash, trashIndex }) => {
   const current = trash.get() || [];
   const entry = current[trashIndex];
   if (!entry) return;
@@ -397,10 +397,10 @@ const restoreSubCharm = handler<
 const permanentlyDelete = handler<
   unknown,
   {
-    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
+    trashedSubPieces: Writable<TrashedSubPieceEntry[]>;
     trashIndex: number;
   }
->((_event, { trashedSubCharms: trash, trashIndex }) => {
+>((_event, { trashedSubPieces: trash, trashIndex }) => {
   const current = trash.get() || [];
   if (trashIndex < 0 || trashIndex >= current.length) return;
 
@@ -412,8 +412,8 @@ const permanentlyDelete = handler<
 // Empty all trash
 const emptyTrash = handler<
   unknown,
-  { trashedSubCharms: Writable<TrashedSubCharmEntry[]> }
->((_event, { trashedSubCharms: trash }) => {
+  { trashedSubPieces: Writable<TrashedSubPieceEntry[]> }
+>((_event, { trashedSubPieces: trash }) => {
   trash.set([]);
 });
 
@@ -421,13 +421,13 @@ const emptyTrash = handler<
 const openNoteEditor = handler<
   unknown,
   {
-    subCharms: Writable<SubCharmEntry[]>;
+    subPieces: Writable<SubPieceEntry[]>;
     editingNoteIndex: Writable<number | undefined>;
     editingNoteText: Writable<string | undefined>;
     index: number;
   }
->((_event, { subCharms, editingNoteIndex, editingNoteText, index }) => {
-  const current = subCharms.get() || [];
+>((_event, { subPieces, editingNoteIndex, editingNoteText, index }) => {
+  const current = subPieces.get() || [];
   const entry = current[index];
   if (!entry) return;
   editingNoteIndex.set(index);
@@ -438,11 +438,11 @@ const openNoteEditor = handler<
 const saveNote = handler<
   unknown,
   {
-    subCharms: Writable<SubCharmEntry[]>;
+    subPieces: Writable<SubPieceEntry[]>;
     editingNoteIndex: Writable<number | undefined>;
     editingNoteText: Writable<string | undefined>;
   }
->((_event, { subCharms: sc, editingNoteIndex, editingNoteText }) => {
+>((_event, { subPieces: sc, editingNoteIndex, editingNoteText }) => {
   const index = editingNoteIndex.get();
   const noteValue = (editingNoteText.get() || "").trim();
 
@@ -509,47 +509,47 @@ const handleGetSummary = handler<
   { result?: Writable<unknown> },
   {
     title: Writable<string>;
-    subCharms: Writable<SubCharmEntry[]>;
+    subPieces: Writable<SubPieceEntry[]>;
   }
->(({ result }, { title, subCharms }) => {
-  const modules = subCharms.get() || [];
+>(({ result }, { title, subPieces }) => {
+  const modules = subPieces.get() || [];
   const summary = {
     title: title.get() || "(Untitled Record)",
     moduleCount: modules.length,
     modules: modules.map((entry, index) => {
       const def = getDefinition(entry.type);
-      // Extract data from charm - access common fields reactively
+      // Extract data from piece - access common fields reactively
       // deno-lint-ignore no-explicit-any
-      const charm = entry.charm as any;
+      const piece = entry.piece as any;
       const moduleData: Record<string, unknown> = {};
 
       // Try to extract common fields based on module type
       try {
         // Most modules have a primary value field
-        if (charm?.label !== undefined) moduleData.label = charm.label;
-        if (charm?.value !== undefined) moduleData.value = charm.value;
-        if (charm?.content !== undefined) moduleData.content = charm.content;
-        if (charm?.address !== undefined) moduleData.address = charm.address;
-        if (charm?.email !== undefined) moduleData.email = charm.email;
-        if (charm?.phone !== undefined) moduleData.phone = charm.phone;
-        if (charm?.rating !== undefined) moduleData.rating = charm.rating;
-        if (charm?.tags !== undefined) moduleData.tags = charm.tags;
-        if (charm?.status !== undefined) moduleData.status = charm.status;
-        if (charm?.nickname !== undefined) moduleData.nickname = charm.nickname;
-        if (charm?.icon !== undefined) moduleData.icon = charm.icon;
-        if (charm?.birthDate !== undefined) {
-          moduleData.birthDate = charm.birthDate;
+        if (piece?.label !== undefined) moduleData.label = piece.label;
+        if (piece?.value !== undefined) moduleData.value = piece.value;
+        if (piece?.content !== undefined) moduleData.content = piece.content;
+        if (piece?.address !== undefined) moduleData.address = piece.address;
+        if (piece?.email !== undefined) moduleData.email = piece.email;
+        if (piece?.phone !== undefined) moduleData.phone = piece.phone;
+        if (piece?.rating !== undefined) moduleData.rating = piece.rating;
+        if (piece?.tags !== undefined) moduleData.tags = piece.tags;
+        if (piece?.status !== undefined) moduleData.status = piece.status;
+        if (piece?.nickname !== undefined) moduleData.nickname = piece.nickname;
+        if (piece?.icon !== undefined) moduleData.icon = piece.icon;
+        if (piece?.birthDate !== undefined) {
+          moduleData.birthDate = piece.birthDate;
         }
-        if (charm?.birthYear !== undefined) {
-          moduleData.birthYear = charm.birthYear;
+        if (piece?.birthYear !== undefined) {
+          moduleData.birthYear = piece.birthYear;
         }
-        if (charm?.url !== undefined) moduleData.url = charm.url;
-        if (charm?.notes !== undefined) moduleData.notes = charm.notes;
-        if (charm?.occurrences !== undefined) {
-          moduleData.occurrences = charm.occurrences;
+        if (piece?.url !== undefined) moduleData.url = piece.url;
+        if (piece?.notes !== undefined) moduleData.notes = piece.notes;
+        if (piece?.occurrences !== undefined) {
+          moduleData.occurrences = piece.occurrences;
         }
       } catch {
-        // Ignore errors from charms without expected fields
+        // Ignore errors from pieces without expected fields
       }
 
       return {
@@ -579,13 +579,13 @@ const handleAddModule = handler<
     result?: Writable<unknown>;
   },
   {
-    subCharms: Writable<SubCharmEntry[]>;
-    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
+    subPieces: Writable<SubPieceEntry[]>;
+    trashedSubPieces: Writable<TrashedSubPieceEntry[]>;
     title: Writable<string>;
   }
 >((
   { type, initialData, result },
-  { subCharms: sc, trashedSubCharms: trash, title },
+  { subPieces: sc, trashedSubPieces: trash, title },
 ) => {
   if (!type) {
     if (result) {
@@ -617,7 +617,7 @@ const handleAddModule = handler<
   };
 
   // Create the module - special cases handled
-  let charm: unknown;
+  let piece: unknown;
   if (type === "notes") {
     if (result) {
       result.set({
@@ -628,24 +628,24 @@ const handleAddModule = handler<
     return;
   } else if (type === "extractor") {
     // ExtractorModule needs parent Cells and title
-    charm = ExtractorModule({
-      parentSubCharms: sc,
-      parentTrashedSubCharms: trash,
+    piece = ExtractorModule({
+      parentSubPieces: sc,
+      parentTrashedSubPieces: trash,
       parentTitle: title,
       // deno-lint-ignore no-explicit-any
     } as any);
   } else {
-    charm = createSubCharm(type, initialValues);
+    piece = createSubPiece(type, initialValues);
   }
 
   // Capture schema at creation time
-  const schema = getResultSchema(charm);
+  const schema = getResultSchema(piece);
 
   sc.push({
     type,
     pinned: false,
     collapsed: false,
-    charm,
+    piece,
     schema,
   });
 
@@ -660,13 +660,13 @@ const handleAddModule = handler<
 });
 
 // Update a field in a specific module
-// index: module index in subCharms array
+// index: module index in subPieces array
 // field: field name to update
 // value: new value
 const handleUpdateModule = handler<
   { index: number; field: string; value: unknown; result?: Writable<unknown> },
-  { subCharms: Writable<SubCharmEntry[]> }
->(({ index, field, value, result }, { subCharms: sc }) => {
+  { subPieces: Writable<SubPieceEntry[]> }
+>(({ index, field, value, result }, { subPieces: sc }) => {
   const current = sc.get() || [];
 
   if (index < 0 || index >= current.length) {
@@ -683,16 +683,16 @@ const handleUpdateModule = handler<
 
   const entry = current[index];
   // deno-lint-ignore no-explicit-any
-  const charm = entry.charm as any;
+  const piece = entry.piece as any;
 
-  if (!charm) {
-    if (result) result.set({ success: false, error: "Module charm not found" });
+  if (!piece) {
+    if (result) result.set({ success: false, error: "Module piece not found" });
     return;
   }
 
   try {
     // Try to access the field as a Cell and set it
-    const fieldCell = charm[field];
+    const fieldCell = piece[field];
     if (fieldCell && typeof fieldCell.set === "function") {
       fieldCell.set(value);
       if (result) {
@@ -730,10 +730,10 @@ const handleUpdateModule = handler<
 const handleRemoveModule = handler<
   { index: number; result?: Writable<unknown> },
   {
-    subCharms: Writable<SubCharmEntry[]>;
-    trashedSubCharms: Writable<TrashedSubCharmEntry[]>;
+    subPieces: Writable<SubPieceEntry[]>;
+    trashedSubPieces: Writable<TrashedSubPieceEntry[]>;
   }
->(({ index, result }, { subCharms: sc, trashedSubCharms: trash }) => {
+>(({ index, result }, { subPieces: sc, trashedSubPieces: trash }) => {
   const current = sc.get() || [];
 
   if (index < 0 || index >= current.length) {
@@ -802,8 +802,8 @@ const handleListModuleTypes = handler<
 // Used by '+' button in module headers for email/phone/address
 const createSibling = handler<
   unknown,
-  { subCharms: Writable<SubCharmEntry[]>; index: number }
->((_event, { subCharms: sc, index }) => {
+  { subPieces: Writable<SubPieceEntry[]>; index: number }
+>((_event, { subPieces: sc, index }) => {
   const current = sc.get() || [];
   const entry = current[index];
   if (!entry) return;
@@ -813,7 +813,7 @@ const createSibling = handler<
   const initialValues = nextLabel ? { label: nextLabel } : undefined;
 
   // Create new module of same type
-  const charm = createSubCharm(entry.type, initialValues);
+  const piece = createSubPiece(entry.type, initialValues);
 
   // Insert after current position
   const updated = [...current];
@@ -821,7 +821,7 @@ const createSibling = handler<
     type: entry.type,
     pinned: false,
     collapsed: false,
-    charm,
+    piece,
   });
   sc.set(updated);
 });
@@ -831,19 +831,19 @@ const createSibling = handler<
 // This is called inside computed() blocks after values are accessed
 function getDisplayInfo(
   type: string,
-  charmLabel?: string,
+  pieceLabel?: string,
 ): { icon: string; label: string; allowMultiple: boolean } {
   const def = getDefinition(type);
   return {
     icon: def?.icon || "📋",
-    label: charmLabel || def?.label || type,
+    label: pieceLabel || def?.label || type,
     allowMultiple: def?.allowMultiple || false,
   };
 }
 
 // ===== The Record Pattern =====
 const Record = pattern<RecordInput, RecordOutput>(
-  ({ title, subCharms, trashedSubCharms, [SELF]: self }) => {
+  ({ title, subPieces, trashedSubPieces, [SELF]: self }) => {
     // Local state
     const selectedAddType = Writable.of<string>("");
     const trashExpanded = Writable.of(false);
@@ -876,9 +876,9 @@ const Record = pattern<RecordInput, RecordOutput>(
     // Capture return value to force lift execution (fixes wiki-link creation)
     const isInitialized = Writable.of(false);
     const _initialized = initializeRecord({
-      currentCharms: subCharms,
-      subCharms,
-      trashedSubCharms,
+      currentPieces: subPieces,
+      subPieces,
+      trashedSubPieces,
       isInitialized,
       recordPatternJson,
     });
@@ -888,11 +888,11 @@ const Record = pattern<RecordInput, RecordOutput>(
     // Display name with fallback
     const displayName = computed(() => title?.trim() || "(Untitled Record)");
 
-    // Entry with index for rendering - preserves charm references (no spreading!)
+    // Entry with index for rendering - preserves piece references (no spreading!)
     // isExpanded is pre-computed to avoid closure issues inside .map() callbacks
     // displayInfo is computed using module-scope lift() that properly unwraps Cell values
     type EntryWithIndex = {
-      entry: SubCharmEntry;
+      entry: SubPieceEntry;
       index: number;
       isExpanded: boolean;
       displayInfo: { icon: string; label: string; allowMultiple: boolean };
@@ -901,21 +901,21 @@ const Record = pattern<RecordInput, RecordOutput>(
     };
 
     // Pre-compute entries with their indices AND expanded state for stable reference during render
-    // IMPORTANT: We do NOT spread entry properties - that breaks charm rendering
+    // IMPORTANT: We do NOT spread entry properties - that breaks piece rendering
     // IMPORTANT: isExpanded must be computed here, not inside .map() - closures over cells in .map() don't work correctly
     // IMPORTANT: displayInfo uses getDisplayInfo (plain helper) - this works because
     //   computed() transforms .map() callbacks to properly unwrap reactive values
     const allEntriesWithIndex = computed(() => {
       const expandedIdx = expandedIndex.get();
       // Note: Don't use fallback (|| []) as it breaks CTS transformer's mapWithPattern
-      // subCharms is guaranteed to be an array by the Default type
-      return subCharms.map((entry, index) => {
+      // subPieces is guaranteed to be an array by the Default type
+      return subPieces.map((entry, index) => {
         // Get display info using plain helper function
         // This works because CTS transforms .map() to properly unwrap reactive values
         const displayInfo = getDisplayInfo(
           entry.type,
           // deno-lint-ignore no-explicit-any
-          (entry.charm as any)?.label,
+          (entry.piece as any)?.label,
         );
         return {
           entry,
@@ -947,7 +947,7 @@ const Record = pattern<RecordInput, RecordOutput>(
     // Build dropdown items from registry, separating new types from existing ones
     // Note: Don't use fallback (|| []) as it breaks CTS transformer's mapWithPattern
     const addSelectItems = computed(() => {
-      const types = [...new Set(subCharms.map((e) => e?.type).filter(Boolean))];
+      const types = [...new Set(subPieces.map((e) => e?.type).filter(Boolean))];
       const existingTypes = new Set<string>(types);
       const allTypes = getAddableTypes();
 
@@ -980,17 +980,17 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // Infer record type from modules (data-up philosophy)
     const inferredType = computed(() => {
-      const types = subCharms.map((e) => e?.type).filter(Boolean) as string[];
+      const types = subPieces.map((e) => e?.type).filter(Boolean) as string[];
       return inferTypeFromModules(types);
     });
 
     // Check for manual icon override from record-icon module
     // Note: Don't use fallback (|| []) as it breaks CTS transformer's method replacement
     const manualIcon = computed(() => {
-      const iconModule = subCharms.find((e) => e?.type === "record-icon");
+      const iconModule = subPieces.find((e) => e?.type === "record-icon");
       if (!iconModule) return null;
       // deno-lint-ignore no-explicit-any
-      const iconValue = (iconModule.charm as any)?.icon;
+      const iconValue = (iconModule.piece as any)?.icon;
       if (!iconValue) return null;
       return typeof iconValue === "string" && iconValue.trim()
         ? iconValue.trim()
@@ -1007,12 +1007,12 @@ const Record = pattern<RecordInput, RecordOutput>(
     // Extract nicknames from nickname modules for display in NAME
     // Note: Don't use fallback (|| []) as it breaks CTS transformer's method replacement
     const nicknamesList = computed(() => {
-      const nicknameModules = subCharms.filter((e) => e?.type === "nickname");
+      const nicknameModules = subPieces.filter((e) => e?.type === "nickname");
       const nicknames: string[] = [];
       for (const mod of nicknameModules) {
         try {
           // deno-lint-ignore no-explicit-any
-          const nicknameValue = (mod.charm as any)?.nickname;
+          const nicknameValue = (mod.piece as any)?.nickname;
           if (typeof nicknameValue === "string" && nicknameValue.trim()) {
             nicknames.push(nicknameValue.trim());
           }
@@ -1037,22 +1037,22 @@ const Record = pattern<RecordInput, RecordOutput>(
     // Pre-compute trashed entries with displayInfo using getDisplayInfo helper
     // Note: Don't use fallback (|| []) as it breaks CTS transformer's mapWithPattern
     const trashedEntriesWithDisplay = computed(() => {
-      return trashedSubCharms.map((entry, trashIndex) => {
+      return trashedSubPieces.map((entry, trashIndex) => {
         // Get display info using plain helper function
         const displayInfo = getDisplayInfo(
           entry.type,
           // deno-lint-ignore no-explicit-any
-          (entry.charm as any)?.label,
+          (entry.piece as any)?.label,
         );
         return { entry, trashIndex, displayInfo };
       });
     });
 
     // Compute trash count directly
-    const trashCount = computed(() => (trashedSubCharms || []).length);
+    const trashCount = computed(() => (trashedSubPieces || []).length);
 
     // Check if there are any trashed items
-    const hasTrash = computed(() => (trashedSubCharms || []).length > 0);
+    const hasTrash = computed(() => (trashedSubPieces || []).length > 0);
 
     // ===== Settings Modal Computed Values =====
 
@@ -1060,23 +1060,23 @@ const Record = pattern<RecordInput, RecordOutput>(
     const currentSettingsUI = computed(() => {
       const idx = settingsModuleIndex.get();
       if (idx === undefined) return null;
-      const entry = subCharms[idx];
+      const entry = subPieces[idx];
       if (!entry) return null;
       // deno-lint-ignore no-explicit-any
-      return (entry.charm as any)?.settingsUI || null;
+      return (entry.piece as any)?.settingsUI || null;
     });
 
     // Get display info for the module whose settings are open
     const settingsModuleDisplay = computed(() => {
       const idx = settingsModuleIndex.get();
       if (idx === undefined) return { icon: "", label: "Settings" };
-      const entry = subCharms[idx];
+      const entry = subPieces[idx];
       if (!entry) return { icon: "", label: "Settings" };
       // Use plain helper function to get display info
       return getDisplayInfo(
         entry.type,
         // deno-lint-ignore no-explicit-any
-        (entry.charm as any)?.label,
+        (entry.piece as any)?.label,
       );
     });
 
@@ -1104,9 +1104,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                 $value={selectedAddType}
                 placeholder="+ Add"
                 items={addSelectItems}
-                onct-change={addSubCharm({
-                  subCharms,
-                  trashedSubCharms,
+                onct-change={addSubPiece({
+                  subPieces,
+                  trashedSubPieces,
                   title,
                   selectedAddType,
                   recordPatternJson,
@@ -1200,7 +1200,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                             >
                               <button
                                 type="button"
-                                onClick={toggleCollapsed({ subCharms, index })}
+                                onClick={toggleCollapsed({ subPieces, index })}
                                 aria-expanded={computed(() =>
                                   entry.collapsed ? "false" : "true"
                                 )}
@@ -1251,7 +1251,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   <button
                                     type="button"
                                     onClick={createSibling({
-                                      subCharms,
+                                      subPieces,
                                       index,
                                     })}
                                     style={{
@@ -1274,7 +1274,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   <button
                                     type="button"
                                     onClick={openNoteEditor({
-                                      subCharms,
+                                      subPieces,
                                       editingNoteIndex,
                                       editingNoteText,
                                       index,
@@ -1299,7 +1299,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 {/* Settings gear - only show if module has settingsUI */}
                                 {!isExpanded &&
                                   ifElse(
-                                    moduleHasSettings({ charm: entry.charm }),
+                                    moduleHasSettings({ piece: entry.piece }),
                                     <button
                                       type="button"
                                       onClick={openSettings({
@@ -1324,7 +1324,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 {!isExpanded && (
                                   <button
                                     type="button"
-                                    onClick={togglePin({ subCharms, index })}
+                                    onClick={togglePin({ subPieces, index })}
                                     style={{
                                       background: isPinned
                                         ? "#e0f2fe"
@@ -1369,9 +1369,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 {!isExpanded && (
                                   <button
                                     type="button"
-                                    onClick={trashSubCharm({
-                                      subCharms,
-                                      trashedSubCharms,
+                                    onClick={trashSubPiece({
+                                      subPieces,
+                                      trashedSubPieces,
                                       expandedIndex,
                                       settingsModuleIndex,
                                       index,
@@ -1406,10 +1406,10 @@ const Record = pattern<RecordInput, RecordOutput>(
                               }}
                             >
                               {computed(() => {
-                                const charm = entry.charm as any;
+                                const piece = entry.piece as any;
                                 // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
-                                return charm?.embeddedUI ??
-                                  <ct-render $cell={entry.charm} />;
+                                return piece?.embeddedUI ??
+                                  <ct-render $cell={entry.piece} />;
                               })}
                             </div>,
                             null,
@@ -1492,7 +1492,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 <button
                                   type="button"
                                   onClick={toggleCollapsed({
-                                    subCharms,
+                                    subPieces,
                                     index,
                                   })}
                                   aria-expanded={computed(() =>
@@ -1545,7 +1545,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                     <button
                                       type="button"
                                       onClick={createSibling({
-                                        subCharms,
+                                        subPieces,
                                         index,
                                       })}
                                       style={{
@@ -1568,7 +1568,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                     <button
                                       type="button"
                                       onClick={openNoteEditor({
-                                        subCharms,
+                                        subPieces,
                                         editingNoteIndex,
                                         editingNoteText,
                                         index,
@@ -1593,7 +1593,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   {/* Settings gear - only show if module has settingsUI */}
                                   {!isExpanded &&
                                     ifElse(
-                                      moduleHasSettings({ charm: entry.charm }),
+                                      moduleHasSettings({ piece: entry.piece }),
                                       <button
                                         type="button"
                                         onClick={openSettings({
@@ -1618,7 +1618,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   {!isExpanded && (
                                     <button
                                       type="button"
-                                      onClick={togglePin({ subCharms, index })}
+                                      onClick={togglePin({ subPieces, index })}
                                       style={{
                                         background: isPinned
                                           ? "#e0f2fe"
@@ -1663,9 +1663,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   {!isExpanded && (
                                     <button
                                       type="button"
-                                      onClick={trashSubCharm({
-                                        subCharms,
-                                        trashedSubCharms,
+                                      onClick={trashSubPiece({
+                                        subPieces,
+                                        trashedSubPieces,
                                         expandedIndex,
                                         settingsModuleIndex,
                                         index,
@@ -1700,10 +1700,10 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 }}
                               >
                                 {computed(() => {
-                                  const charm = entry.charm as any;
+                                  const piece = entry.piece as any;
                                   // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
-                                  return charm?.embeddedUI ??
-                                    <ct-render $cell={entry.charm} />;
+                                  return piece?.embeddedUI ??
+                                    <ct-render $cell={entry.piece} />;
                                 })}
                               </div>,
                               null,
@@ -1784,7 +1784,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                           >
                             <button
                               type="button"
-                              onClick={toggleCollapsed({ subCharms, index })}
+                              onClick={toggleCollapsed({ subPieces, index })}
                               aria-expanded={computed(() =>
                                 entry.collapsed ? "false" : "true"
                               )}
@@ -1834,7 +1834,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 allowMultiple,
                                 <button
                                   type="button"
-                                  onClick={createSibling({ subCharms, index })}
+                                  onClick={createSibling({ subPieces, index })}
                                   style={{
                                     background: "transparent",
                                     border: "1px solid #e5e7eb",
@@ -1855,7 +1855,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 <button
                                   type="button"
                                   onClick={openNoteEditor({
-                                    subCharms,
+                                    subPieces,
                                     editingNoteIndex,
                                     editingNoteText,
                                     index,
@@ -1880,7 +1880,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                               {/* Settings gear - only show if module has settingsUI */}
                               {!isExpanded &&
                                 ifElse(
-                                  moduleHasSettings({ charm: entry.charm }),
+                                  moduleHasSettings({ piece: entry.piece }),
                                   <button
                                     type="button"
                                     onClick={openSettings({
@@ -1905,7 +1905,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                               {!isExpanded && (
                                 <button
                                   type="button"
-                                  onClick={togglePin({ subCharms, index })}
+                                  onClick={togglePin({ subPieces, index })}
                                   style={{
                                     background: isPinned
                                       ? "#e0f2fe"
@@ -1950,9 +1950,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                               {!isExpanded && (
                                 <button
                                   type="button"
-                                  onClick={trashSubCharm({
-                                    subCharms,
-                                    trashedSubCharms,
+                                  onClick={trashSubPiece({
+                                    subPieces,
+                                    trashedSubPieces,
                                     expandedIndex,
                                     settingsModuleIndex,
                                     index,
@@ -1987,10 +1987,10 @@ const Record = pattern<RecordInput, RecordOutput>(
                             }}
                           >
                             {computed(() => {
-                              const charm = entry.charm as any;
+                              const piece = entry.piece as any;
                               // Use embeddedUI if available, otherwise fall back to ct-render for default [UI]
-                              return charm?.embeddedUI ??
-                                <ct-render $cell={entry.charm} />;
+                              return piece?.embeddedUI ??
+                                <ct-render $cell={entry.piece} />;
                             })}
                           </div>,
                           null,
@@ -2077,9 +2077,9 @@ const Record = pattern<RecordInput, RecordOutput>(
                             >
                               <button
                                 type="button"
-                                onClick={restoreSubCharm({
-                                  subCharms,
-                                  trashedSubCharms,
+                                onClick={restoreSubPiece({
+                                  subPieces,
+                                  trashedSubPieces,
                                   trashIndex,
                                 })}
                                 style={{
@@ -2098,7 +2098,7 @@ const Record = pattern<RecordInput, RecordOutput>(
                               <button
                                 type="button"
                                 onClick={permanentlyDelete({
-                                  trashedSubCharms,
+                                  trashedSubPieces,
                                   trashIndex,
                                 })}
                                 style={{
@@ -2122,7 +2122,7 @@ const Record = pattern<RecordInput, RecordOutput>(
 
                     <button
                       type="button"
-                      onClick={emptyTrash({ trashedSubCharms })}
+                      onClick={emptyTrash({ trashedSubPieces })}
                       style={{
                         marginTop: "8px",
                         background: "transparent",
@@ -2168,7 +2168,7 @@ const Record = pattern<RecordInput, RecordOutput>(
               meta
               ignore-editable={false}
               onct-keybind={saveNote({
-                subCharms,
+                subPieces,
                 editingNoteIndex,
                 editingNoteText,
               })}
@@ -2178,7 +2178,7 @@ const Record = pattern<RecordInput, RecordOutput>(
               ctrl
               ignore-editable={false}
               onct-keybind={saveNote({
-                subCharms,
+                subPieces,
                 editingNoteIndex,
                 editingNoteText,
               })}
@@ -2200,7 +2200,7 @@ const Record = pattern<RecordInput, RecordOutput>(
               <ct-button
                 variant="primary"
                 onClick={saveNote({
-                  subCharms,
+                  subPieces,
                   editingNoteIndex,
                   editingNoteText,
                 })}
@@ -2263,18 +2263,18 @@ const Record = pattern<RecordInput, RecordOutput>(
         </ct-vstack>
       ),
       title,
-      subCharms,
-      trashedSubCharms,
-      // Self-reference for sub-charms to access their parent Record
+      subPieces,
+      trashedSubPieces,
+      // Self-reference for sub-pieces to access their parent Record
       // Enables cleaner parent-child relationships than ContainerCoordinationContext
       parentRecord: self,
       "#record": true,
       // LLM-callable streams for Omnibot integration
       // Omnibot can invoke these via: invoke({ "@link": "/of:record-id/getSummary" }, {})
-      getSummary: handleGetSummary({ title, subCharms }),
-      addModule: handleAddModule({ subCharms, trashedSubCharms, title }),
-      updateModule: handleUpdateModule({ subCharms }),
-      removeModule: handleRemoveModule({ subCharms, trashedSubCharms }),
+      getSummary: handleGetSummary({ title, subPieces }),
+      addModule: handleAddModule({ subPieces, trashedSubPieces, title }),
+      updateModule: handleUpdateModule({ subPieces }),
+      removeModule: handleRemoveModule({ subPieces, trashedSubPieces }),
       setTitle: handleSetTitle({ title }),
       listModuleTypes: handleListModuleTypes({}),
     };

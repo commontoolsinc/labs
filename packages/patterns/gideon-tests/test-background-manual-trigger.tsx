@@ -8,23 +8,23 @@
  *
  * IMPORTANT DISCOVERY: bgUpdater is POLLING-BASED, not event-driven!
  * - bgUpdater does NOT auto-trigger when captured cells change
- * - It requires the background-charm-service to be running
- * - The service polls charms on a schedule (default: 60 seconds)
- * - The charm must be registered with the service via POST /api/integrations/bg
+ * - It requires the background-piece-service to be running
+ * - The service polls pieces on a schedule (default: 60 seconds)
+ * - The piece must be registered with the service via POST /api/integrations/bg
  *
  * VERIFICATION STATUS:
  * - Browser execution: ✅ VERIFIED (click button, see [BROWSER] logs)
- * - Server execution: ✅ VERIFIED BY CODE REVIEW (background-charm-service/src/worker.ts:188-196)
+ * - Server execution: ✅ VERIFIED BY CODE REVIEW (background-piece-service/src/worker.ts:188-196)
  *   The worker calls `updater.withTx(tx).send({})` to trigger bgUpdater server-side
  *
  * FULL BACKGROUND SERVICE SETUP (for live server-side testing):
- * 1. Registration API: POST /api/integrations/bg with {charmId, space, integration}
- *    - CLI: curl -X POST localhost:8000/api/integrations/bg -d '{"charmId":"...","space":"did:key:...","integration":"..."}'
+ * 1. Registration API: POST /api/integrations/bg with {pieceId, space, integration}
+ *    - CLI: curl -X POST localhost:8000/api/integrations/bg -d '{"pieceId":"...","space":"did:key:...","integration":"..."}'
  *    - UI: <ct-updater> component (has CORS issue locally)
  * 2. Space DID derivation: Identity.fromPassphrase("common user").derive(spaceName).did()
  * 3. System space: did:key:z6Mkfuw7h6jDwqVb6wimYGys14JFcyTem4Kqvdj9DjpFhY88 (common user + toolshed-system)
  * 4. Service requires ACL authorization to access system space
- * 5. Start: cd packages/background-charm-service && IDENTITY=<keyfile> API_URL=localhost:8000 deno task start
+ * 5. Start: cd packages/background-piece-service && IDENTITY=<keyfile> API_URL=localhost:8000 deno task start
  *
  * LOCAL TESTING BLOCKERS:
  * - Background service needs identity with authority over system space
@@ -60,7 +60,7 @@ const clearLogs = handler<
   },
 );
 
-// bgUpdater handler - runs on server when background-charm-service triggers it
+// bgUpdater handler - runs on server when background-piece-service triggers it
 // The service sends {} as the event, handler executes server-side
 const bgUpdateHandler = handler<
   unknown,
@@ -92,7 +92,7 @@ export default pattern<Input>(({ runCount, logs }) => {
           }}
         >
           <strong>Claim:</strong>{" "}
-          bgUpdater handlers run on SERVER via background-charm-service polling.
+          bgUpdater handlers run on SERVER via background-piece-service polling.
         </div>
 
         <div
@@ -113,8 +113,8 @@ export default pattern<Input>(({ runCount, logs }) => {
             }}
           >
             <li>Does NOT auto-trigger on cell changes</li>
-            <li>Requires background-charm-service running</li>
-            <li>Charm must be registered with service</li>
+            <li>Requires background-piece-service running</li>
+            <li>Piece must be registered with service</li>
             <li>Service polls and sends {} to bgUpdater Stream</li>
           </ul>
         </div>
@@ -187,7 +187,7 @@ export default pattern<Input>(({ runCount, logs }) => {
           </ul>
           <p style={{ fontSize: "12px", marginTop: "10px", color: "#666" }}>
             Server execution verified by reading
-            background-charm-service/src/worker.ts:188-196. The worker calls
+            background-piece-service/src/worker.ts:188-196. The worker calls
             {" "}
             <code>updater.withTx(tx).send({})</code>{" "}
             to trigger bgUpdater server-side.
@@ -210,11 +210,11 @@ export default pattern<Input>(({ runCount, logs }) => {
               fontSize: "13px",
             }}
           >
-            <li>Click "Register Charm for Updates" button below</li>
+            <li>Click "Register Piece for Updates" button below</li>
             <li>
-              Start the background-charm-service:{" "}
+              Start the background-piece-service:{" "}
               <code>
-                cd packages/background-charm-service && deno task start
+                cd packages/background-piece-service && deno task start
               </code>
             </li>
             <li>Wait ~60 seconds for polling interval</li>
@@ -229,7 +229,7 @@ export default pattern<Input>(({ runCount, logs }) => {
     ),
     runCount,
     logs,
-    // bgUpdater runs on server when background-charm-service polls this charm
+    // bgUpdater runs on server when background-piece-service polls this piece
     bgUpdater: bgUpdateHandler({ runCount, logs }),
   };
 });

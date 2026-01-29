@@ -72,7 +72,7 @@ export function applyCommand(
     }
     case "set-view": {
       next.view = command.view;
-      if ("charmId" in command.view && command.view.charmId) {
+      if ("pieceId" in command.view && command.view.pieceId) {
         next.config.showShellCharmListView = false;
       }
       break;

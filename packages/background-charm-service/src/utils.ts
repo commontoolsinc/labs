@@ -54,14 +54,14 @@ export async function getIdentity(
 
 export async function setBGCharm({
   space,
-  charmId,
+  pieceId,
   integration,
   runtime,
   bgSpace,
   bgCause,
 }: {
   space: string;
-  charmId: string;
+  pieceId: string;
   integration: string;
   runtime: Runtime;
   bgSpace?: MemorySpace;
@@ -82,16 +82,16 @@ export async function setBGCharm({
 
   const existingCharmIndex = charms.findIndex(
     (charm: Cell<BGCharmEntry>) =>
-      charm.get().space === space && charm.get().charmId === charmId,
+      charm.get().space === space && charm.get().pieceId === pieceId,
   );
 
   if (existingCharmIndex === -1) {
     console.log("Adding charm to BGUpdater charms cell");
     runtime.editWithRetry((tx) => {
       charmsCell.withTx(tx).push({
-        [ID]: `${space}/${charmId}`,
+        [ID]: `${space}/${pieceId}`,
         space,
-        charmId,
+        pieceId,
         integration,
         createdAt: Date.now(),
         updatedAt: Date.now(),

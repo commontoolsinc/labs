@@ -61,7 +61,7 @@ export const Counter = pattern<RecipeState>((state) => {
 
 interface FactoryInput {
   // Provided by the shell; not used directly here
-  allCharms: Default<unknown[], []>;
+  allPieces: Default<unknown[], []>;
 }
 
 // No additional outputs beyond name and UI
@@ -73,8 +73,8 @@ type FactoryOutput = {
 type InputEvent = { detail: { message: string } };
 
 const newCounter = handler<InputEvent, Record<string, never>>((_, __) => {
-  const charm = Counter({ value: Math.round(Math.random() * 10) });
-  return navigateTo(charm);
+  const piece = Counter({ value: Math.round(Math.random() * 10) });
+  return navigateTo(piece);
 });
 
 export default pattern<FactoryInput, FactoryOutput>((_) => {

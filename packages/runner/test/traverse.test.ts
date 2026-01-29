@@ -135,6 +135,182 @@ describe("SchemaObjectTraverser.traverseDAG", () => {
   });
 });
 
+describe("SchemaObjectTraverser missing value handling", () => {
+  // Missing values are handled consistently with other value transforms
+  // (toJSON, toStorableValue, etc.):
+  // - Arrays: null is inserted for missing elements
+  // - Objects: undefined is assigned for missing properties
+
+  it("uses null for missing array elements", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-with-array" as URI;
+    const docEntity = docUri as Entity;
+    const missingUri = "of:missing-doc" as URI;
+
+    // Array with a link to a non-existent document
+    const docValue = [
+      "present",
+      { "/": missingUri }, // link to missing doc
+      "also-present",
+    ];
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+    // Note: missingUri is NOT in the store
+
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schemaContext: { schema: true, rootSchema: true },
+    });
+
+    const result = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // Missing elements become null (consistent with toJSON, toStorableValue, etc.)
+    expect(result).toEqual(["present", null, "also-present"]);
+  });
+
+  it("uses undefined for missing object properties", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-with-object" as URI;
+    const docEntity = docUri as Entity;
+    const missingUri = "of:missing-doc" as URI;
+
+    // Object with a link to a non-existent document
+    const docValue = {
+      present: "here",
+      missing: { "/": missingUri }, // link to missing doc
+      alsoPresent: "also here",
+    };
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+    // Note: missingUri is NOT in the store
+
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schemaContext: { schema: true, rootSchema: true },
+    });
+
+    const result = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // Missing properties become undefined
+    expect(result).toEqual({
+      present: "here",
+      missing: undefined,
+      alsoPresent: "also here",
+    });
+  });
+
+  it("uses null for missing array elements with schema when allowed", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-with-array" as URI;
+    const docEntity = docUri as Entity;
+    const missingUri = "of:missing-doc" as URI;
+
+    // Array with a link to a non-existent document
+    const docValue = [
+      "present",
+      { "/": missingUri }, // link to missing doc
+      "also-present",
+    ];
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+    // Note: missingUri is NOT in the store
+
+    const schema = {
+      type: "array",
+      items: {
+        anyOf: [
+          { type: "null" },
+          { type: "string" },
+        ],
+      },
+    } as JSONSchema;
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schemaContext: { schema, rootSchema: schema },
+    });
+
+    const result = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // Missing elements become null (consistent with toJSON, toStorableValue, etc.)
+    expect(result).toEqual(["present", null, "also-present"]);
+  });
+
+  it("does not use null for missing array elements with schema when not allowed", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-with-array" as URI;
+    const docEntity = docUri as Entity;
+    const missingUri = "of:missing-doc" as URI;
+
+    // Array with a link to a non-existent document
+    const docValue = [
+      "present",
+      { "/": missingUri }, // link to missing doc
+      "also-present",
+    ];
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: refer({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+    // Note: missingUri is NOT in the store
+
+    const schema = {
+      type: "array",
+      items: { type: "string" },
+    } as JSONSchema;
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schemaContext: { schema, rootSchema: schema },
+    });
+
+    const result = traverser.traverse({
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    });
+
+    // Missing elements make the array invalid, thus undefined.
+    expect(result).toBeUndefined();
+  });
+});
+
 describe("SchemaObjectTraverser array traversal", () => {
   it("uses prefixItems schemas for indexed items", () => {
     const store = new Map<string, Revision<State>>();

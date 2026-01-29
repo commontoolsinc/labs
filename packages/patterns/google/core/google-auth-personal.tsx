@@ -132,7 +132,7 @@ export default pattern<Input, Output>(({ auth, selectedScopes }) => {
                 color: "#1e40af",
               }}
             >
-              Favorite This Charm!
+              Favorite This Piece!
             </h3>
             <p
               style={{

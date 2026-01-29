@@ -1,12 +1,13 @@
 {
   "name": "@commontools/shell",
   "tasks": {
-    "build": "deno run -A ../felt/cli.ts build .",
-    "production": "PRODUCTION=1 deno run -A ../felt/cli.ts build .",
+    "clean": "rm -rf dist",
+    "build": "deno task clean && deno run -A ../felt/cli.ts build .",
+    "production": "deno task clean && PRODUCTION=1 deno run -A ../felt/cli.ts build .",
     "serve": "deno run -A ../felt/cli.ts serve .",
-    "dev": "API_URL=https://toolshed.saga-castor.ts.net deno run -A ../felt/cli.ts dev .",
-    "dev-local": "API_URL=http://localhost:8000 deno run -A ../felt/cli.ts dev .",
-    "dev-clusterduck": "API_URL='http://localhost:7001'  deno run -A ../felt/cli.ts dev .",
+    "dev": "deno task clean && API_URL=https://toolshed.saga-castor.ts.net deno run -A ../felt/cli.ts dev .",
+    "dev-local": "deno task clean && API_URL=http://localhost:8000 deno run -A ../felt/cli.ts dev .",
+    "dev-clusterduck": "deno task clean && API_URL='http://localhost:7001' deno run -A ../felt/cli.ts dev .",
     "integration": "LOG_LEVEL=warn deno test -A ./integration/*.test.ts",
     "test": "deno test test/*.test.ts"
   },

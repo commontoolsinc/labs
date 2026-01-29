@@ -2,12 +2,12 @@
 
 import type { JSONSchema } from "./extraction/schema-utils-pure.ts";
 
-// ===== Sub-Charm Architecture Types =====
+// ===== Sub-Piece Architecture Types =====
 
 /**
  * Expected schema shape for extraction.
  *
- * When sub-charms are created, their resultSchema is captured and stored.
+ * When sub-pieces are created, their resultSchema is captured and stored.
  * This enables dynamic schema discovery for LLM extraction.
  *
  * Schema should be JSON Schema-like:
@@ -23,29 +23,29 @@ import type { JSONSchema } from "./extraction/schema-utils-pure.ts";
  */
 
 /**
- * SubCharmEntry - An entry in the Record's sub-charms array.
- * Each entry holds a reference to an actual sub-charm pattern instance.
+ * SubPieceEntry - An entry in the Record's sub-pieces array.
+ * Each entry holds a reference to an actual sub-piece pattern instance.
  */
-export interface SubCharmEntry {
+export interface SubPieceEntry {
   type: string; // Module type identifier (e.g., "birthday", "email")
-  pinned: boolean; // Pin state owned by Record (not the sub-charm)
+  pinned: boolean; // Pin state owned by Record (not the sub-piece)
   collapsed?: boolean; // Collapse state - when true, only header is shown (default: false/expanded)
-  charm: unknown; // Reference to the actual sub-charm pattern instance
+  piece: unknown; // Reference to the actual sub-piece pattern instance
   schema?: JSONSchema; // Schema captured at creation time for dynamic discovery
   note?: string; // User annotation about this module (visible to LLM reads, not extraction)
 }
 
 /**
- * TrashedSubCharmEntry - A sub-charm that has been soft-deleted.
- * Extends SubCharmEntry with a timestamp for when it was trashed.
+ * TrashedSubPieceEntry - A sub-piece that has been soft-deleted.
+ * Extends SubPieceEntry with a timestamp for when it was trashed.
  * Users can restore from trash or permanently delete.
  */
-export interface TrashedSubCharmEntry extends SubCharmEntry {
+export interface TrashedSubPieceEntry extends SubPieceEntry {
   trashedAt: string; // ISO timestamp when moved to trash
 }
 
-// Sub-charm types (all available module types)
-export type SubCharmType =
+// Sub-piece types (all available module types)
+export type SubPieceType =
   | "notes" // Built-in, always present
   | "birthday"
   | "rating"
@@ -85,11 +85,11 @@ export type SubCharmType =
   | "type-picker"
   | "extractor";
 
-// Module type is the same as SubCharmType (notes is now included)
-export type ModuleType = SubCharmType;
+// Module type is the same as SubPieceType (notes is now included)
+export type ModuleType = SubPieceType;
 
-export interface SubCharmMetadata {
-  type: SubCharmType;
+export interface SubPieceMetadata {
+  type: SubPieceType;
   label: string;
   icon: string;
 }

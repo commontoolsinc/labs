@@ -1,6 +1,6 @@
 import { env } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
-import { CharmsController } from "@commontools/charm/ops";
+import { PiecesController } from "@commontools/piece/ops";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -17,14 +17,14 @@ describe("Chat Note pattern test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  let charmId: string;
+  let pieceId: string;
   let identity: Identity;
-  let cc: CharmsController;
+  let cc: PiecesController;
 
   if (!ignore) {
     beforeAll(async () => {
       identity = await Identity.generate({ implementation: "noble" });
-      cc = await CharmsController.initialize({
+      cc = await PiecesController.initialize({
         spaceName: SPACE_NAME,
         apiUrl: new URL(API_URL),
         identity: identity,
@@ -35,14 +35,14 @@ describe("Chat Note pattern test", () => {
       await page.goto(`${FRONTEND_URL}/${SPACE_NAME}`);
       await sleep(3000); // Wait for space initialization
 
-      // Create the chat-note charm
-      const charm = await cc.create(
+      // Create the chat-note piece
+      const piece = await cc.create(
         await Deno.readTextFile(
           join(import.meta.dirname!, "..", "experimental", "chat-note.tsx"),
         ),
         { start: true },
       );
-      charmId = charm.id;
+      pieceId = piece.id;
     });
 
     afterAll(async () => {
@@ -51,7 +51,7 @@ describe("Chat Note pattern test", () => {
   }
 
   it({
-    name: "should load the chat-note charm and display initial UI",
+    name: "should load the chat-note piece and display initial UI",
     ignore,
     fn: async () => {
       const page = shell.page();
@@ -59,7 +59,7 @@ describe("Chat Note pattern test", () => {
         frontendUrl: FRONTEND_URL,
         view: {
           spaceName: SPACE_NAME,
-          charmId,
+          pieceId,
         },
         identity,
       });
@@ -220,7 +220,7 @@ describe("Chat Note pattern test", () => {
         frontendUrl: FRONTEND_URL,
         view: {
           spaceName: SPACE_NAME,
-          charmId,
+          pieceId,
         },
         identity,
       });

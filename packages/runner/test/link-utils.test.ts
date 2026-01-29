@@ -740,7 +740,7 @@ describe("link-utils", () => {
         asCell: true,
         properties: {
           name: { type: "string" },
-          subCharms: {
+          subPieces: {
             type: "array",
             items: {
               type: "object",
@@ -752,7 +752,7 @@ describe("link-utils", () => {
         },
       };
       // Create the circular reference
-      schema.properties.subCharms.items.properties.schema = schema;
+      schema.properties.subPieces.items.properties.schema = schema;
 
       // This should not throw a stack overflow
       const result = sanitizeSchemaForLinks(schema);
@@ -764,7 +764,7 @@ describe("link-utils", () => {
       // CT-1142: Result should be JSON-serializable without exponential growth
       expect(() => JSON.stringify(result)).not.toThrow();
       // The circular reference should use $ref
-      const schemaRef = (result as any).properties.subCharms.items.properties
+      const schemaRef = (result as any).properties.subPieces.items.properties
         .schema;
       expect(schemaRef.$ref).toBeDefined();
       expect(schemaRef.$ref).toMatch(/^#\/\$defs\//);
@@ -1227,19 +1227,19 @@ describe("link-utils", () => {
 
     it("should throw if target does not start with slash", () => {
       expect(() => parseLLMFriendlyLink(`${longId}/path`, space)).toThrow(
-        'Target must include a charm handle, e.g. "/of:bafyabc123/path".',
+        'Target must include a piece handle, e.g. "/of:bafyabc123/path".',
       );
     });
 
     it("should throw if target does not include handle", () => {
       expect(() => parseLLMFriendlyLink("/path/only", space)).toThrow(
-        'Target must include a charm handle, e.g. "/of:bafyabc123/path".',
+        'Target must include a piece handle, e.g. "/of:bafyabc123/path".',
       );
     });
 
     it("should throw if handle is too short (human name)", () => {
       expect(() => parseLLMFriendlyLink("/of:short/path", space)).toThrow(
-        'Charm references must use handles (e.g., "/of:bafyabc123/path"), not human names (e.g., "of:short").',
+        'Piece references must use handles (e.g., "/of:bafyabc123/path"), not human names (e.g., "of:short").',
       );
     });
   });

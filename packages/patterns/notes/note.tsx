@@ -19,27 +19,27 @@ import {
 import NoteMd from "./note-md.tsx";
 
 // Type for backlinks (inline to work around CLI path resolution bug)
-type MentionableCharm = {
+type MentionablePiece = {
   [NAME]?: string;
   isHidden?: boolean;
-  mentioned: MentionableCharm[];
-  backlinks: MentionableCharm[];
+  mentioned: MentionablePiece[];
+  backlinks: MentionablePiece[];
 };
 
 // Simple random ID generator (crypto.randomUUID not available in pattern env)
 const generateId = () =>
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
 
-type MinimalCharm = {
+type MinimalPiece = {
   [NAME]?: string;
 };
 
-type NotebookCharm = {
+type NotebookPiece = {
   [NAME]?: string;
-  notes?: NoteCharm[];
+  notes?: NotePiece[];
 };
 
-type NoteCharm = {
+type NotePiece = {
   [NAME]?: string;
   noteId?: string;
 };
@@ -59,8 +59,8 @@ type Input = {
 type Output = {
   [NAME]?: string;
   [UI]: VNode;
-  mentioned: Default<Array<MentionableCharm>, []>;
-  backlinks: MentionableCharm[];
+  mentioned: Default<Array<MentionablePiece>, []>;
+  backlinks: MentionablePiece[];
   parentNotebook: any; // Reference to parent notebook (set on navigation for back link)
 
   content: Default<string, "">;
@@ -91,40 +91,40 @@ const _updateContent = handler<
   },
 );
 
-const handleCharmLinkClick = handler<
+const handlePieceLinkClick = handler<
   {
     detail: {
-      charm: Writable<MentionableCharm>;
+      piece: Writable<MentionablePiece>;
     };
   },
   Record<string, never>
 >(({ detail }, _) => {
-  return navigateTo(detail.charm);
+  return navigateTo(detail.piece);
 });
 
 const handleNewBacklink = handler<
   {
     detail: {
       text: string;
-      charmId: any;
-      charm: Writable<MentionableCharm>;
+      pieceId: any;
+      piece: Writable<MentionablePiece>;
       navigate: boolean;
     };
   },
   {
-    mentionable: Writable<MentionableCharm[]>;
-    allCharms: Writable<MinimalCharm[]>;
+    mentionable: Writable<MentionablePiece[]>;
+    allPieces: Writable<MinimalPiece[]>;
   }
->(({ detail }, { mentionable, allCharms }) => {
-  console.log("new charm", detail.text, detail.charmId);
+>(({ detail }, { mentionable, allPieces }) => {
+  console.log("new piece", detail.text, detail.pieceId);
 
-  // Push to allCharms so it appears in default-app (this was the missing piece!)
-  allCharms.push(detail.charm);
+  // Push to allPieces so it appears in default-app (this was the missing piece!)
+  allPieces.push(detail.piece);
 
   if (detail.navigate) {
-    return navigateTo(detail.charm);
+    return navigateTo(detail.piece);
   } else {
-    mentionable.push(detail.charm);
+    mentionable.push(detail.piece);
   }
 });
 
@@ -139,12 +139,12 @@ const handleEditContent = handler<
   },
 );
 
-const handleCharmLinkClicked = handler<
+const handlePieceLinkClicked = handler<
   void,
-  { charm: Writable<MentionableCharm> }
+  { piece: Writable<MentionablePiece> }
 >(
-  (_, { charm }) => {
-    return navigateTo(charm);
+  (_, { piece }) => {
+    return navigateTo(piece);
   },
 );
 
@@ -188,10 +188,10 @@ const closeMenu = handler<void, { menuOpen: Writable<boolean> }>(
 const createNewNote = handler<
   void,
   {
-    allCharms: Writable<MinimalCharm[]>;
-    parentNotebook: Writable<NotebookCharm | null>;
+    allPieces: Writable<MinimalPiece[]>;
+    parentNotebook: Writable<NotebookPiece | null>;
   }
->((_, { allCharms, parentNotebook }) => {
+>((_, { allPieces, parentNotebook }) => {
   const notebook = parentNotebook?.get?.();
 
   const note = Note({
@@ -201,15 +201,15 @@ const createNewNote = handler<
     isHidden: !!notebook, // Hide from default-app if in a notebook
     parentNotebook: notebook ?? undefined, // Set parent for back navigation
   });
-  allCharms.push(note);
+  allPieces.push(note);
 
   // Add to parent notebook using Cell.key() pattern
   if (notebook) {
-    const charmsList = allCharms.get();
+    const charmsList = allPieces.get();
     const nbName = notebook?.[NAME];
-    const nbIndex = charmsList.findIndex((c: any) => c?.[NAME] === nbName);
+    const nbIndex = piecesList.findIndex((c: any) => c?.[NAME] === nbName);
     if (nbIndex >= 0) {
-      const notebookCell = allCharms.key(nbIndex);
+      const notebookCell = allPieces.key(nbIndex);
       const notesCell = notebookCell.key("notes");
       notesCell.push(note);
     }
@@ -221,7 +221,7 @@ const createNewNote = handler<
 // Menu: Navigate to a notebook
 const menuGoToNotebook = handler<
   void,
-  { menuOpen: Writable<boolean>; notebook: Writable<MinimalCharm> }
+  { menuOpen: Writable<boolean>; notebook: Writable<MinimalPiece> }
 >((_, { menuOpen, notebook }) => {
   menuOpen.set(false);
   return navigateTo(notebook);
@@ -242,7 +242,7 @@ const goToViewer = handler<
   {
     title: Writable<string>;
     content: Writable<string>;
-    backlinks: Writable<MentionableCharm[]>;
+    backlinks: Writable<MentionablePiece[]>;
     noteId: Writable<string>;
     self: any;
   }
@@ -294,12 +294,12 @@ const translateFn = (
 // Menu: All Notes (find existing only - can't create due to circular imports)
 const menuAllNotebooks = handler<
   void,
-  { menuOpen: Writable<boolean>; allCharms: Writable<MinimalCharm[]> }
->((_, { menuOpen, allCharms }) => {
+  { menuOpen: Writable<boolean>; allPieces: Writable<MinimalPiece[]> }
+>((_, { menuOpen, allPieces }) => {
   menuOpen.set(false);
-  const charms = allCharms.get();
-  const existing = charms.find((charm: any) => {
-    const name = charm?.[NAME];
+  const pieces = allPieces.get();
+  const existing = pieces.find((piece: any) => {
+    const name = piece?.[NAME];
     return typeof name === "string" && name.startsWith("All Notes");
   });
   if (existing) {
@@ -321,12 +321,12 @@ const Note = pattern<Input, Output>(
       [SELF]: self,
     },
   ) => {
-    const { allCharms } = wish<{ allCharms: MinimalCharm[] }>("#default");
-    const mentionable = wish<Default<MentionableCharm[], []>>(
+    const { allPieces } = wish<{ allPieces: MinimalPiece[] }>("#default");
+    const mentionable = wish<Default<MentionablePiece[], []>>(
       "#mentionable",
     );
-    const _recentCharms = wish<MinimalCharm[]>("#recent");
-    const mentioned = Writable.of<MentionableCharm[]>([]);
+    const _recentPieces = wish<MinimalPiece[]>("#recent");
+    const mentioned = Writable.of<MentionablePiece[]>([]);
 
     // Dropdown menu state
     const menuOpen = Writable.of(false);
@@ -335,26 +335,26 @@ const Note = pattern<Input, Output>(
     const isEditingTitle = Writable.of<boolean>(false);
 
     // LAZY: Only filter notebooks when menu is open (dropdown needs them)
-    // This avoids O(n) filter on every allCharms change for every note
+    // This avoids O(n) filter on every allPieces change for every note
     const notebooks = computed(() => {
       if (!menuOpen.get()) return [];
-      return allCharms.filter((charm: any) => {
-        const name = charm?.[NAME];
+      return allPieces.filter((piece: any) => {
+        const name = piece?.[NAME];
         return typeof name === "string" && name.startsWith("📓");
       }) as NotebookCharm[];
     });
 
-    // LAZY: Only check for "All Notes" charm when menu is open
-    const allNotesCharm = computed(() => {
+    // LAZY: Only check for "All Notes" piece when menu is open
+    const allNotesPiece = computed(() => {
       if (!menuOpen.get()) return null;
-      return allCharms.find((charm: any) => {
-        const name = charm?.[NAME];
+      return allPieces.find((piece: any) => {
+        const name = piece?.[NAME];
         return typeof name === "string" && name.startsWith("All Notes");
       });
     });
 
     // LAZY: Only compute which notebooks contain this note when menu is open
-    // This avoids O(n*m) computation on every allCharms change
+    // This avoids O(n*m) computation on every allPieces change
     const containingNotebookNames = computed(() => {
       // Only compute when menu is actually open
       if (!menuOpen.get()) return [];
@@ -390,7 +390,7 @@ const Note = pattern<Input, Output>(
     });
 
     // populated in backlinks-index.tsx
-    const backlinks = Writable.of<MentionableCharm[]>([]);
+    const backlinks = Writable.of<MentionablePiece[]>([]);
 
     // Use provided linkPattern or default to creating new Notes
     // linkPattern is a Writable<string> - access reactively, not as raw string
@@ -408,8 +408,8 @@ const Note = pattern<Input, Output>(
         $mentionable={mentionable}
         $mentioned={mentioned}
         $pattern={patternJson}
-        onbacklink-click={handleCharmLinkClick({})}
-        onbacklink-create={handleNewBacklink({ mentionable, allCharms })}
+        onbacklink-click={handlePieceLinkClick({})}
+        onbacklink-create={handleNewBacklink({ mentionable, allPieces })}
         language="text/markdown"
         theme="light"
         wordWrap
@@ -525,7 +525,7 @@ const Note = pattern<Input, Output>(
               {/* New Note button */}
               <ct-button
                 variant="ghost"
-                onClick={createNewNote({ allCharms, parentNotebook })}
+                onClick={createNewNote({ allPieces, parentNotebook })}
                 style={{
                   alignItems: "center",
                   padding: "6px 12px",
@@ -598,10 +598,10 @@ const Note = pattern<Input, Output>(
                   </ct-button>
                 ))}
 
-                {/* Divider + All Notes - only show if All Notes charm exists */}
+                {/* Divider + All Notes - only show if All Notes piece exists */}
                 <div
                   style={{
-                    display: computed(() => allNotesCharm ? "block" : "none"),
+                    display: computed(() => allNotesPiece ? "block" : "none"),
                     height: "1px",
                     background: "var(--ct-color-border, #e5e5e7)",
                     margin: "4px 8px",
@@ -610,9 +610,9 @@ const Note = pattern<Input, Output>(
 
                 <ct-button
                   variant="ghost"
-                  onClick={menuAllNotebooks({ menuOpen, allCharms })}
+                  onClick={menuAllNotebooks({ menuOpen, allPieces })}
                   style={{
-                    display: computed(() => allNotesCharm ? "flex" : "none"),
+                    display: computed(() => allNotesPiece ? "flex" : "none"),
                     justifyContent: "flex-start",
                   }}
                 >
@@ -625,11 +625,11 @@ const Note = pattern<Input, Output>(
           {editorUI}
 
           <ct-hstack slot="footer">
-            {backlinks?.map((charm) => (
+            {backlinks?.map((piece) => (
               <ct-button
-                onClick={handleCharmLinkClicked({ charm })}
+                onClick={handlePieceLinkClicked({ piece })}
               >
-                {charm?.[NAME]}
+                {piece?.[NAME]}
               </ct-button>
             ))}
           </ct-hstack>

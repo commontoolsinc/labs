@@ -1,7 +1,7 @@
 import { refer } from "merkle-reference/json";
 import { getLogger } from "@commontools/utils/logger";
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
-import { vdomSchema } from "./schemas.ts";
+import { rendererVDOMSchema } from "./schemas.ts";
 import type {
   JSONValue,
   StorableDatum,
@@ -110,11 +110,11 @@ export class Runner {
   }
 
   /**
-   * Prepare a charm for running by creating/updating its process and result
+   * Prepare a piece for running by creating/updating its process and result
    * cells, registering the recipe, and applying defaults/arguments.
    * This does not schedule any nodes. Use start() to schedule execution.
-   * If the charm is already running and the recipe changes, it will stop the
-   * charm.
+   * If the piece is already running and the recipe changes, it will stop the
+   * piece.
    */
   setup<T, R>(
     tx: IExtendedStorageTransaction | undefined,
@@ -331,7 +331,7 @@ export class Runner {
     }
 
     // Send "query" to results to the result doc only on initial run or if
-    // recipe changed. This preserves user modifications like renamed charms.
+    // recipe changed. This preserves user modifications like renamed pieces.
     let result = unwrapOneLevelAndBindtoDoc<R, any>(
       recipe.result as R,
       processCell,
@@ -360,7 +360,7 @@ export class Runner {
   }
 
   /**
-   * Start scheduling nodes for a previously set up charm.
+   * Start scheduling nodes for a previously set up piece.
    * If already started, this is a no-op.
    *
    * Returns a Promise that resolves to true on success, or rejects with an error.
@@ -910,7 +910,7 @@ export class Runner {
       (!isRecord(recipe.resultSchema) ||
         !recipe.resultSchema.properties?.[UI])
     ) {
-      cells.push(resultCell.key(UI).asSchema(vdomSchema));
+      cells.push(resultCell.key(UI).asSchema(rendererVDOMSchema));
     }
 
     await Promise.all(cells.map((c) => c.sync()));
@@ -1771,7 +1771,7 @@ export class Runner {
     }
 
     // TODO(seefeld): Make sure to not cancel after a recipe is elevated to a
-    // charm, e.g. via navigateTo. Nothing is cancelling right now, so leaving
+    // piece, e.g. via navigateTo. Nothing is cancelling right now, so leaving
     // this as TODO.
     addCancel(() => this.stop(resultCell));
   }

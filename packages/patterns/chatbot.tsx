@@ -15,7 +15,7 @@ import {
   wish,
   Writable,
 } from "commontools";
-import { type MentionableCharm } from "./system/backlinks-index.tsx";
+import { type MentionablePiece } from "./system/backlinks-index.tsx";
 
 const sendMessage = handler<
   {
@@ -65,7 +65,7 @@ type PromptAttachment = {
   name: string;
   type: "file" | "clipboard" | "mention";
   data?: any; // File | Blob | string
-  charm?: any;
+  piece?: any;
   removable?: boolean; // Whether this attachment can be removed
 };
 
@@ -125,11 +125,11 @@ export const TitleGenerator = pattern<
 export default pattern<ChatInput, ChatOutput>(
   ({ messages, tools, theme, system }) => {
     const model = Writable.of<string>("anthropic:claude-sonnet-4-5");
-    const mentionable = wish<MentionableCharm[]>("#mentionable");
-    const recentCharms = wish<{ [NAME]: string }[]>("#recent");
+    const mentionable = wish<MentionablePiece[]>("#mentionable");
+    const recentPieces = wish<{ [NAME]: string }[]>("#recent");
 
-    const latest = computed(() => recentCharms[0]);
-    const latestName = computed(() => recentCharms[0]?.[NAME] ?? "latest");
+    const latest = computed(() => recentPieces[0]);
+    const latestName = computed(() => recentPieces[0]?.[NAME] ?? "latest");
 
     const {
       addMessage,

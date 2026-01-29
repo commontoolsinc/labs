@@ -1,4 +1,4 @@
-// @ts-nocheck - This test file is disabled and uses the old CharmController API
+// @ts-nocheck - This test file is disabled and uses the old PieceController API
 // that has been replaced by CharmHandle with the RuntimeClient implementation.
 /**
  * Integration test for iframe counter recipe.
@@ -22,7 +22,7 @@ import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 import type { ElementHandle } from "@astral/astral";
 import { Identity } from "@commontools/identity";
-import { CharmController, CharmsController } from "@commontools/charm/ops";
+import { PieceController, PiecesController } from "@commontools/piece/ops";
 import { type XAppView } from "../src/views/AppView.ts";
 
 const { SPACE_NAME, API_URL, FRONTEND_URL } = env;
@@ -95,12 +95,12 @@ describe("shell iframe counter tests", () => {
   shell.bindLifecycle();
 
   let identity: Identity;
-  let cc: CharmsController;
-  let charm: CharmController;
+  let cc: PiecesController;
+  let charm: PieceController;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
-    cc = await CharmsController.initialize({
+    cc = await PiecesController.initialize({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
@@ -126,7 +126,7 @@ describe("shell iframe counter tests", () => {
       frontendUrl: FRONTEND_URL,
       view: {
         spaceName: SPACE_NAME,
-        charmId: charm.id,
+        pieceId: charm.id,
       },
       identity,
     });
@@ -179,7 +179,7 @@ describe("shell iframe counter tests", () => {
       frontendUrl: FRONTEND_URL,
       view: {
         spaceName: SPACE_NAME,
-        charmId: charm.id,
+        pieceId: charm.id,
       },
       identity,
     });

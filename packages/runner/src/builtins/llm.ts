@@ -427,9 +427,9 @@ export function llm(
       stream: true,
       model: model ?? DEFAULT_MODEL_NAME,
       metadata: {
-        // FIXME(ja): how do we get the context of space/charm id here
+        // FIXME(ja): how do we get the context of space/piece id here
         // bf: I also do not know... this one is tricky
-        context: "charm",
+        context: "piece",
       },
       cache: true,
       // tools will be added below if present
@@ -609,7 +609,7 @@ export function generateText(
       stream: true,
       model: model ?? DEFAULT_MODEL_NAME,
       metadata: {
-        context: "charm",
+        context: "piece",
       },
       cache: true,
       // tools will be added below if present
@@ -816,7 +816,7 @@ export function generateObject<T extends Record<string, unknown>>(
         model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,
         metadata: {
           ...readyMetadata,
-          context: "charm",
+          context: "piece",
         },
         cache: cache ?? true,
       };
@@ -1007,7 +1007,7 @@ export function generateObject<T extends Record<string, unknown>>(
         model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,
         metadata: {
           ...readyMetadata,
-          context: "charm",
+          context: "piece",
         },
         cache: cache ?? true,
       };

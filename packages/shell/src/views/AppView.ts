@@ -87,9 +87,9 @@ export class XAppView extends BaseView {
     > => {
       if (!rt) return;
       this._patternError = undefined;
-      if ("charmId" in app.view && app.view.charmId) {
+      if ("pieceId" in app.view && app.view.pieceId) {
         try {
-          return await rt.getPattern(app.view.charmId);
+          return await rt.getPattern(app.view.pieceId);
         } catch (e) {
           if (!signal.aborted) {
             this._patternError = e as any;
@@ -123,7 +123,7 @@ export class XAppView extends BaseView {
       // The "active" pattern is the main pattern to be rendered.
       // This may be the same as the space root pattern, unless we're
       // in a view that specifies a different pattern to use.
-      const useSpaceRootAsActive = !("charmId" in app.view && app.view.charmId);
+      const useSpaceRootAsActive = !("pieceId" in app.view && app.view.pieceId);
       const activePattern = useSpaceRootAsActive
         ? spaceRootPattern
         : selectedPatternStatus === TaskStatus.COMPLETE
@@ -218,8 +218,8 @@ export class XAppView extends BaseView {
   private getActivePatternId(): string | undefined {
     const activePattern = this._patterns.value?.activePattern;
     if (activePattern) return activePattern.id();
-    if ("charmId" in this.app.view && this.app.view.charmId) {
-      return this.app.view.charmId;
+    if ("pieceId" in this.app.view && this.app.view.pieceId) {
+      return this.app.view.pieceId;
     }
   }
 
@@ -242,13 +242,13 @@ export class XAppView extends BaseView {
       <x-login-view .keyStore="${this.keyStore}"></x-login-view>
     `;
 
-    const charmId = this.getActivePatternId();
+    const pieceId = this.getActivePatternId();
     const spaceName = this.app && "spaceName" in this.app.view
       ? this.app.view.spaceName
       : undefined;
-    // We're viewing the default pattern if there's no charmId in the current view
-    const isViewingDefaultPattern = !("charmId" in this.app.view &&
-      this.app.view.charmId);
+    // We're viewing the default pattern if there's no pieceId in the current view
+    const isViewingDefaultPattern = !("pieceId" in this.app.view &&
+      this.app.view.pieceId);
     const content = this.app?.identity ? authenticated : unauthenticated;
     return html`
       <div class="shell-container">
@@ -258,7 +258,7 @@ export class XAppView extends BaseView {
           .rt="${this.rt}"
           .keyStore="${this.keyStore}"
           .charmTitle="${this.charmTitle}"
-          .charmId="${charmId}"
+          .pieceId="${pieceId}"
           .isViewingDefaultPattern="${isViewingDefaultPattern}"
           .showShellCharmListView="${config.showShellCharmListView ?? false}"
           .showDebuggerView="${config.showDebuggerView ?? false}"

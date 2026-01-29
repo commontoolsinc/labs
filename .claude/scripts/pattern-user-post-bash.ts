@@ -21,24 +21,24 @@ try {
 const command = input.tool_input?.command || "";
 
 // Only process ct commands
-if (!command.includes("ct charm") && !command.includes("ct ")) {
+if (!command.includes("ct piece") && !command.includes("ct ")) {
   Deno.exit(0);
 }
 
 let suggestion = "";
 
-if (command.includes("charm new")) {
+if (command.includes("piece new")) {
   suggestion =
-    "Charm created. Next: use 'ct charm inspect' to view state or 'ct charm call' to test handlers.";
-} else if (command.includes("charm setsrc")) {
+    "Piece created. Next: use 'ct piece inspect' to view state or 'ct piece call' to test handlers.";
+} else if (command.includes("piece setsrc")) {
   suggestion =
-    "Source updated. Next: use 'ct charm step' to trigger re-evaluation, then 'ct charm inspect' to verify.";
-} else if (command.includes("charm set ")) {
+    "Source updated. Next: use 'ct piece step' to trigger re-evaluation, then 'ct piece inspect' to verify.";
+} else if (command.includes("piece set ")) {
   suggestion =
-    "State set. Run 'ct charm step' to trigger re-evaluation before reading computed values.";
-} else if (command.includes("charm inspect")) {
+    "State set. Run 'ct piece step' to trigger re-evaluation before reading computed values.";
+} else if (command.includes("piece inspect")) {
   suggestion =
-    "State inspected. Use 'ct charm call handlerName' to test handlers or 'ct charm set' to modify state.";
+    "State inspected. Use 'ct piece call handlerName' to test handlers or 'ct piece set' to modify state.";
 }
 
 if (suggestion) {
