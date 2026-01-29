@@ -34,11 +34,9 @@ export function getDefaultLockdownOptions(debug = false): LockdownOptions {
 
     // Console taming: "unsafe" preserves console functionality
     consoleTaming: "unsafe",
-
-    // TODO(seefeld): Tighten these once patterns no longer use
-    // Math.random() or Date.now() directly.
-    mathTaming: "unsafe",
-    dateTaming: "unsafe",
+    // Note: mathTaming and dateTaming were removed in SES ≥1.11.0.
+    // Math.random() and Date.now() are available because we pass the
+    // real Math and Date objects as compartment globals (see runtime-globals.ts).
   };
 }
 

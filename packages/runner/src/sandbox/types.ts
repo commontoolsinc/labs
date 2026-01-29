@@ -6,68 +6,6 @@
  */
 
 /**
- * Configuration for a pattern compartment.
- */
-export interface PatternCompartmentConfig {
-  /**
-   * Unique identifier for the pattern (typically the module URL or hash).
-   */
-  readonly patternId: string;
-
-  /**
-   * The compiled JavaScript source code to load into the compartment.
-   */
-  readonly source: string;
-
-  /**
-   * Optional source map for error mapping.
-   */
-  readonly sourceMap?: string;
-}
-
-/**
- * A frozen export from a pattern compartment.
- * The implementation function is deeply frozen and cannot be modified.
- */
-export interface FrozenExport {
-  /**
-   * The name of the export.
-   */
-  readonly name: string;
-
-  /**
-   * The frozen implementation function or object.
-   * Uses unknown to avoid ban-types lint rule for Function.
-   */
-  readonly implementation: unknown;
-
-  /**
-   * The pattern ID this export belongs to.
-   */
-  readonly patternId: string;
-}
-
-/**
- * Result of loading a pattern into a compartment.
- */
-export interface PatternCompartment {
-  /**
-   * The pattern ID.
-   */
-  readonly patternId: string;
-
-  /**
-   * Map of export names to frozen exports.
-   */
-  readonly exports: ReadonlyMap<string, FrozenExport>;
-
-  /**
-   * Get a specific export by name.
-   */
-  getExport(name: string): FrozenExport | undefined;
-}
-
-/**
  * Sandbox configuration options.
  */
 export interface SandboxConfig {
@@ -121,20 +59,6 @@ export interface LockdownOptions {
    * Whether to harden console methods.
    */
   readonly consoleTaming?: "safe" | "unsafe";
-
-  /**
-   * Math.random taming.
-   * - "safe": Math.random() returns NaN
-   * - "unsafe": Math.random() works normally
-   */
-  readonly mathTaming?: "safe" | "unsafe";
-
-  /**
-   * Date.now taming.
-   * - "safe": Date.now() returns NaN, new Date() returns invalid date
-   * - "unsafe": Date works normally
-   */
-  readonly dateTaming?: "safe" | "unsafe";
 }
 
 /**
@@ -272,24 +196,5 @@ export class SandboxSecurityError extends Error {
   ) {
     super(message);
     this.name = "SandboxSecurityError";
-  }
-}
-
-/**
- * Error thrown when compartment initialization fails.
- */
-export class CompartmentInitializationError extends Error {
-  public readonly patternId: string;
-  public readonly originalCause?: Error;
-
-  constructor(
-    message: string,
-    patternId: string,
-    originalCause?: Error,
-  ) {
-    super(message, originalCause ? { cause: originalCause } : undefined);
-    this.name = "CompartmentInitializationError";
-    this.patternId = patternId;
-    this.originalCause = originalCause;
   }
 }
