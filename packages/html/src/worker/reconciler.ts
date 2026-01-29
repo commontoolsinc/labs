@@ -136,6 +136,7 @@ export class WorkerReconciler {
       // Static VNode - render directly into container
       const state = this.renderNode(ctx, vnode, new Set());
       if (state) {
+        addCancel(state.cancel);
         this.rootChildId = state.nodeId;
         this.queueOps([
           {
@@ -482,10 +483,12 @@ export class WorkerReconciler {
       { op: "create-element", nodeId, tagName: "ct-fragment" },
     ]);
 
+    const [cancel, addCancel] = useCancelGroup();
+
     const state: NodeState = {
       nodeId,
       tagName: "ct-fragment",
-      cancel: () => {},
+      cancel,
       children: new Map(),
       propSubscriptions: new Map(),
       eventHandlers: new Map(),
@@ -495,6 +498,7 @@ export class WorkerReconciler {
     for (const childNode of nodes) {
       const childState = this.renderNode(ctx, childNode, new Set(visited));
       if (childState) {
+        addCancel(childState.cancel);
         this.queueOps([
           {
             op: "insert-child",
@@ -553,10 +557,20 @@ export class WorkerReconciler {
 
     // Handle Cell<Props>
     if (isCell(props)) {
+      let currentPropsCancel: Cancel | undefined;
       addCancel(
         props.sink((resolvedProps) => {
+          if (currentPropsCancel) {
+            currentPropsCancel();
+            currentPropsCancel = undefined;
+          }
           if (resolvedProps) {
-            addCancel(this.bindProps(ctx, state, resolvedProps as WorkerProps));
+            currentPropsCancel = this.bindProps(
+              ctx,
+              state,
+              resolvedProps as WorkerProps,
+            );
+            addCancel(currentPropsCancel);
           }
         }),
       );
