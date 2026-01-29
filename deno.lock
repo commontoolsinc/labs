@@ -125,6 +125,7 @@
     "npm:quickjs-emscripten-core@*": "0.31.0",
     "npm:ses@1.10.0": "1.10.0",
     "npm:ses@1.14.0": "1.14.0",
+    "npm:ses@^1.14.0": "1.14.0",
     "npm:source-map-js@^1.2.1": "1.2.1",
     "npm:stoker@^1.4.2": "1.4.3_@hono+zod-openapi@0.18.4__hono@4.10.5__zod@3.25.76_hono@4.10.5_zod@3.25.76",
     "npm:turndown@^7.1.2": "7.2.2",
@@ -1840,6 +1841,7 @@
       "npm:lit@^3.3.0",
       "npm:merkle-reference@^2.2.0",
       "npm:multiformats@^13.3.2",
+      "npm:ses@^1.14.0",
       "npm:turndown@^7.1.2",
       "npm:zod@^3.24.1"
     ],
