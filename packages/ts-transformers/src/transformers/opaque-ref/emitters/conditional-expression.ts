@@ -3,6 +3,7 @@ import ts from "typescript";
 import type { Emitter } from "../types.ts";
 import { createIfElseCall } from "../../builtins/ifelse.ts";
 import {
+  isReactiveArrayMapCall,
   registerSyntheticCallType,
   selectDataFlowsReferencedIn,
 } from "../../../ast/mod.ts";
@@ -31,10 +32,28 @@ function processBranch(
 
   const branchAnalysis = analyze(expr);
 
+  // Skip derive wrapping for reactive array map calls - they will be transformed
+  // to mapWithPattern by ClosureTransformer, which is already reactive.
+  // Wrapping in derive would incorrectly put the map callback in a "safe context",
+  // which would prevent nested maps from being transformed to mapWithPattern.
+  // Note: We need to unwrap parenthesized expressions to find the actual call.
+  let unwrappedExpr: ts.Expression = expr;
+  while (ts.isParenthesizedExpression(unwrappedExpr)) {
+    unwrappedExpr = unwrappedExpr.expression;
+  }
+  const isReactiveMap = ts.isCallExpression(unwrappedExpr) &&
+    isReactiveArrayMapCall(
+      unwrappedExpr,
+      context.checker,
+      context.options.typeRegistry,
+      context.options.logger,
+    );
+
   if (
     branchDataFlows.length > 0 &&
     branchAnalysis.requiresRewrite &&
-    !isSimpleOpaqueRefAccess(expr, context.checker)
+    !isSimpleOpaqueRefAccess(expr, context.checker) &&
+    !isReactiveMap
   ) {
     const plan = createBindingPlan(branchDataFlows);
     const derived = createComputedCallForExpression(expr, plan, context);
