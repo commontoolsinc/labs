@@ -407,11 +407,11 @@ export interface IMemoryChange {
   /**
    * Value memory address had before change.
    */
-  before: StorableValue;
+  before: Immutable<StorableValue>;
   /**
    * Value memory address has after change.
    */
-  after: StorableValue;
+  after: Immutable<StorableValue>;
 }
 
 export type StorageTransactionStatus =
