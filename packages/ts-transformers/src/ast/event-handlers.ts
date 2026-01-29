@@ -18,8 +18,19 @@ const MAX_HANDLER_PARAMS = 1;
  * Check if a return type is consistent with an event handler.
  * Handlers typically return void/undefined, boolean (for "handled" signaling),
  * or Promise versions of these for async handlers.
+ *
+ * For union types (e.g., void | boolean), ALL constituents must be handler-compatible.
  */
 function isHandlerReturnType(type: ts.Type, checker: ts.TypeChecker): boolean {
+  // Handle union types - ALL members must be handler-compatible
+  if (type.isUnion()) {
+    const constituents = type.types;
+    return (
+      constituents.length > 0 &&
+      constituents.every((t) => isHandlerReturnType(t, checker))
+    );
+  }
+
   // void or undefined - classic handler return
   if (type.flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined)) {
     return true;
