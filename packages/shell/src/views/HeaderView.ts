@@ -229,7 +229,7 @@ export class XHeaderView extends BaseView {
     const charmLink = this.pieceId && this.spaceName
       ? html`
         <x-charm-link
-          id="header-charm-link"
+          id="header-piece-link"
           .pieceId="${this.pieceId}"
           .spaceName="${this.spaceName}"
         >${this.charmTitle || this.pieceId}</x-charm-link>
