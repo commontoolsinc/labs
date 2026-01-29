@@ -16,7 +16,9 @@ import {
   type Cancel,
   type Cell,
   convertCellsToLinks,
+  getCellOrThrow,
   isCell,
+  isCellResult,
   isStream,
   type Stream,
   UI,
@@ -619,8 +621,13 @@ export class WorkerReconciler {
       } else if (isBindingProp(key)) {
         // Bidirectional binding ($prop)
         const propName = getBindingPropName(key);
-        if (isCell(value)) {
-          const cellRef = value.getAsNormalizedFullLink();
+        const cell = isCell(value)
+          ? value
+          : isCellResult(value)
+          ? getCellOrThrow(value)
+          : null;
+        if (cell) {
+          const cellRef = cell.getAsNormalizedFullLink();
           this.queueOps([{
             op: "set-binding",
             nodeId: state.nodeId,
@@ -628,10 +635,13 @@ export class WorkerReconciler {
             cellRef,
           }]);
         }
-      } else if (isCell(value)) {
-        // Reactive prop value
+      } else if (isCell(value) || isCellResult(value)) {
+        // Reactive prop value (Cell or CellResult proxy from computed())
+        const cell = isCell(value)
+          ? (value as Cell<unknown>)
+          : getCellOrThrow(value);
         addCancel(
-          (value as Cell<unknown>).sink((resolvedValue) => {
+          cell.sink((resolvedValue) => {
             const propValue = this.transformPropValue(key, resolvedValue);
             this.queueOps([{
               op: "set-prop",
@@ -668,8 +678,12 @@ export class WorkerReconciler {
     ) {
       return this.styleObjectToCssString(value as Record<string, unknown>);
     }
-    // Use convertCellsToLinks to handle Cells, circular refs, and non-JSON values
-    return convertCellsToLinks(value);
+    // Use convertCellsToLinks to handle Cells, circular refs, and non-JSON values.
+    // doNotConvertCellResults: resolved values from cell.sink() are CellResult
+    // proxies (Proxy(Array), etc). Without this flag, convertCellsToLinks treats
+    // them as cell references and converts to link objects instead of walking
+    // their actual values.
+    return convertCellsToLinks(value, { doNotConvertCellResults: true });
   }
 
   /**
