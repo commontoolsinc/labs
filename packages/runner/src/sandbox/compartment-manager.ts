@@ -24,7 +24,7 @@ import {
 import { getDefaultLockdownOptions, resolveSandboxConfig } from "./config.ts";
 import { createRuntimeGlobals } from "./runtime-globals.ts";
 import { createSilentConsole } from "./sandboxed-console.ts";
-import "npm:ses@1.14.0";
+import "ses";
 
 // SES adds lockdown, Compartment, harden to globalThis
 declare const lockdown: (options?: LockdownOptions) => void;
@@ -123,18 +123,13 @@ export class CompartmentManager {
     delete g.Math?.f16round;
 
     // Symbol.metadata is not configurable so SES can't remove it and
-    // logs a warning via console.error. Filter that known warning.
-    // Any NEW intrinsic warnings will still surface since we only
-    // suppress the specific Symbol%.metadata message.
+    // logs a warning via console.error. Buffer SES messages during lockdown
+    // and replay any that aren't about the known Symbol%.metadata removal,
+    // so new intrinsic warnings still surface.
+    const buffered: unknown[][] = [];
     const origError = console.error;
     console.error = (...args: unknown[]) => {
-      const msg = args.map(String).join(" ");
-      if (
-        msg.includes("Removing unpermitted intrinsics") ||
-        msg.includes("Removing intrinsics") ||
-        msg.includes("Symbol%.metadata")
-      ) return;
-      origError.apply(console, args);
+      buffered.push(args);
     };
 
     try {
@@ -155,6 +150,20 @@ export class CompartmentManager {
       }
     } finally {
       console.error = origError;
+
+      // Replay any messages that aren't about the known Symbol%.metadata removal
+      const unknown = buffered.filter((args) => {
+        const msg = args.map(String).join(" ");
+        return !msg.includes("Symbol%.metadata") &&
+          !msg.includes("Removing unpermitted intrinsics");
+      });
+      // If there are unknown intrinsic removals, replay all messages
+      // (including the header) so the full context is visible
+      if (unknown.length > 0) {
+        for (const args of buffered) {
+          origError.apply(console, args);
+        }
+      }
     }
   }
 
