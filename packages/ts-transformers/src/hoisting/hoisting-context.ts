@@ -99,6 +99,17 @@ const WELL_KNOWN_GLOBALS = new Set([
 ]);
 
 /**
+ * Type definition files that describe JS environment globals (not user modules).
+ * Used by isBuiltinGlobal to recognize symbols declared in these files as built-ins,
+ * since the static type cache strips the `lib.` prefix from standard lib files.
+ */
+const JS_ENVIRONMENT_TYPE_FILES = new Set([
+  "dom.d.ts",
+  "es2023.d.ts",
+  "jsx.d.ts",
+]);
+
+/**
  * Types of declarations that can be hoisted to module scope.
  */
 export type HoistedDeclarationType = "lift" | "handler" | "derive";
@@ -363,11 +374,13 @@ function isBuiltinGlobal(symbol: ts.Symbol): boolean {
   if (!sourceFile) return false;
 
   const fileName = sourceFile.fileName.replace(/\\/g, "/");
-  return (
-    fileName === "lib.d.ts" ||
-    fileName.endsWith("/lib.d.ts") ||
-    /\/lib\.[\w.]+\.d\.ts$/.test(fileName)
-  );
+  const baseName = fileName.substring(fileName.lastIndexOf("/") + 1);
+  // Match TypeScript lib files (lib.d.ts, lib.es5.d.ts, lib.dom.d.ts, etc.)
+  if (/^lib(\.[\w.]+)?\.d\.ts$/.test(baseName)) return true;
+  // Match JS environment type stubs from the static type cache
+  // (dom.d.ts, es2023.d.ts, jsx.d.ts — but NOT commontools.d.ts etc.)
+  if (JS_ENVIRONMENT_TYPE_FILES.has(baseName)) return true;
+  return false;
 }
 
 /**
