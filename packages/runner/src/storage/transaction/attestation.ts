@@ -371,7 +371,7 @@ export const resolve = (
   while (++at < path.length) {
     const key = path[at];
     if (isRecord(value)) {
-      value = value[key] as StorableDatum;
+      value = (value as StorableObject)[key];
     } else {
       // If the value is undefined, the path doesn't exist, but we can still
       // write onto it. Return error with last valid path component.
