@@ -1785,9 +1785,7 @@
     }
   },
   "redirects": {
-    "https://esm.sh/@types/dagre@~0.7.53/index.d.ts": "https://esm.sh/@types/dagre@0.7.53/index.d.ts",
-    "https://esm.sh/core-js/proposals/async-explicit-resource-management": "https://esm.sh/core-js@3.46.0/proposals/async-explicit-resource-management",
-    "https://esm.sh/core-js/proposals/explicit-resource-management": "https://esm.sh/core-js@3.46.0/proposals/explicit-resource-management"
+    "https://esm.sh/@types/dagre@~0.7.53/index.d.ts": "https://esm.sh/@types/dagre@0.7.53/index.d.ts"
   },
   "remote": {
     "https://esm.sh/core-js@3.46.0/denonext/proposals/async-explicit-resource-management.mjs": "d75be20fbac6aec6a9c3f5f920641d135a9ece80b474fd17ff282e1288043d76",
