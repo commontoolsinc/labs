@@ -146,6 +146,7 @@ inductive AtomPattern where
   | hasRole (principal : Pat String) (space : Pat String) (role : Pat String)
   | integrityTok (name : Pat String)
   | expires (t : Pat Nat)
+  | capability (kind : Pat String) (resource : Pat String)
   | other (name : Pat String)
   /-- Match exactly a specific atom (no variables). -/
   | eq (a : Atom)
@@ -169,6 +170,9 @@ def matchAtomPattern (p : AtomPattern) (a : Atom) (bs : Bindings) : Option Bindi
       matchPat nP n bs
   | .expires tP, .expires t =>
       matchPat tP t bs
+  | .capability kP rP, .capability k r =>
+      matchPat kP k bs >>= fun bs1 =>
+      matchPat rP r bs1
   | .other nP, .other n =>
       matchPat nP n bs
   | .eq a', _ =>
@@ -192,6 +196,9 @@ def instantiateAtomPattern (p : AtomPattern) (bs : Bindings) : Option Atom :=
       Atom.integrityTok <$> instantiatePat nP bs
   | .expires tP =>
       Atom.expires <$> instantiatePat tP bs
+  | .capability kP rP =>
+      let mk (k r : String) := Atom.capability k r
+      mk <$> instantiatePat kP bs <*> instantiatePat rP bs
   | .other nP =>
       Atom.other <$> instantiatePat nP bs
   | .eq a =>
