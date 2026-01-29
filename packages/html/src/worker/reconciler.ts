@@ -671,7 +671,11 @@ export class WorkerReconciler {
     // Use convertCellsToLinks to handle Cells, circular refs, and non-JSON values.
     // Pass doNotConvertCellResults to prevent already-resolved values (from .sink())
     // from being converted back to links - we want the actual data for props.
-    return convertCellsToLinks(value, { doNotConvertCellResults: true });
+    return convertCellsToLinks(value, {
+      doNotConvertCellResults: true,
+      includeSchema: true,
+      keepStreams: true,
+    });
   }
 
   /**
