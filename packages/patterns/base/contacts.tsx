@@ -24,7 +24,8 @@ import {
   Writable,
 } from "commontools";
 
-// Import shared types
+// Import shared types and default constants
+import { FAMILY_MEMBER_DEFAULTS, PERSON_DEFAULTS } from "./contact-types.tsx";
 import type {
   ContactCharm,
   ContactGroup,
@@ -65,23 +66,10 @@ const addPerson = handler<
     selectedIndex: Writable<number>;
   }
 >((_event, { contacts, selectedIndex }) => {
-  const personData = Writable.of<Person>({
-    firstName: "",
-    lastName: "",
-    middleName: "",
-    nickname: "",
-    prefix: "",
-    suffix: "",
-    pronouns: "",
-    birthday: { month: 0, day: 0, year: 0 },
-    photo: "",
-    email: "",
-    phone: "",
-    notes: "",
-    tags: [],
-    addresses: [],
-    socialProfiles: [],
-  });
+  // WORKAROUND: Writable.of<Type>() with no args produces broken cells.
+  // Use co-located defaults constant instead of duplicating field list here.
+  // See: superstitions/2026-01-29-writable-of-no-args-breaks-runtime.md
+  const personData = Writable.of<Person>({ ...PERSON_DEFAULTS });
   const charm = PersonPattern({
     person: personData,
     sameAs: contacts,
@@ -98,17 +86,8 @@ const addFamilyMember = handler<
     selectedIndex: Writable<number>;
   }
 >((_event, { contacts, selectedIndex }) => {
-  const memberData = Writable.of<FamilyMember>({
-    firstName: "",
-    lastName: "",
-    relationship: "",
-    birthday: "",
-    dietaryRestrictions: [],
-    notes: "",
-    tags: [],
-    allergies: [],
-    giftIdeas: [],
-  });
+  // WORKAROUND: See addPerson above.
+  const memberData = Writable.of<FamilyMember>({ ...FAMILY_MEMBER_DEFAULTS });
   const charm = FamilyMemberPattern({
     member: memberData,
     sameAs: contacts,

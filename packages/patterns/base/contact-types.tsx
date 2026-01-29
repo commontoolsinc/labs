@@ -76,6 +76,33 @@ export interface Person extends PersonLike {
   socialProfiles: Default<SocialProfile[], []>;
 }
 
+/**
+ * WORKAROUND: Writable.of<Type>() with no argument produces broken cells at
+ * runtime — Default<> schema annotations are NOT applied to the initial value.
+ * Every field must be listed explicitly. We co-locate defaults here so the
+ * field list lives next to the type definition, not in every container that
+ * instantiates the pattern.
+ *
+ * See: superstitions/2026-01-29-writable-of-no-args-breaks-runtime.md
+ */
+export const PERSON_DEFAULTS: Person = {
+  firstName: "",
+  lastName: "",
+  middleName: "",
+  nickname: "",
+  prefix: "",
+  suffix: "",
+  pronouns: "",
+  birthday: { month: 0, day: 0, year: 0 },
+  photo: "",
+  email: "",
+  phone: "",
+  notes: "",
+  tags: [],
+  addresses: [],
+  socialProfiles: [],
+};
+
 // ============================================================================
 // FamilyMember Type - Extends PersonLike with family-specific fields
 // ============================================================================
@@ -91,6 +118,19 @@ export interface FamilyMember extends PersonLike {
   allergies: Default<string[], []>;
   giftIdeas: Default<string[], []>;
 }
+
+/** WORKAROUND: See PERSON_DEFAULTS comment above. */
+export const FAMILY_MEMBER_DEFAULTS: FamilyMember = {
+  firstName: "",
+  lastName: "",
+  relationship: "",
+  birthday: "",
+  dietaryRestrictions: [],
+  notes: "",
+  tags: [],
+  allergies: [],
+  giftIdeas: [],
+};
 
 // ============================================================================
 // ContactCharm - What the container stores in its contacts array
