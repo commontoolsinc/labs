@@ -14,57 +14,58 @@ export default function TestComputedWithClosedOverCellMap() {
     // The computed gets transformed to derive({}, () => numbers.map(...))
     // Inside a derive, .map on a closed-over Cell should STILL be transformed to mapWithPattern
     // because Cells need the pattern-based mapping even when unwrapped
-    const doubled = __ctHelpers.derive({
-        type: "object",
-        properties: {
-            numbers: {
-                type: "array",
-                items: {
-                    type: "number"
-                },
-                asCell: true
-            },
-            multiplier: {
-                type: "number",
-                asCell: true
-            }
-        },
-        required: ["numbers", "multiplier"]
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "number"
-        },
-        asOpaque: true
-    } as const satisfies __ctHelpers.JSONSchema, {
+    const doubled = __lift_0({
         numbers: numbers,
         multiplier: multiplier
-    }, ({ numbers, multiplier }) => numbers.mapWithPattern(__ctHelpers.recipe({
-        type: "object",
-        properties: {
-            element: {
-                type: "number"
-            },
-            params: {
-                type: "object",
-                properties: {
-                    multiplier: {
-                        type: "number",
-                        asCell: true
-                    }
-                },
-                required: ["multiplier"]
-            }
-        },
-        required: ["element", "params"]
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, ({ element: n, params: { multiplier } }) => n * multiplier.get()), {
-        multiplier: multiplier
-    }));
+    });
     return doubled;
 }
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
+const __lift_0 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        numbers: {
+            type: "array",
+            items: {
+                type: "number"
+            },
+            asCell: true
+        },
+        multiplier: {
+            type: "number",
+            asCell: true
+        }
+    },
+    required: ["numbers", "multiplier"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "number"
+    },
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema, ({ numbers, multiplier }) => numbers.mapWithPattern(__ctHelpers.recipe({
+    type: "object",
+    properties: {
+        element: {
+            type: "number"
+        },
+        params: {
+            type: "object",
+            properties: {
+                multiplier: {
+                    type: "number",
+                    asCell: true
+                }
+            },
+            required: ["multiplier"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __ctHelpers.JSONSchema, ({ element: n, params: { multiplier } }) => n * multiplier.get()), {
+    multiplier: multiplier
+}));

@@ -97,11 +97,6 @@ export class HoistingTransformer extends Transformer {
         return ts.visitEachChild(node, visitor, context.tsContext);
       }
 
-      // Skip synthetic nodes created by other transformers (pos === -1)
-      if (node.pos === -1) {
-        return ts.visitEachChild(node, visitor, context.tsContext);
-      }
-
       // Check if this is a hoistable builder call
       const builderName = callKind.kind === "builder"
         ? callKind.builderName
@@ -124,7 +119,7 @@ export class HoistingTransformer extends Transformer {
         return ts.visitEachChild(node, visitor, context.tsContext);
       }
 
-      // Check if callback references module-scope symbols
+      // Check if callback references external symbols
       if (!referencesExternalSymbols(callback, checker)) {
         return ts.visitEachChild(node, visitor, context.tsContext);
       }
@@ -279,10 +274,10 @@ export class HoistingTransformer extends Transformer {
       return transformed;
     }
 
-    // Prepend hoisted statements to the file
+    // Append hoisted statements after all other module statements
     return factory.updateSourceFile(transformed, [
-      ...hoistedStatements,
       ...transformed.statements,
+      ...hoistedStatements,
     ]);
   }
 }
@@ -293,10 +288,14 @@ export class HoistingTransformer extends Transformer {
  * since parent pointers may be stale after earlier transforms.
  */
 function isAtModuleScope(node: ts.Node): boolean {
+  // Synthetic nodes (pos === -1) were created by prior transformers inside
+  // function bodies. They have no parent chain, so assume NOT at module scope.
+  if (node.pos === -1) {
+    return false;
+  }
+
   // Walk up the parent chain. If we hit a function-like node before
   // reaching SourceFile, we're NOT at module scope.
-  // If parents are broken (null), fall back to assuming not at module scope
-  // (safer to skip hoisting than to hoist incorrectly).
   let current = node.parent;
   let depth = 0;
   while (current) {
@@ -317,8 +316,7 @@ function isAtModuleScope(node: ts.Node): boolean {
     // Safety: if we've walked too deep without finding SourceFile, bail
     if (depth > 50) return false;
   }
-  // Parent chain broken — conservatively assume module scope
-  // (skip hoisting rather than incorrectly hoisting module-level code)
+  // Parent chain broken on a real node — conservatively assume module scope
   return true;
 }
 

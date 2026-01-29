@@ -3,25 +3,7 @@ import { derive, pattern } from "commontools";
 export default pattern((items) => {
     // items is OpaqueRef<number[]> as a pattern parameter
     // Inside the derive callback, items.map should NOT be transformed
-    const doubled = __ctHelpers.derive({
-        type: "object",
-        properties: {
-            items: {
-                type: "array",
-                items: {
-                    type: "number"
-                },
-                asOpaque: true
-            }
-        },
-        required: ["items"]
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "number"
-        },
-        asOpaque: true
-    } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => items.map((n) => n * 2));
+    const doubled = __lift_0({ items: items });
     return doubled;
 }, {
     type: "array",
@@ -39,3 +21,22 @@ export default pattern((items) => {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
+const __lift_0 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                type: "number"
+            },
+            asOpaque: true
+        }
+    },
+    required: ["items"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "number"
+    },
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema, ({ items }) => items.map((n) => n * 2));

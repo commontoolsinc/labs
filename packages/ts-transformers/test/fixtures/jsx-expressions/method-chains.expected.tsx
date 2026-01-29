@@ -299,70 +299,18 @@ export default recipe({
         {/* Filter then length */}
         <p>
           Count above threshold:{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        },
-                        threshold: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items", "threshold"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+          {__lift_0({ state: {
                 items: state.items,
                 threshold: state.threshold
-            } }, ({ state }) => state.items.filter((x) => x > state.threshold).length)}
+            } })}
         </p>
 
         {/* Filter then map */}
         <ul>
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        },
-                        threshold: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items", "threshold"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "array",
-            items: {
-                type: "number",
-                asOpaque: true
-            }
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+          {__lift_2({ state: {
                 items: state.items,
                 threshold: state.threshold
-            } }, ({ state }) => state.items.filter((x) => x > state.threshold)).mapWithPattern(__ctHelpers.recipe({
+            } }).mapWithPattern(__ctHelpers.recipe({
             type: "object",
             properties: {
                 element: {
@@ -526,39 +474,11 @@ export default recipe({
         {/* Multiple filters */}
         <p>
           Double filter count:{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        },
-                        start: {
-                            type: "number",
-                            asOpaque: true
-                        },
-                        end: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items", "start", "end"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+          {__lift_4({ state: {
                 items: state.items,
                 start: state.start,
                 end: state.end
-            } }, ({ state }) => state.items.filter((x) => x > state.start).filter((x) => x < state.end).length)}
+            } })}
         </p>
 
         <h3>Methods with Reactive Arguments</h3>
@@ -602,67 +522,18 @@ export default recipe({
         {/* String methods with reactive args */}
         <p>
           Starts with:{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        names: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            },
-                            asOpaque: true
-                        },
-                        prefix: {
-                            type: "string",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["names", "prefix"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+          {__lift_6({ state: {
                 names: state.names,
                 prefix: state.prefix
-            } }, ({ state }) => state.names.filter((n) => n.startsWith(state.prefix)).join(", "))}
+            } })}
         </p>
 
         {/* Array find with reactive predicate */}
         <p>
-          First match: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        names: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            },
-                            asOpaque: true
-                        },
-                        searchTerm: {
-                            type: "string",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["names", "searchTerm"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "string",
-            asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+          First match: {__lift_8({ state: {
                 names: state.names,
                 searchTerm: state.searchTerm
-            } }, ({ state }) => state.names.find((n) => n.includes(state.searchTerm)))}
+            } })}
         </p>
 
         <h3>Complex Method Combinations</h3>
@@ -799,68 +670,19 @@ export default recipe({
 
         {/* Reduce with reactive accumulator */}
         <p>
-          Total with discount: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        prices: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        },
-                        discount: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["prices", "discount"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+          Total with discount: {__lift_10({ state: {
                 prices: state.prices,
                 discount: state.discount
-            } }, ({ state }) => state.prices.reduce((sum, price) => sum + price * (1 - state.discount), 0))}
+            } })}
         </p>
 
         {/* Method result used in computation */}
         <p>
           Average * factor:{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        },
-                        factor: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items", "factor"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+          {__lift_12({ state: {
                 items: state.items,
                 factor: state.factor
-            } }, ({ state }) => (state.items.reduce((a, b) => a + b, 0) / state.items.length) *
-            state.factor)}
+            } })}
         </p>
 
         <h3>Methods on Computed Values</h3>
@@ -961,46 +783,10 @@ export default recipe({
         {/* Filter with multiple conditions */}
         <p>
           Active adults:{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        users: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    },
-                                    age: {
-                                        type: "number"
-                                    },
-                                    active: {
-                                        type: "boolean"
-                                    }
-                                },
-                                required: ["name", "age", "active"]
-                            },
-                            asOpaque: true
-                        },
-                        minAge: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["users", "minAge"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+          {__lift_14({ state: {
                 users: state.users,
                 minAge: state.minAge
-            } }, ({ state }) => state.users.filter((u) => u.age >= state.minAge && u.active).length)}
+            } })}
         </p>
 
         {/* Map with conditional logic */}
@@ -1193,46 +979,10 @@ export default recipe({
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        users: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    },
-                                    age: {
-                                        type: "number"
-                                    },
-                                    active: {
-                                        type: "boolean"
-                                    }
-                                },
-                                required: ["name", "age", "active"]
-                            },
-                            asOpaque: true
-                        },
-                        minAge: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["users", "minAge"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, __lift_16({ state: {
                 users: state.users,
                 minAge: state.minAge
-            } }, ({ state }) => state.users.some((u) => u.age >= state.minAge)), "Yes", "No")}
+            } }), "Yes", "No")}
         </p>
         <p>All active: {__ctHelpers.ifElse({
             type: "boolean"
@@ -1242,41 +992,9 @@ export default recipe({
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        users: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    },
-                                    age: {
-                                        type: "number"
-                                    },
-                                    active: {
-                                        type: "boolean"
-                                    }
-                                },
-                                required: ["name", "age", "active"]
-                            },
-                            asOpaque: true
-                        }
-                    },
-                    required: ["users"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, __lift_18({ state: {
                 users: state.users
-            } }, ({ state }) => state.users.every((u) => u.active)), "Yes", "No")}</p>
+            } }), "Yes", "No")}</p>
 
         <h3>Method Calls in Expressions</h3>
         {/* Method result in arithmetic */}
@@ -1381,3 +1099,295 @@ export default recipe({
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
+const __lift_0 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    },
+                    asOpaque: true
+                },
+                threshold: {
+                    type: "number",
+                    asOpaque: true
+                }
+            },
+            required: ["items", "threshold"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __ctHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).length);
+const __lift_2 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    },
+                    asOpaque: true
+                },
+                threshold: {
+                    type: "number",
+                    asOpaque: true
+                }
+            },
+            required: ["items", "threshold"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "number",
+        asOpaque: true
+    }
+} as const satisfies __ctHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold));
+const __lift_4 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    },
+                    asOpaque: true
+                },
+                start: {
+                    type: "number",
+                    asOpaque: true
+                },
+                end: {
+                    type: "number",
+                    asOpaque: true
+                }
+            },
+            required: ["items", "start", "end"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __ctHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.start).filter((x) => x < state.end).length);
+const __lift_6 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                names: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    },
+                    asOpaque: true
+                },
+                prefix: {
+                    type: "string",
+                    asOpaque: true
+                }
+            },
+            required: ["names", "prefix"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __ctHelpers.JSONSchema, ({ state }) => state.names.filter((n) => n.startsWith(state.prefix)).join(", "));
+const __lift_8 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                names: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    },
+                    asOpaque: true
+                },
+                searchTerm: {
+                    type: "string",
+                    asOpaque: true
+                }
+            },
+            required: ["names", "searchTerm"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "string",
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema, ({ state }) => state.names.find((n) => n.includes(state.searchTerm)));
+const __lift_10 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                prices: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    },
+                    asOpaque: true
+                },
+                discount: {
+                    type: "number",
+                    asOpaque: true
+                }
+            },
+            required: ["prices", "discount"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __ctHelpers.JSONSchema, ({ state }) => state.prices.reduce((sum, price) => sum + price * (1 - state.discount), 0));
+const __lift_12 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    },
+                    asOpaque: true
+                },
+                factor: {
+                    type: "number",
+                    asOpaque: true
+                }
+            },
+            required: ["items", "factor"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __ctHelpers.JSONSchema, ({ state }) => (state.items.reduce((a, b) => a + b, 0) / state.items.length) *
+    state.factor);
+const __lift_14 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                users: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            name: {
+                                type: "string"
+                            },
+                            age: {
+                                type: "number"
+                            },
+                            active: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["name", "age", "active"]
+                    },
+                    asOpaque: true
+                },
+                minAge: {
+                    type: "number",
+                    asOpaque: true
+                }
+            },
+            required: ["users", "minAge"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __ctHelpers.JSONSchema, ({ state }) => state.users.filter((u) => u.age >= state.minAge && u.active).length);
+const __lift_16 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                users: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            name: {
+                                type: "string"
+                            },
+                            age: {
+                                type: "number"
+                            },
+                            active: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["name", "age", "active"]
+                    },
+                    asOpaque: true
+                },
+                minAge: {
+                    type: "number",
+                    asOpaque: true
+                }
+            },
+            required: ["users", "minAge"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __ctHelpers.JSONSchema, ({ state }) => state.users.some((u) => u.age >= state.minAge));
+const __lift_18 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                users: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            name: {
+                                type: "string"
+                            },
+                            age: {
+                                type: "number"
+                            },
+                            active: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["name", "age", "active"]
+                    },
+                    asOpaque: true
+                }
+            },
+            required: ["users"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __ctHelpers.JSONSchema, ({ state }) => state.users.every((u) => u.active));

@@ -136,21 +136,7 @@ export default recipe({
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     const recordMap = state.records;
     return {
-        [UI]: (<button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                recordMap: {
-                    type: "object",
-                    properties: {},
-                    additionalProperties: {
-                        type: "number",
-                        asCell: true
-                    },
-                    asOpaque: true
-                }
-            },
-            required: ["recordMap"]
-        } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { recordMap }) => recordMap[nextKey()]!.set(counter))({
+        [UI]: (<button type="button" onClick={__handler_0({
             recordMap: recordMap
         })}>
         Step
@@ -161,3 +147,18 @@ export default recipe({
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
+const __handler_0 = __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        recordMap: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                type: "number",
+                asCell: true
+            },
+            asOpaque: true
+        }
+    },
+    required: ["recordMap"]
+} as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { recordMap }) => recordMap[nextKey()]!.set(counter));

@@ -528,29 +528,9 @@ export default recipe({
             } }, ({ state }) => parseFloat(state.float))}</p>
 
         <h3>Array Method Calls</h3>
-        <p>Sum: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        values: {
-                            type: "array",
-                            items: {
-                                type: "number"
-                            },
-                            asOpaque: true
-                        }
-                    },
-                    required: ["values"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>Sum: {__lift_0({ state: {
                 values: state.values
-            } }, ({ state }) => state.values.reduce((a, b) => a + b, 0))}</p>
+            } })}</p>
         <p>Max value: {__ctHelpers.derive({
             type: "object",
             properties: {
@@ -691,3 +671,24 @@ export default recipe({
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
+const __lift_0 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                values: {
+                    type: "array",
+                    items: {
+                        type: "number"
+                    },
+                    asOpaque: true
+                }
+            },
+            required: ["values"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __ctHelpers.JSONSchema, ({ state }) => state.values.reduce((a, b) => a + b, 0));

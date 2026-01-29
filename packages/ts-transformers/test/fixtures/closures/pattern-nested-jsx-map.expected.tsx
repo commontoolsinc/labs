@@ -241,478 +241,7 @@ export default pattern(({ items }) => {
                     }
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, hasItems, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                items: {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Item"
-                    },
-                    asCell: true
-                }
-            },
-            required: ["items"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        label: {
-                            type: "string"
-                        },
-                        tags: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Tag"
-                            }
-                        },
-                        selectedIndex: {
-                            type: "number"
-                        }
-                    },
-                    required: ["label", "tags", "selectedIndex"]
-                },
-                Tag: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string"
-                        }
-                    },
-                    required: ["name"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "array",
-            items: {
-                $ref: "#/$defs/UIRenderable"
-            },
-            asOpaque: true,
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "#/$defs/VNode"
-                        }
-                    },
-                    required: ["$UI"]
-                },
-                VNode: {
-                    type: "object",
-                    properties: {
-                        type: {
-                            type: "string",
-                            "enum": ["vnode"]
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        props: {
-                            $ref: "#/$defs/Props"
-                        },
-                        children: {
-                            $ref: "#/$defs/RenderNode"
-                        },
-                        $UI: {
-                            $ref: "#/$defs/VNode"
-                        }
-                    },
-                    required: ["type", "name", "props"]
-                },
-                RenderNode: {
-                    anyOf: [{
-                            type: "string"
-                        }, {
-                            type: "number"
-                        }, {
-                            type: "boolean",
-                            "enum": [false]
-                        }, {
-                            type: "boolean",
-                            "enum": [true]
-                        }, {
-                            $ref: "#/$defs/VNode"
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }, {
-                            $ref: "#/$defs/UIRenderable",
-                            asOpaque: true
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }, {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/RenderNode"
-                            }
-                        }, {
-                            type: "null"
-                        }]
-                },
-                Props: {
-                    type: "object",
-                    properties: {},
-                    additionalProperties: {
-                        anyOf: [{
-                                type: "string"
-                            }, {
-                                type: "number"
-                            }, {
-                                type: "boolean",
-                                "enum": [false]
-                            }, {
-                                type: "boolean",
-                                "enum": [true]
-                            }, {
-                                type: "object",
-                                additionalProperties: true
-                            }, {
-                                type: "array",
-                                items: true
-                            }, {
-                                asCell: true
-                            }, {
-                                asStream: true
-                            }, {
-                                type: "null"
-                            }]
-                    }
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, { items: items }, ({ items }) => (items.mapWithPattern(__ctHelpers.recipe({
-            type: "object",
-            properties: {
-                element: {
-                    $ref: "#/$defs/Item"
-                },
-                params: {
-                    type: "object",
-                    properties: {}
-                }
-            },
-            required: ["element", "params"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        label: {
-                            type: "string"
-                        },
-                        tags: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Tag"
-                            }
-                        },
-                        selectedIndex: {
-                            type: "number"
-                        }
-                    },
-                    required: ["label", "tags", "selectedIndex"]
-                },
-                Tag: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string"
-                        }
-                    },
-                    required: ["name"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{
-                    $ref: "#/$defs/VNode"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }],
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "#/$defs/VNode"
-                        }
-                    },
-                    required: ["$UI"]
-                },
-                VNode: {
-                    type: "object",
-                    properties: {
-                        type: {
-                            type: "string",
-                            "enum": ["vnode"]
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        props: {
-                            $ref: "#/$defs/Props"
-                        },
-                        children: {
-                            $ref: "#/$defs/RenderNode"
-                        },
-                        $UI: {
-                            $ref: "#/$defs/VNode"
-                        }
-                    },
-                    required: ["type", "name", "props"]
-                },
-                RenderNode: {
-                    anyOf: [{
-                            type: "string"
-                        }, {
-                            type: "number"
-                        }, {
-                            type: "boolean",
-                            "enum": [false]
-                        }, {
-                            type: "boolean",
-                            "enum": [true]
-                        }, {
-                            $ref: "#/$defs/VNode"
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }, {
-                            $ref: "#/$defs/UIRenderable",
-                            asOpaque: true
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }, {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/RenderNode"
-                            }
-                        }, {
-                            type: "null"
-                        }]
-                },
-                Props: {
-                    type: "object",
-                    properties: {},
-                    additionalProperties: {
-                        anyOf: [{
-                                type: "string"
-                            }, {
-                                type: "number"
-                            }, {
-                                type: "boolean",
-                                "enum": [false]
-                            }, {
-                                type: "boolean",
-                                "enum": [true]
-                            }, {
-                                type: "object",
-                                additionalProperties: true
-                            }, {
-                                type: "array",
-                                items: true
-                            }, {
-                                asCell: true
-                            }, {
-                                asStream: true
-                            }, {
-                                type: "null"
-                            }]
-                    }
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => (<div>
-              <strong>{item.label}</strong>
-              <ul>
-                {item.tags.mapWithPattern(__ctHelpers.recipe({
-                type: "object",
-                properties: {
-                    element: {
-                        $ref: "#/$defs/Tag"
-                    },
-                    index: {
-                        type: "number"
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            item: {
-                                type: "object",
-                                properties: {
-                                    selectedIndex: {
-                                        type: "number",
-                                        asOpaque: true
-                                    }
-                                },
-                                required: ["selectedIndex"]
-                            }
-                        },
-                        required: ["item"]
-                    }
-                },
-                required: ["element", "params"],
-                $defs: {
-                    Tag: {
-                        type: "object",
-                        properties: {
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["name"]
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "#/$defs/VNode"
-                    }, {
-                        type: "object",
-                        properties: {}
-                    }, {
-                        $ref: "#/$defs/UIRenderable",
-                        asOpaque: true
-                    }],
-                $defs: {
-                    UIRenderable: {
-                        type: "object",
-                        properties: {
-                            $UI: {
-                                $ref: "#/$defs/VNode"
-                            }
-                        },
-                        required: ["$UI"]
-                    },
-                    VNode: {
-                        type: "object",
-                        properties: {
-                            type: {
-                                type: "string",
-                                "enum": ["vnode"]
-                            },
-                            name: {
-                                type: "string"
-                            },
-                            props: {
-                                $ref: "#/$defs/Props"
-                            },
-                            children: {
-                                $ref: "#/$defs/RenderNode"
-                            },
-                            $UI: {
-                                $ref: "#/$defs/VNode"
-                            }
-                        },
-                        required: ["type", "name", "props"]
-                    },
-                    RenderNode: {
-                        anyOf: [{
-                                type: "string"
-                            }, {
-                                type: "number"
-                            }, {
-                                type: "boolean",
-                                "enum": [false]
-                            }, {
-                                type: "boolean",
-                                "enum": [true]
-                            }, {
-                                $ref: "#/$defs/VNode"
-                            }, {
-                                type: "object",
-                                properties: {}
-                            }, {
-                                $ref: "#/$defs/UIRenderable",
-                                asOpaque: true
-                            }, {
-                                type: "object",
-                                properties: {}
-                            }, {
-                                type: "array",
-                                items: {
-                                    $ref: "#/$defs/RenderNode"
-                                }
-                            }, {
-                                type: "null"
-                            }]
-                    },
-                    Props: {
-                        type: "object",
-                        properties: {},
-                        additionalProperties: {
-                            anyOf: [{
-                                    type: "string"
-                                }, {
-                                    type: "number"
-                                }, {
-                                    type: "boolean",
-                                    "enum": [false]
-                                }, {
-                                    type: "boolean",
-                                    "enum": [true]
-                                }, {
-                                    type: "object",
-                                    additionalProperties: true
-                                }, {
-                                    type: "array",
-                                    items: true
-                                }, {
-                                    asCell: true
-                                }, {
-                                    asStream: true
-                                }, {
-                                    type: "null"
-                                }]
-                        }
-                    }
-                }
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: tag, index: i, params: { item } }) => (<li>
-                    {__ctHelpers.ifElse({
-                type: "boolean"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                "enum": ["", "* "]
-            } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-                type: "object",
-                properties: {
-                    i: {
-                        type: "number",
-                        asOpaque: true
-                    },
-                    item: {
-                        type: "object",
-                        properties: {
-                            selectedIndex: {
-                                type: "number",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["selectedIndex"]
-                    }
-                },
-                required: ["i", "item"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "boolean"
-            } as const satisfies __ctHelpers.JSONSchema, {
-                i: i,
-                item: {
-                    selectedIndex: item.selectedIndex
-                }
-            }, ({ i, item }) => i === item.selectedIndex), "* ", "")}
-                    {tag.name}
-                  </li>)), {
-                item: {
-                    selectedIndex: item.selectedIndex
-                }
-            })}
-              </ul>
-            </div>)), {}))), <p>No items</p>)}
+        } as const satisfies __ctHelpers.JSONSchema, hasItems, __lift_0({ items: items }), <p>No items</p>)}
       </div>),
     };
 }, {
@@ -873,3 +402,475 @@ export default pattern(({ items }) => {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
+const __lift_0 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Item"
+            },
+            asCell: true
+        }
+    },
+    required: ["items"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                label: {
+                    type: "string"
+                },
+                tags: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Tag"
+                    }
+                },
+                selectedIndex: {
+                    type: "number"
+                }
+            },
+            required: ["label", "tags", "selectedIndex"]
+        },
+        Tag: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        $ref: "#/$defs/UIRenderable"
+    },
+    asOpaque: true,
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["$UI"]
+        },
+        VNode: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        RenderNode: {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "number"
+                }, {
+                    type: "boolean",
+                    "enum": [false]
+                }, {
+                    type: "boolean",
+                    "enum": [true]
+                }, {
+                    $ref: "#/$defs/VNode"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/RenderNode"
+                    }
+                }, {
+                    type: "null"
+                }]
+        },
+        Props: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "number"
+                    }, {
+                        type: "boolean",
+                        "enum": [false]
+                    }, {
+                        type: "boolean",
+                        "enum": [true]
+                    }, {
+                        type: "object",
+                        additionalProperties: true
+                    }, {
+                        type: "array",
+                        items: true
+                    }, {
+                        asCell: true
+                    }, {
+                        asStream: true
+                    }, {
+                        type: "null"
+                    }]
+            }
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, ({ items }) => (items.mapWithPattern(__ctHelpers.recipe({
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        },
+        params: {
+            type: "object",
+            properties: {}
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                label: {
+                    type: "string"
+                },
+                tags: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Tag"
+                    }
+                },
+                selectedIndex: {
+                    type: "number"
+                }
+            },
+            required: ["label", "tags", "selectedIndex"]
+        },
+        Tag: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "#/$defs/VNode"
+        }, {
+            type: "object",
+            properties: {}
+        }, {
+            $ref: "#/$defs/UIRenderable",
+            asOpaque: true
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["$UI"]
+        },
+        VNode: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        RenderNode: {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "number"
+                }, {
+                    type: "boolean",
+                    "enum": [false]
+                }, {
+                    type: "boolean",
+                    "enum": [true]
+                }, {
+                    $ref: "#/$defs/VNode"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/RenderNode"
+                    }
+                }, {
+                    type: "null"
+                }]
+        },
+        Props: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "number"
+                    }, {
+                        type: "boolean",
+                        "enum": [false]
+                    }, {
+                        type: "boolean",
+                        "enum": [true]
+                    }, {
+                        type: "object",
+                        additionalProperties: true
+                    }, {
+                        type: "array",
+                        items: true
+                    }, {
+                        asCell: true
+                    }, {
+                        asStream: true
+                    }, {
+                        type: "null"
+                    }]
+            }
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => (<div>
+              <strong>{item.label}</strong>
+              <ul>
+                {item.tags.mapWithPattern(__ctHelpers.recipe({
+        type: "object",
+        properties: {
+            element: {
+                $ref: "#/$defs/Tag"
+            },
+            index: {
+                type: "number"
+            },
+            params: {
+                type: "object",
+                properties: {
+                    item: {
+                        type: "object",
+                        properties: {
+                            selectedIndex: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["selectedIndex"]
+                    }
+                },
+                required: ["item"]
+            }
+        },
+        required: ["element", "params"],
+        $defs: {
+            Tag: {
+                type: "object",
+                properties: {
+                    name: {
+                        type: "string"
+                    }
+                },
+                required: ["name"]
+            }
+        }
+    } as const satisfies __ctHelpers.JSONSchema, {
+        anyOf: [{
+                $ref: "#/$defs/VNode"
+            }, {
+                type: "object",
+                properties: {}
+            }, {
+                $ref: "#/$defs/UIRenderable",
+                asOpaque: true
+            }],
+        $defs: {
+            UIRenderable: {
+                type: "object",
+                properties: {
+                    $UI: {
+                        $ref: "#/$defs/VNode"
+                    }
+                },
+                required: ["$UI"]
+            },
+            VNode: {
+                type: "object",
+                properties: {
+                    type: {
+                        type: "string",
+                        "enum": ["vnode"]
+                    },
+                    name: {
+                        type: "string"
+                    },
+                    props: {
+                        $ref: "#/$defs/Props"
+                    },
+                    children: {
+                        $ref: "#/$defs/RenderNode"
+                    },
+                    $UI: {
+                        $ref: "#/$defs/VNode"
+                    }
+                },
+                required: ["type", "name", "props"]
+            },
+            RenderNode: {
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "number"
+                    }, {
+                        type: "boolean",
+                        "enum": [false]
+                    }, {
+                        type: "boolean",
+                        "enum": [true]
+                    }, {
+                        $ref: "#/$defs/VNode"
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        $ref: "#/$defs/UIRenderable",
+                        asOpaque: true
+                    }, {
+                        type: "object",
+                        properties: {}
+                    }, {
+                        type: "array",
+                        items: {
+                            $ref: "#/$defs/RenderNode"
+                        }
+                    }, {
+                        type: "null"
+                    }]
+            },
+            Props: {
+                type: "object",
+                properties: {},
+                additionalProperties: {
+                    anyOf: [{
+                            type: "string"
+                        }, {
+                            type: "number"
+                        }, {
+                            type: "boolean",
+                            "enum": [false]
+                        }, {
+                            type: "boolean",
+                            "enum": [true]
+                        }, {
+                            type: "object",
+                            additionalProperties: true
+                        }, {
+                            type: "array",
+                            items: true
+                        }, {
+                            asCell: true
+                        }, {
+                            asStream: true
+                        }, {
+                            type: "null"
+                        }]
+                }
+            }
+        }
+    } as const satisfies __ctHelpers.JSONSchema, ({ element: tag, index: i, params: { item } }) => (<li>
+                    {__ctHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __ctHelpers.JSONSchema, {
+        "enum": ["", "* "]
+    } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
+        type: "object",
+        properties: {
+            i: {
+                type: "number",
+                asOpaque: true
+            },
+            item: {
+                type: "object",
+                properties: {
+                    selectedIndex: {
+                        type: "number",
+                        asOpaque: true
+                    }
+                },
+                required: ["selectedIndex"]
+            }
+        },
+        required: ["i", "item"]
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "boolean"
+    } as const satisfies __ctHelpers.JSONSchema, {
+        i: i,
+        item: {
+            selectedIndex: item.selectedIndex
+        }
+    }, ({ i, item }) => i === item.selectedIndex), "* ", "")}
+                    {tag.name}
+                  </li>)), {
+        item: {
+            selectedIndex: item.selectedIndex
+        }
+    })}
+              </ul>
+            </div>)), {})));

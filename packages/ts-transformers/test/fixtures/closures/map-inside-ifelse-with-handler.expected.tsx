@@ -5,44 +5,7 @@ interface Item {
     name: string;
 }
 // Handler that closes over both items array and individual item
-const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        items: {
-            type: "array",
-            items: {
-                $ref: "#/$defs/Item",
-                asCell: true
-            },
-            asCell: true
-        },
-        item: {
-            $ref: "#/$defs/Item",
-            asCell: true
-        }
-    },
-    required: ["items", "item"],
-    $defs: {
-        Item: {
-            type: "object",
-            properties: {
-                id: {
-                    type: "number"
-                },
-                name: {
-                    type: "string"
-                }
-            },
-            required: ["id", "name"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, (_event, { items, item }) => {
-    const currentItems = items.get();
-    const index = currentItems.findIndex((el) => el.equals(item));
-    if (index >= 0) {
-        items.set(currentItems.toSpliced(index, 1));
-    }
-});
+const removeItem = __handler_0;
 export default recipe({
     type: "object",
     properties: {
@@ -432,3 +395,41 @@ export default recipe({
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
+const __handler_0 = handler(true as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Item",
+                asCell: true
+            },
+            asCell: true
+        },
+        item: {
+            $ref: "#/$defs/Item",
+            asCell: true
+        }
+    },
+    required: ["items", "item"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["id", "name"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, (_event, { items, item }) => {
+    const currentItems = items.get();
+    const index = currentItems.findIndex((el) => el.equals(item));
+    if (index >= 0) {
+        items.set(currentItems.toSpliced(index, 1));
+    }
+});

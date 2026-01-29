@@ -176,72 +176,7 @@ export default recipe({
     // The callback becomes synthetic during transformation, which previously
     // caused type inference to fail, resulting in a 'true' schema instead of
     // the correct union type schema.
-    const latestMessage = derive({
-        type: "array",
-        items: {
-            $ref: "#/$defs/Message"
-        },
-        $defs: {
-            Message: {
-                type: "object",
-                properties: {
-                    role: {
-                        "enum": ["user", "assistant"]
-                    },
-                    content: {
-                        anyOf: [{
-                                type: "string"
-                            }, {
-                                type: "array",
-                                items: {
-                                    $ref: "#/$defs/ContentPart"
-                                }
-                            }]
-                    }
-                },
-                required: ["role", "content"]
-            },
-            ContentPart: {
-                type: "object",
-                properties: {
-                    type: {
-                        "enum": ["text", "image"]
-                    },
-                    text: {
-                        type: "string"
-                    },
-                    image: {
-                        type: "string"
-                    }
-                },
-                required: ["type"]
-            }
-        }
-    } as const satisfies __ctHelpers.JSONSchema, {
-        anyOf: [{
-                type: "string"
-            }, {
-                type: "null"
-            }]
-    } as const satisfies __ctHelpers.JSONSchema, state.messages, (messages) => {
-        if (!messages || messages.length === 0)
-            return null;
-        for (let i = messages.length - 1; i >= 0; i--) {
-            const msg = messages[i]!;
-            if (msg.role === "assistant") {
-                // This map call inside the derive callback was the key issue
-                const content = typeof msg.content === "string"
-                    ? msg.content
-                    : msg.content.map((part) => {
-                        if (part.type === "text")
-                            return part.text || "";
-                        return "";
-                    }).join("");
-                return content;
-            }
-        }
-        return null;
-    });
+    const latestMessage = __lift_0(state.messages);
     return {
         [UI]: (<div>
         <div>Latest: {latestMessage}</div>
@@ -252,3 +187,69 @@ export default recipe({
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
+const __lift_0 = __ctHelpers.lift({
+    type: "array",
+    items: {
+        $ref: "#/$defs/Message"
+    },
+    $defs: {
+        Message: {
+            type: "object",
+            properties: {
+                role: {
+                    "enum": ["user", "assistant"]
+                },
+                content: {
+                    anyOf: [{
+                            type: "string"
+                        }, {
+                            type: "array",
+                            items: {
+                                $ref: "#/$defs/ContentPart"
+                            }
+                        }]
+                }
+            },
+            required: ["role", "content"]
+        },
+        ContentPart: {
+            type: "object",
+            properties: {
+                type: {
+                    "enum": ["text", "image"]
+                },
+                text: {
+                    type: "string"
+                },
+                image: {
+                    type: "string"
+                }
+            },
+            required: ["type"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    anyOf: [{
+            type: "string"
+        }, {
+            type: "null"
+        }]
+} as const satisfies __ctHelpers.JSONSchema, (messages) => {
+    if (!messages || messages.length === 0)
+        return null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i]!;
+        if (msg.role === "assistant") {
+            // This map call inside the derive callback was the key issue
+            const content = typeof msg.content === "string"
+                ? msg.content
+                : msg.content.map((part) => {
+                    if (part.type === "text")
+                        return part.text || "";
+                    return "";
+                }).join("");
+            return content;
+        }
+    }
+    return null;
+});

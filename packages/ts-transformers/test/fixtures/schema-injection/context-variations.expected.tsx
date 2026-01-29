@@ -38,12 +38,7 @@ const testRecipe = recipe(false as const satisfies __ctHelpers.JSONSchema, {
     return _inRecipe;
 });
 // 6. Inside handler
-const testHandler = handler(false as const satisfies __ctHelpers.JSONSchema, false as const satisfies __ctHelpers.JSONSchema, () => {
-    const _inHandler = cell(60, {
-        type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
-    return _inHandler;
-});
+const testHandler = __handler_0;
 export default function TestContextVariations() {
     return {
         topLevel: _topLevel,
@@ -58,3 +53,9 @@ export default function TestContextVariations() {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
+const __handler_0 = handler(false as const satisfies __ctHelpers.JSONSchema, false as const satisfies __ctHelpers.JSONSchema, () => {
+    const _inHandler = cell(60, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
+    return _inHandler;
+});

@@ -1,6 +1,104 @@
 import ts from "typescript";
 
 /**
+ * Well-known JS global names used as a fallback when the type checker
+ * cannot resolve a symbol (e.g. on synthetic AST nodes created by
+ * prior transformers). These should never trigger hoisting.
+ *
+ * TODO(seefeld): Remove disallowed symbols from this list and instead
+ * throw an error when they are referenced. Not all of these globals
+ * should be available inside SES compartments.
+ */
+const WELL_KNOWN_GLOBALS = new Set([
+  // ES built-ins
+  "Object",
+  "Array",
+  "Map",
+  "Set",
+  "WeakMap",
+  "WeakSet",
+  "WeakRef",
+  "Promise",
+  "Proxy",
+  "Reflect",
+  "Symbol",
+  "BigInt",
+  "Math",
+  "JSON",
+  "Number",
+  "String",
+  "Boolean",
+  "Date",
+  "RegExp",
+  "Error",
+  "TypeError",
+  "RangeError",
+  "SyntaxError",
+  "ReferenceError",
+  "URIError",
+  "EvalError",
+  "AggregateError",
+  "parseInt",
+  "parseFloat",
+  "isNaN",
+  "isFinite",
+  "encodeURI",
+  "decodeURI",
+  "encodeURIComponent",
+  "decodeURIComponent",
+  "NaN",
+  "Infinity",
+  "undefined",
+  "globalThis",
+  "ArrayBuffer",
+  "SharedArrayBuffer",
+  "DataView",
+  "Int8Array",
+  "Uint8Array",
+  "Uint8ClampedArray",
+  "Int16Array",
+  "Uint16Array",
+  "Int32Array",
+  "Uint32Array",
+  "Float32Array",
+  "Float64Array",
+  "BigInt64Array",
+  "BigUint64Array",
+  "Intl",
+  "Atomics",
+  "FinalizationRegistry",
+  "Iterator",
+  "AsyncIterator",
+  "Generator",
+  "AsyncGenerator",
+  "GeneratorFunction",
+  "AsyncGeneratorFunction",
+  // Web/runtime globals
+  "console",
+  "setTimeout",
+  "clearTimeout",
+  "setInterval",
+  "clearInterval",
+  "fetch",
+  "URL",
+  "URLSearchParams",
+  "Headers",
+  "Request",
+  "Response",
+  "AbortController",
+  "AbortSignal",
+  "TextEncoder",
+  "TextDecoder",
+  "crypto",
+  "performance",
+  "navigator",
+  "structuredClone",
+  "queueMicrotask",
+  "atob",
+  "btoa",
+]);
+
+/**
  * Types of declarations that can be hoisted to module scope.
  */
 export type HoistedDeclarationType = "lift" | "handler" | "derive";
@@ -147,6 +245,10 @@ export class HoistingContext {
    * @returns The source position
    */
   private getSourcePosition(node: ts.Node): SourcePosition {
+    // Synthetic nodes (pos === -1) have no real position
+    if (node.pos === -1) {
+      return { line: 0, column: 0, pos: 0 };
+    }
     const { line, character } = this.sourceFile.getLineAndCharacterOfPosition(
       node.getStart(this.sourceFile),
     );
@@ -177,57 +279,60 @@ export class HoistingContext {
 }
 
 /**
- * Checks if a callback references anything declared outside its own scope
- * (i.e. not its own parameters or local variables).
+ * Checks if a callback references anything outside its own lexical scope
+ * (i.e. not its own parameters, local variables, or JS built-in globals).
  *
- * Any such external reference means the callback must be hoisted to module
- * scope for SES compartment safety — a pristine SES compartment with no
- * globals injected must be able to run the hoisted code.
+ * Uses pure name-based tracking rather than positional comparison, which
+ * makes it robust against synthetic AST nodes from prior transformers.
+ *
+ * Any external reference means the callback must be hoisted to module
+ * scope for SES compartment safety.
  *
  * @param callback - The callback function to analyze
- * @param checker - TypeScript type checker
+ * @param checker - TypeScript type checker (used only for built-in detection)
  * @returns True if the callback has external references and needs hoisting
  */
 export function referencesExternalSymbols(
   callback: ts.ArrowFunction | ts.FunctionExpression,
   checker: ts.TypeChecker,
 ): boolean {
-  const paramNames = new Set<string>();
+  // Collect all names bound inside the callback (params + locals)
+  const localNames = new Set<string>();
   for (const param of callback.parameters) {
-    collectBindingNames(param.name, paramNames);
+    collectBindingNames(param.name, localNames);
   }
 
-  const localNames = new Set<string>();
   let hasExternalRef = false;
 
   const visit = (node: ts.Node): void => {
     if (hasExternalRef) return;
 
+    // Track local variable declarations as we encounter them
     if (ts.isVariableDeclaration(node)) {
       collectBindingNames(node.name, localNames);
+    }
+
+    // Track function declarations inside the callback
+    if (ts.isFunctionDeclaration(node) && node.name) {
+      localNames.add(node.name.text);
     }
 
     if (ts.isIdentifier(node)) {
       if (isPropertyName(node)) return;
 
       const name = node.text;
-      if (paramNames.has(name) || localNames.has(name)) return;
+      if (localNames.has(name)) return;
 
+      // Check if this is a JS built-in global (Object, Math, Array, etc.)
+      // First try the type checker, then fall back to a name-based allowlist
+      // (needed when lib file paths don't match the expected pattern or when
+      // synthetic nodes prevent symbol resolution).
       const symbol = checker.getSymbolAtLocation(node);
-      if (symbol) {
-        const declarations = symbol.getDeclarations();
-        if (declarations && declarations.length > 0) {
-          const decl = declarations[0]!;
-          const declPos = decl.getStart();
-          const callbackStart = callback.getStart();
-          const callbackEnd = callback.getEnd();
+      if (symbol && isBuiltinGlobal(symbol)) return;
+      if (WELL_KNOWN_GLOBALS.has(name)) return;
 
-          // Declared outside the callback → external reference
-          if (declPos < callbackStart || declPos > callbackEnd) {
-            hasExternalRef = true;
-          }
-        }
-      }
+      // Not a local, not a builtin → external reference
+      hasExternalRef = true;
     }
 
     ts.forEachChild(node, visit);
@@ -235,6 +340,30 @@ export function referencesExternalSymbols(
 
   visit(callback.body);
   return hasExternalRef;
+}
+
+/**
+ * Check if a symbol is a JavaScript built-in global (Object, Math, Array,
+ * console, etc.) by checking if its declaration comes from a TypeScript
+ * lib.*.d.ts file.
+ */
+function isBuiltinGlobal(symbol: ts.Symbol): boolean {
+  const declarations = symbol.getDeclarations();
+  if (!declarations?.length) {
+    // Symbols with no declarations are typically intrinsic types
+    // (e.g., undefined, void) — treat as built-in
+    return true;
+  }
+
+  const sourceFile = declarations[0]!.getSourceFile();
+  if (!sourceFile) return false;
+
+  const fileName = sourceFile.fileName.replace(/\\/g, "/");
+  return (
+    fileName === "lib.d.ts" ||
+    fileName.endsWith("/lib.d.ts") ||
+    /\/lib\.[\w.]+\.d\.ts$/.test(fileName)
+  );
 }
 
 /**
