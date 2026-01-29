@@ -8,7 +8,7 @@ import {
   toDeepStorableValue,
   toStorableValue,
 } from "@commontools/memory/storable-value";
-import type { MemorySpace } from "@commontools/memory/interface";
+import type { MemorySpace, StorableValue } from "@commontools/memory/interface";
 import { getTopFrame, recipe } from "./builder/recipe.ts";
 import { createNodeFactory } from "./builder/module.ts";
 import {
@@ -324,7 +324,8 @@ interface CauseContainer {
  * CellImpl - Unified cell implementation that handles both regular cells and
  * streams.
  */
-export class CellImpl<T> implements ICell<T>, IStreamable<T> {
+export class CellImpl<T extends StorableValue>
+  implements ICell<T>, IStreamable<T> {
   private readOnlyReason: string | undefined;
 
   // Stream-specific fields
@@ -894,7 +895,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
     const newArray = [
       ...array.slice(0, index),
       ...array.slice(index + 1),
-    ] as T;
+    ] as unknown as T;
     this.set(newArray);
   }
 
@@ -916,7 +917,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
           this.runtime,
         )
         : item !== ref
-    ) as T;
+    ) as unknown as T;
     this.set(newArray);
   }
 
@@ -1348,7 +1349,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       nodes: cellNodes.get(this._causeContainer.cell) ?? new Set(),
       frame: this._frame,
       value: this._kind === "stream"
-        ? { $stream: true } as T
+        ? { $stream: true } as unknown as T
         : this._initialValue,
       name: this._causeContainer.cause as string | undefined,
       external: this._link.id
