@@ -419,6 +419,62 @@ def evalFixpointLoop (policies : List PolicyRecord) (boundaryIntegrity : IntegLa
 def evalFixpoint (fuel : Nat) (policies : List PolicyRecord) (boundaryIntegrity : IntegLabel) (ℓ : Label) : Label :=
   evalFixpointLoop policies boundaryIntegrity fuel ℓ
 
+/-!
+## Small reasoning lemmas (building blocks)
+
+The definitions above are executable, but when we later want to prove "end-to-end" theorems
+about boundaries (or about whole pipelines), we need a couple of small facts to avoid having to
+re-expand the evaluator every time.
+
+These lemmas are deliberately simple:
+- they do not attempt to prove that a given `fuel` is sufficient, and
+- they avoid any heavy termination / measure arguments.
+
+They are still quite useful: they let you "peel back" the evaluator just enough to reason about
+the stable/no-change cases that occur frequently in safety proofs.
+-/
+
+/--
+If no policy records are in scope (for the current label's confidentiality),
+then a single evaluation pass makes no change.
+
+This is the "nothing to do" case: no policy principals, or no matching records provided.
+-/
+theorem evalOnce_eq_of_policiesInScope_nil
+    (policies : List PolicyRecord) (boundaryIntegrity : IntegLabel) (ℓ : Label)
+    (h : policiesInScope policies ℓ.conf = []) :
+    evalOnce policies boundaryIntegrity ℓ = ℓ := by
+  -- `evalOnce` is a fold over the in-scope policy records; if that list is empty, the fold returns `ℓ`.
+  simp [evalOnce, h]
+
+/--
+If `evalOnce` is already stable at `cur`, then the fuelled fixpoint loop returns `cur` for *any*
+fuel.
+
+This captures the key operational intuition:
+once a boundary pass makes no change, evaluating "more" doesn't do anything.
+-/
+theorem evalFixpointLoop_eq_of_evalOnce_eq
+    (policies : List PolicyRecord) (boundaryIntegrity : IntegLabel) (fuel : Nat) (cur : Label)
+    (h : evalOnce policies boundaryIntegrity cur = cur) :
+    evalFixpointLoop policies boundaryIntegrity fuel cur = cur := by
+  cases fuel with
+  | zero =>
+      simp [evalFixpointLoop]
+  | succ n =>
+      -- In the `succ` case, the definition checks whether `next = cur`.
+      -- Our hypothesis says exactly that `next` (which is `evalOnce ... cur`) equals `cur`,
+      -- so the evaluator returns immediately without consuming the remaining fuel.
+      simp [evalFixpointLoop, h]
+
+/-- The corresponding wrapper lemma for `evalFixpoint`. -/
+theorem evalFixpoint_eq_of_evalOnce_eq
+    (fuel : Nat) (policies : List PolicyRecord) (boundaryIntegrity : IntegLabel) (cur : Label)
+    (h : evalOnce policies boundaryIntegrity cur = cur) :
+    evalFixpoint fuel policies boundaryIntegrity cur = cur := by
+  -- `evalFixpoint` is just a wrapper around the loop, so we reuse the loop lemma.
+  simpa [evalFixpoint] using (evalFixpointLoop_eq_of_evalOnce_eq policies boundaryIntegrity fuel cur h)
+
 end Policy
 
 end Cfc
