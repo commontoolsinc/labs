@@ -206,10 +206,8 @@ const createNewNote = handler<
   // Add to parent notebook using Cell.key() pattern
   if (notebook) {
     const charmsList = allCharms.get();
-    const nbName = (notebook as any)?.[NAME];
-    const nbIndex = charmsList.findIndex((c: any) =>
-      (c as any)?.[NAME] === nbName
-    );
+    const nbName = notebook?.[NAME];
+    const nbIndex = charmsList.findIndex((c: any) => c?.[NAME] === nbName);
     if (nbIndex >= 0) {
       const notebookCell = allCharms.key(nbIndex);
       const notesCell = notebookCell.key("notes");
@@ -232,7 +230,7 @@ const menuGoToNotebook = handler<
 // Navigate to parent notebook
 const goToParent = handler<Record<string, never>, { self: any }>(
   (_, { self }) => {
-    const p = (self as any).parentNotebook;
+    const p = self.parentNotebook;
     if (p) navigateTo(p);
   },
 );
@@ -343,7 +341,7 @@ const Note = pattern<Input, Output>(
       return allCharms.filter((charm: any) => {
         const name = charm?.[NAME];
         return typeof name === "string" && name.startsWith("📓");
-      });
+      }) as NotebookCharm[];
     });
 
     // LAZY: Only check for "All Notes" charm when menu is open
@@ -365,8 +363,8 @@ const Note = pattern<Input, Output>(
       if (!myId) return []; // Can't match if we have no noteId
       const result: string[] = [];
       for (const nb of notebooks) {
-        const nbNotes = (nb as any)?.notes ?? [];
-        const nbName = (nb as any)?.[NAME] ?? "";
+        const nbNotes = nb?.notes ?? [];
+        const nbName = nb?.[NAME] ?? "";
         for (const n of nbNotes) {
           if (n?.noteId && n.noteId === myId) {
             result.push(nbName);
@@ -381,7 +379,7 @@ const Note = pattern<Input, Output>(
     // No expensive fallback - if parentNotebook isn't set, it's null
     const parentNotebook = computed(() => {
       // Read from self.parentNotebook for reactive updates when navigating
-      const selfParent = (self as any)?.parentNotebook;
+      const selfParent = self?.parentNotebook;
       if (selfParent) return selfParent;
 
       // If parent was passed explicitly as prop, use it
@@ -398,7 +396,7 @@ const Note = pattern<Input, Output>(
     // linkPattern is a Writable<string> - access reactively, not as raw string
     const patternJson = computed(() => {
       // deno-lint-ignore no-explicit-any
-      const lpValue = (linkPattern as any)?.get?.() ?? linkPattern;
+      const lpValue = linkPattern?.get?.() ?? linkPattern;
       const custom = typeof lpValue === "string" ? lpValue.trim() : "";
       return custom || JSON.stringify(Note);
     });
@@ -438,7 +436,7 @@ const Note = pattern<Input, Output>(
               align="center"
               style={{
                 display: computed(() => {
-                  const p = (self as any).parentNotebook;
+                  const p = self.parentNotebook;
                   return p ? "flex" : "none";
                 }),
                 marginBottom: "4px",
@@ -454,7 +452,7 @@ const Note = pattern<Input, Output>(
               </span>
               <ct-chip
                 label={computed(() => {
-                  const p = (self as any).parentNotebook;
+                  const p = self.parentNotebook;
                   return p?.[NAME] ?? p?.title ?? "Notebook";
                 })}
                 interactive
@@ -591,8 +589,9 @@ const Note = pattern<Input, Output>(
                     {"\u00A0\u00A0"}
                     {notebook?.[NAME] ?? "Untitled"}
                     {computed(() => {
-                      const nbName = (notebook as any)?.[NAME] ?? "";
-                      return containingNotebookNames.includes(nbName)
+                      const nbName = notebook?.[NAME] ?? "";
+                      return (containingNotebookNames as string[])
+                          .includes(nbName)
                         ? " ✓"
                         : "";
                     })}
