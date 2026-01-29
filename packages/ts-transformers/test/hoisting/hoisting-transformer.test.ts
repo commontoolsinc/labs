@@ -116,9 +116,13 @@ export default function MyPattern(props: any) {
     assertEquals(output.includes("__lift_"), true);
     // The hoisted declaration should wrap callback in lift()
     assertEquals(output.includes("lift("), true);
-    // The hoisted declaration should be after the main body
+    // The hoisted declaration should be after imports but before the main body
     assertEquals(
-      output.indexOf("const __lift_") > output.indexOf("export default"),
+      output.indexOf("const __lift_") < output.indexOf("export default"),
+      true,
+    );
+    assertEquals(
+      output.indexOf("const __lift_") > output.indexOf("import"),
       true,
     );
   });
@@ -194,7 +198,7 @@ export default function MyPattern(props: any) {
     assertEquals(output.includes("__handler_"), true);
     // The inner handler(fn) should be hoisted, outer call stays at call site
     assertEquals(
-      output.indexOf("const __handler_") > output.indexOf("export default"),
+      output.indexOf("const __handler_") < output.indexOf("export default"),
       true,
     );
     // The call site should invoke the hoisted handler with captures

@@ -1,5 +1,207 @@
 import * as __ctHelpers from "commontools";
 import { Cell, derive, recipe, UI } from "commontools";
+const __lift_0 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Item"
+            },
+            asOpaque: true
+        }
+    },
+    required: ["items"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                done: {
+                    type: "boolean",
+                    asCell: true
+                }
+            },
+            required: ["name", "done"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "object",
+        properties: {
+            aisle: {
+                type: "string"
+            },
+            item: {
+                $ref: "#/$defs/Item",
+                asOpaque: true
+            }
+        },
+        required: ["aisle", "item"]
+    },
+    asOpaque: true,
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                done: {
+                    type: "boolean",
+                    asCell: true
+                }
+            },
+            required: ["name", "done"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, ({ items }) => items.mapWithPattern(__ctHelpers.recipe({
+    type: "object",
+    properties: {
+        element: {
+            $ref: "#/$defs/Item"
+        },
+        index: {
+            type: "number"
+        },
+        params: {
+            type: "object",
+            properties: {}
+        }
+    },
+    required: ["element", "params"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                done: {
+                    type: "boolean",
+                    asCell: true
+                }
+            },
+            required: ["name", "done"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        aisle: {
+            type: "string"
+        },
+        item: {
+            $ref: "#/$defs/Item",
+            asOpaque: true
+        }
+    },
+    required: ["aisle", "item"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                done: {
+                    type: "boolean",
+                    asCell: true
+                }
+            },
+            required: ["name", "done"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, ({ element: item, index: idx, params: {} }) => ({
+    aisle: `Aisle ${(idx % 3) + 1}`,
+    item: item,
+})), {}));
+const __lift_2 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        itemsWithAisles: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    aisle: {
+                        type: "string"
+                    },
+                    item: {
+                        $ref: "#/$defs/Item",
+                        asOpaque: true
+                    }
+                },
+                required: ["aisle", "item"]
+            },
+            asOpaque: true
+        }
+    },
+    required: ["itemsWithAisles"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                done: {
+                    type: "boolean",
+                    asCell: true
+                }
+            },
+            required: ["name", "done"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {},
+    additionalProperties: {
+        type: "array",
+        items: {
+            $ref: "#/$defs/Assignment"
+        }
+    },
+    $defs: {
+        Assignment: {
+            type: "object",
+            properties: {
+                aisle: {
+                    type: "string"
+                },
+                item: {
+                    $ref: "#/$defs/Item"
+                }
+            },
+            required: ["aisle", "item"]
+        },
+        Item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                done: {
+                    type: "boolean",
+                    asCell: true
+                }
+            },
+            required: ["name", "done"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, ({ itemsWithAisles }) => {
+    const groups: Record<string, Assignment[]> = {};
+    for (const assignment of itemsWithAisles) {
+        if (!groups[assignment.aisle]) {
+            groups[assignment.aisle] = [];
+        }
+        groups[assignment.aisle]!.push(assignment);
+    }
+    return groups;
+});
 interface Item {
     name: string;
     done: Cell<boolean>;
@@ -606,205 +808,3 @@ export default recipe({
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
-const __lift_0 = __ctHelpers.lift({
-    type: "object",
-    properties: {
-        items: {
-            type: "array",
-            items: {
-                $ref: "#/$defs/Item"
-            },
-            asOpaque: true
-        }
-    },
-    required: ["items"],
-    $defs: {
-        Item: {
-            type: "object",
-            properties: {
-                name: {
-                    type: "string"
-                },
-                done: {
-                    type: "boolean",
-                    asCell: true
-                }
-            },
-            required: ["name", "done"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "array",
-    items: {
-        type: "object",
-        properties: {
-            aisle: {
-                type: "string"
-            },
-            item: {
-                $ref: "#/$defs/Item",
-                asOpaque: true
-            }
-        },
-        required: ["aisle", "item"]
-    },
-    asOpaque: true,
-    $defs: {
-        Item: {
-            type: "object",
-            properties: {
-                name: {
-                    type: "string"
-                },
-                done: {
-                    type: "boolean",
-                    asCell: true
-                }
-            },
-            required: ["name", "done"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, ({ items }) => items.mapWithPattern(__ctHelpers.recipe({
-    type: "object",
-    properties: {
-        element: {
-            $ref: "#/$defs/Item"
-        },
-        index: {
-            type: "number"
-        },
-        params: {
-            type: "object",
-            properties: {}
-        }
-    },
-    required: ["element", "params"],
-    $defs: {
-        Item: {
-            type: "object",
-            properties: {
-                name: {
-                    type: "string"
-                },
-                done: {
-                    type: "boolean",
-                    asCell: true
-                }
-            },
-            required: ["name", "done"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        aisle: {
-            type: "string"
-        },
-        item: {
-            $ref: "#/$defs/Item",
-            asOpaque: true
-        }
-    },
-    required: ["aisle", "item"],
-    $defs: {
-        Item: {
-            type: "object",
-            properties: {
-                name: {
-                    type: "string"
-                },
-                done: {
-                    type: "boolean",
-                    asCell: true
-                }
-            },
-            required: ["name", "done"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, ({ element: item, index: idx, params: {} }) => ({
-    aisle: `Aisle ${(idx % 3) + 1}`,
-    item: item,
-})), {}));
-const __lift_2 = __ctHelpers.lift({
-    type: "object",
-    properties: {
-        itemsWithAisles: {
-            type: "array",
-            items: {
-                type: "object",
-                properties: {
-                    aisle: {
-                        type: "string"
-                    },
-                    item: {
-                        $ref: "#/$defs/Item",
-                        asOpaque: true
-                    }
-                },
-                required: ["aisle", "item"]
-            },
-            asOpaque: true
-        }
-    },
-    required: ["itemsWithAisles"],
-    $defs: {
-        Item: {
-            type: "object",
-            properties: {
-                name: {
-                    type: "string"
-                },
-                done: {
-                    type: "boolean",
-                    asCell: true
-                }
-            },
-            required: ["name", "done"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {},
-    additionalProperties: {
-        type: "array",
-        items: {
-            $ref: "#/$defs/Assignment"
-        }
-    },
-    $defs: {
-        Assignment: {
-            type: "object",
-            properties: {
-                aisle: {
-                    type: "string"
-                },
-                item: {
-                    $ref: "#/$defs/Item"
-                }
-            },
-            required: ["aisle", "item"]
-        },
-        Item: {
-            type: "object",
-            properties: {
-                name: {
-                    type: "string"
-                },
-                done: {
-                    type: "boolean",
-                    asCell: true
-                }
-            },
-            required: ["name", "done"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, ({ itemsWithAisles }) => {
-    const groups: Record<string, Assignment[]> = {};
-    for (const assignment of itemsWithAisles) {
-        if (!groups[assignment.aisle]) {
-            groups[assignment.aisle] = [];
-        }
-        groups[assignment.aisle]!.push(assignment);
-    }
-    return groups;
-});

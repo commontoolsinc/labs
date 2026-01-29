@@ -1,18 +1,5 @@
 import * as __ctHelpers from "commontools";
 import { computed, OpaqueRef } from "commontools";
-export default function TestComputedWithClosedOverOpaqueRefMap() {
-    const items = [1, 2, 3] as OpaqueRef<number[]>;
-    // Inside computed, we close over items (an OpaqueRef)
-    // The computed gets transformed to derive({}, () => items.map(...))
-    // Inside a derive, .map on a closed-over OpaqueRef should NOT be transformed to mapWithPattern
-    // because items is already an OpaqueRef and will be passed through as-is
-    const doubled = __lift_0({ items: items });
-    return doubled;
-}
-// @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
 const __lift_0 = __ctHelpers.lift({
     type: "object",
     properties: {
@@ -32,3 +19,16 @@ const __lift_0 = __ctHelpers.lift({
     },
     asOpaque: true
 } as const satisfies __ctHelpers.JSONSchema, ({ items }) => items.map(n => n * 2));
+export default function TestComputedWithClosedOverOpaqueRefMap() {
+    const items = [1, 2, 3] as OpaqueRef<number[]>;
+    // Inside computed, we close over items (an OpaqueRef)
+    // The computed gets transformed to derive({}, () => items.map(...))
+    // Inside a derive, .map on a closed-over OpaqueRef should NOT be transformed to mapWithPattern
+    // because items is already an OpaqueRef and will be passed through as-is
+    const doubled = __lift_0({ items: items });
+    return doubled;
+}
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

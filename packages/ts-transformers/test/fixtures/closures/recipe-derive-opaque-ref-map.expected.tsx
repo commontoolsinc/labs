@@ -1,5 +1,24 @@
 import * as __ctHelpers from "commontools";
 import { derive, recipe } from "commontools";
+const __lift_0 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                type: "number"
+            },
+            asOpaque: true
+        }
+    },
+    required: ["items"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "number"
+    },
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema, ({ items }) => items.map((n) => n * 2));
 export default recipe({
     type: "array",
     items: {
@@ -21,22 +40,3 @@ export default recipe({
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
-const __lift_0 = __ctHelpers.lift({
-    type: "object",
-    properties: {
-        items: {
-            type: "array",
-            items: {
-                type: "number"
-            },
-            asOpaque: true
-        }
-    },
-    required: ["items"]
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "array",
-    items: {
-        type: "number"
-    },
-    asOpaque: true
-} as const satisfies __ctHelpers.JSONSchema, ({ items }) => items.map((n) => n * 2));

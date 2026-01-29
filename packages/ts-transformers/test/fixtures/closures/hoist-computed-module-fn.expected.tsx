@@ -1,5 +1,17 @@
 import * as __ctHelpers from "commontools";
 import { computed, pattern } from "commontools";
+const __lift_0 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        value: {
+            type: "number",
+            asOpaque: true
+        }
+    },
+    required: ["value"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __ctHelpers.JSONSchema, ({ value }) => helper(value));
 function helper(x: number) {
     return x * 2;
 }
@@ -28,15 +40,3 @@ export default pattern(({ value }) => {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
-const __lift_0 = __ctHelpers.lift({
-    type: "object",
-    properties: {
-        value: {
-            type: "number",
-            asOpaque: true
-        }
-    },
-    required: ["value"]
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __ctHelpers.JSONSchema, ({ value }) => helper(value));

@@ -1,26 +1,5 @@
 import * as __ctHelpers from "commontools";
 import { cell, derive } from "commontools";
-export default function TestDerive() {
-    const numbers = cell([1, 2, 3], {
-        type: "array",
-        items: {
-            type: "number"
-        }
-    } as const satisfies __ctHelpers.JSONSchema);
-    const multiplier = cell(2, {
-        type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
-    // Nested callback - inner array map should not capture outer multiplier
-    const result = __lift_0({
-        numbers,
-        multiplier: multiplier
-    });
-    return result;
-}
-// @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
 const __lift_0 = __ctHelpers.lift({
     type: "object",
     properties: {
@@ -66,3 +45,24 @@ const __lift_0 = __ctHelpers.lift({
 } as const satisfies __ctHelpers.JSONSchema, ({ element: n, params: { multiplier } }) => n * multiplier.get()), {
     multiplier: multiplier
 }));
+export default function TestDerive() {
+    const numbers = cell([1, 2, 3], {
+        type: "array",
+        items: {
+            type: "number"
+        }
+    } as const satisfies __ctHelpers.JSONSchema);
+    const multiplier = cell(2, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
+    // Nested callback - inner array map should not capture outer multiplier
+    const result = __lift_0({
+        numbers,
+        multiplier: multiplier
+    });
+    return result;
+}
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;

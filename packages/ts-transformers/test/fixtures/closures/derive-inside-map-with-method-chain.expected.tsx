@@ -1,5 +1,33 @@
 import * as __ctHelpers from "commontools";
 import { derive, recipe, UI } from "commontools";
+const __lift_0 = __ctHelpers.lift({
+    type: "array",
+    items: {
+        $ref: "#/$defs/SubItem"
+    },
+    $defs: {
+        SubItem: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                name: {
+                    type: "string"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["id", "name", "active"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __ctHelpers.JSONSchema, (subs) => subs
+    .filter((s) => s.active)
+    .map((s) => s.name)
+    .join(", "));
 interface SubItem {
     id: number;
     name: string;
@@ -343,31 +371,3 @@ export default recipe({
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
-const __lift_0 = __ctHelpers.lift({
-    type: "array",
-    items: {
-        $ref: "#/$defs/SubItem"
-    },
-    $defs: {
-        SubItem: {
-            type: "object",
-            properties: {
-                id: {
-                    type: "number"
-                },
-                name: {
-                    type: "string"
-                },
-                active: {
-                    type: "boolean"
-                }
-            },
-            required: ["id", "name", "active"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "string"
-} as const satisfies __ctHelpers.JSONSchema, (subs) => subs
-    .filter((s) => s.active)
-    .map((s) => s.name)
-    .join(", "));

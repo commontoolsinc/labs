@@ -1,5 +1,49 @@
 import * as __ctHelpers from "commontools";
 import { derive, recipe } from "commontools";
+const __lift_0 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        food: {
+            type: "string",
+            asOpaque: true
+        },
+        prefs: {
+            type: "array",
+            items: {
+                $ref: "#/$defs/Preference"
+            },
+            asOpaque: true
+        }
+    },
+    required: ["food", "prefs"],
+    $defs: {
+        Preference: {
+            type: "object",
+            properties: {
+                ingredient: {
+                    type: "string"
+                },
+                preference: {
+                    "enum": ["liked", "disliked"]
+                }
+            },
+            required: ["ingredient", "preference"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __ctHelpers.JSONSchema, ({ food, prefs }) => {
+    // Filter-map chain inside derive callback
+    // The .map() should NOT be transformed to .mapWithPattern() because:
+    // - Inside derive, `prefs` is unwrapped to a plain array
+    // - .filter() returns a plain JS array
+    // - Plain arrays don't have .mapWithPattern()
+    const liked = prefs
+        .filter((p) => p.preference === "liked")
+        .map((p) => p.ingredient)
+        .join(", ");
+    return `Recipe for ${food} with: ${liked}`;
+});
 interface Preference {
     ingredient: string;
     preference: "liked" | "disliked";
@@ -51,47 +95,3 @@ export default recipe({
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
-const __lift_0 = __ctHelpers.lift({
-    type: "object",
-    properties: {
-        food: {
-            type: "string",
-            asOpaque: true
-        },
-        prefs: {
-            type: "array",
-            items: {
-                $ref: "#/$defs/Preference"
-            },
-            asOpaque: true
-        }
-    },
-    required: ["food", "prefs"],
-    $defs: {
-        Preference: {
-            type: "object",
-            properties: {
-                ingredient: {
-                    type: "string"
-                },
-                preference: {
-                    "enum": ["liked", "disliked"]
-                }
-            },
-            required: ["ingredient", "preference"]
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "string"
-} as const satisfies __ctHelpers.JSONSchema, ({ food, prefs }) => {
-    // Filter-map chain inside derive callback
-    // The .map() should NOT be transformed to .mapWithPattern() because:
-    // - Inside derive, `prefs` is unwrapped to a plain array
-    // - .filter() returns a plain JS array
-    // - Plain arrays don't have .mapWithPattern()
-    const liked = prefs
-        .filter((p) => p.preference === "liked")
-        .map((p) => p.ingredient)
-        .join(", ");
-    return `Recipe for ${food} with: ${liked}`;
-});

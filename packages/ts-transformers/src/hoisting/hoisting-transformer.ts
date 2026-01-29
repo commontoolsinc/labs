@@ -274,10 +274,22 @@ export class HoistingTransformer extends Transformer {
       return transformed;
     }
 
-    // Append hoisted statements after all other module statements
+    // Insert hoisted statements after imports but before other code.
+    // They must come before the pattern body (which references them)
+    // but after imports (which they may reference).
+    const imports: ts.Statement[] = [];
+    const rest: ts.Statement[] = [];
+    for (const stmt of transformed.statements) {
+      if (ts.isImportDeclaration(stmt) || ts.isImportEqualsDeclaration(stmt)) {
+        imports.push(stmt);
+      } else {
+        rest.push(stmt);
+      }
+    }
     return factory.updateSourceFile(transformed, [
-      ...transformed.statements,
+      ...imports,
       ...hoistedStatements,
+      ...rest,
     ]);
   }
 }

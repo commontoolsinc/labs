@@ -8,6 +8,223 @@ import * as __ctHelpers from "commontools";
  * and skipped by CaptureCollector.
  */
 import { action, Cell, computed, pattern, UI } from "commontools";
+const __lift_0 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        card: {
+            type: "object",
+            properties: {
+                title: {
+                    type: "string",
+                    asOpaque: true
+                },
+                description: {
+                    type: "string",
+                    asOpaque: true
+                }
+            },
+            required: ["title", "description"]
+        },
+        hasDescription: {
+            type: "boolean",
+            asOpaque: true
+        },
+        startEditing: {
+            asStream: true
+        }
+    },
+    required: ["card", "hasDescription", "startEditing"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "#/$defs/VNode"
+        }, {
+            type: "object",
+            properties: {}
+        }, {
+            $ref: "#/$defs/UIRenderable",
+            asOpaque: true
+        }],
+    $defs: {
+        UIRenderable: {
+            type: "object",
+            properties: {
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["$UI"]
+        },
+        VNode: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string",
+                    "enum": ["vnode"]
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        RenderNode: {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "number"
+                }, {
+                    type: "boolean",
+                    "enum": [false]
+                }, {
+                    type: "boolean",
+                    "enum": [true]
+                }, {
+                    $ref: "#/$defs/VNode"
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    $ref: "#/$defs/UIRenderable",
+                    asOpaque: true
+                }, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/RenderNode"
+                    }
+                }, {
+                    type: "null"
+                }]
+        },
+        Props: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "number"
+                    }, {
+                        type: "boolean",
+                        "enum": [false]
+                    }, {
+                        type: "boolean",
+                        "enum": [true]
+                    }, {
+                        type: "object",
+                        additionalProperties: true
+                    }, {
+                        type: "array",
+                        items: true
+                    }, {
+                        asCell: true
+                    }, {
+                        asStream: true
+                    }, {
+                        type: "null"
+                    }]
+            }
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, ({ card, hasDescription, startEditing }) => (<div>
+            <span>{card.title}</span>
+            {/* Nested ternary with computed - triggers derive wrapper */}
+            {__ctHelpers.ifElse({
+    type: "boolean"
+} as const satisfies __ctHelpers.JSONSchema, {
+    anyOf: [{}, {
+            type: "object",
+            properties: {}
+        }]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "null"
+} as const satisfies __ctHelpers.JSONSchema, {
+    anyOf: [{
+            $ref: "#/$defs/VNode"
+        }, {
+            type: "object",
+            properties: {}
+        }, {
+            type: "null"
+        }],
+    $defs: {
+        VNode: {
+            type: "object",
+            properties: {
+                type: {
+                    type: "string"
+                },
+                name: {
+                    type: "string"
+                },
+                props: {
+                    $ref: "#/$defs/Props"
+                },
+                children: {
+                    $ref: "#/$defs/RenderNode"
+                },
+                $UI: {
+                    $ref: "#/$defs/VNode"
+                }
+            },
+            required: ["type", "name", "props"]
+        },
+        RenderNode: {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "number"
+                }, {
+                    type: "boolean"
+                }, {}, {
+                    type: "object",
+                    properties: {}
+                }, {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/RenderNode"
+                    }
+                }, {
+                    type: "null"
+                }]
+        },
+        Props: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "number"
+                    }, {
+                        type: "boolean"
+                    }, {
+                        type: "object",
+                        additionalProperties: true
+                    }, {
+                        type: "array",
+                        items: true
+                    }, {}, {
+                        type: "null"
+                    }]
+            }
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, hasDescription, <span>{card.description}</span>, null)}
+            {/* Action in SAME branch - must be captured by the derive! */}
+            <ct-button onClick={startEditing}>Edit</ct-button>
+          </div>));
 interface Card {
     title: string;
     description: string;
@@ -242,220 +459,3 @@ export default pattern(({ card }) => {
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
-const __lift_0 = __ctHelpers.lift({
-    type: "object",
-    properties: {
-        card: {
-            type: "object",
-            properties: {
-                title: {
-                    type: "string",
-                    asOpaque: true
-                },
-                description: {
-                    type: "string",
-                    asOpaque: true
-                }
-            },
-            required: ["title", "description"]
-        },
-        hasDescription: {
-            type: "boolean",
-            asOpaque: true
-        },
-        startEditing: {
-            asStream: true
-        }
-    },
-    required: ["card", "hasDescription", "startEditing"]
-} as const satisfies __ctHelpers.JSONSchema, {
-    anyOf: [{
-            $ref: "#/$defs/VNode"
-        }, {
-            type: "object",
-            properties: {}
-        }, {
-            $ref: "#/$defs/UIRenderable",
-            asOpaque: true
-        }],
-    $defs: {
-        UIRenderable: {
-            type: "object",
-            properties: {
-                $UI: {
-                    $ref: "#/$defs/VNode"
-                }
-            },
-            required: ["$UI"]
-        },
-        VNode: {
-            type: "object",
-            properties: {
-                type: {
-                    type: "string",
-                    "enum": ["vnode"]
-                },
-                name: {
-                    type: "string"
-                },
-                props: {
-                    $ref: "#/$defs/Props"
-                },
-                children: {
-                    $ref: "#/$defs/RenderNode"
-                },
-                $UI: {
-                    $ref: "#/$defs/VNode"
-                }
-            },
-            required: ["type", "name", "props"]
-        },
-        RenderNode: {
-            anyOf: [{
-                    type: "string"
-                }, {
-                    type: "number"
-                }, {
-                    type: "boolean",
-                    "enum": [false]
-                }, {
-                    type: "boolean",
-                    "enum": [true]
-                }, {
-                    $ref: "#/$defs/VNode"
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    $ref: "#/$defs/UIRenderable",
-                    asOpaque: true
-                }, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/RenderNode"
-                    }
-                }, {
-                    type: "null"
-                }]
-        },
-        Props: {
-            type: "object",
-            properties: {},
-            additionalProperties: {
-                anyOf: [{
-                        type: "string"
-                    }, {
-                        type: "number"
-                    }, {
-                        type: "boolean",
-                        "enum": [false]
-                    }, {
-                        type: "boolean",
-                        "enum": [true]
-                    }, {
-                        type: "object",
-                        additionalProperties: true
-                    }, {
-                        type: "array",
-                        items: true
-                    }, {
-                        asCell: true
-                    }, {
-                        asStream: true
-                    }, {
-                        type: "null"
-                    }]
-            }
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, ({ card, hasDescription, startEditing }) => (<div>
-            <span>{card.title}</span>
-            {/* Nested ternary with computed - triggers derive wrapper */}
-            {__ctHelpers.ifElse({
-    type: "boolean"
-} as const satisfies __ctHelpers.JSONSchema, {
-    anyOf: [{}, {
-            type: "object",
-            properties: {}
-        }]
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "null"
-} as const satisfies __ctHelpers.JSONSchema, {
-    anyOf: [{
-            $ref: "#/$defs/VNode"
-        }, {
-            type: "object",
-            properties: {}
-        }, {
-            type: "null"
-        }],
-    $defs: {
-        VNode: {
-            type: "object",
-            properties: {
-                type: {
-                    type: "string"
-                },
-                name: {
-                    type: "string"
-                },
-                props: {
-                    $ref: "#/$defs/Props"
-                },
-                children: {
-                    $ref: "#/$defs/RenderNode"
-                },
-                $UI: {
-                    $ref: "#/$defs/VNode"
-                }
-            },
-            required: ["type", "name", "props"]
-        },
-        RenderNode: {
-            anyOf: [{
-                    type: "string"
-                }, {
-                    type: "number"
-                }, {
-                    type: "boolean"
-                }, {}, {
-                    type: "object",
-                    properties: {}
-                }, {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/RenderNode"
-                    }
-                }, {
-                    type: "null"
-                }]
-        },
-        Props: {
-            type: "object",
-            properties: {},
-            additionalProperties: {
-                anyOf: [{
-                        type: "string"
-                    }, {
-                        type: "number"
-                    }, {
-                        type: "boolean"
-                    }, {
-                        type: "object",
-                        additionalProperties: true
-                    }, {
-                        type: "array",
-                        items: true
-                    }, {}, {
-                        type: "null"
-                    }]
-            }
-        }
-    }
-} as const satisfies __ctHelpers.JSONSchema, hasDescription, <span>{card.description}</span>, null)}
-            {/* Action in SAME branch - must be captured by the derive! */}
-            <ct-button onClick={startEditing}>Edit</ct-button>
-          </div>));

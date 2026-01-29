@@ -1,5 +1,44 @@
 import * as __ctHelpers from "commontools";
 import { recipe, UI } from "commontools";
+const __lift_0 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number",
+                    asOpaque: true
+                },
+                quantity: {
+                    type: "number",
+                    asOpaque: true
+                }
+            },
+            required: ["price", "quantity"]
+        },
+        state: {
+            type: "object",
+            properties: {
+                discount: {
+                    type: "number",
+                    asOpaque: true
+                },
+                taxRate: {
+                    type: "number",
+                    asOpaque: true
+                }
+            },
+            required: ["discount", "taxRate"]
+        },
+        multiplier: {
+            type: "number"
+        }
+    },
+    required: ["item", "state", "multiplier"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __ctHelpers.JSONSchema, ({ item, state, multiplier }) => item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost);
 interface Item {
     price: number;
     quantity: number;
@@ -331,42 +370,3 @@ export default recipe({
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
 // @ts-ignore: Internals
 h.fragment = __ctHelpers.h.fragment;
-const __lift_0 = __ctHelpers.lift({
-    type: "object",
-    properties: {
-        item: {
-            type: "object",
-            properties: {
-                price: {
-                    type: "number",
-                    asOpaque: true
-                },
-                quantity: {
-                    type: "number",
-                    asOpaque: true
-                }
-            },
-            required: ["price", "quantity"]
-        },
-        state: {
-            type: "object",
-            properties: {
-                discount: {
-                    type: "number",
-                    asOpaque: true
-                },
-                taxRate: {
-                    type: "number",
-                    asOpaque: true
-                }
-            },
-            required: ["discount", "taxRate"]
-        },
-        multiplier: {
-            type: "number"
-        }
-    },
-    required: ["item", "state", "multiplier"]
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __ctHelpers.JSONSchema, ({ item, state, multiplier }) => item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost);

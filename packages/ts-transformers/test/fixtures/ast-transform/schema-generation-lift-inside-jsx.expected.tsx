@@ -1,21 +1,5 @@
 import * as __ctHelpers from "commontools";
 import { lift } from "commontools";
-interface Person {
-    name: string;
-    age: number;
-}
-interface PersonWithYear {
-    name: string;
-    birthYear: number;
-}
-const currentYear = 2024;
-export const result = (<div>
-    {__lift_0}
-  </div>);
-// @ts-ignore: Internals
-function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
-// @ts-ignore: Internals
-h.fragment = __ctHelpers.h.fragment;
 const __lift_0 = lift({
     type: "object",
     properties: {
@@ -42,3 +26,19 @@ const __lift_0 = lift({
     name: person.name,
     birthYear: currentYear - person.age,
 }));
+interface Person {
+    name: string;
+    age: number;
+}
+interface PersonWithYear {
+    name: string;
+    birthYear: number;
+}
+const currentYear = 2024;
+export const result = (<div>
+    {__lift_0}
+  </div>);
+// @ts-ignore: Internals
+function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }
+// @ts-ignore: Internals
+h.fragment = __ctHelpers.h.fragment;
