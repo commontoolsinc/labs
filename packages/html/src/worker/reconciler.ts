@@ -668,8 +668,10 @@ export class WorkerReconciler {
     ) {
       return this.styleObjectToCssString(value as Record<string, unknown>);
     }
-    // Use convertCellsToLinks to handle Cells, circular refs, and non-JSON values
-    return convertCellsToLinks(value);
+    // Use convertCellsToLinks to handle Cells, circular refs, and non-JSON values.
+    // Pass doNotConvertCellResults to prevent already-resolved values (from .sink())
+    // from being converted back to links - we want the actual data for props.
+    return convertCellsToLinks(value, { doNotConvertCellResults: true });
   }
 
   /**
