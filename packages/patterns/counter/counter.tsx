@@ -14,11 +14,11 @@ import {
 
 // ===== Types =====
 
-interface Input {
+interface CounterInput {
   value?: Writable<Default<number, 0>>;
 }
 
-interface Output {
+interface CounterOutput {
   [NAME]: string;
   [UI]: VNode;
   value: number;
@@ -51,7 +51,7 @@ function ordinal(n: number): string {
 
 // ===== Pattern =====
 
-const Counter = pattern<Input, Output>(({ value }) => {
+const Counter = pattern<CounterInput, CounterOutput>(({ value }) => {
   // Bind the module-scope handler with its required context
   const boundIncrement = increment({ value });
 

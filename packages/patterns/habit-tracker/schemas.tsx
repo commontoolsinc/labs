@@ -17,12 +17,12 @@ export interface HabitLog {
 
 // === Pattern Types ===
 
-export interface Input {
+export interface HabitTrackerInput {
   habits: Writable<Default<Habit[], []>>;
   logs: Writable<Default<HabitLog[], []>>;
 }
 
-export interface Output {
+export interface HabitTrackerOutput {
   [NAME]: string;
   [UI]: VNode;
   habits: Habit[];

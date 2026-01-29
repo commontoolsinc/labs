@@ -15,6 +15,8 @@ flowchart TD
 
 Explicitly define types for your pattern inputs and outputs.
 
+**Naming convention:** Prefix Input and Output interface names with the pattern name, e.g. `TodoListInput`/`TodoListOutput`, `ContactDetailInput`/`ContactDetailOutput`. Avoid generic `Input`/`Output` names — they collide across files and make imports ambiguous.
+
 The type declares what data it expects and _how_ it is accessed.
 
 ```typescript
