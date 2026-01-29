@@ -5,11 +5,11 @@ import type { JSONSchemaObj } from "@commontools/api";
 import type {
   JSONValue,
   MemorySpace,
-  OptStorableValue,
   Result,
   SchemaContext,
   SchemaPathSelector,
   StorableDatum,
+  StorableValue,
   Unit,
 } from "@commontools/memory/interface";
 import { deepEqual } from "@commontools/utils/deep-equal";
@@ -516,7 +516,7 @@ export abstract class BaseObjectTraverser {
       new StandardObjectCreator(),
     protected traverseCells = true,
   ) {}
-  abstract traverse(doc: IMemorySpaceAttestation): Immutable<OptStorableValue>;
+  abstract traverse(doc: IMemorySpaceAttestation): Immutable<StorableValue>;
   /**
    * Attempt to traverse the document as a directed acyclic graph.
    * This is the simplest form of traversal, where we include everything.
@@ -534,7 +534,7 @@ export abstract class BaseObjectTraverser {
     doc: IMemorySpaceAttestation,
     defaultValue?: JSONValue,
     itemLink?: NormalizedFullLink,
-  ): Immutable<OptStorableValue> {
+  ): Immutable<StorableValue> {
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
@@ -592,10 +592,9 @@ export abstract class BaseObjectTraverser {
       // We copy the contents of our result into newValue so that if we have a
       // cycle, we can return newValue before we actually finish populating it.
       for (const v of entries) {
-        if (v === undefined) {
-          return undefined;
-        }
-        newValue.push(v as StorableDatum);
+        // Use null for missing/undefined elements (consistent with other value
+        // transforms in this system, e.g. toJSON and toStorableValue)
+        newValue.push(v === undefined ? null : v as StorableDatum);
       }
       // Our link is based on the last link in the chain and not the first.
       const newLink = getNormalizedLink(doc.address, true, true);
@@ -1523,7 +1522,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
   override traverse(
     doc: IMemorySpaceAttestation,
     link?: NormalizedFullLink,
-  ): Immutable<OptStorableValue> {
+  ): Immutable<StorableValue> {
     this.trackNewLink(getTrackerKey(doc.address), this.selector);
     const rv = this.traverseWithSelector(doc, this.selector, link);
     if (rv === undefined) {
@@ -1558,7 +1557,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
     doc: IMemorySpaceAttestation,
     selector: SchemaPathSelector,
     link?: NormalizedFullLink,
-  ): Immutable<OptStorableValue> {
+  ): Immutable<StorableValue> {
     const docPath = doc.address.path;
     if (deepEqual(docPath, selector.path)) {
       return this.traverseWithSchemaContext(doc, selector.schemaContext!, link);
@@ -1651,7 +1650,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
     doc: IMemorySpaceAttestation,
     schemaContext: Readonly<SchemaContext>,
     link?: NormalizedFullLink,
-  ): Immutable<OptStorableValue> {
+  ): Immutable<StorableValue> {
     // Handle any top-level $ref in the schema
     const resolved = this.resolveRefSchema(schemaContext);
     if (resolved === undefined) {
@@ -1676,7 +1675,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
           ),
           ...anyOf.filter(SchemaObjectTraverser.asCellOrStream),
         ];
-        const matches: Immutable<OptStorableValue>[] = [];
+        const matches: Immutable<StorableValue>[] = [];
         for (const optionSchema of sortedAnyOf) {
           if (ContextualFlowControl.isFalseSchema(optionSchema)) {
             continue;
@@ -1832,7 +1831,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
           rootSchema: schemaContext.rootSchema,
         }, link);
       } else if (this.isValidType(schemaObj, "object")) {
-        const newValue: Record<string, Immutable<OptStorableValue>> = {};
+        const newValue: Record<string, Immutable<StorableValue>> = {};
         // Our link is based on the last link in the chain and not the first.
         const newLink = link ?? getNormalizedLink(
           doc.address,
@@ -1941,8 +1940,8 @@ export class SchemaObjectTraverser<V extends JSONValue>
     doc: IMemorySpaceAttestation,
     schemaContext: SchemaContext & { schema: JSONSchemaObj },
     _link?: NormalizedFullLink,
-  ): Immutable<OptStorableValue> {
-    const arrayObj: Immutable<OptStorableValue>[] = [];
+  ): Immutable<StorableValue> {
+    const arrayObj: Immutable<StorableDatum>[] = [];
     const schema = schemaContext.schema;
     for (
       const [index, item] of (doc.value as Immutable<JSONValue>[]).entries()
@@ -2099,8 +2098,8 @@ export class SchemaObjectTraverser<V extends JSONValue>
     doc: IMemorySpaceAttestation,
     schemaContext: SchemaContext & { schema: JSONSchemaObj },
     _link?: NormalizedFullLink,
-  ): Immutable<OptStorableValue> {
-    const filteredObj: Record<string, Immutable<OptStorableValue>> = {};
+  ): Immutable<StorableValue> {
+    const filteredObj: Record<string, Immutable<StorableDatum>> = {};
     const schema = schemaContext.schema;
     for (const [propKey, propValue] of Object.entries(doc.value!)) {
       const schemaProperties = isObject(schema)
@@ -2227,7 +2226,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
     doc: IMemorySpaceAttestation,
     schemaContext: SchemaContext,
     link?: NormalizedFullLink,
-  ): Immutable<OptStorableValue> {
+  ): Immutable<StorableValue> {
     const selector = {
       path: doc.address.path,
       schemaContext: schemaContext,
@@ -2300,7 +2299,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
     doc: IMemorySpaceAttestation,
     schemaObj: JSONSchemaObj,
     rootSchema: JSONSchema,
-  ): Immutable<OptStorableValue> {
+  ): Immutable<StorableValue> {
     if (SchemaObjectTraverser.asCellOrStream(schemaObj)) {
       return this.objectCreator.createObject(
         getNormalizedLink(
