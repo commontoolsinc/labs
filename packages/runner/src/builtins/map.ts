@@ -155,8 +155,12 @@ export function map(
     }
 
     // Shorten the result if the list got shorter
-    if (resultWithLog.get().length > list.length) {
-      resultWithLog.set(resultWithLog.get().slice(0, list.length));
+    const currentResult = resultWithLog.get();
+    if (currentResult.length > list.length) {
+      // Use getRaw() to preserve cell references. Using .get() would dereference
+      // cells to their values, losing the reference when the value is null.
+      const rawResult = resultWithLog.getRaw() ?? currentResult;
+      resultWithLog.set(rawResult.slice(0, list.length));
       initializedUpTo = list.length;
     } else if (resultWithLog.get().length < list.length) {
       resultWithLog.set(newArrayValue);

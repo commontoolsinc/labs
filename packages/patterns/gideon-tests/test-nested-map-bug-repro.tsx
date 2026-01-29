@@ -140,7 +140,9 @@ export default pattern<Input>(({ items, log }) => {
             <h3 style={{ margin: "0 0 12px 0", color: "#2e7d32" }}>
               1. Basic List (simple map)
             </h3>
-            <div style={{ fontSize: "11px", color: "#666", marginBottom: "8px" }}>
+            <div
+              style={{ fontSize: "11px", color: "#666", marginBottom: "8px" }}
+            >
               No ifElse → no nulls → WORKS
             </div>
             {items.map((item, idx) => (
@@ -164,7 +166,9 @@ export default pattern<Input>(({ items, log }) => {
             <h3 style={{ margin: "0 0 12px 0", color: "#c62828" }}>
               2. Category List (nested map + ifElse null)
             </h3>
-            <div style={{ fontSize: "11px", color: "#666", marginBottom: "8px" }}>
+            <div
+              style={{ fontSize: "11px", color: "#666", marginBottom: "8px" }}
+            >
               ifElse returns null → cell ref lost → FAILS
             </div>
             {categories.map((category) => (
@@ -202,7 +206,9 @@ export default pattern<Input>(({ items, log }) => {
             <h3 style={{ margin: "0 0 12px 0", color: "#c62828" }}>
               3. Single Map + ifElse null
             </h3>
-            <div style={{ fontSize: "11px", color: "#666", marginBottom: "8px" }}>
+            <div
+              style={{ fontSize: "11px", color: "#666", marginBottom: "8px" }}
+            >
               Shows only done items. No nesting → still FAILS
             </div>
             {items.map((item, idx) =>
@@ -233,7 +239,9 @@ export default pattern<Input>(({ items, log }) => {
             <h3 style={{ margin: "0 0 12px 0", color: "#2e7d32" }}>
               4. Single Map + ifElse empty span
             </h3>
-            <div style={{ fontSize: "11px", color: "#666", marginBottom: "8px" }}>
+            <div
+              style={{ fontSize: "11px", color: "#666", marginBottom: "8px" }}
+            >
               Non-null false branch → survives round-trip → WORKS
             </div>
             {items.map((item, idx) =>
@@ -277,10 +285,18 @@ export default pattern<Input>(({ items, log }) => {
         >
           <strong>Expected after "Run Repro Sequence":</strong>
           <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
-            <li><strong>Test 1 (Basic):</strong> Shows Bread, Cheese ✓</li>
-            <li><strong>Test 2 (Nested + null):</strong> Empty or broken ✗</li>
-            <li><strong>Test 3 (Single + null):</strong> Empty or broken ✗</li>
-            <li><strong>Test 4 (Single + span):</strong> Shows Cheese ✓</li>
+            <li>
+              <strong>Test 1 (Basic):</strong> Shows Bread, Cheese ✓
+            </li>
+            <li>
+              <strong>Test 2 (Nested + null):</strong> Empty or broken ✗
+            </li>
+            <li>
+              <strong>Test 3 (Single + null):</strong> Empty or broken ✗
+            </li>
+            <li>
+              <strong>Test 4 (Single + span):</strong> Shows Cheese ✓
+            </li>
           </ul>
         </div>
       </div>
