@@ -7,7 +7,7 @@
  * - Learned: user's learned profile data
  *
  * This package exists to break the circular dependency between
- * @commontools/runner and @commontools/charm. Both packages can
+ * @commontools/runner and @commontools/piece. Both packages can
  * safely import schemas from here.
  */
 

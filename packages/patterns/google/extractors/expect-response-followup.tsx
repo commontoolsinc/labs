@@ -575,7 +575,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
   // ==========================================================================
 
   // Use createGoogleAuth to handle authentication with the wish system
-  // This will auto-request a google-auth charm if one doesn't exist
+  // This will auto-request a google-auth piece if one doesn't exist
   const {
     auth,
     fullUI: authUI,

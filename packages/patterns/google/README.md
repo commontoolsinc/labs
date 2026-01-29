@@ -275,7 +275,7 @@ You should see `overrideAuth` in the Source (Inputs) with token, user info, etc.
 
 ### Important Notes
 
-1. **Path format**: Use forward slashes, e.g., `charmId/auth` not `charmId.auth`
+1. **Path format**: Use forward slashes, e.g., `pieceId/auth` not `pieceId.auth`
 
 2. **Link direction**: Source -> Target. The target charm "reads from" the
    source.

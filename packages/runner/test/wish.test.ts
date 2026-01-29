@@ -38,35 +38,35 @@ describe("wish built-in", () => {
     await storageManager.close();
   });
 
-  it("resolves the well known all charms cell", async () => {
-    const allCharmsCell = runtime.getCellFromEntityId<unknown[]>(
+  it("resolves the well known all pieces cell", async () => {
+    const allPiecesCell = runtime.getCellFromEntityId<unknown[]>(
       space,
       { "/": ALL_CHARMS_ID },
       [],
       undefined,
       tx,
     );
-    const charmsData = [{ name: "Alpha", title: "Alpha" }];
-    allCharmsCell.withTx(tx).set(charmsData);
+    const piecesData = [{ name: "Alpha", title: "Alpha" }];
+    allPiecesCell.withTx(tx).set(piecesData);
 
-    // Set up the space cell to link to allCharms
-    const spaceCell = runtime.getCell<{ allCharms?: unknown[] }>(space, space)
+    // Set up the space cell to link to allPieces
+    const spaceCell = runtime.getCell<{ allPieces?: unknown[] }>(space, space)
       .withTx(tx);
-    spaceCell.key("allCharms").set(allCharmsCell.withTx(tx));
+    spaceCell.key("allPieces").set(allPiecesCell.withTx(tx));
 
     await tx.commit();
     await runtime.idle();
     tx = runtime.edit();
 
-    const wishRecipe = recipe("wish resolves all charms", () => {
-      const allCharms = wish<Array<Record<string, unknown>>>("/allCharms");
-      const firstCharmTitle = wish("/allCharms/0/title");
-      return { allCharms, firstCharmTitle };
+    const wishRecipe = recipe("wish resolves all pieces", () => {
+      const allPieces = wish<Array<Record<string, unknown>>>("/allPieces");
+      const firstPieceTitle = wish("/allPieces/0/title");
+      return { allPieces, firstPieceTitle };
     });
 
     const resultCell = runtime.getCell<{
-      allCharms?: unknown[];
-      firstCharmTitle?: string;
+      allPieces?: unknown[];
+      firstPieceTitle?: string;
     }>(
       space,
       "wish built-in result",
@@ -80,7 +80,7 @@ describe("wish built-in", () => {
     // Pull to trigger computation
     await result.pull();
 
-    const actualCell = result.key("allCharms");
+    const actualCell = result.key("allPieces");
     const rawValue = actualCell.getRaw() as
       | { ["/"]: Record<string, unknown> }
       | undefined;
@@ -88,31 +88,31 @@ describe("wish built-in", () => {
       | { id?: string; overwrite?: string }
       | undefined;
 
-    expect(result.key("allCharms").get()).toEqual(charmsData);
-    expect(result.key("firstCharmTitle").get()).toEqual(charmsData[0].title);
+    expect(result.key("allPieces").get()).toEqual(piecesData);
+    expect(result.key("firstPieceTitle").get()).toEqual(piecesData[0].title);
     expect(linkData?.id).toEqual(`of:${ALL_CHARMS_ID}`);
   });
 
   it("resolves semantic wishes with # prefixes", async () => {
-    const allCharmsCell = runtime.getCellFromEntityId(
+    const allPiecesCell = runtime.getCellFromEntityId(
       space,
       { "/": ALL_CHARMS_ID },
       [],
       undefined,
       tx,
     );
-    const charmsData = [
+    const piecesData = [
       { name: "Alpha", title: "Alpha" },
       { name: "Beta", title: "Beta" },
     ];
-    allCharmsCell.withTx(tx).set(charmsData);
+    allPiecesCell.withTx(tx).set(piecesData);
 
-    // Set up the space cell with defaultPattern that links to allCharms
+    // Set up the space cell with defaultPattern that links to allPieces
     const spaceCell = runtime.getCell(space, space).withTx(tx);
     const defaultPatternCell = runtime.getCell(space, "default-pattern").withTx(
       tx,
     );
-    (defaultPatternCell as any).key("allCharms").set(allCharmsCell.withTx(tx));
+    (defaultPatternCell as any).key("allPieces").set(allPiecesCell.withTx(tx));
     (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
     await tx.commit();
@@ -121,13 +121,13 @@ describe("wish built-in", () => {
 
     const wishRecipe = recipe("wish semantic target", () => {
       return {
-        semanticAllCharms: wish("#allCharms"),
-        semanticFirstTitle: wish("#allCharms/0/title"),
+        semanticAllPieces: wish("#allPieces"),
+        semanticFirstTitle: wish("#allPieces/0/title"),
       };
     });
 
     const resultCell = runtime.getCell<{
-      semanticAllCharms?: unknown[];
+      semanticAllPieces?: unknown[];
       semanticFirstTitle?: string;
     }>(
       space,
@@ -142,7 +142,7 @@ describe("wish built-in", () => {
     // Pull to trigger computation
     await result.pull();
 
-    expect(result.key("semanticAllCharms").get()).toEqual(charmsData);
+    expect(result.key("semanticAllPieces").get()).toEqual(piecesData);
     expect(result.key("semanticFirstTitle").get()).toEqual("Alpha");
   });
 
@@ -234,27 +234,27 @@ describe("wish built-in", () => {
     expect(result.key("firstMentionable").get()).toEqual("Alpha");
   });
 
-  it("resolves recent charms via #recent", async () => {
+  it("resolves recent pieces via #recent", async () => {
     const spaceCell = runtime.getCell(space, space).withTx(tx);
-    const recentCharmsCell = runtime.getCell(space, "recent-charms", {
+    const recentPiecesCell = runtime.getCell(space, "recent-pieces", {
       type: "array",
       items: { type: "object" },
     }).withTx(tx);
-    const recentData = [{ name: "Charm A" }, { name: "Charm B" }];
-    recentCharmsCell.set(recentData);
+    const recentData = [{ name: "Piece A" }, { name: "Piece B" }];
+    recentPiecesCell.set(recentData);
 
-    // Set up defaultPattern to own recentCharms
+    // Set up defaultPattern to own recentPieces
     const defaultPatternCell = runtime.getCell(space, "default-pattern").withTx(
       tx,
     );
-    (defaultPatternCell as any).key("recentCharms").set(recentCharmsCell);
+    (defaultPatternCell as any).key("recentPieces").set(recentPiecesCell);
     (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
     await tx.commit();
     await runtime.idle();
     tx = runtime.edit();
 
-    const wishRecipe = recipe("wish recent charms", () => {
+    const wishRecipe = recipe("wish recent pieces", () => {
       return {
         recent: wish("#recent"),
         recentFirst: wish("#recent/0/name"),
@@ -266,7 +266,7 @@ describe("wish built-in", () => {
       recentFirst?: string;
     }>(
       space,
-      "wish recent charms result",
+      "wish recent pieces result",
       undefined,
       tx,
     );
@@ -277,7 +277,7 @@ describe("wish built-in", () => {
     await result.pull();
 
     expect(result.key("recent").get()).toEqual(recentData);
-    expect(result.key("recentFirst").get()).toEqual("Charm A");
+    expect(result.key("recentFirst").get()).toEqual("Piece A");
   });
 
   it("returns current timestamp via #now", async () => {
@@ -405,24 +405,24 @@ describe("wish built-in", () => {
   });
 
   describe("object-based wish syntax", () => {
-    it("resolves allCharms using tag parameter", async () => {
-      const allCharmsCell = runtime.getCellFromEntityId<unknown[]>(
+    it("resolves allPieces using tag parameter", async () => {
+      const allPiecesCell = runtime.getCellFromEntityId<unknown[]>(
         space,
         { "/": ALL_CHARMS_ID },
         [],
         undefined,
         tx,
       );
-      const charmsData = [{ name: "Alpha", title: "Alpha" }];
-      allCharmsCell.withTx(tx).set(charmsData);
+      const piecesData = [{ name: "Alpha", title: "Alpha" }];
+      allPiecesCell.withTx(tx).set(piecesData);
 
-      // Set up defaultPattern to own allCharms
-      const spaceCell = runtime.getCell<{ allCharms?: unknown[] }>(space, space)
+      // Set up defaultPattern to own allPieces
+      const spaceCell = runtime.getCell<{ allPieces?: unknown[] }>(space, space)
         .withTx(tx);
       const defaultPatternCell = runtime.getCell(space, "default-pattern")
         .withTx(tx);
-      (defaultPatternCell as any).key("allCharms").set(
-        allCharmsCell.withTx(tx),
+      (defaultPatternCell as any).key("allPieces").set(
+        allPiecesCell.withTx(tx),
       );
       (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
@@ -430,13 +430,13 @@ describe("wish built-in", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      const wishRecipe = recipe("wish object syntax allCharms", () => {
-        const allCharms = wish<unknown[]>({ query: "#allCharms" });
-        return { allCharms };
+      const wishRecipe = recipe("wish object syntax allPieces", () => {
+        const allPieces = wish<unknown[]>({ query: "#allPieces" });
+        return { allPieces };
       });
 
       const resultCell = runtime.getCell<{
-        allCharms?: { result?: unknown[] };
+        allPieces?: { result?: unknown[] };
       }>(
         space,
         "wish object syntax result",
@@ -449,30 +449,30 @@ describe("wish built-in", () => {
 
       await result.pull();
 
-      expect(result.key("allCharms").get()?.result).toEqual(charmsData);
+      expect(result.key("allPieces").get()?.result).toEqual(piecesData);
     });
 
     it("resolves nested paths using tag and path parameters", async () => {
-      const allCharmsCell = runtime.getCellFromEntityId<unknown[]>(
+      const allPiecesCell = runtime.getCellFromEntityId<unknown[]>(
         space,
         { "/": ALL_CHARMS_ID },
         [],
         undefined,
         tx,
       );
-      const charmsData = [
+      const piecesData = [
         { name: "Alpha", title: "First Title" },
         { name: "Beta", title: "Second Title" },
       ];
-      allCharmsCell.withTx(tx).set(charmsData);
+      allPiecesCell.withTx(tx).set(piecesData);
 
-      // Set up defaultPattern to own allCharms
-      const spaceCell = runtime.getCell<{ allCharms?: unknown[] }>(space, space)
+      // Set up defaultPattern to own allPieces
+      const spaceCell = runtime.getCell<{ allPieces?: unknown[] }>(space, space)
         .withTx(tx);
       const defaultPatternCell = runtime.getCell(space, "default-pattern")
         .withTx(tx);
-      (defaultPatternCell as any).key("allCharms").set(
-        allCharmsCell.withTx(tx),
+      (defaultPatternCell as any).key("allPieces").set(
+        allPiecesCell.withTx(tx),
       );
       (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
@@ -482,7 +482,7 @@ describe("wish built-in", () => {
 
       const wishRecipe = recipe("wish object syntax with path", () => {
         const firstTitle = wish<string>({
-          query: "#allCharms",
+          query: "#allPieces",
           path: ["0", "title"],
         });
         return { firstTitle };
@@ -1119,9 +1119,9 @@ describe("wish built-in", () => {
       expect(taggedItem).toEqual({ name: "Item with #myTag" });
     });
 
-    it("starts charm automatically when accessed via cross-space wish", async () => {
-      // Setup 1: Create a simple counter recipe/charm
-      const counterRecipe = recipe<{ count: number }>("counter charm", () => {
+    it("starts piece automatically when accessed via cross-space wish", async () => {
+      // Setup 1: Create a simple counter recipe/piece
+      const counterRecipe = recipe<{ count: number }>("counter piece", () => {
         const count = 0;
         return {
           count,
@@ -1131,17 +1131,17 @@ describe("wish built-in", () => {
         };
       });
 
-      // Setup 2: Store the charm in home space
-      const charmCell = runtime.getCell(
+      // Setup 2: Store the piece in home space
+      const pieceCell = runtime.getCell(
         userIdentity.did(),
-        "counter-charm",
+        "counter-piece",
         undefined,
         tx,
       );
-      // Setup the charm (but don't start it yet)
-      runtime.setup(tx, counterRecipe, {}, charmCell);
+      // Setup the piece (but don't start it yet)
+      runtime.setup(tx, counterRecipe, {}, pieceCell);
 
-      // Setup 3: Add charm to favorites through defaultPattern
+      // Setup 3: Add piece to favorites through defaultPattern
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
       const defaultPatternCell = runtime.getCell(
         userIdentity.did(),
@@ -1151,7 +1151,7 @@ describe("wish built-in", () => {
       );
       const favoritesCell = defaultPatternCell.key("favorites");
       favoritesCell.set([
-        { cell: charmCell, tag: "#counterCharm test charm" },
+        { cell: pieceCell, tag: "#counterPiece test piece" },
       ]);
       (homeSpaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
@@ -1159,16 +1159,16 @@ describe("wish built-in", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      // Execute: Pattern in different space wishes for the charm via hashtag
-      const wishingRecipe = recipe("wish for charm", () => {
-        return { charmData: wish({ query: "#counterCharm" }) };
+      // Execute: Pattern in different space wishes for the piece via hashtag
+      const wishingRecipe = recipe("wish for piece", () => {
+        return { pieceData: wish({ query: "#counterPiece" }) };
       });
 
       const resultCell = runtime.getCell<{
-        charmData?: { result?: unknown };
+        pieceData?: { result?: unknown };
       }>(
         patternSpace.did(),
-        "wish-charm-result",
+        "wish-piece-result",
         undefined,
         tx,
       );
@@ -1178,15 +1178,15 @@ describe("wish built-in", () => {
 
       await result.pull();
 
-      // Verify: Wish triggered charm to start and returns running charm data
-      const charmData = result.key("charmData").get()?.result;
-      expect(charmData).toBeDefined();
-      expect(typeof charmData).toBe("object");
+      // Verify: Wish triggered piece to start and returns running piece data
+      const pieceData = result.key("pieceData").get()?.result;
+      expect(pieceData).toBeDefined();
+      expect(typeof pieceData).toBe("object");
 
-      // The charm should be running and have its state accessible
-      // Note: This test may need adjustment based on actual charm startup behavior
-      if (typeof charmData === "object" && charmData !== null) {
-        expect("count" in charmData || "increment" in charmData).toBe(true);
+      // The piece should be running and have its state accessible
+      // Note: This test may need adjustment based on actual piece startup behavior
+      if (typeof pieceData === "object" && pieceData !== null) {
+        expect("count" in pieceData || "increment" in pieceData).toBe(true);
       }
     });
   });
@@ -1194,13 +1194,13 @@ describe("wish built-in", () => {
 
 describe("parseWishTarget", () => {
   it("parses absolute paths starting with /", () => {
-    const result = parseWishTarget("/allCharms");
-    expect(result).toEqual({ key: "/", path: ["allCharms"] });
+    const result = parseWishTarget("/allPieces");
+    expect(result).toEqual({ key: "/", path: ["allPieces"] });
   });
 
   it("parses nested absolute paths", () => {
-    const result = parseWishTarget("/allCharms/0/title");
-    expect(result).toEqual({ key: "/", path: ["allCharms", "0", "title"] });
+    const result = parseWishTarget("/allPieces/0/title");
+    expect(result).toEqual({ key: "/", path: ["allPieces", "0", "title"] });
   });
 
   it("parses hash tag targets", () => {
@@ -1214,13 +1214,13 @@ describe("parseWishTarget", () => {
   });
 
   it("trims whitespace", () => {
-    const result = parseWishTarget("  /allCharms  ");
-    expect(result).toEqual({ key: "/", path: ["allCharms"] });
+    const result = parseWishTarget("  /allPieces  ");
+    expect(result).toEqual({ key: "/", path: ["allPieces"] });
   });
 
   it("filters empty segments", () => {
-    const result = parseWishTarget("/allCharms//nested/");
-    expect(result).toEqual({ key: "/", path: ["allCharms", "nested"] });
+    const result = parseWishTarget("/allPieces//nested/");
+    expect(result).toEqual({ key: "/", path: ["allPieces", "nested"] });
   });
 
   it("throws on empty string", () => {

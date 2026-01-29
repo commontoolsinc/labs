@@ -374,11 +374,11 @@ describe("RuntimeClient", () => {
       const session = await createSession({ identity, spaceName });
       await using rt = await createRuntimeClient(session);
 
-      const charmsListCell = await rt.getCharmsListCell();
-      assertExists(charmsListCell);
+      const piecesListCell = await rt.getPiecesListCell();
+      assertExists(piecesListCell);
 
-      await charmsListCell.sync();
-      const link = charmsListCell.ref();
+      await piecesListCell.sync();
+      const link = piecesListCell.ref();
       assertExists(link);
     });
   });

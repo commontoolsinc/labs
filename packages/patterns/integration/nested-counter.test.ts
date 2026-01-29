@@ -1,5 +1,5 @@
 import { env, Page, waitFor } from "@commontools/integration";
-import { CharmController, CharmsController } from "@commontools/charm/ops";
+import { PieceController, PiecesController } from "@commontools/piece/ops";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -14,13 +14,13 @@ describe("nested counter integration test", () => {
   shell.bindLifecycle();
 
   let identity: Identity;
-  let cc: CharmsController;
-  let charm: CharmController;
-  let charmSinkCancel: (() => void) | undefined;
+  let cc: PiecesController;
+  let piece: PieceController;
+  let pieceSinkCancel: (() => void) | undefined;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
-    cc = await CharmsController.initialize({
+    cc = await PiecesController.initialize({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
@@ -37,28 +37,28 @@ describe("nested counter integration test", () => {
         new FileSystemProgramResolver(sourcePath, rootPath),
       );
 
-    charm = await cc.create(
-      program, // We operate on the charm in this thread
+    piece = await cc.create(
+      program, // We operate on the piece in this thread
       { start: true },
     );
 
-    // In pull mode, create a sink to keep the charm reactive when inputs change.
-    const resultCell = cc.manager().getResult(charm.getCell());
-    charmSinkCancel = resultCell.sink(() => {});
+    // In pull mode, create a sink to keep the piece reactive when inputs change.
+    const resultCell = cc.manager().getResult(piece.getCell());
+    pieceSinkCancel = resultCell.sink(() => {});
   });
 
   afterAll(async () => {
-    charmSinkCancel?.();
+    pieceSinkCancel?.();
     if (cc) await cc.dispose();
   });
 
-  it("should load the nested counter charm and verify initial state", async () => {
+  it("should load the nested counter piece and verify initial state", async () => {
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
       view: {
         spaceName: SPACE_NAME,
-        charmId: charm.id,
+        pieceId: piece.id,
       },
       identity,
     });
@@ -78,7 +78,7 @@ describe("nested counter integration test", () => {
     });
 
     // Verify via direct operations that the nested structure works
-    assertEquals(await charm.result.get(["value"]), 0);
+    assertEquals(await piece.result.get(["value"]), 0);
   });
 
   it("should click the increment button and update the counter", async () => {
@@ -88,9 +88,9 @@ describe("nested counter integration test", () => {
     // Use retry logic to handle unstable box model during page settling
     await clickNthButton(page, "[data-ct-button]", 1);
 
-    // Wait for charm result update
+    // Wait for piece result update
     await waitFor(async () => {
-      return await await charm.result.get(["value"]) === 1;
+      return await await piece.result.get(["value"]) === 1;
     });
     await waitForCounter(page, "Counter is the 1st number");
   });
@@ -99,21 +99,21 @@ describe("nested counter integration test", () => {
     const page = shell.page();
 
     // Set value to 5 via direct operation
-    await charm.result.set(5, ["value"]);
+    await piece.result.set(5, ["value"]);
 
     // Verify we can read the value back via operations
     assertEquals(
-      await charm.result.get(["value"]),
+      await piece.result.get(["value"]),
       5,
       "Value should be 5 in backend",
     );
 
-    // Navigate to the charm to see if UI reflects the change
+    // Navigate to the piece to see if UI reflects the change
     await shell.goto({
       frontendUrl: FRONTEND_URL,
       view: {
         spaceName: SPACE_NAME,
-        charmId: charm.id,
+        pieceId: piece.id,
       },
       identity,
     });

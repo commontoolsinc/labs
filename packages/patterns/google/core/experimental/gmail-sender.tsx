@@ -9,8 +9,8 @@
  * gate when policies are implemented (patterns with verified SHA can be trusted).
  *
  * Usage:
- * 1. Create and favorite a Google Auth charm with "Gmail (send emails)" permission
- * 2. Create a Gmail Sender charm
+ * 1. Create and favorite a Google Auth piece with "Gmail (send emails)" permission
+ * 2. Create a Gmail Sender piece
  * 3. Compose your email and click "Review & Send"
  * 4. Review the confirmation dialog showing exactly what will be sent
  * 5. Click "Send Email" to send
@@ -172,7 +172,7 @@ const dismissResult = handler<unknown, { result: Writable<SendResult | null> }>(
 // ============================================================================
 
 export default pattern<Input, Output>(({ draft }) => {
-  // Auth via createGoogleAuth - discovers favorited Google Auth charm with gmailSend scope
+  // Auth via createGoogleAuth - discovers favorited Google Auth piece with gmailSend scope
   const {
     auth,
     fullUI: authUI,

@@ -23,12 +23,12 @@ export function isInitializationData(
 }
 
 export type RunData = {
-  charmId: string;
+  pieceId: string;
 };
 
 export function isRunData(value: unknown): value is RunData {
   return !!(isRecord(value) &&
-    typeof value.charmId === "string");
+    typeof value.pieceId === "string");
 }
 
 export type WorkerIPCRequest = {

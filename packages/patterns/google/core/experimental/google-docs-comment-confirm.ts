@@ -120,7 +120,7 @@ class GoogleDocsClient {
       const text = await res.text();
       if (res.status === 401) {
         throw new Error(
-          "Token expired. Please re-authenticate in your Google Auth charm.",
+          "Token expired. Please re-authenticate in your Google Auth piece.",
         );
       }
       if (res.status === 403) {

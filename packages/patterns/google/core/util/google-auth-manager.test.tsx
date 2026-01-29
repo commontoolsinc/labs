@@ -7,7 +7,7 @@
  * - Helper computed values (isReady, currentEmail, currentState)
  * - AuthInfo structure
  *
- * Note: Since this pattern depends on wish() finding auth charms,
+ * Note: Since this pattern depends on wish() finding auth pieces,
  * we can only test the "no auth found" scenarios without external setup.
  *
  * Run: deno task ct test packages/patterns/google/core/util/google-auth-manager.test.tsx --verbose
@@ -40,7 +40,7 @@ export default pattern(() => {
   // Assertions - Initial State
   // ==========================================================================
 
-  // When no auth charms exist, state should be loading or not-found
+  // When no auth pieces exist, state should be loading or not-found
   const assert_default_not_ready = computed(() =>
     authDefault.isReady === false
   );

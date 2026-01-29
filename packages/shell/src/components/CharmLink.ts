@@ -11,7 +11,7 @@ export class CharmLinkElement extends LitElement {
   `;
 
   @property()
-  charmId?: string;
+  pieceId?: string;
 
   @property()
   spaceName?: string;
@@ -24,14 +24,14 @@ export class CharmLinkElement extends LitElement {
     e.stopPropagation();
     if (this.spaceName) {
       navigate(
-        this.charmId
-          ? { spaceName: this.spaceName, charmId: this.charmId }
+        this.pieceId
+          ? { spaceName: this.spaceName, pieceId: this.pieceId }
           : { spaceName: this.spaceName },
       );
     } else if (this.spaceDid) {
       navigate(
-        this.charmId
-          ? { spaceDid: this.spaceDid, charmId: this.charmId }
+        this.pieceId
+          ? { spaceDid: this.spaceDid, pieceId: this.pieceId }
           : { spaceDid: this.spaceDid },
       );
     } else {
@@ -41,10 +41,10 @@ export class CharmLinkElement extends LitElement {
 
   asHref(): string {
     if (this.spaceName) {
-      return `/${this.spaceName}${this.charmId ? `/${this.charmId}` : ""}`;
+      return `/${this.spaceName}${this.pieceId ? `/${this.pieceId}` : ""}`;
     }
     if (this.spaceDid) {
-      return `/${this.spaceDid}${this.charmId ? `/${this.charmId}` : ""}`;
+      return `/${this.spaceDid}${this.pieceId ? `/${this.pieceId}` : ""}`;
     }
     return "/";
   }

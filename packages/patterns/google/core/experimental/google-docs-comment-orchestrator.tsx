@@ -38,7 +38,7 @@ const DEBUG_ORCHESTRATOR = false;
 // This pattern requires Google OAuth with specific scopes and APIs enabled:
 //
 // 1. GOOGLE AUTH CHARM
-//    - Create and favorite a Google Auth charm with these scopes enabled:
+//    - Create and favorite a Google Auth piece with these scopes enabled:
 //      - Drive (read/write files & comments) - for fetching and posting comments
 //      - Docs (read document content) - for fetching document text for AI context
 //
@@ -205,7 +205,7 @@ class GoogleDocsClient {
     // Handle 401 (expired token) - tell user to refresh auth
     if (status === 401) {
       throw new Error(
-        "Token expired. Please re-authenticate in your Google Auth charm.",
+        "Token expired. Please re-authenticate in your Google Auth piece.",
       );
     }
 

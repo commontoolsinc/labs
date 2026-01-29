@@ -106,7 +106,7 @@ export class XQuickJumpView extends BaseView {
       if (!rt) return undefined;
       await rt.synced();
 
-      const charmsListCell = await rt.getCharmsListCell();
+      const charmsListCell = await rt.getPiecesListCell();
       await charmsListCell.sync();
 
       const charmsList = charmsListCell.get() as any[];
@@ -240,7 +240,7 @@ export class XQuickJumpView extends BaseView {
   private navigateTo(id: string) {
     const spaceName = this.rt?.spaceName();
     if (!spaceName) return;
-    navigate({ spaceName, charmId: id });
+    navigate({ spaceName, pieceId: id });
     this.close();
   }
 

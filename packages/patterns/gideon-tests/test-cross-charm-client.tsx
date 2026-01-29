@@ -1,26 +1,26 @@
 /// <cts-enable />
 /**
- * Test Pattern: Cross-Charm Stream Client
+ * Test Pattern: Cross-Piece Stream Client
  *
  * VERIFIED CLAIMS:
  *
- * 1. Cross-Charm Stream Invocation via wish() - WORKS (with corrections to blessed doc)
- *    - Streams from wished charms appear as Cells wrapping { $stream: true } marker
+ * 1. Cross-Piece Stream Invocation via wish() - WORKS (with corrections to blessed doc)
+ *    - Streams from wished pieces appear as Cells wrapping { $stream: true } marker
  *    - Call .send(eventData) on the Cell itself (NOT on an "unwrapped" stream)
  *    - The blessed doc's "auto-unwrap via Stream<T> signature" explanation is WRONG
  *    - Event must be an object (runtime calls preventDefault), can have data props but NO functions
  *
- * 2. ct.render Forces Charm Execution - VERIFIED
- *    - Just wishing for a charm doesn't make it run
+ * 2. ct.render Forces Piece Execution - VERIFIED
+ *    - Just wishing for a piece doesn't make it run
  *    - Use <ct-render $cell={...} /> to force execution
  *
  * PREREQUISITES DISCOVERED:
  *    - Wish tags must be in JSDoc on Output type (not file-level comments)
- *    - wish({ query: "#tag" }) searches FAVORITES only - charm must be favorited first
+ *    - wish({ query: "#tag" }) searches FAVORITES only - piece must be favorited first
  *
  * TESTING:
- *    1. Deploy server charm first, favorite it
- *    2. Deploy this client charm
+ *    1. Deploy server piece first, favorite it
+ *    2. Deploy this client piece
  *    3. Toggle to Mode B (ct.render active)
  *    4. Click "Invoke Server Stream" - server counter should increment
  */
@@ -53,7 +53,7 @@ interface Output {
   invocationCount: number;
 }
 
-// Handler that invokes a stream from the wished charm
+// Handler that invokes a stream from the wished piece
 // KEY FINDING: Despite blessed doc claims, Stream<T> in signature does NOT auto-unwrap.
 // The stream comes through as a Cell wrapping { $stream: true }. Call .send({}) on the Cell.
 const invokeServerStream = handler<
@@ -97,26 +97,26 @@ const toggleMode = handler<unknown, { useCtRender: Writable<boolean> }>(
 
 export default pattern<Input, Output>(
   ({ useCtRender, lastInvocationStatus, invocationCount }) => {
-    // Wish for the server charm by tag
+    // Wish for the server piece by tag
     const wishResult = wish<{
       counter: number;
       invocationLog: string[];
       incrementCounter: Stream<void>;
     }>({
-      query: "#cross-charm-test-server",
+      query: "#cross-piece-test-server",
     });
 
     // Access the result from the wish (WishState has a result property)
-    const serverCharm = wishResult.result;
+    const serverPiece = wishResult.result;
 
     // Extract the stream using derive
     const serverStream = derive(
-      serverCharm,
-      (charm) => charm?.incrementCounter,
+      serverPiece,
+      (piece) => piece?.incrementCounter,
     );
 
     return {
-      [NAME]: "Cross-Charm Test Client",
+      [NAME]: "Cross-Piece Test Client",
       [UI]: (
         <div
           style={{
@@ -125,7 +125,7 @@ export default pattern<Input, Output>(
             borderRadius: "8px",
           }}
         >
-          <h2>Cross-Charm Test Client</h2>
+          <h2>Cross-Piece Test Client</h2>
 
           {/* Mode Toggle Section */}
           <div
@@ -154,12 +154,12 @@ export default pattern<Input, Output>(
               Toggle Mode
             </ct-button>
             <p style={{ fontSize: "12px", marginTop: "8px", marginBottom: 0 }}>
-              In Mode A, server charm should NOT execute. In Mode B, it should
+              In Mode A, server piece should NOT execute. In Mode B, it should
               execute.
             </p>
           </div>
 
-          {/* Server Charm Rendering Section */}
+          {/* Server Piece Rendering Section */}
           <div
             style={{
               marginTop: "16px",
@@ -168,14 +168,14 @@ export default pattern<Input, Output>(
               borderRadius: "4px",
             }}
           >
-            <h3 style={{ marginTop: 0 }}>Server Charm Status</h3>
+            <h3 style={{ marginTop: 0 }}>Server Piece Status</h3>
             {useCtRender
               ? (
                 <div>
                   <p style={{ color: "#4CAF50", fontWeight: "bold" }}>
-                    Mode B Active: Rendering server charm with ct.render
+                    Mode B Active: Rendering server piece with ct.render
                   </p>
-                  {/* Use ct.render to force execution - even hidden, this makes the charm active */}
+                  {/* Use ct.render to force execution - even hidden, this makes the piece active */}
                   <div
                     style={{
                       border: "1px dashed #999",
@@ -189,7 +189,7 @@ export default pattern<Input, Output>(
               )
               : (
                 <p style={{ color: "#FF9800", fontWeight: "bold" }}>
-                  Mode A Active: Server charm wished for but NOT rendered
+                  Mode A Active: Server piece wished for but NOT rendered
                   (should not execute)
                 </p>
               )}
@@ -219,8 +219,8 @@ export default pattern<Input, Output>(
               Invoke Server Stream
             </ct-button>
             <p style={{ fontSize: "12px", marginTop: "8px", marginBottom: 0 }}>
-              Click to invoke the incrementCounter stream from the server charm.
-              Check the server charm to see if the counter incremented.
+              Click to invoke the incrementCounter stream from the server piece.
+              Check the server piece to see if the counter incremented.
             </p>
           </div>
 
@@ -243,7 +243,7 @@ export default pattern<Input, Output>(
                   useCtRender,
                   invocationCount,
                   lastInvocationStatus,
-                  serverCharmExists: serverCharm !== undefined && serverCharm !== null,
+                  serverPieceExists: serverPiece !== undefined && serverPiece !== null,
                   serverStreamExists: serverStream !== undefined && serverStream !== null,
                 },
                 null,

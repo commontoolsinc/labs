@@ -13,7 +13,7 @@
  *
  * Setup:
  * 1. Deploy to space: community-patterns-shared
- * 2. Favorite the charm with tag: #gmailSearchRegistry
+ * 2. Favorite the piece with tag: #gmailSearchRegistry
  * 3. Other gmail-agent patterns discover via: wish({ query: "#gmailSearchRegistry" })
  *
  * TODO: Future framework enhancement will support wish() without requiring favorites
@@ -475,7 +475,7 @@ const GmailSearchRegistry = pattern<
               </div>
               <ul style={{ margin: "0", paddingLeft: "16px" }}>
                 <li>
-                  This charm should be in space:{" "}
+                  This piece should be in space:{" "}
                   <code>community-patterns-shared</code>
                 </li>
                 <li>

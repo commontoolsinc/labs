@@ -33,11 +33,11 @@ const COLORS: string[] = [
 ];
 
 // Type for backlinks (inline to work around CLI path resolution bug)
-type MentionableCharm = {
+type MentionablePiece = {
   [NAME]?: string;
   isHidden?: boolean;
-  mentioned: MentionableCharm[];
-  backlinks: MentionableCharm[];
+  mentioned: MentionablePiece[];
+  backlinks: MentionablePiece[];
 };
 
 interface Input {
@@ -61,7 +61,7 @@ interface Output {
   notes: string;
   isHidden: boolean;
   eventId: string;
-  backlinks: MentionableCharm[];
+  backlinks: MentionablePiece[];
   // LLM-callable streams
   setTitle: Stream<{ newTitle: string }>;
   setDate: Stream<{ newDate: string }>;
@@ -155,8 +155,8 @@ const handleTitleKeydown = handler<
 // Handler for clicking on a backlink
 const handleBacklinkClick = handler<
   void,
-  { charm: Writable<MentionableCharm> }
->((_, { charm }) => navigateTo(charm));
+  { piece: Writable<MentionablePiece> }
+>((_, { piece }) => navigateTo(piece));
 
 // Auto-update end time when start time changes
 const onStartTimeChange = handler<
@@ -256,7 +256,7 @@ const Event = pattern<Input, Output>(
     const isEditingTitle = Writable.of<boolean>(false);
 
     // Backlinks - populated by backlinks-index.tsx
-    const backlinks = Writable.of<MentionableCharm[]>([]);
+    const backlinks = Writable.of<MentionablePiece[]>([]);
 
     // Computed display values
     const dateDisplay = computed(() => formatDateDisplay(date.get()));
@@ -429,14 +429,14 @@ const Event = pattern<Input, Output>(
             >
               Linked from:
             </span>
-            {backlinks.map((charm) => (
+            {backlinks.map((piece) => (
               <ct-button
                 variant="ghost"
                 size="sm"
-                onClick={handleBacklinkClick({ charm })}
+                onClick={handleBacklinkClick({ piece })}
                 style={{ fontSize: "12px" }}
               >
-                {charm?.[NAME]}
+                {piece?.[NAME]}
               </ct-button>
             ))}
           </ct-hstack>

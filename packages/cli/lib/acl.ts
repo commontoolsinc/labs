@@ -8,7 +8,7 @@ import {
   type Capability,
   isACLUser,
 } from "@commontools/memory/acl";
-import { ACLManager } from "@commontools/charm/ops";
+import { ACLManager } from "@commontools/piece/ops";
 
 export interface SpaceConfig {
   apiUrl: URL;

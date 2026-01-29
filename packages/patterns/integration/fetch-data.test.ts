@@ -1,6 +1,6 @@
 import { env, Page, waitFor } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
-import { CharmController, CharmsController } from "@commontools/charm/ops";
+import { PieceController, PiecesController } from "@commontools/piece/ops";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -20,18 +20,18 @@ describe("fetch data integration test", () => {
   shell.bindLifecycle();
 
   let identity: Identity;
-  let cc: CharmsController;
-  let charm: CharmController;
+  let cc: PiecesController;
+  let piece: PieceController;
 
   if (!ignore) {
     beforeAll(async () => {
       identity = await Identity.generate({ implementation: "noble" });
-      cc = await CharmsController.initialize({
+      cc = await PiecesController.initialize({
         spaceName: SPACE_NAME,
         apiUrl: new URL(API_URL),
         identity: identity,
       });
-      charm = await cc.create(
+      piece = await cc.create(
         await Deno.readTextFile(
           join(
             import.meta.dirname!,
@@ -50,7 +50,7 @@ describe("fetch data integration test", () => {
   }
 
   it({
-    name: "should load the github fetcher charm and verify initial state",
+    name: "should load the github fetcher piece and verify initial state",
     ignore,
     fn: async () => {
       const page = shell.page();
@@ -58,7 +58,7 @@ describe("fetch data integration test", () => {
         frontendUrl: FRONTEND_URL,
         view: {
           spaceName: SPACE_NAME,
-          charmId: charm.id,
+          pieceId: piece.id,
         },
         identity,
       });
@@ -66,7 +66,7 @@ describe("fetch data integration test", () => {
       await waitForTitle("next.js", page);
 
       // Also verify via direct operations
-      const repoUrl = await charm.input.get(["repoUrl"]);
+      const repoUrl = await piece.input.get(["repoUrl"]);
       assertEquals(repoUrl, "https://github.com/vercel/next.js");
     },
   });
@@ -78,19 +78,19 @@ describe("fetch data integration test", () => {
       const page = shell.page();
 
       // Set new repo URL via direct operation
-      await charm.input.set(
+      await piece.input.set(
         "https://github.com/commontoolsinc/labs",
         ["repoUrl"],
       );
 
       await sleep(200);
 
-      // Navigate to the charm to see updated data
+      // Navigate to the piece to see updated data
       await shell.goto({
         frontendUrl: FRONTEND_URL,
         view: {
           spaceName: SPACE_NAME,
-          charmId: charm.id,
+          pieceId: piece.id,
         },
         identity,
       });
@@ -98,7 +98,7 @@ describe("fetch data integration test", () => {
       await waitForTitle("labs", page);
 
       // Also verify via direct operations
-      const repoUrl = await charm.input.get(["repoUrl"]);
+      const repoUrl = await piece.input.get(["repoUrl"]);
       assertEquals(repoUrl, "https://github.com/commontoolsinc/labs");
     },
   });

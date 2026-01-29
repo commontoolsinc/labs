@@ -51,9 +51,9 @@ describe("isWorkerIPCRequest", () => {
     );
   });
   it("validates run messages", () => {
-    const charmId = "abc";
-    assert(isWorkerIPCRequest({ msgId: 1, type: "run", data: { charmId } }));
-    assert(!isWorkerIPCRequest({ type: "run", data: { charmId } }));
+    const pieceId = "abc";
+    assert(isWorkerIPCRequest({ msgId: 1, type: "run", data: { pieceId } }));
+    assert(!isWorkerIPCRequest({ type: "run", data: { pieceId } }));
     assert(!isWorkerIPCRequest({ msgId: 1, type: "run" }));
   });
 });
