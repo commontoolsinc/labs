@@ -1866,6 +1866,26 @@ runner.start(recipe, inputs);
 
 3. **No network restrictions**: `fetch` is not blocked. Future work: Proxy `fetch` with allowlist.
 
+### 11.3 Temporary Relaxations
+
+The following unsafe capabilities are temporarily allowed while existing
+patterns are migrated. Each will be tightened in a future release.
+
+1. **`Math.random()`** (`mathTaming: "unsafe"`): SES normally makes
+   `Math.random()` return `NaN` to prevent covert channels. Currently
+   allowed because many patterns use it for ID generation and shuffling.
+   Migrate to a deterministic PRNG seeded by the runtime.
+
+2. **`Date.now()` / `new Date()`** (`dateTaming: "unsafe"`): SES normally
+   makes `Date.now()` return `NaN` to prevent timing side-channels.
+   Currently allowed because patterns use timestamps for display and
+   logging. Migrate to a runtime-provided clock.
+
+3. **`fetch()`** (provided as a global with deprecation warning): Patterns
+   should use `fetchData()` instead, which is managed by the runtime.
+   Direct `fetch()` logs a console warning and will be removed once all
+   patterns are migrated.
+
 ### 11.3 Escape Hatch Analysis
 
 Potential escape routes and their status:

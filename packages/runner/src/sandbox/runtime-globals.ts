@@ -147,6 +147,15 @@ export function createRuntimeGlobals(
     encodeURIComponent,
     decodeURIComponent,
 
+    // Network access with deprecation warning
+    // TODO(seefeld): Remove direct fetch access once patterns migrate to fetchData
+    fetch: ((...args: Parameters<typeof fetch>) => {
+      sandboxedConsole.warn(
+        "Direct fetch() is deprecated. Rewrite as several steps in a pattern using fetchData() instead.",
+      );
+      return fetch(...args);
+    }) as typeof fetch,
+
     // SES utility - harden is available after lockdown
     harden: typeof harden === "function" ? harden : Object.freeze,
   };

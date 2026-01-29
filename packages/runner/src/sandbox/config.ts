@@ -34,6 +34,11 @@ export function getDefaultLockdownOptions(debug = false): LockdownOptions {
 
     // Console taming: "unsafe" preserves console functionality
     consoleTaming: "unsafe",
+
+    // TODO(seefeld): Tighten these once patterns no longer use
+    // Math.random() or Date.now() directly.
+    mathTaming: "unsafe",
+    dateTaming: "unsafe",
   };
 }
 

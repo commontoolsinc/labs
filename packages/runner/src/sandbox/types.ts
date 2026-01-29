@@ -121,6 +121,20 @@ export interface LockdownOptions {
    * Whether to harden console methods.
    */
   readonly consoleTaming?: "safe" | "unsafe";
+
+  /**
+   * Math.random taming.
+   * - "safe": Math.random() returns NaN
+   * - "unsafe": Math.random() works normally
+   */
+  readonly mathTaming?: "safe" | "unsafe";
+
+  /**
+   * Date.now taming.
+   * - "safe": Date.now() returns NaN, new Date() returns invalid date
+   * - "unsafe": Date works normally
+   */
+  readonly dateTaming?: "safe" | "unsafe";
 }
 
 /**
@@ -238,6 +252,10 @@ export interface RuntimeGlobals {
   readonly decodeURI: typeof decodeURI;
   readonly encodeURIComponent: typeof encodeURIComponent;
   readonly decodeURIComponent: typeof decodeURIComponent;
+
+  // Network
+  // TODO(seefeld): Remove direct fetch access once patterns migrate to fetchData
+  readonly fetch: typeof fetch;
 
   // SES utilities
   readonly harden: <T>(obj: T) => T;
