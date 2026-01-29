@@ -821,18 +821,45 @@ function evaluateExchangeRules(
 
     for (const policy of policiesInScope) {
       for (const rule of policy.exchangeRules) {
-        const matches = matchRuleWithTargetClause(rule.preCondition, result, integrityInScope);
-        for (const match of matches) {
-          const next = applyExchangeRule(
-            result,
-            match.targetClauseIndex,
-            match.targetAlternativeIndex,
-            rule,
-            match.bindings
-          );
-          if (next !== result) {
-            result = next;
-            changed = true;
+        // IMPORTANT: `matchRuleWithTargetClause` returns *indices* into the label CNF.
+        // If `applyExchangeRule` removes an alternative/clause (the "drop" case),
+        // then later indices can shift and become stale.
+        //
+        // Correct implementations MUST either:
+        //   (A) re-run matching after each successful application, or
+        //   (B) apply drop-matches from the "back" (descending clause/alternative indices).
+        //
+        // We do both here: for drop rules we order matches from the back, and after any
+        // successful application we restart matching so indices always refer to the current label.
+        let applied = true;
+        while (applied) {
+          applied = false;
+
+          // Recompute available integrity based on the *current* label.
+          const integrityInScope = [...result.integrity, ...boundaryIntegrity];
+          const matches = matchRuleWithTargetClause(rule.preCondition, result, integrityInScope);
+
+          const ordered = (rule.postCondition.confidentiality.length === 0)
+            ? [...matches].sort((a, b) =>
+                (b.targetClauseIndex - a.targetClauseIndex) ||
+                (b.targetAlternativeIndex - a.targetAlternativeIndex)
+              )
+            : matches;
+
+          for (const match of ordered) {
+            const next = applyExchangeRule(
+              result,
+              match.targetClauseIndex,
+              match.targetAlternativeIndex,
+              rule,
+              match.bindings
+            );
+            if (next !== result) {
+              result = next;
+              changed = true;
+              applied = true;
+              break; // Restart matching: indices may have shifted.
+            }
           }
         }
       }
