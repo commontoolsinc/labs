@@ -1886,7 +1886,7 @@ patterns are migrated. Each will be tightened in a future release.
    Direct `fetch()` logs a console warning and will be removed once all
    patterns are migrated.
 
-### 11.3 Escape Hatch Analysis
+### 11.4 Escape Hatch Analysis
 
 Potential escape routes and their status:
 

@@ -329,7 +329,11 @@ export function referencesExternalSymbols(
       // synthetic nodes prevent symbol resolution).
       const symbol = checker.getSymbolAtLocation(node);
       if (symbol && isBuiltinGlobal(symbol)) return;
-      if (WELL_KNOWN_GLOBALS.has(name)) return;
+      // Fallback: only use the name-based allowlist when the checker
+      // cannot resolve the symbol (e.g. synthetic nodes from prior
+      // transforms). When a symbol IS resolved, trust the checker —
+      // a module-scope `const Map = …` should NOT be treated as built-in.
+      if (!symbol && WELL_KNOWN_GLOBALS.has(name)) return;
 
       // Not a local, not a builtin → external reference
       hasExternalRef = true;
