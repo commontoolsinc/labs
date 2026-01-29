@@ -7,9 +7,8 @@ import type {
 } from "@commontools/memory/interface";
 import type { Cancel } from "../cancel.ts";
 import {
-  ImmutableStorageValue,
   IStorageProvider,
-  OptImmutableStorageValue,
+  OptStorageValue,
   StorageValue,
 } from "./interface.ts";
 export type { Result, Unit };
@@ -19,7 +18,7 @@ export abstract class BaseStorageProvider implements IStorageProvider {
   // but all receive StorableValue at runtime.
   protected subscribers = new Map<
     string,
-    Set<(value: ImmutableStorageValue<any>) => void>
+    Set<(value: StorageValue<any>) => void>
   >();
   protected waitingForSync = new Map<string, Promise<void>>();
   protected waitingForSyncResolvers = new Map<string, () => void>();
@@ -41,16 +40,16 @@ export abstract class BaseStorageProvider implements IStorageProvider {
 
   abstract get<T extends StorableValue = StorableValue>(
     uri: URI,
-  ): OptImmutableStorageValue<T>;
+  ): OptStorageValue<T>;
 
   sink<T extends StorableValue = StorableValue>(
     uri: URI,
-    callback: (value: ImmutableStorageValue<T>) => void,
+    callback: (value: StorageValue<T>) => void,
   ): Cancel {
     if (!this.subscribers.has(uri)) {
       this.subscribers.set(
         uri,
-        new Set<(value: ImmutableStorageValue<any>) => void>(),
+        new Set<(value: StorageValue<any>) => void>(),
       );
     }
     const listeners = this.subscribers.get(uri)!;
@@ -62,7 +61,7 @@ export abstract class BaseStorageProvider implements IStorageProvider {
     };
   }
 
-  protected notifySubscribers(key: string, value: ImmutableStorageValue): void {
+  protected notifySubscribers(key: string, value: StorageValue): void {
     const listeners = this.subscribers.get(key);
     if (this.waitingForSync.has(key) && listeners && listeners.size > 0) {
       throw new Error(
