@@ -5,6 +5,7 @@ import {
   TransformationOptions,
 } from "./transformers.ts";
 import { CTHelpers } from "./ct-helpers.ts";
+import { HoistingContext } from "../hoisting/mod.ts";
 
 const DEFAULT_OPTIONS: TransformationOptions = {
   mode: "transform",
@@ -28,6 +29,12 @@ export class TransformationContext {
   readonly diagnostics: TransformationDiagnostic[] = [];
   readonly tsContext: ts.TransformationContext;
 
+  /**
+   * Hoisting context for SES sandboxing.
+   * Tracks declarations hoisted to module scope for SES safety.
+   */
+  readonly hoistingContext: HoistingContext | undefined;
+
   constructor(config: TransformationContextConfig) {
     this.program = config.program;
     this.checker = config.program.getTypeChecker();
@@ -42,6 +49,9 @@ export class TransformationContext {
       ...DEFAULT_OPTIONS,
       ...config.options,
     };
+
+    // Initialize hoisting context for SES-safe module-scope hoisting
+    this.hoistingContext = new HoistingContext(config.sourceFile);
   }
 
   reportDiagnostic(input: DiagnosticInput): void {

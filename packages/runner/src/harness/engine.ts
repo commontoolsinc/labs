@@ -20,6 +20,7 @@ import {
   UnsafeEvalIsolate,
   UnsafeEvalRuntime,
 } from "./eval-runtime.ts";
+import { SESIsolate, SESRuntime } from "./ses-runtime.ts";
 import {
   CommonToolsTransformerPipeline,
   OpaqueRefErrorTransformer,
@@ -82,10 +83,13 @@ export class EngineProgramResolver extends InMemoryProgram {
   }
 }
 
+type EngineRuntime = UnsafeEvalRuntime | SESRuntime;
+type EngineIsolate = UnsafeEvalIsolate | SESIsolate;
+
 interface Internals {
   compiler: TypeScriptCompiler;
-  runtime: UnsafeEvalRuntime;
-  isolate: UnsafeEvalIsolate;
+  runtime: EngineRuntime;
+  isolate: EngineIsolate;
   runtimeExports: Record<string, any> | undefined;
   // Callback will be called with a map of exported values to `RuntimeProgram`
   // after compilation and initial eval and before compilation returns, so
@@ -110,8 +114,17 @@ export class Engine extends EventTarget implements Harness {
       this.ctRuntime.staticCache,
     );
     const compiler = new TypeScriptCompiler(environmentTypes);
-    const runtime = new UnsafeEvalRuntime();
+
+    const sesEnabled = this.ctRuntime.compartmentManager.isEnabled();
+    let runtime: EngineRuntime;
+    if (sesEnabled) {
+      this.ctRuntime.compartmentManager.initialize();
+      runtime = new SESRuntime();
+    } else {
+      runtime = new UnsafeEvalRuntime();
+    }
     const isolate = runtime.getIsolate("");
+
     const { runtimeExports, exportsCallback } = await RuntimeModules
       .getExports();
     return { compiler, runtime, isolate, runtimeExports, exportsCallback };

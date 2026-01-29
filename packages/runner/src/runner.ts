@@ -1170,10 +1170,19 @@ export class Runner {
       if (cached) {
         fn = cached as (inputs: any) => any;
       } else {
-        // Fall back to evaluating and cache it
-        fn = this.runtime.harness.getInvocation(module.implementation) as (
-          inputs: any,
-        ) => any;
+        // Check if SES sandboxing is enabled and ready
+        const compartmentManager = this.runtime.compartmentManager;
+        if (compartmentManager.isEnabled() && compartmentManager.isReady()) {
+          // SES path: evaluate in a sandboxed compartment
+          fn = compartmentManager.evaluateStringSync(
+            module.implementation,
+          ) as (inputs: any) => any;
+        } else {
+          // Legacy path: unsafe eval
+          fn = this.runtime.harness.getInvocation(module.implementation) as (
+            inputs: any,
+          ) => any;
+        }
         this.functionCache.set(module, fn);
       }
     } else {

@@ -15,6 +15,7 @@ import {
   AuthSchema,
   ID,
   ID_FIELD,
+  isModule,
   isRecipe,
   NAME,
   schema,
@@ -72,6 +73,9 @@ export const createBuilder = (): {
     for (const [value, program] of exports) {
       if (isRecipe(value)) {
         // This will associate the program with the recipe
+        value.program = program;
+      } else if (isModule(value)) {
+        // Associate the program with lift/handler/action modules
         value.program = program;
       }
     }

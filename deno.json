@@ -131,6 +131,7 @@
     "lit": "npm:lit@^3.3.0",
     "merkle-reference": "npm:merkle-reference@^2.2.0",
     "multiformats": "npm:multiformats@^13.3.2",
+    "ses": "npm:ses@^1.14.0",
     "turndown": "npm:turndown@^7.1.2",
     "zod": "npm:zod@^3.24.1"
   }
