@@ -42,12 +42,32 @@ export interface SocialProfile {
 }
 
 // ============================================================================
+// Birthday - Structured date with optional year
+// ============================================================================
+
+export interface Birthday {
+  month: Default<number, 0>; // 1-12, 0 = unset
+  day: Default<number, 0>; // 1-31, 0 = unset
+  year: Default<number, 0>; // 4-digit year, 0 = unknown
+}
+
+// ============================================================================
 // Person Type - Extends PersonLike with optional contact fields
 // ============================================================================
 
 export interface Person extends PersonLike {
   firstName: string;
   lastName: string;
+  // Name extensions
+  middleName: Default<string, "">;
+  nickname: Default<string, "">; // preferred name / what they go by
+  prefix: Default<string, "">; // Dr., Mr., Prof.
+  suffix: Default<string, "">; // Jr., III, Ph.D.
+  // Identity metadata
+  pronouns: Default<string, "">; // freeform: "he/him", "they/them"
+  birthday: Default<Birthday, { month: 0; day: 0; year: 0 }>;
+  photo: Default<string, "">; // URL or data reference
+  // Contact fields
   email: Default<string, "">;
   phone: Default<string, "">;
   notes: Default<string, "">;
