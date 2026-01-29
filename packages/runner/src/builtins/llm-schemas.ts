@@ -51,8 +51,8 @@ export const LLMToolSchema = {
       asCell: true,
     },
     extraParams: { type: "object" },
-    charm: {
-      // Accept whole charm - its own schema defines its handlers
+    piece: {
+      // Accept whole piece - its own schema defines its handlers
       asCell: true,
     },
   },

@@ -13,9 +13,9 @@
  * - Shows check-in availability, delays, gate changes
  *
  * Usage:
- * 1. Deploy a google-auth charm and complete OAuth
+ * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct charm link google-auth/auth united-flight-tracker/overrideAuth
+ * 3. Link: ct piece link google-auth/auth united-flight-tracker/overrideAuth
  */
 import { computed, ifElse, JSONSchema, NAME, pattern, UI } from "commontools";
 import type { Schema } from "commontools/schema";

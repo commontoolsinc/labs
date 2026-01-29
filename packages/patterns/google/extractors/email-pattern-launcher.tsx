@@ -14,9 +14,9 @@
  * 6. Renders pattern previews with navigation links
  *
  * Usage:
- * 1. Deploy a google-auth charm and complete OAuth
+ * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct charm link google-auth/auth email-pattern-launcher/overrideAuth
+ * 3. Link: ct piece link google-auth/auth email-pattern-launcher/overrideAuth
  */
 import {
   //compileAndRun,
@@ -116,8 +116,8 @@ function buildGmailQuery(entries: RegistryEntry[]): string { // Build "from:@dom
 // =============================================================================
 
 interface PatternInput {
-  // Optional: Link auth directly from a Google Auth charm
-  // Use: ct charm link googleAuthCharm/auth emailPatternLauncher/overrideAuth
+  // Optional: Link auth directly from a Google Auth piece
+  // Use: ct piece link googleAuthPiece/auth emailPatternLauncher/overrideAuth
   overrideAuth?: Auth;
 }
 

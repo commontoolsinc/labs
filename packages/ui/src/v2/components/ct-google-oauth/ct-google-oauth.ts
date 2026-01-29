@@ -69,10 +69,10 @@ export class CTGoogleOauth extends BaseElement {
     if (!container) {
       throw new Error("No <ct-charm> container.");
     }
-    const { charmId } = container;
+    const { pieceId } = container;
     const payload = {
       authCellId,
-      integrationCharmId: charmId,
+      integrationCharmId: pieceId,
       scopes: this.scopes,
     };
 

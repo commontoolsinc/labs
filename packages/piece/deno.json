@@ -1,0 +1,10 @@
+{
+  "name": "@commontools/piece",
+  "tasks": {
+    "test": "deno test --allow-env --allow-ffi --allow-read --allow-write"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./ops": "./src/ops/mod.ts"
+  }
+}

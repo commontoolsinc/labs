@@ -1,4 +1,4 @@
-import { CharmManager } from "@commontools/charm";
+import { PieceManager } from "@commontools/piece";
 import {
   Cell,
   type ConsoleHandler,
@@ -28,7 +28,7 @@ let initialized = false;
 let spaceId: DID;
 let latestError: Error | null = null;
 let currentSession: Session | null = null;
-let manager: CharmManager | null = null;
+let manager: PieceManager | null = null;
 let runtime: Runtime | null = null;
 const loadedCharms = new Map<string, Cell<{ bgUpdater: Stream<unknown> }>>();
 
@@ -70,8 +70,8 @@ const consoleHandler: ConsoleHandler = (
         throw new Error("FatalError: Mismatched space ids in worker.");
       }
     }
-    if (metadata.charmId) {
-      ctx = `Charm(${metadata.charmId})`;
+    if (metadata.pieceId) {
+      ctx = `Charm(${metadata.pieceId})`;
     }
   }
   ctx = ctx ?? "Charm(NO_CHARM)";
@@ -108,7 +108,7 @@ async function initialize(
     consoleHandler: consoleHandler,
     errorHandlers: [errorHandler],
   });
-  manager = new CharmManager(currentSession, runtime);
+  manager = new PieceManager(currentSession, runtime);
   await manager.ready;
 
   console.log(`Initialized`);
@@ -142,31 +142,31 @@ async function runCharm(data: RunData): Promise<void> {
     throw new Error("Worker session not initialized");
   }
 
-  const { charmId } = data;
+  const { pieceId } = data;
 
-  console.log(`Running charm ${spaceId}/${charmId}`);
+  console.log(`Running charm ${spaceId}/${pieceId}`);
   try {
     // Reset error tracking
     latestError = null;
 
-    // Get the charm cell from the charmId
+    // Get the charm cell from the pieceId
     const charmCell = manager.runtime.getCellFromEntityId(spaceId, {
-      "/": charmId,
+      "/": pieceId,
     });
 
     // Check whether the charm is still active (in charms or pinned-charms)
-    const charmsEntryCell = await manager.getActiveCharm(charmCell);
+    const charmsEntryCell = await manager.getActivePiece(charmCell);
     if (charmsEntryCell === undefined) {
       // Skip any charms that aren't still in one of the lists
-      throw new Error(`No charms list entry found for charm: ${charmId}`);
+      throw new Error(`No charms list entry found for charm: ${pieceId}`);
     }
 
     // Check if we've already loaded this charm
-    let runningCharm = loadedCharms.get(charmId);
+    let runningCharm = loadedCharms.get(pieceId);
 
     if (!runningCharm) {
       // If not loaded yet, get it from the manager
-      console.log(`Loading charm ${charmId} for the first time`);
+      console.log(`Loading charm ${pieceId} for the first time`);
       runningCharm = await manager.get(charmsEntryCell, true, {
         type: "object",
         properties: { bgUpdater: { asStream: true } },
@@ -174,19 +174,19 @@ async function runCharm(data: RunData): Promise<void> {
       });
 
       if (!runningCharm) {
-        throw new Error(`Charm not found: ${charmId}`);
+        throw new Error(`Charm not found: ${pieceId}`);
       }
 
       // Store for future use
-      loadedCharms.set(charmId, runningCharm);
+      loadedCharms.set(pieceId, runningCharm);
     } else {
-      console.log(`Using previously loaded charm ${charmId}`);
+      console.log(`Using previously loaded charm ${pieceId}`);
     }
 
     // Find the updater stream
     const updater = runningCharm.key("bgUpdater") as unknown as Stream<unknown>;
     if (!updater || !isStream(updater)) {
-      throw new Error(`No updater stream found for charm: ${charmId}`);
+      throw new Error(`No updater stream found for charm: ${pieceId}`);
     }
 
     // Execute the background updater
@@ -203,21 +203,21 @@ async function runCharm(data: RunData): Promise<void> {
       throw latestError;
     }
 
-    console.log(`Successfully executed charm ${spaceId}/${charmId}`);
+    console.log(`Successfully executed charm ${spaceId}/${pieceId}`);
     return;
   } catch (error) {
     // Check if error has context properties
     const errorMessage =
-      (error instanceof Error && "space" in error && "charmId" in error &&
+      (error instanceof Error && "space" in error && "pieceId" in error &&
           "recipeId" in error)
-        ? `${error.message} @ ${error.space}:${error.charmId} running ${error.recipeId}`
+        ? `${error.message} @ ${error.space}:${error.pieceId} running ${error.recipeId}`
         : String(error);
     console.error(
-      `Error executing charm ${spaceId}/${charmId}: ${errorMessage}`,
+      `Error executing charm ${spaceId}/${pieceId}: ${errorMessage}`,
     );
 
     // FIXME(ja): this isn't enough to ensure we reload/stop the charm
-    loadedCharms.delete(charmId);
+    loadedCharms.delete(pieceId);
 
     throw new Error(errorMessage, { cause: error });
   }

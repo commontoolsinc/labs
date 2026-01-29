@@ -472,7 +472,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
   const flightTrackerResult = flightTrackerWish.result;
   const profileResult = profileWish.result;
 
-  // Use derive to extract upcomingFlights from the charm result
+  // Use derive to extract upcomingFlights from the piece result
   const upcomingFlights = derive(
     flightTrackerResult,
     (tracker) => tracker?.upcomingFlights ?? [],

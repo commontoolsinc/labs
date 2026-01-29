@@ -10,7 +10,7 @@
  * - Item count tracking (total and filtered)
  * - Status filtering (all, want, reading, finished, abandoned)
  * - Modifying item properties (status, rating, notes)
- * - Composition: items are ReadingItemDetail charms with their own state
+ * - Composition: items are ReadingItemDetail pieces with their own state
  *
  * Run: deno task ct test packages/patterns/reading-list/reading-list.test.tsx --verbose
  */

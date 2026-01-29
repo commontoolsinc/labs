@@ -72,7 +72,7 @@ Remember to consider the context of the code running inside an iframe and ensure
 );
 
 /**
- * Given a broken charm, an error, and a model, returns a recipe with the fixed code.
+ * Given a broken piece, an error, and a model, returns a recipe with the fixed code.
  * @param spec - The specification/description of the web application.
  * @param code - The code of the web application.
  * @param schema - The schema of the web application.

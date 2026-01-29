@@ -71,7 +71,7 @@ export default pattern<Input>(({ code }) => {
             <ct-button
               onClick={visit({ result })}
             >
-              Navigate To Charm
+              Navigate To Piece
             </ct-button>,
           )}
         </ct-cell-context>

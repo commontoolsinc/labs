@@ -19,18 +19,18 @@ import {
 import Note from "./note.tsx";
 
 // Type for backlinks (inline to work around CLI path resolution bug)
-type MentionableCharm = {
+type MentionablePiece = {
   [NAME]?: string;
   isHidden?: boolean;
-  mentioned: MentionableCharm[];
-  backlinks: MentionableCharm[];
+  mentioned: MentionablePiece[];
+  backlinks: MentionablePiece[];
 };
 
 // Simple random ID generator (crypto.randomUUID not available in pattern env)
 const generateId = () =>
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
 
-type NoteCharm = {
+type NotePiece = {
   [NAME]?: string;
   title?: string;
   content?: string;
@@ -38,7 +38,7 @@ type NoteCharm = {
   noteId?: string;
 };
 
-type MinimalCharm = {
+type MinimalPiece = {
   [NAME]?: string;
 };
 
@@ -54,22 +54,22 @@ function _getNotebookNotesArray(notebook: unknown): unknown[] {
   return Array.isArray(notes) ? notes : [];
 }
 
-// Helper to get a comparable name from a charm (handles both local and wish("#default") charms)
-function getCharmName(charm: unknown): string {
-  // First try [NAME] (works for wish("#default") charms)
-  const symbolName = (charm as any)?.[NAME];
+// Helper to get a comparable name from a piece (handles both local and wish("#default") pieces)
+function getPieceName(piece: unknown): string {
+  // First try [NAME] (works for wish("#default") pieces)
+  const symbolName = (piece as any)?.[NAME];
   if (typeof symbolName === "string") return symbolName;
-  // Fallback to title (works for local charms)
-  const titleProp = (charm as any)?.title;
+  // Fallback to title (works for local pieces)
+  const titleProp = (piece as any)?.title;
   if (typeof titleProp === "string") return titleProp;
   return "";
 }
 
 interface Input {
   title?: Default<string, "Notebook">;
-  notes?: Writable<Default<NoteCharm[], []>>;
+  notes?: Writable<Default<NotePiece[], []>>;
   isNotebook?: Default<boolean, true>; // Marker for identification through proxy
-  isHidden?: Default<boolean, false>; // Hide from default-app charm list when nested
+  isHidden?: Default<boolean, false>; // Hide from default-app piece list when nested
   parentNotebook?: any; // Reference to parent notebook (set on navigation for back link)
 }
 
@@ -77,12 +77,12 @@ interface Output {
   [NAME]?: string;
   [UI]?: VNode;
   title: string;
-  notes: NoteCharm[];
+  notes: NotePiece[];
   noteCount: number;
   isNotebook: boolean;
   isHidden: boolean;
   parentNotebook: any; // Reference to parent notebook (reactive)
-  backlinks: MentionableCharm[];
+  backlinks: MentionablePiece[];
   // LLM-callable streams for omnibot integration
   createNote: Stream<{ title: string; content: string }>;
   createNotes: Stream<{ notesData: Array<{ title: string; content: string }> }>;
@@ -115,8 +115,8 @@ const createNoteAndOpen = handler<
   {
     newNoteTitle: Writable<string>;
     showNewNotePrompt: Writable<boolean>;
-    notes: Writable<NoteCharm[]>;
-    allCharms: Writable<NoteCharm[]>;
+    notes: Writable<NotePiece[]>;
+    allPieces: Writable<NotePiece[]>;
     usedCreateAnotherNote: Writable<boolean>;
     self: any;
   }
@@ -126,7 +126,7 @@ const createNoteAndOpen = handler<
     newNoteTitle,
     showNewNotePrompt,
     notes,
-    allCharms,
+    allPieces,
     usedCreateAnotherNote,
     self,
   },
@@ -139,7 +139,7 @@ const createNoteAndOpen = handler<
     noteId: generateId(),
     parentNotebook: self, // Set parent at creation for back navigation
   });
-  allCharms.push(newNote as any); // Required for persistence
+  allPieces.push(newNote as any); // Required for persistence
   notes.push(newNote);
 
   const shouldNavigate = !usedCreateAnotherNote.get();
@@ -160,12 +160,12 @@ const createNoteAndContinue = handler<
   void,
   {
     newNoteTitle: Writable<string>;
-    notes: Writable<NoteCharm[]>;
-    allCharms: Writable<NoteCharm[]>;
+    notes: Writable<NotePiece[]>;
+    allPieces: Writable<NotePiece[]>;
     usedCreateAnotherNote: Writable<boolean>;
     self: any;
   }
->((_, { newNoteTitle, notes, allCharms, usedCreateAnotherNote, self }) => {
+>((_, { newNoteTitle, notes, allPieces, usedCreateAnotherNote, self }) => {
   const title = newNoteTitle.get() || "New Note";
   const newNote = Note({
     title,
@@ -174,7 +174,7 @@ const createNoteAndContinue = handler<
     noteId: generateId(),
     parentNotebook: self, // Set parent for back navigation
   });
-  allCharms.push(newNote as any); // Required for persistence
+  allPieces.push(newNote as any); // Required for persistence
   notes.push(newNote);
   // Mark that "Create Another" was used
   usedCreateAnotherNote.set(true);
@@ -199,7 +199,7 @@ const cancelNewNotePrompt = handler<
 // Handler to remove a note from this notebook (but keep it in the space)
 const removeFromNotebook = handler<
   Record<string, never>,
-  { note: Writable<NoteCharm>; notes: Writable<NoteCharm[]> }
+  { note: Writable<NotePiece>; notes: Writable<NotePiece[]> }
 >((_, { note, notes }) => {
   const notebookNotes = notes.get();
   const index = notebookNotes.findIndex((n: any) => equals(n, note));
@@ -212,10 +212,10 @@ const removeFromNotebook = handler<
   note.key("isHidden").set(false);
 });
 
-// Handler for dropping a charm onto this notebook
-const _handleCharmDrop = handler<
-  { detail: { sourceCell: Writable<NoteCharm> } },
-  { notes: Writable<NoteCharm[]> }
+// Handler for dropping a piece onto this notebook
+const _handlePieceDrop = handler<
+  { detail: { sourceCell: Writable<NotePiece> } },
+  { notes: Writable<NotePiece[]> }
 >((event, { notes }) => {
   const sourceCell = event.detail.sourceCell;
   const notesList = notes.get() ?? [];
@@ -227,7 +227,7 @@ const _handleCharmDrop = handler<
   // Hide from Pages list
   sourceCell.key("isHidden").set(true);
 
-  // Add to notebook - push cell reference, not value, to maintain charm identity
+  // Add to notebook - push cell reference, not value, to maintain piece identity
   notes.push(sourceCell);
 });
 
@@ -237,8 +237,8 @@ const _handleCharmDrop = handler<
 const handleDropOntoCurrentNotebook = handler<
   { detail: { sourceCell: Writable<unknown> } },
   {
-    notes: Writable<NoteCharm[]>;
-    notebooks: Writable<NotebookCharm[]>;
+    notes: Writable<NotePiece[]>;
+    notebooks: Writable<NotebookPiece[]>;
     selectedNoteIndices: Writable<number[]>;
   }
 >((event, { notes, notebooks, selectedNoteIndices }) => {
@@ -286,7 +286,7 @@ const handleDropOntoCurrentNotebook = handler<
 
       const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
       if (filtered.length !== nbNotes.length) {
-        nbNotesCell.set(filtered as NoteCharm[]);
+        nbNotesCell.set(filtered as NotePiece[]);
       }
     }
 
@@ -325,11 +325,11 @@ const handleDropOntoCurrentNotebook = handler<
         return true;
       });
       if (filtered.length !== nbNotes.length) {
-        nbNotesCell.set(filtered as NoteCharm[]);
+        nbNotesCell.set(filtered as NotePiece[]);
       }
     }
 
-    // Hide from default-app charm list
+    // Hide from default-app piece list
     sourceCell.key("isHidden").set(true);
 
     // Add to this notebook
@@ -343,9 +343,9 @@ const handleDropOntoNotebook = handler<
   { detail: { sourceCell: Writable<unknown> } },
   {
     targetNotebook: Writable<{ notes?: unknown[]; isNotebook?: boolean }>;
-    currentNotes: Writable<NoteCharm[]>;
+    currentNotes: Writable<NotePiece[]>;
     selectedNoteIndices: Writable<number[]>;
-    notebooks: Writable<NotebookCharm[]>;
+    notebooks: Writable<NotebookPiece[]>;
   }
 >((event, { targetNotebook, currentNotes, selectedNoteIndices, notebooks }) => {
   const sourceCell = event.detail.sourceCell;
@@ -442,7 +442,7 @@ const handleDropOntoNotebook = handler<
       currentNotes.set(copy);
     }
 
-    // Hide from default-app charm list
+    // Hide from default-app piece list
     sourceCell.key("isHidden").set(true);
 
     // Add to target notebook
@@ -457,8 +457,8 @@ const createNestedNotebookAndOpen = handler<
   {
     newNestedNotebookTitle: Writable<string>;
     showNewNestedNotebookPrompt: Writable<boolean>;
-    notes: Writable<NoteCharm[]>;
-    allCharms: Writable<NoteCharm[]>;
+    notes: Writable<NotePiece[]>;
+    allPieces: Writable<NotePiece[]>;
     usedCreateAnotherNotebook: Writable<boolean>;
     self: any;
   }
@@ -468,7 +468,7 @@ const createNestedNotebookAndOpen = handler<
     newNestedNotebookTitle,
     showNewNestedNotebookPrompt,
     notes,
-    allCharms,
+    allPieces,
     usedCreateAnotherNotebook,
     self,
   },
@@ -481,7 +481,7 @@ const createNestedNotebookAndOpen = handler<
     isHidden: true,
     parentNotebook: self,
   });
-  allCharms.push(nb);
+  allPieces.push(nb);
   notes.push(nb);
 
   const shouldNavigate = !usedCreateAnotherNotebook.get();
@@ -503,13 +503,13 @@ const createNestedNotebookAndContinue = handler<
   void,
   {
     newNestedNotebookTitle: Writable<string>;
-    notes: Writable<NoteCharm[]>;
-    allCharms: Writable<NoteCharm[]>;
+    notes: Writable<NotePiece[]>;
+    allPieces: Writable<NotePiece[]>;
     usedCreateAnotherNotebook: Writable<boolean>;
   }
 >((
   _,
-  { newNestedNotebookTitle, notes, allCharms, usedCreateAnotherNotebook },
+  { newNestedNotebookTitle, notes, allPieces, usedCreateAnotherNotebook },
 ) => {
   const title = newNestedNotebookTitle.get() || "New Notebook";
 
@@ -518,7 +518,7 @@ const createNestedNotebookAndContinue = handler<
     notes: [],
     isHidden: true,
   });
-  allCharms.push(nb);
+  allPieces.push(nb);
   notes.push(nb);
   // Mark that "Create Another" was used
   usedCreateAnotherNotebook.set(true);
@@ -547,11 +547,11 @@ const cancelNewNestedNotebookPrompt = handler<
 });
 
 // Simple button handler: Go to All Notes (no menu state)
-const goToAllNotes = handler<void, { allCharms: Writable<NoteCharm[]> }>(
-  (_, { allCharms }) => {
-    const charms = allCharms.get();
-    const existing = charms.find((charm: any) => {
-      const name = charm?.[NAME];
+const goToAllNotes = handler<void, { allPieces: Writable<NotePiece[]> }>(
+  (_, { allPieces }) => {
+    const pieces = allPieces.get();
+    const existing = pieces.find((piece: any) => {
+      const name = piece?.[NAME];
       return typeof name === "string" && name.startsWith("All Notes");
     });
     if (existing) {
@@ -563,9 +563,9 @@ const goToAllNotes = handler<void, { allCharms: Writable<NoteCharm[]> }>(
 // Handler for clicking on a backlink
 const handleBacklinkClick = handler<
   void,
-  { charm: Writable<MentionableCharm> }
+  { piece: Writable<MentionablePiece> }
 >(
-  (_, { charm }) => navigateTo(charm),
+  (_, { piece }) => navigateTo(piece),
 );
 
 // Handler to navigate to parent notebook
@@ -594,7 +594,7 @@ const navigateToChild = handler<
 // Handler to select all notes in this notebook
 const selectAllNotes = handler<
   Record<string, never>,
-  { notes: Writable<NoteCharm[]>; selectedNoteIndices: Writable<number[]> }
+  { notes: Writable<NotePiece[]>; selectedNoteIndices: Writable<number[]> }
 >((_, { notes, selectedNoteIndices }) => {
   const notesList = notes.get();
   selectedNoteIndices.set(notesList.map((_, i) => i));
@@ -612,16 +612,16 @@ const deselectAllNotes = handler<
 const _duplicateSelectedNotes = handler<
   Record<string, never>,
   {
-    notes: Writable<NoteCharm[]>;
-    allCharms: Writable<NoteCharm[]>;
+    notes: Writable<NotePiece[]>;
+    allPieces: Writable<NotePiece[]>;
     selectedNoteIndices: Writable<number[]>;
   }
->((_, { notes, allCharms, selectedNoteIndices }) => {
+>((_, { notes, allPieces, selectedNoteIndices }) => {
   const selected = selectedNoteIndices.get();
   const notesList = notes.get();
 
   // Collect copies first, then batch push (reduces N reactive cycles to 1)
-  const copies: NoteCharm[] = [];
+  const copies: NotePiece[] = [];
   for (const idx of selected) {
     const original = notesList[idx];
     if (original) {
@@ -633,29 +633,29 @@ const _duplicateSelectedNotes = handler<
       }));
     }
   }
-  allCharms.push(...copies); // Required for persistence
+  allPieces.push(...copies); // Required for persistence
   notes.push(...copies);
   selectedNoteIndices.set([]);
 });
 
-type NotebookCharm = {
+type NotebookPiece = {
   [NAME]?: string;
-  notes?: NoteCharm[];
+  notes?: NotePiece[];
 };
 
 // Handler to permanently delete selected notes from the space
 const deleteSelectedNotes = handler<
   Record<string, never>,
   {
-    notes: Writable<NoteCharm[]>;
+    notes: Writable<NotePiece[]>;
     selectedNoteIndices: Writable<number[]>;
-    allCharms: Writable<NoteCharm[]>;
-    notebooks: Writable<NotebookCharm[]>;
+    allPieces: Writable<NotePiece[]>;
+    notebooks: Writable<NotebookPiece[]>;
   }
->((_, { notes, selectedNoteIndices, allCharms, notebooks }) => {
+>((_, { notes, selectedNoteIndices, allPieces, notebooks }) => {
   const selected = selectedNoteIndices.get();
   const notesList = notes.get();
-  const allCharmsList = allCharms.get();
+  const allPiecesList = allPieces.get();
   const notebooksList = notebooks.get();
 
   // Collect noteIds and titles to delete (titles for notebooks which don't have noteId)
@@ -696,11 +696,11 @@ const deleteSelectedNotes = handler<
   const filteredNotes = notesList.filter((n: any) => !shouldDelete(n));
   notes.set(filteredNotes);
 
-  // Remove from allCharms (permanent delete)
-  const filteredCharms = allCharmsList.filter((charm: any) =>
-    !shouldDelete(charm)
+  // Remove from allPieces (permanent delete)
+  const filteredPieces = allPiecesList.filter((piece: any) =>
+    !shouldDelete(piece)
   );
-  allCharms.set(filteredCharms);
+  allPieces.set(filteredPieces);
 
   selectedNoteIndices.set([]);
 });
@@ -709,9 +709,9 @@ const deleteSelectedNotes = handler<
 const addSelectedToNotebook = handler<
   { target?: { value: string }; detail?: { value: string } },
   {
-    notes: Writable<NoteCharm[]>;
+    notes: Writable<NotePiece[]>;
     selectedNoteIndices: Writable<number[]>;
-    notebooks: Writable<NotebookCharm[]>;
+    notebooks: Writable<NotebookPiece[]>;
     selectedAddNotebook: Writable<string>;
     showNewNotebookPrompt: Writable<boolean>;
     pendingNotebookAction: Writable<"add" | "move" | "">;
@@ -749,12 +749,12 @@ const addSelectedToNotebook = handler<
   const targetNotebookNotes = targetNotebookCell.key("notes");
 
   // Collect notes first, then batch push (reduces N reactive cycles to 1)
-  const notesToAdd: NoteCharm[] = [];
+  const notesToAdd: NotePiece[] = [];
   for (const idx of selected) {
     const note = notesList[idx];
     if (note) notesToAdd.push(note);
   }
-  (targetNotebookNotes as Writable<NoteCharm[] | undefined>).push(
+  (targetNotebookNotes as Writable<NotePiece[] | undefined>).push(
     ...notesToAdd,
   );
 
@@ -766,9 +766,9 @@ const addSelectedToNotebook = handler<
 const moveSelectedToNotebook = handler<
   { target?: { value: string }; detail?: { value: string } },
   {
-    notes: Writable<NoteCharm[]>;
+    notes: Writable<NotePiece[]>;
     selectedNoteIndices: Writable<number[]>;
-    notebooks: Writable<NotebookCharm[]>;
+    notebooks: Writable<NotebookPiece[]>;
     selectedMoveNotebook: Writable<string>;
     showNewNotebookPrompt: Writable<boolean>;
     pendingNotebookAction: Writable<"add" | "move" | "">;
@@ -809,7 +809,7 @@ const moveSelectedToNotebook = handler<
   // Collect notes/notebooks and IDs/titles for removal
   const selectedNoteIds: string[] = [];
   const selectedTitles: string[] = []; // For notebooks (no noteId)
-  const notesToMove: NoteCharm[] = [];
+  const notesToMove: NotePiece[] = [];
   for (const idx of selected) {
     const item = notesList[idx];
     const noteId = (item as any)?.noteId;
@@ -830,7 +830,7 @@ const moveSelectedToNotebook = handler<
   };
 
   // Add to target notebook in one operation
-  (targetNotebookNotes as Writable<NoteCharm[] | undefined>).push(
+  (targetNotebookNotes as Writable<NotePiece[] | undefined>).push(
     ...notesToMove,
   );
 
@@ -865,9 +865,9 @@ const createNotebookFromPrompt = handler<
     showNewNotebookPrompt: Writable<boolean>;
     pendingNotebookAction: Writable<"add" | "move" | "">;
     selectedNoteIndices: Writable<number[]>;
-    notes: Writable<NoteCharm[]>;
-    allCharms: Writable<MinimalCharm[]>;
-    notebooks: Writable<NotebookCharm[]>;
+    notes: Writable<NotePiece[]>;
+    allPieces: Writable<MinimalPiece[]>;
+    notebooks: Writable<NotebookPiece[]>;
   }
 >((_, state) => {
   const {
@@ -876,7 +876,7 @@ const createNotebookFromPrompt = handler<
     pendingNotebookAction,
     selectedNoteIndices,
     notes,
-    allCharms,
+    allPieces,
     notebooks,
   } = state;
 
@@ -886,7 +886,7 @@ const createNotebookFromPrompt = handler<
   // Gather selected items and track by noteId (notes) or title (notebooks)
   const selected = selectedNoteIndices.get();
   const notesList = notes.get();
-  const selectedItems: NoteCharm[] = [];
+  const selectedItems: NotePiece[] = [];
   const selectedNoteIds: string[] = [];
   const selectedTitles: string[] = []; // For notebooks (no noteId)
 
@@ -917,7 +917,7 @@ const createNotebookFromPrompt = handler<
     notes: selectedItems,
     isHidden: true,
   });
-  allCharms.push(newNotebook);
+  allPieces.push(newNotebook);
 
   if (action === "move") {
     // For move: remove selected items from existing notebooks and this notebook
@@ -971,7 +971,7 @@ const cancelNewNotebookPrompt = handler<
 // Handler to toggle visibility of all selected notes
 const _toggleSelectedVisibility = handler<
   { detail: { checked: boolean } },
-  { notes: Writable<NoteCharm[]>; selectedNoteIndices: Writable<number[]> }
+  { notes: Writable<NotePiece[]>; selectedNoteIndices: Writable<number[]> }
 >((event, { notes, selectedNoteIndices }) => {
   const selected = selectedNoteIndices.get();
   const makeVisible = event.detail?.checked ?? false;
@@ -1058,11 +1058,11 @@ const toggleNoteCheckbox = handler<
 const handleCreateNote = handler<
   { title: string; content: string },
   {
-    notes: Writable<NoteCharm[]>;
-    allCharms: Writable<NoteCharm[]>;
+    notes: Writable<NotePiece[]>;
+    allPieces: Writable<NotePiece[]>;
     self: any;
   }
->(({ title: noteTitle, content }, { notes, allCharms, self }) => {
+>(({ title: noteTitle, content }, { notes, allPieces, self }) => {
   const newNote = Note({
     title: noteTitle,
     content,
@@ -1070,7 +1070,7 @@ const handleCreateNote = handler<
     noteId: generateId(),
     parentNotebook: self, // Set parent for back navigation
   });
-  allCharms.push(newNote as any); // Required for persistence
+  allPieces.push(newNote as any); // Required for persistence
   notes.push(newNote);
   return newNote;
 });
@@ -1079,13 +1079,13 @@ const handleCreateNote = handler<
 const handleCreateNotes = handler<
   { notesData: Array<{ title: string; content: string }> },
   {
-    notes: Writable<NoteCharm[]>;
-    allCharms: Writable<NoteCharm[]>;
+    notes: Writable<NotePiece[]>;
+    allPieces: Writable<NotePiece[]>;
     self: any;
   }
->(({ notesData }, { notes, allCharms, self }) => {
+>(({ notesData }, { notes, allPieces, self }) => {
   // Collect notes first, then batch push (reduces N reactive cycles to 1)
-  const created: NoteCharm[] = [];
+  const created: NotePiece[] = [];
   for (const data of notesData) {
     created.push(Note({
       title: data.title,
@@ -1095,7 +1095,7 @@ const handleCreateNotes = handler<
       parentNotebook: self, // Set parent for back navigation
     }));
   }
-  allCharms.push(...created); // Required for persistence
+  allPieces.push(...created); // Required for persistence
   notes.push(...created);
   return created;
 });
@@ -1113,10 +1113,10 @@ const handleSetTitle = handler<
 // Note: If no notesData provided, notebook is created empty; a default note is created lazily when opened
 const handleCreateNotebook = handler<
   { title: string; notesData?: Array<{ title: string; content: string }> },
-  { allCharms: Writable<NoteCharm[]> }
->(({ title: nbTitle, notesData }, { allCharms }) => {
-  // Create notes with isHidden: true so they don't appear in DefaultCharmList
-  const notesToAdd: NoteCharm[] = [];
+  { allPieces: Writable<NotePiece[]> }
+>(({ title: nbTitle, notesData }, { allPieces }) => {
+  // Create notes with isHidden: true so they don't appear in DefaultPieceList
+  const notesToAdd: NotePiece[] = [];
   if (notesData && notesData.length > 0) {
     for (const data of notesData) {
       notesToAdd.push(Note({
@@ -1134,13 +1134,13 @@ const handleCreateNotebook = handler<
     notes: notesToAdd,
   });
 
-  allCharms.push(newNotebook);
+  allPieces.push(newNotebook);
   return newNotebook;
 });
 
 const Notebook = pattern<Input, Output>(
   ({ title, notes, isNotebook, isHidden, parentNotebook, [SELF]: self }) => {
-    const { allCharms } = wish<{ allCharms: Writable<NoteCharm[]> }>(
+    const { allPieces } = wish<{ allPieces: Writable<NotePiece[]> }>(
       "#default",
     );
 
@@ -1175,7 +1175,7 @@ const Notebook = pattern<Input, Output>(
     const usedCreateAnotherNotebook = Writable.of<boolean>(false); // Track if "Create Another" was used
 
     // Backlinks - populated by backlinks-index.tsx
-    const backlinks = Writable.of<MentionableCharm[]>([]);
+    const backlinks = Writable.of<MentionablePiece[]>([]);
 
     // State for inline title editing
     const isEditingTitle = Writable.of<boolean>(false);
@@ -1183,7 +1183,7 @@ const Notebook = pattern<Input, Output>(
     // State for expanded note previews (tracks which note indices have full content shown)
     const _expandedPreviews = Writable.of<number[]>([]);
 
-    // ===== Actions (close over notes, allCharms, self) =====
+    // ===== Actions (close over notes, allPieces, self) =====
 
     // Action to duplicate selected notes
     const doDuplicateSelectedNotes = action(() => {
@@ -1199,7 +1199,7 @@ const Notebook = pattern<Input, Output>(
             noteId: generateId(),
             parentNotebook: self, // Set parent for back navigation
           });
-          allCharms.push(newNote as any);
+          allPieces.push(newNote as any);
           notes.push(newNote);
         }
       }
@@ -1207,10 +1207,10 @@ const Notebook = pattern<Input, Output>(
     });
 
     // Filter to find all notebooks by checking if [NAME] contains "Notebook" or starts with notebook emoji
-    // Charms from wish("#default") only expose [NAME] at top level, not other properties
+    // Pieces from wish("#default") only expose [NAME] at top level, not other properties
     const notebooks = computed(() =>
-      allCharms.get().filter((charm: any) => {
-        const name = charm?.[NAME];
+      allPieces.get().filter((piece: any) => {
+        const name = piece?.[NAME];
         if (typeof name !== "string") return false;
         // Check for notebook emoji (first char code > 127 and contains "Notebook" pattern)
         // The emoji check via startsWith can have unicode issues, so check both
@@ -1230,21 +1230,21 @@ const Notebook = pattern<Input, Output>(
       const nbCount = notebooks.length;
 
       // Find parent notebooks (notebooks that contain this notebook in their notes)
-      // For now, skip parent detection as it requires accessing notes arrays of other charms
+      // For now, skip parent detection as it requires accessing notes arrays of other pieces
       const parents: any[] = [];
-      // Note: Parent detection requires deeper integration with charm introspection
+      // Note: Parent detection requires deeper integration with piece introspection
 
       // Find child notebooks (notebooks in our notes list)
       const notesList = notes.get() ?? [];
       const childNames = (Array.isArray(notesList) ? notesList : [])
         .filter((n: any) => n?.isNotebook === true)
-        .map((n: any) => getCharmName(n))
+        .map((n: any) => getPieceName(n))
         .filter((t: any) => t.length > 0);
 
       const children: any[] = [];
       for (let i = 0; i < nbCount; i++) {
         const nb = notebooks[i];
-        const nbName = getCharmName(nb);
+        const nbName = getPieceName(nb);
         if (
           childNames.some((cn) => nbName.includes(cn) || cn.includes(nbName))
         ) {
@@ -1268,13 +1268,13 @@ const Notebook = pattern<Input, Output>(
       // ========================================================================
 
       // const notesListNames = (Array.isArray(notesList) ? notesList : [])
-      //   .map((n: any) => getCharmName(n))
+      //   .map((n: any) => getPieceName(n))
       //   .filter((t: any) => t.length > 0);
       //
       // const siblings: any[] = [];
       // for (let i = 0; i < nbCount; i++) {
       //   const nb = notebooks[i];
-      //   const nbName = getCharmName(nb);
+      //   const nbName = getPieceName(nb);
       //   if (nbName.length === 0) continue;
       //   if (nbName.startsWith(currentNamePattern)) continue;
       //   if (notesListNames.some((n) => nbName.includes(n) || n.includes(nbName))) continue;
@@ -1293,10 +1293,10 @@ const Notebook = pattern<Input, Output>(
       };
     });
 
-    // Check if "All Notes" charm exists in the space
-    const allNotesCharm = computed(() =>
-      allCharms.get().find((charm: any) => {
-        const name = charm?.[NAME];
+    // Check if "All Notes" piece exists in the space
+    const allNotesPiece = computed(() =>
+      allPieces.get().find((piece: any) => {
+        const name = piece?.[NAME];
         return typeof name === "string" && name.startsWith("All Notes");
       })
     );
@@ -1386,12 +1386,12 @@ const Notebook = pattern<Input, Output>(
 
                 <ct-button
                   variant="ghost"
-                  onClick={goToAllNotes({ allCharms })}
+                  onClick={goToAllNotes({ allPieces })}
                   style={{
                     padding: "8px 16px",
                     fontSize: "16px",
                     borderRadius: "8px",
-                    display: computed(() => allNotesCharm ? "flex" : "none"),
+                    display: computed(() => allNotesPiece ? "flex" : "none"),
                   }}
                 >
                   📁 All Notes
@@ -1657,7 +1657,7 @@ const Notebook = pattern<Input, Output>(
                           )}
                         />
                       </div>
-                      {/* Text aligned with charm pills */}
+                      {/* Text aligned with piece pills */}
                       <span style={{ paddingLeft: "4px" }}>Select All</span>
                     </div>
                   </ct-vstack>
@@ -1719,7 +1719,7 @@ const Notebook = pattern<Input, Output>(
                       onClick={deleteSelectedNotes({
                         notes,
                         selectedNoteIndices,
-                        allCharms,
+                        allPieces,
                         notebooks,
                       })}
                       style={{ color: "var(--ct-color-danger, #dc3545)" }}
@@ -1825,7 +1825,7 @@ const Notebook = pattern<Input, Output>(
                   pendingNotebookAction,
                   selectedNoteIndices,
                   notes,
-                  allCharms,
+                  allPieces,
                   notebooks,
                 })}
               >
@@ -1866,7 +1866,7 @@ const Notebook = pattern<Input, Output>(
                 onClick={createNoteAndContinue({
                   newNoteTitle,
                   notes,
-                  allCharms,
+                  allPieces,
                   usedCreateAnotherNote,
                   self,
                 })}
@@ -1879,7 +1879,7 @@ const Notebook = pattern<Input, Output>(
                   newNoteTitle,
                   showNewNotePrompt,
                   notes,
-                  allCharms,
+                  allPieces,
                   usedCreateAnotherNote,
                   self,
                 })}
@@ -1921,7 +1921,7 @@ const Notebook = pattern<Input, Output>(
                 onClick={createNestedNotebookAndContinue({
                   newNestedNotebookTitle,
                   notes,
-                  allCharms,
+                  allPieces,
                   usedCreateAnotherNotebook,
                 })}
               >
@@ -1933,7 +1933,7 @@ const Notebook = pattern<Input, Output>(
                   newNestedNotebookTitle,
                   showNewNestedNotebookPrompt,
                   notes,
-                  allCharms,
+                  allPieces,
                   usedCreateAnotherNotebook,
                   self,
                 })}
@@ -1943,7 +1943,7 @@ const Notebook = pattern<Input, Output>(
             </ct-hstack>
           </ct-modal>
 
-          {/* Backlinks footer - show charms that link to this notebook */}
+          {/* Backlinks footer - show pieces that link to this notebook */}
           <ct-hstack
             slot="footer"
             gap="2"
@@ -1966,14 +1966,14 @@ const Notebook = pattern<Input, Output>(
             >
               Linked from:
             </span>
-            {backlinks.map((charm) => (
+            {backlinks.map((piece) => (
               <ct-button
                 variant="ghost"
                 size="sm"
-                onClick={handleBacklinkClick({ charm })}
+                onClick={handleBacklinkClick({ piece })}
                 style={{ fontSize: "12px" }}
               >
-                {charm?.[NAME]}
+                {piece?.[NAME]}
               </ct-button>
             ))}
           </ct-hstack>
@@ -1987,10 +1987,10 @@ const Notebook = pattern<Input, Output>(
       // Make notes discoverable via [[ autocomplete system-wide
       mentionable: notes,
       // LLM-callable streams for omnibot integration
-      createNote: handleCreateNote({ notes, allCharms, self }),
-      createNotes: handleCreateNotes({ notes, allCharms, self }),
+      createNote: handleCreateNote({ notes, allPieces, self }),
+      createNotes: handleCreateNotes({ notes, allPieces, self }),
       setTitle: handleSetTitle({ title }),
-      createNotebook: handleCreateNotebook({ allCharms }),
+      createNotebook: handleCreateNotebook({ allPieces }),
     };
   },
 );

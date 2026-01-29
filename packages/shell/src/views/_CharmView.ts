@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseView } from "./BaseView.ts";
-import { CharmController } from "@commontools/charm/ops";
+import { PieceController } from "@commontools/piece/ops";
 
 export class XCharmView extends BaseView {
   static override styles = css`
@@ -30,7 +30,7 @@ export class XCharmView extends BaseView {
   `;
 
   @property({ attribute: false })
-  charm?: CharmController;
+  charm?: PieceController;
 
   override render() {
     if (!this.charm) {
@@ -42,7 +42,7 @@ export class XCharmView extends BaseView {
     const cell = this.charm.getCell();
 
     return html`
-      <ct-charm .charmId="${this.charm.id}">
+      <ct-charm .pieceId="${this.charm.id}">
         <ct-render .cell="${cell}"></ct-render>
       </ct-charm>
     `;

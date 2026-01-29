@@ -232,8 +232,8 @@ export function compileAndRun(
       if (abortController?.signal.aborted) return;
 
       if (recipe) {
-        // TODO(ja): to support editting of existing charms / running with
-        // inputs from other charms, we will need to think more about
+        // TODO(ja): to support editting of existing pieces / running with
+        // inputs from other pieces, we will need to think more about
         // how we pass input into the builtin.
 
         runtime.runSynced(result, recipe, input.get());

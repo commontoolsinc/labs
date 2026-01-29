@@ -17,15 +17,15 @@ import {
 } from "commontools";
 
 // Type for backlinks (inline to work around CLI path resolution bug)
-type MentionableCharm = {
+type MentionablePiece = {
   [NAME]?: string;
   isHidden?: boolean;
   content?: string;
-  mentioned: MentionableCharm[];
-  backlinks: MentionableCharm[];
+  mentioned: MentionablePiece[];
+  backlinks: MentionablePiece[];
 };
 
-type MinimalCharm = {
+type MinimalPiece = {
   [NAME]?: string;
 };
 
@@ -62,8 +62,8 @@ type LLMMessage = {
 type Output = {
   [NAME]?: string;
   [UI]: VNode;
-  mentioned: Default<Array<MentionableCharm>, []>;
-  backlinks: MentionableCharm[];
+  mentioned: Default<Array<MentionablePiece>, []>;
+  backlinks: MentionablePiece[];
   parentNotebook: any;
   content: Default<string, "">;
   isHidden: Default<boolean, false>;
@@ -80,7 +80,7 @@ type Output = {
 // - Other sections are user messages
 function parseContentToMessages(
   content: string,
-  mentionable: MentionableCharm[],
+  mentionable: MentionablePiece[],
 ): { system: string; messages: LLMMessage[] } {
   if (!content.trim()) {
     return { system: DEFAULT_SYSTEM_PROMPT, messages: [] };
@@ -151,22 +151,22 @@ function parseContentToMessages(
 // Format: [[Name (id)]] -> ## [Name]\n[content of linked note]
 function expandWikiLinks(
   text: string,
-  mentionable: MentionableCharm[],
+  mentionable: MentionablePiece[],
 ): string {
   // Match [[Name (id)]] pattern
   const wikiLinkRegex = /\[\[([^\]]*?)\s*\(([^)]+)\)\]\]/g;
 
   return text.replace(wikiLinkRegex, (match, name, id) => {
-    // Find the charm by ID
-    const charm = mentionable?.find((c: any) => {
+    // Find the piece by ID
+    const piece = mentionable?.find((c: any) => {
       // Check various ways the ID might be stored
-      const charmId = c?.id || c?.noteId || (c as any)?.$id ||
+      const pieceId = c?.id || c?.noteId || (c as any)?.$id ||
         (c as any)?.["$ID"];
-      return charmId === id;
+      return pieceId === id;
     });
 
-    if (charm && charm.content) {
-      return `## ${name.trim()}\n${charm.content}`;
+    if (piece && piece.content) {
+      return `## ${name.trim()}\n${piece.content}`;
     }
 
     // If we can't find the content, keep the original link
@@ -181,37 +181,37 @@ const _updateContent = handler<
   state.content.set(event.detail?.value ?? "");
 });
 
-const handleCharmLinkClick = handler<
+const handlePieceLinkClick = handler<
   {
     detail: {
-      charm: Writable<MentionableCharm>;
+      piece: Writable<MentionablePiece>;
     };
   },
   Record<string, never>
 >(({ detail }, _) => {
-  return navigateTo(detail.charm);
+  return navigateTo(detail.piece);
 });
 
 const handleNewBacklink = handler<
   {
     detail: {
       text: string;
-      charmId: any;
-      charm: Writable<MentionableCharm>;
+      pieceId: any;
+      piece: Writable<MentionablePiece>;
       navigate: boolean;
     };
   },
   {
-    mentionable: Writable<MentionableCharm[]>;
-    allCharms: Writable<MinimalCharm[]>;
+    mentionable: Writable<MentionablePiece[]>;
+    allPieces: Writable<MinimalPiece[]>;
   }
->(({ detail }, { mentionable, allCharms }) => {
-  allCharms.push(detail.charm);
+>(({ detail }, { mentionable, allPieces }) => {
+  allPieces.push(detail.piece);
 
   if (detail.navigate) {
-    return navigateTo(detail.charm);
+    return navigateTo(detail.piece);
   } else {
-    mentionable.push(detail.charm);
+    mentionable.push(detail.piece);
   }
 });
 
@@ -223,11 +223,11 @@ const handleEditContent = handler<
   result?.set("updated");
 });
 
-const handleCharmLinkClicked = handler<
+const handlePieceLinkClicked = handler<
   void,
-  { charm: Writable<MentionableCharm> }
->((_, { charm }) => {
-  return navigateTo(charm);
+  { piece: Writable<MentionablePiece> }
+>((_, { piece }) => {
+  return navigateTo(piece);
 });
 
 // Handler to start editing title
@@ -348,10 +348,10 @@ const ChatNote = pattern<Input, Output>(
     model,
     [SELF]: self,
   }) => {
-    const { allCharms } = wish<{ allCharms: MinimalCharm[] }>("/");
-    const mentionable = wish<Default<MentionableCharm[], []>>("#mentionable");
-    const mentioned = Writable.of<MentionableCharm[]>([]);
-    const backlinks = Writable.of<MentionableCharm[]>([]);
+    const { allPieces } = wish<{ allPieces: MinimalPiece[] }>("/");
+    const mentionable = wish<Default<MentionablePiece[], []>>("#mentionable");
+    const mentioned = Writable.of<MentionablePiece[]>([]);
+    const backlinks = Writable.of<MentionablePiece[]>([]);
 
     // State for inline title editing
     const isEditingTitle = Writable.of<boolean>(false);
@@ -632,8 +632,8 @@ const ChatNote = pattern<Input, Output>(
             $mentionable={mentionable}
             $mentioned={mentioned}
             $pattern={patternJson}
-            onbacklink-click={handleCharmLinkClick({})}
-            onbacklink-create={handleNewBacklink({ mentionable, allCharms })}
+            onbacklink-click={handlePieceLinkClick({})}
+            onbacklink-create={handleNewBacklink({ mentionable, allPieces })}
             language="text/markdown"
             theme="light"
             wordWrap
@@ -643,9 +643,9 @@ const ChatNote = pattern<Input, Output>(
           />
 
           <ct-hstack slot="footer">
-            {backlinks?.map((charm) => (
-              <ct-button onClick={handleCharmLinkClicked({ charm })}>
-                {charm?.[NAME]}
+            {backlinks?.map((piece) => (
+              <ct-button onClick={handlePieceLinkClicked({ piece })}>
+                {piece?.[NAME]}
               </ct-button>
             ))}
           </ct-hstack>

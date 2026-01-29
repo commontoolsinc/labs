@@ -1,13 +1,13 @@
 /// <cts-enable />
 /**
- * Extractor Module - Controller sub-charm for LLM-assisted field extraction
+ * Extractor Module - Controller sub-piece for LLM-assisted field extraction
  *
  * This is a "controller module" that acts on the parent Record's state.
  * It scans existing Notes, Text Imports, and Photos in the Record,
  * extracts structured data from their content, and updates modules.
  *
  * Key architecture:
- * - Receives parentSubCharms and parentTrashedSubCharms as INPUT Cells
+ * - Receives parentSubPieces and parentTrashedSubPieces as INPUT Cells
  * - Scans for extractable sources: notes, text-import (text), photo (OCR)
  * - Uses generateObject() with dynamic schema from existing modules
  * - Shows diff view: currentValue -> extractedValue for each field
@@ -29,12 +29,12 @@ import {
   Writable,
 } from "commontools";
 import {
-  createSubCharm,
+  createSubPiece,
   getDefinition,
   getFieldToTypeMapping as getFullFieldMapping,
   SUB_CHARM_REGISTRY,
 } from "../registry.ts";
-import type { SubCharmEntry, TrashedSubCharmEntry } from "../types.ts";
+import type { SubPieceEntry, TrashedSubPieceEntry } from "../types.ts";
 import type {
   ExtractableSource,
   ExtractedField,
@@ -54,8 +54,8 @@ import { getCellValue } from "./schema-utils-pure.ts";
 
 interface ExtractorModuleInput {
   // Parent's Cells - passed as INPUT so they survive serialization
-  parentSubCharms: Writable<SubCharmEntry[]>;
-  parentTrashedSubCharms: Writable<TrashedSubCharmEntry[]>;
+  parentSubPieces: Writable<SubPieceEntry[]>;
+  parentTrashedSubPieces: Writable<TrashedSubPieceEntry[]>;
   // Parent Record's title Cell - for extracting names to Record title
   parentTitle: Writable<string>;
   // Source selection state (index -> selected, default true)
@@ -77,7 +77,7 @@ interface ExtractorModuleInput {
   // Notes cleanup state
   cleanupNotesEnabled: Writable<Default<boolean, true>>;
   // Snapshot of Notes content at extraction start (for cleanup comparison)
-  // Map of subCharm index (as string) -> original content for ALL selected Notes modules
+  // Map of subPiece index (as string) -> original content for ALL selected Notes modules
   // NOTE: Uses string keys to avoid Cell coercing numeric keys to array indices
   notesContentSnapshot: Writable<
     Default<Record<string, string>, Record<string, never>>
@@ -351,10 +351,10 @@ function isImageWithinSizeLimit(dataUrl: string): boolean {
 /**
  * Get current value from an existing module for diff display
  */
-function getCurrentValue(entry: SubCharmEntry, fieldName: string): unknown {
+function getCurrentValue(entry: SubPieceEntry, fieldName: string): unknown {
   try {
-    const charm = entry.charm as Record<string, unknown>;
-    const field = charm[fieldName];
+    const piece = entry.piece as Record<string, unknown>;
+    const field = piece[fieldName];
     // Try .get() for Cell, otherwise use value directly
     if (field && typeof (field as { get?: () => unknown }).get === "function") {
       return (field as { get: () => unknown }).get();
@@ -492,14 +492,14 @@ function validateFieldValue(
 }
 
 /**
- * Get schema for a specific field from sub-charms
+ * Get schema for a specific field from sub-pieces
  */
 function getFieldSchema(
-  subCharms: readonly SubCharmEntry[],
+  subPieces: readonly SubPieceEntry[],
   moduleType: string,
   fieldName: string,
 ): JSONSchema | undefined {
-  const entry = subCharms.find((e) => e?.type === moduleType);
+  const entry = subPieces.find((e) => e?.type === moduleType);
   if (!entry) return undefined;
 
   // Try stored schema first
@@ -666,7 +666,7 @@ function flattenRecommendations(
  */
 function buildPreview(
   extracted: Record<string, unknown>,
-  subCharms: readonly SubCharmEntry[],
+  subPieces: readonly SubPieceEntry[],
   currentTitle?: string,
   fieldMetadata?: Record<
     string,
@@ -727,7 +727,7 @@ function buildPreview(
     }
 
     // Find existing module of this type
-    const entry = subCharms.find((e) => e?.type === moduleType);
+    const entry = subPieces.find((e) => e?.type === moduleType);
     const currentValue = entry ? getCurrentValue(entry, fieldName) : undefined;
 
     // Skip if value hasn't changed
@@ -736,7 +736,7 @@ function buildPreview(
     }
 
     // Get field schema for validation
-    const fieldSchema = getFieldSchema(subCharms, moduleType, fieldName);
+    const fieldSchema = getFieldSchema(subPieces, moduleType, fieldName);
 
     // Validate the extracted field
     const validationIssue = validateExtractedField(
@@ -839,20 +839,20 @@ function buildPreview(
 }
 
 /**
- * Scan sub-charms for extractable content sources
+ * Scan sub-pieces for extractable content sources
  */
 function scanExtractableSources(
-  subCharms: readonly SubCharmEntry[],
+  subPieces: readonly SubPieceEntry[],
 ): ExtractableSource[] {
   const sources: ExtractableSource[] = [];
 
-  subCharms.forEach((entry, index) => {
+  subPieces.forEach((entry, index) => {
     if (!entry) return;
 
     if (entry.type === "notes") {
       // Notes module - extract content
-      const charm = entry.charm as Record<string, unknown>;
-      const content = getCellValue<unknown>(charm?.content);
+      const piece = entry.piece as Record<string, unknown>;
+      const content = getCellValue<unknown>(piece?.content);
 
       if (content && typeof content === "string" && content.trim()) {
         // Replace newlines with spaces for clean single-line preview display
@@ -879,9 +879,9 @@ function scanExtractableSources(
       }
     } else if (entry.type === "text-import") {
       // Text Import module - extract content and filename
-      const charm = entry.charm as Record<string, unknown>;
-      const content = getCellValue<unknown>(charm?.content);
-      const filename = getCellValue<unknown>(charm?.filename);
+      const piece = entry.piece as Record<string, unknown>;
+      const content = getCellValue<unknown>(piece?.content);
+      const filename = getCellValue<unknown>(piece?.filename);
 
       if (content && typeof content === "string" && content.trim()) {
         const label = (filename && typeof filename === "string")
@@ -901,9 +901,9 @@ function scanExtractableSources(
       }
     } else if (entry.type === "photo") {
       // Photo module - needs OCR
-      const charm = entry.charm as Record<string, unknown>;
-      const image = getCellValue<ImageData | null>(charm?.image);
-      const label = getCellValue<unknown>(charm?.label);
+      const piece = entry.piece as Record<string, unknown>;
+      const image = getCellValue<ImageData | null>(piece?.image);
+      const label = getCellValue<unknown>(piece?.label);
 
       if (image && (image.data || image.url)) {
         sources.push({
@@ -930,16 +930,16 @@ function scanExtractableSources(
 const dismiss = handler<
   unknown,
   {
-    parentSubCharms: Writable<SubCharmEntry[]>;
-    parentTrashedSubCharms: Writable<TrashedSubCharmEntry[]>;
+    parentSubPieces: Writable<SubPieceEntry[]>;
+    parentTrashedSubPieces: Writable<TrashedSubPieceEntry[]>;
   }
->((_event, { parentSubCharms, parentTrashedSubCharms }) => {
-  const current = parentSubCharms.get() || [];
+>((_event, { parentSubPieces, parentTrashedSubPieces }) => {
+  const current = parentSubPieces.get() || [];
   const selfEntry = current.find((e) => e?.type === "extractor");
   if (!selfEntry) return;
 
-  parentSubCharms.set(current.filter((e) => e?.type !== "extractor"));
-  parentTrashedSubCharms.push({
+  parentSubPieces.set(current.filter((e) => e?.type !== "extractor"));
+  parentTrashedSubPieces.push({
     ...selfEntry,
     trashedAt: new Date().toISOString(),
   });
@@ -1024,7 +1024,7 @@ const startExtraction = handler<
     sourceSelectionsCell: Writable<
       Default<Record<number, boolean>, Record<number, never>>
     >;
-    parentSubCharmsCell: Writable<SubCharmEntry[]>;
+    parentSubPiecesCell: Writable<SubPieceEntry[]>;
     extractPhaseCell: Writable<
       Default<"select" | "extracting" | "preview", "select">
     >;
@@ -1037,17 +1037,17 @@ const startExtraction = handler<
     _event,
     {
       sourceSelectionsCell,
-      parentSubCharmsCell,
+      parentSubPiecesCell,
       extractPhaseCell,
       notesContentSnapshotCell,
     },
   ) => {
     // Use .get() to read Cell values inside handler
     const selectionsMap = sourceSelectionsCell.get() || {};
-    const subCharmsData = parentSubCharmsCell.get() || [];
+    const subPiecesData = parentSubPiecesCell.get() || [];
 
     // Scan sources to find selected Notes for snapshot
-    const sources = scanExtractableSources(subCharmsData);
+    const sources = scanExtractableSources(subPiecesData);
 
     // Map to store ALL selected Notes modules' content (index -> content)
     // This is used for cleanup comparison after extraction
@@ -1062,13 +1062,13 @@ const startExtraction = handler<
       hasSelectedSources = true;
 
       if (source.type === "notes") {
-        // Access charm content via .get() first to resolve links, then access properties
-        // Cell.key() navigation doesn't work through link boundaries - charm is stored as a link
-        const entry = (parentSubCharmsCell as Writable<SubCharmEntry[]>)
+        // Access piece content via .get() first to resolve links, then access properties
+        // Cell.key() navigation doesn't work through link boundaries - piece is stored as a link
+        const entry = (parentSubPiecesCell as Writable<SubPieceEntry[]>)
           .key(source.index)
           .get();
-        const charm = entry?.charm as Record<string, unknown>;
-        const liveContent = getCellValue<unknown>(charm?.content);
+        const piece = entry?.piece as Record<string, unknown>;
+        const liveContent = getCellValue<unknown>(piece?.content);
         const content = typeof liveContent === "string" ? liveContent : "";
 
         if (content.trim()) {
@@ -1098,18 +1098,18 @@ const startExtraction = handler<
  * @returns true if the field was successfully applied, false otherwise
  */
 function applyFieldToModule(
-  parentSubCharmsCell: Writable<SubCharmEntry[]>,
+  parentSubPiecesCell: Writable<SubPieceEntry[]>,
   existingIndex: number,
   moduleType: string,
   fieldName: string,
   extractedValue: unknown,
-  subCharms: readonly SubCharmEntry[],
+  subPieces: readonly SubPieceEntry[],
 ): boolean {
   // Get the primary field name (e.g., "notes" alias -> "content" primary)
   const actualFieldName = getPrimaryFieldName(fieldName, moduleType);
 
   // Validate extracted value against schema (use actual field name)
-  const fieldSchema = getFieldSchema(subCharms, moduleType, actualFieldName);
+  const fieldSchema = getFieldSchema(subPieces, moduleType, actualFieldName);
   const isValid = validateFieldValue(extractedValue, fieldSchema);
 
   if (!isValid) {
@@ -1128,9 +1128,9 @@ function applyFieldToModule(
     // Only write if validation passed
     // Cast needed: Cell.key() navigation loses type info for dynamic nested paths
     // Use actualFieldName to write to the correct field (handles aliases)
-    (parentSubCharmsCell as Writable<SubCharmEntry[]>)
+    (parentSubPiecesCell as Writable<SubPieceEntry[]>)
       .key(existingIndex)
-      .key("charm")
+      .key("piece")
       .key(actualFieldName)
       .set(extractedValue);
     return true;
@@ -1141,16 +1141,16 @@ function applyFieldToModule(
 }
 
 /**
- * Create a new sub-charm module with extracted fields.
+ * Create a new sub-piece module with extracted fields.
  * Validates each field before adding to initial values.
  *
- * @returns The new SubCharmEntry or null if no valid fields
+ * @returns The new SubPieceEntry or null if no valid fields
  */
 function createModuleWithFields(
   moduleType: string,
   fields: ExtractedField[],
-  subCharms: readonly SubCharmEntry[],
-): SubCharmEntry | null {
+  subPieces: readonly SubPieceEntry[],
+): SubPieceEntry | null {
   // Build initial values object from extracted fields
   const initialValues: Record<string, unknown> = {};
 
@@ -1159,7 +1159,7 @@ function createModuleWithFields(
     const actualFieldName = getPrimaryFieldName(field.fieldName, moduleType);
 
     // Validate before adding to initialValues (use actual field name)
-    const fieldSchema = getFieldSchema(subCharms, moduleType, actualFieldName);
+    const fieldSchema = getFieldSchema(subPieces, moduleType, actualFieldName);
     const isValid = validateFieldValue(field.extractedValue, fieldSchema);
 
     if (!isValid) {
@@ -1184,13 +1184,13 @@ function createModuleWithFields(
   }
 
   try {
-    const newCharm = createSubCharm(moduleType, initialValues);
+    const newPiece = createSubPiece(moduleType, initialValues);
     // Capture schema at creation time for dynamic discovery
-    const schema = getResultSchema(newCharm);
+    const schema = getResultSchema(newPiece);
     return {
       type: moduleType,
       pinned: false,
-      charm: newCharm,
+      piece: newPiece,
       schema,
     };
   } catch (e) {
@@ -1203,8 +1203,8 @@ function createModuleWithFields(
  * Parameters for Notes cleanup operation.
  */
 interface NotesCleanupParams {
-  parentSubCharmsCell: Writable<SubCharmEntry[]>;
-  current: SubCharmEntry[];
+  parentSubPiecesCell: Writable<SubPieceEntry[]>;
+  current: SubPieceEntry[];
   cleanupEnabledValue: boolean;
   cleanedNotesValue: string;
   notesSnapshotMapValue: Record<string, string>;
@@ -1217,14 +1217,14 @@ interface NotesCleanupParams {
  * Apply Notes cleanup by updating the Notes module content.
  * Uses a dual-approach architecture for reliability:
  *
- * 1. Stream.send() - Preferred method for cross-charm mutation
+ * 1. Stream.send() - Preferred method for cross-piece mutation
  * 2. Cell.key() navigation - Fallback when stream is unavailable
  *
  * @returns true if any cleanup was successfully applied
  */
 function applyNotesCleanup(params: NotesCleanupParams): boolean {
   const {
-    parentSubCharmsCell,
+    parentSubPiecesCell,
     current,
     cleanupEnabledValue,
     cleanedNotesValue,
@@ -1265,11 +1265,11 @@ function applyNotesCleanup(params: NotesCleanupParams): boolean {
 
     // Approach 1: Try editContent.send (best for UI reactivity)
     try {
-      const notesCharm = notesEntry.charm as {
+      const notesPiece = notesEntry.piece as {
         editContent?: { send?: (data: unknown) => void };
       };
-      if (notesCharm?.editContent?.send) {
-        notesCharm.editContent.send({
+      if (notesPiece?.editContent?.send) {
+        notesPiece.editContent.send({
           detail: { value: cleanedNotesValue },
         });
         thisCleanupSucceeded = true;
@@ -1288,9 +1288,9 @@ function applyNotesCleanup(params: NotesCleanupParams): boolean {
     if (!thisCleanupSucceeded) {
       try {
         // Cast needed: Writable.key() navigation loses type info for dynamic nested paths
-        (parentSubCharmsCell as Writable<SubCharmEntry[]>)
+        (parentSubPiecesCell as Writable<SubPieceEntry[]>)
           .key(notesIndex)
-          .key("charm")
+          .key("piece")
           .key("content")
           .set(cleanedNotesValue);
         thisCleanupSucceeded = true;
@@ -1366,8 +1366,8 @@ function buildTrashList(
 const applySelected = handler<
   unknown,
   {
-    parentSubCharmsCell: Writable<SubCharmEntry[]>;
-    parentTrashedSubCharmsCell: Writable<TrashedSubCharmEntry[]>;
+    parentSubPiecesCell: Writable<SubPieceEntry[]>;
+    parentTrashedSubPiecesCell: Writable<TrashedSubPieceEntry[]>;
     parentTitleCell: Writable<string>;
     extractionResultValue: Record<string, unknown> | null;
     // Field metadata from extraction (confidence scores, explanations)
@@ -1394,8 +1394,8 @@ const applySelected = handler<
   (
     _event,
     {
-      parentSubCharmsCell,
-      parentTrashedSubCharmsCell,
+      parentSubPiecesCell,
+      parentTrashedSubPiecesCell,
       parentTitleCell,
       extractionResultValue,
       extractionFieldMetadataValue,
@@ -1416,9 +1416,9 @@ const applySelected = handler<
 
     try {
       // Read Cells inside handler, filter out malformed entries
-      const rawSubCharms = parentSubCharmsCell.get() || [];
-      const subCharmsData = rawSubCharms.filter(
-        (e): e is SubCharmEntry =>
+      const rawSubPieces = parentSubPiecesCell.get() || [];
+      const subPiecesData = rawSubPieces.filter(
+        (e): e is SubPieceEntry =>
           e != null && typeof e === "object" && "type" in e,
       );
       const extractionResult = extractionResultValue;
@@ -1427,20 +1427,20 @@ const applySelected = handler<
       const currentTitle = parentTitleCell.get() || "";
       const previewData = buildPreview(
         extractionResult,
-        subCharmsData,
+        subPiecesData,
         currentTitle,
         extractionFieldMetadataValue,
       );
-      const sourcesData = scanExtractableSources(subCharmsData);
+      const sourcesData = scanExtractableSources(subPiecesData);
 
       if (!previewData || !previewData.fields) return;
 
       // Filter current entries too (defensive)
-      const current: SubCharmEntry[] = (parentSubCharmsCell.get() || []).filter(
-        (e): e is SubCharmEntry =>
+      const current: SubPieceEntry[] = (parentSubPiecesCell.get() || []).filter(
+        (e): e is SubPieceEntry =>
           e != null && typeof e === "object" && "type" in e,
       );
-      const subCharms = current; // For schema lookups
+      const subPieces = current; // For schema lookups
       const selected = selectionsCell.get() || {};
       const toTrash = trashSelectionsCell.get() || {};
 
@@ -1466,7 +1466,7 @@ const applySelected = handler<
       let anySuccess = false;
 
       // Collect new entries to add (batched to avoid multiple set() calls)
-      const newEntries: SubCharmEntry[] = [];
+      const newEntries: SubPieceEntry[] = [];
 
       // Process each module type
       for (const [moduleType, fields] of Object.entries(fieldsByModule)) {
@@ -1514,12 +1514,12 @@ const applySelected = handler<
                 Object.assign(initialValues, item);
               }
 
-              const newCharm = createSubCharm(moduleType, initialValues);
-              const schema = getResultSchema(newCharm);
+              const newPiece = createSubPiece(moduleType, initialValues);
+              const schema = getResultSchema(newPiece);
               newEntries.push({
                 type: moduleType,
                 pinned: false,
-                charm: newCharm,
+                piece: newPiece,
                 schema,
               });
               anySuccess = true;
@@ -1564,12 +1564,12 @@ const applySelected = handler<
 
             // Apply field using helper function
             const success = applyFieldToModule(
-              parentSubCharmsCell,
+              parentSubPiecesCell,
               existingIndex,
               moduleType,
               field.fieldName,
               field.extractedValue,
-              subCharms,
+              subPieces,
             );
             if (success) {
               anySuccess = true;
@@ -1580,7 +1580,7 @@ const applySelected = handler<
           const newEntry = createModuleWithFields(
             moduleType,
             fields,
-            subCharms,
+            subPieces,
           );
           if (newEntry) {
             newEntries.push(newEntry);
@@ -1609,7 +1609,7 @@ const applySelected = handler<
       // Apply Notes cleanup using helper function
       // See applyNotesCleanup for dual-approach architecture details
       applyNotesCleanup({
-        parentSubCharmsCell,
+        parentSubPiecesCell,
         current,
         cleanupEnabledValue,
         cleanedNotesValue,
@@ -1625,7 +1625,7 @@ const applySelected = handler<
       for (const idx of indicesToTrash) {
         const entry = current[idx];
         if (entry) {
-          parentTrashedSubCharmsCell.push({
+          parentTrashedSubPiecesCell.push({
             ...entry,
             trashedAt: new Date().toISOString(),
           });
@@ -1635,7 +1635,7 @@ const applySelected = handler<
       // Build final list: remove trashed items, add new entries
       const remaining = current.filter((_, i) => !indicesToTrash.includes(i));
       const final = [...remaining, ...newEntries];
-      parentSubCharmsCell.set(final);
+      parentSubPiecesCell.set(final);
     } finally {
       applyInProgressCell.set(false);
     }
@@ -1651,8 +1651,8 @@ export const ExtractorModule = recipe<
   "ExtractorModule",
   (
     {
-      parentSubCharms,
-      parentTrashedSubCharms,
+      parentSubPieces,
+      parentTrashedSubPieces,
       parentTitle,
       sourceSelections,
       trashSelections,
@@ -1681,8 +1681,8 @@ export const ExtractorModule = recipe<
 
     // Single computed that derives ALL source-related data
     const sourceData = computed(() => {
-      const subCharms = parentSubCharms.get() || [];
-      const sources = scanExtractableSources(subCharms);
+      const subPieces = parentSubPieces.get() || [];
+      const sources = scanExtractableSources(subPieces);
       const selectionsMap = sourceSelections.get() || {};
       const trashMap = trashSelections.get() || {};
 
@@ -2109,12 +2109,12 @@ export const ExtractorModule = recipe<
     // Build preview from merged extraction result
     const preview = computed((): ExtractionPreview | null => {
       if (!mergedExtractionResult) return null;
-      const subCharms = parentSubCharms.get() || [];
+      const subPieces = parentSubPieces.get() || [];
       const currentTitle = parentTitle.get() || "";
       const metadata = extractionFieldMetadata;
       const result = buildPreview(
         mergedExtractionResult,
-        subCharms,
+        subPieces,
         currentTitle,
         metadata,
       );
@@ -2479,7 +2479,7 @@ export const ExtractorModule = recipe<
               null,
               <button
                 type="button"
-                onClick={dismiss({ parentSubCharms, parentTrashedSubCharms })}
+                onClick={dismiss({ parentSubPieces, parentTrashedSubPieces })}
                 style={{
                   background: "transparent",
                   border: "none",
@@ -2682,7 +2682,7 @@ export const ExtractorModule = recipe<
                       disabled={extractButtonDisabled}
                       onClick={startExtraction({
                         sourceSelectionsCell: sourceSelections,
-                        parentSubCharmsCell: parentSubCharms,
+                        parentSubPiecesCell: parentSubPieces,
                         extractPhaseCell: extractPhase,
                         notesContentSnapshotCell: notesContentSnapshot,
                       })}
@@ -3387,7 +3387,7 @@ export const ExtractorModule = recipe<
                 </button>
                 <button
                   type="button"
-                  onClick={dismiss({ parentSubCharms, parentTrashedSubCharms })}
+                  onClick={dismiss({ parentSubPieces, parentTrashedSubPieces })}
                   style={{
                     padding: "8px 16px",
                     background: "white",
@@ -3403,8 +3403,8 @@ export const ExtractorModule = recipe<
                   type="button"
                   disabled={applyButtonDisabled}
                   onClick={applySelected({
-                    parentSubCharmsCell: parentSubCharms,
-                    parentTrashedSubCharmsCell: parentTrashedSubCharms,
+                    parentSubPiecesCell: parentSubPieces,
+                    parentTrashedSubPiecesCell: parentTrashedSubPieces,
                     parentTitleCell: parentTitle,
                     // Pass computed that dereferences mergedExtractionResult (reactive properties
                     // don't auto-dereference when passed directly to handlers)

@@ -1,6 +1,6 @@
 import { env, waitFor } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
-import { CharmsController } from "@commontools/charm/ops";
+import { PiecesController } from "@commontools/piece/ops";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -19,19 +19,19 @@ describe("Chat pattern test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  let charmId: string;
+  let pieceId: string;
   let identity: Identity;
-  let cc: CharmsController;
+  let cc: PiecesController;
 
   if (!ignore) {
     beforeAll(async () => {
       identity = await Identity.generate({ implementation: "noble" });
-      cc = await CharmsController.initialize({
+      cc = await PiecesController.initialize({
         spaceName: SPACE_NAME,
         apiUrl: new URL(API_URL),
         identity: identity,
       });
-      const charm = await cc.create(
+      const piece = await cc.create(
         await Deno.readTextFile(
           join(
             import.meta.dirname!,
@@ -41,7 +41,7 @@ describe("Chat pattern test", () => {
         ),
         { start: false },
       );
-      charmId = charm.id;
+      pieceId = piece.id;
     });
 
     afterAll(async () => {
@@ -50,7 +50,7 @@ describe("Chat pattern test", () => {
   }
 
   it({
-    name: "should load the Chat test charm and display initial UI",
+    name: "should load the Chat test piece and display initial UI",
     ignore,
     fn: async () => {
       const page = shell.page();
@@ -58,7 +58,7 @@ describe("Chat pattern test", () => {
         frontendUrl: FRONTEND_URL,
         view: {
           spaceName: SPACE_NAME,
-          charmId,
+          pieceId,
         },
         identity,
       });

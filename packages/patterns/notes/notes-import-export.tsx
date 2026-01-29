@@ -24,7 +24,7 @@ const generateId = () =>
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
 
 // Types for notes and notebooks in the space
-type NoteCharm = {
+type NotePiece = {
   [NAME]?: string;
   title?: string;
   content?: string;
@@ -32,23 +32,23 @@ type NoteCharm = {
   noteId?: string;
 };
 
-type NotebookCharm = {
+type NotebookPiece = {
   [NAME]?: string;
   title?: string;
-  notes?: NoteCharm[];
+  notes?: NotePiece[];
   isNotebook?: boolean;
   isHidden?: boolean;
 };
 
-type MinimalCharm = {
+type MinimalPiece = {
   [NAME]?: string;
 };
 
 interface Input {
   title?: Default<string, "All Notes">;
   importMarkdown?: Default<string, "">;
-  /** Pass allCharms directly from default-app for proper cell sharing */
-  allCharms?: NoteCharm[];
+  /** Pass allPieces directly from default-app for proper cell sharing */
+  allPieces?: NotePiece[];
 }
 
 interface Output {
@@ -58,7 +58,7 @@ interface Output {
   importMarkdown: string;
   noteCount: number;
   notebookCount: number;
-  mentionable: NoteCharm[];
+  mentionable: NotePiece[];
 }
 
 // Helper to resolve proxy value to primitive string
@@ -89,20 +89,20 @@ function resolveBooleanValue(value: unknown, parentObj?: unknown): boolean {
   return String(value) === "true";
 }
 
-// Helper to get charm name (handles both local and wish("#default") charms)
-function _getCharmName(charm: unknown): string {
-  const symbolName = (charm as any)?.[NAME];
+// Helper to get piece name (handles both local and wish("#default") pieces)
+function _getPieceName(piece: unknown): string {
+  const symbolName = (piece as any)?.[NAME];
   if (typeof symbolName === "string") return symbolName;
-  const titleProp = (charm as any)?.title;
+  const titleProp = (piece as any)?.title;
   if (typeof titleProp === "string") return titleProp;
   return "";
 }
 
-// Helper to check if a charm is a notebook
-function isNotebookCharm(charm: unknown): boolean {
-  const name = (charm as any)?.[NAME];
+// Helper to check if a piece is a notebook
+function isNotebookPiece(piece: unknown): boolean {
+  const name = (piece as any)?.[NAME];
   if (typeof name === "string" && name.startsWith("📓")) return true;
-  return (charm as any)?.isNotebook === true;
+  return (piece as any)?.isNotebook === true;
 }
 
 // Helper to get clean notebook title (strip emoji and count)
@@ -127,8 +127,8 @@ function stripMentionIds(content: string): string {
 
 // Get notebook names that contain a note (by noteId)
 function getNotebookNamesForNote(
-  note: NoteCharm,
-  notebooks: NotebookCharm[],
+  note: NotePiece,
+  notebooks: NotebookPiece[],
 ): string[] {
   const noteId = resolveValue(note?.noteId);
   if (!noteId) return [];
@@ -149,14 +149,14 @@ function getNotebookNamesForNote(
 
 // Get noteIds and child notebook titles from a notebook
 function getNotebookContents(
-  notebook: NotebookCharm,
+  notebook: NotebookPiece,
 ): { noteIds: string[]; childNotebookTitles: string[] } {
   const notes = (notebook as any)?.notes ?? [];
   const noteIds: string[] = [];
   const childNotebookTitles: string[] = [];
 
   for (const item of notes) {
-    if (isNotebookCharm(item)) {
+    if (isNotebookPiece(item)) {
       const title = getCleanNotebookTitle(item);
       if (title) childNotebookTitles.push(title);
     } else {
@@ -173,13 +173,13 @@ function getNotebookContents(
 // ============================================================================
 
 function generateExport(
-  charms: NoteCharm[],
-  notebooks: NotebookCharm[],
-  allCharmsRaw?: unknown[],
+  pieces: NotePiece[],
+  notebooks: NotebookPiece[],
+  allPiecesRaw?: unknown[],
 ): { markdown: string; count: number; notebookCount: number } {
-  // Filter to only note charms
-  const notes = charms.filter(
-    (charm) => charm?.title !== undefined && charm?.content !== undefined,
+  // Filter to only note pieces
+  const notes = pieces.filter(
+    (piece) => piece?.title !== undefined && piece?.content !== undefined,
   );
 
   // Format each note with HTML comment markers
@@ -203,11 +203,11 @@ function generateExport(
     const escapedTitle = title.replace(/"/g, "&quot;");
 
     let isHidden = false;
-    if (allCharmsRaw) {
+    if (allPiecesRaw) {
       const notebookName = (notebook as any)?.[NAME];
-      for (const charm of allCharmsRaw) {
-        if ((charm as any)?.[NAME] === notebookName) {
-          isHidden = resolveBooleanValue((charm as any)?.isHidden, charm);
+      for (const piece of allPiecesRaw) {
+        if ((piece as any)?.[NAME] === notebookName) {
+          isHidden = resolveBooleanValue((piece as any)?.isHidden, piece);
           break;
         }
       }
@@ -365,8 +365,8 @@ type DetectedDuplicate = {
 
 function performImport(
   parsedNotes: ParsedNote[],
-  allCharms: Writable<NoteCharm[]>,
-  notebooks: Writable<NotebookCharm[]>,
+  allPieces: Writable<NotePiece[]>,
+  notebooks: Writable<NotebookPiece[]>,
   skipTitles: Set<string>,
   rawMarkdown?: string,
   onComplete?: () => void,
@@ -419,12 +419,12 @@ function performImport(
     contentCell: Writable<string>;
     originalContent: string;
   }> = [];
-  const noteIdToCharm = new Map<string, NoteCharm>();
-  const notesByNotebook = new Map<string, NoteCharm[]>();
+  const noteIdToPiece = new Map<string, NotePiece>();
+  const notesByNotebook = new Map<string, NotePiece[]>();
 
-  const startingIndex = allCharms.get().length;
+  const startingIndex = allPieces.get().length;
   let currentIndex = startingIndex;
-  const newItems: NoteCharm[] = [];
+  const newItems: NotePiece[] = [];
 
   parsedNotes.forEach((noteData) => {
     if (skipTitles.has(noteData.title)) return;
@@ -447,7 +447,7 @@ function performImport(
     });
 
     newItems.push(note);
-    noteIdToCharm.set(noteIdToUse, note);
+    noteIdToPiece.set(noteIdToUse, note);
     createdNotes.push({
       title: noteData.title,
       noteId: noteIdToUse,
@@ -473,21 +473,21 @@ function performImport(
       notesByNotebook.set(nb.title, []);
     }
     for (const noteId of nb.noteIds) {
-      const charm = noteIdToCharm.get(noteId);
-      if (charm) {
+      const piece = noteIdToPiece.get(noteId);
+      if (piece) {
         const existing = notesByNotebook.get(nb.title)!;
-        if (!existing.includes(charm)) {
-          existing.push(charm);
+        if (!existing.includes(piece)) {
+          existing.push(piece);
         }
       }
     }
   }
 
   // Phase 2: Create notebooks in topological order
-  const createdNotebookByIndex = new Map<number, NoteCharm>();
+  const createdNotebookByIndex = new Map<number, NotePiece>();
   const usedTitles = new Set<string>(existingNames);
   const createdNotebooks: Array<
-    { originalIndex: number; notebook: NoteCharm }
+    { originalIndex: number; notebook: NotePiece }
   > = [];
 
   const getUniqueTitle = (baseTitle: string): string => {
@@ -521,13 +521,13 @@ function performImport(
       const actualName = getUniqueTitle(nbData.title);
       const notesForNotebook = notesByNotebook.get(nbData.title) ?? [];
 
-      const childNotebooks: NoteCharm[] = [];
+      const childNotebooks: NotePiece[] = [];
       for (const childTitle of nbData.childNotebookTitles) {
         const childIndices = titleToChildIndices.get(childTitle) ?? [];
         for (const childIdx of childIndices) {
-          const childCharm = createdNotebookByIndex.get(childIdx);
-          if (childCharm) {
-            childNotebooks.push(childCharm);
+          const childPiece = createdNotebookByIndex.get(childIdx);
+          if (childPiece) {
+            childNotebooks.push(childPiece);
           }
         }
       }
@@ -562,14 +562,14 @@ function performImport(
 
   // Batch push all items
   if (newItems.length > 0) {
-    allCharms.set([...allCharms.get(), ...newItems]);
+    allPieces.set([...allPieces.get(), ...newItems]);
   }
 
   // Phase 3: Resolve mentions
   const titleToId = new Map<string, string>();
   for (const { title, index } of createdNotes) {
     try {
-      const noteCell = allCharms.key(index) as any;
+      const noteCell = allPieces.key(index) as any;
       const resolved = noteCell.resolveAsCell();
       const entityId = resolved?.entityId;
       if (entityId?.["/"] && title) {
@@ -680,7 +680,7 @@ const toggleNotebookCheckbox = handler<
 // Select all/deselect all handlers
 const selectAllNotes = handler<
   Record<string, never>,
-  { notes: Writable<NoteCharm[]>; selectedNoteIndices: Writable<number[]> }
+  { notes: Writable<NotePiece[]>; selectedNoteIndices: Writable<number[]> }
 >((_, { notes, selectedNoteIndices }) => {
   selectedNoteIndices.set(notes.get().map((_, i) => i));
 });
@@ -695,7 +695,7 @@ const deselectAllNotes = handler<
 const selectAllNotebooks = handler<
   Record<string, never>,
   {
-    notebooks: Writable<NotebookCharm[]>;
+    notebooks: Writable<NotebookPiece[]>;
     selectedNotebookIndices: Writable<number[]>;
   }
 >((_, { notebooks, selectedNotebookIndices }) => {
@@ -710,12 +710,12 @@ const deselectAllNotebooks = handler<
 });
 
 // Navigate to note
-const goToNote = handler<void, { note: Writable<NoteCharm> }>(
+const goToNote = handler<void, { note: Writable<NotePiece> }>(
   (_, { note }) => navigateTo(note),
 );
 
 // Navigate to notebook
-const goToNotebook = handler<void, { notebook: Writable<NotebookCharm> }>(
+const goToNotebook = handler<void, { notebook: Writable<NotebookPiece> }>(
   (_, { notebook }) => navigateTo(notebook),
 );
 
@@ -726,7 +726,7 @@ const goToNotebook = handler<void, { notebook: Writable<NotebookCharm> }>(
 // Toggle individual note visibility
 const toggleNoteVisibility = handler<
   Record<string, never>,
-  { note: Writable<NoteCharm> }
+  { note: Writable<NotePiece> }
 >((_, { note }) => {
   const isHiddenCell = note.key("isHidden");
   const current = isHiddenCell.get() ?? false;
@@ -736,7 +736,7 @@ const toggleNoteVisibility = handler<
 // Toggle individual notebook visibility
 const toggleNotebookVisibility = handler<
   Record<string, never>,
-  { notebook: Writable<NotebookCharm> }
+  { notebook: Writable<NotebookPiece> }
 >((_, { notebook }) => {
   const isHiddenCell = notebook.key("isHidden");
   const current = isHiddenCell.get() ?? false;
@@ -746,7 +746,7 @@ const toggleNotebookVisibility = handler<
 // Toggle all notes visibility (bulk)
 const toggleAllNotesVisibility = handler<
   Record<string, never>,
-  { notes: Writable<NoteCharm[]> }
+  { notes: Writable<NotePiece[]> }
 >((_, { notes }) => {
   const notesList = notes.get();
   if (notesList.length === 0) return;
@@ -763,7 +763,7 @@ const toggleAllNotesVisibility = handler<
 // Toggle all notebooks visibility (bulk)
 const toggleAllNotebooksVisibility = handler<
   Record<string, never>,
-  { notebooks: Writable<NotebookCharm[]> }
+  { notebooks: Writable<NotebookPiece[]> }
 >((_, { notebooks }) => {
   const notebooksList = notebooks.get();
   if (notebooksList.length === 0) return;
@@ -780,29 +780,29 @@ const toggleAllNotebooksVisibility = handler<
 // Create a new note
 const createNote = handler<
   Record<string, never>,
-  { allCharms: Writable<NoteCharm[]> }
->((_, { allCharms }) => {
+  { allPieces: Writable<NotePiece[]> }
+>((_, { allPieces }) => {
   const note = Note({
     title: "New Note",
     content: "",
     noteId: generateId(),
   });
-  allCharms.push(note);
+  allPieces.push(note);
 });
 
 // Duplicate selected notes (reserved for future use)
 const _duplicateSelectedNotes = handler<
   Record<string, never>,
   {
-    notes: Writable<NoteCharm[]>;
+    notes: Writable<NotePiece[]>;
     selectedNoteIndices: Writable<number[]>;
-    allCharms: Writable<NoteCharm[]>;
+    allPieces: Writable<NotePiece[]>;
   }
->((_, { notes, selectedNoteIndices, allCharms }) => {
+>((_, { notes, selectedNoteIndices, allPieces }) => {
   const selected = selectedNoteIndices.get();
   const notesList = notes.get();
 
-  const copies: NoteCharm[] = [];
+  const copies: NotePiece[] = [];
   for (const idx of selected) {
     const original = notesList[idx];
     if (original) {
@@ -813,7 +813,7 @@ const _duplicateSelectedNotes = handler<
       }));
     }
   }
-  allCharms.push(...copies);
+  allPieces.push(...copies);
   selectedNoteIndices.set([]);
 });
 
@@ -821,15 +821,15 @@ const _duplicateSelectedNotes = handler<
 const deleteSelectedNotes = handler<
   Record<string, never>,
   {
-    notes: Writable<NoteCharm[]>;
+    notes: Writable<NotePiece[]>;
     selectedNoteIndices: Writable<number[]>;
-    allCharms: Writable<NoteCharm[]>;
-    notebooks: Writable<NotebookCharm[]>;
+    allPieces: Writable<NotePiece[]>;
+    notebooks: Writable<NotebookPiece[]>;
   }
->((_, { notes, selectedNoteIndices, allCharms, notebooks }) => {
+>((_, { notes, selectedNoteIndices, allPieces, notebooks }) => {
   const selected = selectedNoteIndices.get();
   const notesList = notes.get();
-  const allCharmsList = allCharms.get();
+  const allPiecesList = allPieces.get();
   const notebooksList = notebooks.get();
 
   const noteIdsToDelete: string[] = [];
@@ -856,11 +856,11 @@ const deleteSelectedNotes = handler<
     }
   }
 
-  // Remove from allCharms
-  const filteredCharms = allCharmsList.filter((charm: any) =>
-    !shouldDelete(charm)
+  // Remove from allPieces
+  const filteredPieces = allPiecesList.filter((piece: any) =>
+    !shouldDelete(piece)
   );
-  allCharms.set(filteredCharms);
+  allPieces.set(filteredPieces);
 
   selectedNoteIndices.set([]);
 });
@@ -869,8 +869,8 @@ const deleteSelectedNotes = handler<
 const addToNotebook = handler<
   { target?: { value: string }; detail?: { value: string } },
   {
-    notebooks: Writable<NotebookCharm[]>;
-    notes: Writable<NoteCharm[]>;
+    notebooks: Writable<NotebookPiece[]>;
+    notes: Writable<NotePiece[]>;
     selectedNoteIndices: Writable<number[]>;
     selectedNotebook: Writable<string>;
     showNewNotebookPrompt: Writable<boolean>;
@@ -898,7 +898,7 @@ const addToNotebook = handler<
   for (const idx of selected) {
     const note = notesList[idx];
     if (note) {
-      (notebookNotes as Writable<NoteCharm[] | undefined>).push(note);
+      (notebookNotes as Writable<NotePiece[] | undefined>).push(note);
       state.notes.key(idx).key("isHidden").set(true);
     }
   }
@@ -911,8 +911,8 @@ const addToNotebook = handler<
 const moveToNotebook = handler<
   { target?: { value: string }; detail?: { value: string } },
   {
-    notebooks: Writable<NotebookCharm[]>;
-    notes: Writable<NoteCharm[]>;
+    notebooks: Writable<NotebookPiece[]>;
+    notes: Writable<NotePiece[]>;
     selectedNoteIndices: Writable<number[]>;
     selectedMoveNotebook: Writable<string>;
     showNewNotebookPrompt: Writable<boolean>;
@@ -939,7 +939,7 @@ const moveToNotebook = handler<
   const targetNotebookNotes = targetNotebookCell.key("notes");
 
   const selectedNoteIds: string[] = [];
-  const itemsToMove: NoteCharm[] = [];
+  const itemsToMove: NotePiece[] = [];
 
   for (const idx of selected) {
     const item = notesList[idx];
@@ -973,7 +973,7 @@ const moveToNotebook = handler<
 
   // Add to target
   for (const item of itemsToMove) {
-    (targetNotebookNotes as Writable<NoteCharm[] | undefined>).push(item);
+    (targetNotebookNotes as Writable<NotePiece[] | undefined>).push(item);
   }
 
   state.selectedNoteIndices.set([]);
@@ -984,15 +984,15 @@ const moveToNotebook = handler<
 const cloneSelectedNotebooks = handler<
   Record<string, never>,
   {
-    notebooks: Writable<NotebookCharm[]>;
+    notebooks: Writable<NotebookPiece[]>;
     selectedNotebookIndices: Writable<number[]>;
-    allCharms: Writable<NoteCharm[]>;
+    allPieces: Writable<NotePiece[]>;
   }
->((_, { notebooks, selectedNotebookIndices, allCharms }) => {
+>((_, { notebooks, selectedNotebookIndices, allPieces }) => {
   const selected = selectedNotebookIndices.get();
   const notebooksList = notebooks.get();
 
-  const copies: NoteCharm[] = [];
+  const copies: NotePiece[] = [];
   for (const idx of selected) {
     const original = notebooksList[idx];
     if (original) {
@@ -1003,7 +1003,7 @@ const cloneSelectedNotebooks = handler<
       }));
     }
   }
-  allCharms.push(...copies);
+  allPieces.push(...copies);
   selectedNotebookIndices.set([]);
 });
 
@@ -1011,15 +1011,15 @@ const cloneSelectedNotebooks = handler<
 const duplicateSelectedNotebooks = handler<
   Record<string, never>,
   {
-    notebooks: Writable<NotebookCharm[]>;
+    notebooks: Writable<NotebookPiece[]>;
     selectedNotebookIndices: Writable<number[]>;
-    allCharms: Writable<NoteCharm[]>;
+    allPieces: Writable<NotePiece[]>;
   }
->((_, { notebooks, selectedNotebookIndices, allCharms }) => {
+>((_, { notebooks, selectedNotebookIndices, allPieces }) => {
   const selected = selectedNotebookIndices.get();
   const notebooksList = notebooks.get();
 
-  const newItems: NoteCharm[] = [];
+  const newItems: NotePiece[] = [];
 
   for (const idx of selected) {
     const original = notebooksList[idx];
@@ -1043,7 +1043,7 @@ const duplicateSelectedNotebooks = handler<
     }
   }
 
-  allCharms.push(...newItems);
+  allPieces.push(...newItems);
   selectedNotebookIndices.set([]);
 });
 
@@ -1064,18 +1064,18 @@ const confirmDeleteNotebooks = handler<
 const deleteNotebooksOnly = handler<
   Record<string, never>,
   {
-    notebooks: Writable<NotebookCharm[]>;
+    notebooks: Writable<NotebookPiece[]>;
     selectedNotebookIndices: Writable<number[]>;
-    allCharms: Writable<NoteCharm[]>;
+    allPieces: Writable<NotePiece[]>;
     showDeleteNotebookModal: Writable<boolean>;
   }
 >((
   _,
-  { notebooks, selectedNotebookIndices, allCharms, showDeleteNotebookModal },
+  { notebooks, selectedNotebookIndices, allPieces, showDeleteNotebookModal },
 ) => {
   const selected = selectedNotebookIndices.get();
   const notebooksList = notebooks.get();
-  const allCharmsList = allCharms.get();
+  const allPiecesList = allPieces.get();
 
   if (!selected || selected.length === 0) {
     showDeleteNotebookModal.set(false);
@@ -1089,9 +1089,9 @@ const deleteNotebooksOnly = handler<
     for (const note of nbNotes) {
       const noteId = (note as any)?.noteId;
       if (noteId) {
-        for (let i = 0; i < allCharmsList.length; i++) {
-          if ((allCharmsList[i] as any)?.noteId === noteId) {
-            allCharms.key(i).key("isHidden").set(false);
+        for (let i = 0; i < allPiecesList.length; i++) {
+          if ((allPiecesList[i] as any)?.noteId === noteId) {
+            allPieces.key(i).key("isHidden").set(false);
             break;
           }
         }
@@ -1099,27 +1099,27 @@ const deleteNotebooksOnly = handler<
     }
   }
 
-  // Find notebook indices in allCharms
-  const notebookIndicesInAllCharms: number[] = [];
-  for (let i = 0; i < allCharmsList.length; i++) {
-    if (isNotebookCharm(allCharmsList[i])) {
-      notebookIndicesInAllCharms.push(i);
+  // Find notebook indices in allPieces
+  const notebookIndicesInAllPieces: number[] = [];
+  for (let i = 0; i < allPiecesList.length; i++) {
+    if (isNotebookPiece(allPiecesList[i])) {
+      notebookIndicesInAllPieces.push(i);
     }
   }
 
-  // Map selected to allCharms indices
-  const allCharmsIndicesToDelete = new Set<number>();
+  // Map selected to allPieces indices
+  const allPiecesIndicesToDelete = new Set<number>();
   for (const selectedIdx of selected) {
-    const allCharmsIdx = notebookIndicesInAllCharms[selectedIdx];
-    if (allCharmsIdx !== undefined) {
-      allCharmsIndicesToDelete.add(allCharmsIdx);
+    const allPiecesIdx = notebookIndicesInAllPieces[selectedIdx];
+    if (allPiecesIdx !== undefined) {
+      allPiecesIndicesToDelete.add(allPiecesIdx);
     }
   }
 
-  const filteredCharms = allCharmsList.filter((_, i) =>
-    !allCharmsIndicesToDelete.has(i)
+  const filteredPieces = allPiecesList.filter((_, i) =>
+    !allPiecesIndicesToDelete.has(i)
   );
-  allCharms.set(filteredCharms);
+  allPieces.set(filteredPieces);
 
   selectedNotebookIndices.set([]);
   showDeleteNotebookModal.set(false);
@@ -1129,18 +1129,18 @@ const deleteNotebooksOnly = handler<
 const deleteNotebooksAndNotes = handler<
   Record<string, never>,
   {
-    notebooks: Writable<NotebookCharm[]>;
+    notebooks: Writable<NotebookPiece[]>;
     selectedNotebookIndices: Writable<number[]>;
-    allCharms: Writable<NoteCharm[]>;
+    allPieces: Writable<NotePiece[]>;
     showDeleteNotebookModal: Writable<boolean>;
   }
 >((
   _,
-  { notebooks, selectedNotebookIndices, allCharms, showDeleteNotebookModal },
+  { notebooks, selectedNotebookIndices, allPieces, showDeleteNotebookModal },
 ) => {
   const selected = selectedNotebookIndices.get();
   const notebooksList = notebooks.get();
-  const allCharmsList = allCharms.get();
+  const allPiecesList = allPieces.get();
 
   if (!selected || selected.length === 0) {
     showDeleteNotebookModal.set(false);
@@ -1158,29 +1158,29 @@ const deleteNotebooksAndNotes = handler<
     }
   }
 
-  // Find notebook indices in allCharms
-  const notebookIndicesInAllCharms: number[] = [];
-  for (let i = 0; i < allCharmsList.length; i++) {
-    if (isNotebookCharm(allCharmsList[i])) {
-      notebookIndicesInAllCharms.push(i);
+  // Find notebook indices in allPieces
+  const notebookIndicesInAllPieces: number[] = [];
+  for (let i = 0; i < allPiecesList.length; i++) {
+    if (isNotebookPiece(allPiecesList[i])) {
+      notebookIndicesInAllPieces.push(i);
     }
   }
 
-  const allCharmsIndicesToDelete = new Set<number>();
+  const allPiecesIndicesToDelete = new Set<number>();
   for (const selectedIdx of selected) {
-    const allCharmsIdx = notebookIndicesInAllCharms[selectedIdx];
-    if (allCharmsIdx !== undefined) {
-      allCharmsIndicesToDelete.add(allCharmsIdx);
+    const allPiecesIdx = notebookIndicesInAllPieces[selectedIdx];
+    if (allPiecesIdx !== undefined) {
+      allPiecesIndicesToDelete.add(allPiecesIdx);
     }
   }
 
-  const filteredCharms = allCharmsList.filter((charm: any, i) => {
-    if (allCharmsIndicesToDelete.has(i)) return false;
-    const noteId = charm?.noteId;
+  const filteredPieces = allPiecesList.filter((piece: any, i) => {
+    if (allPiecesIndicesToDelete.has(i)) return false;
+    const noteId = piece?.noteId;
     if (noteId && noteIdsToDelete.includes(noteId)) return false;
     return true;
   });
-  allCharms.set(filteredCharms);
+  allPieces.set(filteredPieces);
 
   selectedNotebookIndices.set([]);
   showDeleteNotebookModal.set(false);
@@ -1211,12 +1211,12 @@ const createStandaloneNotebookAndOpen = handler<
   {
     standaloneNotebookTitle: Writable<string>;
     showStandaloneNotebookPrompt: Writable<boolean>;
-    allCharms: Writable<NoteCharm[]>;
+    allPieces: Writable<NotePiece[]>;
   }
->((_, { standaloneNotebookTitle, showStandaloneNotebookPrompt, allCharms }) => {
+>((_, { standaloneNotebookTitle, showStandaloneNotebookPrompt, allPieces }) => {
   const title = standaloneNotebookTitle.get().trim() || "New Notebook";
   const nb = Notebook({ title });
-  allCharms.push(nb);
+  allPieces.push(nb);
   showStandaloneNotebookPrompt.set(false);
   standaloneNotebookTitle.set("");
   return navigateTo(nb);
@@ -1227,12 +1227,12 @@ const createStandaloneNotebookAndContinue = handler<
   void,
   {
     standaloneNotebookTitle: Writable<string>;
-    allCharms: Writable<NoteCharm[]>;
+    allPieces: Writable<NotePiece[]>;
   }
->((_, { standaloneNotebookTitle, allCharms }) => {
+>((_, { standaloneNotebookTitle, allPieces }) => {
   const title = standaloneNotebookTitle.get().trim() || "New Notebook";
   const nb = Notebook({ title });
-  allCharms.push(nb);
+  allPieces.push(nb);
   standaloneNotebookTitle.set("");
 });
 
@@ -1256,16 +1256,16 @@ const createNotebookFromPrompt = handler<
     showNewNotebookPrompt: Writable<boolean>;
     pendingNotebookAction: Writable<"add" | "move" | "">;
     selectedNoteIndices: Writable<number[]>;
-    notes: Writable<NoteCharm[]>;
-    allCharms: Writable<NoteCharm[]>;
-    notebooks: Writable<NotebookCharm[]>;
+    notes: Writable<NotePiece[]>;
+    allPieces: Writable<NotePiece[]>;
+    notebooks: Writable<NotebookPiece[]>;
   }
 >((_, state) => {
   const name = state.newNotebookName.get().trim() || "New Notebook";
   const actionType = state.pendingNotebookAction.get();
   const selected = state.selectedNoteIndices.get();
 
-  const selectedItems: NoteCharm[] = [];
+  const selectedItems: NotePiece[] = [];
   const selectedNoteIds: string[] = [];
 
   for (const idx of selected) {
@@ -1283,7 +1283,7 @@ const createNotebookFromPrompt = handler<
   };
 
   const newNotebook = Notebook({ title: name, notes: selectedItems });
-  state.allCharms.push(newNotebook);
+  state.allPieces.push(newNotebook);
 
   // Mark selected items as hidden
   for (const idx of selected) {
@@ -1337,16 +1337,16 @@ const openExportAllModal = handler<
   void,
   {
     showExportAllModal: Writable<boolean>;
-    allCharms: Writable<NoteCharm[]>;
-    notebooks: Writable<NotebookCharm[]>;
+    allPieces: Writable<NotePiece[]>;
+    notebooks: Writable<NotebookPiece[]>;
     exportedMarkdown: Writable<string>;
   }
->((_, { showExportAllModal, allCharms, notebooks, exportedMarkdown }) => {
-  const allCharmsArray = [...allCharms.get()];
+>((_, { showExportAllModal, allPieces, notebooks, exportedMarkdown }) => {
+  const allPiecesArray = [...allPieces.get()];
   const result = generateExport(
-    allCharmsArray,
+    allPiecesArray,
     [...notebooks.get()],
-    allCharmsArray,
+    allPiecesArray,
   );
   exportedMarkdown.set(result.markdown);
   showExportAllModal.set(true);
@@ -1362,7 +1362,7 @@ const closeExportAllModal = handler<
 const exportSelectedNotebooks = handler<
   Record<string, never>,
   {
-    notebooks: Writable<NotebookCharm[]>;
+    notebooks: Writable<NotebookPiece[]>;
     selectedNotebookIndices: Writable<number[]>;
     showExportNotebooksModal: Writable<boolean>;
     exportNotebooksMarkdown: Writable<string>;
@@ -1467,9 +1467,9 @@ const analyzeImport = handler<
   Record<string, never>,
   {
     importMarkdown: Writable<string>;
-    notes: Writable<NoteCharm[]>;
-    allCharms: Writable<NoteCharm[]>;
-    notebooks: Writable<NotebookCharm[]>;
+    notes: Writable<NotePiece[]>;
+    allPieces: Writable<NotePiece[]>;
+    notebooks: Writable<NotebookPiece[]>;
     showDuplicateModal: Writable<boolean>;
     detectedDuplicates: Writable<DetectedDuplicate[]>;
     pendingImportData: Writable<string>;
@@ -1487,7 +1487,7 @@ const analyzeImport = handler<
   if (parsedNotes.length === 0 && parsedNotebooks.length === 0) return;
 
   const existingNotes = state.notes.get();
-  const existingByTitle = new Map<string, NoteCharm>();
+  const existingByTitle = new Map<string, NotePiece>();
   existingNotes.forEach((note: any) => {
     const title = note?.title;
     if (title) existingByTitle.set(title, note);
@@ -1535,7 +1535,7 @@ const analyzeImport = handler<
 
     performImport(
       parsedNotes,
-      state.allCharms,
+      state.allPieces,
       state.notebooks,
       new Set(),
       markdown,
@@ -1551,9 +1551,9 @@ const handleImportFileUpload = handler<
   { detail: { files: Array<{ url: string; name: string }> } },
   {
     importMarkdown: Writable<string>;
-    notes: Writable<NoteCharm[]>;
-    allCharms: Writable<NoteCharm[]>;
-    notebooks: Writable<NotebookCharm[]>;
+    notes: Writable<NotePiece[]>;
+    allPieces: Writable<NotePiece[]>;
+    notebooks: Writable<NotebookPiece[]>;
     showDuplicateModal: Writable<boolean>;
     detectedDuplicates: Writable<DetectedDuplicate[]>;
     pendingImportData: Writable<string>;
@@ -1584,7 +1584,7 @@ const handleImportFileUpload = handler<
   }
 
   const existingNotes = state.notes.get();
-  const existingByTitle = new Map<string, NoteCharm>();
+  const existingByTitle = new Map<string, NotePiece>();
   existingNotes.forEach((note: any) => {
     const title = note?.title;
     if (title) existingByTitle.set(title, note);
@@ -1631,7 +1631,7 @@ const handleImportFileUpload = handler<
 
     performImport(
       parsedNotes,
-      state.allCharms,
+      state.allPieces,
       state.notebooks,
       new Set(),
       content,
@@ -1647,8 +1647,8 @@ const importSkipDuplicates = handler<
   Record<string, never>,
   {
     pendingImportData: Writable<string>;
-    allCharms: Writable<NoteCharm[]>;
-    notebooks: Writable<NotebookCharm[]>;
+    allPieces: Writable<NotePiece[]>;
+    notebooks: Writable<NotebookPiece[]>;
     detectedDuplicates: Writable<DetectedDuplicate[]>;
     showDuplicateModal: Writable<boolean>;
     importMarkdown: Writable<string>;
@@ -1672,7 +1672,7 @@ const importSkipDuplicates = handler<
   state.importProgressMessage.set(`Importing ${importCount} notes...`);
   state.showImportProgressModal.set(true);
 
-  performImport(parsed, state.allCharms, state.notebooks, skipTitles, markdown);
+  performImport(parsed, state.allPieces, state.notebooks, skipTitles, markdown);
 
   state.importProgressMessage.set(`Imported ${importCount} notes!`);
   state.importComplete.set(true);
@@ -1683,8 +1683,8 @@ const importAllAsCopies = handler<
   Record<string, never>,
   {
     pendingImportData: Writable<string>;
-    allCharms: Writable<NoteCharm[]>;
-    notebooks: Writable<NotebookCharm[]>;
+    allPieces: Writable<NotePiece[]>;
+    notebooks: Writable<NotebookPiece[]>;
     showDuplicateModal: Writable<boolean>;
     detectedDuplicates: Writable<DetectedDuplicate[]>;
     importMarkdown: Writable<string>;
@@ -1704,7 +1704,7 @@ const importAllAsCopies = handler<
   state.importProgressMessage.set(`Importing ${parsed.length} notes...`);
   state.showImportProgressModal.set(true);
 
-  performImport(parsed, state.allCharms, state.notebooks, new Set(), markdown);
+  performImport(parsed, state.allPieces, state.notebooks, new Set(), markdown);
 
   state.importProgressMessage.set(`Imported ${parsed.length} notes!`);
   state.importComplete.set(true);
@@ -1736,22 +1736,22 @@ const getExportFilename = (prefix: string) => {
 // ============================================================================
 
 const NotesImportExport = pattern<Input, Output>(
-  ({ title, importMarkdown, allCharms }) => {
-    // allCharms is passed directly from default-app for proper cell sharing
+  ({ title, importMarkdown, allPieces }) => {
+    // allPieces is passed directly from default-app for proper cell sharing
     // This is the only reliable way to share the cell - wish("#default") doesn't work in this context
 
     // Filter to only notes using 📝 marker in NAME (same pattern as notebooks)
     // Note: Using NAME prefix is more reliable than checking title/content through proxy
     const notes = computed(() =>
-      (allCharms ?? []).filter((charm: any) => {
-        const name = charm?.[NAME];
+      (allPieces ?? []).filter((piece: any) => {
+        const name = piece?.[NAME];
         return typeof name === "string" && name.startsWith("📝");
       })
     );
 
     // Filter to only notebooks using 📓 marker in NAME
     const notebooks = computed(() =>
-      (allCharms ?? []).filter((charm: any) => isNotebookCharm(charm))
+      (allPieces ?? []).filter((piece: any) => isNotebookPiece(piece))
     );
 
     // Counts
@@ -1841,7 +1841,7 @@ const NotesImportExport = pattern<Input, Output>(
     const noteMemberships = computed(() => {
       const result: Record<
         string,
-        Array<{ name: string; notebook: NotebookCharm }>
+        Array<{ name: string; notebook: NotebookPiece }>
       > = {};
       for (const nb of notebooks) {
         const nbNotes = (nb as any)?.notes ?? [];
@@ -1868,7 +1868,7 @@ const NotesImportExport = pattern<Input, Output>(
             content: (original as any).content ?? "",
             noteId: generateId(),
           });
-          allCharms.push(newNote as any);
+          allPieces.push(newNote as any);
         }
       }
       selectedNoteIndices.set([]);
@@ -1901,7 +1901,7 @@ const NotesImportExport = pattern<Input, Output>(
                 variant="ghost"
                 onClick={openExportAllModal({
                   showExportAllModal,
-                  allCharms,
+                  allPieces,
                   notebooks,
                   exportedMarkdown,
                 })}
@@ -1929,7 +1929,7 @@ const NotesImportExport = pattern<Input, Output>(
                     <ct-button
                       size="sm"
                       variant="ghost"
-                      onClick={createNote({ allCharms })}
+                      onClick={createNote({ allPieces })}
                     >
                       + New Note
                     </ct-button>
@@ -2124,7 +2124,7 @@ const NotesImportExport = pattern<Input, Output>(
                       onClick={deleteSelectedNotes({
                         notes,
                         selectedNoteIndices,
-                        allCharms,
+                        allPieces,
                         notebooks,
                       })}
                       style={{ color: "var(--ct-color-danger, #dc3545)" }}
@@ -2312,7 +2312,7 @@ const NotesImportExport = pattern<Input, Output>(
                       onClick={cloneSelectedNotebooks({
                         notebooks,
                         selectedNotebookIndices,
-                        allCharms,
+                        allPieces,
                       })}
                     >
                       Clone
@@ -2323,7 +2323,7 @@ const NotesImportExport = pattern<Input, Output>(
                       onClick={duplicateSelectedNotebooks({
                         notebooks,
                         selectedNotebookIndices,
-                        allCharms,
+                        allPieces,
                       })}
                     >
                       Duplicate
@@ -2461,7 +2461,7 @@ const NotesImportExport = pattern<Input, Output>(
                 onct-change={handleImportFileUpload({
                   importMarkdown,
                   notes,
-                  allCharms,
+                  allPieces,
                   notebooks,
                   showDuplicateModal,
                   detectedDuplicates,
@@ -2516,7 +2516,7 @@ const NotesImportExport = pattern<Input, Output>(
                 onClick={analyzeImport({
                   importMarkdown,
                   notes,
-                  allCharms,
+                  allPieces,
                   notebooks,
                   showDuplicateModal,
                   detectedDuplicates,
@@ -2577,7 +2577,7 @@ const NotesImportExport = pattern<Input, Output>(
                 variant="ghost"
                 onClick={importSkipDuplicates({
                   pendingImportData,
-                  allCharms,
+                  allPieces,
                   notebooks,
                   detectedDuplicates,
                   showDuplicateModal,
@@ -2593,7 +2593,7 @@ const NotesImportExport = pattern<Input, Output>(
                 variant="primary"
                 onClick={importAllAsCopies({
                   pendingImportData,
-                  allCharms,
+                  allPieces,
                   notebooks,
                   showDuplicateModal,
                   detectedDuplicates,
@@ -2676,7 +2676,7 @@ const NotesImportExport = pattern<Input, Output>(
                   pendingNotebookAction,
                   selectedNoteIndices,
                   notes,
-                  allCharms,
+                  allPieces,
                   notebooks,
                 })}
               >
@@ -2715,7 +2715,7 @@ const NotesImportExport = pattern<Input, Output>(
                 variant="ghost"
                 onClick={createStandaloneNotebookAndContinue({
                   standaloneNotebookTitle,
-                  allCharms,
+                  allPieces,
                 })}
               >
                 Create Another
@@ -2725,7 +2725,7 @@ const NotesImportExport = pattern<Input, Output>(
                 onClick={createStandaloneNotebookAndOpen({
                   standaloneNotebookTitle,
                   showStandaloneNotebookPrompt,
-                  allCharms,
+                  allPieces,
                 })}
               >
                 Create
@@ -2763,7 +2763,7 @@ const NotesImportExport = pattern<Input, Output>(
                 onClick={deleteNotebooksOnly({
                   notebooks,
                   selectedNotebookIndices,
-                  allCharms,
+                  allPieces,
                   showDeleteNotebookModal,
                 })}
               >
@@ -2774,7 +2774,7 @@ const NotesImportExport = pattern<Input, Output>(
                 onClick={deleteNotebooksAndNotes({
                   notebooks,
                   selectedNotebookIndices,
-                  allCharms,
+                  allPieces,
                   showDeleteNotebookModal,
                 })}
                 style={{ background: "var(--ct-color-danger, #dc3545)" }}

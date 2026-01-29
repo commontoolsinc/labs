@@ -18,7 +18,7 @@ describe("default-app flow test", () => {
 
     const page = shell.page();
 
-    // Navigate directly to the new space (no charm creation via ct tools)
+    // Navigate directly to the new space (no piece creation via ct tools)
     await shell.goto({
       frontendUrl: FRONTEND_URL,
       view: { spaceName },
@@ -40,7 +40,7 @@ describe("default-app flow test", () => {
     // Wait for the note page to load by checking for the note title
     console.log("Look for '📝 New Note'...");
     await waitFor(async () => {
-      const link = await page.waitForSelector("#header-charm-link", {
+      const link = await page.waitForSelector("#header-piece-link", {
         strategy: "pierce",
       });
       const innerText = await link.innerText();
@@ -83,7 +83,7 @@ async function clickButtonWithText(
         return true;
       }
     }
-    // Also check x-charm-link elements
+    // Also check x-charm-link elements (custom element name not renamed)
     const links = await page.$$("x-charm-link", { strategy: "pierce" });
     for (const link of links) {
       const text = await link.innerText();

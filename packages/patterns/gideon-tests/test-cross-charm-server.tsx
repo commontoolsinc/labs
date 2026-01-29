@@ -1,14 +1,14 @@
 /// <cts-enable />
 /**
- * Test Pattern: Cross-Charm Stream Server
+ * Test Pattern: Cross-Piece Stream Server
  *
- * Exposes a Stream that increments a counter when invoked from another charm.
- * Used with test-cross-charm-client.tsx to verify cross-charm stream invocation.
+ * Exposes a Stream that increments a counter when invoked from another piece.
+ * Used with test-cross-piece-client.tsx to verify cross-piece stream invocation.
  *
- * IMPORTANT: The #cross-charm-test-server tag is in the JSDoc on the Output
+ * IMPORTANT: The #cross-piece-test-server tag is in the JSDoc on the Output
  * interface below (not here) - that's where wish() looks for tags.
  *
- * SETUP: After deploying, you must FAVORITE this charm for wish() to find it.
+ * SETUP: After deploying, you must FAVORITE this piece for wish() to find it.
  */
 import {
   Default,
@@ -28,12 +28,12 @@ interface Input {
   invocationLog: Default<string[], []>;
 }
 
-/** A #cross-charm-test-server that exposes a stream for testing cross-charm invocation. */
+/** A #cross-piece-test-server that exposes a stream for testing cross-piece invocation. */
 interface Output {
   counter: number;
   invocationLog: string[];
 
-  // Stream that can be invoked from another charm
+  // Stream that can be invoked from another piece
   incrementCounter: Stream<void>;
 }
 
@@ -53,7 +53,7 @@ const incrementHandler = handler<
 
 export default pattern<Input, Output>(({ counter, invocationLog }) => {
   return {
-    [NAME]: "Cross-Charm Test Server",
+    [NAME]: "Cross-Piece Test Server",
     [UI]: (
       <div
         style={{
@@ -62,16 +62,16 @@ export default pattern<Input, Output>(({ counter, invocationLog }) => {
           borderRadius: "8px",
         }}
       >
-        <h2>Cross-Charm Test Server</h2>
+        <h2>Cross-Piece Test Server</h2>
         <p style={{ fontStyle: "italic", color: "#666" }}>
-          Tag: #cross-charm-test-server
+          Tag: #cross-piece-test-server
         </p>
 
         <div style={{ marginTop: "16px" }}>
           <h3>Counter Value: {counter}</h3>
           <p>
             This counter increments when the incrementCounter stream is invoked
-            from another charm.
+            from another piece.
           </p>
         </div>
 
@@ -97,9 +97,9 @@ export default pattern<Input, Output>(({ counter, invocationLog }) => {
           }}
         >
           <p style={{ fontSize: "12px", margin: 0 }}>
-            <strong>How it works:</strong> This charm exposes an{" "}
+            <strong>How it works:</strong> This piece exposes an{" "}
             <code>incrementCounter</code>{" "}
-            stream. When another charm wishes for this charm and invokes that
+            stream. When another piece wishes for this piece and invokes that
             stream, the counter increments and a log entry is added.
           </p>
         </div>

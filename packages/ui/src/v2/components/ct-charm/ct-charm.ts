@@ -19,7 +19,7 @@ const TAG_NAME = "ct-charm";
  * </ct-charm>
  */
 export class CTCharm extends BaseElement {
-  declare charmId: string | null;
+  declare pieceId: string | null;
   declare spaceName: string | null;
 
   static findCharmContainer(element: HTMLElement): CTCharm | null {
@@ -47,13 +47,13 @@ export class CTCharm extends BaseElement {
   }
 
   static override properties = {
-    charmId: { required: true, type: String, attribute: "charm-id" },
+    pieceId: { required: true, type: String, attribute: "charm-id" },
     spaceName: { required: true, type: String, attribute: "space-name" },
   };
 
   constructor() {
     super();
-    this.charmId = null;
+    this.pieceId = null;
     this.spaceName = null;
   }
 

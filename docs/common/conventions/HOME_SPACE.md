@@ -34,10 +34,10 @@ design means:
 
 ### Accessing Favorites
 
-Via `CharmManager`:
+Via `PieceManager`:
 
 ```typescript
-const manager = new CharmManager(session, runtime);
+const manager = new PieceManager(session, runtime);
 await manager.addFavorite(charm);
 await manager.removeFavorite(charm);
 const isFav = manager.isFavorite(charm);
@@ -52,7 +52,7 @@ import {
   removeFavorite,
   isFavorite,
   getHomeFavorites,
-} from "@commontools/charm";
+} from "@commontools/piece";
 
 await addFavorite(runtime, charm);
 await removeFavorite(runtime, charm);
@@ -79,7 +79,7 @@ const runtime = new Runtime({
 
 The home space requires special ACL handling since there's no separate space
 identity to delegate from. When `space === runtime.userIdentityDID`, the
-CharmManager detects this as a home space and uses `runtime.getHomeSpaceCell()`.
+PieceManager detects this as a home space and uses `runtime.getHomeSpaceCell()`.
 
 See `packages/charm/src/manager.ts` (home space detection) and
 `packages/runner/src/runtime.ts` `getHomeSpaceCell()` for implementation.
