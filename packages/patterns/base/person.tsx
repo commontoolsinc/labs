@@ -43,6 +43,46 @@ const SOCIAL_PLATFORM_OPTIONS = [
   { value: "Other", label: "Other" },
 ];
 
+const MONTH_OPTIONS = [
+  { value: "0", label: "Month..." },
+  { value: "1", label: "January" },
+  { value: "2", label: "February" },
+  { value: "3", label: "March" },
+  { value: "4", label: "April" },
+  { value: "5", label: "May" },
+  { value: "6", label: "June" },
+  { value: "7", label: "July" },
+  { value: "8", label: "August" },
+  { value: "9", label: "September" },
+  { value: "10", label: "October" },
+  { value: "11", label: "November" },
+  { value: "12", label: "December" },
+];
+
+const DAY_OPTIONS = [
+  { value: "0", label: "Day..." },
+  ...Array.from({ length: 31 }, (_, i) => ({
+    value: String(i + 1),
+    label: String(i + 1),
+  })),
+];
+
+const MONTH_NAMES = [
+  "",
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
 const ADDRESS_LABEL_OPTIONS = [
   { value: "", label: "Select..." },
   { value: "Home", label: "Home" },
@@ -148,6 +188,13 @@ interface Input {
       {
         firstName: "";
         lastName: "";
+        middleName: "";
+        nickname: "";
+        prefix: "";
+        suffix: "";
+        pronouns: "";
+        birthday: { month: 0; day: 0; year: 0 };
+        photo: "";
         email: "";
         phone: "";
         notes: "";
@@ -230,6 +277,7 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
   const showPicker = Writable.of(false);
 
   // Section expansion state
+  const showNameDetails = Writable.of(false);
   const showContactInfo = Writable.of(true);
   const showAddresses = Writable.of(false);
   const showSocial = Writable.of(false);
@@ -295,12 +343,122 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
             </ct-vstack>
           </ct-hstack>
 
+          {/* Pronouns */}
+          <ct-vstack style={{ gap: "4px" }}>
+            <label style={{ fontSize: "12px", color: "#6b7280" }}>
+              Pronouns
+            </label>
+            <ct-input
+              $value={person.key("pronouns")}
+              placeholder="e.g. he/him, she/her, they/them"
+            />
+          </ct-vstack>
+
           {/* Tags */}
           <ct-vstack style={{ gap: "4px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Tags</label>
             <ct-tags
               tags={person.key("tags")}
               onct-change={updateTags({ person })}
+            />
+          </ct-vstack>
+
+          {/* Name Details Section */}
+          <div>
+            {sectionHeader("Name Details", showNameDetails)}
+            {computed(() => {
+              if (!showNameDetails.get()) return null;
+              return (
+                <ct-vstack style={{ gap: "8px" }}>
+                  <ct-hstack style={{ gap: "8px" }}>
+                    <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                      <label style={{ fontSize: "12px", color: "#6b7280" }}>
+                        Prefix
+                      </label>
+                      <ct-input
+                        $value={person.key("prefix")}
+                        placeholder="Dr., Mr., Prof."
+                      />
+                    </ct-vstack>
+                    <ct-vstack style={{ gap: "4px", flex: 1 }}>
+                      <label style={{ fontSize: "12px", color: "#6b7280" }}>
+                        Suffix
+                      </label>
+                      <ct-input
+                        $value={person.key("suffix")}
+                        placeholder="Jr., III, Ph.D."
+                      />
+                    </ct-vstack>
+                  </ct-hstack>
+                  <ct-vstack style={{ gap: "4px" }}>
+                    <label style={{ fontSize: "12px", color: "#6b7280" }}>
+                      Middle Name
+                    </label>
+                    <ct-input
+                      $value={person.key("middleName")}
+                      placeholder="Middle name"
+                    />
+                  </ct-vstack>
+                  <ct-vstack style={{ gap: "4px" }}>
+                    <label style={{ fontSize: "12px", color: "#6b7280" }}>
+                      Nickname
+                    </label>
+                    <ct-input
+                      $value={person.key("nickname")}
+                      placeholder="Preferred name / what they go by"
+                    />
+                  </ct-vstack>
+                </ct-vstack>
+              );
+            })}
+          </div>
+
+          {/* Birthday Section */}
+          <ct-vstack style={{ gap: "4px" }}>
+            <label style={{ fontSize: "12px", color: "#6b7280" }}>
+              Birthday
+            </label>
+            <ct-hstack style={{ gap: "8px", alignItems: "center" }}>
+              <ct-select
+                $value={person.key("birthday").key("month")}
+                items={MONTH_OPTIONS}
+              />
+              <ct-select
+                $value={person.key("birthday").key("day")}
+                items={DAY_OPTIONS}
+              />
+              <ct-input
+                $value={person.key("birthday").key("year")}
+                placeholder="Year"
+                style={{ width: "80px" }}
+              />
+            </ct-hstack>
+            {computed(() => {
+              const month = person.key("birthday").key("month").get() || 0;
+              const day = person.key("birthday").key("day").get() || 0;
+              const year = person.key("birthday").key("year").get() || 0;
+              if (month === 0 || day === 0) return null;
+              const monthName = MONTH_NAMES[month] || "";
+              const display = year > 0
+                ? `${monthName} ${day}, ${year}`
+                : `${monthName} ${day}`;
+              return (
+                <span style={{ fontSize: "12px", color: "#6b7280" }}>
+                  {display}
+                </span>
+              );
+            })}
+          </ct-vstack>
+
+          {/* Photo URL */}
+          <ct-vstack style={{ gap: "4px" }}>
+            <label style={{ fontSize: "12px", color: "#6b7280" }}>
+              Photo URL
+            </label>
+            <ct-input
+              $value={person.key("photo")}
+              placeholder="https://..."
+              type="url"
             />
           </ct-vstack>
 

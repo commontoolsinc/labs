@@ -68,6 +68,13 @@ const addPerson = handler<
   const personData = Writable.of<Person>({
     firstName: "",
     lastName: "",
+    middleName: "",
+    nickname: "",
+    prefix: "",
+    suffix: "",
+    pronouns: "",
+    birthday: { month: 0, day: 0, year: 0 },
+    photo: "",
     email: "",
     phone: "",
     notes: "",
