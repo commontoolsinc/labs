@@ -1,22 +1,28 @@
 /**
- * HoistingTransformer: Hoists builder calls that reference module-scope
- * symbols to module scope for SES compartment safety.
+ * HoistingTransformer: Splits and hoists builder calls that reference
+ * module-scope symbols for SES compartment safety.
  *
  * This transformer runs AFTER the ClosureTransformer (which makes local
  * closures into explicit params) and BEFORE SchemaInjectionTransformer.
  *
  * It finds derive/lift/handler/action calls that are NOT already at module
  * scope and whose callbacks reference module-scope symbols (imports,
- * module-scope consts, module-scope functions). These calls are hoisted
- * to module scope as const declarations.
+ * module-scope consts, module-scope functions).
  *
- * Example:
- *   // Before (inside a pattern/recipe body):
- *   const doubled = derive(props.value, (v) => someUtil(v) * CONFIG.factor);
+ * Three hoisting strategies:
  *
- *   // After hoisting:
- *   const __derive_0 = derive;  // hoisted call reference
- *   // ... and the HoistingContext records the full call for later prepending
+ * 1. derive → lift: Extract callback into lift() at module scope,
+ *    leave captures at call site.
+ *      // Before: derive(props.value, (x) => someUtil(x))
+ *      // After:  const __lift_0 = lift((x) => someUtil(x));
+ *      //         ... __lift_0(props.value) at call site
+ *
+ * 2. handler/action chain: Hoist inner call, leave captures invocation.
+ *      // Before: handler((e, {c}) => someUtil(c))({c})
+ *      // After:  const __handler_0 = handler((e, {c}) => someUtil(c));
+ *      //         ... __handler_0({c}) at call site
+ *
+ * 3. lift passthrough: Hoist entire call (no captures needed).
  */
 import ts from "typescript";
 import { detectCallKind } from "../ast/call-kind.ts";
@@ -26,7 +32,7 @@ import {
   Transformer,
 } from "../core/transformers.ts";
 import type { TransformationContext } from "../core/context.ts";
-import { referencesModuleScopeSymbols } from "./hoisting-context.ts";
+import { referencesExternalSymbols } from "./hoisting-context.ts";
 
 /**
  * Set of builder names whose calls can be hoisted.
@@ -49,6 +55,8 @@ function builderToHoistType(
     case "handler":
     case "action":
       return "handler";
+    case "derive":
+      return "lift";
     case "lift":
       return "lift";
     default:
@@ -117,7 +125,7 @@ export class HoistingTransformer extends Transformer {
       }
 
       // Check if callback references module-scope symbols
-      if (!referencesModuleScopeSymbols(callback, checker)) {
+      if (!referencesExternalSymbols(callback, checker)) {
         return ts.visitEachChild(node, visitor, context.tsContext);
       }
 
@@ -128,11 +136,115 @@ export class HoistingTransformer extends Transformer {
         context.tsContext,
       ) as ts.CallExpression;
 
-      // Hoist this call: create a module-scope const declaration
+      // Determine hoisting strategy based on call kind
       const hoistType = builderToHoistType(builderName);
+
+      // Branch 1: derive → lift conversion
+      // Extract callback + schemas into lift() at module scope, leave captures at call site.
+      // derive(input, fn)                           → lift(fn), __lift_0(input)
+      // derive(inSchema, outSchema, input, fn)      → lift(inSchema, outSchema, fn), __lift_0(input)
+      if (callKind.kind === "derive") {
+        const args = visited.arguments;
+        const callbackArg = args[args.length - 1]!; // ArrowFunction (always last)
+        const capturesArg = args.length >= 2
+          ? args[args.length - 2]
+          : undefined; // Runtime captures (always second-to-last)
+
+        // Schema args are everything before captures and callback
+        const schemaArgs = args.length > 2
+          ? Array.from(args).slice(0, args.length - 2)
+          : [];
+
+        const hoistedName = hoistingContext.generateUniqueName(hoistType);
+
+        // Create lift(schemaArgs..., callback) expression
+        const liftExpr = context.ctHelpers.sourceHasHelpers()
+          ? context.ctHelpers.getHelperExpr("lift")
+          : factory.createIdentifier("lift");
+        const liftCall = factory.createCallExpression(
+          liftExpr,
+          undefined,
+          [...schemaArgs, callbackArg],
+        );
+
+        // const __lift_0 = lift(callback);
+        const hoistedDecl = factory.createVariableStatement(
+          undefined,
+          factory.createVariableDeclarationList(
+            [
+              factory.createVariableDeclaration(
+                factory.createIdentifier(hoistedName),
+                undefined,
+                undefined,
+                liftCall,
+              ),
+            ],
+            ts.NodeFlags.Const,
+          ),
+        );
+
+        hoistedStatements.push(hoistedDecl);
+        hoistingContext.registerHoistedDeclaration(
+          hoistedDecl,
+          hoistType,
+          node,
+        );
+
+        // Replace at call site: __lift_0(capturesArg)
+        if (capturesArg) {
+          return factory.createCallExpression(
+            factory.createIdentifier(hoistedName),
+            undefined,
+            [capturesArg],
+          );
+        }
+        return factory.createIdentifier(hoistedName);
+      }
+
+      // Branch 2: handler/action with chained call — handler(fn)(captures)
+      // Detect: the outer call's callee is itself a call expression
+      if (
+        (builderName === "handler" || builderName === "action") &&
+        ts.isCallExpression(visited.expression)
+      ) {
+        const innerCall = visited.expression; // handler(fn)
+        const capturesArgs = visited.arguments; // [{count}]
+        const hoistedName = hoistingContext.generateUniqueName(hoistType);
+
+        // const __handler_0 = handler(fn);
+        const hoistedDecl = factory.createVariableStatement(
+          undefined,
+          factory.createVariableDeclarationList(
+            [
+              factory.createVariableDeclaration(
+                factory.createIdentifier(hoistedName),
+                undefined,
+                undefined,
+                innerCall,
+              ),
+            ],
+            ts.NodeFlags.Const,
+          ),
+        );
+
+        hoistedStatements.push(hoistedDecl);
+        hoistingContext.registerHoistedDeclaration(
+          hoistedDecl,
+          hoistType,
+          node,
+        );
+
+        // Replace at call site: __handler_0({captures})
+        return factory.createCallExpression(
+          factory.createIdentifier(hoistedName),
+          undefined,
+          [...capturesArgs],
+        );
+      }
+
+      // Branch 3: lift and other — hoist entire call, replace with identifier
       const hoistedName = hoistingContext.generateUniqueName(hoistType);
 
-      // Create: const __derive_0 = <the full call expression>;
       const hoistedDecl = factory.createVariableStatement(
         undefined,
         factory.createVariableDeclarationList(
@@ -149,8 +261,6 @@ export class HoistingTransformer extends Transformer {
       );
 
       hoistedStatements.push(hoistedDecl);
-
-      // Register in hoisting context for tracking
       hoistingContext.registerHoistedDeclaration(
         hoistedDecl,
         hoistType,

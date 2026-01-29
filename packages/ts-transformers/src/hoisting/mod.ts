@@ -14,7 +14,7 @@ export {
   type HoistedDeclarationType,
   HoistingContext,
   isSelfContainedCallback,
-  referencesModuleScopeSymbols,
+  referencesExternalSymbols,
   type SourcePosition,
 } from "./hoisting-context.ts";
 

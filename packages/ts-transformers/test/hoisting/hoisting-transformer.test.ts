@@ -112,11 +112,13 @@ export default function MyPattern(props: any) {
 }
 `;
     const output = transformWithHoisting(source);
-    // Should contain a hoisted __derive_ declaration
-    assertEquals(output.includes("__derive_"), true);
+    // Should contain a hoisted __lift_ declaration (derive → lift conversion)
+    assertEquals(output.includes("__lift_"), true);
+    // The hoisted declaration should wrap callback in lift()
+    assertEquals(output.includes("lift("), true);
     // The hoisted declaration should be at the top
     assertEquals(
-      output.indexOf("const __derive_") < output.indexOf("export default"),
+      output.indexOf("const __lift_") < output.indexOf("export default"),
       true,
     );
   });
@@ -133,7 +135,9 @@ export default function MyPattern(props: any) {
 }
 `;
     const output = transformWithHoisting(source);
-    assertEquals(output.includes("__derive_"), true);
+    // Should use __lift_ (derive → lift conversion)
+    assertEquals(output.includes("__lift_"), true);
+    assertEquals(output.includes("lift("), true);
   });
 
   await t.step("does not hoist calls already at module scope", () => {
@@ -150,6 +154,51 @@ export default function MyPattern(props: any) {
     const output = transformWithHoisting(source);
     // Should NOT hoist (already at module scope)
     assertEquals(output.includes("__lift_"), false);
+  });
+
+  await t.step("preserves schema args in derive → lift conversion", () => {
+    const source = `
+import { derive } from "commontools";
+import { someUtil } from "some-lib";
+
+const inputSchema = { type: "number" };
+const outputSchema = { type: "string" };
+
+export default function MyPattern(props: any) {
+  const result = derive(inputSchema, outputSchema, props.value, (x: number) => someUtil(x));
+  return { result };
+}
+`;
+    const output = transformWithHoisting(source);
+    // Should hoist with lift and include schema args
+    assertEquals(output.includes("__lift_"), true);
+    assertEquals(output.includes("lift("), true);
+    // The hoisted lift call should include schema args before the callback
+    // lift(inputSchema, outputSchema, (x) => someUtil(x))
+    assertEquals(output.includes("inputSchema"), true);
+    assertEquals(output.includes("outputSchema"), true);
+  });
+
+  await t.step("splits handler chain when hoisting", () => {
+    const source = `
+import { handler } from "commontools";
+import { someUtil } from "some-lib";
+
+export default function MyPattern(props: any) {
+  const onClick = handler((event: any, {count}: any) => someUtil(count))({count: props.count});
+  return { onClick };
+}
+`;
+    const output = transformWithHoisting(source);
+    // Should contain a hoisted __handler_ declaration
+    assertEquals(output.includes("__handler_"), true);
+    // The inner handler(fn) should be hoisted, outer call stays at call site
+    assertEquals(
+      output.indexOf("const __handler_") < output.indexOf("export default"),
+      true,
+    );
+    // The call site should invoke the hoisted handler with captures
+    assertEquals(output.includes("__handler_0("), true);
   });
 
   await t.step("transformer has filter method", () => {

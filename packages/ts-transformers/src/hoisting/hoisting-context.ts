@@ -177,18 +177,18 @@ export class HoistingContext {
 }
 
 /**
- * Checks if a callback function references module-scope symbols
- * (imports, module-scope consts, module-scope functions).
+ * Checks if a callback references anything declared outside its own scope
+ * (i.e. not its own parameters or local variables).
  *
- * Callbacks that reference module-scope symbols must be hoisted to
- * module scope for SES compartment safety, so they become frozen
- * module-level declarations rather than closures over module bindings.
+ * Any such external reference means the callback must be hoisted to module
+ * scope for SES compartment safety — a pristine SES compartment with no
+ * globals injected must be able to run the hoisted code.
  *
  * @param callback - The callback function to analyze
  * @param checker - TypeScript type checker
- * @returns True if the callback references module-scope symbols and needs hoisting
+ * @returns True if the callback has external references and needs hoisting
  */
-export function referencesModuleScopeSymbols(
+export function referencesExternalSymbols(
   callback: ts.ArrowFunction | ts.FunctionExpression,
   checker: ts.TypeChecker,
 ): boolean {
@@ -198,10 +198,10 @@ export function referencesModuleScopeSymbols(
   }
 
   const localNames = new Set<string>();
-  let hasModuleScopeRef = false;
+  let hasExternalRef = false;
 
   const visit = (node: ts.Node): void => {
-    if (hasModuleScopeRef) return;
+    if (hasExternalRef) return;
 
     if (ts.isVariableDeclaration(node)) {
       collectBindingNames(node.name, localNames);
@@ -222,10 +222,9 @@ export function referencesModuleScopeSymbols(
           const callbackStart = callback.getStart();
           const callbackEnd = callback.getEnd();
 
+          // Declared outside the callback → external reference
           if (declPos < callbackStart || declPos > callbackEnd) {
-            if (isModuleScopeDeclaration(decl)) {
-              hasModuleScopeRef = true;
-            }
+            hasExternalRef = true;
           }
         }
       }
@@ -235,77 +234,7 @@ export function referencesModuleScopeSymbols(
   };
 
   visit(callback.body);
-  return hasModuleScopeRef;
-}
-
-/**
- * Module specifiers that are provided as compartment globals and
- * don't need hoisting (they're always available in the sandbox).
- */
-const RUNTIME_PROVIDED_MODULES = new Set([
-  "commontools",
-  "@commontools/common",
-  "@commontools/ui",
-]);
-
-/**
- * Check if a declaration is at module scope (import, module-scope const/function).
- * Excludes imports from runtime-provided modules (commontools, etc.)
- * since those are available as compartment globals.
- */
-function isModuleScopeDeclaration(declaration: ts.Declaration): boolean {
-  if (
-    ts.isImportSpecifier(declaration) ||
-    ts.isImportClause(declaration) ||
-    ts.isNamespaceImport(declaration)
-  ) {
-    // Check if this import is from a runtime-provided module
-    const importDecl = findImportDeclaration(declaration);
-    if (importDecl) {
-      const moduleSpecifier = importDecl.moduleSpecifier;
-      if (ts.isStringLiteral(moduleSpecifier)) {
-        if (RUNTIME_PROVIDED_MODULES.has(moduleSpecifier.text)) {
-          return false; // Runtime-provided, no hoisting needed
-        }
-      }
-    }
-    return true;
-  }
-
-  if (ts.isVariableDeclaration(declaration)) {
-    const varStatement = declaration.parent?.parent;
-    if (
-      varStatement &&
-      ts.isVariableStatement(varStatement) &&
-      ts.isSourceFile(varStatement.parent)
-    ) {
-      return true;
-    }
-  }
-
-  if (ts.isFunctionDeclaration(declaration)) {
-    if (declaration.parent && ts.isSourceFile(declaration.parent)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-/**
- * Walk up the AST from an import specifier/clause to find the ImportDeclaration.
- */
-function findImportDeclaration(
-  node: ts.Declaration,
-): ts.ImportDeclaration | undefined {
-  let current: ts.Node | undefined = node;
-  while (current) {
-    if (ts.isImportDeclaration(current)) {
-      return current;
-    }
-    current = current.parent;
-  }
-  return undefined;
+  return hasExternalRef;
 }
 
 /**
