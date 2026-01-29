@@ -114,27 +114,27 @@ function extractTags(schemaTag: string): string[] {
 
 // Handler to add a favorite
 const addFavorite = handler<
-  { charm: Writable<{ [NAME]?: string }>; tag?: string; spaceName?: string },
+  { piece: Writable<{ [NAME]?: string }>; tag?: string; spaceName?: string },
   { favorites: Writable<Favorite[]>; journal: Writable<JournalEntry[]> }
->(({ charm, tag, spaceName }, { favorites, journal }) => {
+>(({ piece, tag, spaceName }, { favorites, journal }) => {
   const current = favorites.get();
-  if (!current.some((f) => equals(f.cell, charm))) {
+  if (!current.some((f) => equals(f.cell, piece))) {
     // HACK(seefeld): Access internal API to get schema.
     // Once we sandbox, we need proper reflection
     //
     // This first resolves all links, then clears the schema, so it's forced to
     // read the schema defined in the pattern, then reconstructs that schema.
-    let schema = (charm as any)?.resolveAsCell()?.asSchema(undefined)
+    let schema = (piece as any)?.resolveAsCell()?.asSchema(undefined)
       .asSchemaFromLinks?.()?.schema;
     if (typeof schema !== "object") schema = ""; // schema can be true or false
 
-    // Get spaceDid from the charm cell
-    const spaceDid = (charm as any)?.space as string | undefined;
+    // Get spaceDid from the piece cell
+    const spaceDid = (piece as any)?.space as string | undefined;
 
     const schemaTag = tag || JSON.stringify(schema) || "";
 
     favorites.push({
-      cell: charm,
+      cell: piece,
       tag: schemaTag,
       userTags: [],
       spaceName,
@@ -142,11 +142,11 @@ const addFavorite = handler<
     });
 
     // Add journal entry for the favorite action
-    const snapshot = captureSnapshot(charm, schemaTag);
+    const snapshot = captureSnapshot(piece, schemaTag);
     journal.push({
       timestamp: Date.now(),
       eventType: "charm:favorited",
-      subject: charm as any,
+      subject: piece as any,
       snapshot,
       narrative: "",
       narrativePending: true,
@@ -158,14 +158,14 @@ const addFavorite = handler<
 
 // Handler to remove a favorite
 const removeFavorite = handler<
-  { charm: Writable<unknown> },
+  { piece: Writable<unknown> },
   { favorites: Writable<Favorite[]>; journal: Writable<JournalEntry[]> }
->(({ charm }, { favorites, journal }) => {
-  const favorite = favorites.get().find((f) => equals(f.cell, charm));
+>(({ piece }, { favorites, journal }) => {
+  const favorite = favorites.get().find((f) => equals(f.cell, piece));
   if (favorite) {
     // Capture snapshot before removing
     const snapshot = captureSnapshot(
-      charm as Writable<{ [NAME]?: string }>,
+      piece as Writable<{ [NAME]?: string }>,
       favorite.tag,
     );
 
@@ -175,7 +175,7 @@ const removeFavorite = handler<
     journal.push({
       timestamp: Date.now(),
       eventType: "charm:unfavorited",
-      subject: charm as any,
+      subject: piece as any,
       snapshot,
       narrative: "",
       narrativePending: true,
@@ -294,10 +294,10 @@ export default pattern((_) => {
 
       return `Generate a brief journal entry (2-3 sentences) describing this user action.
 
-Event: User ${eventDesc} a charm
-Charm name: ${entry.snapshot?.name || "unnamed"}
+Event: User ${eventDesc} a piece
+Piece name: ${entry.snapshot?.name || "unnamed"}
 
-The full content of the charm is available in the context below. IMPORTANT: Read and analyze the CONTENT, not just the title. If it's a note, what is it about? If it has data, what kind? Extract meaningful insights about their interests, work, or life from the actual content.
+The full content of the piece is available in the context below. IMPORTANT: Read and analyze the CONTENT, not just the title. If it's a note, what is it about? If it has data, what kind? Extract meaningful insights about their interests, work, or life from the actual content.
 
 Write in past tense, personal style. Focus on:
 1. What the content reveals about the user's interests/goals
@@ -305,13 +305,13 @@ Write in past tense, personal style. Focus on:
 3. What this might indicate about what they care about`;
     }),
     system:
-      "You analyze user activity and content to understand their interests. The charm content is provided in the context. Look at the actual data/content, not just titles. Extract meaningful insights about what they care about, work on, or are interested in.",
+      "You analyze user activity and content to understand their interests. The piece content is provided in the context. Look at the actual data/content, not just titles. Extract meaningful insights about what they care about, work on, or are interested in.",
     model: "anthropic:claude-sonnet-4-5",
     // Pass the subject cell as context - system will serialize it properly
     context: computed(() => {
       const entry = pendingEntry;
       if (!entry?.subject) return {};
-      return { favoritedCharm: entry.subject };
+      return { favoritedPiece: entry.subject };
     }),
   });
 
@@ -996,7 +996,7 @@ IMPORTANT:
               ))}
               {uniqueSpaces.length === 0 && (
                 <p style="color: var(--ct-color-text-secondary); text-align: center; padding: 1rem;">
-                  No spaces yet. Favorite charms from different spaces to see
+                  No spaces yet. Favorite pieces from different spaces to see
                   them here.
                 </p>
               )}

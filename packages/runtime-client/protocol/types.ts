@@ -450,7 +450,7 @@ export interface CellUpdateNotification {
 
 export interface ConsoleNotification {
   type: NotificationType.ConsoleMessage;
-  metadata?: { charmId?: string; recipeId?: string; space?: string };
+  metadata?: { pieceId?: string; recipeId?: string; space?: string };
   method: string;
   args: JSONValue[];
 }
@@ -463,7 +463,7 @@ export interface NavigateRequestNotification {
 export interface ErrorNotification {
   type: NotificationType.ErrorReport;
   message: string;
-  charmId?: string;
+  pieceId?: string;
   space?: string;
   recipeId?: string;
   spellId?: string;

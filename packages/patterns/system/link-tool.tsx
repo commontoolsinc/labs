@@ -1,12 +1,12 @@
 /// <cts-enable />
 import { handler, NAME, Writable } from "commontools";
-import { MentionableCharm } from "./backlinks-index.tsx";
+import { MentionablePiece } from "./backlinks-index.tsx";
 
 /**
- * Parse a path like "CharmName/result/field" or "CharmName/input/field"
+ * Parse a path like "PieceName/result/field" or "PieceName/input/field"
  */
 function parsePath(path: string): {
-  charmName: string;
+  pieceName: string;
   cellType?: "result" | "input";
   path: (string | number)[];
 } {
@@ -15,28 +15,28 @@ function parsePath(path: string): {
     throw new Error(`Invalid path: "${path}"`);
   }
 
-  const charmName = segments[0];
+  const pieceName = segments[0];
   const rest = segments.slice(1);
 
   // Check if second segment is "result" or "input"
   if (rest.length > 0 && (rest[0] === "result" || rest[0] === "input")) {
     return {
-      charmName,
+      pieceName,
       cellType: rest[0],
       path: rest.slice(1),
     };
   }
 
-  return { charmName, path: rest };
+  return { pieceName, path: rest };
 }
 
 /**
- * Find a charm by name from the mentionable list
+ * Find a piece by name from the mentionable list
  */
-function findCharmByName(
-  mentionable: Writable<MentionableCharm[]>,
+function findPieceByName(
+  mentionable: Writable<MentionablePiece[]>,
   name: string,
-): Writable<MentionableCharm> | undefined {
+): Writable<MentionablePiece> | undefined {
   for (let i = 0; i < mentionable.get().length; i++) {
     const c = mentionable.key(i);
     if (c.get()[NAME] === name) {
@@ -62,63 +62,63 @@ function navigateToCell(
 }
 
 /**
- * Handler for creating links between charm cells.
+ * Handler for creating links between piece cells.
  * Used by chatbot.tsx to enable LLM-driven cell linking.
  *
  * Supports paths like:
- *   - "CharmName/result/field" - link from charm result
- *   - "CharmName/input/field"  - link to/from charm input
- *   - "CharmName/field"        - defaults to result
+ *   - "PieceName/result/field" - link from piece result
+ *   - "PieceName/input/field"  - link to/from piece input
+ *   - "PieceName/field"        - defaults to result
  */
 export const linkTool = handler<
   { source: string; target: string },
-  { mentionable: Writable<MentionableCharm[]> }
+  { mentionable: Writable<MentionablePiece[]> }
 >(({ source, target }, { mentionable }) => {
   const sourceParsed = parsePath(source);
   const targetParsed = parsePath(target);
 
-  // Find source and target charms
-  const sourceCharm = findCharmByName(mentionable, sourceParsed.charmName);
-  if (!sourceCharm) {
+  // Find source and target pieces
+  const sourcePiece = findPieceByName(mentionable, sourceParsed.pieceName);
+  if (!sourcePiece) {
     const names = mentionable
       .map((c) => c[NAME])
       .filter(Boolean)
       .join(", ");
     throw new Error(
-      `Source charm "${sourceParsed.charmName}" not found. Available: ${
+      `Source piece "${sourceParsed.pieceName}" not found. Available: ${
         names || "none"
       }`,
     );
   }
 
-  const targetCharm = findCharmByName(mentionable, targetParsed.charmName);
-  if (!targetCharm) {
+  const targetPiece = findPieceByName(mentionable, targetParsed.pieceName);
+  if (!targetPiece) {
     const names = mentionable
       .map((c) => c[NAME])
       .filter(Boolean)
       .join(", ");
     throw new Error(
-      `Target charm "${targetParsed.charmName}" not found. Available: ${
+      `Target piece "${targetParsed.pieceName}" not found. Available: ${
         names || "none"
       }`,
     );
   }
 
   // Navigate to source cell
-  let sourceCell: Writable<any> = sourceCharm;
+  let sourceCell: Writable<any> = sourcePiece;
   if (sourceParsed.cellType === "input") {
-    const argCell = sourceCharm.resolveAsCell().getArgumentCell();
-    if (!argCell) throw new Error("Source charm has no argument cell");
+    const argCell = sourcePiece.resolveAsCell().getArgumentCell();
+    if (!argCell) throw new Error("Source piece has no argument cell");
     sourceCell = argCell;
   }
   sourceCell = navigateToCell(sourceCell, sourceParsed.path);
 
   // Navigate to target cell
-  let targetCell: Writable<any> = targetCharm;
+  let targetCell: Writable<any> = targetPiece;
   if (targetParsed.cellType === "input" || targetParsed.path.length > 0) {
     // For any path or explicit "input", navigate to argument cell
-    const argCell = targetCharm.resolveAsCell().getArgumentCell();
-    if (!argCell) throw new Error("Target charm has no argument cell");
+    const argCell = targetPiece.resolveAsCell().getArgumentCell();
+    if (!argCell) throw new Error("Target piece has no argument cell");
     targetCell = argCell;
   }
 

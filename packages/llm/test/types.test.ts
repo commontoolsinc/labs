@@ -73,7 +73,7 @@ describe("types", () => {
       failRequest({ system: {} });
       failRequest({ stop: {} });
       failRequest({ mode: "html" });
-      failRequest({ metadata: "via charm" });
+      failRequest({ metadata: "via piece" });
     });
   });
 });

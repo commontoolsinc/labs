@@ -1,8 +1,8 @@
 import { hydratePrompt, parseTagFromResponse } from "./prompting.ts";
 import { LLMClient } from "../client.ts";
 import type { JSONSchema, JSONSchemaMutable } from "@commontools/runner";
-import { WorkflowForm } from "@commontools/charm";
-import { systemMdConcise } from "../../../charm/src/iframe/static.ts";
+import { WorkflowForm } from "@commontools/piece";
+import { systemMdConcise } from "../../../piece/src/iframe/static.ts";
 import { formatForm } from "./spec-and-schema-gen.ts";
 import { llmPrompt } from "../index.ts";
 import { DEFAULT_MODEL_NAME, extractTextFromLLMResponse } from "../types.ts";
@@ -267,14 +267,14 @@ Based on this goal and the existing schema, please provide a title, description,
       generationId: form.meta.generationId,
       systemPrompt: systemPrompt.version,
       userPrompt: userContent.version,
-      space: form.meta.charmManager.getSpaceName(),
+      space: form.meta.pieceManager.getSpaceName(),
     },
   });
 
   // Extract sections from the response
   const title =
     parseTagFromResponse(extractTextFromLLMResponse(response), "title") ||
-    "New Charm";
+    "New Piece";
   const description = parseTagFromResponse(
     extractTextFromLLMResponse(response),
     "description",

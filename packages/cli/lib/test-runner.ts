@@ -73,7 +73,7 @@ export async function runTestPattern(
   const TIMEOUT = options.timeout ?? 5000;
   const startTime = performance.now();
 
-  // 1. Create emulated runtime (same as charm step)
+  // 1. Create emulated runtime (same as piece step)
   const identity = await Identity.fromPassphrase("test-runner");
   const space = identity.did();
   const { StorageManager } = await import(

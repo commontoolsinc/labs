@@ -14,5 +14,5 @@ export function formatJsonImportPrompt(
 ): string {
   const schema = createJsonSchema(jsonData);
   const schemaString = JSON.stringify(schema, null, 2);
-  return `${title}\n\nLook at the attached JSON schema and use it to create a new charm.\n\n${schemaString}`;
+  return `${title}\n\nLook at the attached JSON schema and use it to create a new piece.\n\n${schemaString}`;
 }

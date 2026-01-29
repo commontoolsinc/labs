@@ -203,7 +203,7 @@ export default pattern(() => {
       // After the previous two auto-classifications, metrics should be > initial values
       { assertion: assert_rule_metrics_updated },
     ],
-    // Expose subject for debugging when deployed as charm
+    // Expose subject for debugging when deployed as piece
     subject,
   };
 });

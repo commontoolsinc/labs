@@ -13,16 +13,16 @@ import {
 } from "commontools";
 
 // Type for backlinks (same as note.tsx)
-type MentionableCharm = {
+type MentionablePiece = {
   [NAME]?: string;
   isHidden?: boolean;
-  mentioned: MentionableCharm[];
-  backlinks: MentionableCharm[];
+  mentioned: MentionablePiece[];
+  backlinks: MentionablePiece[];
 };
 
 // Handler for clicking a backlink chip - must be at module scope
-const handleBacklinkClick = (charm: MentionableCharm) => {
-  return navigateTo(charm as any);
+const handleBacklinkClick = (piece: MentionablePiece) => {
+  return navigateTo(piece as any);
 };
 
 // Handler for Edit button - go back to note editor (module scope)
@@ -78,7 +78,7 @@ const handleCheckboxToggle = handler<
 interface NoteData {
   title?: string;
   content?: string;
-  backlinks?: MentionableCharm[];
+  backlinks?: MentionablePiece[];
   noteId?: string;
 }
 
@@ -97,7 +97,7 @@ interface Input {
 interface Output {
   /** Passthrough note reference */
   note: NoteData;
-  /** Hidden from default-app charm list */
+  /** Hidden from default-app piece list */
   isHidden: true;
   /** Excluded from mentions autocomplete (notes in notebooks may be hidden but still mentionable) */
   isMentionable: false;
@@ -125,8 +125,8 @@ export default pattern<Input, Output>(({ note, sourceNoteRef, content }) => {
     );
   });
 
-  // Get allCharms for noteId lookup fallback
-  const { allCharms } = wish<{ allCharms: any[] }>("#default");
+  // Get allPieces for noteId lookup fallback
+  const { allPieces } = wish<{ allPieces: any[] }>("#default");
 
   // Use sourceNoteRef directly if provided, otherwise fall back to noteId lookup
   const sourceNote = computed(() => {
@@ -136,7 +136,7 @@ export default pattern<Input, Output>(({ note, sourceNoteRef, content }) => {
     }
     const myNoteId = note?.noteId;
     if (!myNoteId) return null;
-    return allCharms.find((charm: any) => charm?.noteId === myNoteId);
+    return allPieces.find((piece: any) => piece?.noteId === myNoteId);
   });
 
   // Bind checkbox toggle handler with properly typed Writable<string>
@@ -176,11 +176,11 @@ export default pattern<Input, Output>(({ note, sourceNoteRef, content }) => {
             Linked from:
           </span>
           <ct-hstack gap="2" wrap>
-            {note?.backlinks?.map((charm) => (
+            {note?.backlinks?.map((piece) => (
               <ct-chip
-                label={charm?.[NAME] ?? "Untitled"}
+                label={piece?.[NAME] ?? "Untitled"}
                 interactive
-                onct-click={() => handleBacklinkClick(charm)}
+                onct-click={() => handleBacklinkClick(piece)}
               />
             ))}
           </ct-hstack>

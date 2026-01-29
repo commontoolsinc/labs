@@ -2164,10 +2164,10 @@ test(
 );
 
 test(
-  "returns all entries from charm list",
+  "returns all entries from piece list",
   DB,
   async (session) => {
-    const charmSchema = {
+    const pieceSchema = {
       type: "object",
       properties: {
         ["$NAME"]: { type: "string" },
@@ -2176,9 +2176,9 @@ test(
       required: ["$UI", "$NAME"],
     } as const satisfies JSONSchema;
 
-    const charmListSchema = {
+    const pieceListSchema = {
       type: "array",
-      items: { ...charmSchema, asCell: true },
+      items: { ...pieceSchema, asCell: true },
     } as const satisfies JSONSchema;
 
     const c1 = Fact.assert({
@@ -2206,13 +2206,13 @@ test(
             "space": space.did(),
             "cell": { "/": doc1.slice(3) },
             "path": [],
-            "schema": charmSchema,
+            "schema": pieceSchema,
           },
           {
             "space": space.did(),
             "cell": { "/": doc2.slice(3) },
             "path": [],
-            "schema": charmSchema,
+            "schema": pieceSchema,
           },
         ],
       },
@@ -2232,8 +2232,8 @@ test(
           _: {
             path: [],
             schemaContext: {
-              schema: charmListSchema,
-              rootSchema: charmListSchema,
+              schema: pieceListSchema,
+              rootSchema: pieceListSchema,
             },
           },
         },

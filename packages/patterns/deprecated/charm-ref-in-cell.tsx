@@ -15,68 +15,68 @@ import {
 
 // full recipe state
 interface RecipeState {
-  charm: any;
-  cellRef: Writable<{ charm: any }>;
+  piece: any;
+  cellRef: Writable<{ piece: any }>;
   isInitialized: Writable<boolean>;
 }
 const RecipeStateSchema = toSchema<RecipeState>();
 
 // what we pass into the recipe as input
-// wraps the charm reference in an object { charm: any }
-// instead of storing the charm directly. This avoids a "pointer of pointers"
-// error that occurs when a Cell directly contains another Cell/charm reference.
+// wraps the piece reference in an object { piece: any }
+// instead of storing the piece directly. This avoids a "pointer of pointers"
+// error that occurs when a Cell directly contains another Cell/piece reference.
 type RecipeInOutput = {
-  cellRef: Default<{ charm: any }, { charm: null }>;
+  cellRef: Default<{ piece: any }, { piece: null }>;
 };
 
-// the simple charm (to which we'll store a reference within a cell)
+// the simple piece (to which we'll store a reference within a cell)
 const SimpleRecipe = recipe(({ id }: { id: string }) => ({
   [NAME]: computed(() => `SimpleRecipe: ${id}`),
   [UI]: <div>Simple Recipe id {id}</div>,
 }));
 
-// Lift that stores a charm reference in a cell and navigates to it.
-// Triggered when any input changes (charm, cellRef, or isInitialized).
+// Lift that stores a piece reference in a cell and navigates to it.
+// Triggered when any input changes (piece, cellRef, or isInitialized).
 //
 // The isInitialized flag prevents infinite loops:
 // - Without it: lift runs → sets cellRef → cellRef changes → lift runs again → loop
 // - With it: lift runs once → sets isInitialized → subsequent runs skip the logic
 //
 // Each handler invocation creates its own isInitialized cell, ensuring
-// independent tracking for multiple charm creations.
+// independent tracking for multiple piece creations.
 //
 // We use a lift() here instead of executing inside of a handler because
-// we want to know the passed in charm is initialized
-const storeCharmAndNavigate = lift(
+// we want to know the passed in piece is initialized
+const storePieceAndNavigate = lift(
   RecipeStateSchema,
   undefined,
-  ({ charm, cellRef, isInitialized }) => {
+  ({ piece, cellRef, isInitialized }) => {
     if (!isInitialized.get()) {
       if (cellRef) {
         console.log(
-          "storeCharmAndNavigate storing charm:",
-          JSON.stringify(charm),
+          "storePieceAndNavigate storing piece:",
+          JSON.stringify(piece),
         );
-        cellRef.set({ charm });
+        cellRef.set({ piece });
         isInitialized.set(true);
-        return navigateTo(charm);
+        return navigateTo(piece);
       } else {
-        console.log("storeCharmAndNavigate undefined cellRef");
+        console.log("storePieceAndNavigate undefined cellRef");
       }
     } else {
-      console.log("storeCharmAndNavigate already initialized, skipping");
+      console.log("storePieceAndNavigate already initialized, skipping");
     }
     return undefined;
   },
 );
 
-// Handler that creates a new charm instance and stores its reference.
+// Handler that creates a new piece instance and stores its reference.
 // 1. Creates a local isInitialized cell to track one-time execution
-// 2. Instantiates SimpleRecipe charm
-// 3. Uses storeCharmAndNavigate lift to save reference and navigate
+// 2. Instantiates SimpleRecipe piece
+// 3. Uses storePieceAndNavigate lift to save reference and navigate
 const createSimpleRecipe = handler<
   unknown,
-  { cellRef: Writable<{ charm: any }> }
+  { cellRef: Writable<{ piece: any }> }
 >(
   (_, { cellRef }) => {
     const isInitialized = Writable.of(false);
@@ -84,24 +84,24 @@ const createSimpleRecipe = handler<
     // Create a random 5-digit ID
     const randomId = Math.floor(10000 + Math.random() * 90000).toString();
 
-    // create the charm
-    const charm = SimpleRecipe({ id: randomId });
+    // create the piece
+    const piece = SimpleRecipe({ id: randomId });
 
-    // store the charm ref in a cell (pass isInitialized to prevent recursive calls)
-    return storeCharmAndNavigate({ charm, cellRef, isInitialized });
+    // store the piece ref in a cell (pass isInitialized to prevent recursive calls)
+    return storePieceAndNavigate({ piece, cellRef, isInitialized });
   },
 );
 
-// Handler to navigate to the stored charm (just console.log for now)
-const goToStoredCharm = handler<unknown, { cellRef: Writable<{ charm: any }> }>(
+// Handler to navigate to the stored piece (just console.log for now)
+const goToStoredPiece = handler<unknown, { cellRef: Writable<{ piece: any }> }>(
   (_, { cellRef }) => {
-    console.log("goToStoredCharm clicked");
+    console.log("goToStoredPiece clicked");
     const cellValue = cellRef.get();
-    if (!cellValue.charm) {
-      console.error("No charm found in cell!");
+    if (!cellValue.piece) {
+      console.error("No piece found in cell!");
       return;
     }
-    return navigateTo(cellValue.charm);
+    return navigateTo(cellValue.piece);
   },
 );
 
@@ -113,27 +113,27 @@ export default recipe<RecipeInOutput, RecipeInOutput>(
       [UI]: (
         <div>
           <div>
-            Stored charm ID: {computed(() => {
+            Stored piece ID: {computed(() => {
               if (!cellRef) return "undefined";
-              if (!cellRef.charm) return "no charm stored yet";
-              return cellRef.charm[UI] || "charm has no UI";
+              if (!cellRef.piece) return "no piece stored yet";
+              return cellRef.piece[UI] || "piece has no UI";
             })}
           </div>
           <ct-button
             onClick={createSimpleRecipe({ cellRef })}
           >
-            Create Sub Charm
+            Create Sub Piece
           </ct-button>
 
           {ifElse(
-            cellRef.charm,
+            cellRef.piece,
             (
-              <ct-button onClick={goToStoredCharm({ cellRef })}>
-                Go to Stored Charm
+              <ct-button onClick={goToStoredPiece({ cellRef })}>
+                Go to Stored Piece
               </ct-button>
             ),
             (
-              <div>no subcharm</div>
+              <div>no subpiece</div>
             ),
           )}
         </div>

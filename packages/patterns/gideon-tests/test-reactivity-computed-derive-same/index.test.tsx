@@ -149,7 +149,7 @@ export default pattern(() => {
       { action: action_set_empty_firstName },
       { assertion: assert_empty_string_handled },
     ],
-    // Expose subject for debugging when deployed as charm
+    // Expose subject for debugging when deployed as piece
     subject,
   };
 });

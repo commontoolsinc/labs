@@ -40,7 +40,7 @@ export class XFavoriteButtonElement extends LitElement {
   rt?: RuntimeInternals;
 
   @property({ attribute: false })
-  charmId?: string;
+  pieceId?: string;
 
   // Server favorites from subscription
   @state()
@@ -68,8 +68,8 @@ export class XFavoriteButtonElement extends LitElement {
   }
 
   protected override willUpdate(changedProperties: PropertyValues): void {
-    // Reset local state when charmId changes
-    if (changedProperties.has("charmId")) {
+    // Reset local state when pieceId changes
+    if (changedProperties.has("pieceId")) {
       this._localIsFavorite = undefined;
     }
 
@@ -107,9 +107,9 @@ export class XFavoriteButtonElement extends LitElement {
       return this._localIsFavorite;
     }
     // Fall back to server state
-    if (!this.charmId) return false;
+    if (!this.pieceId) return false;
     return this._serverFavorites.some(
-      (f) => (f.cell as unknown as CellHandle<unknown>).id() === this.charmId,
+      (f) => (f.cell as unknown as CellHandle<unknown>).id() === this.pieceId,
     );
   }
 
@@ -117,18 +117,18 @@ export class XFavoriteButtonElement extends LitElement {
     e.preventDefault();
     e.stopPropagation();
 
-    if (!this.rt || !this.charmId || this._isLoading) return;
+    if (!this.rt || !this.pieceId || this._isLoading) return;
 
     const currentlyFavorite = this._deriveIsFavorite();
 
     this._isLoading = true;
     try {
       if (currentlyFavorite) {
-        await this.rt.favorites().removeFavorite(this.charmId);
+        await this.rt.favorites().removeFavorite(this.pieceId);
         this._localIsFavorite = false;
       } else {
         await this.rt.favorites().addFavorite(
-          this.charmId,
+          this.pieceId,
           undefined,
           this.rt.spaceName(),
         );

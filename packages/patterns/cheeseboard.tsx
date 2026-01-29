@@ -3,7 +3,7 @@ import { fetchData, lift, NAME, pattern, UI } from "commontools";
 
 /**
  * Fetch the Cheeseboard pizza schedule via Toolshed's web-read endpoint and
- * display a list of pizza descriptions inside the charm.
+ * display a list of pizza descriptions inside the piece.
  *
  * Uses: fetchData, lift, map built-in, toolshed web-read endpoint
  */

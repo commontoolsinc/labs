@@ -636,8 +636,8 @@ interface GoogleCalendarImporterInput {
     maxResults: 100;
     debugMode: false;
   }>;
-  // Optional: Link auth directly from a Google Auth charm when wish() is unavailable
-  // Use: ct charm link googleAuthCharm/auth calendarImporterCharm/overrideAuth
+  // Optional: Link auth directly from a Google Auth piece when wish() is unavailable
+  // Use: ct piece link googleAuthPiece/auth calendarImporterPiece/overrideAuth
   overrideAuth?: Auth;
 }
 

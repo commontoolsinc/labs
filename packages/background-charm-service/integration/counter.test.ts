@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert } from "@std/assert";
 import { Identity } from "@commontools/identity";
-import { CharmsController } from "@commontools/charm/ops";
+import { PiecesController } from "@commontools/piece/ops";
 
 const { SPACE_NAME, API_URL, FRONTEND_URL } = env;
 
@@ -13,13 +13,13 @@ describe("background charm counter tests", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  let charmId: string;
+  let pieceId: string;
   let identity: Identity;
-  let cc: CharmsController;
+  let cc: PiecesController;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
-    cc = await CharmsController.initialize({
+    cc = await PiecesController.initialize({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
@@ -37,7 +37,7 @@ describe("background charm counter tests", () => {
       ),
       { start: false },
     );
-    charmId = charm.id;
+    pieceId = charm.id;
   });
 
   afterAll(async () => {
@@ -56,7 +56,7 @@ describe("background charm counter tests", () => {
       frontendUrl: FRONTEND_URL,
       view: {
         spaceName: SPACE_NAME,
-        charmId,
+        pieceId,
       },
       identity,
     });

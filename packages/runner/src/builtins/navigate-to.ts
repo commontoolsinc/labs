@@ -43,7 +43,7 @@ export function navigateTo(
     // If the result cell is already true, we've already navigated.
     if (resultCell.withTx(tx).get()) return;
 
-    // Read with a schema that won't subscribe to the whole charm
+    // Read with a schema that won't subscribe to the whole piece
     const inputsWithLog = inputsCell.asSchema({
       type: "object",
       properties: {},
@@ -60,7 +60,7 @@ export function navigateTo(
         throw new Error("navigateCallback is not set");
       }
 
-      // Resolve to root charm - follows links until path is empty
+      // Resolve to root piece - follows links until path is empty
       const resolvedTarget = target.resolveAsCell();
 
       // Sync the target cell to ensure data is loaded before navigation

@@ -46,10 +46,10 @@ export interface GoogleDocsClientConfig {
   /** Enable verbose console logging */
   debugMode?: boolean;
   /**
-   * External refresh callback for cross-charm token refresh.
-   * Use this when the auth cell belongs to a different charm - direct cell updates
+   * External refresh callback for cross-piece token refresh.
+   * Use this when the auth cell belongs to a different piece - direct cell updates
    * will fail due to transaction isolation. The callback should trigger refresh
-   * in the auth charm's transaction context (e.g., via a refresh stream).
+   * in the auth piece's transaction context (e.g., via a refresh stream).
    */
   onRefresh?: () => Promise<void>;
 }
@@ -105,7 +105,7 @@ export function extractFileId(url: string): string | null {
  * Google Docs API client with automatic token refresh.
  *
  * CRITICAL: The auth cell MUST be writable for token refresh to work!
- * Do NOT pass a derived auth cell - use property access (charm.auth) instead.
+ * Do NOT pass a derived auth cell - use property access (piece.auth) instead.
  * See: community-docs/superstitions/2025-12-03-derive-creates-readonly-cells-use-property-access.md
  */
 export class GoogleDocsClient {
@@ -139,12 +139,12 @@ export class GoogleDocsClient {
    * Updates the auth cell with new token data.
    *
    * If an external onRefresh callback was provided, it will be used instead
-   * of direct cell update. This enables cross-charm refresh where direct
+   * of direct cell update. This enables cross-piece refresh where direct
    * cell writes would fail due to transaction isolation.
    */
   private async refreshAuth(): Promise<void> {
     // If an external refresh callback was provided, use it
-    // (for cross-charm refresh via streams)
+    // (for cross-piece refresh via streams)
     if (this.onRefresh) {
       debugLog(
         this.debugMode,
@@ -226,7 +226,7 @@ export class GoogleDocsClient {
       // Handle specific error codes with helpful messages
       if (status === 401) {
         throw new Error(
-          "Token expired. Please re-authenticate in your Google Auth charm.",
+          "Token expired. Please re-authenticate in your Google Auth piece.",
         );
       }
       if (status === 403) {

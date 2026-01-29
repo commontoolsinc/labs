@@ -4094,29 +4094,29 @@ describe("Cell success callbacks", () => {
 
     it("should resolve nested cell link similar to wish().result pattern", () => {
       // This test mimics the wish() result pattern where:
-      // - A charm (targetCharm) exists with some data
-      // - A wish result wraps it: { result: <link to targetCharm> }
+      // - A piece (targetPiece) exists with some data
+      // - A wish result wraps it: { result: <link to targetPiece> }
       // - navigateTo receives wish.result which has path ["result"]
-      // - We need to resolve to the actual targetCharm (path [])
+      // - We need to resolve to the actual targetPiece (path [])
 
-      // Create the "target charm" - a cell with path []
-      const targetCharm = runtime.getCell<{ title: string }>(
+      // Create the "target piece" - a cell with path []
+      const targetPiece = runtime.getCell<{ title: string }>(
         space,
-        "target-charm",
+        "target-piece",
         { type: "object", properties: { title: { type: "string" } } },
         tx,
       );
-      targetCharm.set({ title: "My Target Charm" });
+      targetPiece.set({ title: "My Target Piece" });
 
-      // Create the "wish result" that wraps the target charm
-      // This mimics what wish() does: { result: cellToCharm }
+      // Create the "wish result" that wraps the target piece
+      // This mimics what wish() does: { result: cellToPiece }
       const wishResult = runtime.getCell<{ result: unknown }>(
         space,
         "wish-result",
         { type: "object", properties: { result: {} } },
         tx,
       );
-      wishResult.set({ result: targetCharm });
+      wishResult.set({ result: targetPiece });
 
       // Get the cell at path ["result"] - this is what navigateTo receives
       const resultCell = wishResult.key("result");
@@ -4125,26 +4125,26 @@ describe("Cell success callbacks", () => {
       const link = resultCell.getAsNormalizedFullLink();
       expect(link.path.length).toBeGreaterThan(0);
 
-      // Test: Can resolveAsCell() resolve this to the target charm?
+      // Test: Can resolveAsCell() resolve this to the target piece?
       const resolved = resultCell.resolveAsCell();
       const resolvedLink = resolved.getAsNormalizedFullLink();
 
       // This is the key test: does resolveAsCell() give us path []?
       expect(resolvedLink.path.length).toBe(0);
-      expect(resolved.equals(targetCharm)).toBe(true);
+      expect(resolved.equals(targetPiece)).toBe(true);
     });
 
     it("should follow chain of links to root", () => {
-      // Test a chain: A.result -> B.result -> C (the final charm)
+      // Test a chain: A.result -> B.result -> C (the final piece)
       // This tests "following links until there are no more links"
 
-      const finalCharm = runtime.getCell<{ title: string }>(
+      const finalPiece = runtime.getCell<{ title: string }>(
         space,
-        "final-charm",
+        "final-piece",
         { type: "object", properties: { title: { type: "string" } } },
         tx,
       );
-      finalCharm.set({ title: "Final Charm" });
+      finalPiece.set({ title: "Final Piece" });
 
       const middleCell = runtime.getCell<{ result: unknown }>(
         space,
@@ -4152,7 +4152,7 @@ describe("Cell success callbacks", () => {
         { type: "object", properties: { result: {} } },
         tx,
       );
-      middleCell.set({ result: finalCharm });
+      middleCell.set({ result: finalPiece });
 
       const outerCell = runtime.getCell<{ result: unknown }>(
         space,
@@ -4172,9 +4172,9 @@ describe("Cell success callbacks", () => {
       const resolved = startCell.resolveAsCell();
       const resolvedLink = resolved.getAsNormalizedFullLink();
 
-      // Does it resolve all the way to the final charm?
+      // Does it resolve all the way to the final piece?
       expect(resolvedLink.path.length).toBe(0);
-      expect(resolved.equals(finalCharm)).toBe(true);
+      expect(resolved.equals(finalPiece)).toBe(true);
     });
   });
 

@@ -5633,7 +5633,7 @@ describe("pull mode array reactivity", () => {
   it("should trigger computation when array source changes via push", async () => {
     // This tests: when a source array has an element pushed, a computation
     // that reads it should be marked dirty and re-run on pull.
-    // This simulates: visibleCharms = computed(() => allCharms.filter(...))
+    // This simulates: visiblePieces = computed(() => allPieces.filter(...))
 
     const sourceArray = runtime.getCell<{ name: string; hidden: boolean }[]>(
       space,
@@ -5778,16 +5778,16 @@ describe("pull mode array reactivity", () => {
     cancel();
   });
 
-  it("should notify renderer when allCharms array is pushed (Notes UI simulation)", async () => {
+  it("should notify renderer when allPieces array is pushed (Notes UI simulation)", async () => {
     // This simulates the actual Notes UI flow:
-    // - Space has allCharms Cell (array of charms)
-    // - visibleCharms computation filters allCharms
-    // - Renderer effect observes visibleCharms and renders the list
-    // - User creates a new note which pushes to allCharms
+    // - Space has allPieces Cell (array of pieces)
+    // - visiblePieces computation filters allPieces
+    // - Renderer effect observes visiblePieces and renders the list
+    // - User creates a new note which pushes to allPieces
     // - Renderer should be notified and re-render with new note
 
     // Define schemas for realistic data
-    const charmSchema = {
+    const pieceSchema = {
       type: "object",
       properties: {
         name: { type: "string" },
@@ -5796,23 +5796,23 @@ describe("pull mode array reactivity", () => {
       required: ["name"],
     } as const satisfies JSONSchema;
 
-    const allCharmsSchema = {
+    const allPiecesSchema = {
       type: "array",
-      items: charmSchema,
+      items: pieceSchema,
     } as const satisfies JSONSchema;
 
     const spaceSchema = {
       type: "object",
       properties: {
         // Not using asCell: true here - we want inline array data for simplicity
-        allCharms: allCharmsSchema,
+        allPieces: allPiecesSchema,
       },
     } as const satisfies JSONSchema;
 
-    // Create space cell with allCharms
+    // Create space cell with allPieces
     const spaceCell = runtime.getCell(space, "notes-ui-space", spaceSchema, tx);
     spaceCell.set({
-      allCharms: [
+      allPieces: [
         { name: "Existing Note 1", isHidden: false },
         { name: "Hidden Note", isHidden: true },
       ],
@@ -5820,63 +5820,63 @@ describe("pull mode array reactivity", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    // Get the allCharms subcell
-    const allCharmsCell = spaceCell.key("allCharms");
+    // Get the allPieces subcell
+    const allPiecesCell = spaceCell.key("allPieces");
 
-    // Create visibleCharms cell for computed output
-    const visibleCharmsCell = runtime.getCell(
+    // Create visiblePieces cell for computed output
+    const visiblePiecesCell = runtime.getCell(
       space,
-      "visible-charms",
-      { type: "array", items: charmSchema },
+      "visible-pieces",
+      { type: "array", items: pieceSchema },
       tx,
     );
-    visibleCharmsCell.set([]);
+    visiblePiecesCell.set([]);
     await tx.commit();
     tx = runtime.edit();
 
     // Track renderer notifications
     const renderedValues: { name: string }[][] = [];
 
-    // Create computation: visibleCharms = allCharms.filter(c => !c.isHidden)
-    const computeVisibleCharms: Action = function computeVisibleCharms(
+    // Create computation: visiblePieces = allPieces.filter(c => !c.isHidden)
+    const computeVisiblePieces: Action = function computeVisiblePieces(
       actionTx,
     ) {
-      const charms = allCharmsCell.withTx(actionTx).get() ?? [];
-      // Now charms should be an array since we don't have asCell: true
-      const visible = charms.filter((c) => !c.isHidden);
-      visibleCharmsCell.withTx(actionTx).send(visible);
+      const pieces = allPiecesCell.withTx(actionTx).get() ?? [];
+      // Now pieces should be an array since we don't have asCell: true
+      const visible = pieces.filter((c) => !c.isHidden);
+      visiblePiecesCell.withTx(actionTx).send(visible);
     };
 
     // Subscribe computation with schema-aware reads/writes
     runtime.scheduler.subscribe(
-      computeVisibleCharms,
+      computeVisiblePieces,
       {
-        reads: [allCharmsCell.getAsNormalizedFullLink()],
-        writes: [visibleCharmsCell.getAsNormalizedFullLink()],
+        reads: [allPiecesCell.getAsNormalizedFullLink()],
+        writes: [visiblePiecesCell.getAsNormalizedFullLink()],
       },
       {},
     );
 
-    // Create renderer effect (sink on visibleCharms)
-    const cancelRenderer = visibleCharmsCell.withTx(tx).sink((value) => {
+    // Create renderer effect (sink on visiblePieces)
+    const cancelRenderer = visiblePiecesCell.withTx(tx).sink((value) => {
       if (value !== undefined) {
         renderedValues.push([...value]);
       }
     });
 
     // Initial pull to trigger computation and renderer
-    await visibleCharmsCell.withTx(tx).pull();
+    await visiblePiecesCell.withTx(tx).pull();
 
-    // Verify initial render shows only visible charms
+    // Verify initial render shows only visible pieces
     expect(renderedValues.length).toBeGreaterThanOrEqual(1);
     expect(renderedValues[renderedValues.length - 1]).toEqual([
       { name: "Existing Note 1", isHidden: false },
     ]);
 
-    // Simulate creating a new note and pushing to allCharms
+    // Simulate creating a new note and pushing to allPieces
     // (This is what happens when user creates a note in notebook.tsx)
     const createNoteTx = runtime.edit();
-    allCharmsCell.withTx(createNoteTx).push({
+    allPiecesCell.withTx(createNoteTx).push({
       name: "New Note",
       isHidden: false,
     });
@@ -5885,7 +5885,7 @@ describe("pull mode array reactivity", () => {
     // Let the scheduler process the change
     await runtime.scheduler.idle();
 
-    // Renderer should have been notified with updated visible charms
+    // Renderer should have been notified with updated visible pieces
     expect(renderedValues.length).toBeGreaterThanOrEqual(2);
     expect(renderedValues[renderedValues.length - 1]).toEqual([
       { name: "Existing Note 1", isHidden: false },
@@ -5893,17 +5893,17 @@ describe("pull mode array reactivity", () => {
     ]);
 
     cancelRenderer();
-    runtime.scheduler.unsubscribe(computeVisibleCharms);
+    runtime.scheduler.unsubscribe(computeVisiblePieces);
   });
 
-  it("should handle nested cell updates in allCharms pattern", async () => {
-    // More complex test: allCharms contains cell references (like real usage)
-    // When a new charm is pushed, the renderer should see it
+  it("should handle nested cell updates in allPieces pattern", async () => {
+    // More complex test: allPieces contains cell references (like real usage)
+    // When a new piece is pushed, the renderer should see it
 
     const spaceSchema = {
       type: "object",
       properties: {
-        allCharms: {
+        allPieces: {
           type: "array",
           items: { type: "object" },
           // Not using asCell: true - testing inline array data
@@ -5911,26 +5911,26 @@ describe("pull mode array reactivity", () => {
       },
     } as const satisfies JSONSchema;
 
-    // Create space with allCharms - start with 1 item like the first test
+    // Create space with allPieces - start with 1 item like the first test
     const spaceCell = runtime.getCell(
       space,
-      "nested-allcharms-space",
+      "nested-allpieces-space",
       spaceSchema,
       tx,
     );
-    spaceCell.set({ allCharms: [{ name: "Initial Charm" }] });
+    spaceCell.set({ allPieces: [{ name: "Initial Piece" }] });
     await tx.commit();
     tx = runtime.edit();
 
-    const allCharmsCell = spaceCell.key("allCharms");
+    const allPiecesCell = spaceCell.key("allPieces");
 
     // Track what the "renderer" sees
-    const renderedCharmCount: number[] = [];
+    const renderedPieceCount: number[] = [];
 
-    // Create a simple computation that counts charms
+    // Create a simple computation that counts pieces
     const countCell = runtime.getCell(
       space,
-      "charm-count",
+      "piece-count",
       { type: "number" },
       tx,
     );
@@ -5938,15 +5938,15 @@ describe("pull mode array reactivity", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    const countCharms: Action = function countCharms(actionTx) {
-      const charms = allCharmsCell.withTx(actionTx).get() ?? [];
-      countCell.withTx(actionTx).send(charms.length);
+    const countPieces: Action = function countPieces(actionTx) {
+      const pieces = allPiecesCell.withTx(actionTx).get() ?? [];
+      countCell.withTx(actionTx).send(pieces.length);
     };
 
     runtime.scheduler.subscribe(
-      countCharms,
+      countPieces,
       {
-        reads: [allCharmsCell.getAsNormalizedFullLink()],
+        reads: [allPiecesCell.getAsNormalizedFullLink()],
         writes: [countCell.getAsNormalizedFullLink()],
       },
       {},
@@ -5955,40 +5955,40 @@ describe("pull mode array reactivity", () => {
     // Renderer effect
     const cancelRenderer = countCell.withTx(tx).sink((value) => {
       if (value !== undefined) {
-        renderedCharmCount.push(value);
+        renderedPieceCount.push(value);
       }
     });
 
     // Initial pull - we start with 1 item
     await countCell.withTx(tx).pull();
-    expect(renderedCharmCount[renderedCharmCount.length - 1]).toBe(1);
+    expect(renderedPieceCount[renderedPieceCount.length - 1]).toBe(1);
 
-    // Push first new charm (total should be 2)
+    // Push first new piece (total should be 2)
     const tx1 = runtime.edit();
-    allCharmsCell.withTx(tx1).push({ name: "Charm 1" });
+    allPiecesCell.withTx(tx1).push({ name: "Piece 1" });
     await tx1.commit();
 
     await runtime.scheduler.idle();
-    expect(renderedCharmCount[renderedCharmCount.length - 1]).toBe(2);
+    expect(renderedPieceCount[renderedPieceCount.length - 1]).toBe(2);
 
-    // Push second charm (total should be 3)
+    // Push second piece (total should be 3)
     const tx2 = runtime.edit();
-    allCharmsCell.withTx(tx2).push({ name: "Charm 2" });
+    allPiecesCell.withTx(tx2).push({ name: "Piece 2" });
     await tx2.commit();
 
     await runtime.scheduler.idle();
-    expect(renderedCharmCount[renderedCharmCount.length - 1]).toBe(3);
+    expect(renderedPieceCount[renderedPieceCount.length - 1]).toBe(3);
 
-    // Push third charm (total should be 4)
+    // Push third piece (total should be 4)
     const tx3 = runtime.edit();
-    allCharmsCell.withTx(tx3).push({ name: "Charm 3" });
+    allPiecesCell.withTx(tx3).push({ name: "Piece 3" });
     await tx3.commit();
 
     await runtime.scheduler.idle();
-    expect(renderedCharmCount[renderedCharmCount.length - 1]).toBe(4);
+    expect(renderedPieceCount[renderedPieceCount.length - 1]).toBe(4);
 
     cancelRenderer();
-    runtime.scheduler.unsubscribe(countCharms);
+    runtime.scheduler.unsubscribe(countPieces);
   });
 
   it("should see updated data after unsubscribe/resubscribe (navigation flow)", async () => {
@@ -6008,55 +6008,55 @@ describe("pull mode array reactivity", () => {
       },
     } as const satisfies JSONSchema;
 
-    // Create allCharms array with initial data
-    const allCharmsCell = runtime.getCell(
+    // Create allPieces array with initial data
+    const allPiecesCell = runtime.getCell(
       space,
-      "nav-flow-allcharms",
+      "nav-flow-allpieces",
       arraySchema,
       tx,
     );
-    allCharmsCell.set([{ name: "Initial Note" }]);
+    allPiecesCell.set([{ name: "Initial Note" }]);
     await tx.commit();
     tx = runtime.edit();
 
-    // Create computed cell (visibleCharms)
-    const visibleCharmsCell = runtime.getCell(
+    // Create computed cell (visiblePieces)
+    const visiblePiecesCell = runtime.getCell(
       space,
       "nav-flow-visible",
       arraySchema,
       tx,
     );
-    visibleCharmsCell.set([]);
+    visiblePiecesCell.set([]);
     await tx.commit();
     tx = runtime.edit();
 
     // Track what renderer sees
     const renderedValues: { name: string }[][] = [];
 
-    // Computation: copy allCharms to visibleCharms
+    // Computation: copy allPieces to visiblePieces
     const computeVisible: Action = function computeVisible(actionTx) {
-      const charms = allCharmsCell.withTx(actionTx).get() ?? [];
-      visibleCharmsCell.withTx(actionTx).send([...charms]);
+      const pieces = allPiecesCell.withTx(actionTx).get() ?? [];
+      visiblePiecesCell.withTx(actionTx).send([...pieces]);
     };
 
     runtime.scheduler.subscribe(
       computeVisible,
       {
-        reads: [allCharmsCell.getAsNormalizedFullLink()],
-        writes: [visibleCharmsCell.getAsNormalizedFullLink()],
+        reads: [allPiecesCell.getAsNormalizedFullLink()],
+        writes: [visiblePiecesCell.getAsNormalizedFullLink()],
       },
       {},
     );
 
     // STEP 1: Mount default app (subscribe renderer)
-    let cancelRenderer = visibleCharmsCell.withTx(tx).sink((value) => {
+    let cancelRenderer = visiblePiecesCell.withTx(tx).sink((value) => {
       if (value !== undefined) {
         renderedValues.push([...value]);
       }
     });
 
     // Initial pull to see data
-    await visibleCharmsCell.withTx(tx).pull();
+    await visiblePiecesCell.withTx(tx).pull();
     await runtime.scheduler.idle();
 
     expect(renderedValues[renderedValues.length - 1]).toEqual([
@@ -6068,19 +6068,19 @@ describe("pull mode array reactivity", () => {
 
     // STEP 3: Create note while on another page (push while unsubscribed)
     const createTx = runtime.edit();
-    allCharmsCell.withTx(createTx).push({ name: "New Note" });
+    allPiecesCell.withTx(createTx).push({ name: "New Note" });
     await createTx.commit();
 
     // STEP 4: Navigate back (remount default app, resubscribe renderer)
     const tx2 = runtime.edit();
-    cancelRenderer = visibleCharmsCell.withTx(tx2).sink((value) => {
+    cancelRenderer = visiblePiecesCell.withTx(tx2).sink((value) => {
       if (value !== undefined) {
         renderedValues.push([...value]);
       }
     });
 
     // Pull to get fresh data
-    await visibleCharmsCell.withTx(tx2).pull();
+    await visiblePiecesCell.withTx(tx2).pull();
     await runtime.scheduler.idle();
 
     // STEP 5: Should see both notes
@@ -6094,7 +6094,7 @@ describe("pull mode array reactivity", () => {
   });
 
   it("should see updated data when computation is also unsubscribed (full navigation)", async () => {
-    // Even more realistic: when navigating away, the WHOLE charm (including
+    // Even more realistic: when navigating away, the WHOLE piece (including
     // its computation) might get stopped, not just the renderer sink.
     // This is what runner.stop() does.
 
@@ -6107,54 +6107,54 @@ describe("pull mode array reactivity", () => {
       },
     } as const satisfies JSONSchema;
 
-    // Create allCharms array with initial data
-    const allCharmsCell = runtime.getCell(
+    // Create allPieces array with initial data
+    const allPiecesCell = runtime.getCell(
       space,
-      "full-nav-allcharms",
+      "full-nav-allpieces",
       arraySchema,
       tx,
     );
-    allCharmsCell.set([{ name: "Initial Note" }]);
+    allPiecesCell.set([{ name: "Initial Note" }]);
     await tx.commit();
     tx = runtime.edit();
 
-    // Create computed cell (visibleCharms)
-    const visibleCharmsCell = runtime.getCell(
+    // Create computed cell (visiblePieces)
+    const visiblePiecesCell = runtime.getCell(
       space,
       "full-nav-visible",
       arraySchema,
       tx,
     );
-    visibleCharmsCell.set([]);
+    visiblePiecesCell.set([]);
     await tx.commit();
     tx = runtime.edit();
 
     // Track what renderer sees
     const renderedValues: { name: string }[][] = [];
 
-    // Computation: copy allCharms to visibleCharms
+    // Computation: copy allPieces to visiblePieces
     const computeVisible: Action = function computeVisible(actionTx) {
-      const charms = allCharmsCell.withTx(actionTx).get() ?? [];
-      visibleCharmsCell.withTx(actionTx).send([...charms]);
+      const pieces = allPiecesCell.withTx(actionTx).get() ?? [];
+      visiblePiecesCell.withTx(actionTx).send([...pieces]);
     };
 
-    // STEP 1: Mount default app charm
+    // STEP 1: Mount default app piece
     let cancelComputation = runtime.scheduler.subscribe(
       computeVisible,
       {
-        reads: [allCharmsCell.getAsNormalizedFullLink()],
-        writes: [visibleCharmsCell.getAsNormalizedFullLink()],
+        reads: [allPiecesCell.getAsNormalizedFullLink()],
+        writes: [visiblePiecesCell.getAsNormalizedFullLink()],
       },
       {},
     );
 
-    let cancelRenderer = visibleCharmsCell.withTx(tx).sink((value) => {
+    let cancelRenderer = visiblePiecesCell.withTx(tx).sink((value) => {
       if (value !== undefined) {
         renderedValues.push([...value]);
       }
     });
 
-    await visibleCharmsCell.withTx(tx).pull();
+    await visiblePiecesCell.withTx(tx).pull();
     await runtime.scheduler.idle();
 
     expect(renderedValues[renderedValues.length - 1]).toEqual([
@@ -6167,28 +6167,28 @@ describe("pull mode array reactivity", () => {
 
     // STEP 3: Create note while on another page
     const createTx = runtime.edit();
-    allCharmsCell.withTx(createTx).push({ name: "New Note" });
+    allPiecesCell.withTx(createTx).push({ name: "New Note" });
     await createTx.commit();
 
     // STEP 4: Navigate back - resubscribe BOTH computation AND renderer
     cancelComputation = runtime.scheduler.subscribe(
       computeVisible,
       {
-        reads: [allCharmsCell.getAsNormalizedFullLink()],
-        writes: [visibleCharmsCell.getAsNormalizedFullLink()],
+        reads: [allPiecesCell.getAsNormalizedFullLink()],
+        writes: [visiblePiecesCell.getAsNormalizedFullLink()],
       },
       {},
     );
 
     const tx2 = runtime.edit();
-    cancelRenderer = visibleCharmsCell.withTx(tx2).sink((value) => {
+    cancelRenderer = visiblePiecesCell.withTx(tx2).sink((value) => {
       if (value !== undefined) {
         renderedValues.push([...value]);
       }
     });
 
     // Pull to get fresh data
-    await visibleCharmsCell.withTx(tx2).pull();
+    await visiblePiecesCell.withTx(tx2).pull();
     await runtime.scheduler.idle();
 
     // Should see both notes
@@ -6217,26 +6217,26 @@ describe("pull mode array reactivity", () => {
       },
     } as const satisfies JSONSchema;
 
-    // Create allCharms array with initial data
-    const allCharmsCell = runtime.getCell(
+    // Create allPieces array with initial data
+    const allPiecesCell = runtime.getCell(
       space,
-      "pattern-remount-allcharms",
+      "pattern-remount-allpieces",
       arraySchema,
       tx,
     );
-    allCharmsCell.set([{ name: "Initial Note" }]);
+    allPiecesCell.set([{ name: "Initial Note" }]);
     await tx.commit();
     tx = runtime.edit();
 
     // IMPORTANT: The computed output cell is created with a FIXED cause
     // so it will be the SAME cell when the pattern remounts
-    const visibleCharmsCell = runtime.getCell(
+    const visiblePiecesCell = runtime.getCell(
       space,
       "pattern-remount-visible-FIXED-CAUSE", // This cause stays same across remounts
       arraySchema,
       tx,
     );
-    visibleCharmsCell.set([]);
+    visiblePiecesCell.set([]);
     await tx.commit();
     tx = runtime.edit();
 
@@ -6245,26 +6245,26 @@ describe("pull mode array reactivity", () => {
 
     // FIRST MOUNT: Create computation #1
     const computeVisible1: Action = function computeVisible1(actionTx) {
-      const charms = allCharmsCell.withTx(actionTx).get() ?? [];
-      visibleCharmsCell.withTx(actionTx).send([...charms]);
+      const pieces = allPiecesCell.withTx(actionTx).get() ?? [];
+      visiblePiecesCell.withTx(actionTx).send([...pieces]);
     };
 
     let cancelComputation = runtime.scheduler.subscribe(
       computeVisible1,
       {
-        reads: [allCharmsCell.getAsNormalizedFullLink()],
-        writes: [visibleCharmsCell.getAsNormalizedFullLink()],
+        reads: [allPiecesCell.getAsNormalizedFullLink()],
+        writes: [visiblePiecesCell.getAsNormalizedFullLink()],
       },
       {},
     );
 
-    let cancelRenderer = visibleCharmsCell.withTx(tx).sink((value) => {
+    let cancelRenderer = visiblePiecesCell.withTx(tx).sink((value) => {
       if (value !== undefined) {
         renderedValues.push([...value]);
       }
     });
 
-    await visibleCharmsCell.withTx(tx).pull();
+    await visiblePiecesCell.withTx(tx).pull();
     await runtime.scheduler.idle();
 
     expect(renderedValues[renderedValues.length - 1]).toEqual([
@@ -6277,26 +6277,26 @@ describe("pull mode array reactivity", () => {
 
     // PUSH while unmounted
     const createTx = runtime.edit();
-    allCharmsCell.withTx(createTx).push({ name: "New Note" });
+    allPiecesCell.withTx(createTx).push({ name: "New Note" });
     await createTx.commit();
 
     // REMOUNT: Create computation #2 (NEW action, but SAME output cell)
     const computeVisible2: Action = function computeVisible2(actionTx) {
-      const charms = allCharmsCell.withTx(actionTx).get() ?? [];
-      visibleCharmsCell.withTx(actionTx).send([...charms]);
+      const pieces = allPiecesCell.withTx(actionTx).get() ?? [];
+      visiblePiecesCell.withTx(actionTx).send([...pieces]);
     };
 
     cancelComputation = runtime.scheduler.subscribe(
       computeVisible2,
       {
-        reads: [allCharmsCell.getAsNormalizedFullLink()],
-        writes: [visibleCharmsCell.getAsNormalizedFullLink()],
+        reads: [allPiecesCell.getAsNormalizedFullLink()],
+        writes: [visiblePiecesCell.getAsNormalizedFullLink()],
       },
       {},
     );
 
     const tx2 = runtime.edit();
-    cancelRenderer = visibleCharmsCell.withTx(tx2).sink((value) => {
+    cancelRenderer = visiblePiecesCell.withTx(tx2).sink((value) => {
       if (value !== undefined) {
         renderedValues.push([...value]);
       }

@@ -46,7 +46,7 @@ import {
 import GoogleAuth from "../google-auth.tsx";
 import {
   GmailClient,
-  validateAndRefreshTokenCrossCharm,
+  validateAndRefreshTokenCrossPiece,
 } from "../util/gmail-client.ts";
 import GmailSearchRegistry from "./gmail-search-registry.tsx";
 import type {
@@ -355,16 +355,16 @@ export interface GmailAgenticSearchOutput {
 // Handlers must be defined at module scope, not inside patterns.
 // ============================================================================
 
-// Handler to create a new GmailSearchRegistry charm
+// Handler to create a new GmailSearchRegistry piece
 const createSearchRegistryHandler = handler<unknown, Record<string, never>>(
   () => {
     if (DEBUG_AGENT) {
-      console.log("[GmailAgenticSearch] Creating new search registry charm");
+      console.log("[GmailAgenticSearch] Creating new search registry piece");
     }
-    const registryCharm = GmailSearchRegistry({
+    const registryPiece = GmailSearchRegistry({
       queries: [],
     });
-    return navigateTo(registryCharm);
+    return navigateTo(registryPiece);
   },
 );
 
@@ -444,7 +444,7 @@ const searchGmailHandler = handler<
   { query: string; result?: Writable<any> },
   {
     auth: Writable<Auth>;
-    // Stream<T> in signature lets framework unwrap opaque stream from wished charms
+    // Stream<T> in signature lets framework unwrap opaque stream from wished pieces
     authRefreshStream: RefreshStreamType | null;
     progress: Writable<SearchProgress>;
     maxSearches: Writable<Default<number, 0>>;
@@ -528,20 +528,20 @@ const searchGmailHandler = handler<
         console.log(`[SearchGmail Tool] Searching: ${input.query}`);
       }
 
-      // Cross-charm token refresh via Stream<T> handler signature
+      // Cross-piece token refresh via Stream<T> handler signature
       // The framework unwraps the opaque stream, giving us a callable .send()
-      // See: community-docs/blessed/cross-charm.md
+      // See: community-docs/blessed/cross-piece.md
       const refreshStream = state.authRefreshStream;
       let onRefresh: (() => Promise<void>) | undefined = undefined;
 
       if (refreshStream?.send) {
         // Stream.send() supports optional onCommit callback (see labs/packages/runner/src/cell.ts)
-        // The refresh happens in the auth charm's transaction context
+        // The refresh happens in the auth piece's transaction context
         // Note: TypeScript types don't include onCommit, but runtime supports it
         onRefresh = async () => {
           if (DEBUG_AGENT) {
             console.log(
-              "[SearchGmail Tool] Refreshing token via cross-charm stream...",
+              "[SearchGmail Tool] Refreshing token via cross-piece stream...",
             );
           }
           await new Promise<void>((resolve, reject) => {
@@ -745,7 +745,7 @@ const startScanHandler = handler<
     progress: Writable<SearchProgress>;
     auth: Writable<Auth>;
     debugLog: Writable<DebugLogEntry[]>;
-    // Stream<T> in signature lets framework unwrap opaque stream from wished charms
+    // Stream<T> in signature lets framework unwrap opaque stream from wished pieces
     authRefreshStream: RefreshStreamType | null;
   }
 >(async (_, state) => {
@@ -762,8 +762,8 @@ const startScanHandler = handler<
   });
 
   // Validate token before starting scan
-  // Cross-charm refresh works via Stream<T> handler signature pattern
-  // See: community-docs/blessed/cross-charm.md
+  // Cross-piece refresh works via Stream<T> handler signature pattern
+  // See: community-docs/blessed/cross-piece.md
   if (DEBUG_AGENT) {
     console.log("[GmailAgenticSearch] Validating token before scan...");
   }
@@ -775,7 +775,7 @@ const startScanHandler = handler<
   // Stream<T> in handler signature gives us callable .send()
   const refreshStream = state.authRefreshStream;
 
-  const validation = await validateAndRefreshTokenCrossCharm(
+  const validation = await validateAndRefreshTokenCrossPiece(
     state.auth,
     refreshStream,
     true,
@@ -987,9 +987,9 @@ const _updateSanitizedQueryHandler = handler<
   }
 });
 
-// Handler to create a new GoogleAuth charm (module scope)
+// Handler to create a new GoogleAuth piece (module scope)
 const createGoogleAuthHandler = handler(() => {
-  const authCharm = GoogleAuth({
+  const authPiece = GoogleAuth({
     selectedScopes: {
       gmail: true,
       gmailSend: false,
@@ -1010,7 +1010,7 @@ const createGoogleAuthHandler = handler(() => {
       user: { email: "", name: "", picture: "" },
     },
   });
-  return navigateTo(authCharm);
+  return navigateTo(authPiece);
 });
 
 // ============================================================================
@@ -1159,10 +1159,10 @@ const GmailAgenticSearch = pattern<
       accountType: selectedAccountType,
     });
 
-    // For compatibility with existing code - derive charm from authInfo
-    const wishedAuthCharm = derive(
+    // For compatibility with existing code - derive piece from authInfo
+    const wishedAuthPiece = derive(
       authInfo,
-      (info: any) => info?.charm || null,
+      (info: any) => info?.piece || null,
     );
     const hasWishedAuth = wishedAuthReady;
 
@@ -1180,11 +1180,11 @@ const GmailAgenticSearch = pattern<
     // ========================================================================
     // CROSS-CHARM TOKEN REFRESH
     // ========================================================================
-    // The google-auth charm exports a `refreshToken` Stream that allows
-    // other charms to trigger token refresh in google-auth's transaction context.
+    // The google-auth piece exports a `refreshToken` Stream that allows
+    // other pieces to trigger token refresh in google-auth's transaction context.
     //
     // KEY INSIGHT (from Berni, verified 2024-12-10):
-    // - Streams from wished charms appear as opaque objects with `$stream` marker at derive time
+    // - Streams from wished pieces appear as opaque objects with `$stream` marker at derive time
     // - To call .send(), you must pass the stream to a handler with `Stream<T>` in its type signature
     // - The framework "unwraps" the opaque stream into a callable one inside the handler
     //
@@ -1193,13 +1193,13 @@ const GmailAgenticSearch = pattern<
     // 2. Pass to handler with Stream<T> declared in signature
     // 3. Call .send() inside handler
     //
-    // See: community-docs/blessed/cross-charm.md
+    // See: community-docs/blessed/cross-piece.md
     // See: patterns/jkomoros/issues/ISSUE-Token-Refresh-Blocked-By-Storage-Transaction.md
     //
-    // Extract refresh stream from wished charm (will be opaque at derive time)
+    // Extract refresh stream from wished piece (will be opaque at derive time)
     const authRefreshStream = derive(
-      wishedAuthCharm,
-      (charm: any) => charm?.refreshToken || null,
+      wishedAuthPiece,
+      (piece: any) => piece?.refreshToken || null,
     );
 
     // Track where auth came from
@@ -1602,11 +1602,11 @@ When you're done searching, STOP calling tools and produce your final structured
               ⚠️ {authErrorMessage}
             </div>
             <div style={{ textAlign: "center" }}>
-              {derive(wishedAuthCharm, (charm: any) =>
-                charm
+              {derive(wishedAuthPiece, (piece: any) =>
+                piece
                   ? (
                     <ct-button
-                      onClick={() => navigateTo(charm)}
+                      onClick={() => navigateTo(piece)}
                       size="sm"
                       variant="secondary"
                     >
@@ -1651,11 +1651,11 @@ When you're done searching, STOP calling tools and produce your final structured
                 ⚠️ Gmail token may have expired - will verify on scan
               </div>
               <div style={{ textAlign: "center" }}>
-                {derive(wishedAuthCharm, (charm: any) =>
-                  charm
+                {derive(wishedAuthPiece, (piece: any) =>
+                  piece
                     ? (
                       <ct-button
-                        onClick={() => navigateTo(charm)}
+                        onClick={() => navigateTo(piece)}
                         size="sm"
                         variant="secondary"
                       >

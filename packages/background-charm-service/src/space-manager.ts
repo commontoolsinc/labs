@@ -15,7 +15,7 @@ export interface CharmSchedulerOptions extends WorkerOptions {
 }
 
 type Task = {
-  charmId: string;
+  pieceId: string;
   timestamp: number;
   entry: Cell<BGCharmEntry>;
 };
@@ -46,14 +46,14 @@ export class SpaceManager {
   }
 
   private pushTask(
-    charmId: string,
+    pieceId: string,
     entry: Cell<BGCharmEntry>,
     whenInMs?: number,
   ) {
     const when = whenInMs ?? this.rerunIntervalMs;
     const timestamp = Date.now() + when;
     this.pendingTasks.push({
-      charmId,
+      pieceId,
       timestamp,
       entry,
     });
@@ -62,23 +62,23 @@ export class SpaceManager {
   }
 
   private updateCharmStatus(b: BGCharmEntry, c: Cell<BGCharmEntry>) {
-    const charmId = b.charmId;
+    const pieceId = b.pieceId;
     const enabled = !b.disabledAt;
-    const currentlyScheduled = this.enabledCharms.has(charmId) ||
-      this.activeCharm?.get().charmId === charmId;
+    const currentlyScheduled = this.enabledCharms.has(pieceId) ||
+      this.activeCharm?.get().pieceId === pieceId;
 
     if (enabled) {
       // if we aren't already scheduling this charm, add it to the list
       if (!currentlyScheduled) {
-        this.enabledCharms.set(charmId, c);
-        this.pushTask(charmId, c, 0);
+        this.enabledCharms.set(pieceId, c);
+        this.pushTask(pieceId, c, 0);
       }
     } else {
       // if we are disabling a charm, remove it from the list
       if (currentlyScheduled) {
-        this.enabledCharms.delete(charmId);
+        this.enabledCharms.delete(pieceId);
         this.pendingTasks = this.pendingTasks.filter((r) =>
-          r.charmId !== charmId
+          r.pieceId !== pieceId
         );
       }
     }
@@ -96,16 +96,16 @@ export class SpaceManager {
       addCancel(entry.sink((value) => this.updateCharmStatus(value, entry)));
 
       if (!raw.disabledAt) {
-        desired.add(raw.charmId);
+        desired.add(raw.pieceId);
       }
     }
 
-    const toRemove = scheduled.filter((charmId) => !desired.has(charmId));
+    const toRemove = scheduled.filter((pieceId) => !desired.has(pieceId));
 
-    for (const charmId of toRemove) {
-      this.enabledCharms.delete(charmId);
+    for (const pieceId of toRemove) {
+      this.enabledCharms.delete(pieceId);
       this.pendingTasks = this.pendingTasks.filter((task) =>
-        task.charmId !== charmId
+        task.pieceId !== pieceId
       );
     }
 
@@ -161,41 +161,41 @@ export class SpaceManager {
         continue;
       }
 
-      const { charmId, entry, timestamp: _ } = this.pendingTasks.shift()!;
+      const { pieceId, entry, timestamp: _ } = this.pendingTasks.shift()!;
 
-      this.processCharm(charmId, entry);
+      this.processCharm(pieceId, entry);
     }
   }
 
-  private async processCharm(charmId: string, entry: Cell<BGCharmEntry>) {
+  private async processCharm(pieceId: string, entry: Cell<BGCharmEntry>) {
     const raw = entry.get();
 
     if (raw.disabledAt) {
-      console.log(`${this.did} Charm ${charmId} is disabled, skipping`);
+      console.log(`${this.did} Charm ${pieceId} is disabled, skipping`);
       return;
     }
 
-    console.log(`${this.did} Starting ${raw.integration} ${raw.charmId}`);
+    console.log(`${this.did} Starting ${raw.integration} ${raw.pieceId}`);
 
     this.activeCharm = entry;
 
     try {
       await this.workerController.runCharm(entry);
-      this.onProcessSuccess(charmId, entry);
+      this.onProcessSuccess(pieceId, entry);
     } catch (error) {
       const errorString = error instanceof Error
         ? error.message
         : String(error);
       console.error(`${this.did} ${errorString}`);
-      this.onProcessFail(charmId, entry, errorString);
+      this.onProcessFail(pieceId, entry, errorString);
     }
     this.activeCharm = null;
   }
 
-  private onProcessSuccess(charmId: string, entry: Cell<BGCharmEntry>) {
+  private onProcessSuccess(pieceId: string, entry: Cell<BGCharmEntry>) {
     // If previous runs have failed, clear out the counter
-    if (this.failureTracking.has(charmId)) {
-      this.failureTracking.delete(charmId);
+    if (this.failureTracking.has(pieceId)) {
+      this.failureTracking.delete(pieceId);
     }
 
     entry.runtime.editWithRetry((tx) => {
@@ -205,25 +205,25 @@ export class SpaceManager {
       });
     });
 
-    if (this.enabledCharms.has(charmId)) {
-      this.pushTask(charmId, entry);
+    if (this.enabledCharms.has(pieceId)) {
+      this.pushTask(pieceId, entry);
     }
   }
 
   private onProcessFail(
-    charmId: string,
+    pieceId: string,
     entry: Cell<BGCharmEntry>,
     error: string,
   ) {
-    const failureCount = (this.failureTracking.get(charmId) ?? 0) + 1;
+    const failureCount = (this.failureTracking.get(pieceId) ?? 0) + 1;
 
     // If we've received graph errors 3 times in a row,
     // disable the charm.
     if (failureCount >= 3) {
-      this.failureTracking.delete(charmId);
-      this.disableCharm(charmId, entry, error);
+      this.failureTracking.delete(pieceId);
+      this.disableCharm(pieceId, entry, error);
     } else {
-      this.failureTracking.set(charmId, failureCount);
+      this.failureTracking.set(pieceId, failureCount);
       entry.runtime.editWithRetry((tx) => {
         entry.withTx(tx).update({
           lastRun: Date.now(),
@@ -231,10 +231,10 @@ export class SpaceManager {
         });
       });
 
-      if (this.enabledCharms.has(charmId)) {
+      if (this.enabledCharms.has(pieceId)) {
         // Apply a linear backoff for the next attempts
         this.pushTask(
-          charmId,
+          pieceId,
           entry,
           this.rerunIntervalMs * (failureCount + 1),
         );
@@ -243,7 +243,7 @@ export class SpaceManager {
   }
 
   private disableCharm(
-    charmId: string,
+    pieceId: string,
     entry: Cell<BGCharmEntry>,
     error: string,
   ) {
@@ -255,14 +255,14 @@ export class SpaceManager {
       });
     });
 
-    this.enabledCharms.delete(charmId);
-    this.pendingTasks = this.pendingTasks.filter((r) => r.charmId !== charmId);
+    this.enabledCharms.delete(pieceId);
+    this.pendingTasks = this.pendingTasks.filter((r) => r.pieceId !== pieceId);
   }
 
   private disableSpace(reason: string) {
     console.log(`${this.did} Disabling space: ${reason}`);
-    for (const [charmId, entry] of this.enabledCharms.entries()) {
-      this.disableCharm(charmId, entry, reason);
+    for (const [pieceId, entry] of this.enabledCharms.entries()) {
+      this.disableCharm(pieceId, entry, reason);
     }
   }
 

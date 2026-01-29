@@ -1184,42 +1184,42 @@ Deno.bench("Cell equals - comparison operations (100x)", async () => {
   await cleanup(runtime, storageManager, tx);
 });
 
-// Benchmark: Complex linked document graph (MentionableCharm pattern)
+// Benchmark: Complex linked document graph (MentionablePiece pattern)
 // This tests .get() performance on a medium-complexity object spread across many documents
 Deno.bench(
-  "Cell complex - MentionableCharm graph (10 top-level, 20 linked each, 100x get)",
+  "Cell complex - MentionablePiece graph (10 top-level, 20 linked each, 100x get)",
   async () => {
     const { runtime, storageManager, tx } = setup();
 
-    // Schema for MentionableCharm with self-referential mentioned/backlinks
-    const MentionableCharmSchema = {
+    // Schema for MentionablePiece with self-referential mentioned/backlinks
+    const MentionablePieceSchema = {
       $defs: {
-        MentionableCharm: {
+        MentionablePiece: {
           type: "object",
           properties: {
             name: { type: "string" },
             isHidden: { type: "boolean" },
             mentioned: {
               type: "array",
-              items: { $ref: "#/$defs/MentionableCharm" },
+              items: { $ref: "#/$defs/MentionablePiece" },
             },
             backlinks: {
               type: "array",
-              items: { $ref: "#/$defs/MentionableCharm" },
+              items: { $ref: "#/$defs/MentionablePiece" },
             },
           },
         },
       },
       type: "array",
-      items: { $ref: "#/$defs/MentionableCharm" },
+      items: { $ref: "#/$defs/MentionablePiece" },
     } as const satisfies JSONSchema;
 
-    // Create 30 "leaf" charms that will be referenced (no further links)
-    const leafCharms: ReturnType<typeof runtime.getCell>[] = [];
+    // Create 30 "leaf" pieces that will be referenced (no further links)
+    const leafPieces: ReturnType<typeof runtime.getCell>[] = [];
     for (let i = 0; i < 30; i++) {
       const leafCell = runtime.getCell(
         space,
-        `bench-leaf-charm-${i}`,
+        `bench-leaf-piece-${i}`,
         {
           type: "object",
           properties: {
@@ -1232,20 +1232,20 @@ Deno.bench(
         tx,
       );
       leafCell.set({
-        name: `Leaf Charm ${i}`,
+        name: `Leaf Piece ${i}`,
         isHidden: i % 3 === 0,
         mentioned: [],
         backlinks: [],
       });
-      leafCharms.push(leafCell);
+      leafPieces.push(leafCell);
     }
 
-    // Create 10 top-level charms, each linking to ~20 leaf charms
-    const topLevelCharms: ReturnType<typeof runtime.getCell>[] = [];
+    // Create 10 top-level pieces, each linking to ~20 leaf pieces
+    const topLevelPieces: ReturnType<typeof runtime.getCell>[] = [];
     for (let i = 0; i < 10; i++) {
       const topCell = runtime.getCell(
         space,
-        `bench-top-charm-${i}`,
+        `bench-top-piece-${i}`,
         {
           type: "object",
           properties: {
@@ -1258,30 +1258,30 @@ Deno.bench(
         tx,
       );
 
-      // Each top-level charm mentions 10 leaves and has 10 backlinks
-      const mentionedSlice = leafCharms.slice(i * 2, i * 2 + 10);
-      const backlinksSlice = leafCharms.slice(
+      // Each top-level piece mentions 10 leaves and has 10 backlinks
+      const mentionedSlice = leafPieces.slice(i * 2, i * 2 + 10);
+      const backlinksSlice = leafPieces.slice(
         (i * 2 + 10) % 30,
         ((i * 2 + 10) % 30) + 10,
       );
 
       topCell.set({
-        name: `Top Charm ${i}`,
+        name: `Top Piece ${i}`,
         isHidden: false,
         mentioned: mentionedSlice,
         backlinks: backlinksSlice,
       });
-      topLevelCharms.push(topCell);
+      topLevelPieces.push(topCell);
     }
 
-    // Create the main array cell containing all top-level charms
+    // Create the main array cell containing all top-level pieces
     const mainCell = runtime.getCell(
       space,
-      "bench-mentionable-charms",
-      MentionableCharmSchema,
+      "bench-mentionable-pieces",
+      MentionablePieceSchema,
       tx,
     );
-    mainCell.set(topLevelCharms);
+    mainCell.set(topLevelPieces);
 
     await tx.commit();
 
@@ -1289,10 +1289,10 @@ Deno.bench(
     for (let i = 0; i < 100; i++) {
       const result = mainCell.get();
       // Access some nested data to ensure full traversal
-      for (const charm of result) {
-        charm.name;
-        charm.mentioned;
-        charm.backlinks;
+      for (const piece of result) {
+        piece.name;
+        piece.mentioned;
+        piece.backlinks;
       }
     }
 

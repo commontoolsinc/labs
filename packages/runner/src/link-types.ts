@@ -303,7 +303,7 @@ export function parseLLMFriendlyLink(
 
   if (!matchLLMFriendlyLink.test(target)) {
     throw new Error(
-      'Target must include a charm handle, e.g. "/of:bafyabc123/path".',
+      'Target must include a piece handle, e.g. "/of:bafyabc123/path".',
     );
   }
 
@@ -336,7 +336,7 @@ export function parseLLMFriendlyLink(
   // format)
   if (id === undefined || id.length < 20) {
     throw new Error(
-      `Charm references must use handles (e.g., "/of:bafyabc123/path"), not human names (e.g., "${id}").`,
+      `Piece references must use handles (e.g., "/of:bafyabc123/path"), not human names (e.g., "${id}").`,
     );
   }
 

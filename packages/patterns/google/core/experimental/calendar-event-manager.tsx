@@ -10,8 +10,8 @@
  * gate when policies are implemented (patterns with verified SHA can be trusted).
  *
  * Usage:
- * 1. Create and favorite a Google Auth charm with "Calendar (create/edit/delete events)" permission
- * 2. Create a Calendar Event Manager charm
+ * 1. Create and favorite a Google Auth piece with "Calendar (create/edit/delete events)" permission
+ * 2. Create a Calendar Event Manager piece
  * 3. Fill out event details or select an existing event
  * 4. Click the action button (Create/Update/Delete/RSVP)
  * 5. Review the confirmation dialog showing exactly what will happen

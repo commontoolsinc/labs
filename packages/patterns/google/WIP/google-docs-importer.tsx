@@ -41,7 +41,7 @@ import Note from "../../notes/note.tsx";
 // This pattern requires Google OAuth with specific scopes and APIs enabled:
 //
 // 1. GOOGLE AUTH CHARM
-//    - Create and favorite a Google Auth charm with these scopes enabled:
+//    - Create and favorite a Google Auth piece with these scopes enabled:
 //      - Drive (read/write files & comments) - for fetching comments
 //      - Docs (read document content) - for fetching document content
 //
@@ -171,7 +171,7 @@ const importDocument = handler<
   },
 );
 
-// Save as Note charm
+// Save as Note piece
 const saveAsNote = handler<
   unknown,
   { markdown: Cell<string>; docTitle: Cell<string> }
@@ -183,7 +183,7 @@ const saveAsNote = handler<
     return;
   }
 
-  // Create and navigate to a new Note charm with the imported content
+  // Create and navigate to a new Note piece with the imported content
   return navigateTo(Note({ title, content: md }));
 });
 
@@ -246,13 +246,13 @@ export default pattern<Input, Output>(
     const hasError = computed(() => !!lastErrorCell.get());
 
     // Computed name based on doc title
-    const charmName = computed(() => {
+    const pieceName = computed(() => {
       const title = docTitleCell.get();
       return title ? `Import: ${title}` : "Google Docs Importer";
     });
 
     return {
-      [NAME]: charmName,
+      [NAME]: pieceName,
       [UI]: (
         <ct-screen>
           {/* Header */}

@@ -186,7 +186,7 @@ export class CTCellLink extends BaseElement {
       // TODO(runtime-worker-refactor):
       const view = {
         spaceDid: this._resolvedCell.space(),
-        charmId: this._resolvedCell.id(),
+        pieceId: this._resolvedCell.id(),
       };
 
       // Cmd (Mac) or Ctrl (Windows/Linux) opens in new tab

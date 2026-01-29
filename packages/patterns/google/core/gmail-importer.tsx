@@ -42,7 +42,7 @@ type SyncableWritable<T> = Writable<T> & {
  *
  * ⚠️ CRITICAL: When consuming this auth, DO NOT use derive()!
  * derive() creates read-only projections - token refresh will silently fail.
- * Use property access (charm.auth) or ifElse() instead.
+ * Use property access (piece.auth) or ifElse() instead.
  *
  * See: community-docs/superstitions/2025-12-03-derive-creates-readonly-cells-use-property-access.md
  */
@@ -1083,8 +1083,8 @@ export default pattern<{
     autoFetchOnAuth: false;
     resolveInlineImages: false;
   }>;
-  // Optional: Link auth directly from a Google Auth charm when wish() is unavailable
-  // Use: ct charm link googleAuthCharm/auth gmailImporterCharm/overrideAuth
+  // Optional: Link auth directly from a Google Auth piece when wish() is unavailable
+  // Use: ct piece link googleAuthPiece/auth gmailImporterPiece/overrideAuth
   overrideAuth?: Auth;
 }, Output>(
   ({ settings, overrideAuth }) => {

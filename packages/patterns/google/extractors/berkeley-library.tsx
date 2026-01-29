@@ -14,9 +14,9 @@
  * - Omnibot actions: mark books as returned and dismiss holds
  *
  * Usage:
- * 1. Deploy a google-auth charm and complete OAuth
+ * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct charm link google-auth/auth berkeley-library/overrideAuth
+ * 3. Link: ct piece link google-auth/auth berkeley-library/overrideAuth
  *
  * Omnibot Actions:
  * - markAsReturned: Mark a book as returned by title
@@ -534,8 +534,8 @@ const setDueDateForGroup = handler<
 // =============================================================================
 
 interface PatternInput {
-  // Optional: Link auth directly from a Google Auth charm
-  // Use: ct charm link googleAuthCharm/auth berkeleyLibraryCharm/overrideAuth
+  // Optional: Link auth directly from a Google Auth piece
+  // Use: ct piece link googleAuthPiece/auth berkeleyLibraryPiece/overrideAuth
   overrideAuth?: Auth;
   // Track items manually marked as returned (persisted)
   manuallyReturned?: Writable<Default<string[], []>>;

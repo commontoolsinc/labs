@@ -128,11 +128,11 @@ export class CTPlaidLink extends BaseElement {
     if (!container) {
       throw new Error("No <ct-charm> container.");
     }
-    const { charmId } = container;
+    const { pieceId } = container;
 
     const payload = {
       authCellId,
-      integrationCharmId: charmId,
+      integrationCharmId: pieceId,
       products: this.products,
     };
 
@@ -161,7 +161,7 @@ export class CTPlaidLink extends BaseElement {
       this.initializePlaidLink(
         data.linkToken,
         authCellId,
-        charmId || undefined,
+        pieceId || undefined,
       );
     } catch (error) {
       console.error("Error creating link session:", error);

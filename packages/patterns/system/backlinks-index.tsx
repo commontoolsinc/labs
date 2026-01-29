@@ -2,20 +2,20 @@
 import { lift, NAME, pattern, UI, Writable } from "commontools";
 
 /**
- * Type for charms used in the mentionable/backlinks system.
+ * Type for pieces used in the mentionable/backlinks system.
  *
  * Note: While `mentioned` and `backlinks` are typed as required for structural
- * compatibility, at runtime most charms don't actually have these fields.
+ * compatibility, at runtime most pieces don't actually have these fields.
  * Only patterns like notes and calendar events define them. The computeIndex
- * function safely handles charms that lack these fields.
+ * function safely handles pieces that lack these fields.
  */
-export type MentionableCharm = {
+export type MentionablePiece = {
   [NAME]?: string;
   isHidden?: boolean;
   isMentionable?: boolean;
-  mentioned?: MentionableCharm[];
-  backlinks?: MentionableCharm[];
-  mentionable?: MentionableCharm[] | { get?: () => MentionableCharm[] };
+  mentioned?: MentionablePiece[];
+  backlinks?: MentionablePiece[];
+  mentionable?: MentionablePiece[] | { get?: () => MentionablePiece[] };
 };
 
 export type WritableBacklinks = {
@@ -24,22 +24,22 @@ export type WritableBacklinks = {
 };
 
 type Input = {
-  allCharms: MentionableCharm[];
+  allPieces: MentionablePiece[];
 };
 
 type Output = {
-  mentionable: MentionableCharm[];
+  mentionable: MentionablePiece[];
 };
 
 const computeIndex = lift<
-  { allCharms: WritableBacklinks[] | undefined },
+  { allPieces: WritableBacklinks[] | undefined },
   void
 >(
-  ({ allCharms }) => {
-    const cs = allCharms ?? [];
+  ({ allPieces }) => {
+    const cs = allPieces ?? [];
 
-    // Reset backlinks for charms that support it.
-    // Many charms don't have backlinks (e.g., auth charms, google patterns),
+    // Reset backlinks for pieces that support it.
+    // Many pieces don't have backlinks (e.g., auth pieces, google patterns),
     // so we safely skip them with optional chaining.
     // Also skip undefined/null entries that may exist in the array.
     for (const c of cs) {
@@ -48,7 +48,7 @@ const computeIndex = lift<
     }
 
     // Populate backlinks from mentioned references.
-    // Again, use optional chaining since not all charms support backlinks.
+    // Again, use optional chaining since not all pieces support backlinks.
     for (const c of cs) {
       if (!c) continue;
       const mentions = c.mentioned ?? [];
@@ -60,31 +60,31 @@ const computeIndex = lift<
 );
 
 /**
- * BacklinksIndex builds a map of backlinks across all charms and exposes a
+ * BacklinksIndex builds a map of backlinks across all pieces and exposes a
  * unified mentionable list for consumers like editors.
  *
  * Behavior:
- * - Backlinks are computed by scanning each charm's `mentioned` list and
- *   mapping mention target -> list of source charms.
+ * - Backlinks are computed by scanning each piece's `mentioned` list and
+ *   mapping mention target -> list of source pieces.
  * - Mentionable list is a union of:
- *   - every charm in `allCharms`
- *   - any items a charm exports via a `mentionable` property
- *     (either an array of charms or a Cell of such an array)
+ *   - every piece in `allPieces`
+ *   - any items a piece exports via a `mentionable` property
+ *     (either an array of pieces or a Cell of such an array)
  *
- * The backlinks map is keyed by a charm's `content` value (falling back to
+ * The backlinks map is keyed by a piece's `content` value (falling back to
  * its `[NAME]`). This mirrors how existing note patterns identify notes when
  * computing backlinks locally.
  */
 const computeMentionable = lift<
-  { allCharms: MentionableCharm[] },
-  MentionableCharm[]
->(({ allCharms: charmList }) => {
-  const cs = charmList ?? [];
-  const out: MentionableCharm[] = [];
+  { allPieces: MentionablePiece[] },
+  MentionablePiece[]
+>(({ allPieces: pieceList }) => {
+  const cs = pieceList ?? [];
+  const out: MentionablePiece[] = [];
   for (const c of cs) {
     // Skip undefined/null entries that may exist in the array
     if (!c) continue;
-    // Skip charms explicitly marked as not mentionable (like note-md viewer charms)
+    // Skip pieces explicitly marked as not mentionable (like note-md viewer pieces)
     // Note: We check isMentionable === false, not isHidden, because notes in
     // notebooks are hidden but should still be mentionable
     if (c.isMentionable === false) continue;
@@ -93,7 +93,7 @@ const computeMentionable = lift<
     if (Array.isArray(exported)) {
       for (const m of exported) if (m && m.isMentionable !== false) out.push(m);
     } else if (exported && typeof (exported as any).get === "function") {
-      const arr = (exported as { get: () => MentionableCharm[] }).get() ??
+      const arr = (exported as { get: () => MentionablePiece[] }).get() ??
         [];
       for (const m of arr) if (m && m.isMentionable !== false) out.push(m);
     }
@@ -101,11 +101,11 @@ const computeMentionable = lift<
   return out;
 });
 
-const BacklinksIndex = pattern<Input, Output>(({ allCharms }) => {
-  computeIndex({ allCharms } as { allCharms: WritableBacklinks[] });
+const BacklinksIndex = pattern<Input, Output>(({ allPieces }) => {
+  computeIndex({ allPieces } as { allPieces: WritableBacklinks[] });
 
-  // Compute mentionable list from allCharms reactively
-  const mentionable = computeMentionable({ allCharms });
+  // Compute mentionable list from allPieces reactively
+  const mentionable = computeMentionable({ allPieces });
 
   return {
     [NAME]: "BacklinksIndex",

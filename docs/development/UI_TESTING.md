@@ -53,7 +53,7 @@ strategy**.
    // shell.goto() handles navigation, applyConsoleFormatter, and login
    await shell.goto({
      frontendUrl: FRONTEND_URL,
-     view: { spaceName: SPACE_NAME, charmId },
+     view: { spaceName: SPACE_NAME, pieceId },
      identity,
    });
 
@@ -95,7 +95,7 @@ import { env, waitFor } from "@commontools/integration";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { Identity } from "@commontools/identity";
-import { CharmsController } from "@commontools/charm/ops";
+import { PiecesController } from "@commontools/piece/ops";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -104,18 +104,18 @@ describe("shadow DOM component test", () => {
   shell.bindLifecycle();
 
   let identity: Identity;
-  let cc: CharmsController;
-  let charmId: string;
+  let cc: PiecesController;
+  let pieceId: string;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
-    cc = await CharmsController.initialize({
+    cc = await PiecesController.initialize({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
     });
     const charm = await cc.create(yourPatternCode, { start: true });
-    charmId = charm.id;
+    pieceId = charm.id;
   });
 
   afterAll(async () => {
@@ -128,7 +128,7 @@ describe("shadow DOM component test", () => {
     // Setup: shell.goto() handles navigation, applyConsoleFormatter, and login
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      view: { spaceName: SPACE_NAME, charmId },
+      view: { spaceName: SPACE_NAME, pieceId },
       identity,
     });
 

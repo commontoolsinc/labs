@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import "../src/globals.ts";
 import { Identity } from "@commontools/identity";
-import { CharmsController } from "@commontools/charm/ops";
+import { PiecesController } from "@commontools/piece/ops";
 import { FileSystemProgramResolver } from "@commontools/js-compiler";
 
 const { API_URL, SPACE_NAME, FRONTEND_URL } = env;
@@ -13,13 +13,13 @@ describe("shell charm tests", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  let charmId: string;
+  let pieceId: string;
   let identity: Identity;
-  let cc: CharmsController;
+  let cc: PiecesController;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
-    cc = await CharmsController.initialize({
+    cc = await PiecesController.initialize({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
@@ -40,7 +40,7 @@ describe("shell charm tests", () => {
       program,
       { start: false },
     );
-    charmId = charm.id;
+    pieceId = charm.id;
   });
 
   afterAll(async () => {
@@ -53,7 +53,7 @@ describe("shell charm tests", () => {
       frontendUrl: FRONTEND_URL,
       view: {
         spaceName: SPACE_NAME,
-        charmId,
+        pieceId,
       },
       identity,
     });

@@ -1,8 +1,8 @@
 // template-registry.ts - Pre-assembled module sets ("lego sets")
 // Defines common record types and their associated modules
 
-import { createSubCharm } from "./registry.ts";
-import type { SubCharmEntry } from "./types.ts";
+import { createSubPiece } from "./registry.ts";
+import type { SubPieceEntry } from "./types.ts";
 
 // ===== Template Types =====
 
@@ -153,49 +153,49 @@ export function inferTypeFromModules(moduleTypes: string[]): InferredType {
   return { type: "record", icon: "\u{1F4CB}", confidence: 0.5 };
 }
 
-// ===== Functions that require createSubCharm =====
+// ===== Functions that require createSubPiece =====
 
 /**
- * Create all modules for a template, returning SubCharmEntry array.
+ * Create all modules for a template, returning SubPieceEntry array.
  * Notes is pinned by default in all templates.
  *
  * Gracefully handles module creation failures - skips failed modules
  * and logs a warning rather than crashing the entire template application.
  *
  * @param templateId - ID of the template to create modules for
- * @param createNotesCharm - Factory function to create Notes charm with correct linkPattern.
+ * @param createNotesPiece - Factory function to create Notes piece with correct linkPattern.
  *                           Required because Notes needs the Record pattern JSON for wiki-links,
  *                           which avoids global state.
  */
 export function createTemplateModules(
   templateId: string,
-  createNotesCharm?: () => unknown,
-): SubCharmEntry[] {
+  createNotesPiece?: () => unknown,
+): SubPieceEntry[] {
   const template = TEMPLATE_REGISTRY[templateId];
   if (!template) return [];
 
-  const entries: SubCharmEntry[] = [];
+  const entries: SubPieceEntry[] = [];
 
   for (const moduleType of template.modules) {
     try {
       // Special case: use factory for notes if provided
       // Notes needs linkPattern which requires Record's pattern JSON
-      let charm: unknown;
+      let piece: unknown;
       if (moduleType === "notes") {
-        if (!createNotesCharm) {
+        if (!createNotesPiece) {
           console.warn(
-            `Template "${templateId}" includes notes but no createNotesCharm factory provided`,
+            `Template "${templateId}" includes notes but no createNotesPiece factory provided`,
           );
           continue;
         }
-        charm = createNotesCharm();
+        piece = createNotesPiece();
       } else {
-        charm = createSubCharm(moduleType);
+        piece = createSubPiece(moduleType);
       }
       entries.push({
         type: moduleType,
         pinned: template.defaultPinned.includes(moduleType),
-        charm,
+        piece,
       });
     } catch (error) {
       console.warn(

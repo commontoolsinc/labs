@@ -17,7 +17,7 @@ FILES_TO_CHECK=()
 DIRS=(
   "packages/api"
   "packages/background-charm-service"
-  "packages/charm"
+  "packages/piece"
   "packages/cli/test"
   "packages/cli/commands"
   "packages/deno-web-test"

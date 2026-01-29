@@ -3,7 +3,7 @@ import { Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { setLLMUrl } from "@commontools/llm";
 import { createSession, Identity } from "@commontools/identity";
-import { CharmManager } from "@commontools/charm";
+import { PieceManager } from "@commontools/piece";
 import { sleep } from "@commontools/utils/sleep";
 import { Processor } from "./processor.ts";
 import { scenarios } from "./scenarios.ts";
@@ -57,7 +57,7 @@ const runtime = new Runtime({
   apiUrl: new URL(apiUrl),
 });
 
-const charmManager = new CharmManager(session, runtime);
+const charmManager = new PieceManager(session, runtime);
 
 const verifier =
   await (noVerify

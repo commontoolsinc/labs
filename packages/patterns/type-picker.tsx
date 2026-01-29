@@ -33,7 +33,7 @@ import {
   type TemplateDefinition,
 } from "./record/template-registry.ts";
 import Note from "./notes/note.tsx";
-import type { SubCharmEntry, TrashedSubCharmEntry } from "./record/types.ts";
+import type { SubPieceEntry, TrashedSubPieceEntry } from "./record/types.ts";
 
 // Filter function at module scope to avoid transformer errors
 const isNotBlankTemplate = (t: TemplateDefinition): boolean => t.id !== "blank";
@@ -51,8 +51,8 @@ export const MODULE_METADATA: ModuleMetadata = {
 interface TypePickerInput {
   // Cells at top level - CTS handles these correctly for serialization
   // (When nested inside a plain object, serialization fails)
-  entries: Writable<SubCharmEntry[]>;
-  trashedEntries: Writable<TrashedSubCharmEntry[]>;
+  entries: Writable<SubPieceEntry[]>;
+  trashedEntries: Writable<TrashedSubPieceEntry[]>;
   linkPatternJson?: string;
   // Internal state
   dismissed?: Default<boolean, false>;
@@ -70,8 +70,8 @@ interface TypePickerOutput {
 const applyTemplate = handler<
   unknown,
   {
-    entries: Writable<SubCharmEntry[]>;
-    trashedEntries: Writable<TrashedSubCharmEntry[]>;
+    entries: Writable<SubPieceEntry[]>;
+    trashedEntries: Writable<TrashedSubPieceEntry[]>;
     linkPatternJson: string | undefined;
     templateId: string;
   }
@@ -89,10 +89,10 @@ const applyTemplate = handler<
   const selfEntry = current.find((e) => e?.type === "type-picker");
 
   // Create factory for Notes that uses the linkPatternJson for wiki-links
-  const createNotesCharm = () => Note({ linkPattern: linkPatternJson });
+  const createNotesPiece = () => Note({ linkPattern: linkPatternJson });
 
   // Create template modules (skip notes since we keep existing one)
-  const templateEntries = createTemplateModules(templateId, createNotesCharm);
+  const templateEntries = createTemplateModules(templateId, createNotesPiece);
   const newModules = templateEntries.filter((e) => e.type !== "notes");
 
   // Build new list: notes + new template modules (excluding type-picker)
@@ -106,7 +106,7 @@ const applyTemplate = handler<
 
   // Trash self
   if (selfEntry) {
-    const trashedSelf: TrashedSubCharmEntry = {
+    const trashedSelf: TrashedSubPieceEntry = {
       ...selfEntry,
       trashedAt: new Date().toISOString(),
     };
@@ -119,8 +119,8 @@ const applyTemplate = handler<
 const dismiss = handler<
   unknown,
   {
-    entries: Writable<SubCharmEntry[]>;
-    trashedEntries: Writable<TrashedSubCharmEntry[]>;
+    entries: Writable<SubPieceEntry[]>;
+    trashedEntries: Writable<TrashedSubPieceEntry[]>;
   }
 >((_event, { entries, trashedEntries }) => {
   const current = entries.get() || [];
@@ -133,7 +133,7 @@ const dismiss = handler<
   entries.set(current.filter((e) => e?.type !== "type-picker"));
 
   // Add to trash
-  const trashedSelf: TrashedSubCharmEntry = {
+  const trashedSelf: TrashedSubPieceEntry = {
     ...selfEntry,
     trashedAt: new Date().toISOString(),
   };

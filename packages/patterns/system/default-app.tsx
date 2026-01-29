@@ -17,26 +17,26 @@ import { default as Note } from "../notes/note.tsx";
 const generateId = () =>
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
 
-// Maximum number of recent charms to track
+// Maximum number of recent pieces to track
 const MAX_RECENT_CHARMS = 10;
 
-import BacklinksIndex, { type MentionableCharm } from "./backlinks-index.tsx";
+import BacklinksIndex, { type MentionablePiece } from "./backlinks-index.tsx";
 import OmniboxFAB from "./omnibox-fab.tsx";
 import Notebook from "../notes/notebook.tsx";
 import NotesImportExport from "../notes/notes-import-export.tsx";
 
-type MinimalCharm = {
+type MinimalPiece = {
   [NAME]?: string;
   isHidden?: boolean;
 };
 
-type CharmsListInput = void;
+type PiecesListInput = void;
 
 // Recipe returns only UI, no data outputs (only symbol properties)
-interface CharmsListOutput {
+interface PiecesListOutput {
   [key: string]: unknown;
   backlinksIndex: {
-    mentionable: MentionableCharm[];
+    mentionable: MentionablePiece[];
   };
   sidebarUI: unknown;
   fabUI: unknown;
@@ -44,29 +44,29 @@ interface CharmsListOutput {
 
 const _visit = handler<
   Record<string, never>,
-  { charm: Writable<MinimalCharm> }
+  { piece: Writable<MinimalPiece> }
 >((_, state) => {
-  return navigateTo(state.charm);
+  return navigateTo(state.piece);
 }, { proxy: true });
 
-const removeCharm = handler<
+const removePiece = handler<
   Record<string, never>,
   {
-    charm: Writable<MinimalCharm>;
-    allCharms: Writable<MinimalCharm[]>;
+    piece: Writable<MinimalPiece>;
+    allPieces: Writable<MinimalPiece[]>;
   }
 >((_, state) => {
-  const allCharmsValue = state.allCharms.get();
-  const index = allCharmsValue.findIndex((c: any) =>
-    c && state.charm.equals(c)
+  const allPiecesValue = state.allPieces.get();
+  const index = allPiecesValue.findIndex((c: any) =>
+    c && state.piece.equals(c)
   );
 
   if (index !== -1) {
-    const charmListCopy = [...allCharmsValue];
-    console.log("charmListCopy before", charmListCopy.length);
-    charmListCopy.splice(index, 1);
-    console.log("charmListCopy after", charmListCopy.length);
-    state.allCharms.set(charmListCopy);
+    const pieceListCopy = [...allPiecesValue];
+    console.log("pieceListCopy before", pieceListCopy.length);
+    pieceListCopy.splice(index, 1);
+    console.log("pieceListCopy after", pieceListCopy.length);
+    state.allPieces.set(pieceListCopy);
   }
 });
 
@@ -86,7 +86,7 @@ const dropOntoNotebook = handler<
   // Hide from Patterns list
   sourceCell.key("isHidden").set(true);
 
-  // Add to notebook - push cell reference, not value, to maintain charm identity
+  // Add to notebook - push cell reference, not value, to maintain piece identity
   notesCell.push(sourceCell);
 });
 
@@ -126,11 +126,11 @@ const menuNewNotebook = handler<void, { menuOpen: Writable<boolean> }>(
   },
 );
 
-// Helper to find existing All Notes charm
-const findAllNotebooksCharm = (allCharms: Writable<MinimalCharm[]>) => {
-  const charms = allCharms.get();
-  return charms.find((charm: any) => {
-    const name = charm?.[NAME];
+// Helper to find existing All Notes piece
+const findAllNotebooksPiece = (allPieces: Writable<MinimalPiece[]>) => {
+  const pieces = allPieces.get();
+  return pieces.find((piece: any) => {
+    const name = piece?.[NAME];
     return typeof name === "string" && name.startsWith("All Notes");
   });
 };
@@ -138,61 +138,61 @@ const findAllNotebooksCharm = (allCharms: Writable<MinimalCharm[]>) => {
 // Menu: All Notes
 const menuAllNotebooks = handler<
   void,
-  { menuOpen: Writable<boolean>; allCharms: Writable<MinimalCharm[]> }
->((_, { menuOpen, allCharms }) => {
+  { menuOpen: Writable<boolean>; allPieces: Writable<MinimalPiece[]> }
+>((_, { menuOpen, allPieces }) => {
   menuOpen.set(false);
-  const existing = findAllNotebooksCharm(allCharms);
+  const existing = findAllNotebooksPiece(allPieces);
   if (existing) {
     return navigateTo(existing);
   }
-  return navigateTo(NotesImportExport({ importMarkdown: "", allCharms }));
+  return navigateTo(NotesImportExport({ importMarkdown: "", allPieces }));
 });
 
-// Handler: Add charm to allCharms if not already present
-const addCharm = handler<
-  { charm: MentionableCharm },
-  { allCharms: Writable<MentionableCharm[]> }
->(({ charm }, { allCharms }) => {
-  const current = allCharms.get();
-  if (!current.some((c) => equals(c, charm))) {
-    allCharms.push(charm);
+// Handler: Add piece to allPieces if not already present
+const addPiece = handler<
+  { piece: MentionablePiece },
+  { allPieces: Writable<MentionablePiece[]> }
+>(({ piece }, { allPieces }) => {
+  const current = allPieces.get();
+  if (!current.some((c) => equals(c, piece))) {
+    allPieces.push(piece);
   }
 });
 
-// Handler: Track charm as recently used (add to front, maintain max)
+// Handler: Track piece as recently used (add to front, maintain max)
 const trackRecent = handler<
-  { charm: MentionableCharm },
-  { recentCharms: Writable<MentionableCharm[]> }
->(({ charm }, { recentCharms }) => {
-  const current = recentCharms.get();
+  { piece: MentionablePiece },
+  { recentPieces: Writable<MentionablePiece[]> }
+>(({ piece }, { recentPieces }) => {
+  const current = recentPieces.get();
   // Remove if already present
-  const filtered = current.filter((c) => !equals(c, charm));
+  const filtered = current.filter((c) => !equals(c, piece));
   // Add to front and limit to max
-  const updated = [charm, ...filtered].slice(0, MAX_RECENT_CHARMS);
-  recentCharms.set(updated);
+  const updated = [piece, ...filtered].slice(0, MAX_RECENT_CHARMS);
+  recentPieces.set(updated);
 });
 
-export default pattern<CharmsListInput, CharmsListOutput>((_) => {
+export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   // OWN the data cells (not from wish)
-  const allCharms = Writable.of<MentionableCharm[]>([]);
-  const recentCharms = Writable.of<MentionableCharm[]>([]);
+  const allPieces = Writable.of<MentionablePiece[]>([]);
+  const recentPieces = Writable.of<MentionablePiece[]>([]);
 
   // Dropdown menu state
   const menuOpen = Writable.of(false);
 
-  // Filter out hidden charms and charms without resolved NAME
+  // Filter out hidden pieces and pieces without resolved NAME
   // (prevents transient hash-only pills during reactive updates)
-  // NOTE: Use truthy check, not === true, because charm.isHidden is a proxy object
-  const visibleCharms = computed(() =>
-    allCharms.get().filter((charm) => {
-      if (!charm) return false;
-      if (charm.isHidden) return false;
-      const name = charm?.[NAME];
+  // NOTE: Use truthy check, not === true, because piece.isHidden is a proxy object
+  const visiblePieces = computed(() =>
+    allPieces.get().filter((piece) => {
+      if (!piece) return false;
+      if (piece.isHidden) return false;
+      const name = piece?.[NAME];
       return typeof name === "string" && name.length > 0;
     })
   );
 
-  const index = BacklinksIndex({ allCharms });
+  const index = BacklinksIndex({ allPieces });
 
   const fab = OmniboxFAB({
     mentionable: index.mentionable,
@@ -200,7 +200,7 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
 
   return {
     backlinksIndex: index,
-    [NAME]: computed(() => `Space Home (${visibleCharms.length})`),
+    [NAME]: computed(() => `Space Home (${visiblePieces.length})`),
     [UI]: (
       <ct-screen>
         <ct-keybind
@@ -284,7 +284,7 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
               />
               <ct-button
                 variant="ghost"
-                onClick={menuAllNotebooks({ menuOpen, allCharms })}
+                onClick={menuAllNotebooks({ menuOpen, allPieces })}
                 style={{ justifyContent: "flex-start" }}
               >
                 {"\u00A0\u00A0"}📁 All Notes
@@ -310,19 +310,19 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
 
             <ct-table full-width hover>
               <tbody>
-                {visibleCharms.map((charm) => {
-                  // Check if charm is a notebook by NAME prefix (isNotebook prop not reliable through proxy)
+                {visiblePieces.map((piece) => {
+                  // Check if piece is a notebook by NAME prefix (isNotebook prop not reliable through proxy)
                   const isNotebook = computed(() => {
-                    const name = charm?.[NAME];
+                    const name = piece?.[NAME];
                     const result = typeof name === "string" &&
                       name.startsWith("📓");
                     return result;
                   });
 
                   const link = (
-                    <ct-drag-source $cell={charm} type="note">
-                      <ct-cell-context $cell={charm}>
-                        <ct-cell-link $cell={charm} />
+                    <ct-drag-source $cell={piece} type="note">
+                      <ct-cell-context $cell={piece}>
+                        <ct-cell-link $cell={piece} />
                       </ct-cell-context>
                     </ct-drag-source>
                   );
@@ -335,7 +335,7 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
                           <ct-drop-zone
                             accept="note"
                             onct-drop={dropOntoNotebook({
-                              notebook: charm as any,
+                              notebook: piece as any,
                             })}
                           >
                             {link}
@@ -347,7 +347,7 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
                         <ct-button
                           size="sm"
                           variant="ghost"
-                          onClick={removeCharm({ charm, allCharms })}
+                          onClick={removePiece({ piece, allPieces })}
                         >
                           🗑️
                         </ct-button>
@@ -365,11 +365,11 @@ export default pattern<CharmsListInput, CharmsListOutput>((_) => {
     fabUI: fab[UI],
 
     // Exported data
-    allCharms,
-    recentCharms,
+    allPieces,
+    recentPieces,
 
     // Exported handlers (bound to state cells for external callers)
-    addCharm: addCharm({ allCharms }),
-    trackRecent: trackRecent({ recentCharms }),
+    addPiece: addPiece({ allPieces }),
+    trackRecent: trackRecent({ recentPieces }),
   };
 });

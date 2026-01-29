@@ -3,7 +3,7 @@ import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { Identity } from "@commontools/identity";
-import { CharmsController } from "@commontools/charm/ops";
+import { PiecesController } from "@commontools/piece/ops";
 import { ANYONE_USER } from "@commontools/memory/acl";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
@@ -17,18 +17,18 @@ testComponents.forEach(({ name, file }) => {
     const shell = new ShellIntegration();
     shell.bindLifecycle();
 
-    let charmId: string;
+    let pieceId: string;
     let identity: Identity;
-    let cc: CharmsController;
+    let cc: PiecesController;
 
     beforeAll(async () => {
       identity = await Identity.generate({ implementation: "noble" });
-      cc = await CharmsController.initialize({
+      cc = await PiecesController.initialize({
         spaceName: SPACE_NAME,
         apiUrl: new URL(API_URL),
         identity: identity,
       });
-      const charm = await cc.create(
+      const piece = await cc.create(
         await Deno.readTextFile(
           join(
             import.meta.dirname!,
@@ -38,7 +38,7 @@ testComponents.forEach(({ name, file }) => {
         ),
         { start: false },
       );
-      charmId = charm.id;
+      pieceId = piece.id;
 
       // Add permissions for ANYONE in the first test
       await cc.acl().set(ANYONE_USER, "WRITE");
@@ -48,13 +48,13 @@ testComponents.forEach(({ name, file }) => {
       if (cc) await cc.dispose();
     });
 
-    it(`should load the ${name} charm`, async () => {
+    it(`should load the ${name} piece`, async () => {
       const page = shell.page();
       await shell.goto({
         frontendUrl: FRONTEND_URL,
         view: {
           spaceName: SPACE_NAME,
-          charmId,
+          pieceId,
         },
         identity,
       });

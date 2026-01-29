@@ -22,10 +22,10 @@ import {
   searchWeb,
   updateProfile,
 } from "./common-tools.tsx";
-import { MentionableCharm } from "./backlinks-index.tsx";
+import { MentionablePiece } from "./backlinks-index.tsx";
 
 interface OmniboxFABInput {
-  mentionable: Writable<MentionableCharm[]>;
+  mentionable: Writable<MentionablePiece[]>;
 }
 
 const toggle = handler<any, { value: Writable<boolean> }>((_, { value }) => {
@@ -62,26 +62,26 @@ const wishTool = pattern<WishToolParameters>(
 );
 
 const listMentionable = pattern<
-  { mentionable: Array<MentionableCharm> },
-  { result: Array<{ label: string; charm: MentionableCharm }> }
+  { mentionable: Array<MentionablePiece> },
+  { result: Array<{ label: string; piece: MentionablePiece }> }
 >(
   ({ mentionable }) => {
     const result = mentionable.map((c) => ({
       label: c[NAME]!,
-      charm: c,
+      piece: c,
     }));
     return { result };
   },
 );
 
 const listRecent = pattern<
-  { recentCharms: Array<MentionableCharm> },
-  { result: Array<{ label: string; charm: MentionableCharm }> }
+  { recentPieces: Array<MentionablePiece> },
+  { result: Array<{ label: string; piece: MentionablePiece }> }
 >(
-  ({ recentCharms }) => {
-    const namesList = recentCharms.map((c) => ({
+  ({ recentPieces }) => {
+    const namesList = recentPieces.map((c) => ({
       label: c[NAME]!,
-      charm: c,
+      piece: c,
     }));
     return { result: namesList };
   },
@@ -89,8 +89,8 @@ const listRecent = pattern<
 
 export default pattern<OmniboxFABInput>(
   (_) => {
-    const mentionable = wish<MentionableCharm[]>("#mentionable");
-    const recentCharms = wish<MentionableCharm[]>("#recent");
+    const mentionable = wish<MentionablePiece[]>("#mentionable");
+    const recentPieces = wish<MentionablePiece[]>("#recent");
 
     const profile = wish<string>({ query: "#profile" });
 
@@ -132,7 +132,7 @@ Be matter-of-fact. Prefer action to explanation.`;
         navigateTo: patternTool(navigateToPattern),
         wishAndNavigate: patternTool(wishTool),
         listMentionable: patternTool(listMentionable, { mentionable }),
-        listRecent: patternTool(listRecent, { recentCharms }),
+        listRecent: patternTool(listRecent, { recentPieces }),
         updateProfile: patternTool(updateProfile),
       },
     });

@@ -21,19 +21,19 @@
  * KEY CONDITIONS TO TRIGGER:
  * 1. Parent pattern owns cells with Writable<Default<T | null, null>>
  * 2. Child pattern receives cells as Writable<T | null> (no Default wrapper)
- * 3. Cell data is SET by one browser session (charm instance)
- * 4. Cell data is READ by a DIFFERENT browser session (charm instance)
+ * 3. Cell data is SET by one browser session (piece instance)
+ * 4. Cell data is READ by a DIFFERENT browser session (piece instance)
  * 5. Data contains nested arrays with objects
  *
  * STEPS TO REPRODUCE:
  * 1. Deploy this pattern:
  *    CT_API_URL=http://localhost:8000 CT_IDENTITY=./claude.key \
- *    deno task ct charm new packages/patterns/battleship/multiplayer/repro-minimal.tsx \
+ *    deno task ct piece new packages/patterns/battleship/multiplayer/repro-minimal.tsx \
  *    --root packages/patterns/battleship --space gideon
  *
- * 2. Open the charm URL in Browser Tab 1
+ * 2. Open the piece URL in Browser Tab 1
  * 3. Click "Join as P1" → navigates to Child pattern
- * 4. Open the SAME charm URL in Browser Tab 2 (new session)
+ * 4. Open the SAME piece URL in Browser Tab 2 (new session)
  * 5. Click "Join as P2" → this sets data2 cell
  * 6. Go back to Tab 1 (P1's view)
  * 7. Click "Check OTHER Data"

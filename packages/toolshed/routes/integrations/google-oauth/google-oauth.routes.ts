@@ -259,13 +259,13 @@ export const backgroundIntegration = createRoute({
         "application/json": {
           schema: z
             .object({
-              charmId: z.string().describe("The charm ID"),
+              pieceId: z.string().describe("The charm ID"),
               space: z.string().describe("The space DID"),
               integration: z.string().describe("The integration name"),
             })
             .openapi({
               example: {
-                charmId: "bafy...",
+                pieceId: "bafy...",
                 space: "did:",
                 integration: "rss",
               },

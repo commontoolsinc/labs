@@ -38,35 +38,35 @@ echo "WORK_DIR=$WORK_DIR"
 ct id new > $IDENTITY
 
 # Check space is empty
-if [ "$(ct charm ls $SPACE_ARGS)" != "" ]; then
+if [ "$(ct piece ls $SPACE_ARGS)" != "" ]; then
   error "Space not empty."
 fi
 
-# Create a new charm using custom default export as input
-CHARM_ID=$(ct charm new --main-export $CUSTOM_EXPORT $SPACE_ARGS $RECIPE_SRC)
-echo "Created charm: $CHARM_ID"
+# Create a new piece using custom default export as input
+PIECE_ID=$(ct piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $RECIPE_SRC)
+echo "Created piece: $PIECE_ID"
 
-echo "Fetching charm source to $WORK_DIR"
-# Retrieve the source code for $CHARM_ID to $WORK_DIR
-ct charm getsrc $SPACE_ARGS --charm $CHARM_ID $WORK_DIR
+echo "Fetching piece source to $WORK_DIR"
+# Retrieve the source code for $PIECE_ID to $WORK_DIR
+ct piece getsrc $SPACE_ARGS --piece $PIECE_ID $WORK_DIR
 
 # Check file was retrieved
 if [ ! -f "$WORK_DIR/main.tsx" ]; then
-  error "Source code was not retrieved from $CHARM_ID"
+  error "Source code was not retrieved from $PIECE_ID"
 fi
 if [ ! -f "$WORK_DIR/utils.ts" ]; then
-  error "Source code was not retrieved from $CHARM_ID"
+  error "Source code was not retrieved from $PIECE_ID"
 fi
 
-echo "Updating charm source."
+echo "Updating piece source."
 
-# Update the charm's source code
+# Update the piece's source code
 replace 's/Simple counter:/Simple counter 2:/g' "$WORK_DIR/main.tsx"
-ct charm setsrc --main-export $CUSTOM_EXPORT $SPACE_ARGS --charm $CHARM_ID $WORK_DIR/main.tsx
+ct piece setsrc --main-export $CUSTOM_EXPORT $SPACE_ARGS --piece $PIECE_ID $WORK_DIR/main.tsx
 
-# (Again) Retrieve the source code for $CHARM_ID to $WORK_DIR
+# (Again) Retrieve the source code for $PIECE_ID to $WORK_DIR
 rm "$WORK_DIR/main.tsx"
-ct charm getsrc $SPACE_ARGS --charm $CHARM_ID $WORK_DIR
+ct piece getsrc $SPACE_ARGS --piece $PIECE_ID $WORK_DIR
 
 # Check file was retrieved with modifications
 grep -q "Simple counter 2" "$WORK_DIR/main.tsx"
@@ -74,16 +74,16 @@ if [ $? -ne 0 ]; then
   error "Retrieved source code was not modified"
 fi
 
-echo "Applying charm input."
+echo "Applying piece input."
 
-# Apply new input to charm
-echo '{"value":5}' | ct charm apply $SPACE_ARGS --charm $CHARM_ID
+# Apply new input to piece
+echo '{"value":5}' | ct piece apply $SPACE_ARGS --piece $PIECE_ID
 
-# get, set and then re-get a value from the charm
-echo '10' | ct charm set $SPACE_ARGS --charm $CHARM_ID value
+# get, set and then re-get a value from the piece
+echo '10' | ct piece set $SPACE_ARGS --piece $PIECE_ID value
 
 # Verify the get returned what we expect
-RESULT=$(ct charm get $SPACE_ARGS --charm $CHARM_ID value)
+RESULT=$(ct piece get $SPACE_ARGS --piece $PIECE_ID value)
 echo '10' | jq . > /tmp/expected.json
 echo "$RESULT" | jq . > /tmp/actual.json
 if ! diff -q /tmp/expected.json /tmp/actual.json > /dev/null; then
@@ -98,8 +98,8 @@ test_value() {
   local expected="$4"
   local flags="$5"
 
-  echo "$value" | ct charm set $SPACE_ARGS --charm $CHARM_ID "$path" $flags
-  local result=$(ct charm get $SPACE_ARGS --charm $CHARM_ID "$path" $flags)
+  echo "$value" | ct piece set $SPACE_ARGS --piece $PIECE_ID "$path" $flags
+  local result=$(ct piece get $SPACE_ARGS --piece $PIECE_ID "$path" $flags)
 
   if [ "$result" != "$expected" ]; then
     error "$test_name failed. Expected: $expected, Got: $result"
@@ -112,8 +112,8 @@ test_json_value() {
   local value="$3"
   local flags="$4"
 
-  echo "$value" | ct charm set $SPACE_ARGS --charm $CHARM_ID "$path" $flags
-  local result=$(ct charm get $SPACE_ARGS --charm $CHARM_ID "$path" $flags)
+  echo "$value" | ct piece set $SPACE_ARGS --piece $PIECE_ID "$path" $flags
+  local result=$(ct piece get $SPACE_ARGS --piece $PIECE_ID "$path" $flags)
 
   echo "$value" | jq . > /tmp/expected.json
   echo "$result" | jq . > /tmp/actual.json
@@ -127,9 +127,9 @@ test_get_only() {
   local path="$2"
   local expected="$3"
   local flags="$4"
-  
-  local result=$(ct charm get $SPACE_ARGS --charm $CHARM_ID "$path" $flags)
-  
+
+  local result=$(ct piece get $SPACE_ARGS --piece $PIECE_ID "$path" $flags)
+
   if [ "$result" != "$expected" ]; then
     error "$test_name failed. Expected: $expected, Got: $result"
   fi
@@ -158,15 +158,15 @@ echo "Testing --input flag operations..."
 test_json_value "Input flag set" "userData" '{"user":{"name":"test"}}' "--input"
 test_value "Nested input path" "userData/user/name" '"inputValue"' '"inputValue"' "--input"
 
-echo "Testing charm step..."
+echo "Testing piece step..."
 
 # Recompute (one iteration) with updated inputs
-ct charm step $SPACE_ARGS --charm $CHARM_ID
+ct piece step $SPACE_ARGS --piece $PIECE_ID
 
-# Check space has new charm with correct inputs and title
+# Check space has new piece with correct inputs and title
 TITLE="Simple counter 2: 10"
-if ! ct charm ls $SPACE_ARGS | grep -q "$CHARM_ID $TITLE <unnamed>"; then
-  error "Charm did not appear in list of space charms."
+if ! ct piece ls $SPACE_ARGS | grep -q "$PIECE_ID $TITLE <unnamed>"; then
+  error "Piece did not appear in list of space pieces."
 fi
 
-echo "Successfully ran integration tests for ${API_URL}/${SPACE}/${CHARM_ID}."
+echo "Successfully ran integration tests for ${API_URL}/${SPACE}/${PIECE_ID}."

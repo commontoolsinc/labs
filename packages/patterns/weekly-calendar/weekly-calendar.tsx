@@ -3,7 +3,7 @@
  * Weekly Calendar Pattern
  *
  * A weekly calendar that manages Event patterns (event.tsx) similar to how
- * notebook.tsx manages note.tsx patterns. Events are independent charms that
+ * notebook.tsx manages note.tsx patterns. Events are independent pieces that
  * can be viewed, edited, and created from this calendar.
  *
  * Features:
@@ -12,7 +12,7 @@
  * - Drag to resize event duration
  * - Click time slots to create new events
  * - Color-coded events
- * - Events are separate charms that can be opened and edited
+ * - Events are separate pieces that can be opened and edited
  */
 import {
   action,
@@ -34,7 +34,7 @@ import Event, { COLORS, generateId } from "./event.tsx";
 
 // ============ TYPES ============
 
-type EventCharm = {
+type EventPiece = {
   [NAME]?: string;
   title?: string;
   date?: string;
@@ -46,32 +46,32 @@ type EventCharm = {
   eventId?: string;
 };
 
-type MinimalCharm = {
+type MinimalPiece = {
   [NAME]?: string;
 };
 
 // Type for backlinks
-type MentionableCharm = {
+type MentionablePiece = {
   [NAME]?: string;
   isHidden?: boolean;
-  mentioned: MentionableCharm[];
-  backlinks: MentionableCharm[];
+  mentioned: MentionablePiece[];
+  backlinks: MentionablePiece[];
 };
 
 interface Input {
   title?: Default<string, "Weekly Calendar">;
-  events: Writable<Default<EventCharm[], []>>;
+  events: Writable<Default<EventPiece[], []>>;
   isCalendar?: Default<boolean, true>; // Marker for identification
   isHidden?: Default<boolean, false>;
 }
 
 interface Output {
   title: string;
-  events: EventCharm[];
+  events: EventPiece[];
   eventCount: number;
   isCalendar: boolean;
   isHidden: boolean;
-  backlinks: MentionableCharm[];
+  backlinks: MentionablePiece[];
   // LLM-callable streams
   createEvent: Stream<{
     title: string;
@@ -234,8 +234,8 @@ const createEventHandler = handler<
     newEventEndTime: Writable<string>;
     newEventColor: Writable<string>;
     showNewEventPrompt: Writable<boolean>;
-    events: Writable<EventCharm[]>;
-    allCharms: Writable<EventCharm[]>;
+    events: Writable<EventPiece[]>;
+    allPieces: Writable<EventPiece[]>;
   }
 >((
   _,
@@ -247,7 +247,7 @@ const createEventHandler = handler<
     newEventColor,
     showNewEventPrompt,
     events,
-    allCharms,
+    allPieces,
   },
 ) => {
   const title = newEventTitle.get() || "New Event";
@@ -261,7 +261,7 @@ const createEventHandler = handler<
     isHidden: false,
     eventId: generateId(),
   });
-  allCharms.push(newEvent);
+  allPieces.push(newEvent);
   events.push(newEvent);
 
   // Reset modal state and stay on calendar
@@ -278,8 +278,8 @@ const createEventAndContinue = handler<
     newEventStartTime: Writable<string>;
     newEventEndTime: Writable<string>;
     newEventColor: Writable<string>;
-    events: Writable<EventCharm[]>;
-    allCharms: Writable<EventCharm[]>;
+    events: Writable<EventPiece[]>;
+    allPieces: Writable<EventPiece[]>;
     usedCreateAnother: Writable<boolean>;
   }
 >((
@@ -291,7 +291,7 @@ const createEventAndContinue = handler<
     newEventEndTime,
     newEventColor,
     events,
-    allCharms,
+    allPieces,
     usedCreateAnother,
   },
 ) => {
@@ -306,7 +306,7 @@ const createEventAndContinue = handler<
     isHidden: false,
     eventId: generateId(),
   });
-  allCharms.push(newEvent);
+  allPieces.push(newEvent);
   events.push(newEvent);
   usedCreateAnother.set(true);
   newEventTitle.set("");
@@ -329,14 +329,14 @@ const cancelNewEventPrompt = handler<
 // Handler for clicking on a backlink
 const handleBacklinkClick = handler<
   void,
-  { charm: Writable<MentionableCharm> }
->((_, { charm }) => navigateTo(charm));
+  { piece: Writable<MentionablePiece> }
+>((_, { piece }) => navigateTo(piece));
 
 // LLM-callable handler: Create a single event
 const handleCreateEvent = handler<
   { title: string; date: string; startTime: string; endTime: string },
-  { events: Writable<EventCharm[]>; allCharms: Writable<EventCharm[]> }
->(({ title, date, startTime, endTime }, { events, allCharms }) => {
+  { events: Writable<EventPiece[]>; allPieces: Writable<EventPiece[]> }
+>(({ title, date, startTime, endTime }, { events, allPieces }) => {
   const newEvent = Event({
     title,
     date,
@@ -347,7 +347,7 @@ const handleCreateEvent = handler<
     isHidden: false,
     eventId: generateId(),
   });
-  allCharms.push(newEvent);
+  allPieces.push(newEvent);
   events.push(newEvent);
   return newEvent;
 });
@@ -365,7 +365,7 @@ const handleSetTitle = handler<
 
 const WeeklyCalendar = pattern<Input, Output>(
   ({ title, events, isCalendar, isHidden }) => {
-    const { allCharms } = wish<{ allCharms: EventCharm[] }>("#default");
+    const { allPieces } = wish<{ allPieces: EventPiece[] }>("#default");
 
     // Navigation State
     const startDate = Cell.of(getWeekStart(getTodayDate()));
@@ -393,7 +393,7 @@ const WeeklyCalendar = pattern<Input, Output>(
     const lastDropTime = Cell.of(0);
 
     // Backlinks
-    const backlinks = Writable.of<MentionableCharm[]>([]);
+    const backlinks = Writable.of<MentionablePiece[]>([]);
 
     // Computed Values
     const eventCount = computed(() => events.get().length);
@@ -688,7 +688,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                     newEventEndTime,
                     newEventColor,
                     events,
-                    allCharms,
+                    allPieces,
                     usedCreateAnother,
                   })}
                 >
@@ -705,7 +705,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                     newEventColor,
                     showNewEventPrompt,
                     events,
-                    allCharms,
+                    allPieces,
                   })}
                 >
                   Create
@@ -893,7 +893,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                     // Drop handler for moving/resizing events (using action)
                     const handleDayDrop = action((e: {
                       detail: {
-                        sourceCell: Cell<EventCharm>;
+                        sourceCell: Cell<EventPiece>;
                         pointerY?: number;
                         dropZoneRect?: { top: number };
                         type?: string;
@@ -1249,14 +1249,14 @@ const WeeklyCalendar = pattern<Input, Output>(
             >
               Linked from:
             </span>
-            {backlinks.map((charm) => (
+            {backlinks.map((piece) => (
               <ct-button
                 variant="ghost"
                 size="sm"
-                onClick={handleBacklinkClick({ charm })}
+                onClick={handleBacklinkClick({ piece })}
                 style={{ fontSize: "12px" }}
               >
-                {charm?.[NAME]}
+                {piece?.[NAME]}
               </ct-button>
             ))}
           </ct-hstack>
@@ -1269,7 +1269,7 @@ const WeeklyCalendar = pattern<Input, Output>(
       isHidden,
       backlinks,
       // LLM-callable streams
-      createEvent: handleCreateEvent({ events, allCharms }),
+      createEvent: handleCreateEvent({ events, allPieces }),
       setTitle: handleSetTitle({ title }),
     };
   },

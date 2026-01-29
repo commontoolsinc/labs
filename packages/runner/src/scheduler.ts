@@ -35,7 +35,7 @@ import {
   sortAndCompactPaths,
   type SortedAndCompactPaths,
 } from "./reactive-dependencies.ts";
-import { ensureCharmRunning } from "./ensure-charm-running.ts";
+import { ensurePieceRunning } from "./ensure-piece-running.ts";
 import type {
   ActionStats,
   SchedulerActionInfo,
@@ -266,7 +266,7 @@ export class Scheduler {
       // Called synchronously when `console` methods are
       // called within the runtime.
       const { method, args } = e as ConsoleEvent;
-      const metadata = getCharmMetadataFromFrame();
+      const metadata = getPieceMetadataFromFrame();
       const result = this.consoleHandler({ metadata, method, args });
       console[method].apply(console, result);
     });
@@ -799,7 +799,7 @@ export class Scheduler {
     event: any,
     retries: number = DEFAULT_RETRIES_FOR_EVENTS,
     onCommit?: (tx: IExtendedStorageTransaction) => void,
-    doNotLoadCharmIfNotRunning: boolean = false,
+    doNotLoadPieceIfNotRunning: boolean = false,
   ): void {
     let handlerFound = false;
 
@@ -817,13 +817,13 @@ export class Scheduler {
       }
     }
 
-    // If no handler was found, try to start the charm that should handle this event
-    if (!handlerFound && !doNotLoadCharmIfNotRunning) {
+    // If no handler was found, try to start the piece that should handle this event
+    if (!handlerFound && !doNotLoadPieceIfNotRunning) {
       // Use an async IIFE to handle the async operation without blocking
       (async () => {
-        const started = await ensureCharmRunning(this.runtime, eventLink);
+        const started = await ensurePieceRunning(this.runtime, eventLink);
         if (started) {
-          // Charm was started, re-queue the event. Don't trigger loading again
+          // Piece was started, re-queue the event. Don't trigger loading again
           // if this didn't result in registering a handler, as trying again
           // won't change this.
           this.queueEvent(eventLink, event, retries, onCommit, true);
@@ -1890,7 +1890,7 @@ export class Scheduler {
     this.filterStats = { filtered: 0, executed: 0 };
   }
   private handleError(error: Error, action: any) {
-    const { charmId, spellId, recipeId, space } = getCharmMetadataFromFrame(
+    const { pieceId, spellId, recipeId, space } = getPieceMetadataFromFrame(
       (error as Error & { frame?: Frame }).frame,
     );
 
@@ -1901,7 +1901,7 @@ export class Scheduler {
 
     const errorWithContext = error as ErrorWithContext;
     errorWithContext.action = action;
-    if (charmId) errorWithContext.charmId = charmId;
+    if (pieceId) errorWithContext.pieceId = pieceId;
     if (spellId) errorWithContext.spellId = spellId;
     if (recipeId) errorWithContext.recipeId = recipeId;
     if (space) errorWithContext.space = space as MemorySpace;
@@ -2597,11 +2597,11 @@ export function txToReactivityLog(
   return log;
 }
 
-function getCharmMetadataFromFrame(frame?: Frame): {
+function getPieceMetadataFromFrame(frame?: Frame): {
   spellId?: string;
   recipeId?: string;
   space?: string;
-  charmId?: string;
+  pieceId?: string;
 } {
   // TODO(seefeld): This is a rather hacky way to get the context, based on the
   // unsafe_binding pattern. Once we replace that mechanism, let's add nicer
@@ -2613,7 +2613,7 @@ function getCharmMetadataFromFrame(frame?: Frame): {
   if (!isCellResultForDereferencing(sourceAsProxy)) {
     return {};
   }
-  const result: ReturnType<typeof getCharmMetadataFromFrame> = {};
+  const result: ReturnType<typeof getPieceMetadataFromFrame> = {};
   const source = getCellOrThrow(sourceAsProxy).asSchema({
     type: "object",
     properties: {
@@ -2627,7 +2627,7 @@ function getCharmMetadataFromFrame(frame?: Frame): {
   result.spellId = spellCell?.getAsNormalizedFullLink().id;
   const resultCell = source.get()?.resultRef;
   result.space = source.space;
-  result.charmId = JSON.parse(
+  result.pieceId = JSON.parse(
     JSON.stringify(resultCell?.entityId ?? {}),
   )["/"];
   return result;

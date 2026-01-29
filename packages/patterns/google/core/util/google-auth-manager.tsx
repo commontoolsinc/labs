@@ -4,7 +4,7 @@
  *
  * This utility encapsulates all Google Auth best practices:
  * - Uses wish() with framework's built-in picker for multi-account selection
- * - Detects missing scopes and navigates to auth charm
+ * - Detects missing scopes and navigates to auth piece
  * - Detects expired tokens and provides recovery UI
  * - Pre-composed UI components for consistent UX
  *
@@ -65,7 +65,7 @@ import {
   Writable,
 } from "commontools";
 
-// Import GoogleAuth pattern for creating new auth charms
+// Import GoogleAuth pattern for creating new auth pieces
 // Note: Path is relative from util/ directory (go up to jkomoros/, then find google-auth.tsx)
 import GoogleAuth, { type Auth } from "../google-auth.tsx";
 
@@ -110,7 +110,7 @@ export type AuthState =
   | "loading" // Wish in progress
   | "selecting" // Multiple matches, showing picker (wishResult has [UI])
   | "not-found" // No matching auth favorited
-  | "needs-login" // Auth charm found but user not signed in
+  | "needs-login" // Auth piece found but user not signed in
   | "missing-scopes" // Authenticated but missing required scopes
   | "token-expired" // Token has expired (expiresAt < now)
   | "ready"; // All good - auth is usable
@@ -143,10 +143,10 @@ export interface AuthInfo {
   statusDotColor: string;
   statusText: string;
   // For navigation/actions (internal use - typed as unknown to avoid exposing private type)
-  charm: unknown;
-  // UI components from wished charm (to avoid accessing wishResult in fullUI)
+  piece: unknown;
+  // UI components from wished piece (to avoid accessing wishResult in fullUI)
   userChip: unknown;
-  charmUI: unknown;
+  pieceUI: unknown;
 }
 
 /** Account type for multi-account support */
@@ -174,8 +174,8 @@ export interface GoogleAuthManagerOutput {
   fullUI: any;
 }
 
-/** Type for the Google Auth charm returned by wish (internal) */
-interface GoogleAuthCharm {
+/** Type for the Google Auth piece returned by wish (internal) */
+interface GoogleAuthPiece {
   auth: Writable<Auth>;
   scopes?: string[];
   selectedScopes?: Record<ScopeKey, boolean>;
@@ -194,7 +194,7 @@ interface GoogleAuthCharm {
  * WishState includes result, error, and [UI] properties.
  * The [UI] property is accessed via the UI symbol from commontools.
  */
-type UnwrappedWishResult = WishState<GoogleAuthCharm> & {
+type UnwrappedWishResult = WishState<GoogleAuthPiece> & {
   [UI]?: { props?: { $cell?: unknown } };
 };
 
@@ -230,7 +230,7 @@ const TOKEN_WARNING_THRESHOLD_MS = 10 * 60 * 1000;
 // =============================================================================
 
 /**
- * Handler to create new Google Auth charm with pre-selected scopes.
+ * Handler to create new Google Auth piece with pre-selected scopes.
  */
 const createAuthHandler = handler<unknown, { scopes: ScopeKey[] }>(
   (_event, { scopes }) => {
@@ -251,7 +251,7 @@ const createAuthHandler = handler<unknown, { scopes: ScopeKey[] }>(
       }
     }
 
-    const authCharm = GoogleAuth({
+    const authPiece = GoogleAuth({
       selectedScopes,
       auth: {
         token: "",
@@ -264,19 +264,19 @@ const createAuthHandler = handler<unknown, { scopes: ScopeKey[] }>(
       },
     });
 
-    return navigateTo(authCharm);
+    return navigateTo(authPiece);
   },
 );
 
 /**
- * Handler to navigate to existing auth charm.
- * Note: charm is typed as unknown in the public interface to avoid exposing private types,
- * but internally we know it's a GoogleAuthCharm.
+ * Handler to navigate to existing auth piece.
+ * Note: piece is typed as unknown in the public interface to avoid exposing private types,
+ * but internally we know it's a GoogleAuthPiece.
  */
-const goToAuthHandler = handler<unknown, { charm: unknown }>(
-  (_event, { charm }) => {
-    // charm is the reactive value from authInfo.charm
-    if (charm) return navigateTo(charm as GoogleAuthCharm);
+const goToAuthHandler = handler<unknown, { piece: unknown }>(
+  (_event, { piece }) => {
+    // piece is the reactive value from authInfo.piece
+    if (piece) return navigateTo(piece as GoogleAuthPiece);
   },
 );
 
@@ -342,7 +342,7 @@ export const GoogleAuthManager = pattern<
     });
 
     // CRITICAL: wish() at pattern body level, NOT inside derive
-    const wishResult = wish<GoogleAuthCharm>({ query: tag });
+    const wishResult = wish<GoogleAuthPiece>({ query: tag });
 
     // computed() closes over all accessed cells (wishResult, requiredScopes, debugMode)
     const authInfo = computed((): AuthInfo => {
@@ -484,12 +484,12 @@ export const GoogleAuthManager = pattern<
         tokenExpiryDisplay,
         statusDotColor,
         statusText,
-        charm: (wr?.result ?? null) as GoogleAuthCharm | null,
-        // Include UI components from wished charm so fullUI doesn't need to access wishResult directly
+        piece: (wr?.result ?? null) as GoogleAuthPiece | null,
+        // Include UI components from wished piece so fullUI doesn't need to access wishResult directly
         userChip: wr?.result?.userChip ?? null,
-        // Access [UI] symbol property from the result (charm's UI)
-        charmUI:
-          (wr?.result as (GoogleAuthCharm & { [UI]?: unknown }) | undefined)
+        // Access [UI] symbol property from the result (piece's UI)
+        pieceUI:
+          (wr?.result as (GoogleAuthPiece & { [UI]?: unknown }) | undefined)
             ?.[UI] ?? null,
       };
     });
@@ -501,12 +501,12 @@ export const GoogleAuthManager = pattern<
     // but NOT inside derive() callbacks.
     // ==========================================================================
 
-    // Pre-create charm cell for goToAuth binding
-    const charmCell = authInfo.charm;
+    // Pre-create piece cell for goToAuth binding
+    const pieceCell = authInfo.piece;
 
     // Bind handlers with their required state
     const boundCreateAuth = createAuthHandler({ scopes: requiredScopes });
-    const boundGoToAuth = goToAuthHandler({ charm: charmCell });
+    const boundGoToAuth = goToAuthHandler({ piece: pieceCell });
 
     // ==========================================================================
     // UI COMPONENTS
@@ -916,7 +916,7 @@ export const GoogleAuthManager = pattern<
             </div>
           </div>
           <div style={{ backgroundColor: "white" }}>
-            {info.charmUI as any}
+            {info.pieceUI as any}
           </div>
           {actionButtonsRow}
         </div>

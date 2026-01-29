@@ -26,31 +26,31 @@ deno task ct check pattern.tsx --no-run
 
 **Deploy new pattern:**
 ```bash
-deno task ct charm new packages/patterns/[name]/main.tsx --identity PATH_TO_KEY
+deno task ct piece new packages/patterns/[name]/main.tsx --identity PATH_TO_KEY
 ```
 
-**Inspect charm state:**
+**Inspect piece state:**
 ```bash
-deno task ct charm inspect
+deno task ct piece inspect
 ```
 
 **Update deployed pattern:**
 ```bash
-deno task ct charm setsrc packages/patterns/[name]/main.tsx
+deno task ct piece setsrc packages/patterns/[name]/main.tsx
 ```
 
 **Test handler via CLI:**
 ```bash
-deno task ct charm call handlerName --charm CHARM_ID
+deno task ct piece call handlerName --piece PIECE_ID
 ```
 
 ## Get Help
 ```bash
 deno task ct --help
-deno task ct charm --help
+deno task ct piece --help
 ```
 
 ## Done When
-- Charm deploys without errors
+- Piece deploys without errors
 - State inspects correctly
 - Handlers respond to CLI calls

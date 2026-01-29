@@ -151,7 +151,7 @@ export default pattern<Record<string, never>>((_) => {
           >
             <p>No journal entries yet.</p>
             <p style={{ fontSize: "0.9em" }}>
-              Favorite some charms to start building your journal.
+              Favorite some pieces to start building your journal.
             </p>
           </div>
         )}

@@ -6,9 +6,9 @@
  * Unlike the launcher, this doesn't do email matching - it just renders all patterns.
  *
  * Usage:
- * 1. Deploy a google-auth charm and complete OAuth
+ * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct charm link google-auth/auth email-pattern-dreamer/overrideAuth
+ * 3. Link: ct piece link google-auth/auth email-pattern-dreamer/overrideAuth
  */
 import { NAME, pattern, UI } from "commontools";
 import GmailImporter, { type Auth } from "../core/gmail-importer.tsx";

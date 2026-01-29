@@ -106,10 +106,10 @@ export class CTUpdater extends BaseElement {
     if (!container) {
       throw new Error("No <ct-charm> container.");
     }
-    const { charmId } = container;
+    const { pieceId } = container;
     const space = this.state.space;
     const payload = {
-      charmId,
+      pieceId,
       space,
       integration: this.integration!,
     };

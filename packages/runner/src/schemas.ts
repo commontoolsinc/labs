@@ -59,31 +59,31 @@ export const uiSchema = {
 export type UISchema = Schema<typeof uiSchema>;
 
 // We specify not true for the items, since we don't want to recursively load them
-export const charmListSchema = {
+export const pieceListSchema = {
   type: "array",
   items: { type: "object", properties: {}, asCell: true },
   default: [],
 } as const satisfies JSONSchema;
 
-export const charmLineageSchema = {
+export const pieceLineageSchema = {
   type: "object",
   properties: {
-    charm: { type: "object", properties: {}, asCell: true },
+    piece: { type: "object", properties: {}, asCell: true },
     relation: { type: "string" },
     timestamp: { type: "number" },
   },
-  required: ["charm", "relation", "timestamp"],
+  required: ["piece", "relation", "timestamp"],
 } as const satisfies JSONSchema;
-export type CharmLineage = Schema<typeof charmLineageSchema>;
+export type PieceLineage = Schema<typeof pieceLineageSchema>;
 
-export const charmSourceCellSchema = {
+export const pieceSourceCellSchema = {
   type: "object",
   properties: {
     [TYPE]: { type: "string" },
     spell: { type: "object" },
     lineage: {
       type: "array",
-      items: charmLineageSchema,
+      items: pieceLineageSchema,
       default: [],
     },
     llmRequestId: { type: "string" },

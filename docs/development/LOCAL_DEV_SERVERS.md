@@ -195,7 +195,7 @@ Charms must be registered to receive background polling:
 # Via curl
 curl -X POST http://localhost:8000/api/integrations/bg \
   -H "Content-Type: application/json" \
-  -d '{"charmId":"baedrei...","space":"did:key:z6Mk...","integration":"my-integration"}'
+  -d '{"pieceId":"baedrei...","space":"did:key:z6Mk...","integration":"my-integration"}'
 ```
 
 Or use the `<ct-updater>` component in your charm's UI.

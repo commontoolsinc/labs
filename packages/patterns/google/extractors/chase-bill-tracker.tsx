@@ -12,9 +12,9 @@
  * - Groups bills by card (last 4 digits)
  *
  * Usage:
- * 1. Deploy a google-auth charm and complete OAuth
+ * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct charm link google-auth/auth chase-bill-tracker/overrideAuth
+ * 3. Link: ct piece link google-auth/auth chase-bill-tracker/overrideAuth
  */
 import {
   computed,

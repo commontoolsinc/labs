@@ -6,16 +6,16 @@
  * incoming mail using LLM vision analysis.
  *
  * Features:
- * - Embeds gmail-importer directly (no separate charm needed)
+ * - Embeds gmail-importer directly (no separate piece needed)
  * - Pre-configured with USPS filter query and settings
  * - Auto-analyzes mail piece images with LLM vision
  * - Learns household members from recipient names over time
  * - Classifies mail type and spam likelihood
  *
  * Usage:
- * 1. Deploy a google-auth charm and complete OAuth
+ * 1. Deploy a google-auth piece and complete OAuth
  * 2. Deploy this pattern
- * 3. Link: ct charm link google-auth/auth usps/overrideAuth
+ * 3. Link: ct piece link google-auth/auth usps/overrideAuth
  */
 import {
   computed,
@@ -264,8 +264,8 @@ const deleteMember = handler<
 
 interface PatternInput {
   householdMembers?: Default<HouseholdMember[], []>;
-  // Optional: Link auth directly from a Google Auth charm
-  // Use: ct charm link googleAuthCharm/auth uspsCharm/overrideAuth
+  // Optional: Link auth directly from a Google Auth piece
+  // Use: ct piece link googleAuthPiece/auth uspsPiece/overrideAuth
   overrideAuth?: Auth;
 }
 
@@ -290,7 +290,7 @@ interface PatternOutput {
 export default pattern<PatternInput, PatternOutput>(
   ({ householdMembers, overrideAuth }) => {
     // Directly instantiate GmailExtractor with USPS-specific settings (raw mode)
-    // This eliminates the need for separate gmail-importer charm + wish()
+    // This eliminates the need for separate gmail-importer piece + wish()
     const extractor = GmailExtractor({
       gmailQuery: "from:USPSInformeddelivery@email.informeddelivery.usps.com",
       resolveInlineImages: true,

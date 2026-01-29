@@ -37,7 +37,7 @@ state changes flow through typed commands:
 // State changes via commands
 dispatch("setState", { key: "value" });
 dispatch("login", { username });
-dispatch("navigateTo", { spaceName, charmId });
+dispatch("navigateTo", { spaceName, pieceId });
 ```
 
 ### Component Hierarchy
@@ -63,12 +63,12 @@ RootView (authentication wrapper)
    - Session state managed in AppState
 
 3. **Charm Integration**:
-   - CharmsController (`src/contexts/charms-controller.ts`) manages lifecycle
+   - PiecesController (`src/contexts/charms-controller.ts`) manages lifecycle
    - Runtime provided by `@commontools/runner`
    - Storage via StorageManager for persistent data
 
 4. **Routing**:
-   - URL pattern: `/{spaceName}/{charmId}`
+   - URL pattern: `/{spaceName}/{pieceId}`
    - History API integration with back/forward support
    - Default space: "common-knowledge"
 

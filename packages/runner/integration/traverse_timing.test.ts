@@ -23,37 +23,37 @@ const selector: SchemaPathSelector = {
     "schema": {
       "type": "object",
       "properties": {
-        "selectedCharm": {
+        "selectedPiece": {
           "type": "object",
           "properties": {
-            "charm": true,
+            "piece": true,
           },
           "required": [
-            "charm",
+            "piece",
           ],
           "default": {},
         },
       },
       "required": [
-        "selectedCharm",
+        "selectedPiece",
       ],
     },
     "rootSchema": {
       "type": "object",
       "properties": {
-        "selectedCharm": {
+        "selectedPiece": {
           "type": "object",
           "properties": {
-            "charm": true,
+            "piece": true,
           },
           "required": [
-            "charm",
+            "piece",
           ],
           "default": {},
         },
       },
       "required": [
-        "selectedCharm",
+        "selectedPiece",
       ],
     },
   },

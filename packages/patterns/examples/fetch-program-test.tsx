@@ -50,7 +50,7 @@ export default pattern(() => {
         )}
         {result && (
           <div style="color: green">
-            Successfully compiled recipe! Charm ID: {result}
+            Successfully compiled recipe! Piece ID: {result}
             <pre>{computed(() => JSON.stringify(result, null, 2))}</pre>
           </div>
         )}

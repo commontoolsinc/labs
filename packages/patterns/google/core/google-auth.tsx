@@ -252,17 +252,17 @@ export function createPreviewUI(
  *
  * ❌ WRONG - creates read-only projection, token refresh fails silently:
  * ```typescript
- * const auth = derive(googleAuthCharm, (charm) => charm?.auth);
+ * const auth = derive(googleAuthPiece, (piece) => piece?.auth);
  * ```
  *
  * ✅ CORRECT - maintains writable cell reference:
  * ```typescript
- * const auth = googleAuthCharm.auth;  // Property access, not derive
+ * const auth = googleAuthPiece.auth;  // Property access, not derive
  * ```
  *
  * ✅ ALSO CORRECT - use ifElse for conditional auth sources:
  * ```typescript
- * const auth = ifElse(hasDirectAuth, directAuth, wishedCharm.auth);
+ * const auth = ifElse(hasDirectAuth, directAuth, wishedPiece.auth);
  * ```
  *
  * See: community-docs/superstitions/2025-12-03-derive-creates-readonly-cells-use-property-access.md
@@ -325,15 +325,15 @@ interface Output {
   /** Minimal preview for picker display with scope summary */
   previewUI: unknown;
   /**
-   * Refresh the OAuth token. Call this from other charms when the token expires.
+   * Refresh the OAuth token. Call this from other pieces when the token expires.
    *
    * This handler runs in google-auth's transaction context, so it can write to
-   * the auth cell even when called from another charm's handler.
+   * the auth cell even when called from another piece's handler.
    *
-   * Usage from consuming charm:
+   * Usage from consuming piece:
    * ```typescript
    * await new Promise<void>((resolve, reject) => {
-   *   authCharm.refreshToken.send({}, (tx) => {
+   *   authPiece.refreshToken.send({}, (tx) => {
    *     const status = tx.status();
    *     if (status.status === "done") resolve();
    *     else reject(status.error);
@@ -414,9 +414,9 @@ const getScopeFriendlyName = (scope: string): string => {
  * Handler for refreshing OAuth tokens.
  *
  * This runs in google-auth's transaction context, allowing it to write to the
- * auth cell even when called from another charm. This solves the cross-charm
- * write isolation issue where a consuming charm's handler cannot write to
- * cells owned by a different charm's DID.
+ * auth cell even when called from another piece. This solves the cross-piece
+ * write isolation issue where a consuming piece's handler cannot write to
+ * cells owned by a different piece's DID.
  *
  * The handler reads the current refreshToken from the auth cell, calls the
  * server refresh endpoint, and updates the auth cell with the new token.
@@ -760,7 +760,7 @@ export default pattern<Input, Output>(
               }}
             >
               <strong>Tip:</strong>{" "}
-              Favorite this charm (click ⭐) to share your Google auth across
+              Favorite this piece (click ⭐) to share your Google auth across
               all your patterns. Any pattern using{" "}
               <code>wish("#googleAuth")</code>{" "}
               will automatically find and use it.
@@ -915,9 +915,9 @@ export default pattern<Input, Output>(
             }}
           >
             <strong>Usage:</strong>{" "}
-            This charm provides unified Google OAuth authentication. Link its
+            This piece provides unified Google OAuth authentication. Link its
             {" "}
-            <code>auth</code> output to any Google importer charm's{" "}
+            <code>auth</code> output to any Google importer piece's{" "}
             <code>auth</code> input, or favorite it for automatic discovery.
           </div>
         </div>
@@ -927,7 +927,7 @@ export default pattern<Input, Output>(
       selectedScopes,
       userChip,
       previewUI,
-      // Export the refresh handler for cross-charm calling
+      // Export the refresh handler for cross-piece calling
       refreshToken: refreshTokenHandler({ auth }),
     };
   },

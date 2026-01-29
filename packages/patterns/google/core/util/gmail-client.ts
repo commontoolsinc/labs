@@ -37,10 +37,10 @@ export interface GmailClientConfig {
   /** Enable verbose console logging */
   debugMode?: boolean;
   /**
-   * External refresh callback for cross-charm token refresh.
-   * Use this when the auth cell belongs to a different charm - direct cell updates
+   * External refresh callback for cross-piece token refresh.
+   * Use this when the auth cell belongs to a different piece - direct cell updates
    * will fail due to transaction isolation. The callback should trigger refresh
-   * in the auth charm's transaction context (e.g., via a refresh stream).
+   * in the auth piece's transaction context (e.g., via a refresh stream).
    */
   onRefresh?: () => Promise<void>;
 }
@@ -93,7 +93,7 @@ function debugWarn(debugMode: boolean, ...args: unknown[]) {
  * Gmail API client with automatic token refresh.
  *
  * ⚠️ CRITICAL: The auth cell MUST be writable for token refresh to work!
- * Do NOT pass a derived auth cell - use property access (charm.auth) instead.
+ * Do NOT pass a derived auth cell - use property access (piece.auth) instead.
  * See: community-docs/superstitions/2025-12-03-derive-creates-readonly-cells-use-property-access.md
  */
 export class GmailClient {
@@ -127,12 +127,12 @@ export class GmailClient {
    * Updates the auth cell with new token data.
    *
    * If an external onRefresh callback was provided, it will be used instead
-   * of direct cell update. This enables cross-charm refresh where direct
+   * of direct cell update. This enables cross-piece refresh where direct
    * cell writes would fail due to transaction isolation.
    */
   private async refreshAuth(): Promise<void> {
     // If an external refresh callback was provided, use it
-    // (for cross-charm refresh via streams)
+    // (for cross-piece refresh via streams)
     if (this.onRefresh) {
       debugLog(
         this.debugMode,
@@ -822,19 +822,19 @@ export async function validateAndRefreshToken(
 }
 
 /**
- * Validate a Gmail token, using a cross-charm refresh stream if token expired.
+ * Validate a Gmail token, using a cross-piece refresh stream if token expired.
  *
  * This version handles the framework's transaction isolation constraint:
- * When called from a handler in charm A, you cannot write to cells owned by charm B.
- * The solution is to call a handler on charm B via its exported Stream, which runs
- * in charm B's transaction context and can write to its own cells.
+ * When called from a handler in piece A, you cannot write to cells owned by piece B.
+ * The solution is to call a handler on piece B via its exported Stream, which runs
+ * in piece B's transaction context and can write to its own cells.
  *
  * @param auth - The auth Cell (read access)
- * @param refreshStream - A Stream from the auth charm that triggers token refresh
+ * @param refreshStream - A Stream from the auth piece that triggers token refresh
  * @param debugMode - Enable debug logging
  * @returns { valid: true, refreshed?: boolean } or { valid: false, error: string }
  */
-export async function validateAndRefreshTokenCrossCharm(
+export async function validateAndRefreshTokenCrossPiece(
   auth: Writable<Auth>,
   refreshStream:
     | {
@@ -848,7 +848,7 @@ export async function validateAndRefreshTokenCrossCharm(
   debugMode: boolean = false,
 ): Promise<{ valid: boolean; refreshed?: boolean; error?: string }> {
   if (debugMode) {
-    console.log("[GmailClient] validateAndRefreshTokenCrossCharm called");
+    console.log("[GmailClient] validateAndRefreshTokenCrossPiece called");
     console.log("[GmailClient] Has refresh stream:", !!refreshStream?.send);
   }
 
@@ -882,7 +882,7 @@ export async function validateAndRefreshTokenCrossCharm(
           "[GmailClient] Token expired but no refresh stream available",
         );
       }
-      // Fall back to direct refresh attempt (will fail with cross-charm write isolation)
+      // Fall back to direct refresh attempt (will fail with cross-piece write isolation)
       return validateAndRefreshToken(auth, debugMode);
     }
 

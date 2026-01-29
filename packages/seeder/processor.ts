@@ -5,14 +5,14 @@ import type {
   Step,
 } from "./interfaces.ts";
 import { Verifier } from "./verifier.ts";
-import { CharmManager } from "@commontools/charm";
+import { PieceManager } from "@commontools/piece";
 import { CommandType } from "./interfaces.ts";
-import { createDataCharm, processWorkflow } from "@commontools/charm";
+import { createDataPiece, processWorkflow } from "@commontools/piece";
 import { isRecord } from "@commontools/utils/types";
 
 export class Processor {
   private cache: boolean;
-  private charmManager: CharmManager;
+  private charmManager: PieceManager;
   private name: string;
   private model: string;
   private verifier?: Verifier;
@@ -22,7 +22,7 @@ export class Processor {
       name: string;
       model: string;
       cache: boolean;
-      charmManager: CharmManager;
+      charmManager: PieceManager;
       verifier?: Verifier;
     },
   ) {
@@ -118,7 +118,7 @@ export class Processor {
           },
         });
 
-        const charm = form.generation?.charm;
+        const charm = form.generation?.piece;
         if (charm) {
           const id = charm.entityId;
           if (id) {
@@ -140,7 +140,7 @@ export class Processor {
         }
         const charm = await this.charmManager.get(prevCharmId);
         const form = await processWorkflow(prompt, this.charmManager, {
-          existingCharm: charm,
+          existingPiece: charm,
           cache: this.cache,
           model: this.model,
           prefill: {
@@ -152,9 +152,9 @@ export class Processor {
           },
         });
 
-        const newCharm = form.generation?.charm;
-        if (newCharm) {
-          const id = newCharm.entityId;
+        const newPiece = form.generation?.piece;
+        if (newPiece) {
+          const id = newPiece.entityId;
           if (id) {
             return this.verify({ id: id["/"], prompt, name: this.name });
           }
@@ -173,7 +173,7 @@ export class Processor {
           throw new Error("Missing data for JSON import.");
         }
 
-        const charm = await createDataCharm(
+        const charm = await createDataPiece(
           this.charmManager,
           step.data,
           step.dataSchema,

@@ -9,8 +9,8 @@
  * gate when policies are implemented (patterns with verified SHA can be trusted).
  *
  * Usage:
- * 1. Create and favorite a Google Auth charm with "Gmail (add/remove labels)" permission
- * 2. Create a Gmail Label Manager charm
+ * 1. Create and favorite a Google Auth piece with "Gmail (add/remove labels)" permission
+ * 2. Create a Gmail Label Manager piece
  * 3. Set the messageIds to modify (single ID or array of IDs)
  * 4. Select labels to add/remove
  * 5. Review the confirmation dialog

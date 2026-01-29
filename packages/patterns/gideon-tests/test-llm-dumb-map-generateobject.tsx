@@ -22,7 +22,7 @@
  * - Network tab shows requests = new/changed items only
  *
  * MANUAL VERIFICATION STEPS:
- * 1. Deploy pattern: deno task ct charm new test-llm-dumb-map-generateobject.tsx
+ * 1. Deploy pattern: deno task ct piece new test-llm-dumb-map-generateobject.tsx
  * 2. Add 3-5 items with different content (e.g., "I love this!", "This is terrible", "It's okay")
  * 3. Open browser DevTools → Network tab → filter for "anthropic" or "generate"
  * 4. Wait for all items to complete (all show sentiment results)

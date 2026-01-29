@@ -1,5 +1,5 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { CharmManager, compileRecipe } from "@commontools/charm";
+import { compileRecipe, PieceManager } from "@commontools/piece";
 import { Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type DID } from "@commontools/identity";
@@ -93,7 +93,7 @@ async function castRecipe() {
     });
 
     // Create charm manager for the specified space
-    const charmManager = new CharmManager(session, runtime);
+    const charmManager = new PieceManager(session, runtime);
     await charmManager.ready;
     const recipe = await compileRecipe(
       recipeSrc,

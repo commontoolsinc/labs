@@ -1,5 +1,5 @@
 import { env, Page, waitFor } from "@commontools/integration";
-import { CharmController, CharmsController } from "@commontools/charm/ops";
+import { PieceController, PiecesController } from "@commontools/piece/ops";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -13,18 +13,18 @@ describe("ct-render integration test", () => {
   shell.bindLifecycle();
 
   let identity: Identity;
-  let cc: CharmsController;
-  let charm: CharmController;
-  let charmSinkCancel: (() => void) | undefined;
+  let cc: PiecesController;
+  let piece: PieceController;
+  let pieceSinkCancel: (() => void) | undefined;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
-    cc = await CharmsController.initialize({
+    cc = await PiecesController.initialize({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
     });
-    charm = await cc.create(
+    piece = await cc.create(
       await Deno.readTextFile(
         join(
           import.meta.dirname!,
@@ -33,27 +33,27 @@ describe("ct-render integration test", () => {
           "ct-render.tsx",
         ),
       ),
-      // We operate on the charm in this thread
+      // We operate on the piece in this thread
       { start: true },
     );
 
-    // In pull mode, create a sink to keep the charm reactive when inputs change.
-    const resultCell = cc.manager().getResult(charm.getCell());
-    charmSinkCancel = resultCell.sink(() => {});
+    // In pull mode, create a sink to keep the piece reactive when inputs change.
+    const resultCell = cc.manager().getResult(piece.getCell());
+    pieceSinkCancel = resultCell.sink(() => {});
   });
 
   afterAll(async () => {
-    charmSinkCancel?.();
+    pieceSinkCancel?.();
     if (cc) await cc.dispose();
   });
 
-  it("should load the nested counter charm and verify initial state", async () => {
+  it("should load the nested counter piece and verify initial state", async () => {
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
       view: {
         spaceName: SPACE_NAME,
-        charmId: charm.id,
+        pieceId: piece.id,
       },
       identity,
     });
@@ -75,7 +75,7 @@ describe("ct-render integration test", () => {
     });
 
     // Verify via direct operations that the ct-render structure works
-    const value = await charm.result.get(["value"]);
+    const value = await piece.result.get(["value"]);
     assertEquals(value, 0);
   });
 
@@ -87,29 +87,29 @@ describe("ct-render integration test", () => {
     await clickNthButton(page, "[data-ct-button]", 1);
 
     await waitFor(async () => {
-      return (await charm.result.get(["value"])) === 1;
+      return (await piece.result.get(["value"])) === 1;
     });
-    assertEquals(await charm.result.get(["value"]), 1);
+    assertEquals(await piece.result.get(["value"]), 1);
   });
 
   it("should update counter value via direct operations and verify UI", async () => {
     const page = shell.page();
 
-    await charm.result.set(5, ["value"]);
+    await piece.result.set(5, ["value"]);
 
     // Verify we can read the value back via operations
     assertEquals(
-      await charm.result.get(["value"]),
+      await piece.result.get(["value"]),
       5,
       "Value should be 5 in backend",
     );
 
-    // Navigate to the charm to see if UI reflects the change
+    // Navigate to the piece to see if UI reflects the change
     await shell.goto({
       frontendUrl: FRONTEND_URL,
       view: {
         spaceName: SPACE_NAME,
-        charmId: charm.id,
+        pieceId: piece.id,
       },
       identity,
     });
@@ -191,17 +191,17 @@ describe("ct-render subpath handling", () => {
   shell.bindLifecycle();
 
   let identity: Identity;
-  let cc: CharmsController;
-  let charm: CharmController;
+  let cc: PiecesController;
+  let piece: PieceController;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
-    cc = await CharmsController.initialize({
+    cc = await PiecesController.initialize({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
     });
-    charm = await cc.create(
+    piece = await cc.create(
       await Deno.readTextFile(
         join(
           import.meta.dirname!,
@@ -227,7 +227,7 @@ describe("ct-render subpath handling", () => {
       frontendUrl: FRONTEND_URL,
       view: {
         spaceName: SPACE_NAME,
-        charmId: charm.id,
+        pieceId: piece.id,
       },
       identity,
     });
@@ -261,7 +261,7 @@ describe("ct-render subpath handling", () => {
 
   it("should verify previewUI exists in the pattern", () => {
     // Verify previewUI exists (a valid subpath property)
-    const previewUI = charm.result.get(["previewUI"]);
+    const previewUI = piece.result.get(["previewUI"]);
     assertEquals(
       typeof previewUI,
       "object",
@@ -275,12 +275,12 @@ describe("ct-render subpath handling", () => {
     // that subpath cells like .key("sidebarUI") don't block the main render.
     const page = shell.page();
 
-    // Navigate to the charm
+    // Navigate to the piece
     await shell.goto({
       frontendUrl: FRONTEND_URL,
       view: {
         spaceName: SPACE_NAME,
-        charmId: charm.id,
+        pieceId: piece.id,
       },
       identity,
     });

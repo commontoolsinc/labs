@@ -3,7 +3,7 @@ import { HelpCommand } from "@cliffy/command/help";
 import { acl } from "./acl.ts";
 import { check, dev } from "./dev.ts";
 import { init } from "./init.ts";
-import { charm } from "./charm.ts";
+import { piece } from "./piece.ts";
 import { identity } from "./identity.ts";
 import { test } from "./test.ts";
 
@@ -11,8 +11,8 @@ const mainDescription = `Tool for running programs on common fabric.
 
 QUICK START:
   ct check ./pattern.tsx            # Type-check and test locally
-  ct charm new ./pattern.tsx ...    # Deploy to a space
-  ct charm --help                   # Help for deployed patterns (with tips)
+  ct piece new ./pattern.tsx ...    # Deploy to a space
+  ct piece --help                   # Help for deployed patterns (with tips)
 
 FIRST TIME SETUP:
   ct id new > claude.key            # Create identity key
@@ -43,7 +43,7 @@ export const main = new Command()
   // @ts-ignore for the above type issue
   .command("acl", acl)
   // @ts-ignore for the above type issue
-  .command("charm", charm)
+  .command("piece", piece)
   .command("check", check)
   .command("dev", dev)
   .command("id", identity)

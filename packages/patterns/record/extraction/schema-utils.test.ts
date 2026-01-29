@@ -15,11 +15,11 @@ import {
   getResultSchema,
   type JSONSchema,
 } from "./schema-utils-pure.ts";
-import type { SubCharmEntry } from "../types.ts";
+import type { SubPieceEntry } from "../types.ts";
 
 describe("getResultSchema", () => {
   it("should extract resultSchema from a pattern-like object", () => {
-    const mockCharm = {
+    const mockPiece = {
       resultSchema: {
         type: "object",
         properties: {
@@ -29,7 +29,7 @@ describe("getResultSchema", () => {
       },
     };
 
-    const schema = getResultSchema(mockCharm);
+    const schema = getResultSchema(mockPiece);
     expect(schema).toBeDefined();
     expect(schema?.properties).toHaveProperty("email");
     expect(schema?.properties).toHaveProperty("phone");
@@ -59,11 +59,11 @@ describe("getResultSchema", () => {
 
 describe("buildExtractionSchemaPure", () => {
   it("should build combined schema from stored schemas", () => {
-    const entries: SubCharmEntry[] = [
+    const entries: SubPieceEntry[] = [
       {
         type: "contact",
         pinned: false,
-        charm: {},
+        piece: {},
         schema: {
           type: "object",
           properties: {
@@ -75,7 +75,7 @@ describe("buildExtractionSchemaPure", () => {
       {
         type: "birthday",
         pinned: false,
-        charm: {},
+        piece: {},
         schema: {
           type: "object",
           properties: {
@@ -93,11 +93,11 @@ describe("buildExtractionSchemaPure", () => {
   });
 
   it("should skip internal modules (type-picker, extract)", () => {
-    const entries: SubCharmEntry[] = [
+    const entries: SubPieceEntry[] = [
       {
         type: "contact",
         pinned: false,
-        charm: {},
+        piece: {},
         schema: {
           type: "object",
           properties: { email: { type: "string" } },
@@ -106,7 +106,7 @@ describe("buildExtractionSchemaPure", () => {
       {
         type: "type-picker",
         pinned: false,
-        charm: {},
+        piece: {},
         schema: {
           type: "object",
           properties: { internalField: { type: "string" } },
@@ -115,7 +115,7 @@ describe("buildExtractionSchemaPure", () => {
       {
         type: "extractor",
         pinned: false,
-        charm: {},
+        piece: {},
         schema: {
           type: "object",
           properties: { rawText: { type: "string" } },
@@ -136,11 +136,11 @@ describe("buildExtractionSchemaPure", () => {
   });
 
   it("should handle entries without stored schema", () => {
-    const entries: SubCharmEntry[] = [
+    const entries: SubPieceEntry[] = [
       {
         type: "unknown-type",
         pinned: false,
-        charm: {},
+        piece: {},
         // No schema stored
       },
     ];
@@ -152,23 +152,23 @@ describe("buildExtractionSchemaPure", () => {
   });
 
   it("should merge properties from multiple schemas", () => {
-    const entries: SubCharmEntry[] = [
+    const entries: SubPieceEntry[] = [
       {
         type: "a",
         pinned: false,
-        charm: {},
+        piece: {},
         schema: { type: "object", properties: { fieldA: { type: "string" } } },
       },
       {
         type: "b",
         pinned: false,
-        charm: {},
+        piece: {},
         schema: { type: "object", properties: { fieldB: { type: "number" } } },
       },
       {
         type: "c",
         pinned: false,
-        charm: {},
+        piece: {},
         schema: { type: "object", properties: { fieldC: { type: "boolean" } } },
       },
     ];
@@ -188,7 +188,7 @@ describe("buildExtractionSchemaFromCellPure", () => {
         {
           type: "contact",
           pinned: false,
-          charm: {},
+          piece: {},
           schema: {
             type: "object",
             properties: {
@@ -226,11 +226,11 @@ describe("buildExtractionSchemaFromCellPure", () => {
 
 describe("getFieldToTypeMappingPure", () => {
   it("should create reverse mapping from fields to types", () => {
-    const entries: SubCharmEntry[] = [
+    const entries: SubPieceEntry[] = [
       {
         type: "contact",
         pinned: false,
-        charm: {},
+        piece: {},
         schema: {
           type: "object",
           properties: {
@@ -242,7 +242,7 @@ describe("getFieldToTypeMappingPure", () => {
       {
         type: "birthday",
         pinned: false,
-        charm: {},
+        piece: {},
         schema: {
           type: "object",
           properties: {
@@ -259,11 +259,11 @@ describe("getFieldToTypeMappingPure", () => {
   });
 
   it("should skip internal modules", () => {
-    const entries: SubCharmEntry[] = [
+    const entries: SubPieceEntry[] = [
       {
         type: "type-picker",
         pinned: false,
-        charm: {},
+        piece: {},
         schema: {
           type: "object",
           properties: { internalField: { type: "string" } },
@@ -272,7 +272,7 @@ describe("getFieldToTypeMappingPure", () => {
       {
         type: "extractor",
         pinned: false,
-        charm: {},
+        piece: {},
         schema: {
           type: "object",
           properties: { rawText: { type: "string" } },
@@ -291,11 +291,11 @@ describe("getFieldToTypeMappingPure", () => {
   });
 
   it("should handle entries without schema", () => {
-    const entries: SubCharmEntry[] = [
+    const entries: SubPieceEntry[] = [
       {
         type: "unknown",
         pinned: false,
-        charm: {},
+        piece: {},
         // No schema
       },
     ];
