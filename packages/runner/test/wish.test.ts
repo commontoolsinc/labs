@@ -1060,6 +1060,72 @@ describe("wish built-in", () => {
       expect(patternData).toEqual({ type: "pattern" });
     });
 
+    it("resolves hashtag using computed query (GoogleAuthManager pattern)", async () => {
+      // This test mimics GoogleAuthManager which uses computed() for the wish query
+      const { commontools: { computed } } = createBuilder();
+
+      // Setup: Favorites with #googleAuth tag in home space
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const defaultPatternCell = runtime.getCell(
+        userIdentity.did(),
+        "default-pattern",
+        undefined,
+        tx,
+      );
+      const favoritesCell = defaultPatternCell.key("favorites");
+      const authItem = runtime.getCell(
+        userIdentity.did(),
+        "google-auth-item",
+        undefined,
+        tx,
+      );
+      authItem.set({
+        auth: {
+          token: "test-token",
+          user: { email: "test@gmail.com" },
+          scope: ["https://www.googleapis.com/auth/gmail.readonly"],
+        },
+      });
+
+      favoritesCell.set([
+        { cell: authItem, tag: "#googleAuth" },
+      ]);
+      (homeSpaceCell as any).key("defaultPattern").set(defaultPatternCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Execute: Pattern uses computed() for the query - just like GoogleAuthManager
+      const wishRecipe = recipe("wish computed query", () => {
+        const tag = computed(() => "#googleAuth");
+        const authResult = wish({ query: tag });
+        return { authResult };
+      });
+
+      const resultCell = runtime.getCell<{
+        authResult?: { result?: unknown };
+      }>(
+        patternSpace.did(),
+        "wish-computed-query-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      // Verify: Should find the auth item via hashtag search in home space
+      const authResult = result.key("authResult").get();
+      expect(authResult?.error).toBeUndefined();
+      expect(authResult?.result).toBeDefined();
+      expect((authResult?.result as any)?.auth?.user?.email).toEqual(
+        "test@gmail.com",
+      );
+    });
+
     it("resolves hashtag search in home space favorites from different pattern space", async () => {
       // Setup: Favorites with tags in home space through defaultPattern
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
