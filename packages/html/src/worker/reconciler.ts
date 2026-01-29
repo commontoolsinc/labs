@@ -755,6 +755,16 @@ export class WorkerReconciler {
       this.updateChildren(ctx, state, children, visited);
     }
 
+    // When this cancel is called, also cancel all current children.
+    // This ensures child sinks are cleaned up when the parent render tree
+    // is torn down (e.g., during reconcileIntoWrapper).
+    addCancel(() => {
+      for (const [, childState] of state.children) {
+        childState.cancel();
+      }
+      state.children.clear();
+    });
+
     return cancel;
   }
 
