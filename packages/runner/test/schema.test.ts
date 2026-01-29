@@ -526,7 +526,6 @@ describe("Schema Support", () => {
       expect(currentValues).toEqualIgnoringSymbols([
         "first",
         "first - update",
-        "first - update", // don't know why/where this comes from
         "second", // That was changing `value` on root
         "second",
         "second - update",
