@@ -273,7 +273,7 @@ const sanitizeClause = (value: unknown): ClauseRecord | null => {
   };
 };
 
-const defaultClauseRecords: ClauseRecord[] = (() => {
+function buildDefaultClauseRecords(): ClauseRecord[] {
   const dedup = new Map<string, ClauseRecord>();
   for (const entry of defaultClauses) {
     const clause = sanitizeClause(entry);
@@ -285,7 +285,9 @@ const defaultClauseRecords: ClauseRecord[] = (() => {
   const list = Array.from(dedup.values());
   list.sort(compareClauses);
   return list;
-})();
+}
+
+const defaultClauseRecords: ClauseRecord[] = buildDefaultClauseRecords();
 
 const cloneDefaultClauses = (): ClauseRecord[] =>
   defaultClauseRecords.map(cloneClause);

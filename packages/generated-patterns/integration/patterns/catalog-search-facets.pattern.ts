@@ -358,10 +358,10 @@ export const catalogSearchFacets = recipe<CatalogSearchArgs>(
     const sanitizedCatalog = liftSanitizeCatalog(catalog);
 
     const selectedCategories = cell<string[]>(
-      structuredClone(defaultSelection.categories),
+      JSON.parse(JSON.stringify(defaultSelection.categories)),
     );
     const selectedBrands = cell<string[]>(
-      structuredClone(defaultSelection.brands),
+      JSON.parse(JSON.stringify(defaultSelection.brands)),
     );
     const priceCeiling = cell<number | null>(defaultSelection.priceCeiling);
 
