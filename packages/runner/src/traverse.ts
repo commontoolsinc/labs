@@ -2062,15 +2062,27 @@ export class SchemaObjectTraverser<V extends JSONValue>
         // We want those links to point directly at the linked cells, instead of
         // using our path (e.g. ["items", "0"]), so don't pass in a modified link.
         const val = this.traverseWithSelector(curDoc, curSelector);
-        if (val === undefined) {
-          // this array is invalid, since one or more items do not match the schema
-          logger.debug(
-            "traverse",
-            () => ["Item doesn't match array schema", curDoc, curSelector],
-          );
-          return undefined;
+        // If our item doesn't match our schema, we may be able to use null
+        if (val !== undefined) {
+          arrayObj.push(val);
+        } else {
+          const schema = curSelector.schemaContext!.schema;
+          const isNullValid = [
+            schema,
+            ...getSchemaOptions(schema, "anyOf"),
+            ...getSchemaOptions(schema, "oneOf"),
+          ].some((schemaOption) => this.isValidType(schemaOption, "null"));
+          if (isNullValid) {
+            arrayObj.push(null);
+          } else {
+            // this array is invalid, since one or more items do not match the schema
+            logger.debug(
+              "traverse",
+              () => ["Item doesn't match array schema", curDoc, curSelector],
+            );
+            return undefined;
+          }
         }
-        arrayObj.push(val);
       }
     }
     return arrayObj;
@@ -2476,4 +2488,38 @@ function getNextCellLink(
     doc.value,
   ]);
   return getNormalizedLink(doc.address, schema, rootSchema);
+}
+
+function getSchemaOptions(
+  schema: JSONSchema,
+  type: "anyOf" | "oneOf",
+): JSONSchema[] {
+  if (schema === true) {
+    return [true];
+  } else if (schema === false) {
+    return [];
+  } else {
+    const rv = [];
+    // There are a lot of valid logical schema flags, and we only handle
+    // a very limited set here, with no support for combinations.
+    const { anyOf, oneOf, ...restSchema } = schema;
+    const options =
+      (type === "anyOf" ? anyOf : type === "oneOf" ? oneOf : []) ?? [];
+    // Consider items without asCell or asStream first, since if we aren't
+    // traversing cells, we consider them a match.
+    const sortedOptions = [
+      ...options.filter((option) =>
+        !SchemaObjectTraverser.asCellOrStream(option)
+      ),
+      ...options.filter(SchemaObjectTraverser.asCellOrStream),
+    ];
+    for (const optionSchema of sortedOptions) {
+      if (ContextualFlowControl.isFalseSchema(optionSchema)) {
+        continue;
+      }
+      const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
+      rv.push(mergedSchema);
+    }
+    return rv;
+  }
 }
