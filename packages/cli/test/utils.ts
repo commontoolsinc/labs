@@ -8,14 +8,20 @@ export function bytesToLines(stream: Uint8Array): string[] {
 }
 
 export function checkStderr(stderr: string[]) {
+  // Filter out known SES lockdown warnings that are expected when sandboxing is enabled
+  const filtered = stderr.filter(
+    (line) =>
+      !line.startsWith("SES ") &&
+      !line.startsWith("  Removing intrinsics."),
+  );
   try {
-    expect(stderr.length).toBe(2);
+    expect(filtered.length).toBe(2);
   } catch (e) {
-    console.error(stderr);
+    console.error(filtered);
     throw e;
   }
-  expect(stderr[0]).toMatch(/deno run /);
-  expect(stderr[1]).toMatch(/experimentalDecorators compiler option/);
+  expect(filtered[0]).toMatch(/deno run /);
+  expect(filtered[1]).toMatch(/experimentalDecorators compiler option/);
 }
 
 // Executes the `ct` command via CLI
