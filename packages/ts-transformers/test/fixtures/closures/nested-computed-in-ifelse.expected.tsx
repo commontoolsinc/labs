@@ -1,72 +1,69 @@
 import * as __ctHelpers from "commontools";
 /**
- * Regression test: inline arrow function inside explicit computed() in JSX
+ * Regression test: computed() inside ifElse branch should not double-wrap .get()
  *
- * Variation where an inline arrow function handler is wrapped inside an
- * explicit computed() in JSX. The transformer will convert the arrow function
- * to a handler, and the Cell reference (state.isEditing) must be properly
- * captured in the derive wrapper created for the computed.
+ * When a computed() callback is inside an ifElse branch, the OpaqueRefJSX
+ * transformer's rewriteChildExpressions should NOT wrap expressions like
+ * `toggle.get()` in an extra derive, since the computed callback is already
+ * a safe reactive context.
+ *
+ * Bug: secondToggle.get() was returning CellImpl instead of boolean
+ * Fix: Added isInsideSafeCallbackWrapper check in rewriteChildExpressions
  */
-import { Cell, computed, pattern, UI } from "commontools";
-interface Card {
-    title: string;
-    description: string;
-}
-interface State {
-    card: Card;
-    isEditing: Cell<boolean>;
-}
-export default pattern((state) => {
+import { computed, ifElse, pattern, UI, Writable } from "commontools";
+export default pattern(() => {
+    const showOuter = Writable.of(false, {
+        type: "boolean"
+    } as const satisfies __ctHelpers.JSONSchema);
+    const secondToggle = Writable.of(false, {
+        type: "boolean"
+    } as const satisfies __ctHelpers.JSONSchema);
     return {
-        [UI]: (<ct-card>
-        {__ctHelpers.ifElse({
-            type: "boolean",
-            asCell: true
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{}, {
-                    type: "object",
-                    properties: {}
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{}, {
-                    type: "object",
-                    properties: {}
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            anyOf: [{}, {
-                    type: "object",
-                    properties: {}
-                }]
-        } as const satisfies __ctHelpers.JSONSchema, state.isEditing, <div>Editing</div>, <div>
-            <span>{state.card.title}</span>
-            {/* Explicit computed() wrapping a button with inline handler */}
-            {/* The Cell ref in the handler must be captured in the derive */}
-            {__ctHelpers.derive({
+        [UI]: (<div>
+        {/* Case A: Top-level computed - always worked */}
+        <div style={__ctHelpers.derive({
                 type: "object",
                 properties: {
-                    state: {
-                        type: "object",
-                        properties: {
-                            isEditing: {
-                                type: "boolean",
-                                asCell: true
-                            }
-                        },
-                        required: ["isEditing"]
+                    secondToggle: {
+                        type: "boolean",
+                        asCell: true
                     }
                 },
-                required: ["state"]
+                required: ["secondToggle"]
             } as const satisfies __ctHelpers.JSONSchema, {
-                anyOf: [{
-                        $ref: "#/$defs/VNode"
-                    }, {
+                type: "object",
+                properties: {
+                    background: {
+                        type: "string"
+                    }
+                },
+                required: ["background"]
+            } as const satisfies __ctHelpers.JSONSchema, { secondToggle: secondToggle }, ({ secondToggle }) => {
+                const val = secondToggle.get();
+                return { background: val ? "green" : "red" };
+            })}>Case A</div>
+
+        {/* Case B: Computed inside ifElse - this was the bug */}
+        {ifElse({
+                type: "boolean",
+                asCell: true
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{}, {
                         type: "object",
                         properties: {}
-                    }, {
+                    }]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                anyOf: [{}, {
+                        type: "object",
+                        properties: {}
+                    }]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                $ref: "#/$defs/AnonymousType_1",
+                $defs: {
+                    AnonymousType_1: {
                         $ref: "#/$defs/UIRenderable",
                         asOpaque: true
-                    }],
-                $defs: {
+                    },
                     UIRenderable: {
                         type: "object",
                         properties: {
@@ -80,8 +77,7 @@ export default pattern((state) => {
                         type: "object",
                         properties: {
                             type: {
-                                type: "string",
-                                "enum": ["vnode"]
+                                type: "string"
                             },
                             name: {
                                 type: "string"
@@ -104,20 +100,8 @@ export default pattern((state) => {
                             }, {
                                 type: "number"
                             }, {
-                                type: "boolean",
-                                "enum": [false]
-                            }, {
-                                type: "boolean",
-                                "enum": [true]
-                            }, {
-                                $ref: "#/$defs/VNode"
-                            }, {
-                                type: "object",
-                                properties: {}
-                            }, {
-                                $ref: "#/$defs/UIRenderable",
-                                asOpaque: true
-                            }, {
+                                type: "boolean"
+                            }, {}, {
                                 type: "object",
                                 properties: {}
                             }, {
@@ -138,104 +122,56 @@ export default pattern((state) => {
                                 }, {
                                     type: "number"
                                 }, {
-                                    type: "boolean",
-                                    "enum": [false]
-                                }, {
-                                    type: "boolean",
-                                    "enum": [true]
+                                    type: "boolean"
                                 }, {
                                     type: "object",
                                     additionalProperties: true
                                 }, {
                                     type: "array",
                                     items: true
-                                }, {
-                                    asCell: true
-                                }, {
-                                    asStream: true
-                                }, {
+                                }, {}, {
                                     type: "null"
                                 }]
                         }
                     }
                 }
-            } as const satisfies __ctHelpers.JSONSchema, { state: {
-                    isEditing: state.isEditing
-                } }, ({ state }) => (<ct-button onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
-                type: "object",
-                properties: {
-                    state: {
-                        type: "object",
-                        properties: {
-                            isEditing: {
-                                type: "boolean",
-                                asCell: true
-                            }
-                        },
-                        required: ["isEditing"]
-                    }
-                },
-                required: ["state"]
-            } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => state.isEditing.set(true))({
-                state: {
-                    isEditing: state.isEditing
-                }
-            })}>Edit</ct-button>))}
-          </div>)}
-      </ct-card>),
-        card: state.card,
+            } as const satisfies __ctHelpers.JSONSchema, showOuter, <div style={__ctHelpers.derive({
+                    type: "object",
+                    properties: {
+                        secondToggle: {
+                            type: "boolean",
+                            asCell: true
+                        }
+                    },
+                    required: ["secondToggle"]
+                } as const satisfies __ctHelpers.JSONSchema, {
+                    type: "object",
+                    properties: {
+                        background: {
+                            type: "string"
+                        }
+                    },
+                    required: ["background"]
+                } as const satisfies __ctHelpers.JSONSchema, { secondToggle: secondToggle }, ({ secondToggle }) => {
+                    // This .get() should NOT be wrapped in extra derive
+                    const val = secondToggle.get();
+                    return { background: val ? "green" : "red" };
+                })}>Case B</div>, <div>Hidden</div>)}
+      </div>),
     };
 }, {
     type: "object",
-    properties: {
-        card: {
-            $ref: "#/$defs/Card"
-        },
-        isEditing: {
-            type: "boolean",
-            asCell: true
-        }
-    },
-    required: ["card", "isEditing"],
-    $defs: {
-        Card: {
-            type: "object",
-            properties: {
-                title: {
-                    type: "string"
-                },
-                description: {
-                    type: "string"
-                }
-            },
-            required: ["title", "description"]
-        }
-    }
+    properties: {},
+    additionalProperties: false
 } as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         $UI: {
             $ref: "#/$defs/JSXElement"
-        },
-        card: {
-            $ref: "#/$defs/Card",
-            asOpaque: true
         }
     },
-    required: ["$UI", "card"],
+    required: ["$UI"],
     $defs: {
-        Card: {
-            type: "object",
-            properties: {
-                title: {
-                    type: "string"
-                },
-                description: {
-                    type: "string"
-                }
-            },
-            required: ["title", "description"]
-        },
         JSXElement: {
             anyOf: [{
                     $ref: "#/$defs/VNode"
