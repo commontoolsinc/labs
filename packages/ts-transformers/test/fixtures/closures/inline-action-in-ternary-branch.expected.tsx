@@ -8,42 +8,6 @@ import * as __ctHelpers from "commontools";
  * captured in the derive wrapper created for the computed.
  */
 import { Cell, computed, pattern, UI } from "commontools";
-const __handler_0 = __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                isEditing: {
-                    type: "boolean",
-                    asCell: true
-                }
-            },
-            required: ["isEditing"]
-        }
-    },
-    required: ["state"]
-} as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => __ctHelpers.derive({
-    type: "object",
-    properties: {
-        state: {
-            type: "object",
-            properties: {
-                isEditing: {
-                    type: "boolean",
-                    asCell: true
-                }
-            },
-            required: ["isEditing"]
-        }
-    },
-    required: ["state"]
-} as const satisfies __ctHelpers.JSONSchema, {
-    type: "boolean",
-    asCell: true
-} as const satisfies __ctHelpers.JSONSchema, { state: {
-        isEditing: state.isEditing
-    } }, ({ state }) => state.isEditing.set(true)));
 const __lift_0 = __ctHelpers.lift({
     type: "object",
     properties: {
@@ -162,7 +126,22 @@ const __lift_0 = __ctHelpers.lift({
             }
         }
     }
-} as const satisfies __ctHelpers.JSONSchema, ({ state }) => (<ct-button onClick={__handler_0({
+} as const satisfies __ctHelpers.JSONSchema, ({ state }) => (<ct-button onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                isEditing: {
+                    type: "boolean",
+                    asCell: true
+                }
+            },
+            required: ["isEditing"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => state.isEditing.set(true))({
     state: {
         isEditing: state.isEditing
     }
