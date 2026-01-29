@@ -280,6 +280,41 @@ const Note = pattern<NoteInput, NoteOutput>(
       return custom || JSON.stringify(Note);
     });
 
+    // ===== Pre-computed UI values =====
+
+    // Parent notebook display state
+    const hasParentNotebook = computed(() => !!(self as any).parentNotebook);
+    const parentNotebookLabel = computed(() => {
+      const p = (self as any).parentNotebook;
+      return p?.[NAME] ?? p?.title ?? "Notebook";
+    });
+
+    // Menu display states
+    const menuDisplayStyle = computed(() => menuOpen.get() ? "flex" : "none");
+    const allNotesDividerDisplay = computed(() =>
+      allNotesPiece ? "block" : "none"
+    );
+    const allNotesButtonDisplay = computed(() =>
+      allNotesPiece ? "flex" : "none"
+    );
+
+    // Title editing display states
+    const titleDisplayStyle = computed(() =>
+      isEditingTitle.get() ? "none" : "flex"
+    );
+    const titleInputDisplayStyle = computed(() =>
+      isEditingTitle.get() ? "flex" : "none"
+    );
+
+    // ===== Shared UI Styles =====
+
+    const headerButtonStyle = {
+      alignItems: "center",
+      padding: "6px 12px",
+      fontSize: "14px",
+      borderRadius: "8px",
+    };
+
     // ===== UI =====
 
     const editorUI = (
@@ -315,9 +350,7 @@ const Note = pattern<NoteInput, NoteOutput>(
               gap="2"
               align="center"
               style={{
-                display: computed(() =>
-                  (self as any).parentNotebook ? "flex" : "none"
-                ),
+                display: computed(() => hasParentNotebook ? "flex" : "none"),
                 marginBottom: "4px",
               }}
             >
@@ -330,10 +363,7 @@ const Note = pattern<NoteInput, NoteOutput>(
                 In:
               </span>
               <ct-chip
-                label={computed(() => {
-                  const p = (self as any).parentNotebook;
-                  return p?.[NAME] ?? p?.title ?? "Notebook";
-                })}
+                label={parentNotebookLabel}
                 interactive
                 onct-click={goToParent}
               />
@@ -343,9 +373,7 @@ const Note = pattern<NoteInput, NoteOutput>(
               {/* Editable Title - click to edit */}
               <div
                 style={{
-                  display: computed(() =>
-                    isEditingTitle.get() ? "none" : "flex"
-                  ),
+                  display: titleDisplayStyle,
                   alignItems: "center",
                   gap: "8px",
                   cursor: "pointer",
@@ -361,9 +389,7 @@ const Note = pattern<NoteInput, NoteOutput>(
               </div>
               <div
                 style={{
-                  display: computed(() =>
-                    isEditingTitle.get() ? "flex" : "none"
-                  ),
+                  display: titleInputDisplayStyle,
                   flex: 1,
                   marginRight: "12px",
                 }}
@@ -381,12 +407,7 @@ const Note = pattern<NoteInput, NoteOutput>(
               <ct-button
                 variant="ghost"
                 onClick={goToViewer}
-                style={{
-                  alignItems: "center",
-                  padding: "6px 12px",
-                  fontSize: "14px",
-                  borderRadius: "8px",
-                }}
+                style={headerButtonStyle}
                 title="View as markdown"
               >
                 View
@@ -396,13 +417,7 @@ const Note = pattern<NoteInput, NoteOutput>(
               <ct-button
                 variant="ghost"
                 onClick={createNewNote}
-                style={{
-                  alignItems: "center",
-                  padding: "6px 12px",
-                  fontSize: "14px",
-                  borderRadius: "8px",
-                  gap: "4px",
-                }}
+                style={{ ...headerButtonStyle, gap: "4px" }}
                 title="Create new note"
               >
                 📝 New
@@ -411,21 +426,16 @@ const Note = pattern<NoteInput, NoteOutput>(
               <ct-button
                 variant="ghost"
                 onClick={toggleMenu}
-                style={{
-                  alignItems: "center",
-                  padding: "8px 16px",
-                  fontSize: "14px",
-                  borderRadius: "8px",
-                }}
+                style={{ ...headerButtonStyle, padding: "8px 16px" }}
               >
-                Notebooks {"\u25BE"}
+                Notebooks ▾
               </ct-button>
 
               {/* Backdrop to close menu */}
               <div
                 onClick={closeMenu}
                 style={{
-                  display: computed(() => (menuOpen.get() ? "block" : "none")),
+                  display: computed(() => menuOpen.get() ? "block" : "none"),
                   position: "fixed",
                   inset: "0",
                   zIndex: "999",
@@ -436,7 +446,7 @@ const Note = pattern<NoteInput, NoteOutput>(
               <ct-vstack
                 gap="0"
                 style={{
-                  display: computed(() => (menuOpen.get() ? "flex" : "none")),
+                  display: menuDisplayStyle,
                   position: "fixed",
                   top: "112px",
                   right: "16px",
@@ -455,7 +465,7 @@ const Note = pattern<NoteInput, NoteOutput>(
                     onClick={menuGoToNotebook({ menuOpen, notebook })}
                     style={{ justifyContent: "flex-start" }}
                   >
-                    {"\u00A0\u00A0"}
+                    {"  "}
                     {notebook?.[NAME] ?? "Untitled"}
                     {computed(() => {
                       const nbName = (notebook as any)?.[NAME] ?? "";
@@ -469,7 +479,7 @@ const Note = pattern<NoteInput, NoteOutput>(
                 {/* Divider + All Notes - only show if All Notes piece exists */}
                 <div
                   style={{
-                    display: computed(() => (allNotesPiece ? "block" : "none")),
+                    display: allNotesDividerDisplay,
                     height: "1px",
                     background: "var(--ct-color-border, #e5e5e7)",
                     margin: "4px 8px",
@@ -480,11 +490,11 @@ const Note = pattern<NoteInput, NoteOutput>(
                   variant="ghost"
                   onClick={menuAllNotebooks}
                   style={{
-                    display: computed(() => (allNotesPiece ? "flex" : "none")),
+                    display: allNotesButtonDisplay,
                     justifyContent: "flex-start",
                   }}
                 >
-                  {"\u00A0\u00A0"}📁 All Notes
+                  {"  "}📁 All Notes
                 </ct-button>
               </ct-vstack>
             </ct-hstack>
