@@ -234,13 +234,21 @@ export default pattern<Input, Output>(({ member, sameAs }) => {
 
     const selfFirst = member.key("firstName").get();
     const selfLast = member.key("lastName").get();
+    const hasSelfName = Boolean(selfFirst || selfLast);
 
     const result: Array<{ value: string; label: string; data: PersonLike }> =
       [];
     for (const c of all) {
       const p = c.person ?? c.member;
       if (!p) continue;
-      if (p.firstName === selfFirst && p.lastName === selfLast) continue;
+      // Only filter by name if this contact actually has a name set
+      if (
+        hasSelfName &&
+        p.firstName === selfFirst &&
+        p.lastName === selfLast
+      ) {
+        continue;
+      }
       const label = p.firstName && p.lastName
         ? `${p.firstName} ${p.lastName}`
         : p.firstName || p.lastName || "Person";
