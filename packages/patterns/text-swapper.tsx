@@ -26,7 +26,7 @@ interface Output {
 const swapTexts = handler<
   unknown,
   { leftText: Writable<string>; rightText: Writable<string> }
-  >((_event, { leftText, rightText }) => {
+>((_event, { leftText, rightText }) => {
   const left = leftText.get();
   const right = rightText.get();
   console.log("swapTexts", { left, right });
@@ -42,7 +42,7 @@ const openEditLeft = handler<
     editValue: Writable<string>;
     showModal: Writable<boolean>;
   }
-  >((_event, { leftText, editingSide, editValue, showModal }) => {
+>((_event, { leftText, editingSide, editValue, showModal }) => {
   console.log("openEditLeft");
   editingSide.set("left");
   editValue.set(leftText.get());
@@ -57,7 +57,7 @@ const openEditRight = handler<
     editValue: Writable<string>;
     showModal: Writable<boolean>;
   }
-  >((_event, { rightText, editingSide, editValue, showModal }) => {
+>((_event, { rightText, editingSide, editValue, showModal }) => {
   console.log("openEditRight");
   editingSide.set("right");
   editValue.set(rightText.get());
