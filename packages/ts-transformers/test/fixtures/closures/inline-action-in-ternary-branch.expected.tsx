@@ -176,27 +176,7 @@ export default pattern((state) => {
                     }
                 },
                 required: ["state"]
-            } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => __ctHelpers.derive({
-                type: "object",
-                properties: {
-                    state: {
-                        type: "object",
-                        properties: {
-                            isEditing: {
-                                type: "boolean",
-                                asCell: true
-                            }
-                        },
-                        required: ["isEditing"]
-                    }
-                },
-                required: ["state"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "boolean",
-                asCell: true
-            } as const satisfies __ctHelpers.JSONSchema, { state: {
-                    isEditing: state.isEditing
-                } }, ({ state }) => state.isEditing.set(true)))({
+            } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => state.isEditing.set(true))({
                 state: {
                     isEditing: state.isEditing
                 }
