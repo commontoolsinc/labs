@@ -39,6 +39,25 @@ Proof building blocks:
 - `formal/Cfc/Proofs/Exchange.lean`: monotonicity lemmas (exchange doesn't *reduce* accessibility)
 - `formal/Cfc/Proofs/Scenarios.lean`: worked examples for spaces, links, multiparty, authority-only drop, expiration.
 
+### Policy Evaluation at Trusted Boundaries (Spec Sections 4.3 / 4.4 / 5)
+
+- `formal/Cfc/Policy.lean`: minimal policy-record + exchange-rule evaluator:
+  - discovers policy principals in a label (`Atom.policy ...`) and looks up policy records in scope
+  - matches exchange rules using a small pattern language with variable bindings
+  - applies rewrites and iterates to a fuelled fixpoint (`Policy.evalFixpoint`)
+- `formal/Cfc/Proofs/Policy.lean`: executable regressions showing:
+  - the Gmail "authority-only token drop" behavior can be expressed via a policy record, and
+  - without integrity guards the evaluator is a no-op (safe default).
+
+### Trusted Boundary Egress Checks (Spec Chapters 11 / 13)
+
+- `formal/Cfc/Atom.lean`: `Atom.capability kind resource` (spec 13.2 "Capability") for modeling egress sinks
+- `formal/Cfc/Egress.lean`: small boundary wrapper:
+  - evaluate policies at the boundary, then check `canAccess` for the boundary principal
+- `formal/Cfc/Proofs/Egress.lean`: end-to-end regressions:
+  - without guards, the boundary cannot unlock egress
+  - with guards, policy evaluation can add the capability needed for `canAccess`.
+
 ### Links / Endorsement Integrity (Spec Section 3.7)
 
 - `formal/Cfc/Link.lean`: `Link.deref` (conf conjunctive, integrity additive)
@@ -132,19 +151,23 @@ Trusted-runtime label propagation rules (schema-driven transitions):
   - `formal/Cfc/WriteAuthority.lean`: handler identity, `writeAuthorizedBy`, schema union, and an
     in-place `modify` primitive that preserves the authority set
   - `formal/Cfc/Proofs/WriteAuthority.lean`: counter example and composition/stability lemmas
+- Contamination scoping (8.14, open problem):
+  - `formal/Cfc/Contamination.lean`: candidate model using scoped integrity atoms to isolate "blast radius"
+  - `formal/Cfc/Proofs/Contamination.lean`: small regressions showing scoped evidence drops when steps recombine
 
 ## What Is Not Yet Modeled (Gaps vs Spec)
 
 The Lean model does *not* currently include:
 - Full commit-point state machine (attempt tracking, deduplication, concurrency) and its integration
   with label transitions / side effects (Spec Sections 6/7; invariant 4)
-- Full policy record architecture (hash binding, fixpoint evaluation, targeting)
+- Full policy record architecture from the spec (hash binding, richer pattern language / constraints,
+  policy discovery/selection beyond `Atom.policy ...`, and an un-fuelled fixpoint semantics)
 - Full schema-driven propagation algorithm (Spec 8.9) beyond local transition primitives
 - Full transformation-integrity framework (Spec 8.7) beyond the minimal endorsed-transform allowlist
   and "preserve only common integrity atoms" checked transition that is modeled in Chapter 8
 - Full selection-decision integrity framework (Spec 8.5.7) beyond the tokenized `selectionDecisionConf`
   taint + guarded declassification primitive modeled in `formal/Cfc/Collection.lean`
-- Side effects / egress enforcement beyond the abstract exchange/declassify rules above
+- Side effects / egress enforcement beyond the small trusted-boundary wrapper and regression examples
 
 These can be added incrementally, but would expand the model beyond the current "core IFC proofs"
 focus.
