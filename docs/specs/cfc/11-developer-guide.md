@@ -164,7 +164,7 @@ function combine(input: { a: A; b: B }): Combined {
 }
 ```
 
-Override with transition annotations (Section 8):
+Override with transition annotations ([§8](./08-label-transitions.md#8-label-transition-rules)):
 
 ```typescript
 function selectOne(input: { items: Item[] }): Item {
@@ -281,7 +281,7 @@ export default pattern<Input, Output>({
 });
 ```
 
-The intent system (Section 6) ensures:
+The intent system ([§6](./06-events-and-intents.md#6-events-intents-and-single-use-semantics)) ensures:
 - External effects require explicit user intent
 - The intent authorizes the observation of success/failure
 - Retry semantics prevent timing-based inference
@@ -709,7 +709,7 @@ async function getStatus(status: Secret<Status>): Promise<StatusData> {
 
 **Tier 4: Sensitive Requests** (requires intent)
 - Requests that could leak information to untrusted destinations
-- Require explicit user intent (Section 6)
+- Require explicit user intent ([§6](./06-events-and-intents.md#6-events-intents-and-single-use-semantics))
 - User is informed that making this request reveals information
 
 #### 11.1.7.11 Multi-User Scenario Analysis
@@ -829,7 +829,7 @@ When unsafe patterns are necessary:
 | Confidentiality | Space membership | Cross-space requires explicit handling |
 | Integrity | Handler identity | External endorsement needs declaration |
 | Termination | Single-principal renders are safe | Multi-principal flows need progress labels |
-| External effects | Intent system (Section 6) | Network timing out of scope |
+| External effects | Intent system ([§6](./06-events-and-intents.md#6-events-intents-and-single-use-semantics)) | Network timing out of scope |
 | Side channels | Trusted browser model | Extensions, timing attacks not covered |
 
 **Core invariant**: Termination-insensitivity holds when the observer is the same principal whose data influences the computation.

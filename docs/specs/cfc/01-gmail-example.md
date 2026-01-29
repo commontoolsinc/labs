@@ -36,7 +36,7 @@ Steps:
 
 The response does **not** inherit `GoogleAuth(Alice)` secrecy.
 
-Integrity: responses from Gmail may also carry **provenance integrity** (see Section 5.6) indicating that message fields originate from Gmail under trusted transport and parsing.
+Integrity: responses from Gmail may also carry **provenance integrity** (see [§5.6](./05-policy-architecture.md#56-provenance-integrity-fetched-data)) indicating that message fields originate from Gmail under trusted transport and parsing.
 
 
 ---

@@ -135,7 +135,7 @@ CFC's unique contributions:
 
 ### 12.4.1 Recombination Attack Mitigation
 
-**Problem**: Overlapping declassifiers can leak more information when outputs are combined (Section 10).
+**Problem**: Overlapping declassifiers can leak more information when outputs are combined ([§10](./10-safety-invariants.md#10-safety-invariants)).
 
 **Potential approaches**:
 - Linkage tracking to prevent joining outputs from the same source
@@ -159,7 +159,7 @@ CFC's unique contributions:
 
 ### 12.4.3 Formal Verification
 
-**Goal**: Machine-checked proofs of safety invariants (Section 10).
+**Goal**: Machine-checked proofs of safety invariants ([§10](./10-safety-invariants.md#10-safety-invariants)).
 
 **Challenges**:
 - Model reactive dataflow with dynamic policy evaluation
@@ -170,7 +170,7 @@ CFC's unique contributions:
 
 ### 12.4.4 Static Analysis for Patterns
 
-**Goal**: Detect label violations before deployment (Section 11).
+**Goal**: Detect label violations before deployment ([§11](./11-developer-guide.md#11-developer-guide)).
 
 **Challenges**:
 - Infer labels through reactive operators (`map`, `filter`, `flatMap`)

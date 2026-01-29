@@ -11,8 +11,8 @@ The system enforces the following invariants:
    Minimal control-integrity constraints remain for minting intents and policy-state transitions.
 5. Authority-only secrets do not taint responses only when endorsed usage contracts are satisfied.
 6. Violating a policy never silently downgrades confidentiality; it disables exchange.
-7. **Robust declassification**: Low-integrity inputs cannot influence which data is declassified or where it flows. Intent parameters affecting scope or destination must meet policy-defined integrity thresholds (see Section 3.8.6).
-8. **Transparent endorsement**: High-confidentiality data cannot influence which inputs get endorsed (upgraded to high integrity). Endorsement decisions must not branch on secret comparisons (see Section 3.8.7).
+7. **Robust declassification**: Low-integrity inputs cannot influence which data is declassified or where it flows. Intent parameters affecting scope or destination must meet policy-defined integrity thresholds (see [§3.8.6](./03-core-concepts.md#386-integrity-requirements-for-intent-parameters-robust-declassification)).
+8. **Transparent endorsement**: High-confidentiality data cannot influence which inputs get endorsed (upgraded to high integrity). Endorsement decisions must not branch on secret comparisons (see [§3.8.7](./03-core-concepts.md#387-transparent-endorsement)).
 9. **Flow-path confidentiality**: The path by which data arrives (not just the data content) carries its own confidentiality. An output tainted by high-confidentiality input is itself high-confidentiality, even if the output value is public.
 
 ---

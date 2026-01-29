@@ -1279,7 +1279,7 @@ interface IFCHandlerTypeAnnotations {
 
 ### 8.9.1 Propagation Algorithm
 
-In addition to content-based label transitions, the runtime MUST account for **flow-path confidentiality** (PC confidentiality): if a handler's control decisions (branching, gating, selection) are influenced by labeled inputs, the decision itself contributes confidentiality that must be joined onto downstream outputs (Section 8.11).
+In addition to content-based label transitions, the runtime MUST account for **flow-path confidentiality** (PC confidentiality): if a handler's control decisions (branching, gating, selection) are influenced by labeled inputs, the decision itself contributes confidentiality that must be joined onto downstream outputs ([§8.11](#811-content-labels-vs-flow-labels)).
 
 For implementation clarity, the algorithm below models this as an explicit `pcConfidentiality` input computed by the runtime (potentially conservatively).
 At minimum, `pcConfidentiality` must include the confidentiality of any values that can influence which outputs are produced, selected, or routed. A conservative implementation may approximate this as the join of confidentiality of all inputs the handler can observe.
@@ -1661,7 +1661,7 @@ function verifyIntegrityBinding(
 
 ## 8.11 Content Labels vs Flow Labels
 
-Confidentiality clauses can arise from two conceptually distinct sources, but are stored together in the single `Label` structure (Section 3.1.7):
+Confidentiality clauses can arise from two conceptually distinct sources, but are stored together in the single `Label` structure ([§3.1.7](./03-core-concepts.md#317-complete-label-structure)):
 
 ### 8.11.1 Data Content Labels
 
@@ -1687,7 +1687,7 @@ This answers: "What does the existence of this data at this point reveal?"
 
 ### 8.11.3 Why Both Matter
 
-The router attack (Section 10) shows why flow labels are needed. An adversary can encode high-precision data in routing decisions:
+The router attack ([§10](./10-safety-invariants.md#10-safety-invariants)) shows why flow labels are needed. An adversary can encode high-precision data in routing decisions:
 
 ```
 High-precision location → [router] → 64 paths → [declassifier] → low-precision outputs
@@ -1983,7 +1983,7 @@ Opaque and authority-only both prevent certain data from tainting outputs, but t
 
 **Key distinction**:
 - **Opaque** is a schema annotation on *handler inputs* — the handler declares it won't read the content
-- **Authority-only** is a policy classification for *external API fields* — the policy declares which request fields don't taint the response (Section 5.3.1)
+- **Authority-only** is a policy classification for *external API fields* — the policy declares which request fields don't taint the response ([§5.3.1](./05-policy-architecture.md#531-authority-only-vs-data-bearing-inputs))
 
 Both achieve non-tainting but through different means:
 - Opaque: Handler provably can't access content (enforced by runtime)
@@ -2216,8 +2216,8 @@ Two distinct input constraints:
 ```
 
 A handler that reads AND writes the same field (like `increment` reading then incrementing `count`):
-- Reads are governed by confidentiality/integrity labels on the value (Sections 3–8)
-- Writes are governed by the field's `writeAuthorizedBy` set (Section 8.15)
+- Reads are governed by confidentiality/integrity labels on the value ([§3](./03-core-concepts.md#3-core-concepts)–[§8](#8-label-transition-rules))
+- Writes are governed by the field's `writeAuthorizedBy` set ([§8.15](#815-modification-authorization-write-authority))
 
 ### 8.15.6 Write Authorization
 
@@ -2354,7 +2354,7 @@ This creates a two-layer check:
 | Operation | Example | Integrity model |
 |-----------|---------|-----------------|
 | **Modification** | `self.count++` | Handler identity must be in field's write-authority set |
-| **Replacement** | `return { count: 5 }` | Standard transformation rules (Section 8.7) |
+| **Replacement** | `return { count: 5 }` | Standard transformation rules ([§8.7](#87-transformation-rules)) |
 
 Modification preserves the field's identity and uses write authorization. Replacement creates a new value with transformation-derived integrity.
 

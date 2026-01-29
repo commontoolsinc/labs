@@ -2,7 +2,7 @@
 
 Events and intents achieve single-use semantics through cell ID derivation using `refer({ causal: {...} })`. Event transformations chain together while preserving consumption guarantees.
 
-**Trust boundary note**: The `refer()`-based ID derivations and `atomicClaimCell(...)` operations described in this section are performed by trusted runtime components. Untrusted pattern code should not be able to call `refer()` or observe stable cell/document IDs directly (see Section 11.1.7.9).
+**Trust boundary note**: The `refer()`-based ID derivations and `atomicClaimCell(...)` operations described in this section are performed by trusted runtime components. Untrusted pattern code should not be able to call `refer()` or observe stable cell/document IDs directly (see [§11.1.7.9](./11-developer-guide.md#11179-sandbox-constraints)).
 
 ## 6.1 Causal ID Derivation with `refer()`
 
@@ -263,11 +263,11 @@ async function refineIntent<S, T>(
 
 Refiners are **trusted components** that transform high-level intents into specific, consumable intents. Because they can influence what operations are authorized, they require explicit trust.
 
-Refiner trust uses the general **TrustStatement** mechanism (Section 4.8.2):
+Refiner trust uses the general **TrustStatement** mechanism ([§4.8.2](./04-label-representation.md#482-trust-statements)):
 
 1. A **verifier** issues a `TrustStatement` asserting that a refiner code hash implements a concept (e.g., `"gmail-intent-refiner"`)
 2. The **concept definition** specifies what the refiner can do (accepted actions, authorized operations, target audiences)
-3. The **user** delegates trust to verifiers for specific concept categories (Section 4.8.3)
+3. The **user** delegates trust to verifiers for specific concept categories ([§4.8.3](./04-label-representation.md#483-verifier-delegation))
 
 ```typescript
 // Example: Trust statement for a Gmail refiner
@@ -342,7 +342,7 @@ async function refineIntentWithTrustCheck<S, T>(
 3. **Supports delegation**: Users can trust different verifiers for different domains
 4. **Prevents scope creep**: Refiners cannot expand their authority over time without re-verification
 
-**Open problem (Section 10)**: Full semantic verification that a refiner's output correctly represents the user's intent remains an open problem. Scoped trust mitigates but doesn't eliminate the risk of buggy refiners.
+**Open problem ([§10](./10-safety-invariants.md#10-safety-invariants))**: Full semantic verification that a refiner's output correctly represents the user's intent remains an open problem. Scoped trust mitigates but doesn't eliminate the risk of buggy refiners.
 
 ### 6.4.3 IntentOnce Structure
 
@@ -518,14 +518,14 @@ async function consumeIntent<T>(
 
 ### 6.5.2 Commit-Coupled Consumption
 
-For external side effects, the system cannot make the effect part of an internal transaction. CFC therefore couples consumption to a **policy-defined commit condition** (see Section 7.5):
+For external side effects, the system cannot make the effect part of an internal transaction. CFC therefore couples consumption to a **policy-defined commit condition** (see [§7.5](./07-write-actions.md#75-commit-points)):
 
 1. Attempt the side effect using bindings from `IntentOnce` (audience, endpoint, payload digest, idempotency key).
 2. If the effect is considered **committed**, atomically claim the consumed cell (`intentConsumed`).
 3. If the consumed cell was already claimed, treat the result as **deduplicated success** (the system recorded that the intent was already committed).
 4. On non-commit outcomes (network error, non-2xx, schema invalid, timeout), do **not** consume; retries remain possible until `exp` and `maxAttempts`.
 
-This is the “no-consume-on-failure” model (Section 7.5.1) and matches the Gmail forward example (Section 1.4.6).
+This is the “no-consume-on-failure” model ([§7.5.1](./07-write-actions.md#751-retry-semantics)) and matches the Gmail forward example ([§1.4.6](./01-gmail-example.md#146-fetch-as-commit-point-with-retries)).
 
 ### 6.5.3 Bounded Retries via Attempt Cells
 

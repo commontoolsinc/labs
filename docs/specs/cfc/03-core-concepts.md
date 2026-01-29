@@ -95,7 +95,7 @@ function canAccess(principal: Principal, label: Clause[]): boolean {
 }
 ```
 
-See Section 4.4.5 for a concrete definition of `Principal` and `principal.satisfies(...)` (including special handling for `Expires`).
+See [§4.4.5](./04-label-representation.md#445-exchange-rule-evaluation) for a concrete definition of `Principal` and `principal.satisfies(...)` (including special handling for `Expires`).
 
 ### 3.1.5 Dead Alternatives
 
@@ -201,9 +201,9 @@ The distinction matters for understanding how integrity is minted:
 
 Integrity facts are minted only by trusted code and are non-malleable.
 
-**Policy certification integrity**: A special class of integrity atom attests that data was produced under a specific policy regime being enforced. For example, `PolicyCertified(ApprovedModels)` indicates the output was computed while a policy restricting ML model usage was in effect. See Section 5.5 for details.
+**Policy certification integrity**: A special class of integrity atom attests that data was produced under a specific policy regime being enforced. For example, `PolicyCertified(ApprovedModels)` indicates the output was computed while a policy restricting ML model usage was in effect. See [§5.5](./05-policy-architecture.md#55-policy-certification-integrity) for details.
 
-**Write authorization (modifications)**: Modifying stored state is authorized by a field-level **write-authority set** derived from handlers that declare `writes: true`. This is an access-control capability (“who may write”), not value integrity (“what may be believed”). See Section 8.15 for the full model.
+**Write authorization (modifications)**: Modifying stored state is authorized by a field-level **write-authority set** derived from handlers that declare `writes: true`. This is an access-control capability (“who may write”), not value integrity (“what may be believed”). See [§8.15](./08-label-transitions.md#815-modification-authorization-write-authority) for the full model.
 
 ---
 
@@ -265,7 +265,7 @@ Each piece of stored data belongs to exactly one space. The space is represented
 
 Data inherits its space from the context in which it is created.
 
-**Note on examples**: Many examples write `User(Alice)` to mean “visible only to Alice.” In a concrete runtime, this is equivalent to placing the data in `PersonalSpace(Alice)` (Section 3.6.4). Spaces are the general mechanism; `User(·)` is often used as a shorthand in narrative examples.
+**Note on examples**: Many examples write `User(Alice)` to mean “visible only to Alice.” In a concrete runtime, this is equivalent to placing the data in `PersonalSpace(Alice)` ([§3.6.4](#364-personal-spaces)). Spaces are the general mechanism; `User(·)` is often used as a shorthand in narrative examples.
 
 ### 3.6.2 Role Membership
 
@@ -377,7 +377,7 @@ This system supports minting high-integrity user intent events from UI interacti
 
 Label summaries are policy-defined projections sufficient for later justification (e.g., include confidentiality atoms and selected integrity atoms, but not raw secret values).
 
-Note: Snapshot digests alone could theoretically fingerprint displayed content, but each event carries its own random `nonce` (see 3.8.2), so event identity is not predictable from content.
+Note: Snapshot digests alone could theoretically fingerprint displayed content, but each event carries its own random `nonce` (see [§3.8.2](#382-gesture-events)), so event identity is not predictable from content.
 
 ### 3.8.2 Gesture Events
 
@@ -639,7 +639,7 @@ interface MultiPartyConsentIntent {
 
 #### 3.9.2.1 How Consent Is Minted
 
-Consent uses the same UI event mechanism as other intents (Section 3.8):
+Consent uses the same UI event mechanism as other intents ([§3.8](#38-ui-backed-integrity-and-gesture-provenance)):
 
 1. **UI Display**: The participant views a consent UI showing what data will be shared, with whom, for what purpose, and what constraints apply
 2. **UI Event**: The participant clicks "Allow" or equivalent, generating a `UIEvent` with `snapshotDigest` binding to the displayed consent details

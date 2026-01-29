@@ -531,8 +531,8 @@ This keeps the trust assumption explicit: if the system does not trust Gmail as 
 
 Policies commonly require provenance integrity as a guard for confidentiality exchange:
 
-- **Authority-only token untainting**: only drop/relax authority-only secrecy when the endorsed request and network provenance facts are present (Section 5.3).
-- **Error declassification**: only declassify structured error fields when `AuthorizedRequest` and `NetworkProvenance` prove the error is from the expected destination (Section 5.4).
+- **Authority-only token untainting**: only drop/relax authority-only secrecy when the endorsed request and network provenance facts are present ([§5.3](#53-confidentiality-exchange)).
+- **Error declassification**: only declassify structured error fields when `AuthorizedRequest` and `NetworkProvenance` prove the error is from the expected destination ([§5.4](#54-error-response-handling)).
 - **Safe derived facts**: only mint derived integrity (e.g., extracted attributes) when upstream provenance integrity is present.
 
 ### 5.6.5 Non-Goals

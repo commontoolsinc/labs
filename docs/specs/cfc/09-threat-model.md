@@ -76,7 +76,7 @@ Browser extensions operate with elevated privileges and can:
 
 ## 9.4 Trust Assumptions
 
-1. **Browser is trusted**: The browser correctly isolates JavaScript contexts (but see 9.3.2 regarding extensions)
+1. **Browser is trusted**: The browser correctly isolates JavaScript contexts (but see [§9.3.2](#932-out-of-scope) regarding extensions)
 2. **TLS is secure**: Network encryption prevents tampering
 3. **Code hashes are collision-resistant**: SHA-256 or equivalent
 4. **UI runtime is attested**: The UI runtime is part of the TCB, verified via attestation, and correctly produces snapshot digests that accurately represent rendered state
@@ -85,7 +85,7 @@ Browser extensions operate with elevated privileges and can:
 
 ## 9.5 Limitations
 
-See Section 10 (Safety Invariants) for:
+See [§10](./10-safety-invariants.md#10-safety-invariants) (Safety Invariants) for:
 - Overlapping declassifiers (recombination attacks)
 - Termination sensitivity edge cases
 - Multi-step contamination scoping (open problem)

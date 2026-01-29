@@ -392,7 +392,7 @@ Implementations SHOULD try methods in this order:
 
 **Step A — Gmail provenance integrity**
 
-From Section 5.6, the runtime has minted:
+From [§5.6](./05-policy-architecture.md#56-provenance-integrity-fetched-data), the runtime has minted:
 
 - `AuthoredBy{ messageId=m, sender=did:mailto:hotel@example.com, provider=Gmail, ... }`
 - and (when trusted): `I_sender_authored(did:mailto:hotel@example.com)`.

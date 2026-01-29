@@ -162,7 +162,7 @@ interface Label {
 }
 ```
 
-**CNF structure for confidentiality** (see Section 3.1.1):
+**CNF structure for confidentiality** (see [§3.1.1](./03-core-concepts.md#311-confidentiality-cnf-structure)):
 - Each clause represents a requirement that must be satisfied
 - A clause with multiple atoms (array) represents alternatives (OR)
 - All clauses must be satisfied (AND)
@@ -717,7 +717,7 @@ Labels with old hashes continue to use the old policy until explicitly migrated.
 
 ### 4.4.5 Exchange Rule Evaluation
 
-Exchange rules typically **add alternatives** to existing clauses rather than replacing them. This creates the disjunctive structure in CNF labels (see Section 3.1.3).
+Exchange rules typically **add alternatives** to existing clauses rather than replacing them. This creates the disjunctive structure in CNF labels (see [§3.1.3](./03-core-concepts.md#313-exchange-rules-add-alternatives)).
 
 Some policies also use exchange rules to **remove** a confidentiality requirement (e.g., dropping an `Expires(...)` clause on derived, policy-approved metadata). In this spec, that is represented by an exchange rule whose instantiated `postCondition.confidentiality` is empty when applied to the target clause.
 
@@ -1273,7 +1273,7 @@ High-precision location
 
 Both modules implement the same concept (`location-rounding`), so both are valid declassification paths. A user might trust different verifiers for each, allowing either path.
 
-**Note**: This creates a potential information leakage problem when outputs from multiple declassification paths are recombined (see Section 10, Open Problems).
+**Note**: This creates a potential information leakage problem when outputs from multiple declassification paths are recombined (see [§10](./10-safety-invariants.md#10-safety-invariants), Open Problems).
 
 ### 4.8.6 Ecosystem Coordination
 
