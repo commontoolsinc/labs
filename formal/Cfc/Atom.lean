@@ -26,6 +26,17 @@ inductive Atom where
   | multiPartyConsent (participant : String) (participants : List String)
   | integrityTok (name : String)
   /-
+  Capability principals (spec 13.2 "Capability").
+
+  These are confidentiality principals that represent *where* data may flow.
+  The most important example is network egress:
+  an output labeled with `capability "network" "gmail.googleapis.com"` is intended to be
+  sendable only to that host (subject to policy exchange rules at the trusted boundary).
+
+  We keep the structure intentionally small: just a `kind` string and a `resource` string.
+  -/
+  | capability (kind : String) (resource : String)
+  /-
   Transformation provenance (spec 8.7 and the default case in 8.9.2).
 
   When a handler *computes* a new value from inputs (as opposed to passing through a reference or

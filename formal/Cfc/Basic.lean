@@ -16,6 +16,8 @@ import Cfc.Contamination
 import Cfc.Store
 import Cfc.Opaque
 import Cfc.WriteAuthority
+import Cfc.Policy
+import Cfc.Egress
 import Cfc.LabelTransitions
 import Cfc.Access
 import Cfc.Link
@@ -44,4 +46,6 @@ import Cfc.Proofs.Opaque
 import Cfc.Proofs.WriteAuthority
 import Cfc.Proofs.Collection
 import Cfc.Proofs.Contamination
+import Cfc.Proofs.Policy
+import Cfc.Proofs.Egress
 import Cfc.Proofs.LabelTransitionExamples
