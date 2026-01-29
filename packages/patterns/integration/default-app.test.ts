@@ -83,8 +83,8 @@ async function clickButtonWithText(
         return true;
       }
     }
-    // Also check x-piece-link elements
-    const links = await page.$$("x-piece-link", { strategy: "pierce" });
+    // Also check x-charm-link elements (custom element name not renamed)
+    const links = await page.$$("x-charm-link", { strategy: "pierce" });
     for (const link of links) {
       const text = await link.innerText();
       if (text?.trim().includes(searchText)) {
