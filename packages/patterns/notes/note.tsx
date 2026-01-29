@@ -205,7 +205,7 @@ const createNewNote = handler<
 
   // Add to parent notebook using Cell.key() pattern
   if (notebook) {
-    const charmsList = allPieces.get();
+    const piecesList = allPieces.get();
     const nbName = notebook?.[NAME];
     const nbIndex = piecesList.findIndex((c: any) => c?.[NAME] === nbName);
     if (nbIndex >= 0) {
