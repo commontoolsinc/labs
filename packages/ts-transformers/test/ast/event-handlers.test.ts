@@ -31,11 +31,20 @@ interface PromiseLike<T> {
 
 // Custom component with typed callback prop
 interface CustomButtonProps {
+  // Handlers (0-2 params, void/boolean/Promise<void|boolean> return)
   callback: () => void;
   asyncCallback: () => Promise<void>;
+  toggle: () => boolean;                          // boolean return = handler
+  asyncToggle: () => Promise<boolean>;            // Promise<boolean> = handler
+  eventHandler: (event: MouseEvent) => void;      // 1 param = handler
+  contextHandler: (event: MouseEvent, ctx: any) => void; // 2 params = handler
+
+  // Non-handlers (data transformers)
   label: string;
-  mapper: (item: number) => string; // Non-handler: returns value
-  predicate: (item: number) => boolean; // Non-handler: returns value
+  mapper: (item: number) => string;               // returns data
+  renderItem: (item: number) => any;              // returns renderable
+  reducer: (acc: number, item: number, index: number) => number; // 3 params
+  complexTransform: (a: number, b: string, c: boolean) => void;  // 3 params, even void
 }
 declare function CustomButton(props: CustomButtonProps): JSX.Element;
 
@@ -125,7 +134,7 @@ function findJsxAttribute(
 
 Deno.test("isEventHandlerType - void return type is handler", () => {
   const { checker, sourceFile } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} label="test" mapper={(n) => String(n)} predicate={(n) => n > 0} />`,
+    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} contextHandler={(e, ctx) => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} reducer={(acc, item, idx) => acc + item} complexTransform={(a, b, c) => {}} />`,
   );
 
   const callbackAttr = findJsxAttribute(sourceFile, "callback");
@@ -151,7 +160,7 @@ Deno.test("isEventHandlerType - void return type is handler", () => {
 
 Deno.test("isEventHandlerType - Promise<void> return type is handler", () => {
   const { checker, sourceFile } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} label="test" mapper={(n) => String(n)} predicate={(n) => n > 0} />`,
+    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} contextHandler={(e, ctx) => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} reducer={(acc, item, idx) => acc + item} complexTransform={(a, b, c) => {}} />`,
   );
 
   const asyncCallbackAttr = findJsxAttribute(sourceFile, "asyncCallback");
@@ -178,7 +187,7 @@ Deno.test("isEventHandlerType - Promise<void> return type is handler", () => {
 
 Deno.test("isEventHandlerType - non-void return type is NOT handler", () => {
   const { checker, sourceFile } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} label="test" mapper={(n) => String(n)} predicate={(n) => n > 0} />`,
+    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} contextHandler={(e, ctx) => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} reducer={(acc, item, idx) => acc + item} complexTransform={(a, b, c) => {}} />`,
   );
 
   const mapperAttr = findJsxAttribute(sourceFile, "mapper");
@@ -200,30 +209,111 @@ Deno.test("isEventHandlerType - non-void return type is NOT handler", () => {
   );
 });
 
-Deno.test("isEventHandlerType - boolean return type is NOT handler", () => {
+Deno.test("isEventHandlerType - boolean return type IS handler (0 params)", () => {
   const { checker, sourceFile } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} label="test" mapper={(n) => String(n)} predicate={(n) => n > 0} />`,
+    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} contextHandler={(e, ctx) => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} reducer={(acc, item, idx) => acc + item} complexTransform={(a, b, c) => {}} />`,
   );
 
-  const predicateAttr = findJsxAttribute(sourceFile, "predicate");
+  const toggleAttr = findJsxAttribute(sourceFile, "toggle");
   if (
-    !predicateAttr?.initializer ||
-    !ts.isJsxExpression(predicateAttr.initializer)
+    !toggleAttr?.initializer ||
+    !ts.isJsxExpression(toggleAttr.initializer)
   ) {
-    throw new Error("predicate attribute not found");
+    throw new Error("toggle attribute not found");
   }
 
-  const expr = predicateAttr.initializer.expression!;
+  const expr = toggleAttr.initializer.expression!;
   const contextualType = checker.getContextualType(expr);
 
   if (!contextualType) {
-    throw new Error("No contextual type for predicate");
+    throw new Error("No contextual type for toggle");
+  }
+
+  assertEquals(
+    isEventHandlerType(contextualType, checker),
+    true,
+    "() => boolean should be detected as handler type",
+  );
+});
+
+Deno.test("isEventHandlerType - Promise<boolean> return type IS handler", () => {
+  const { checker, sourceFile } = createJsxTestProgram(
+    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} contextHandler={(e, ctx) => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} reducer={(acc, item, idx) => acc + item} complexTransform={(a, b, c) => {}} />`,
+  );
+
+  const asyncToggleAttr = findJsxAttribute(sourceFile, "asyncToggle");
+  if (
+    !asyncToggleAttr?.initializer ||
+    !ts.isJsxExpression(asyncToggleAttr.initializer)
+  ) {
+    throw new Error("asyncToggle attribute not found");
+  }
+
+  const expr = asyncToggleAttr.initializer.expression!;
+  const contextualType = checker.getContextualType(expr);
+
+  if (!contextualType) {
+    throw new Error("No contextual type for asyncToggle");
+  }
+
+  assertEquals(
+    isEventHandlerType(contextualType, checker),
+    true,
+    "() => Promise<boolean> should be detected as handler type",
+  );
+});
+
+Deno.test("isEventHandlerType - 3+ params is NOT handler even with void return", () => {
+  const { checker, sourceFile } = createJsxTestProgram(
+    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} contextHandler={(e, ctx) => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} reducer={(acc, item, idx) => acc + item} complexTransform={(a, b, c) => {}} />`,
+  );
+
+  const complexTransformAttr = findJsxAttribute(sourceFile, "complexTransform");
+  if (
+    !complexTransformAttr?.initializer ||
+    !ts.isJsxExpression(complexTransformAttr.initializer)
+  ) {
+    throw new Error("complexTransform attribute not found");
+  }
+
+  const expr = complexTransformAttr.initializer.expression!;
+  const contextualType = checker.getContextualType(expr);
+
+  if (!contextualType) {
+    throw new Error("No contextual type for complexTransform");
   }
 
   assertEquals(
     isEventHandlerType(contextualType, checker),
     false,
-    "(n: number) => boolean should NOT be detected as handler type",
+    "(a, b, c) => void should NOT be detected as handler (too many params)",
+  );
+});
+
+Deno.test("isEventHandlerType - 2 params IS handler", () => {
+  const { checker, sourceFile } = createJsxTestProgram(
+    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} contextHandler={(e, ctx) => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} reducer={(acc, item, idx) => acc + item} complexTransform={(a, b, c) => {}} />`,
+  );
+
+  const contextHandlerAttr = findJsxAttribute(sourceFile, "contextHandler");
+  if (
+    !contextHandlerAttr?.initializer ||
+    !ts.isJsxExpression(contextHandlerAttr.initializer)
+  ) {
+    throw new Error("contextHandler attribute not found");
+  }
+
+  const expr = contextHandlerAttr.initializer.expression!;
+  const contextualType = checker.getContextualType(expr);
+
+  if (!contextualType) {
+    throw new Error("No contextual type for contextHandler");
+  }
+
+  assertEquals(
+    isEventHandlerType(contextualType, checker),
+    true,
+    "(event, ctx) => void should be detected as handler (2 params is ok)",
   );
 });
 
@@ -288,7 +378,7 @@ Deno.test("isEventHandlerJsxAttribute - non-on attribute not detected (without c
 
 Deno.test("isEventHandlerJsxAttribute - callback detected by type (with checker)", () => {
   const { sourceFile, checker } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} label="test" mapper={(n) => String(n)} predicate={(n) => n > 0} />`,
+    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} contextHandler={(e, ctx) => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} reducer={(acc, item, idx) => acc + item} complexTransform={(a, b, c) => {}} />`,
   );
 
   const callbackAttr = findJsxAttribute(sourceFile, "callback");
@@ -305,7 +395,7 @@ Deno.test("isEventHandlerJsxAttribute - callback detected by type (with checker)
 
 Deno.test("isEventHandlerJsxAttribute - asyncCallback detected by type (with checker)", () => {
   const { sourceFile, checker } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} label="test" mapper={(n) => String(n)} predicate={(n) => n > 0} />`,
+    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} contextHandler={(e, ctx) => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} reducer={(acc, item, idx) => acc + item} complexTransform={(a, b, c) => {}} />`,
   );
 
   const asyncCallbackAttr = findJsxAttribute(sourceFile, "asyncCallback");
@@ -322,7 +412,7 @@ Deno.test("isEventHandlerJsxAttribute - asyncCallback detected by type (with che
 
 Deno.test("isEventHandlerJsxAttribute - mapper NOT detected as handler (with checker)", () => {
   const { sourceFile, checker } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} label="test" mapper={(n) => String(n)} predicate={(n) => n > 0} />`,
+    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} contextHandler={(e, ctx) => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} reducer={(acc, item, idx) => acc + item} complexTransform={(a, b, c) => {}} />`,
   );
 
   const mapperAttr = findJsxAttribute(sourceFile, "mapper");
@@ -339,7 +429,7 @@ Deno.test("isEventHandlerJsxAttribute - mapper NOT detected as handler (with che
 
 Deno.test("isEventHandlerJsxAttribute - label (string prop) NOT detected as handler", () => {
   const { sourceFile, checker } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} label="test" mapper={(n) => String(n)} predicate={(n) => n > 0} />`,
+    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} contextHandler={(e, ctx) => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} reducer={(acc, item, idx) => acc + item} complexTransform={(a, b, c) => {}} />`,
   );
 
   const labelAttr = findJsxAttribute(sourceFile, "label");

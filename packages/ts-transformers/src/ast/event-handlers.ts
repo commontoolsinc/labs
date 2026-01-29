@@ -11,23 +11,31 @@ export function isSafeEventHandlerCall(node: ts.CallExpression): boolean {
   return false;
 }
 
+/** Maximum number of parameters for a function to be considered a handler */
+const MAX_HANDLER_PARAMS = 2;
+
 /**
- * Check if a type is void-like (void, undefined, or Promise<void>)
+ * Check if a return type is consistent with an event handler.
+ * Handlers typically return void/undefined, boolean (for "handled" signaling),
+ * or Promise versions of these for async handlers.
  */
-function isVoidLike(type: ts.Type, checker: ts.TypeChecker): boolean {
-  // Direct void or undefined
+function isHandlerReturnType(type: ts.Type, checker: ts.TypeChecker): boolean {
+  // void or undefined - classic handler return
   if (type.flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined)) {
     return true;
   }
 
-  // Promise<void> - check if it's a Promise with void type argument
+  // boolean - often used for "handled" or "preventDefault" signaling
+  if (type.flags & ts.TypeFlags.BooleanLike) {
+    return true;
+  }
+
+  // Promise<void|boolean> - async handlers
   const symbol = type.getSymbol();
   if (symbol?.name === "Promise") {
     const typeArgs = checker.getTypeArguments(type as ts.TypeReference);
-    if (
-      typeArgs.length > 0 && typeArgs[0] && isVoidLike(typeArgs[0], checker)
-    ) {
-      return true;
+    if (typeArgs.length > 0 && typeArgs[0]) {
+      return isHandlerReturnType(typeArgs[0], checker);
     }
   }
 
@@ -36,9 +44,18 @@ function isVoidLike(type: ts.Type, checker: ts.TypeChecker): boolean {
 
 /**
  * Check if a function type represents an event handler signature.
- * An event handler is a function that:
- * - Has at least one call signature
- * - Returns void (or void-compatible: undefined, Promise<void>)
+ *
+ * Heuristic: A handler is a function with 0-2 parameters that returns
+ * void, undefined, boolean, or Promise<void|boolean>.
+ *
+ * This distinguishes handlers (which notify about events) from data
+ * transformers (which return values the component uses, like renderItem,
+ * keyExtractor, formatter).
+ *
+ * Known limitations:
+ * - May incorrectly identify predicates like `filter: (item) => boolean`
+ *   as handlers (false positive)
+ * - May miss handlers with 3+ parameters (false negative, rare in practice)
  */
 export function isEventHandlerType(
   type: ts.Type,
@@ -49,10 +66,15 @@ export function isEventHandlerType(
     return false;
   }
 
-  // Check if any signature returns void or void-compatible
   for (const sig of callSignatures) {
+    const params = sig.getParameters();
     const returnType = checker.getReturnTypeOfSignature(sig);
-    if (isVoidLike(returnType, checker)) {
+
+    // Handler heuristic: limited params + handler-compatible return type
+    if (
+      params.length <= MAX_HANDLER_PARAMS &&
+      isHandlerReturnType(returnType, checker)
+    ) {
       return true;
     }
   }
