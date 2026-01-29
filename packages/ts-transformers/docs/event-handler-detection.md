@@ -32,6 +32,8 @@ handlers themselves never need more than 1 parameter.
 - `void`/`undefined`: Classic handler, no return value needed
 - `boolean`: Common for "handled" signaling (prevent default, stop propagation)
 - `Promise<...>`: Async versions of the above
+- Union types: `void | boolean` is allowed (all constituents must be
+  handler-compatible)
 
 ### What Gets Excluded
 
@@ -62,7 +64,8 @@ These are rare as JSX props but could cause unnecessary wrapping if encountered.
 
 ### Edge Cases
 
-- Union types with mixed signatures: Uses first matching signature
+- Union return types: `void | boolean` = handler, `void | string` = NOT handler
+  (all constituents must be handler-compatible)
 - Overloaded functions: Any signature matching = handler
 - Generic handlers: Works if contextual type resolves
 
@@ -85,6 +88,7 @@ These are rare as JSX props but could cause unnecessary wrapping if encountered.
 See `test/ast/event-handlers.test.ts` for test cases covering:
 
 - Void, boolean, Promise<void>, Promise<boolean> returns
+- Union return types (void | boolean, void | string)
 - 0, 1, 2, and 3 parameter functions
 - Name-based vs type-based detection
 - Non-function props
