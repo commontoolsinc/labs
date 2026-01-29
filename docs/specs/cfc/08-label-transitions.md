@@ -4,6 +4,8 @@ Labels propagate through computations at runtime. The transition rules depend on
 
 ## 8.1 Overview
 
+> **Note on code blocks:** TypeScript code blocks in this chapter are *illustrative pseudocode*, not normative. They show one way to implement the described semantics; conforming implementations may use any approach that satisfies the stated properties.
+
 When a computation (handler, action, or transformation) executes, labels must transition from inputs to outputs. The transition depends on how data flows:
 
 | Flow Type | Confidentiality | Integrity |

@@ -70,6 +70,9 @@ has `DecidableEq`).
 
 Note: this intersection is not symmetric at the list level (it preserves the order from `I₁`),
 but it is symmetric as a set-of-atoms, which is what we care about in most proofs.
+
+Runtime note: if using this as executable code, implementations should dedup/canonicalize
+the result to avoid growing lists across repeated joins.
 -/
 def joinIntegrity (I₁ I₂ : IntegLabel) : IntegLabel :=
   I₁.filter (fun a => decide (a ∈ I₂))

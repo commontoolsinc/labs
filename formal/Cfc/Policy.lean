@@ -244,13 +244,9 @@ def isPolicyPrincipal : Atom → Bool
   | .policy _ _ _ => true
   | _ => false
 
-/-!
-`Std` in this repo's Lean toolchain does not provide some common list utilities
-(`List.join`, `List.get?`, `List.enum`, `List.bind`).
-
-So we define the tiny helpers we need locally, in a way that stays executable and easy to reason
-about.
--/
+-- TODO: Lean 4.26 provides `List.flatten` and `List.get?` in core.
+-- Replace these custom definitions with the stdlib versions once we confirm they work with
+-- our Std import configuration. For now, keep them to avoid breakage.
 
 def flatten (xss : List (List α)) : List α :=
   xss.foldl (fun acc xs => acc ++ xs) []
@@ -260,6 +256,8 @@ def get? : Nat → List α → Option α
   | 0, x :: _ => some x
   | n + 1, _ :: xs => get? n xs
 
+/-- Remove duplicates (preserving first occurrence). O(n²) via linear scans, which is acceptable
+because policy principal lists are small (typically < 10 items). -/
 def dedup [DecidableEq α] (xs : List α) : List α :=
   let rec go (seen : List α) : List α → List α
     | [] => []
@@ -361,7 +359,7 @@ This standard "delete from the back" trick ensures that earlier indices remain v
 Add-rules do not remove clauses/alternatives, so they do not need this treatment.
 -/
 
-def matchBeforeForDrop (m₁ m₂ : RuleMatch) : Bool :=
+def shouldApplyBefore (m₁ m₂ : RuleMatch) : Bool :=
   if m₁.clauseIndex = m₂.clauseIndex then
     decide (m₁.altIndex > m₂.altIndex)
   else
@@ -370,7 +368,7 @@ def matchBeforeForDrop (m₁ m₂ : RuleMatch) : Bool :=
 def insertSortedForDrop (m : RuleMatch) : List RuleMatch → List RuleMatch
   | [] => [m]
   | x :: xs =>
-      if matchBeforeForDrop m x then
+      if shouldApplyBefore m x then
         m :: x :: xs
       else
         x :: insertSortedForDrop m xs
@@ -450,6 +448,14 @@ We also provide the key semantic property:
 Later files can add stronger theorems that the chosen fuel bound is sufficient for a given policy set.
 -/
 
+/--
+Evaluate one pass of all in-scope policy rules against the label.
+
+Matches are computed once per rule (against the *current* label at that point), then applied
+sequentially. This is best-effort: a match may become stale if an earlier application in the
+same rule modified the label. Stale matches are caught by the `targetAtom` guard in `applyRule`
+and become no-ops, so correctness is preserved.
+-/
 def evalOnce (policies : List PolicyRecord) (boundaryIntegrity : IntegLabel) (ℓ : Label) : Label :=
   let pols := policiesInScope policies ℓ.conf
   -- Apply all rules, and within a rule apply all matches, sequentially.
