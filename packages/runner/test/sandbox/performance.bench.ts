@@ -8,7 +8,6 @@ import {
   classifyFrame,
   classifyStack,
   createErrorMapper,
-  createResolveHook,
   filterFrames,
   mapError,
 } from "../../src/sandbox/mod.ts";
@@ -70,16 +69,4 @@ Deno.bench("wrapExecution - setup cost", () => {
     functionName: "noop",
   });
   wrapped();
-});
-
-// --- Resolve Hook Benchmarks ---
-
-const resolveHook = createResolveHook();
-
-Deno.bench("resolveHook - esm.sh URL", () => {
-  resolveHook("https://esm.sh/zod@3.0.0", "");
-});
-
-Deno.bench("resolveHook - bare specifier", () => {
-  resolveHook("lodash", "");
 });

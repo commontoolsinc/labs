@@ -9,56 +9,12 @@
  * - eval/Function constructor abuse
  */
 
-import { assertEquals, assertThrows } from "@std/assert";
-import {
-  createResolveHook,
-  SandboxSecurityError,
-} from "../../src/sandbox/mod.ts";
+import { assertEquals } from "@std/assert";
+import { SandboxSecurityError } from "../../src/sandbox/mod.ts";
 import {
   PatternExecutionError,
   wrapExecution,
 } from "../../src/sandbox/execution-wrapper.ts";
-
-Deno.test("Security: resolve hook blocks dangerous imports", async (t) => {
-  const resolve = createResolveHook({ patternId: "test-pattern" });
-
-  await t.step("blocks file: protocol", () => {
-    assertThrows(
-      () => resolve("file:///etc/passwd", ""),
-      SandboxSecurityError,
-    );
-  });
-
-  await t.step("blocks data: protocol", () => {
-    assertThrows(
-      () => resolve("data:text/javascript,alert(1)", ""),
-      SandboxSecurityError,
-    );
-  });
-
-  await t.step("blocks relative imports", () => {
-    assertThrows(
-      () => resolve("./steal-data", ""),
-      SandboxSecurityError,
-    );
-    assertThrows(
-      () => resolve("../escape-sandbox", ""),
-      SandboxSecurityError,
-    );
-  });
-
-  await t.step("blocks non-allowed HTTPS hosts", () => {
-    assertThrows(
-      () => resolve("https://malicious-site.com/exploit.js", ""),
-      SandboxSecurityError,
-    );
-  });
-
-  await t.step("allows esm.sh imports", () => {
-    const result = resolve("https://esm.sh/zod@3.0.0", "");
-    assertEquals(result.startsWith("https://esm.sh/zod@3.0.0"), true);
-  });
-});
 
 Deno.test("Security: execution wrapper catches errors", async (t) => {
   await t.step("wraps thrown errors with context", () => {
@@ -140,19 +96,5 @@ Deno.test("Security: SandboxSecurityError properties", async (t) => {
     assertEquals(error.message, "forbidden");
     assertEquals(error.patternId, undefined);
     assertEquals(error.attemptedOperation, undefined);
-  });
-});
-
-Deno.test("Security: resolve hook isolation", async (t) => {
-  await t.step("generates unique suffixes per resolution", () => {
-    const resolve = createResolveHook();
-    const urls = new Set<string>();
-
-    for (let i = 0; i < 10; i++) {
-      urls.add(resolve("https://esm.sh/zod", ""));
-    }
-
-    // All resolved URLs should be unique
-    assertEquals(urls.size, 10);
   });
 });

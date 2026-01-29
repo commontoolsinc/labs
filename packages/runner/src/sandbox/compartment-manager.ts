@@ -10,17 +10,8 @@
  * - Unauthorized access to runtime internals
  */
 
-import type {
-  FrozenExport,
-  LockdownOptions,
-  PatternCompartment,
-  PatternCompartmentConfig,
-  SandboxConfig,
-} from "./types.ts";
-import {
-  CompartmentInitializationError,
-  SandboxSecurityError,
-} from "./types.ts";
+import type { LockdownOptions, SandboxConfig } from "./types.ts";
+import { SandboxSecurityError } from "./types.ts";
 import { getDefaultLockdownOptions, resolveSandboxConfig } from "./config.ts";
 import { createRuntimeGlobals } from "./runtime-globals.ts";
 import { createSilentConsole } from "./sandboxed-console.ts";
@@ -41,35 +32,21 @@ interface CompartmentInstance {
 }
 
 /**
- * CompartmentManager manages SES compartments for secure pattern execution.
+ * CompartmentManager manages SES lockdown and provides sandboxed evaluation.
  *
  * Key features:
- * - Lazy lockdown: SES lockdown is applied on first compartment creation
- * - Compartment reuse: Patterns are cached to avoid repeated parsing
- * - Frozen exports: All exports are deeply frozen (hardened)
- * - Sandboxed globals: Patterns only have access to allowed APIs
+ * - Lazy lockdown: SES lockdown is applied on first use
+ * - Sandboxed globals: Evaluated code only has access to allowed APIs
  *
  * @example
  * ```typescript
  * const manager = new CompartmentManager({ enabled: true });
- *
- * // Load a pattern
- * const compartment = manager.loadPattern({
- *   patternId: "my-pattern",
- *   source: "export const MyPattern = pattern<...>(...);",
- * });
- *
- * // Get a frozen export
- * const myPattern = manager.getExport("my-pattern", "MyPattern");
- *
- * // Evaluate arbitrary code (fresh compartment each time)
- * const result = manager.evaluateString("(() => 42)()");
+ * manager.initialize();
+ * const result = manager.evaluateStringSync("(() => 42)()");
  * ```
  */
 export class CompartmentManager {
   private static lockdownApplied = false;
-  private static lockdownPromise: Promise<void> | undefined;
-  private readonly patternCompartments = new Map<string, PatternCompartment>();
   private readonly config: SandboxConfig;
 
   constructor(config?: Partial<SandboxConfig>) {
@@ -168,141 +145,6 @@ export class CompartmentManager {
   }
 
   /**
-   * Load a pattern into a compartment.
-   *
-   * @param config - Pattern configuration including source code
-   * @returns The pattern compartment with frozen exports
-   */
-  loadPattern(
-    config: PatternCompartmentConfig,
-  ): PatternCompartment {
-    if (!this.config.enabled) {
-      throw new SandboxSecurityError(
-        "SES sandboxing is disabled. Enable it with sesEnabled: true in RuntimeOptions",
-      );
-    }
-
-    // Check cache first
-    const cached = this.patternCompartments.get(config.patternId);
-    if (cached) {
-      return cached;
-    }
-
-    // Ensure lockdown is applied
-    this.ensureLockdown();
-
-    try {
-      // Create runtime globals for this pattern
-      const globals = createRuntimeGlobals(
-        config.patternId,
-        this.config.console,
-      );
-
-      // Create the compartment
-      const compartment = new Compartment(
-        harden(globals),
-        {}, // No module map for now
-        {
-          name: config.patternId,
-          // Disable dynamic import for security
-          __noNamespaceBox__: true,
-        },
-      );
-
-      // Wrap the source to capture exports
-      const wrappedSource = this.wrapSourceForExports(config.source);
-
-      // Evaluate the pattern source
-      const exports = compartment.evaluate(wrappedSource) as Record<
-        string,
-        unknown
-      >;
-
-      // Build frozen exports map
-      const frozenExports = new Map<string, FrozenExport>();
-
-      for (const [name, value] of Object.entries(exports)) {
-        if (typeof value === "function" || typeof value === "object") {
-          // Harden (deeply freeze) the export
-          const frozen = harden(value);
-
-          frozenExports.set(name, {
-            name,
-            implementation: frozen,
-            patternId: config.patternId,
-          });
-        }
-      }
-
-      // Create and cache the pattern compartment
-      const patternCompartment: PatternCompartment = {
-        patternId: config.patternId,
-        exports: frozenExports,
-        getExport: (name: string) => frozenExports.get(name),
-      };
-
-      this.patternCompartments.set(config.patternId, patternCompartment);
-
-      if (this.config.debug) {
-        console.log(
-          `[CompartmentManager] Loaded pattern "${config.patternId}" with ${frozenExports.size} exports`,
-        );
-      }
-
-      return patternCompartment;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new CompartmentInitializationError(
-        `Failed to load pattern: ${message}`,
-        config.patternId,
-        error instanceof Error ? error : undefined,
-      );
-    }
-  }
-
-  /**
-   * Get a frozen export from a loaded pattern.
-   *
-   * @param patternId - The pattern ID
-   * @param exportName - The export name
-   * @returns The frozen export, or undefined if not found
-   */
-  getExport(patternId: string, exportName: string): FrozenExport | undefined {
-    const compartment = this.patternCompartments.get(patternId);
-    return compartment?.getExport(exportName);
-  }
-
-  /**
-   * Check if a pattern is loaded.
-   *
-   * @param patternId - The pattern ID
-   * @returns True if the pattern is loaded
-   */
-  hasPattern(patternId: string): boolean {
-    return this.patternCompartments.has(patternId);
-  }
-
-  /**
-   * Evaluate a string of JavaScript code in a fresh compartment.
-   * Each call creates a new compartment for isolation.
-   *
-   * @param code - The JavaScript code to evaluate
-   * @returns The result of evaluation
-   */
-  evaluateString(code: string): unknown {
-    if (!this.config.enabled) {
-      throw new SandboxSecurityError(
-        "SES sandboxing is disabled. Enable it with sesEnabled: true in RuntimeOptions",
-      );
-    }
-
-    // Ensure lockdown is applied
-    this.ensureLockdown();
-
-    return this.evaluateStringSync(code);
-  }
-
-  /**
    * Synchronously evaluate a string of JavaScript code in a fresh compartment.
    * Requires lockdown to be already applied (call initialize() first).
    *
@@ -349,52 +191,6 @@ export class CompartmentManager {
       );
     }
   }
-
-  /**
-   * Wrap source code to capture exports.
-   * Transforms ES module exports into an object we can retrieve.
-   */
-  private wrapSourceForExports(source: string): string {
-    // Wrap source so we can capture its exports.
-    // The runtime's engine.ts exportsByValue mechanism already discovers
-    // exports by iterating Object.entries(exports) from the compiled module,
-    // so we don't need __exportName annotations. This wrapper just ensures
-    // the source executes in a contained scope.
-    return `
-      (function() {
-        ${source}
-      }).call({})
-    `;
-  }
-
-  /**
-   * Clear all cached compartments.
-   * Useful for testing or when reloading patterns.
-   */
-  clearCache(): void {
-    this.patternCompartments.clear();
-
-    if (this.config.debug) {
-      console.log("[CompartmentManager] Cache cleared");
-    }
-  }
-
-  /**
-   * Get statistics about the compartment manager.
-   */
-  getStats(): {
-    enabled: boolean;
-    lockdownApplied: boolean;
-    loadedPatterns: number;
-    patternIds: string[];
-  } {
-    return {
-      enabled: this.config.enabled,
-      lockdownApplied: CompartmentManager.lockdownApplied,
-      loadedPatterns: this.patternCompartments.size,
-      patternIds: Array.from(this.patternCompartments.keys()),
-    };
-  }
 }
 
 /**
@@ -419,6 +215,5 @@ export function getCompartmentManager(): CompartmentManager {
  * Useful for testing.
  */
 export function resetCompartmentManager(): void {
-  defaultManager?.clearCache();
   defaultManager = undefined;
 }
