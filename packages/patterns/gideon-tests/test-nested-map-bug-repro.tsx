@@ -1,14 +1,18 @@
 /// <cts-enable />
 /**
- * MINIMAL BUG REPRO: Nested map + ifElse + checkbox + delete
+ * CT-1158 BUG REPRO: Map truncation loses cell references when ifElse returns null
  *
- * BUG: Items disappear from CategoryList but remain in BasicList
+ * ROOT CAUSE: In map.ts, truncation uses .get().slice() which dereferences cell
+ * links. When ifElse returns null (falsy branch), the cell reference is lost and
+ * literal null is stored instead.
  *
- * REPRO STEPS (automated via "Run Repro" button):
- * 1. Start with items: Milk (Dairy), Bread (Bakery), Cheese (Dairy, checked)
- * 2. Check Milk's done state
- * 3. Remove Milk (index 0)
- * 4. OBSERVE: CategoryList loses all items, BasicList shows remaining items
+ * TEST CASES:
+ * 1. Basic List (simple map) - WORKS: No ifElse, no nulls
+ * 2. Category List (nested map + ifElse null) - FAILS: ifElse returns null
+ * 3. Single Map + ifElse null - FAILS: Proves nesting isn't required
+ * 4. Single Map + ifElse empty span - WORKS: Non-null falsy branch survives
+ *
+ * REPRO: Click "Run Repro Sequence" to check item[0] then remove it
  */
 import {
   Cell,
@@ -122,8 +126,9 @@ export default pattern<Input>(({ items, log }) => {
           </ct-button>
         </div>
 
+        {/* Row 1: Basic List vs Category List (original repro) */}
         <div style={{ display: "flex", gap: "20px", marginBottom: "20px" }}>
-          {/* Basic List - simple items.map */}
+          {/* Test 1: Basic List - simple items.map (WORKS) */}
           <div
             style={{
               flex: 1,
@@ -133,8 +138,11 @@ export default pattern<Input>(({ items, log }) => {
             }}
           >
             <h3 style={{ margin: "0 0 12px 0", color: "#2e7d32" }}>
-              Basic List (simple map)
+              1. Basic List (simple map)
             </h3>
+            <div style={{ fontSize: "11px", color: "#666", marginBottom: "8px" }}>
+              No ifElse → no nulls → WORKS
+            </div>
             {items.map((item, idx) => (
               <div style={{ margin: "4px 0" }}>
                 <ct-checkbox $checked={item.done}>
@@ -144,18 +152,21 @@ export default pattern<Input>(({ items, log }) => {
             ))}
           </div>
 
-          {/* Category List - nested map with ifElse */}
+          {/* Test 2: Category List - nested map with ifElse null (FAILS) */}
           <div
             style={{
               flex: 1,
               padding: "12px",
-              border: "2px solid #2196f3",
+              border: "2px solid #f44336",
               borderRadius: "8px",
             }}
           >
-            <h3 style={{ margin: "0 0 12px 0", color: "#1565c0" }}>
-              Category List (nested map + ifElse)
+            <h3 style={{ margin: "0 0 12px 0", color: "#c62828" }}>
+              2. Category List (nested map + ifElse null)
             </h3>
+            <div style={{ fontSize: "11px", color: "#666", marginBottom: "8px" }}>
+              ifElse returns null → cell ref lost → FAILS
+            </div>
             {categories.map((category) => (
               <div style={{ marginBottom: "8px" }}>
                 <strong>{category}:</strong>
@@ -174,6 +185,71 @@ export default pattern<Input>(({ items, log }) => {
                 )}
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* Row 2: Single map tests to prove nesting isn't required */}
+        <div style={{ display: "flex", gap: "20px", marginBottom: "20px" }}>
+          {/* Test 3: Single map + ifElse null (FAILS) - proves nesting not required */}
+          <div
+            style={{
+              flex: 1,
+              padding: "12px",
+              border: "2px solid #f44336",
+              borderRadius: "8px",
+            }}
+          >
+            <h3 style={{ margin: "0 0 12px 0", color: "#c62828" }}>
+              3. Single Map + ifElse null
+            </h3>
+            <div style={{ fontSize: "11px", color: "#666", marginBottom: "8px" }}>
+              Shows only done items. No nesting → still FAILS
+            </div>
+            {items.map((item, idx) =>
+              ifElse(
+                computed(() => item.done),
+                <div style={{ margin: "4px 0" }}>
+                  <ct-checkbox $checked={item.done}>
+                    [{idx}] {item.title} (done)
+                  </ct-checkbox>
+                </div>,
+                null,
+              )
+            )}
+            <div style={{ fontSize: "11px", color: "#999", marginTop: "8px" }}>
+              (Shows only checked items)
+            </div>
+          </div>
+
+          {/* Test 4: Single map + ifElse empty span (WORKS) - proves null is the issue */}
+          <div
+            style={{
+              flex: 1,
+              padding: "12px",
+              border: "2px solid #4caf50",
+              borderRadius: "8px",
+            }}
+          >
+            <h3 style={{ margin: "0 0 12px 0", color: "#2e7d32" }}>
+              4. Single Map + ifElse empty span
+            </h3>
+            <div style={{ fontSize: "11px", color: "#666", marginBottom: "8px" }}>
+              Non-null false branch → survives round-trip → WORKS
+            </div>
+            {items.map((item, idx) =>
+              ifElse(
+                computed(() => item.done),
+                <div style={{ margin: "4px 0" }}>
+                  <ct-checkbox $checked={item.done}>
+                    [{idx}] {item.title} (done)
+                  </ct-checkbox>
+                </div>,
+                <span style={{ display: "none" }} />,
+              )
+            )}
+            <div style={{ fontSize: "11px", color: "#999", marginTop: "8px" }}>
+              (Shows only checked items)
+            </div>
           </div>
         </div>
 
@@ -199,9 +275,13 @@ export default pattern<Input>(({ items, log }) => {
             borderRadius: "8px",
           }}
         >
-          <strong>Expected Bug:</strong>{" "}
-          After "Run Repro Sequence", CategoryList should be empty while
-          BasicList still shows Bread and Cheese.
+          <strong>Expected after "Run Repro Sequence":</strong>
+          <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
+            <li><strong>Test 1 (Basic):</strong> Shows Bread, Cheese ✓</li>
+            <li><strong>Test 2 (Nested + null):</strong> Empty or broken ✗</li>
+            <li><strong>Test 3 (Single + null):</strong> Empty or broken ✗</li>
+            <li><strong>Test 4 (Single + span):</strong> Shows Cheese ✓</li>
+          </ul>
         </div>
       </div>
     ),
