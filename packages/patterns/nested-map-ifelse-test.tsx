@@ -1,18 +1,17 @@
 /// <cts-enable />
 /**
- * CT-1158 BUG REPRO: Map truncation loses cell references when ifElse returns null
+ * CT-1158 TEST: Nested map with ifElse null handling
  *
- * ROOT CAUSE: In map.ts, truncation uses .get().slice() which dereferences cell
- * links. When ifElse returns null (falsy branch), the cell reference is lost and
- * literal null is stored instead.
+ * This pattern demonstrates various map + ifElse combinations working correctly.
+ * The fix ensures cell references are preserved even when ifElse returns null.
  *
  * TEST CASES:
- * 1. Basic List (simple map) - WORKS: No ifElse, no nulls
- * 2. Category List (nested map + ifElse null) - FAILS: ifElse returns null
- * 3. Single Map + ifElse null - FAILS: Proves nesting isn't required
- * 4. Single Map + ifElse empty span - WORKS: Non-null falsy branch survives
+ * 1. Basic List - simple map over items
+ * 2. Category List - nested map with ifElse filtering by category
+ * 3. Single Map + ifElse null - conditional rendering with null fallback
+ * 4. Single Map + ifElse empty span - conditional rendering with empty element
  *
- * REPRO: Click "Run Repro Sequence" to check item[0] then remove it
+ * Use "Run Test Sequence" to verify all cases handle state changes correctly.
  */
 import {
   Cell,
@@ -82,7 +81,7 @@ const runRepro = handler<unknown, { items: Cell<Item[]>; log: Cell<string[]> }>(
         final.map((i) => `${i.title}(done=${i.done})`).join(", ")
       }`,
     );
-    logMsg("Repro complete - check if CategoryList shows items");
+    logMsg("Test complete - all lists should show Bread and Cheese");
   },
 );
 
@@ -112,38 +111,38 @@ export default pattern<Input>(({ items, log }) => {
   });
 
   return {
-    [NAME]: "Bug Repro: Nested Map + ifElse",
+    [NAME]: "Nested Map + ifElse Test",
     [UI]: (
       <div style={{ padding: "20px", fontFamily: "system-ui" }}>
-        <h2>Nested Map Bug Repro</h2>
+        <h2>Nested Map + ifElse Test</h2>
 
         <div style={{ marginBottom: "20px", display: "flex", gap: "10px" }}>
           <ct-button onClick={runRepro({ items, log })}>
-            Run Repro Sequence
+            Run Test Sequence
           </ct-button>
           <ct-button onClick={resetItems({ items, log })}>
             Reset
           </ct-button>
         </div>
 
-        {/* Row 1: Basic List vs Category List (original repro) */}
+        {/* Row 1: Basic List vs Category List */}
         <div style={{ display: "flex", gap: "20px", marginBottom: "20px" }}>
-          {/* Test 1: Basic List - simple items.map (WORKS) */}
+          {/* Test 1: Basic List - simple items.map */}
           <div
             style={{
               flex: 1,
               padding: "12px",
-              border: "2px solid #4caf50",
+              border: "1px solid #e0e0e0",
               borderRadius: "8px",
             }}
           >
-            <h3 style={{ margin: "0 0 12px 0", color: "#2e7d32" }}>
-              1. Basic List (simple map)
+            <h3 style={{ margin: "0 0 12px 0" }}>
+              1. Basic List
             </h3>
             <div
               style={{ fontSize: "11px", color: "#666", marginBottom: "8px" }}
             >
-              No ifElse → no nulls → WORKS
+              Simple map over items
             </div>
             {items.map((item, idx) => (
               <div style={{ margin: "4px 0" }}>
@@ -154,22 +153,22 @@ export default pattern<Input>(({ items, log }) => {
             ))}
           </div>
 
-          {/* Test 2: Category List - nested map with ifElse null (FAILS) */}
+          {/* Test 2: Category List - nested map with ifElse null */}
           <div
             style={{
               flex: 1,
               padding: "12px",
-              border: "2px solid #f44336",
+              border: "1px solid #e0e0e0",
               borderRadius: "8px",
             }}
           >
-            <h3 style={{ margin: "0 0 12px 0", color: "#c62828" }}>
-              2. Category List (nested map + ifElse null)
+            <h3 style={{ margin: "0 0 12px 0" }}>
+              2. Category List
             </h3>
             <div
               style={{ fontSize: "11px", color: "#666", marginBottom: "8px" }}
             >
-              ifElse returns null → cell ref lost → FAILS
+              Nested map with ifElse filtering by category
             </div>
             {categories.map((category) => (
               <div style={{ marginBottom: "8px" }}>
@@ -192,24 +191,24 @@ export default pattern<Input>(({ items, log }) => {
           </div>
         </div>
 
-        {/* Row 2: Single map tests to prove nesting isn't required */}
+        {/* Row 2: Single map tests with ifElse */}
         <div style={{ display: "flex", gap: "20px", marginBottom: "20px" }}>
-          {/* Test 3: Single map + ifElse null (FAILS) - proves nesting not required */}
+          {/* Test 3: Single map + ifElse null */}
           <div
             style={{
               flex: 1,
               padding: "12px",
-              border: "2px solid #f44336",
+              border: "1px solid #e0e0e0",
               borderRadius: "8px",
             }}
           >
-            <h3 style={{ margin: "0 0 12px 0", color: "#c62828" }}>
-              3. Single Map + ifElse null
+            <h3 style={{ margin: "0 0 12px 0" }}>
+              3. Filtered (ifElse null)
             </h3>
             <div
               style={{ fontSize: "11px", color: "#666", marginBottom: "8px" }}
             >
-              Shows only done items. No nesting → still FAILS
+              Shows only done items using null fallback
             </div>
             {items.map((item, idx) =>
               ifElse(
@@ -227,22 +226,22 @@ export default pattern<Input>(({ items, log }) => {
             </div>
           </div>
 
-          {/* Test 4: Single map + ifElse empty span (WORKS) - proves null is the issue */}
+          {/* Test 4: Single map + ifElse empty span */}
           <div
             style={{
               flex: 1,
               padding: "12px",
-              border: "2px solid #4caf50",
+              border: "1px solid #e0e0e0",
               borderRadius: "8px",
             }}
           >
-            <h3 style={{ margin: "0 0 12px 0", color: "#2e7d32" }}>
-              4. Single Map + ifElse empty span
+            <h3 style={{ margin: "0 0 12px 0" }}>
+              4. Filtered (ifElse span)
             </h3>
             <div
               style={{ fontSize: "11px", color: "#666", marginBottom: "8px" }}
             >
-              Non-null false branch → survives round-trip → WORKS
+              Shows only done items using empty span fallback
             </div>
             {items.map((item, idx) =>
               ifElse(
@@ -279,23 +278,23 @@ export default pattern<Input>(({ items, log }) => {
           style={{
             marginTop: "20px",
             padding: "12px",
-            background: "#ffebee",
+            background: "#e8f5e9",
             borderRadius: "8px",
           }}
         >
-          <strong>Expected after "Run Repro Sequence":</strong>
+          <strong>Expected after "Run Test Sequence":</strong>
           <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
             <li>
-              <strong>Test 1 (Basic):</strong> Shows Bread, Cheese ✓
+              <strong>Test 1:</strong> Shows Bread, Cheese
             </li>
             <li>
-              <strong>Test 2 (Nested + null):</strong> Empty or broken ✗
+              <strong>Test 2:</strong> Shows Bread (Bakery) and Cheese (Dairy)
             </li>
             <li>
-              <strong>Test 3 (Single + null):</strong> Empty or broken ✗
+              <strong>Test 3:</strong> Shows Cheese (the only done item)
             </li>
             <li>
-              <strong>Test 4 (Single + span):</strong> Shows Cheese ✓
+              <strong>Test 4:</strong> Shows Cheese (the only done item)
             </li>
           </ul>
         </div>
