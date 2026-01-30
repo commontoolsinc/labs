@@ -472,7 +472,7 @@ export class WorkerReconciler {
         this.updateEventProp(ctx, state, key, value, existingState);
       } else if (isBindingProp(key)) {
         // Bindings - check if Cell is same
-        this.updateBindingProp(ctx, state, key, value, existingState);
+        this.updateBindingProp(state, key, value, existingState);
       } else if (isCell(value)) {
         // Reactive prop - check if Cell is same
         if (existingState?.cell && areLinksSame(existingState.cell, value)) {
@@ -612,7 +612,6 @@ export class WorkerReconciler {
    * Update a binding prop ($prop).
    */
   private updateBindingProp(
-    _ctx: ReconcileContext,
     state: NodeState,
     key: string,
     value: unknown,
