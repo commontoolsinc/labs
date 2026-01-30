@@ -193,34 +193,108 @@ async function testRecipeAndDataPersistence() {
     "Result should be formatted correctly",
   );
 
-  // ============================================================
-  // PHASE 3: Update data and verify reactivity
-  // ============================================================
-  console.log("\n--- Phase 3: Update data and verify reactivity ---");
+  // Dispose runtime2 before phase 3
+  await runtime2.dispose();
+  await storageManager2.close();
+  console.log("Runtime 2 disposed (cache cleared)");
 
+  // ============================================================
+  // PHASE 3: Third runtime - reload, observe, update, verify reactivity
+  // ============================================================
+  console.log("\n--- Phase 3: Reload, observe, update, verify reactivity ---");
+
+  const storageManager3 = StorageManager.open({
+    as: identity,
+    address: new URL("/api/storage/memory", API_URL),
+  });
+
+  const runtime3 = new Runtime({
+    apiUrl: new URL(API_URL),
+    storageManager: storageManager3,
+  });
+
+  tx = runtime3.edit();
+
+  // Load recipe from storage (fresh cache)
+  const loadedRecipe3 = await runtime3.recipeManager.loadRecipe(
+    recipeId,
+    space,
+    tx,
+  );
+  console.log("Recipe loaded from storage (third runtime)");
+
+  // Load data cell from storage
+  const dataCell3 = runtime3.getCell(
+    space,
+    "test-input-data",
+    inputDataSchema,
+    tx,
+  );
+  await dataCell3.sync();
+  console.log("Data loaded:", dataCell3.get());
+
+  // Create result cell and run recipe
+  const resultCell3 = runtime3.getCell<{ sum: number; result: string }>(
+    space,
+    "test-recipe-result-3",
+    undefined,
+    tx,
+  );
+  const runResult3 = runtime3.run(
+    tx,
+    loadedRecipe3,
+    { data: dataCell3 },
+    resultCell3,
+  );
+  await tx.commit();
+  await runResult3.pull();
+
+  // Observe computed value before update (should match phase 2)
+  const beforeUpdate = runResult3.getAsQueryResult();
+  console.log(
+    "Computed result before update: sum =",
+    beforeUpdate.sum,
+    ", result =",
+    beforeUpdate.result,
+  );
+
+  assertEquals(beforeUpdate.sum, 15, "Sum should still be 15 after reload");
+  assertEquals(
+    beforeUpdate.result,
+    "Numbers: 15",
+    "Result should still be 'Numbers: 15' after reload",
+  );
+
+  // Now update the data
   const updatedData = { values: [10, 20, 30], label: "Big numbers" };
+  console.log("Updating data to:", updatedData);
 
-  tx = runtime2.edit();
-  dataCell2.withTx(tx).set(updatedData);
+  tx = runtime3.edit();
+  dataCell3.withTx(tx).set(updatedData);
   await tx.commit();
 
   // Wait for reactivity to propagate
-  await runResult.pull();
+  await runResult3.pull();
 
-  const output2 = runResult.getAsQueryResult();
-  console.log(`After update: ${JSON.stringify(output2)}`);
+  const afterUpdate = runResult3.getAsQueryResult();
+  console.log(
+    "Computed result after update: sum =",
+    afterUpdate.sum,
+    ", result =",
+    afterUpdate.result,
+  );
 
   // Verify the recipe reacted to the data change
-  assertEquals(output2.sum, 60, "Sum should be 10+20+30=60");
+  assertEquals(afterUpdate.sum, 60, "Sum should be 10+20+30=60");
   assertEquals(
-    output2.result,
+    afterUpdate.result,
     "Big numbers: 60",
     "Result should reflect updated data",
   );
 
   // Cleanup
-  await runtime2.dispose();
-  await storageManager2.close();
+  await runtime3.dispose();
+  await storageManager3.close();
 
   console.log("\n=== TEST PASSED ===");
 }
