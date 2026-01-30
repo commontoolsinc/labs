@@ -873,10 +873,12 @@ export class CellImpl<T extends StorableValue>
   remove(
     ref: T extends (infer U)[] ? (U | AnyCell<U>) : never,
   ): void {
-    const array = this.get();
-    if (!Array.isArray(array)) {
+    type ElemT = T extends (infer U)[] ? U : never;
+    const got = this.get();
+    if (!Array.isArray(got)) {
       throw new Error("Can't remove from non-array value");
     }
+    const array = got as ElemT[];
     const index = typeof ref === "object"
       ? array.findIndex((item) =>
         areLinksSame(
@@ -888,10 +890,11 @@ export class CellImpl<T extends StorableValue>
           this.runtime,
         )
       )
-      : array.indexOf(ref);
+      : array.indexOf(ref as ElemT);
     if (index === -1) {
       return;
     }
+    // Cast needed: TS can't prove ElemT[] reconstitutes to T
     const newArray = [
       ...array.slice(0, index),
       ...array.slice(index + 1),
@@ -902,10 +905,13 @@ export class CellImpl<T extends StorableValue>
   removeAll(
     ref: T extends (infer U)[] ? (U | AnyCell<U>) : never,
   ): void {
-    const array = this.get();
-    if (!Array.isArray(array)) {
+    type ElemT = T extends (infer U)[] ? U : never;
+    const got = this.get();
+    if (!Array.isArray(got)) {
       throw new Error("Can't remove from non-array value");
     }
+    const array = got as ElemT[];
+    // Cast needed: TS can't prove ElemT[] reconstitutes to T
     const newArray = array.filter((item) =>
       typeof ref === "object"
         ? !areLinksSame(
@@ -1348,6 +1354,7 @@ export class CellImpl<T extends StorableValue>
       rootSchema: this.rootSchema ?? this.schema,
       nodes: cellNodes.get(this._causeContainer.cell) ?? new Set(),
       frame: this._frame,
+      // Cast needed: stream sentinel marker isn't actually of type T
       value: this._kind === "stream"
         ? { $stream: true } as unknown as T
         : this._initialValue,
