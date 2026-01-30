@@ -269,7 +269,8 @@ export class CTSelect extends BaseElement {
     }
 
     private _renderOptions() {
-      if (!this.items?.length) return nothing;
+      // Guard against non-array items (e.g., reactive proxy not yet resolved)
+      if (!Array.isArray(this.items) || !this.items.length) return nothing;
 
       // Group items by `group` key
       const groups = new Map<string | undefined, SelectItem[]>();
@@ -360,7 +361,9 @@ export class CTSelect extends BaseElement {
 
     private _buildKeyMap() {
       this._keyMap.clear();
-      this.items?.forEach((item, index) => {
+      // Guard against non-array items (e.g., reactive proxy not yet resolved)
+      if (!Array.isArray(this.items)) return;
+      this.items.forEach((item, index) => {
         if (!item) return;
         this._keyMap.set(this._makeKey(item, index), item);
       });
