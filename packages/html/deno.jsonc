@@ -1,7 +1,7 @@
 {
   "name": "@commontools/html",
   "tasks": {
-    "test": "deno test --allow-env --allow-ffi --allow-read test/*.test.ts"
+    "test": "deno test --allow-env --allow-ffi --allow-read --allow-net test/*.test.ts test/*.test.tsx"
   },
   "exports": {
     ".": "./src/index.ts",

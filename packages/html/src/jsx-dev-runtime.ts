@@ -72,7 +72,7 @@ export function jsxDEV(
  * Fragment component for grouping elements without adding DOM nodes.
  *
  * Used when you write <></> or <React.Fragment> in JSX.
- * Renders as a "common-fragment" element in the virtual DOM.
+ * Renders as a "ct-fragment" element in the virtual DOM.
  */
 export const Fragment = h.fragment;
 
