@@ -63,6 +63,27 @@ export function isWorkerVNode(value: unknown): value is WorkerVNode {
 }
 
 /**
+ * Tracks a prop's current Cell reference and cancel function.
+ * Used for diffing props during in-place updates.
+ */
+export interface PropState {
+  /** The Cell being subscribed to (if reactive), or undefined for static props */
+  cell: Cell<unknown> | undefined;
+  /** Cancel function for this prop's subscription */
+  cancel: Cancel;
+}
+
+/**
+ * Tracks the children Cell reference for diffing.
+ */
+export interface ChildrenState {
+  /** The Cell being subscribed to (if reactive), or undefined for static children */
+  cell: Cell<unknown> | undefined;
+  /** Cancel function for the children subscription */
+  cancel: Cancel;
+}
+
+/**
  * State tracked for each rendered node in the worker reconciler.
  * This is used to manage subscriptions and track DOM node IDs.
  */
@@ -79,11 +100,14 @@ export interface NodeState {
   /** Child states, keyed by their stable key */
   children: Map<string, ChildNodeState>;
 
-  /** Props subscriptions */
-  propSubscriptions: Map<string, Cancel>;
+  /** Props subscriptions - now tracks Cell reference for diffing */
+  propSubscriptions: Map<string, PropState>;
 
   /** Event handler IDs registered on this node */
   eventHandlers: Map<string, number>;
+
+  /** Children Cell reference for diffing during updates */
+  childrenState?: ChildrenState;
 }
 
 /**
