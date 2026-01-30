@@ -115,10 +115,14 @@ function getCleanNotebookTitle(notebook: unknown): string {
 // Export/Import Format Constants
 // ============================================================================
 
-const NOTE_START_MARKER = "<!-- COMMON_NOTE_START";
-const NOTE_END_MARKER = "<!-- COMMON_NOTE_END -->";
-const NOTEBOOK_START_MARKER = "<!-- COMMON_NOTEBOOK_START";
-const NOTEBOOK_END_MARKER = "<!-- COMMON_NOTEBOOK_END -->";
+// Split HTML comment tokens to avoid SES_HTML_COMMENT_REJECTED at compile time.
+// SES rejects any source containing literal "<!--" or "-->" sequences.
+const CO = "<" + "!--"; // comment open
+const CC = "--" + ">"; // comment close
+const NOTE_START_MARKER = `${CO} COMMON_NOTE_START`;
+const NOTE_END_MARKER = `${CO} COMMON_NOTE_END ${CC}`;
+const NOTEBOOK_START_MARKER = `${CO} COMMON_NOTEBOOK_START`;
+const NOTEBOOK_END_MARKER = `${CO} COMMON_NOTEBOOK_END ${CC}`;
 
 // Strip entity IDs from mentions for portable export: [[Name (id)]] -> [[Name]]
 function stripMentionIds(content: string): string {
@@ -194,7 +198,7 @@ function generateExport(
     const escapedTitle = title.replace(/"/g, "&quot;");
     const notebooksStr = notebookNames.join(", ");
 
-    return `${NOTE_START_MARKER} title="${escapedTitle}" noteId="${noteId}" notebooks="${notebooksStr}" isHidden="${isHidden}" -->\n\n${content}\n\n${NOTE_END_MARKER}`;
+    return `${NOTE_START_MARKER} title="${escapedTitle}" noteId="${noteId}" notebooks="${notebooksStr}" isHidden="${isHidden}" ${CC}\n\n${content}\n\n${NOTE_END_MARKER}`;
   });
 
   // Format each notebook
@@ -221,18 +225,18 @@ function generateExport(
       .map((t) => t.replace(/,/g, "&#44;"))
       .join(",");
 
-    return `${NOTEBOOK_START_MARKER} title="${escapedTitle}" isHidden="${isHidden}" noteIds="${noteIdsStr}" childNotebooks="${childNotebooksStr}" -->\n${NOTEBOOK_END_MARKER}`;
+    return `${NOTEBOOK_START_MARKER} title="${escapedTitle}" isHidden="${isHidden}" noteIds="${noteIdsStr}" childNotebooks="${childNotebooksStr}" ${CC}\n${NOTEBOOK_END_MARKER}`;
   });
 
   const timestamp = new Date().toISOString();
   const header =
-    `<!-- Common Tools Export - ${timestamp} -->\n<!-- Format: v2 (hierarchical) -->\n<!-- Notes: ${notes.length}, Notebooks: ${notebooks.length} -->\n\n`;
+    `${CO} Common Tools Export - ${timestamp} ${CC}\n${CO} Format: v2 (hierarchical) ${CC}\n${CO} Notes: ${notes.length}, Notebooks: ${notebooks.length} ${CC}\n\n`;
 
   const notesSection = formattedNotes.length > 0
-    ? `<!-- === NOTES === -->\n\n${formattedNotes.join("\n\n")}`
+    ? `${CO} === NOTES === ${CC}\n\n${formattedNotes.join("\n\n")}`
     : "";
   const notebooksSection = formattedNotebooks.length > 0
-    ? `\n\n<!-- === NOTEBOOKS === -->\n\n${formattedNotebooks.join("\n\n")}`
+    ? `\n\n${CO} === NOTEBOOKS === ${CC}\n\n${formattedNotebooks.join("\n\n")}`
     : "";
 
   const markdown = notes.length === 0 && notebooks.length === 0
@@ -265,8 +269,10 @@ function parseNotesFromMarkdown(markdown: string): ParsedNote[] {
   if (!markdown || markdown.trim() === "") return [];
 
   const notes: ParsedNote[] = [];
-  const noteBlockRegex =
-    /<!-- COMMON_NOTE_START title="([^"]*)"(?:\s+noteId="([^"]*)")?(?:\s+notebooks="([^"]*)")?(?:\s+isHidden="([^"]*)")? -->([\s\S]*?)<!-- COMMON_NOTE_END -->/g;
+  const noteBlockRegex = new RegExp(
+    `${CO} COMMON_NOTE_START title="([^"]*)"(?:\\s+noteId="([^"]*)")?(?:\\s+notebooks="([^"]*)")?(?:\\s+isHidden="([^"]*)")? ${CC}([\\s\\S]*?)${CO} COMMON_NOTE_END ${CC}`,
+    "g",
+  );
 
   let match;
   while ((match = noteBlockRegex.exec(markdown)) !== null) {
@@ -296,8 +302,10 @@ function parseNotebooksFromMarkdown(markdown: string): ParsedNotebook[] {
   if (!markdown || markdown.trim() === "") return [];
 
   const notebooks: ParsedNotebook[] = [];
-  const notebookBlockRegex =
-    /<!-- COMMON_NOTEBOOK_START title="([^"]*)" isHidden="([^"]*)" noteIds="([^"]*)" childNotebooks="([^"]*)" -->/g;
+  const notebookBlockRegex = new RegExp(
+    `${CO} COMMON_NOTEBOOK_START title="([^"]*)" isHidden="([^"]*)" noteIds="([^"]*)" childNotebooks="([^"]*)" ${CC}`,
+    "g",
+  );
 
   let match;
   while ((match = notebookBlockRegex.exec(markdown)) !== null) {
@@ -1399,17 +1407,17 @@ const exportSelectedNotebooks = handler<
   if (allNotes.length > 0) {
     const lines = allNotes.map((note) => {
       const escapedTitle = note.title.replace(/"/g, "&quot;");
-      return `${NOTE_START_MARKER} title="${escapedTitle}" notebooks="${note.notebookName}" -->\n\n${note.content}\n\n${NOTE_END_MARKER}`;
+      return `${NOTE_START_MARKER} title="${escapedTitle}" notebooks="${note.notebookName}" ${CC}\n\n${note.content}\n\n${NOTE_END_MARKER}`;
     });
 
     const timestamp = new Date().toISOString();
     const header =
-      `<!-- Common Tools Export - ${timestamp} -->\n<!-- Notes: ${allNotes.length}, Notebooks: ${selected.length} -->\n\n`;
+      `${CO} Common Tools Export - ${timestamp} ${CC}\n${CO} Notes: ${allNotes.length}, Notebooks: ${selected.length} ${CC}\n\n`;
 
     exportNotebooksMarkdown.set(header + lines.join("\n\n"));
   } else {
     exportNotebooksMarkdown.set(
-      "<!-- No notes found in selected notebooks -->",
+      `${CO} No notes found in selected notebooks ${CC}`,
     );
   }
   showExportNotebooksModal.set(true);

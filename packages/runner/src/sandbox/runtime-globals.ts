@@ -8,6 +8,7 @@
 import type { RuntimeGlobals } from "./types.ts";
 import { createBuilder } from "../builder/factory.ts";
 import { createSandboxedConsole } from "./sandboxed-console.ts";
+import { OriginalDate, OriginalMath } from "./pre-lockdown-intrinsics.ts";
 
 // Declare harden as a global (added by SES lockdown)
 declare const harden: <T>(obj: T) => T;
@@ -102,8 +103,8 @@ export function createRuntimeGlobals(
 
     // Standard JavaScript globals (frozen copies)
     JSON,
-    Math,
-    Date,
+    Math: OriginalMath,
+    Date: OriginalDate,
     String,
     Number,
     Boolean,
@@ -190,8 +191,8 @@ export function createMinimalGlobals(
   return {
     console: customConsole ?? console,
     JSON,
-    Math,
-    Date,
+    Math: OriginalMath,
+    Date: OriginalDate,
     String,
     Number,
     Boolean,

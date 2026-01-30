@@ -35,8 +35,12 @@ export function getDefaultLockdownOptions(debug = false): LockdownOptions {
     // Console taming: "unsafe" preserves console functionality
     consoleTaming: "unsafe",
     // Note: mathTaming and dateTaming were removed in SES ≥1.11.0.
-    // Math.random() and Date.now() are available because we pass the
-    // real Math and Date objects as compartment globals (see runtime-globals.ts).
+    // SES always tames Date/Math (no-arg new Date() throws, Math.random()
+    // returns NaN). We work around this by capturing the original Date/Math
+    // before lockdown (see pre-lockdown-intrinsics.ts) and passing them as
+    // compartment globals (see runtime-globals.ts).
+    // TODO(seefeld): Remove the pre-lockdown intrinsics workaround once we
+    // lock down Date and Math.random again (patterns should not use them).
   };
 }
 
