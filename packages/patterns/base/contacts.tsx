@@ -26,8 +26,8 @@ import {
 
 // Import shared types
 import type {
-  ContactPiece,
   ContactGroup,
+  ContactPiece,
   FamilyMember,
   Person,
 } from "./contact-types.tsx";

@@ -1,6 +1,6 @@
 import type {
-  PieceResult,
   ExecutedScenario,
+  PieceResult,
   Scenario,
   Step,
 } from "./interfaces.ts";
