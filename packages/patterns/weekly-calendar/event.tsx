@@ -19,8 +19,7 @@ import {
 } from "commontools";
 
 // Simple random ID generator
-const generateId = () =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
+const generateId = () => crypto.randomUUID();
 
 // Available colors for events
 const COLORS: string[] = [

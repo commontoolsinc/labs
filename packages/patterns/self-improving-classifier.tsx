@@ -299,7 +299,7 @@ function getCachedRegex(
 
 /** Generate a unique ID */
 function generateId(): string {
-  return Math.random().toString(36).substring(2, 15);
+  return crypto.randomUUID();
 }
 
 /** Validate a regex pattern and return validation result */
@@ -660,7 +660,7 @@ const confirmPendingClassification = handler<
     decidedBy: "suggestion-accepted",
     reasoning: result.reasoning,
     confidence: result.confidence,
-    labeledAt: Date.now(),
+    labeledAt: Temporal.Now.instant().epochMilliseconds,
     wasCorrection: false,
     isInteresting: result.confidence < 0.7,
     interestingReason: result.confidence < 0.7
@@ -695,7 +695,7 @@ const correctPendingClassification = handler<
     decidedBy: "user",
     reasoning: "User correction",
     confidence: 1.0,
-    labeledAt: Date.now(),
+    labeledAt: Temporal.Now.instant().epochMilliseconds,
     wasCorrection: true,
     originalPrediction: item.result.classification,
     isInteresting: true,
@@ -810,7 +810,7 @@ const reclassifyExampleHandler = handler<
   // Set as current item with a new ID (so it's treated as a fresh classification)
   const newInput: ClassifiableInput = {
     id: generateId(),
-    receivedAt: Date.now(),
+    receivedAt: Temporal.Now.instant().epochMilliseconds,
     fields: { ...inputData.fields },
   };
   currentItem.set(newInput);
@@ -948,7 +948,7 @@ const submitItemHandler = handler<
     // Create the input object
     const input: ClassifiableInput = {
       id: generateId(),
-      receivedAt: Date.now(),
+      receivedAt: Temporal.Now.instant().epochMilliseconds,
       fields: { ...event.fields },
     };
 
@@ -971,7 +971,7 @@ const submitItemHandler = handler<
           ruleMatch.matchedRules.join(", ")
         }`,
         confidence: ruleMatch.confidence,
-        labeledAt: Date.now(),
+        labeledAt: Temporal.Now.instant().epochMilliseconds,
         wasCorrection: false,
         isInteresting: false,
       };
@@ -985,7 +985,7 @@ const submitItemHandler = handler<
         reasoning: example.reasoning,
         matchedRules: ruleMatch.matchedRules,
         tier: ruleMatch.highestTier,
-        classifiedAt: Date.now(),
+        classifiedAt: Temporal.Now.instant().epochMilliseconds,
       };
       recentAutoClassified.set(
         [autoItem, ...recentAutoClassified.get()].slice(0, 10),
@@ -1089,7 +1089,7 @@ const confirmClassificationHandler = handler<
     decidedBy: "suggestion-accepted",
     reasoning: result.reasoning,
     confidence: result.confidence,
-    labeledAt: Date.now(),
+    labeledAt: Temporal.Now.instant().epochMilliseconds,
     wasCorrection: false,
     isInteresting: result.confidence < 0.7,
     interestingReason: result.confidence < 0.7
@@ -1126,7 +1126,7 @@ const correctClassificationHandler = handler<
     decidedBy: "user",
     reasoning: reasoning || "User correction",
     confidence: 1.0,
-    labeledAt: Date.now(),
+    labeledAt: Temporal.Now.instant().epochMilliseconds,
     wasCorrection: true,
     originalPrediction: item.result.classification,
     isInteresting: true,
@@ -1183,7 +1183,7 @@ const addRuleHandler = handler<
     falsePositives: 0,
     trueNegatives: 0,
     falseNegatives: 0,
-    createdAt: Date.now(),
+    createdAt: Temporal.Now.instant().epochMilliseconds,
     isShared: false,
   };
   rules.push(newRule);
@@ -1267,7 +1267,7 @@ const acceptSuggestionHandler = handler<
     falsePositives: 0,
     trueNegatives: 0,
     falseNegatives: 0,
-    createdAt: Date.now(),
+    createdAt: Temporal.Now.instant().epochMilliseconds,
     isShared: false,
   };
   rules.push(newRule);
@@ -1327,7 +1327,7 @@ const acceptCurrentClassificationHandler = handler<
     decidedBy: "suggestion-accepted",
     reasoning: classification.reasoning,
     confidence: classification.confidence,
-    labeledAt: Date.now(),
+    labeledAt: Temporal.Now.instant().epochMilliseconds,
     wasCorrection: false,
     isInteresting: classification.confidence < 0.7,
     interestingReason: classification.confidence < 0.7
@@ -1366,7 +1366,7 @@ const correctCurrentClassificationHandler = handler<
     decidedBy: "user",
     reasoning: "User corrected classification",
     confidence: 1.0, // User is certain
-    labeledAt: Date.now(),
+    labeledAt: Temporal.Now.instant().epochMilliseconds,
     wasCorrection: true,
     originalPrediction: classification.classification,
     isInteresting: true,
@@ -1409,7 +1409,7 @@ const acceptUndoneClassificationHandler = handler<
     decidedBy: "suggestion-accepted",
     reasoning: undone.reasoning,
     confidence: undone.confidence,
-    labeledAt: Date.now(),
+    labeledAt: Temporal.Now.instant().epochMilliseconds,
     wasCorrection: false,
     isInteresting: false,
   });
@@ -1492,7 +1492,7 @@ const correctUndoneClassificationHandler = handler<
     decidedBy: "user",
     reasoning: "User corrected classification",
     confidence: 1.0, // User is certain
-    labeledAt: Date.now(),
+    labeledAt: Temporal.Now.instant().epochMilliseconds,
     wasCorrection: true,
     originalPrediction: undone.label,
     isInteresting: true,

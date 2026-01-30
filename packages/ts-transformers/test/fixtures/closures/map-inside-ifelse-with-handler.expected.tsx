@@ -1,11 +1,6 @@
 import * as __ctHelpers from "commontools";
 import { Cell, handler, ifElse, recipe, UI } from "commontools";
-interface Item {
-    id: number;
-    name: string;
-}
-// Handler that closes over both items array and individual item
-const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
+const __handler_0 = handler(true as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
     properties: {
         items: {
@@ -43,6 +38,12 @@ const removeItem = handler(true as const satisfies __ctHelpers.JSONSchema, {
         items.set(currentItems.toSpliced(index, 1));
     }
 });
+interface Item {
+    id: number;
+    name: string;
+}
+// Handler that closes over both items array and individual item
+const removeItem = __handler_0;
 export default recipe({
     type: "object",
     properties: {

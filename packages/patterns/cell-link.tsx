@@ -2,9 +2,7 @@
 import { Default, NAME, pattern, UI } from "commontools";
 import Note from "./notes/note.tsx";
 
-// Simple random ID generator (crypto.randomUUID not available in pattern env)
-const generateId = () =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
+const generateId = () => crypto.randomUUID();
 
 export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
   ({ title }) => {

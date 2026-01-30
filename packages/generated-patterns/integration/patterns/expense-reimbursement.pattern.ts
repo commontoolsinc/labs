@@ -252,41 +252,71 @@ const buildActionMessage = (
   return `Recorded payment for ${claim.id} (${amount})`;
 };
 
-const buildStatusChangeHandler = (
+const isAllowedStatus = (
+  status: ClaimStatus,
+  allowedStatuses: string,
+): boolean => {
+  return allowedStatuses.indexOf(status) !== -1;
+};
+
+const applyStatusChange = (
+  event: StatusChangeEvent | undefined,
+  context: StatusHandlerContext,
   kind: ActionKind,
   nextStatus: ClaimStatus,
-  allowed: readonly ClaimStatus[],
-) =>
-  handler(
-    (event: StatusChangeEvent | undefined, context: StatusHandlerContext) => {
-      const id = typeof event?.id === "string" ? event.id.trim() : "";
-      if (id.length === 0) return;
+  allowedStatuses: string,
+): void => {
+  const id = typeof event?.id === "string" ? event.id.trim() : "";
+  if (id.length === 0) return;
 
-      const sanitized = sanitizeClaimList(context.claims.get());
-      const index = sanitized.findIndex((claim) => claim.id === id);
-      if (index === -1) return;
+  const sanitized = sanitizeClaimList(context.claims.get());
+  const index = sanitized.findIndex((claim) => claim.id === id);
+  if (index === -1) return;
 
-      const target = sanitized[index];
-      if (!allowed.includes(target.status)) return;
+  const target = sanitized[index];
+  if (!isAllowedStatus(target.status, allowedStatuses)) return;
 
-      const updatedClaim: ExpenseClaim = { ...target, status: nextStatus };
-      const nextClaims = sanitized.map((claim, claimIndex) =>
-        claimIndex === index ? updatedClaim : claim
-      );
-      context.claims.set(nextClaims.map((claim) => ({ ...claim })));
-
-      const message = buildActionMessage(kind, updatedClaim);
-      context.latestAction.set(message);
-
-      const previousHistory = context.history.get() ?? [];
-      const appended = [...previousHistory, message];
-      const trimmed = appended.length > 5 ? appended.slice(-5) : appended;
-      context.history.set(trimmed);
-
-      const sequence = (context.sequence.get() ?? 0) + 1;
-      context.sequence.set(sequence);
-    },
+  const updatedClaim: ExpenseClaim = { ...target, status: nextStatus };
+  const nextClaims = sanitized.map((claim, claimIndex) =>
+    claimIndex === index ? updatedClaim : claim
   );
+  context.claims.set(nextClaims.map((claim) => ({ ...claim })));
+
+  const message = buildActionMessage(kind, updatedClaim);
+  context.latestAction.set(message);
+
+  const previousHistory = context.history.get() ?? [];
+  const appended = [...previousHistory, message];
+  const trimmed = appended.length > 5 ? appended.slice(-5) : appended;
+  context.history.set(trimmed);
+
+  const sequence = (context.sequence.get() ?? 0) + 1;
+  context.sequence.set(sequence);
+};
+
+const approveClaimHandler = handler(
+  (event: StatusChangeEvent | undefined, context: StatusHandlerContext) => {
+    applyStatusChange(event, context, "approved", "approved", "submitted");
+  },
+);
+
+const recordPaymentHandler = handler(
+  (event: StatusChangeEvent | undefined, context: StatusHandlerContext) => {
+    applyStatusChange(event, context, "paid", "paid", "approved");
+  },
+);
+
+const rejectClaimHandler = handler(
+  (event: StatusChangeEvent | undefined, context: StatusHandlerContext) => {
+    applyStatusChange(
+      event,
+      context,
+      "rejected",
+      "rejected",
+      "submitted,approved",
+    );
+  },
+);
 
 const liftSanitizeClaimList = lift(sanitizeClaimList);
 const liftCalculateTotals = lift(calculateTotals);
@@ -336,21 +366,9 @@ export const expenseReimbursement = recipe<ExpenseReimbursementArgs>(
       statusHeadline,
       latestAction,
       activityLog: history,
-      approveClaim: buildStatusChangeHandler(
-        "approved",
-        "approved",
-        ["submitted"],
-      )(handlerContext),
-      recordPayment: buildStatusChangeHandler(
-        "paid",
-        "paid",
-        ["approved"],
-      )(handlerContext),
-      rejectClaim: buildStatusChangeHandler(
-        "rejected",
-        "rejected",
-        ["submitted", "approved"],
-      )(handlerContext),
+      approveClaim: approveClaimHandler(handlerContext),
+      recordPayment: recordPaymentHandler(handlerContext),
+      rejectClaim: rejectClaimHandler(handlerContext),
     };
   },
 );

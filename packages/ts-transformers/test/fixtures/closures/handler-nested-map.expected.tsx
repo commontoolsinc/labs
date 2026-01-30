@@ -1,5 +1,73 @@
 import * as __ctHelpers from "commontools";
 import { recipe, UI } from "commontools";
+const __handler_0 = __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            value: {
+                                type: "number"
+                            }
+                        },
+                        required: ["value"]
+                    },
+                    asOpaque: true
+                },
+                multiplier: {
+                    type: "number",
+                    asOpaque: true
+                }
+            },
+            required: ["items", "multiplier"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => {
+    const scaled = state.items.mapWithPattern(__ctHelpers.recipe({
+        type: "object",
+        properties: {
+            element: {
+                type: "object",
+                properties: {
+                    value: {
+                        type: "number"
+                    }
+                },
+                required: ["value"]
+            },
+            params: {
+                type: "object",
+                properties: {
+                    state: {
+                        type: "object",
+                        properties: {
+                            multiplier: {
+                                type: "number",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["multiplier"]
+                    }
+                },
+                required: ["state"]
+            }
+        },
+        required: ["element", "params"]
+    } as const satisfies __ctHelpers.JSONSchema, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { state } }) => item.value * state.multiplier), {
+        state: {
+            multiplier: state.multiplier
+        }
+    });
+    console.log(scaled);
+});
 interface State {
     items: Array<{
         value: number;
@@ -140,74 +208,7 @@ export default recipe({
     }
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     return {
-        [UI]: (<button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    value: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["value"]
-                            },
-                            asOpaque: true
-                        },
-                        multiplier: {
-                            type: "number",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items", "multiplier"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => {
-            const scaled = state.items.mapWithPattern(__ctHelpers.recipe({
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            value: {
-                                type: "number"
-                            }
-                        },
-                        required: ["value"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    multiplier: {
-                                        type: "number",
-                                        asOpaque: true
-                                    }
-                                },
-                                required: ["multiplier"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { state } }) => item.value * state.multiplier), {
-                state: {
-                    multiplier: state.multiplier
-                }
-            });
-            console.log(scaled);
-        })({
+        [UI]: (<button type="button" onClick={__handler_0({
             state: {
                 items: state.items,
                 multiplier: state.multiplier

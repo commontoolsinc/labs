@@ -52,9 +52,11 @@ const updateNames = handler<
   { firstName: Writable<string>; lastName: Writable<string> }
 >((_event, { firstName, lastName }) => {
   const names = ["Alice", "Bob", "Charlie", "Diana"];
-  const randomName = names[Math.floor(Math.random() * names.length)];
+  const randomIndex = crypto.getRandomValues(new Uint32Array(1))[0] %
+    names.length;
+  const randomName = names[randomIndex];
   firstName.set(randomName);
-  lastName.set(`Smith-${Date.now() % 1000}`);
+  lastName.set(`Smith-${Temporal.Now.instant().epochMilliseconds % 1000}`);
 });
 
 export default pattern<TestInput>(({ firstName, lastName, age }) => {

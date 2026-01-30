@@ -84,7 +84,10 @@ export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
     if (trigger > 0) {
       // NON-IDEMPOTENT SIDE EFFECT: Always append
       const current = nonIdempotentArray.get();
-      nonIdempotentArray.set([...current, { trigger, timestamp: Date.now() }]);
+      nonIdempotentArray.set([...current, {
+        trigger,
+        timestamp: Temporal.Now.instant().epochMilliseconds,
+      }]);
 
       // Increment counter to show how many times this ran
       nonIdempotentCounter.set(nonIdempotentCounter.get() + 1);
@@ -112,7 +115,10 @@ export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
       if (!(key in current)) {
         idempotentMap.set({
           ...current,
-          [key]: { trigger, timestamp: Date.now() },
+          [key]: {
+            trigger,
+            timestamp: Temporal.Now.instant().epochMilliseconds,
+          },
         });
       }
 

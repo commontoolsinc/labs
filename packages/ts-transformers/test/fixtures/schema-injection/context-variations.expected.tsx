@@ -1,5 +1,11 @@
 import * as __ctHelpers from "commontools";
 import { cell, recipe, handler } from "commontools";
+const __handler_0 = handler(false as const satisfies __ctHelpers.JSONSchema, false as const satisfies __ctHelpers.JSONSchema, () => {
+    const _inHandler = cell(60, {
+        type: "number"
+    } as const satisfies __ctHelpers.JSONSchema);
+    return _inHandler;
+});
 // 1. Top-level
 const _topLevel = cell(10, {
     type: "number"
@@ -38,12 +44,7 @@ const testRecipe = recipe(false as const satisfies __ctHelpers.JSONSchema, {
     return _inRecipe;
 });
 // 6. Inside handler
-const testHandler = handler(false as const satisfies __ctHelpers.JSONSchema, false as const satisfies __ctHelpers.JSONSchema, () => {
-    const _inHandler = cell(60, {
-        type: "number"
-    } as const satisfies __ctHelpers.JSONSchema);
-    return _inHandler;
-});
+const testHandler = __handler_0;
 export default function TestContextVariations() {
     return {
         topLevel: _topLevel,

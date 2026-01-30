@@ -1,5 +1,20 @@
 import * as __ctHelpers from "commontools";
 import { Cell, recipe, UI } from "commontools";
+const __handler_0 = __ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        recordMap: {
+            type: "object",
+            properties: {},
+            additionalProperties: {
+                type: "number",
+                asCell: true
+            },
+            asOpaque: true
+        }
+    },
+    required: ["recordMap"]
+} as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { recordMap }) => recordMap[nextKey()]!.set(counter));
 interface State {
     records: Record<string, Cell<number>>;
 }
@@ -136,21 +151,7 @@ export default recipe({
 } as const satisfies __ctHelpers.JSONSchema, (state) => {
     const recordMap = state.records;
     return {
-        [UI]: (<button type="button" onClick={__ctHelpers.handler(false as const satisfies __ctHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                recordMap: {
-                    type: "object",
-                    properties: {},
-                    additionalProperties: {
-                        type: "number",
-                        asCell: true
-                    },
-                    asOpaque: true
-                }
-            },
-            required: ["recordMap"]
-        } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { recordMap }) => recordMap[nextKey()]!.set(counter))({
+        [UI]: (<button type="button" onClick={__handler_0({
             recordMap: recordMap
         })}>
         Step

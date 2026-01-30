@@ -97,7 +97,7 @@ type NotePiece = {
 function formatDate(dateStr: string): string {
   try {
     const date = new Date(dateStr);
-    const now = new Date();
+    const now = new Date(Temporal.Now.instant().epochMilliseconds);
     const diffMs = now.getTime() - date.getTime();
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 

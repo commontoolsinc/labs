@@ -175,13 +175,14 @@ export function listTool<Fields extends string>(
       if (existingKeys.has(dedupeKey)) {
         resultMessage = `Duplicate: ${dedupeKey} already saved`;
       } else {
-        const id = `${state.idPrefix}-${Date.now()}-${
-          Math.random().toString(36).slice(2, 8)
-        }`;
+        const id =
+          `${state.idPrefix}-${Temporal.Now.instant().epochMilliseconds}-${
+            crypto.randomUUID().slice(0, 8)
+          }`;
         const newRecord = {
           ...input,
           id,
-          [state.timestampField]: Date.now(),
+          [state.timestampField]: Temporal.Now.instant().epochMilliseconds,
         };
         delete newRecord.result; // Don't save the result cell
 

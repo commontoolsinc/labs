@@ -43,10 +43,11 @@ const browserTrigger = handler<
   unknown,
   { runCount: Writable<number>; logs: Writable<string[]> }
 >((_event, state) => {
-  const now = Date.now();
   const count = state.runCount.get() + 1;
   state.runCount.set(count);
-  state.logs.push(`[BROWSER] Run #${count} at ${new Date(now).toISOString()}`);
+  state.logs.push(
+    `[BROWSER] Run #${count} at ${Temporal.Now.instant().toString()}`,
+  );
 });
 
 // Clear logs handler
@@ -66,11 +67,10 @@ const bgUpdateHandler = handler<
   unknown,
   { runCount: Writable<number>; logs: Writable<string[]> }
 >((_event, state) => {
-  const now = Date.now();
   const count = state.runCount.get() + 1;
   state.runCount.set(count);
   state.logs.push(
-    `[SERVER] Run #${count} at ${new Date(now).toISOString()} (bgUpdater poll)`,
+    `[SERVER] Run #${count} at ${Temporal.Now.instant().toString()} (bgUpdater poll)`,
   );
 });
 

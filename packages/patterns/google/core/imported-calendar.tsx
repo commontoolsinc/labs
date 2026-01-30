@@ -87,8 +87,7 @@ const COLORS = [
 ];
 
 // Simple random ID generator
-const generateId = () =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
+const generateId = () => crypto.randomUUID();
 
 // ============ STYLES ============
 
@@ -140,7 +139,8 @@ const STYLES = {
 const formatDatePST = (d: Date): string =>
   d.toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
 
-const getTodayDate = (): string => formatDatePST(new Date());
+const getTodayDate = (): string =>
+  formatDatePST(new Date(Temporal.Now.instant().epochMilliseconds));
 
 const getWeekStart = (date: string): string => {
   const d = new Date(date + "T12:00:00-08:00");
@@ -930,13 +930,16 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                       );
                     }
 
-                    lastDropTime.set(Date.now());
+                    lastDropTime.set(Temporal.Now.instant().epochMilliseconds);
                   });
 
                   // Click handlers for creating events at specific hours
                   const hourClickActions = HOURS.map((hour) =>
                     action(() => {
-                      if (Date.now() - lastDropTime.get() < 300) {
+                      if (
+                        Temporal.Now.instant().epochMilliseconds -
+                            lastDropTime.get() < 300
+                      ) {
                         return;
                       }
                       newEventTitle.set("");
@@ -1256,7 +1259,10 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
 
                   // Click action to open edit modal
                   const openEvent = action(() => {
-                    if (Date.now() - lastDropTime.get() < 300) {
+                    if (
+                      Temporal.Now.instant().epochMilliseconds -
+                          lastDropTime.get() < 300
+                    ) {
                       return;
                     }
                     // Populate edit form with event data

@@ -159,7 +159,7 @@ const joinAsPlayer = handler<
     name,
     color: getRandomColor(playerSlot),
     score: 0,
-    joinedAt: Date.now(),
+    joinedAt: Temporal.Now.instant().epochMilliseconds,
   };
 
   // Ensure array is big enough and set at exact slot
@@ -175,11 +175,11 @@ const joinAsPlayer = handler<
   // Add join event
   const existingEvents = parseGameEventsJson(gameEventsJson.get());
   existingEvents.push({
-    id: `event-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: `event-${crypto.randomUUID()}`,
     type: "join",
     player: name,
     details: `${name} joined as Player ${playerSlot + 1}`,
-    timestamp: Date.now(),
+    timestamp: Temporal.Now.instant().epochMilliseconds,
   });
   gameEventsJson.set(JSON.stringify(existingEvents));
 

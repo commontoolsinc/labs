@@ -1,5 +1,23 @@
 import * as __ctHelpers from "commontools";
 import { recipe, UI } from "commontools";
+const __lift_0 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                price: {
+                    type: "number",
+                    asOpaque: true
+                }
+            },
+            required: ["price"]
+        }
+    },
+    required: ["item"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __ctHelpers.JSONSchema, ({ item }) => formatPrice(item.price * (1 + TAX_RATE)));
 // Module-level constant - should NOT be captured
 const TAX_RATE = 0.08;
 // Module-level function - should NOT be captured
@@ -284,26 +302,9 @@ export default recipe({
                     }
                 }
             } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: {} }) => (<div>
-            Item: {__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    item: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number",
-                                asOpaque: true
-                            }
-                        },
-                        required: ["price"]
-                    }
-                },
-                required: ["item"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "string"
-            } as const satisfies __ctHelpers.JSONSchema, { item: {
+            Item: {__lift_0({ item: {
                     price: item.price
-                } }, ({ item }) => formatPrice(item.price * (1 + TAX_RATE)))}
+                } })}
           </div>)), {})}
       </div>),
     };

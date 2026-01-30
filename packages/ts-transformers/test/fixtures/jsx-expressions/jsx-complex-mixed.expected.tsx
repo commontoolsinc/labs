@@ -1,5 +1,214 @@
 import * as __ctHelpers from "commontools";
 import { recipe, UI } from "commontools";
+const __lift_0 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Item"
+                    },
+                    asOpaque: true
+                },
+                filter: {
+                    type: "string",
+                    asOpaque: true
+                }
+            },
+            required: ["items", "filter"]
+        }
+    },
+    required: ["state"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                name: {
+                    type: "string"
+                },
+                price: {
+                    type: "number"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["id", "name", "price", "active"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __ctHelpers.JSONSchema, ({ state }) => state.items.filter((i) => i.name.includes(state.filter)).length);
+const __lift_2 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Item"
+                    },
+                    asOpaque: true
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                name: {
+                    type: "string"
+                },
+                price: {
+                    type: "number"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["id", "name", "price", "active"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __ctHelpers.JSONSchema, ({ state }) => state.items.filter((i) => i.active).length);
+const __lift_4 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Item"
+                    },
+                    asOpaque: true
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                name: {
+                    type: "string"
+                },
+                price: {
+                    type: "number"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["id", "name", "price", "active"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __ctHelpers.JSONSchema, ({ state }) => state.items.every((i) => i.active));
+const __lift_6 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Item"
+                    },
+                    asOpaque: true
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                name: {
+                    type: "string"
+                },
+                price: {
+                    type: "number"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["id", "name", "price", "active"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __ctHelpers.JSONSchema, ({ state }) => state.items.some((i) => i.active));
+const __lift_8 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Item"
+                    },
+                    asOpaque: true
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                name: {
+                    type: "string"
+                },
+                price: {
+                    type: "number"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["id", "name", "price", "active"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __ctHelpers.JSONSchema, ({ state }) => state.items.some((i) => i.price > 100));
 interface Item {
     id: number;
     name: string;
@@ -171,54 +380,10 @@ export default recipe({
         <p>Total items: {state.items.length}</p>
         <p>
           Filtered count:{" "}
-          {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
-                        },
-                        filter: {
-                            type: "string",
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items", "filter"]
-                }
-            },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+          {__lift_0({ state: {
                 items: state.items,
                 filter: state.filter
-            } }, ({ state }) => state.items.filter((i) => i.name.includes(state.filter)).length)}
+            } })}
         </p>
 
         <h3>Array with Complex Expressions</h3>
@@ -468,49 +633,9 @@ export default recipe({
 
         <h3>Array Methods</h3>
         <p>Item count: {state.items.length}</p>
-        <p>Active items: {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items"]
-                }
-            },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "number"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        <p>Active items: {__lift_2({ state: {
                 items: state.items
-            } }, ({ state }) => state.items.filter((i) => i.active).length)}</p>
+            } })}</p>
 
         <h3>Simple Operations</h3>
         <p>Discount percent: {__ctHelpers.derive({
@@ -563,49 +688,9 @@ export default recipe({
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items"]
-                }
-            },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, __lift_4({ state: {
                 items: state.items
-            } }, ({ state }) => state.items.every((i) => i.active)), "Yes", "No")}</p>
+            } }), "Yes", "No")}</p>
         <p>Any active: {__ctHelpers.ifElse({
             type: "boolean"
         } as const satisfies __ctHelpers.JSONSchema, {
@@ -614,49 +699,9 @@ export default recipe({
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items"]
-                }
-            },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, __lift_6({ state: {
                 items: state.items
-            } }, ({ state }) => state.items.some((i) => i.active)), "Yes", "No")}</p>
+            } }), "Yes", "No")}</p>
         <p>
           Has expensive (gt 100):{" "}
           {__ctHelpers.ifElse({
@@ -667,49 +712,9 @@ export default recipe({
             type: "string"
         } as const satisfies __ctHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __ctHelpers.JSONSchema, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items"]
-                }
-            },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "price", "active"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        } as const satisfies __ctHelpers.JSONSchema, __lift_8({ state: {
                 items: state.items
-            } }, ({ state }) => state.items.some((i) => i.price > 100)), "Yes", "No")}
+            } }), "Yes", "No")}
         </p>
 
         <h3>Object Operations</h3>

@@ -27,7 +27,7 @@ const testContact: Contact = {
     "common",
   ],
   phone: "0",
-  createdAt: Date.now(),
+  createdAt: Temporal.Now.instant().epochMilliseconds,
 };
 
 export default pattern(() => {

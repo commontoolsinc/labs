@@ -263,7 +263,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     const changeList: ScheduleChange[] = [];
 
     // Create a single reference date for ALL calculations
-    const today = new Date();
+    const today = new Date(Temporal.Now.instant().epochMilliseconds);
     today.setHours(0, 0, 0, 0);
 
     // Seven days from now

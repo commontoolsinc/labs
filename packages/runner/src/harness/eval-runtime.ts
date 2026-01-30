@@ -55,7 +55,7 @@ export class UnsafeEvalJsValue {
   }
 }
 
-class IsolateInternals {
+export class IsolateInternals {
   private sourceMaps = new SourceMapParser();
 
   exec<T>(callback: () => T) {

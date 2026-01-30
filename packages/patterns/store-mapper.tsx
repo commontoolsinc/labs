@@ -2160,7 +2160,8 @@ export default pattern<Input, Output>(
                               itemName: item,
                               correctAisle: aisle,
                               incorrectAisle: "",
-                              timestamp: Date.now(),
+                              timestamp:
+                                Temporal.Now.instant().epochMilliseconds,
                             });
                             itemLocations.set(filtered);
                             newCorrectionItem.set("");

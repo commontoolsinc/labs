@@ -1,5 +1,53 @@
 import * as __ctHelpers from "commontools";
 import { Cell, recipe, UI } from "commontools";
+const __handler_0 = __ctHelpers.handler({
+    type: "object",
+    properties: {
+        detail: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            label: {
+                                type: "string"
+                            },
+                            value: true
+                        },
+                        required: ["label", "value"]
+                    }
+                },
+                value: true
+            },
+            required: ["items", "value"]
+        }
+    },
+    required: ["detail"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                selectedValue: {
+                    type: "string",
+                    asCell: true
+                },
+                lastItems: {
+                    type: "string",
+                    asCell: true
+                }
+            },
+            required: ["selectedValue", "lastItems"]
+        }
+    },
+    required: ["state"]
+} as const satisfies __ctHelpers.JSONSchema, ({ detail: { value, items } }, { state }) => {
+    state.selectedValue.set(value);
+    state.lastItems.set(items.map(i => i.label).join(", "));
+});
 interface State {
     selectedValue: Cell<string>;
     lastItems: Cell<string>;
@@ -135,54 +183,7 @@ export default recipe({
         [UI]: (<ct-select $value={state.selectedValue} items={[
                 { label: "Option A", value: "a" },
                 { label: "Option B", value: "b" },
-            ]} onct-change={__ctHelpers.handler({
-            type: "object",
-            properties: {
-                detail: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                type: "object",
-                                properties: {
-                                    label: {
-                                        type: "string"
-                                    },
-                                    value: true
-                                },
-                                required: ["label", "value"]
-                            }
-                        },
-                        value: true
-                    },
-                    required: ["items", "value"]
-                }
-            },
-            required: ["detail"]
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        selectedValue: {
-                            type: "string",
-                            asCell: true
-                        },
-                        lastItems: {
-                            type: "string",
-                            asCell: true
-                        }
-                    },
-                    required: ["selectedValue", "lastItems"]
-                }
-            },
-            required: ["state"]
-        } as const satisfies __ctHelpers.JSONSchema, ({ detail: { value, items } }, { state }) => {
-            state.selectedValue.set(value);
-            state.lastItems.set(items.map(i => i.label).join(", "));
-        })({
+            ]} onct-change={__handler_0({
             state: {
                 selectedValue: state.selectedValue,
                 lastItems: state.lastItems

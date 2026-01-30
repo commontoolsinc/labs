@@ -65,7 +65,9 @@ const addItem = handler<
     if (!content) return;
 
     items.push({
-      id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      id: `item-${Temporal.Now.instant().epochMilliseconds}-${
+        crypto.randomUUID().slice(0, 9)
+      }`,
       content,
     });
   },

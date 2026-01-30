@@ -33,8 +33,7 @@ interface CalendarOutput {
 }
 
 const getTodayDate = (): string => {
-  const now = new Date();
-  return now.toISOString().split("T")[0];
+  return Temporal.Now.plainDateISO().toString();
 };
 
 const formatDate = (date: string): string => {

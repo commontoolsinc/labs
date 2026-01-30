@@ -45,7 +45,12 @@ function getRandomColor(): string {
     "#FF2D55", // Apple pink
     "#00C7BE", // Apple teal
   ];
-  return colors[Math.floor(Math.random() * colors.length)];
+  return colors[
+    Math.floor(
+      crypto.getRandomValues(new Uint32Array(1))[0] / 0xFFFFFFFF *
+        colors.length,
+    )
+  ];
 }
 
 // Get initials from name
@@ -71,9 +76,7 @@ const resetLobby = handler<
 >((_event, { messages, users, sessionId }) => {
   console.log("[resetLobby] Resetting all chat state...");
   // Generate new session ID to invalidate all existing chat room connections
-  const newSessionId = `session-${Date.now()}-${
-    Math.random().toString(36).slice(2)
-  }`;
+  const newSessionId = `session-${crypto.randomUUID()}`;
   sessionId.set(newSessionId);
   messages.set([]);
   users.set([]);
@@ -104,9 +107,7 @@ const joinChat = handler<
   // Initialize session ID if not set (first user joining)
   let currentSessionId = sessionId.get();
   if (!currentSessionId) {
-    currentSessionId = `session-${Date.now()}-${
-      Math.random().toString(36).slice(2)
-    }`;
+    currentSessionId = `session-${crypto.randomUUID()}`;
     sessionId.set(currentSessionId);
     console.log("[joinChat] Initialized new session:", currentSessionId);
   }
@@ -120,7 +121,7 @@ const joinChat = handler<
     // Create new user and add to list
     const newUser: User = {
       name,
-      joinedAt: Date.now(),
+      joinedAt: Temporal.Now.instant().epochMilliseconds,
       color: getRandomColor(),
     };
     users.set([...existingUsers, newUser]);
@@ -131,10 +132,10 @@ const joinChat = handler<
     messages.set([
       ...existingMessages,
       {
-        id: `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        id: `msg-${crypto.randomUUID()}`,
         author: "System",
         content: `${name} joined the chat`,
-        timestamp: Date.now(),
+        timestamp: Temporal.Now.instant().epochMilliseconds,
         type: "system",
         reactions: [],
       },

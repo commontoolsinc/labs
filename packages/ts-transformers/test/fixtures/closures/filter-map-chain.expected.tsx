@@ -1,5 +1,65 @@
 import * as __ctHelpers from "commontools";
 import { recipe, UI } from "commontools";
+const __lift_0 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        state: {
+            type: "object",
+            properties: {
+                items: {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Item"
+                    },
+                    asOpaque: true
+                }
+            },
+            required: ["items"]
+        }
+    },
+    required: ["state"],
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                price: {
+                    type: "number"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["id", "price", "active"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        $ref: "#/$defs/Item",
+        asOpaque: true
+    },
+    $defs: {
+        Item: {
+            type: "object",
+            properties: {
+                id: {
+                    type: "number"
+                },
+                price: {
+                    type: "number"
+                },
+                active: {
+                    type: "boolean"
+                }
+            },
+            required: ["id", "price", "active"]
+        }
+    }
+} as const satisfies __ctHelpers.JSONSchema, ({ state }) => state.items
+    .filter((item) => item.active));
 interface Item {
     id: number;
     price: number;
@@ -156,68 +216,9 @@ export default recipe({
     return {
         [UI]: (<div>
         {/* Method chain: filter then map, both with captures */}
-        {__ctHelpers.derive({
-            type: "object",
-            properties: {
-                state: {
-                    type: "object",
-                    properties: {
-                        items: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Item"
-                            },
-                            asOpaque: true
-                        }
-                    },
-                    required: ["items"]
-                }
-            },
-            required: ["state"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "price", "active"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "array",
-            items: {
-                $ref: "#/$defs/Item",
-                asOpaque: true
-            },
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        price: {
-                            type: "number"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "price", "active"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, { state: {
+        {__lift_0({ state: {
                 items: state.items
-            } }, ({ state }) => state.items
-            .filter((item) => item.active)).mapWithPattern(__ctHelpers.recipe({
+            } }).mapWithPattern(__ctHelpers.recipe({
             type: "object",
             properties: {
                 element: {

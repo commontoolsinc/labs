@@ -57,7 +57,8 @@ export interface OccurrenceTrackerInput {
 
 function formatRelativeTime(timestamp: string): string {
   if (!timestamp) return "";
-  const diffMs = Date.now() - new Date(timestamp).getTime();
+  const diffMs = Temporal.Now.instant().epochMilliseconds -
+    new Date(timestamp).getTime();
   const mins = Math.floor(diffMs / 60000);
   const hours = Math.floor(diffMs / 3600000);
   const days = Math.floor(diffMs / 86400000);
@@ -131,16 +132,14 @@ const formatFrequencyFromList = lift((list: Occurrence[]): string => {
 
 // ===== Handlers =====
 
-// TODO(future): Replace Date.now()/new Date() with proper time service when available.
-// Date.now() will be blocked in patterns in the future. The wish("#now") mechanism
-// only captures time once at pattern creation, so it doesn't work for fresh timestamps
-// in handlers. When a handler-compatible time service is available (e.g., clock builtin
-// or transaction timestamp), update these handlers to use it instead.
+// NOTE: Using Temporal.Now.instant() for timestamps since Date.now()/new Date() are
+// tamed by SES lockdown. When a handler-compatible time service is available (e.g.,
+// clock builtin or transaction timestamp), consider updating these handlers to use it.
 
 const recordNow = handler<unknown, { occurrences: Writable<Occurrence[]> }>(
   (_, { occurrences }) => {
     occurrences.push({
-      timestamp: new Date().toISOString(),
+      timestamp: Temporal.Now.instant().toString(),
       note: "",
     });
   },
@@ -163,7 +162,7 @@ const handleRecordNow = handler<
   { note?: string; result?: Writable<unknown> },
   { occurrences: Writable<Occurrence[]>; label: string }
 >(({ note, result }, { occurrences, label }) => {
-  const timestamp = new Date().toISOString();
+  const timestamp = Temporal.Now.instant().toString();
 
   occurrences.push({
     timestamp,

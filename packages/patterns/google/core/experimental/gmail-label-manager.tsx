@@ -223,7 +223,7 @@ const confirmOperation = handler<
       result.set({
         success: true,
         messageCount: op.messageIds.length,
-        timestamp: new Date().toISOString(),
+        timestamp: Temporal.Now.instant().toString(),
       });
 
       pendingOp.set(null);
@@ -236,7 +236,7 @@ const confirmOperation = handler<
         success: false,
         messageCount: op.messageIds.length,
         error: error instanceof Error ? error.message : String(error),
-        timestamp: new Date().toISOString(),
+        timestamp: Temporal.Now.instant().toString(),
       });
     } finally {
       processing.set(false);

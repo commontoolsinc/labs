@@ -1,5 +1,42 @@
 import * as __ctHelpers from "commontools";
 import { Cell, cell, handler, ifElse, lift, NAME, navigateTo, OpaqueRef, recipe, UI, } from "commontools";
+const __handler_0 = handler(true as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        cellRef: {
+            type: "array",
+            items: true,
+            asCell: true
+        }
+    },
+    required: ["cellRef"]
+} as const satisfies __ctHelpers.JSONSchema, (_, { cellRef }) => {
+    // Create isInitialized cell for this charm addition
+    const isInitialized = cell(false, {
+        type: "boolean"
+    } as const satisfies __ctHelpers.JSONSchema);
+    // Create the charm
+    const charm = SimpleRecipe({});
+    // Store the charm in the array and navigate
+    return addCharmAndNavigate({ charm, cellRef, isInitialized });
+});
+const __handler_2 = handler(true as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        charm: true
+    },
+    required: ["charm"]
+} as const satisfies __ctHelpers.JSONSchema, (_, { charm }) => {
+    console.log("goToCharm clicked");
+    return navigateTo(charm);
+});
+const __lift_0 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        charm: true
+    },
+    required: ["charm"]
+} as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, ({ charm }) => charm[NAME] || "Unnamed");
 // the simple charm (to which we'll store references within a cell)
 const SimpleRecipe = recipe(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
@@ -175,37 +212,9 @@ const addCharmAndNavigate = lift({
     return undefined;
 });
 // Create a new SimpleRecipe and add it to the array
-const createSimpleRecipe = handler(true as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        cellRef: {
-            type: "array",
-            items: true,
-            asCell: true
-        }
-    },
-    required: ["cellRef"]
-} as const satisfies __ctHelpers.JSONSchema, (_, { cellRef }) => {
-    // Create isInitialized cell for this charm addition
-    const isInitialized = cell(false, {
-        type: "boolean"
-    } as const satisfies __ctHelpers.JSONSchema);
-    // Create the charm
-    const charm = SimpleRecipe({});
-    // Store the charm in the array and navigate
-    return addCharmAndNavigate({ charm, cellRef, isInitialized });
-});
+const createSimpleRecipe = __handler_0;
 // Handler to navigate to a specific charm from the list
-const goToCharm = handler(true as const satisfies __ctHelpers.JSONSchema, {
-    type: "object",
-    properties: {
-        charm: true
-    },
-    required: ["charm"]
-} as const satisfies __ctHelpers.JSONSchema, (_, { charm }) => {
-    console.log("goToCharm clicked");
-    return navigateTo(charm);
-});
+const goToCharm = __handler_2;
 // create the named cell inside the recipe body, so we do it just once
 export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
     type: "object",
@@ -587,13 +596,7 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
                 required: ["index"]
             } as const satisfies __ctHelpers.JSONSchema, {
                 type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}: {__ctHelpers.derive({
-                type: "object",
-                properties: {
-                    charm: true
-                },
-                required: ["charm"]
-            } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, { charm: charm }, ({ charm }) => charm[NAME] || "Unnamed")}</span>
+            } as const satisfies __ctHelpers.JSONSchema, { index: index }, ({ index }) => index + 1)}: {__lift_0({ charm: charm })}</span>
               </li>)), {})}
           </ul>)}
 

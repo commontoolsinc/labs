@@ -1,5 +1,31 @@
 import * as __ctHelpers from "commontools";
 import { lift } from "commontools";
+const __lift_0 = lift({
+    type: "object",
+    properties: {
+        name: {
+            type: "string"
+        },
+        age: {
+            type: "number"
+        }
+    },
+    required: ["name", "age"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        name: {
+            type: "string"
+        },
+        birthYear: {
+            type: "number"
+        }
+    },
+    required: ["name", "birthYear"]
+} as const satisfies __ctHelpers.JSONSchema, (person: Person): PersonWithYear => ({
+    name: person.name,
+    birthYear: currentYear - person.age,
+}));
 interface Person {
     name: string;
     age: number;
@@ -10,32 +36,7 @@ interface PersonWithYear {
 }
 const currentYear = 2024;
 export const result = (<div>
-    {lift({
-        type: "object",
-        properties: {
-            name: {
-                type: "string"
-            },
-            age: {
-                type: "number"
-            }
-        },
-        required: ["name", "age"]
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "object",
-        properties: {
-            name: {
-                type: "string"
-            },
-            birthYear: {
-                type: "number"
-            }
-        },
-        required: ["name", "birthYear"]
-    } as const satisfies __ctHelpers.JSONSchema, (person: Person): PersonWithYear => ({
-        name: person.name,
-        birthYear: currentYear - person.age,
-    }))}
+    {__lift_0}
   </div>);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __ctHelpers.h.apply(null, args); }

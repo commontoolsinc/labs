@@ -254,7 +254,9 @@ export class GmailClient {
   async fetchBatch(messages: { id: string }[]): Promise<any[]> {
     if (messages.length === 0) return [];
 
-    const boundary = `batch_${Math.random().toString(36).substring(2)}`;
+    const boundary = `batch_${
+      crypto.randomUUID().replace(/-/g, "").substring(0, 12)
+    }`;
     debugLog(this.debugMode, `Processing batch of ${messages.length} messages`);
 
     const batchBody = messages
@@ -393,7 +395,9 @@ Accept: application/json
       return results;
     }
 
-    const boundary = `batch_${Math.random().toString(36).substring(2)}`;
+    const boundary = `batch_${
+      crypto.randomUUID().replace(/-/g, "").substring(0, 12)
+    }`;
     debugLog(
       this.debugMode,
       `Processing attachment batch of ${attachments.length} items`,

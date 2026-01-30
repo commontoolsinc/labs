@@ -46,7 +46,7 @@ const incrementHandler = handler<
   counter.set(counter.get() + 1);
 
   // Add timestamp to log
-  const timestamp = new Date().toISOString();
+  const timestamp = Temporal.Now.instant().toString();
   const log = invocationLog.get();
   invocationLog.set([...log, `Invoked at ${timestamp}`]);
 });

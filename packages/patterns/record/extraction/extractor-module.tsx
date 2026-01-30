@@ -941,7 +941,7 @@ const dismiss = handler<
   parentSubPieces.set(current.filter((e) => e?.type !== "extractor"));
   parentTrashedSubPieces.push({
     ...selfEntry,
-    trashedAt: new Date().toISOString(),
+    trashedAt: Temporal.Now.instant().toString(),
   });
 });
 
@@ -1627,7 +1627,7 @@ const applySelected = handler<
         if (entry) {
           parentTrashedSubPiecesCell.push({
             ...entry,
-            trashedAt: new Date().toISOString(),
+            trashedAt: Temporal.Now.instant().toString(),
           });
         }
       }

@@ -1,5 +1,50 @@
 import * as __ctHelpers from "commontools";
 import { cell, derive } from "commontools";
+const __lift_0 = __ctHelpers.lift({
+    type: "object",
+    properties: {
+        numbers: {
+            type: "array",
+            items: {
+                type: "number"
+            },
+            asCell: true
+        },
+        multiplier: {
+            type: "number",
+            asCell: true
+        }
+    },
+    required: ["numbers", "multiplier"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "array",
+    items: {
+        type: "number"
+    },
+    asOpaque: true
+} as const satisfies __ctHelpers.JSONSchema, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__ctHelpers.recipe({
+    type: "object",
+    properties: {
+        element: {
+            type: "number"
+        },
+        params: {
+            type: "object",
+            properties: {
+                multiplier: {
+                    type: "number",
+                    asCell: true
+                }
+            },
+            required: ["multiplier"]
+        }
+    },
+    required: ["element", "params"]
+} as const satisfies __ctHelpers.JSONSchema, {
+    type: "number"
+} as const satisfies __ctHelpers.JSONSchema, ({ element: n, params: { multiplier } }) => n * multiplier.get()), {
+    multiplier: multiplier
+}));
 export default function TestDerive() {
     const numbers = cell([1, 2, 3], {
         type: "array",
@@ -11,54 +56,10 @@ export default function TestDerive() {
         type: "number"
     } as const satisfies __ctHelpers.JSONSchema);
     // Nested callback - inner array map should not capture outer multiplier
-    const result = __ctHelpers.derive({
-        type: "object",
-        properties: {
-            numbers: {
-                type: "array",
-                items: {
-                    type: "number"
-                },
-                asCell: true
-            },
-            multiplier: {
-                type: "number",
-                asCell: true
-            }
-        },
-        required: ["numbers", "multiplier"]
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "number"
-        },
-        asOpaque: true
-    } as const satisfies __ctHelpers.JSONSchema, {
+    const result = __lift_0({
         numbers,
         multiplier: multiplier
-    }, ({ numbers: nums, multiplier }) => nums.mapWithPattern(__ctHelpers.recipe({
-        type: "object",
-        properties: {
-            element: {
-                type: "number"
-            },
-            params: {
-                type: "object",
-                properties: {
-                    multiplier: {
-                        type: "number",
-                        asCell: true
-                    }
-                },
-                required: ["multiplier"]
-            }
-        },
-        required: ["element", "params"]
-    } as const satisfies __ctHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __ctHelpers.JSONSchema, ({ element: n, params: { multiplier } }) => n * multiplier.get()), {
-        multiplier: multiplier
-    }));
+    });
     return result;
 }
 // @ts-ignore: Internals

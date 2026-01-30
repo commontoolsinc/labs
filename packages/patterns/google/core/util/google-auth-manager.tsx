@@ -419,7 +419,7 @@ export const GoogleAuthManager = pattern<
 
       // Check token expiry
       const tokenExpiresAt = authData?.expiresAt || null;
-      const now = Date.now();
+      const now = Temporal.Now.instant().epochMilliseconds;
       const tokenTimeRemaining = tokenExpiresAt ? tokenExpiresAt - now : null;
       const isTokenExpired = tokenTimeRemaining !== null &&
         tokenTimeRemaining < 0;

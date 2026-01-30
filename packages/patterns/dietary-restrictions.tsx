@@ -1260,11 +1260,8 @@ function buildAutocompleteItems(): AutocompleteItem[] {
 }
 
 // Lazy-init singleton for autocomplete items (defers work until first use)
-let _cachedAutocompleteItems: AutocompleteItem[] | null = null;
+const _cachedAutocompleteItems = buildAutocompleteItems();
 function getAutocompleteItems(): AutocompleteItem[] {
-  if (!_cachedAutocompleteItems) {
-    _cachedAutocompleteItems = buildAutocompleteItems();
-  }
   return _cachedAutocompleteItems;
 }
 

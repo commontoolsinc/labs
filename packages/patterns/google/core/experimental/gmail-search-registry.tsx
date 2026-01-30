@@ -105,16 +105,14 @@ const submitQuery = handler<
   }
 
   // Create new query entry and push to array
-  const queryId = `query-${Date.now()}-${
-    Math.random().toString(36).slice(2, 8)
-  }`;
+  const queryId = crypto.randomUUID();
   state.queries.push({
     id: queryId,
     agentTypeUrl: input.agentTypeUrl,
     query: input.query,
     description: input.description || "",
     submittedBy: input.submittedBy || "",
-    submittedAt: Date.now(),
+    submittedAt: Temporal.Now.instant().epochMilliseconds,
     upvotes: 0,
     downvotes: 0,
     lastValidated: 0,
@@ -136,7 +134,7 @@ const upvoteQuery = handler<
   const updatedQuery = {
     ...allQueries[queryIdx],
     upvotes: allQueries[queryIdx].upvotes + 1,
-    lastValidated: Date.now(),
+    lastValidated: Temporal.Now.instant().epochMilliseconds,
   };
 
   state.queries.set([

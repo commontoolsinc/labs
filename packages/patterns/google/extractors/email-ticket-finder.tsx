@@ -446,7 +446,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     const ticketMap = new Map<string, TrackedTicket>();
 
     // Create a single reference date for deterministic calculations
-    const today = new Date();
+    const today = new Date(Temporal.Now.instant().epochMilliseconds);
     today.setHours(0, 0, 0, 0);
 
     // Sort emails by date (newest first) so we keep most recent data

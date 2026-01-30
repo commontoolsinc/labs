@@ -124,8 +124,8 @@ export function calculateAge(
 ): number | null {
   if (!birthYear) return null;
 
-  const today = new Date();
-  const currentYear = today.getFullYear();
+  const today = Temporal.Now.plainDateISO();
+  const currentYear = today.year;
   let age = currentYear - birthYear;
 
   // If we have MM-DD or YYYY-MM-DD, check if birthday has passed this year
@@ -133,12 +133,12 @@ export function calculateAge(
     const match = birthDate.match(/(\d{2})-(\d{2})$/);
     if (match) {
       const [, month, day] = match;
-      const birthdayThisYear = new Date(
-        currentYear,
-        parseInt(month) - 1,
-        parseInt(day),
-      );
-      if (today < birthdayThisYear) {
+      const birthdayThisYear = Temporal.PlainDate.from({
+        year: currentYear,
+        month: parseInt(month),
+        day: parseInt(day),
+      });
+      if (Temporal.PlainDate.compare(today, birthdayThisYear) < 0) {
         age--;
       }
     }

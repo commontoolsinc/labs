@@ -258,7 +258,7 @@ export function processBills(
   isDemoMode: boolean,
 ): TrackedBill[] {
   const billMap: Record<string, TrackedBill> = {};
-  const today = new Date();
+  const today = new Date(Temporal.Now.instant().epochMilliseconds);
   today.setHours(0, 0, 0, 0);
 
   const sortedAnalyses = [...(rawAnalyses || [])]
@@ -410,7 +410,7 @@ function BillExtractor(input: BillExtractorInput): BillExtractorOutput {
     const paidKeys = manuallyPaid?.get() || [];
     const payments = paymentConfirmations || {};
     const isDemoMode = demoMode?.get() ?? true;
-    const today = new Date();
+    const today = new Date(Temporal.Now.instant().epochMilliseconds);
     today.setHours(0, 0, 0, 0);
 
     const sortedAnalyses = [...(extractor.rawAnalyses || [])]

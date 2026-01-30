@@ -55,7 +55,7 @@ const updateViaComputed = handler<
   const current = computedAuth.get();
   computedAuth.set({
     ...current,
-    token: "updated-via-computed-" + Date.now(),
+    token: "updated-via-computed-" + Temporal.Now.instant().epochMilliseconds,
     refreshCount: current.refreshCount + 1,
   });
 });
@@ -69,7 +69,7 @@ const updateViaKey = handler<
   const current = authViaKey.get();
   authViaKey.set({
     ...current,
-    token: "updated-via-key-" + Date.now(),
+    token: "updated-via-key-" + Temporal.Now.instant().epochMilliseconds,
     refreshCount: current.refreshCount + 1,
   });
 });
@@ -85,7 +85,7 @@ const updateDirect = handler<
     ...current,
     auth: {
       ...current.auth,
-      token: "updated-direct-" + Date.now(),
+      token: "updated-direct-" + Temporal.Now.instant().epochMilliseconds,
       refreshCount: current.auth.refreshCount + 1,
     },
   });
