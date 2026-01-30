@@ -15,7 +15,7 @@ import type {
   MemorySpace,
 } from "../storage/interface.ts";
 import type { EntityId } from "../create-ref.ts";
-import { type JSONSchema, type Recipe, UI } from "../builder/types.ts";
+import { type JSONSchema, NAME, type Recipe, UI } from "../builder/types.ts";
 import { getRecipeEnvironment } from "../env.ts";
 
 const WISH_TSX_PATH = getRecipeEnvironment().apiUrl +
@@ -91,6 +91,7 @@ type WishContext = {
   tx: IExtendedStorageTransaction;
   parentCell: Cell<any>;
   spaceCell?: Cell<unknown>;
+  scope?: ("~" | "." | string)[];
 };
 
 type BaseResolution = {
@@ -281,65 +282,111 @@ function resolveBase(
         return [{ cell: baseCell }];
       }
 
-      // Hash tag: Look for exact matches in favorites.
+      // Hash tag: search based on scope
       if (parsed.key.startsWith("#")) {
-        // Unknown tag = search favorites by tag
-        const userDID = ctx.runtime.userIdentityDID;
-        if (!userDID) {
-          throw new WishError(
-            "User identity DID not available for favorites search",
-          );
-        }
-
-        const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
-        const favoritesCell = homeSpaceCell.key("defaultPattern").key(
-          "favorites",
-        )
-          .asSchema(
-            favoriteListSchema,
-          );
-        const favorites = favoritesCell.get() || [];
-
-        // Match hash tags in userTags or tag field (the schema), all lowercase.
-        // If tag is empty, try to compute it lazily from the cell's schema.
-        // This handles existing favorites that were saved before schema was synced.
         const searchTerm = parsed.key.toLowerCase(); // e.g., "#my-tag"
         const searchTermWithoutHash = searchTerm.slice(1); // e.g., "my-tag"
-        const matches = favorites.filter((entry) => {
-          // Check userTags first (stored without # prefix)
-          const userTags = entry.userTags ?? [];
-          for (const t of userTags) {
-            if (t.toLowerCase() === searchTermWithoutHash) return true;
+        const allMatches: BaseResolution[] = [];
+
+        // Determine what to search based on scope
+        // Default (no scope) = favorites only for backward compatibility
+        const searchFavorites = !ctx.scope || ctx.scope.includes("~");
+        const searchMentionables = ctx.scope?.includes(".");
+
+        // Search favorites if in scope
+        if (searchFavorites) {
+          const userDID = ctx.runtime.userIdentityDID;
+          if (userDID) {
+            const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
+            const favoritesCell = homeSpaceCell.key("defaultPattern").key(
+              "favorites",
+            )
+              .asSchema(
+                favoriteListSchema,
+              );
+            const favorites = favoritesCell.get() || [];
+
+            const matches = favorites.filter((entry) => {
+              // Check userTags first (stored without # prefix)
+              const userTags = entry.userTags ?? [];
+              for (const t of userTags) {
+                if (t.toLowerCase() === searchTermWithoutHash) return true;
+              }
+
+              // Fall back to tag field (schema-based hashtag search)
+              let tag = entry.tag;
+
+              // Fallback: compute tag lazily if not stored
+              if (!tag) {
+                try {
+                  const { schema } = entry.cell.asSchemaFromLinks()
+                    .getAsNormalizedFullLink();
+                  if (schema !== undefined) {
+                    tag = JSON.stringify(schema);
+                  }
+                } catch {
+                  // Schema not available yet
+                }
+              }
+
+              const hashtags = tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ??
+                [];
+              return [...hashtags].some((m) => m[1] === searchTermWithoutHash);
+            });
+
+            for (const match of matches) {
+              allMatches.push({ cell: match.cell, pathPrefix: parsed.path });
+            }
           }
+        }
 
-          // Fall back to tag field (schema-based hashtag search)
-          let tag = entry.tag;
+        // Search mentionables if in scope
+        if (searchMentionables) {
+          const mentionableCell = getSpaceCell(ctx)
+            .key("defaultPattern")
+            .key("backlinksIndex")
+            .key("mentionable");
+          const mentionables = mentionableCell.get() || [];
 
-          // Fallback: compute tag lazily if not stored
-          if (!tag) {
+          const matches = mentionables.filter((piece: any) => {
+            if (!piece) return false;
+
+            // Check [NAME] field for exact match
+            const name = piece[NAME]?.toLowerCase() ?? "";
+            if (name === searchTermWithoutHash) return true;
+
+            // Compute schema tag lazily
+            let tag: string | undefined;
             try {
-              const { schema } = entry.cell.asSchemaFromLinks()
-                .getAsNormalizedFullLink();
+              const { schema } = piece.asSchemaFromLinks?.()
+                ?.getAsNormalizedFullLink() ?? {};
               if (schema !== undefined) {
                 tag = JSON.stringify(schema);
               }
             } catch {
               // Schema not available yet
             }
+
+            const hashtags = tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ??
+              [];
+            return [...hashtags].some((m) => m[1] === searchTermWithoutHash);
+          });
+
+          for (const match of matches) {
+            allMatches.push({ cell: match, pathPrefix: parsed.path });
           }
-
-          const hashtags = tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ?? [];
-          return [...hashtags].some((m) => m[1] === searchTermWithoutHash);
-        });
-
-        if (matches.length === 0) {
-          throw new WishError(`No favorite found matching "${searchTerm}"`);
         }
 
-        return matches.map((match) => ({
-          cell: match.cell,
-          pathPrefix: parsed.path,
-        }));
+        if (allMatches.length === 0) {
+          const scopeDesc = searchFavorites && searchMentionables
+            ? "favorites or mentionables"
+            : searchMentionables
+            ? "mentionables"
+            : "favorites";
+          throw new WishError(`No ${scopeDesc} found matching "${searchTerm}"`);
+        }
+
+        return allMatches;
       }
 
       throw new WishError(`Wish target "${parsed.key}" is not recognized.`);
@@ -595,8 +642,7 @@ export function wish(
       }
       return;
     } else if (typeof targetValue === "object") {
-      const { query, path, schema, context, scope: _scope } =
-        targetValue as WishParams;
+      const { query, path, schema, context, scope } = targetValue as WishParams;
 
       if (query === undefined || query === null || query === "") {
         const errorMsg = `Wish target "${
@@ -616,7 +662,7 @@ export function wish(
             key: query as WishTag,
             path: path ?? [],
           };
-          const ctx: WishContext = { runtime, tx, parentCell };
+          const ctx: WishContext = { runtime, tx, parentCell, scope };
           const baseResolutions = resolveBase(parsed, ctx);
           const resultCells = baseResolutions.map((baseResolution) => {
             const combinedPath = baseResolution.pathPrefix
