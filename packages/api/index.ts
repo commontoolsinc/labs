@@ -1641,6 +1641,10 @@ export type WishParams = {
   path?: string[];
   context?: Record<string, any>;
   schema?: JSONSchema;
+  /**
+   * Search scope for hashtag queries: "~" = favorites (home), "." = mentionables (current space).
+   * Default (undefined) = favorites only for backward compatibility.
+   */
   scope?: (DID | "~" | ".")[];
 };
 
