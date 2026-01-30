@@ -15,15 +15,20 @@ export type SigilValue<T> = { "/": T };
 
 export const LINK_V1_TAG = "link@1" as const;
 
+/**
+ * Inner value of a LinkV1 sigil (the object at the LINK_V1_TAG key)
+ */
+export type LinkV1Inner = {
+  id?: URI;
+  path?: readonly string[];
+  space?: MemorySpace;
+  schema?: JSONSchema;
+  rootSchema?: JSONSchema;
+  overwrite?: "redirect" | "this"; // default is "this"
+};
+
 export type LinkV1 = {
-  [LINK_V1_TAG]: {
-    id?: URI;
-    path?: readonly string[];
-    space?: MemorySpace;
-    schema?: JSONSchema;
-    rootSchema?: JSONSchema;
-    overwrite?: "redirect" | "this"; // default is "this"
-  };
+  [LINK_V1_TAG]: LinkV1Inner;
 };
 
 export type WriteRedirectV1 = LinkV1 & {

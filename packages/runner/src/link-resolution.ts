@@ -1,7 +1,6 @@
 import { isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
-import type { StorableObject } from "@commontools/memory/interface";
-import { LINK_V1_TAG } from "./sigil-types.ts";
+import { LINK_V1_TAG, type LinkV1Inner } from "./sigil-types.ts";
 import {
   type CellLink,
   type NormalizedFullLink,
@@ -107,7 +106,7 @@ export function resolveLink(
       isRecord(sigilProbe.ok.value) &&
       lastNode !== "top" &&
       (lastNode !== "writeRedirect" ||
-        (sigilProbe.ok.value as StorableObject).overwrite === "redirect")
+        (sigilProbe.ok.value as LinkV1Inner).overwrite === "redirect")
     ) {
       // Read the full value at this path to ensure correct reactivity logging
       // (we need to be reactive to siblings that could invalidate the link)
