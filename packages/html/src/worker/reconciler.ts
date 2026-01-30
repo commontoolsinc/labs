@@ -350,8 +350,9 @@ export class WorkerReconciler {
             new Set(),
           );
         }
+        return;
       }
-      return;
+      // sanitized is null (e.g., script tag) - fall through to Case 2 to remove
     }
 
     // Case 2: Different type, text node, array, or no previous - destroy and recreate
@@ -453,12 +454,11 @@ export class WorkerReconciler {
           ctx.unregisterHandler(state.eventHandlers.get(key)!);
           state.eventHandlers.delete(key);
         }
-        // Send remove op (set to null/undefined)
+        // Send remove op
         this.queueOps([{
-          op: "set-prop",
+          op: "remove-prop",
           nodeId: state.nodeId,
           key,
-          value: null,
         }]);
       }
     }
@@ -528,10 +528,9 @@ export class WorkerReconciler {
       }
       if (key !== "__cellProps__") {
         this.queueOps([{
-          op: "set-prop",
+          op: "remove-prop",
           nodeId: state.nodeId,
           key,
-          value: null,
         }]);
       }
     }
