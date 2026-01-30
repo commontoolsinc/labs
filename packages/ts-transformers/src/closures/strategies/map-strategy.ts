@@ -355,7 +355,6 @@ function createRecipeCallWithParams(
 
   // Register the result type for the mapWithPattern call so schema injection
   // can find it when this call is used inside ifElse branches
-  const typeRegistry = context.options.typeRegistry;
   if (typeRegistry) {
     // The result type of mapWithPattern is the same as the original map call
     const mapResultType = context.checker.getTypeAtLocation(mapCall);

@@ -73,7 +73,85 @@ export default pattern(({ items, showInactive }) => {
         {__ctHelpers.ifElse({
             type: "boolean",
             asOpaque: true
-        } as const satisfies __ctHelpers.JSONSchema, true as const satisfies __ctHelpers.JSONSchema, {
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "array",
+            items: {
+                $ref: "#/$defs/UIRenderable"
+            },
+            asOpaque: true,
+            $defs: {
+                UIRenderable: {
+                    type: "object",
+                    properties: {
+                        $UI: {
+                            $ref: "#/$defs/VNode"
+                        }
+                    },
+                    required: ["$UI"]
+                },
+                VNode: {
+                    type: "object",
+                    properties: {
+                        type: {
+                            type: "string"
+                        },
+                        name: {
+                            type: "string"
+                        },
+                        props: {
+                            $ref: "#/$defs/Props"
+                        },
+                        children: {
+                            $ref: "#/$defs/RenderNode"
+                        },
+                        $UI: {
+                            $ref: "#/$defs/VNode"
+                        }
+                    },
+                    required: ["type", "name", "props"]
+                },
+                RenderNode: {
+                    anyOf: [{
+                            type: "string"
+                        }, {
+                            type: "number"
+                        }, {
+                            type: "boolean"
+                        }, {}, {
+                            type: "object",
+                            properties: {}
+                        }, {
+                            type: "array",
+                            items: {
+                                $ref: "#/$defs/RenderNode"
+                            }
+                        }, {
+                            type: "null"
+                        }]
+                },
+                Props: {
+                    type: "object",
+                    properties: {},
+                    additionalProperties: {
+                        anyOf: [{
+                                type: "string"
+                            }, {
+                                type: "number"
+                            }, {
+                                type: "boolean"
+                            }, {
+                                type: "object",
+                                additionalProperties: true
+                            }, {
+                                type: "array",
+                                items: true
+                            }, {}, {
+                                type: "null"
+                            }]
+                    }
+                }
+            }
+        } as const satisfies __ctHelpers.JSONSchema, {
             anyOf: [{}, {
                     type: "object",
                     properties: {}
