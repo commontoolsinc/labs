@@ -15,38 +15,21 @@ function createJsxTestProgram(jsxSource: string) {
 declare function handler<E, S>(fn: (event: E, state: S) => void): (state: S) => void;
 declare const state: { count: number };
 
-// Promise type declaration (needed for noLib: true environment)
-interface Promise<T> {
-  then<TResult1 = T, TResult2 = never>(
-    onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null,
-    onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null
-  ): Promise<TResult1 | TResult2>;
-}
-interface PromiseLike<T> {
-  then<TResult1 = T, TResult2 = never>(
-    onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null,
-    onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null
-  ): PromiseLike<TResult1 | TResult2>;
-}
-
 // Custom component with typed callback prop
 interface CustomButtonProps {
-  // Handlers (0-1 params, void/boolean/Promise<void|boolean> return)
+  // Function props (all treated as handlers in Common Tools JSX)
   callback: () => void;
   asyncCallback: () => Promise<void>;
-  toggle: () => boolean;                          // boolean return = handler
-  asyncToggle: () => Promise<boolean>;            // Promise<boolean> = handler
-  eventHandler: (event: MouseEvent) => void;      // 1 param = handler
-  unionReturn: () => void | boolean;              // union return = handler
-  asyncUnionReturn: () => Promise<void | boolean>; // Promise<union> = handler
+  toggle: () => boolean;
+  eventHandler: (event: MouseEvent) => void;
+  mapper: (item: number) => string;
+  renderItem: (item: number) => any;
+  twoParamHandler: (event: MouseEvent, ctx: any) => void;
+  reducer: (acc: number, item: number, index: number) => number;
 
-  // Non-handlers (data transformers or too many params)
+  // Non-function props
   label: string;
-  mapper: (item: number) => string;               // returns data
-  renderItem: (item: number) => any;              // returns renderable
-  twoParamHandler: (event: MouseEvent, ctx: any) => void; // 2 params = NOT handler
-  reducer: (acc: number, item: number, index: number) => number; // 3 params
-  unionWithData: () => void | string;             // union with data type = NOT handler
+  count: number;
 }
 declare function CustomButton(props: CustomButtonProps): JSX.Element;
 
@@ -72,6 +55,7 @@ declare namespace JSX {
 
 declare class MouseEvent {}
 declare class Event {}
+declare class Promise<T> {}
 
 // Test JSX
 const element = ${jsxSource};
@@ -134,243 +118,76 @@ function findJsxAttribute(
 // Tests for isEventHandlerType
 // =============================================================================
 
-Deno.test("isEventHandlerType - void return type is handler", () => {
+Deno.test("isEventHandlerType - any function type is a handler", () => {
   const { checker, sourceFile } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} unionReturn={() => {}} asyncUnionReturn={async () => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} twoParamHandler={(e, ctx) => {}} reducer={(acc, item, idx) => acc + item} unionWithData={() => {}} />`,
+    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} eventHandler={(e) => {}} label="test" count={1} mapper={(n) => String(n)} renderItem={(n) => n} twoParamHandler={(e, ctx) => {}} reducer={(acc, item, idx) => acc + item} />`,
   );
 
-  const callbackAttr = findJsxAttribute(sourceFile, "callback");
-  if (
-    !callbackAttr?.initializer || !ts.isJsxExpression(callbackAttr.initializer)
-  ) {
-    throw new Error("callback attribute not found");
+  // All function props should be detected as handlers
+  const functionProps = [
+    "callback",
+    "asyncCallback",
+    "toggle",
+    "eventHandler",
+    "mapper",
+    "renderItem",
+    "twoParamHandler",
+    "reducer",
+  ];
+
+  for (const propName of functionProps) {
+    const attr = findJsxAttribute(sourceFile, propName);
+    if (!attr?.initializer || !ts.isJsxExpression(attr.initializer)) {
+      throw new Error(`${propName} attribute not found`);
+    }
+
+    const expr = attr.initializer.expression!;
+    const contextualType = checker.getContextualType(expr);
+
+    if (!contextualType) {
+      throw new Error(`No contextual type for ${propName}`);
+    }
+
+    assertEquals(
+      isEventHandlerType(contextualType, checker),
+      true,
+      `${propName} (function type) should be detected as handler`,
+    );
   }
-
-  const expr = callbackAttr.initializer.expression!;
-  const contextualType = checker.getContextualType(expr);
-
-  if (!contextualType) {
-    throw new Error("No contextual type for callback");
-  }
-
-  assertEquals(
-    isEventHandlerType(contextualType, checker),
-    true,
-    "() => void should be detected as handler type",
-  );
 });
 
-Deno.test("isEventHandlerType - Promise<void> return type is handler", () => {
+Deno.test("isEventHandlerType - non-function type is NOT a handler", () => {
   const { checker, sourceFile } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} unionReturn={() => {}} asyncUnionReturn={async () => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} twoParamHandler={(e, ctx) => {}} reducer={(acc, item, idx) => acc + item} unionWithData={() => {}} />`,
+    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} eventHandler={(e) => {}} label="test" count={1} mapper={(n) => String(n)} renderItem={(n) => n} twoParamHandler={(e, ctx) => {}} reducer={(acc, item, idx) => acc + item} />`,
   );
 
-  const asyncCallbackAttr = findJsxAttribute(sourceFile, "asyncCallback");
-  if (
-    !asyncCallbackAttr?.initializer ||
-    !ts.isJsxExpression(asyncCallbackAttr.initializer)
-  ) {
-    throw new Error("asyncCallback attribute not found");
+  // Non-function props should NOT be detected as handlers
+  const nonFunctionProps = ["label", "count"];
+
+  for (const propName of nonFunctionProps) {
+    const attr = findJsxAttribute(sourceFile, propName);
+    if (!attr?.initializer) {
+      throw new Error(`${propName} attribute not found`);
+    }
+
+    // For string/number literals, get the type of the initializer
+    let type: ts.Type | undefined;
+    if (ts.isJsxExpression(attr.initializer) && attr.initializer.expression) {
+      type = checker.getContextualType(attr.initializer.expression);
+    } else if (ts.isStringLiteral(attr.initializer)) {
+      type = checker.getTypeAtLocation(attr.initializer);
+    }
+
+    if (!type) {
+      throw new Error(`No type for ${propName}`);
+    }
+
+    assertEquals(
+      isEventHandlerType(type, checker),
+      false,
+      `${propName} (non-function type) should NOT be detected as handler`,
+    );
   }
-
-  const expr = asyncCallbackAttr.initializer.expression!;
-  const contextualType = checker.getContextualType(expr);
-
-  if (!contextualType) {
-    throw new Error("No contextual type for asyncCallback");
-  }
-
-  assertEquals(
-    isEventHandlerType(contextualType, checker),
-    true,
-    "() => Promise<void> should be detected as handler type",
-  );
-});
-
-Deno.test("isEventHandlerType - non-void return type is NOT handler", () => {
-  const { checker, sourceFile } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} unionReturn={() => {}} asyncUnionReturn={async () => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} twoParamHandler={(e, ctx) => {}} reducer={(acc, item, idx) => acc + item} unionWithData={() => {}} />`,
-  );
-
-  const mapperAttr = findJsxAttribute(sourceFile, "mapper");
-  if (!mapperAttr?.initializer || !ts.isJsxExpression(mapperAttr.initializer)) {
-    throw new Error("mapper attribute not found");
-  }
-
-  const expr = mapperAttr.initializer.expression!;
-  const contextualType = checker.getContextualType(expr);
-
-  if (!contextualType) {
-    throw new Error("No contextual type for mapper");
-  }
-
-  assertEquals(
-    isEventHandlerType(contextualType, checker),
-    false,
-    "(n: number) => string should NOT be detected as handler type",
-  );
-});
-
-Deno.test("isEventHandlerType - boolean return type IS handler (0 params)", () => {
-  const { checker, sourceFile } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} unionReturn={() => {}} asyncUnionReturn={async () => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} twoParamHandler={(e, ctx) => {}} reducer={(acc, item, idx) => acc + item} unionWithData={() => {}} />`,
-  );
-
-  const toggleAttr = findJsxAttribute(sourceFile, "toggle");
-  if (
-    !toggleAttr?.initializer ||
-    !ts.isJsxExpression(toggleAttr.initializer)
-  ) {
-    throw new Error("toggle attribute not found");
-  }
-
-  const expr = toggleAttr.initializer.expression!;
-  const contextualType = checker.getContextualType(expr);
-
-  if (!contextualType) {
-    throw new Error("No contextual type for toggle");
-  }
-
-  assertEquals(
-    isEventHandlerType(contextualType, checker),
-    true,
-    "() => boolean should be detected as handler type",
-  );
-});
-
-Deno.test("isEventHandlerType - Promise<boolean> return type IS handler", () => {
-  const { checker, sourceFile } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} unionReturn={() => {}} asyncUnionReturn={async () => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} twoParamHandler={(e, ctx) => {}} reducer={(acc, item, idx) => acc + item} unionWithData={() => {}} />`,
-  );
-
-  const asyncToggleAttr = findJsxAttribute(sourceFile, "asyncToggle");
-  if (
-    !asyncToggleAttr?.initializer ||
-    !ts.isJsxExpression(asyncToggleAttr.initializer)
-  ) {
-    throw new Error("asyncToggle attribute not found");
-  }
-
-  const expr = asyncToggleAttr.initializer.expression!;
-  const contextualType = checker.getContextualType(expr);
-
-  if (!contextualType) {
-    throw new Error("No contextual type for asyncToggle");
-  }
-
-  assertEquals(
-    isEventHandlerType(contextualType, checker),
-    true,
-    "() => Promise<boolean> should be detected as handler type",
-  );
-});
-
-Deno.test("isEventHandlerType - union return (void | boolean) IS handler", () => {
-  const { checker, sourceFile } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} unionReturn={() => {}} asyncUnionReturn={async () => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} twoParamHandler={(e, ctx) => {}} reducer={(acc, item, idx) => acc + item} unionWithData={() => {}} />`,
-  );
-
-  const unionReturnAttr = findJsxAttribute(sourceFile, "unionReturn");
-  if (
-    !unionReturnAttr?.initializer ||
-    !ts.isJsxExpression(unionReturnAttr.initializer)
-  ) {
-    throw new Error("unionReturn attribute not found");
-  }
-
-  const expr = unionReturnAttr.initializer.expression!;
-  const contextualType = checker.getContextualType(expr);
-
-  if (!contextualType) {
-    throw new Error("No contextual type for unionReturn");
-  }
-
-  assertEquals(
-    isEventHandlerType(contextualType, checker),
-    true,
-    "() => void | boolean should be detected as handler type",
-  );
-});
-
-Deno.test("isEventHandlerType - union with data type (void | string) is NOT handler", () => {
-  const { checker, sourceFile } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} unionReturn={() => {}} asyncUnionReturn={async () => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} twoParamHandler={(e, ctx) => {}} reducer={(acc, item, idx) => acc + item} unionWithData={() => {}} />`,
-  );
-
-  const unionWithDataAttr = findJsxAttribute(sourceFile, "unionWithData");
-  if (
-    !unionWithDataAttr?.initializer ||
-    !ts.isJsxExpression(unionWithDataAttr.initializer)
-  ) {
-    throw new Error("unionWithData attribute not found");
-  }
-
-  const expr = unionWithDataAttr.initializer.expression!;
-  const contextualType = checker.getContextualType(expr);
-
-  if (!contextualType) {
-    throw new Error("No contextual type for unionWithData");
-  }
-
-  assertEquals(
-    isEventHandlerType(contextualType, checker),
-    false,
-    "() => void | string should NOT be detected as handler (string is data)",
-  );
-});
-
-Deno.test("isEventHandlerType - 2 params is NOT handler", () => {
-  const { checker, sourceFile } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} unionReturn={() => {}} asyncUnionReturn={async () => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} twoParamHandler={(e, ctx) => {}} reducer={(acc, item, idx) => acc + item} unionWithData={() => {}} />`,
-  );
-
-  const twoParamAttr = findJsxAttribute(sourceFile, "twoParamHandler");
-  if (
-    !twoParamAttr?.initializer ||
-    !ts.isJsxExpression(twoParamAttr.initializer)
-  ) {
-    throw new Error("twoParamHandler attribute not found");
-  }
-
-  const expr = twoParamAttr.initializer.expression!;
-  const contextualType = checker.getContextualType(expr);
-
-  if (!contextualType) {
-    throw new Error("No contextual type for twoParamHandler");
-  }
-
-  assertEquals(
-    isEventHandlerType(contextualType, checker),
-    false,
-    "(event, ctx) => void should NOT be detected as handler (2+ params)",
-  );
-});
-
-Deno.test("isEventHandlerType - 3 params is NOT handler", () => {
-  const { checker, sourceFile } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} unionReturn={() => {}} asyncUnionReturn={async () => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} twoParamHandler={(e, ctx) => {}} reducer={(acc, item, idx) => acc + item} unionWithData={() => {}} />`,
-  );
-
-  const reducerAttr = findJsxAttribute(sourceFile, "reducer");
-  if (
-    !reducerAttr?.initializer ||
-    !ts.isJsxExpression(reducerAttr.initializer)
-  ) {
-    throw new Error("reducer attribute not found");
-  }
-
-  const expr = reducerAttr.initializer.expression!;
-  const contextualType = checker.getContextualType(expr);
-
-  if (!contextualType) {
-    throw new Error("No contextual type for reducer");
-  }
-
-  assertEquals(
-    isEventHandlerType(contextualType, checker),
-    false,
-    "(acc, item, idx) => number should NOT be detected as handler (3 params)",
-  );
 });
 
 // =============================================================================
@@ -432,60 +249,40 @@ Deno.test("isEventHandlerJsxAttribute - non-on attribute not detected (without c
 // Tests for isEventHandlerJsxAttribute - type-based detection
 // =============================================================================
 
-Deno.test("isEventHandlerJsxAttribute - callback detected by type (with checker)", () => {
+Deno.test("isEventHandlerJsxAttribute - function prop detected by type (with checker)", () => {
   const { sourceFile, checker } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} unionReturn={() => {}} asyncUnionReturn={async () => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} twoParamHandler={(e, ctx) => {}} reducer={(acc, item, idx) => acc + item} unionWithData={() => {}} />`,
+    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} eventHandler={(e) => {}} label="test" count={1} mapper={(n) => String(n)} renderItem={(n) => n} twoParamHandler={(e, ctx) => {}} reducer={(acc, item, idx) => acc + item} />`,
   );
 
-  const callbackAttr = findJsxAttribute(sourceFile, "callback");
-  if (!callbackAttr) {
-    throw new Error("callback attribute not found");
+  // All function props should be detected as handlers with checker
+  const functionProps = [
+    "callback",
+    "asyncCallback",
+    "toggle",
+    "eventHandler",
+    "mapper",
+    "renderItem",
+    "twoParamHandler",
+    "reducer",
+  ];
+
+  for (const propName of functionProps) {
+    const attr = findJsxAttribute(sourceFile, propName);
+    if (!attr) {
+      throw new Error(`${propName} attribute not found`);
+    }
+
+    assertEquals(
+      isEventHandlerJsxAttribute(attr, checker),
+      true,
+      `${propName} (function prop) should be detected as handler with checker`,
+    );
   }
-
-  assertEquals(
-    isEventHandlerJsxAttribute(callbackAttr, checker),
-    true,
-    "callback with () => void type should be detected as handler with checker",
-  );
-});
-
-Deno.test("isEventHandlerJsxAttribute - asyncCallback detected by type (with checker)", () => {
-  const { sourceFile, checker } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} unionReturn={() => {}} asyncUnionReturn={async () => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} twoParamHandler={(e, ctx) => {}} reducer={(acc, item, idx) => acc + item} unionWithData={() => {}} />`,
-  );
-
-  const asyncCallbackAttr = findJsxAttribute(sourceFile, "asyncCallback");
-  if (!asyncCallbackAttr) {
-    throw new Error("asyncCallback attribute not found");
-  }
-
-  assertEquals(
-    isEventHandlerJsxAttribute(asyncCallbackAttr, checker),
-    true,
-    "asyncCallback with () => Promise<void> type should be detected as handler with checker",
-  );
-});
-
-Deno.test("isEventHandlerJsxAttribute - mapper NOT detected as handler (with checker)", () => {
-  const { sourceFile, checker } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} unionReturn={() => {}} asyncUnionReturn={async () => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} twoParamHandler={(e, ctx) => {}} reducer={(acc, item, idx) => acc + item} unionWithData={() => {}} />`,
-  );
-
-  const mapperAttr = findJsxAttribute(sourceFile, "mapper");
-  if (!mapperAttr) {
-    throw new Error("mapper attribute not found");
-  }
-
-  assertEquals(
-    isEventHandlerJsxAttribute(mapperAttr, checker),
-    false,
-    "mapper with (item: number) => string type should NOT be detected as handler",
-  );
 });
 
 Deno.test("isEventHandlerJsxAttribute - label (string prop) NOT detected as handler", () => {
   const { sourceFile, checker } = createJsxTestProgram(
-    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} asyncToggle={async () => true} eventHandler={(e) => {}} unionReturn={() => {}} asyncUnionReturn={async () => {}} label="test" mapper={(n) => String(n)} renderItem={(n) => n} twoParamHandler={(e, ctx) => {}} reducer={(acc, item, idx) => acc + item} unionWithData={() => {}} />`,
+    `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} eventHandler={(e) => {}} label="test" count={1} mapper={(n) => String(n)} renderItem={(n) => n} twoParamHandler={(e, ctx) => {}} reducer={(acc, item, idx) => acc + item} />`,
   );
 
   const labelAttr = findJsxAttribute(sourceFile, "label");
