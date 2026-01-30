@@ -432,7 +432,10 @@ const addDebugLogEntry = (
   entry: Omit<DebugLogEntry, "timestamp">,
 ) => {
   try {
-    logCell.push({ ...entry, timestamp: Temporal.Now.instant().epochMilliseconds });
+    logCell.push({
+      ...entry,
+      timestamp: Temporal.Now.instant().epochMilliseconds,
+    });
   } catch (err) {
     // Log to console but don't let debug logging errors crash the agent
     console.error("[GmailAgenticSearch] Debug log error:", err);
@@ -1217,7 +1220,8 @@ const GmailAgenticSearch = pattern<
       if (!a?.expiresAt) return false;
       // Add 5 minute buffer - if within 5 min of expiry, consider it potentially expired
       const bufferMs = 5 * 60 * 1000;
-      return Temporal.Now.instant().epochMilliseconds > (a.expiresAt - bufferMs);
+      return Temporal.Now.instant().epochMilliseconds >
+        (a.expiresAt - bufferMs);
     });
 
     // Gmail scope URL for checking
@@ -2838,7 +2842,10 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                             (pendingWritable.key(idx).key(
                                               "submittedAt",
                                             ) as Writable<number | undefined>)
-                                              .set(Temporal.Now.instant().epochMilliseconds);
+                                              .set(
+                                                Temporal.Now.instant()
+                                                  .epochMilliseconds,
+                                              );
                                           }
 
                                           // Update local query status to submitted

@@ -1732,7 +1732,10 @@ const cancelImport = handler<
 
 // Helper to generate export filename
 const getExportFilename = (prefix: string) => {
-  const timestamp = Temporal.Now.instant().toString().slice(0, 19).replace(/[T:]/g, "-");
+  const timestamp = Temporal.Now.instant().toString().slice(0, 19).replace(
+    /[T:]/g,
+    "-",
+  );
   return `${prefix}-${timestamp}.md`;
 };
 

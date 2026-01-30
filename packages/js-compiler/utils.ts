@@ -15,11 +15,13 @@ export const getTypeScriptEnvironmentTypes = (() => {
     const es2023 = await cache.getText("types/es2023.d.ts");
     const jsx = await cache.getText("types/jsx.d.ts");
     const dom = await cache.getText("types/dom.d.ts");
+    const polyfills = await cache.getText("types/polyfills.d.ts");
 
     cached = {
       es2023,
       dom,
       jsx,
+      polyfills,
     };
     return cached;
   };

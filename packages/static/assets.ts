@@ -6,5 +6,6 @@ export const assets: Readonly<string[]> = [
   "types/dom.d.ts",
   "types/es2023.d.ts",
   "types/jsx.d.ts",
+  "types/polyfills.d.ts",
   "types/turndown.d.ts",
 ];

@@ -43,7 +43,7 @@
     "jsxImportSource": "@commontools/html",
     "types": [
       "./packages/html/src/jsx.d.ts",
-      "./packages/patterns/temporal.d.ts"
+      "./packages/static/assets/types/polyfills.d.ts"
     ],
     "lib": [
       "deno.ns",

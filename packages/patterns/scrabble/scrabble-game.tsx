@@ -277,7 +277,9 @@ export function createTileBag(): Letter[] {
   }
   // Fisher-Yates shuffle
   for (let i = bag.length - 1; i > 0; i--) {
-    const j = Math.floor(crypto.getRandomValues(new Uint32Array(1))[0] / 0xFFFFFFFF * (i + 1));
+    const j = Math.floor(
+      crypto.getRandomValues(new Uint32Array(1))[0] / 0xFFFFFFFF * (i + 1),
+    );
     [bag[i], bag[j]] = [bag[j], bag[i]];
   }
   return bag;

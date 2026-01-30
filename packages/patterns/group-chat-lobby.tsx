@@ -45,7 +45,12 @@ function getRandomColor(): string {
     "#FF2D55", // Apple pink
     "#00C7BE", // Apple teal
   ];
-  return colors[Math.floor(crypto.getRandomValues(new Uint32Array(1))[0] / 0xFFFFFFFF * colors.length)];
+  return colors[
+    Math.floor(
+      crypto.getRandomValues(new Uint32Array(1))[0] / 0xFFFFFFFF *
+        colors.length,
+    )
+  ];
 }
 
 // Get initials from name

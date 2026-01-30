@@ -28,7 +28,9 @@ interface Output {
 const updateData = handler<void, WritableState>((_event, state) => {
   const newCount = (state.counter.get() ?? 0) + 1;
   state.counter.set(newCount);
-  state.data.set(`Updated data #${newCount} - ${Temporal.Now.instant().toString()}`);
+  state.data.set(
+    `Updated data #${newCount} - ${Temporal.Now.instant().toString()}`,
+  );
 });
 
 export default pattern<State, Output>((state) => {
