@@ -64,7 +64,7 @@ function formatTime(dateStr: string): string {
 function getRelativeLabel(dateStr: string): string {
   try {
     const date = new Date(dateStr);
-    const today = new Date();
+    const today = new Date(Temporal.Now.instant().epochMilliseconds);
     today.setHours(0, 0, 0, 0);
     const eventDate = new Date(date);
     eventDate.setHours(0, 0, 0, 0);
@@ -142,7 +142,7 @@ export default pattern<{
       events: CalendarEvent[];
       hiddenCalendars: string[];
     }) => {
-      const now = new Date();
+      const now = new Date(Temporal.Now.instant().epochMilliseconds);
       const hiddenSet = new Set(hidden || []);
       return [...(evts || [])]
         .filter((e: CalendarEvent) =>

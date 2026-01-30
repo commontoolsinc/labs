@@ -83,10 +83,10 @@ const sendMessage = handler<
   if (!content || !myName) return;
 
   messages.push({
-    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: `msg-${crypto.randomUUID()}`,
     author: myName,
     content,
-    timestamp: Date.now(),
+    timestamp: Temporal.Now.instant().epochMilliseconds,
     type: "chat",
     reactions: [],
   });
@@ -108,11 +108,11 @@ const sendImageMessage = handler<
 
   const image = images[0];
   messages.push({
-    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: `msg-${crypto.randomUUID()}`,
     author: myName,
     content: "",
     imageUrl: image.url,
-    timestamp: Date.now(),
+    timestamp: Temporal.Now.instant().epochMilliseconds,
     type: "image",
     reactions: [],
   });

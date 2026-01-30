@@ -60,7 +60,7 @@ export default pattern<ContactBookInput, ContactBookOutput>(
         company: "",
         tags: [],
         notes: "",
-        createdAt: Date.now(),
+        createdAt: Temporal.Now.instant().epochMilliseconds,
       });
     });
 

@@ -380,7 +380,7 @@ const confirmOperation = handler<
         success: true,
         operation: op.operation,
         eventId,
-        timestamp: new Date().toISOString(),
+        timestamp: Temporal.Now.instant().toString(),
       });
 
       pendingOp.set(null);
@@ -407,7 +407,7 @@ const confirmOperation = handler<
         success: false,
         operation: op.operation,
         error: error instanceof Error ? error.message : String(error),
-        timestamp: new Date().toISOString(),
+        timestamp: Temporal.Now.instant().toString(),
       });
       // Close confirmation modal on error
       pendingOp.set(null);

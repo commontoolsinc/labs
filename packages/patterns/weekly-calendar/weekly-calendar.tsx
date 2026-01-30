@@ -140,7 +140,7 @@ const STYLES = {
 const formatDatePST = (d: Date): string =>
   d.toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
 
-const getTodayDate = (): string => formatDatePST(new Date());
+const getTodayDate = (): string => formatDatePST(new Date(Temporal.Now.instant().epochMilliseconds));
 
 const getWeekStart = (date: string): string => {
   const d = new Date(date + "T12:00:00-08:00");
@@ -959,13 +959,13 @@ const WeeklyCalendar = pattern<Input, Output>(
                           .set(addMinutesToTime(newTime, duration));
                       }
 
-                      lastDropTime.set(Date.now());
+                      lastDropTime.set(Temporal.Now.instant().epochMilliseconds);
                     });
 
                     // Click handlers for creating events at specific hours (using action)
                     const hourClickActions = HOURS.map((hour) =>
                       action(() => {
-                        if (Date.now() - lastDropTime.get() < 300) return;
+                        if (Temporal.Now.instant().epochMilliseconds - lastDropTime.get() < 300) return;
                         newEventTitle.set("");
                         newEventDate.set(columnDate);
                         newEventStartTime.set(hour.startTime);
@@ -1094,7 +1094,7 @@ const WeeklyCalendar = pattern<Input, Output>(
 
                     // Click action to open edit modal
                     const openEvent = action(() => {
-                      if (Date.now() - lastDropTime.get() < 300) return;
+                      if (Temporal.Now.instant().epochMilliseconds - lastDropTime.get() < 300) return;
                       // Populate edit form with event data
                       editingEventIndex.set(evtIndex);
                       editEventTitle.set(evt.title || "");

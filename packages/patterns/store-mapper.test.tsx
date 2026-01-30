@@ -225,7 +225,7 @@ export default pattern(() => {
         itemName: "Coffee",
         correctAisle: "Aisle 5",
         incorrectAisle: "",
-        timestamp: Date.now(),
+        timestamp: Temporal.Now.instant().epochMilliseconds,
       },
     ],
   });

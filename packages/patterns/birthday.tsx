@@ -51,7 +51,7 @@ const DAY_ITEMS = Array.from({ length: 31 }, (_, i) => ({
 }));
 
 function generateYearItems(): Array<{ value: string; label: string }> {
-  const currentYear = new Date().getFullYear();
+  const currentYear = Temporal.Now.plainDateISO().year;
   const years: Array<{ value: string; label: string }> = [];
   for (let year = currentYear; year >= 1920; year--) {
     years.push({ value: String(year), label: String(year) });

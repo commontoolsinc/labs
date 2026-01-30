@@ -8,7 +8,7 @@
 import type { RuntimeGlobals } from "./types.ts";
 import { createBuilder } from "../builder/factory.ts";
 import { createSandboxedConsole } from "./sandboxed-console.ts";
-import { OriginalDate, OriginalMath } from "./pre-lockdown-intrinsics.ts";
+import { Temporal } from "temporal-polyfill";
 
 // Declare harden as a global (added by SES lockdown)
 declare const harden: <T>(obj: T) => T;
@@ -103,8 +103,8 @@ export function createRuntimeGlobals(
 
     // Standard JavaScript globals (frozen copies)
     JSON,
-    Math: OriginalMath,
-    Date: OriginalDate,
+    Math,
+    Date,
     String,
     Number,
     Boolean,
@@ -157,6 +157,18 @@ export function createRuntimeGlobals(
       return fetch(...args);
     }) as typeof fetch,
 
+    // Temporal API (SES-safe replacement for Date.now() and new Date())
+    Temporal,
+
+    // Web Crypto
+    crypto,
+
+    // SES-safe replacement for Math.random() — returns [0, 1) like Math.random()
+    // TODO(seefeld): Replace with something that is seeded consistently,
+    // e.g. with the current frame from handlers.
+    secureRandom: () =>
+      crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000,
+
     // SES utility - harden is available after lockdown
     harden: typeof harden === "function" ? harden : Object.freeze,
   };
@@ -191,8 +203,8 @@ export function createMinimalGlobals(
   return {
     console: customConsole ?? console,
     JSON,
-    Math: OriginalMath,
-    Date: OriginalDate,
+    Math,
+    Date,
     String,
     Number,
     Boolean,

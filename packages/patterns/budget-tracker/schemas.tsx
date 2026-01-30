@@ -31,5 +31,5 @@ export interface BudgetStatusItem {
 // ============ HELPER FUNCTIONS ============
 
 export const getTodayDate = (): string => {
-  return new Date().toISOString().split("T")[0];
+  return Temporal.Now.plainDateISO().toString();
 };

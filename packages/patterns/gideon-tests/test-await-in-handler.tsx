@@ -89,7 +89,7 @@ const testWithoutAwait = handler<
 
   // Trigger by updating a cell - handler returns IMMEDIATELY
   // The actual async work happens in fetchData in the pattern body
-  state.fetchTrigger.set(Date.now());
+  state.fetchTrigger.set(Temporal.Now.instant().epochMilliseconds);
 });
 
 // Simple counter increment to test UI responsiveness

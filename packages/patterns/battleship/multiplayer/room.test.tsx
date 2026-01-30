@@ -48,7 +48,7 @@ function createTestPlayer(name: string, playerNum: 1 | 2): PlayerData {
     name,
     ships: createTestShips(),
     color: playerNum === 1 ? "#3b82f6" : "#ef4444",
-    joinedAt: Date.now(),
+    joinedAt: Temporal.Now.instant().epochMilliseconds,
   };
 }
 

@@ -135,7 +135,7 @@ const confirmAndSend = handler<
       success: true,
       messageId: response.id,
       threadId: response.threadId,
-      timestamp: new Date().toISOString(),
+      timestamp: Temporal.Now.instant().toString(),
     });
 
     showConfirmation.set(false);
@@ -154,7 +154,7 @@ const confirmAndSend = handler<
     result.set({
       success: false,
       error: error instanceof Error ? error.message : String(error),
-      timestamp: new Date().toISOString(),
+      timestamp: Temporal.Now.instant().toString(),
     });
   } finally {
     sending.set(false);

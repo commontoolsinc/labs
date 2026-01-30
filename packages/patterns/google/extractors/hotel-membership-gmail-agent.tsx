@@ -159,7 +159,7 @@ const HOTEL_RESULT_SCHEMA = {
 
 // Helper to generate date filter for recent mode (last 7 days)
 const getRecentDateFilter = (): string => {
-  const weekAgo = new Date();
+  const weekAgo = new Date(Temporal.Now.instant().epochMilliseconds);
   weekAgo.setDate(weekAgo.getDate() - 7);
   // Gmail date format: YYYY/MM/DD
   const year = weekAgo.getFullYear();

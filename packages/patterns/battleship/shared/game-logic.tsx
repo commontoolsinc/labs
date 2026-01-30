@@ -101,9 +101,10 @@ export function generateRandomShips(): Ship[] {
 
     while (!placed && attempts < maxAttempts) {
       attempts++;
-      const orientation: "horizontal" | "vertical" = Math.random() < 0.5
-        ? "horizontal"
-        : "vertical";
+      const orientation: "horizontal" | "vertical" =
+        (crypto.getRandomValues(new Uint32Array(1))[0] / 0xFFFFFFFF) < 0.5
+          ? "horizontal"
+          : "vertical";
       const size = SHIP_SIZES[type];
 
       const maxRow = orientation === "vertical"
@@ -113,8 +114,14 @@ export function generateRandomShips(): Ship[] {
         ? BOARD_SIZE - size
         : BOARD_SIZE - 1;
 
-      const row = Math.floor(Math.random() * (maxRow + 1));
-      const col = Math.floor(Math.random() * (maxCol + 1));
+      const row = Math.floor(
+        (crypto.getRandomValues(new Uint32Array(1))[0] / 0xFFFFFFFF) *
+          (maxRow + 1),
+      );
+      const col = Math.floor(
+        (crypto.getRandomValues(new Uint32Array(1))[0] / 0xFFFFFFFF) *
+          (maxCol + 1),
+      );
 
       const ship: Ship = { type, start: { row, col }, orientation };
 

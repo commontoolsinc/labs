@@ -5,6 +5,8 @@
  * pattern isolation, and secure execution.
  */
 
+import type { Temporal as TemporalType } from "temporal-polyfill";
+
 /**
  * Sandbox configuration options.
  */
@@ -176,6 +178,15 @@ export interface RuntimeGlobals {
   readonly decodeURI: typeof decodeURI;
   readonly encodeURIComponent: typeof encodeURIComponent;
   readonly decodeURIComponent: typeof decodeURIComponent;
+
+  // Temporal API (SES-safe replacement for Date.now() and new Date())
+  readonly Temporal: typeof TemporalType;
+
+  // Web Crypto (SES-safe replacement for Math.random())
+  readonly crypto: typeof crypto;
+
+  // SES-safe replacement for Math.random() — returns [0, 1)
+  readonly secureRandom: () => number;
 
   // Network
   // TODO(seefeld): Remove direct fetch access once patterns migrate to fetchData

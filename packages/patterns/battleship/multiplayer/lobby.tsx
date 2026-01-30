@@ -102,7 +102,7 @@ const joinAsPlayer = handler<
       name,
       ships,
       color: getRandomColor(playerSlot - 1),
-      joinedAt: Date.now(),
+      joinedAt: Temporal.Now.instant().epochMilliseconds,
     };
 
     // Store player data directly (no JSON serialization)
@@ -222,7 +222,7 @@ const joinPlayer1Handler = handler<
     name: name.trim(),
     ships: generateRandomShips(),
     color: getRandomColor(0),
-    joinedAt: Date.now(),
+    joinedAt: Temporal.Now.instant().epochMilliseconds,
   };
 
   player1.set(playerData);
@@ -258,7 +258,7 @@ const joinPlayer2Handler = handler<
     name: name.trim(),
     ships: generateRandomShips(),
     color: getRandomColor(1),
-    joinedAt: Date.now(),
+    joinedAt: Temporal.Now.instant().epochMilliseconds,
   };
 
   player2.set(playerData);

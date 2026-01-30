@@ -125,7 +125,7 @@ export function createPreviewUI(
   const isAuthenticated = !!email;
 
   // Status detection
-  const now = Date.now();
+  const now = Temporal.Now.instant().epochMilliseconds;
   const expiresAt = auth?.expiresAt || 0;
   const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
   const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
@@ -520,13 +520,13 @@ export default pattern<Input, Output>(
     // Check if token is expired (need refresh)
     const isTokenExpired = computed(() => {
       if (!auth?.token || !auth?.expiresAt) return false;
-      return auth.expiresAt < Date.now();
+      return auth.expiresAt < Temporal.Now.instant().epochMilliseconds;
     });
 
     // Format time remaining until token expiry
     const tokenExpiryDisplay = computed(() => {
       if (!auth?.expiresAt || auth.expiresAt === 0) return null;
-      const now = Date.now();
+      const now = Temporal.Now.instant().epochMilliseconds;
       const remaining = auth.expiresAt - now;
       if (remaining <= 0) return "Expired";
 

@@ -33,8 +33,8 @@ type JournalEntry = {
 function formatTimestamp(timestamp: number | undefined): string {
   if (!timestamp) return "";
   const date = new Date(timestamp);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
+  const nowMs = Temporal.Now.instant().epochMilliseconds;
+  const diffMs = nowMs - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMs / 3600000);
   const diffDays = Math.floor(diffMs / 86400000);

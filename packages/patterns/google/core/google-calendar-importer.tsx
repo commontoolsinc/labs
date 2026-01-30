@@ -48,14 +48,14 @@ const DEBUG_DERIVE = false;
 
 let deriveCallCount = 0;
 let perRowDeriveCount = 0;
-let lastLogTime = Date.now();
-const startTime = Date.now();
+let lastLogTime = Temporal.Now.instant().epochMilliseconds;
+const startTime = Temporal.Now.instant().epochMilliseconds;
 
 function logDeriveCall(name: string, isPerRow = false) {
   if (!DEBUG_DERIVE) return;
   deriveCallCount++;
   if (isPerRow) perRowDeriveCount++;
-  const now = Date.now();
+  const now = Temporal.Now.instant().epochMilliseconds;
   const elapsed = now - startTime;
   // Log on milestones or every second
   if (now - lastLogTime > 1000 || deriveCallCount % 100 === 0) {
@@ -70,7 +70,7 @@ function logDeriveCall(name: string, isPerRow = false) {
 if (DEBUG_DERIVE) {
   try {
     setInterval(() => {
-      const elapsed = Date.now() - startTime;
+      const elapsed = Temporal.Now.instant().epochMilliseconds - startTime;
       console.log(
         `[DERIVE DEBUG SUMMARY] total=${deriveCallCount}, perRow=${perRowDeriveCount}, elapsed=${elapsed}ms`,
       );
@@ -387,7 +387,7 @@ async function fetchCalendarEvents(state: FetchState): Promise<void> {
     }
 
     // Calculate time range
-    const now = new Date();
+    const now = new Date(Temporal.Now.instant().epochMilliseconds);
     const timeMin = new Date(now);
     timeMin.setDate(timeMin.getDate() - settings.daysBack);
     const timeMax = new Date(now);
@@ -600,7 +600,7 @@ const getUpcomingEventsImpl = (
 ) => {
   return derive({ count, events }, ({ count, events }) => {
     if (!events || events.length === 0) return "No events";
-    const now = new Date();
+    const now = new Date(Temporal.Now.instant().epochMilliseconds);
     const upcoming = events
       .filter((e) => new Date(e.startDateTime || e.start) >= now)
       .slice(0, count || 5);
@@ -615,7 +615,7 @@ const getUpcomingEventsImpl = (
 const getTodaysEventsImpl = ({ events }: { events: CalendarEvent[] }) => {
   return derive(events, (events) => {
     if (!events || events.length === 0) return "No events";
-    const today = new Date().toISOString().split("T")[0];
+    const today = Temporal.Now.instant().toString().split("T")[0];
     const todayEvents = events.filter((e) =>
       e.start === today ||
       (e.startDateTime && e.startDateTime.startsWith(today))
@@ -735,7 +735,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
 
     // Computed values for pagination
     const upcomingEvents = derive(events, (evts: CalendarEvent[]) => {
-      const now = new Date();
+      const now = new Date(Temporal.Now.instant().epochMilliseconds);
       return [...evts]
         .filter((e) => new Date(e.startDateTime || e.start) >= now)
         .sort((a, b) =>
@@ -756,7 +756,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
     // Paginated events for display - use computed with events Cell directly
     const _paginatedEvents = computed(() => {
       const allEvents = events.get() || [];
-      const now = new Date();
+      const now = new Date(Temporal.Now.instant().epochMilliseconds);
       const upcoming = [...allEvents]
         .filter((e: CalendarEvent) =>
           new Date(e.startDateTime || e.start) >= now

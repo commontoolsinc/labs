@@ -425,7 +425,7 @@ Extract:
       }
 
       // Sort by: urgent first, then by date (soonest first), then by source priority
-      const today = new Date();
+      const today = new Date(Temporal.Now.instant().epochMilliseconds);
       today.setHours(0, 0, 0, 0);
 
       return events.sort((a, b) => {
@@ -447,7 +447,7 @@ Extract:
 
     // Filter events by category/criteria
     const urgentEvents = computed(() => {
-      const today = new Date();
+      const today = new Date(Temporal.Now.instant().epochMilliseconds);
       today.setHours(0, 0, 0, 0);
 
       return allEvents.filter((e) => {
@@ -464,7 +464,7 @@ Extract:
     });
 
     const upcomingEvents = computed(() => {
-      const today = new Date();
+      const today = new Date(Temporal.Now.instant().epochMilliseconds);
       today.setHours(0, 0, 0, 0);
 
       return allEvents
@@ -741,7 +741,9 @@ Extract:
                               style={{
                                 padding: "4px 10px",
                                 backgroundColor: computed(() => {
-                                  const today = new Date();
+                                  const today = new Date(
+                                    Temporal.Now.instant().epochMilliseconds,
+                                  );
                                   today.setHours(0, 0, 0, 0);
                                   return getUrgencyColor(
                                     daysUntil(event.date, today),
@@ -755,7 +757,9 @@ Extract:
                               }}
                             >
                               {computed(() => {
-                                const today = new Date();
+                                const today = new Date(
+                                  Temporal.Now.instant().epochMilliseconds,
+                                );
                                 today.setHours(0, 0, 0, 0);
                                 return getDateLabel(
                                   daysUntil(event.date, today),
@@ -1008,7 +1012,9 @@ Extract:
                           textAlign: "center",
                           padding: "8px",
                           backgroundColor: computed(() => {
-                            const today = new Date();
+                            const today = new Date(
+                              Temporal.Now.instant().epochMilliseconds,
+                            );
                             today.setHours(0, 0, 0, 0);
                             return getUrgencyColor(
                               daysUntil(event.date, today),
@@ -1027,7 +1033,9 @@ Extract:
                           }}
                         >
                           {computed(() => {
-                            const today = new Date();
+                            const today = new Date(
+                              Temporal.Now.instant().epochMilliseconds,
+                            );
                             today.setHours(0, 0, 0, 0);
                             return getDateLabel(daysUntil(event.date, today));
                           })}

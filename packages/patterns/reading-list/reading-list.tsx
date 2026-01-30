@@ -82,7 +82,7 @@ export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
           title: trimmedTitle,
           author: author.trim(),
           type,
-          addedAt: Date.now(),
+          addedAt: Temporal.Now.instant().epochMilliseconds,
         });
         items.push(newItemPiece);
         newTitle.set("");

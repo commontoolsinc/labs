@@ -509,7 +509,7 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
     const flightMap: Record<string, TrackedFlight> = {};
 
     // Create reference dates for calculations
-    const now = new Date(); // Current time for hour-based calculations
+    const now = new Date(Temporal.Now.instant().epochMilliseconds); // Current time for hour-based calculations
     const today = new Date(now);
     today.setHours(0, 0, 0, 0); // Midnight for day-based calculations
 

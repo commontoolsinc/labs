@@ -42,7 +42,8 @@
     "jsx": "react-jsx",
     "jsxImportSource": "@commontools/html",
     "types": [
-      "./packages/html/src/jsx.d.ts"
+      "./packages/html/src/jsx.d.ts",
+      "./packages/patterns/temporal.d.ts"
     ],
     "lib": [
       "deno.ns",
@@ -132,6 +133,7 @@
     "merkle-reference": "npm:merkle-reference@^2.2.0",
     "multiformats": "npm:multiformats@^13.3.2",
     "ses": "npm:ses@^1.14.0",
+    "temporal-polyfill": "npm:temporal-polyfill@^0.3.0",
     "turndown": "npm:turndown@^7.1.2",
     "zod": "npm:zod@^3.24.1"
   }

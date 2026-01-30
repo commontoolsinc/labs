@@ -35,7 +35,7 @@ const setupTier4Rule = handler<
     falsePositives: 2,
     trueNegatives: 8,
     falseNegatives: 0,
-    createdAt: Date.now(),
+    createdAt: Temporal.Now.instant().epochMilliseconds,
     isShared: false,
   }]);
 });

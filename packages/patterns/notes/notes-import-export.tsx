@@ -19,9 +19,7 @@ import Notebook from "./notebook.tsx";
 // PHASE 1: Core Data & Types
 // ============================================================================
 
-// Simple random ID generator (crypto.randomUUID not available in pattern env)
-const generateId = () =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
+const generateId = () => crypto.randomUUID();
 
 // Types for notes and notebooks in the space
 type NotePiece = {
@@ -228,7 +226,7 @@ function generateExport(
     return `${NOTEBOOK_START_MARKER} title="${escapedTitle}" isHidden="${isHidden}" noteIds="${noteIdsStr}" childNotebooks="${childNotebooksStr}" ${CC}\n${NOTEBOOK_END_MARKER}`;
   });
 
-  const timestamp = new Date().toISOString();
+  const timestamp = Temporal.Now.instant().toString();
   const header =
     `${CO} Common Tools Export - ${timestamp} ${CC}\n${CO} Format: v2 (hierarchical) ${CC}\n${CO} Notes: ${notes.length}, Notebooks: ${notebooks.length} ${CC}\n\n`;
 
@@ -1410,7 +1408,7 @@ const exportSelectedNotebooks = handler<
       return `${NOTE_START_MARKER} title="${escapedTitle}" notebooks="${note.notebookName}" ${CC}\n\n${note.content}\n\n${NOTE_END_MARKER}`;
     });
 
-    const timestamp = new Date().toISOString();
+    const timestamp = Temporal.Now.instant().toString();
     const header =
       `${CO} Common Tools Export - ${timestamp} ${CC}\n${CO} Notes: ${allNotes.length}, Notebooks: ${selected.length} ${CC}\n\n`;
 
@@ -1734,8 +1732,7 @@ const cancelImport = handler<
 
 // Helper to generate export filename
 const getExportFilename = (prefix: string) => {
-  const now = new Date();
-  const timestamp = now.toISOString().slice(0, 19).replace(/[T:]/g, "-");
+  const timestamp = Temporal.Now.instant().toString().slice(0, 19).replace(/[T:]/g, "-");
   return `${prefix}-${timestamp}.md`;
 };
 

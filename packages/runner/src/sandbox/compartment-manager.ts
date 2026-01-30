@@ -13,9 +13,6 @@
 import type { LockdownOptions, SandboxConfig } from "./types.ts";
 import { SandboxSecurityError } from "./types.ts";
 import { getDefaultLockdownOptions, resolveSandboxConfig } from "./config.ts";
-// IMPORTANT: pre-lockdown-intrinsics must be imported before "ses" so that
-// Date/Math are captured before SES tames them.
-import "./pre-lockdown-intrinsics.ts";
 import { createRuntimeGlobals } from "./runtime-globals.ts";
 import { createSilentConsole } from "./sandboxed-console.ts";
 import "ses";

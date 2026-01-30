@@ -267,7 +267,7 @@ function calculateDaysUntilDue(dueDate: string | undefined): number {
   // Validate the parsed date is valid
   if (isNaN(due.getTime())) return 999;
 
-  const today = new Date();
+  const today = new Date(Temporal.Now.instant().epochMilliseconds);
   today.setHours(0, 0, 0, 0);
   due.setHours(0, 0, 0, 0);
   return Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));

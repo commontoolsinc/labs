@@ -10,7 +10,8 @@ import { TEST_LLM } from "./flags.ts";
 
 const { API_URL, FRONTEND_URL } = env;
 // Use a unique space name to avoid conflicts
-const SPACE_NAME = "chat-note-test-" + Date.now().toString(36);
+const SPACE_NAME = "chat-note-test-" +
+  Temporal.Now.instant().epochMilliseconds.toString(36);
 const ignore = !TEST_LLM;
 
 describe("Chat Note pattern test", () => {

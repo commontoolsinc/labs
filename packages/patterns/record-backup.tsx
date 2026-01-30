@@ -223,7 +223,7 @@ const buildExportData = lift(
 
     return {
       version: "1.0",
-      exportDate: new Date().toISOString(),
+      exportDate: Temporal.Now.instant().toString(),
       records: exportedRecords,
     };
   },
@@ -665,7 +665,7 @@ export default pattern<Input, Output>(({ importJson }) => {
                 <ct-file-download
                   $data={exportedJson}
                   filename={`record-backup-${
-                    new Date().toISOString().slice(0, 10)
+                    Temporal.Now.instant().toString().slice(0, 10)
                   }.json`}
                   mimeType="application/json"
                   variant="primary"

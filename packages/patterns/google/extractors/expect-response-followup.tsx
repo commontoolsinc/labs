@@ -179,7 +179,7 @@ function calculateDays(
   context: ThreadContext,
 ): number {
   const fromDate = new Date(fromDateStr);
-  const toDate = new Date();
+  const toDate = new Date(Temporal.Now.instant().epochMilliseconds);
 
   if (context === "business") {
     return calculateBusinessDays(fromDate, toDate);
@@ -215,7 +215,8 @@ function formatDate(dateStr: string): string {
     return date.toLocaleDateString(undefined, {
       month: "short",
       day: "numeric",
-      year: date.getFullYear() !== new Date().getFullYear()
+      year: date.getFullYear() !==
+          new Date(Temporal.Now.instant().epochMilliseconds).getFullYear()
         ? "numeric"
         : undefined,
     });

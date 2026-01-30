@@ -11,15 +11,12 @@ export type { Habit, HabitLog } from "./schemas.tsx";
 
 // Get today's date as YYYY-MM-DD
 const getTodayDate = (): string => {
-  const now = new Date();
-  return now.toISOString().split("T")[0];
+  return Temporal.Now.plainDateISO().toString();
 };
 
 // Get date N days ago as YYYY-MM-DD
 const getDateDaysAgo = (daysAgo: number): string => {
-  const date = new Date();
-  date.setDate(date.getDate() - daysAgo);
-  return date.toISOString().split("T")[0];
+  return Temporal.Now.plainDateISO().subtract({ days: daysAgo }).toString();
 };
 
 export default pattern<HabitTrackerInput, HabitTrackerOutput>(

@@ -27,8 +27,10 @@ const addItem = handler<
 >(
   (_, { items, log }) => {
     const newItem: Item = {
-      title: `Item-${Date.now()}`,
-      value: Math.floor(Math.random() * 100),
+      title: `Item-${Temporal.Now.instant().epochMilliseconds}`,
+      value: Math.floor(
+        (crypto.getRandomValues(new Uint32Array(1))[0] / 0xFFFFFFFF) * 100,
+      ),
     };
     items.push(newItem);
     log.push(`Added item: ${newItem.title}`);

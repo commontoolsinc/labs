@@ -53,7 +53,8 @@ interface TestCellEqualsOutput extends TestCellEqualsInput {}
 // (Adding at end keeps indices stable for existing items)
 const addItem = handler<unknown, { items: Writable<Item[]> }>(
   (_, { items }) => {
-    const timestamp = new Date().toLocaleTimeString();
+    const timestamp = new Date(Temporal.Now.instant().epochMilliseconds)
+      .toLocaleTimeString();
     const newItem: Item = {
       title: `Item ${timestamp}`,
       description: `Created at ${timestamp}`,
