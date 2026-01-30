@@ -127,8 +127,8 @@ baedreihr5yyujte22cd7oogtqldt4miifj356zj7ivgk4eom264ldsu5pm
 ```
 
 Notice the last line from the deploy output. This is the piece ID that you just deployed. We will use it to navigate to this piece.
-Here is the URL; replace <CHARM_ID> with
-  the value from your command output: `http://localhost:8000/test_space/<CHARM_ID>`
+Here is the URL; replace <PIECE_ID> with
+  the value from your command output: `http://localhost:8000/test_space/<PIECE_ID>`
 
 Notice the format. Port 8000 is where you access the application (toolshed proxies to shell).
 `test_space` is the SPACE that you are deploying to. You can think of it as a namespace for permissions.

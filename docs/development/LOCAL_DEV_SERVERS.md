@@ -178,7 +178,7 @@ deno task build-binaries
 # 2. Ensure toolshed is running (uses "implicit trust" identity in dev mode)
 ./scripts/restart-local-dev.sh
 
-# 3. Set up admin piece (grants bg-service access to system space)
+# 3. Set up admin charm (grants bg-service access to system space)
 cd packages/background-charm-service
 OPERATOR_PASS="implicit trust" API_URL="http://localhost:8000" deno task add-admin-charm
 
@@ -212,7 +212,7 @@ Or use the `<ct-updater>` component in your piece's UI.
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `CompilerError: no exported member 'pattern'` | Binary version mismatch | Run `deno task build-binaries` |
-| `AuthorizationError` on system space | Admin piece not set up | Run `add-admin-charm` step |
+| `AuthorizationError` on system space | Admin charm not set up | Run `add-admin-charm` step |
 | Piece not polling | Not registered | Register via `/api/integrations/bg` |
 
 See `packages/background-charm-service/CLAUDE.md` for more details.
