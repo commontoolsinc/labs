@@ -11,6 +11,7 @@ import {
   isFunctionLikeExpression,
   isInsideSafeCallbackWrapper,
   isReactiveArrayMapCall,
+  registerSyntheticCallType,
 } from "../../ast/mod.ts";
 import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
@@ -346,11 +347,22 @@ function createRecipeCallWithParams(
     }
   }
 
-  return factory.createCallExpression(
+  const mapWithPatternCall = factory.createCallExpression(
     mapWithPatternAccess,
     mapCall.typeArguments,
     args,
   );
+
+  // Register the result type for the mapWithPattern call so schema injection
+  // can find it when this call is used inside ifElse branches
+  const typeRegistry = context.options.typeRegistry;
+  if (typeRegistry) {
+    // The result type of mapWithPattern is the same as the original map call
+    const mapResultType = context.checker.getTypeAtLocation(mapCall);
+    registerSyntheticCallType(mapWithPatternCall, mapResultType, typeRegistry);
+  }
+
+  return mapWithPatternCall;
 }
 
 /**
