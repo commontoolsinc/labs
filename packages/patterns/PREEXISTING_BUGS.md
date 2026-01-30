@@ -7,22 +7,22 @@ issues, not API migration problems.
 
 ## Bug 1: compiler.tsx - Navigation Button Not Working
 
-**Symptom:** "Navigate To Charm" button appears after compilation succeeds, but
+**Symptom:** "Navigate To Piece" button appears after compilation succeeds, but
 clicking it does nothing.
 
 **Suspected Cause:** The `visit` handler calls `navigateTo(result)` but the
 result cell may not be ready when the button is shown.
 
 **Impact:** Core functionality broken - can compile but can't navigate to the
-compiled charm.
+compiled piece.
 
 **Repro:**
 
 ```bash
-deno task ct charm new packages/patterns/compiler.tsx \
+deno task ct piece new packages/patterns/compiler.tsx \
   -i claude.key -a http://localhost:8000 -s test-space
 # Enter valid pattern code, compile succeeds
-# Click "Navigate To Charm" button - nothing happens
+# Click "Navigate To Piece" button - nothing happens
 ```
 
 ---
@@ -48,7 +48,7 @@ not displayed.
 **Repro:**
 
 ```bash
-deno task ct charm new packages/patterns/suggestion-test.tsx \
+deno task ct piece new packages/patterns/suggestion-test.tsx \
   -i claude.key -a http://localhost:8000 -s test-space
 # Ask it to create a Counter
 # Counter value shows as $alias object instead of number

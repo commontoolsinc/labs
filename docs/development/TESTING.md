@@ -76,7 +76,7 @@ Deno.exit(0);
 **Key characteristics of integration tests:**
 - Start with shebang: `#!/usr/bin/env -S deno run -A`
 - Connect to real API using `env.API_URL` from `@commontools/integration`
-- Test complete workflows (runtime, storage, charms)
+- Test complete workflows (runtime, storage, pieces)
 - Use `console.log` for output and `Deno.exit(1)` for failures
 - Run as part of CI against deployed backend
 

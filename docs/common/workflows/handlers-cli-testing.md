@@ -51,24 +51,24 @@ export default pattern<Input, Output>(({ items }) => {
 
 ```bash
 # Deploy or update the pattern
-deno task ct charm new ... pattern.tsx
-deno task ct charm setsrc ... pattern.tsx
+deno task ct piece new ... pattern.tsx
+deno task ct piece setsrc ... pattern.tsx
 
 # Call a handler with JSON payload
-deno task ct charm call ... addItem '{"title": "Test Item", "category": "demo"}'
+deno task ct piece call ... addItem '{"title": "Test Item", "category": "demo"}'
 
 # Run a step to process the handler
-deno task ct charm step ...
+deno task ct piece step ...
 
 # Verify state changed
-deno task ct charm inspect ...
+deno task ct piece inspect ...
 ```
 
 ## Workflow
 
-1. Deploy pattern: `ct charm new`
-2. Call handler: `ct charm call ... handlerName '{...}'`
-3. Step to process: `ct charm step ...`
-4. Inspect state: `ct charm inspect ...`
+1. Deploy pattern: `ct piece new`
+2. Call handler: `ct piece call ... handlerName '{...}'`
+3. Step to process: `ct piece step ...`
+4. Inspect state: `ct piece inspect ...`
 5. Iterate until handler works correctly
 6. Then build UI that uses the verified handler

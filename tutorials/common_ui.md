@@ -42,7 +42,7 @@ const localTheme = {
 // later...
 
 return {
-  [NAME]: "Themed Charm",
+  [NAME]: "Themed Piece",
   [UI]: (
     <ct-theme theme={localTheme}>
       {/* all components in subtree are themed */}

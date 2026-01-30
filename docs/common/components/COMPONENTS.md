@@ -164,7 +164,7 @@ const subView = SubPattern({ items });
 <SubPattern items={items} />     // JSX syntax
 ```
 
-**Use `$cell`, not `charm` or `pattern` attribute.**
+**Use `$cell`, not `piece` or `pattern` attribute.**
 
 Multiple patterns sharing data:
 

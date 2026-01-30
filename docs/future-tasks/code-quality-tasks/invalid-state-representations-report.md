@@ -138,12 +138,12 @@ type CallbackResult =
   | { success: false; error: string; details?: Record<string, unknown> };
 ```
 
-## 5. BackgroundCharmServiceOptions Interface
+## 5. BackgroundPieceServiceOptions Interface
 
-**File**: `packages/background-charm-service/src/service.ts` **Lines**: 12-19
+**File**: `packages/background-piece-service/src/service.ts` **Lines**: 12-19
 
 ```typescript
-export interface BackgroundCharmServiceOptions {
+export interface BackgroundPieceServiceOptions {
   identity: Identity;
   toolshedUrl: string;
   runtime: Runtime;
@@ -160,7 +160,7 @@ interface.
 **Recommendation**: Make defaults explicit in the type:
 
 ```typescript
-export interface BackgroundCharmServiceOptions {
+export interface BackgroundPieceServiceOptions {
   identity: Identity;
   toolshedUrl: string;
   runtime: Runtime;

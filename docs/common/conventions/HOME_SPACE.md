@@ -16,7 +16,7 @@ Home Space DID = User Identity DID = runtime.storageManager.as.did()
 
 The home space provides a persistent, user-owned storage location for:
 
-- **Favorites** - A singleton list of favorited charms that works across all
+- **Favorites** - A singleton list of favorited pieces that works across all
   spaces
 - Future user-level preferences and settings
 
@@ -38,9 +38,9 @@ Via `PieceManager`:
 
 ```typescript
 const manager = new PieceManager(session, runtime);
-await manager.addFavorite(charm);
-await manager.removeFavorite(charm);
-const isFav = manager.isFavorite(charm);
+await manager.addFavorite(piece);
+await manager.removeFavorite(piece);
+const isFav = manager.isFavorite(piece);
 const favoritesCell = manager.getFavorites();
 ```
 
@@ -54,9 +54,9 @@ import {
   getHomeFavorites,
 } from "@commontools/piece";
 
-await addFavorite(runtime, charm);
-await removeFavorite(runtime, charm);
-const isFav = isFavorite(runtime, charm);
+await addFavorite(runtime, piece);
+await removeFavorite(runtime, piece);
+const isFav = isFavorite(runtime, piece);
 const favoritesCell = getHomeFavorites(runtime);
 ```
 
@@ -81,5 +81,5 @@ The home space requires special ACL handling since there's no separate space
 identity to delegate from. When `space === runtime.userIdentityDID`, the
 PieceManager detects this as a home space and uses `runtime.getHomeSpaceCell()`.
 
-See `packages/charm/src/manager.ts` (home space detection) and
+See `packages/piece/src/manager.ts` (home space detection) and
 `packages/runner/src/runtime.ts` `getHomeSpaceCell()` for implementation.

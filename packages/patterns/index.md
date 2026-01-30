@@ -77,10 +77,10 @@ type NoteOutput = {
 
 ## `gpa-stats-source.tsx`
 
-Source charm for charm linking example. Computes statistics from GPA data and
-exposes them for other charms to consume.
+Source piece for piece linking example. Computes statistics from GPA data and
+exposes them for other pieces to consume.
 
-**Keywords:** charm-linking, source, lift, computed-stats
+**Keywords:** piece-linking, source, lift, computed-stats
 
 ### Input Schema
 
@@ -110,10 +110,10 @@ interface Output {
 
 ## `gpa-stats-reader.tsx`
 
-Consumer charm for charm linking example. Receives linked statistics from
+Consumer piece for piece linking example. Receives linked statistics from
 gpa-stats-source and displays them.
 
-**Keywords:** charm-linking, consumer, Default-null
+**Keywords:** piece-linking, consumer, Default-null
 
 ### Input Schema
 
@@ -288,7 +288,7 @@ interface LobbyOutput {
 
 ## `system/favorites-manager.tsx`
 
-View and manage favorited charms with tags. Uses the wish system to query
+View and manage favorited pieces with tags. Uses the wish system to query
 `#favorites` and allows removing items.
 
 **Keywords:** favorites, wish, ct-cell-link
@@ -303,7 +303,7 @@ type Input = Record<string, never>;
 
 ```ts
 // Uses wish<Array<Favorite>>({ query: "#favorites" }) internally
-// Displays favorited charms with remove functionality
+// Displays favorited pieces with remove functionality
 ```
 
 ## `contacts/contact-book.tsx`
@@ -598,7 +598,7 @@ Flexible container pattern for structured records with composable field modules.
 Supports dynamic type selection, soft-delete with restore, and LLM-powered data
 extraction. Used for contacts, businesses, places, and other structured data.
 
-**Keywords:** record, container, sub-charms, type-picker, modules, composable
+**Keywords:** record, container, sub-pieces, type-picker, modules, composable
 
 ### Input Schema
 
@@ -613,7 +613,7 @@ interface Input {
 ```ts
 interface SubCharmEntry {
   type: string;
-  charm: unknown;
+  piece: unknown;
 }
 
 interface Output {

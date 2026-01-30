@@ -114,8 +114,8 @@ describe("shadow DOM component test", () => {
       apiUrl: new URL(API_URL),
       identity: identity,
     });
-    const charm = await cc.create(yourPatternCode, { start: true });
-    pieceId = charm.id;
+    const piece = await cc.create(yourPatternCode, { start: true });
+    pieceId = piece.id;
   });
 
   afterAll(async () => {

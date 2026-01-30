@@ -28,30 +28,30 @@ keywords/features.
     tabNames
 
 - system/backlinks-index.tsx: Backlinks computation system for bi-directional
-  references between charms
+  references between pieces
   - **Data types**: array of objects (MentionableCharm with mentioned/backlinks
     arrays)
   - **Keywords**: lift, array operations, backlinks, mentionable pattern,
     OpaqueRef
 
-- charm-ref-in-cell.tsx: Storing and navigating to charm references within cells
-  - **Data types**: object containing charm reference
+- piece-ref-in-cell.tsx: Storing and navigating to piece references within cells
+  - **Data types**: object containing piece reference
   - **Keywords**: lift, cell, navigateTo, ifElse, derive, isInitialized flag
 
-- charms-ref-in-cell.tsx: Managing an array of charm references with navigation
-  - **Data types**: array of charm objects
+- pieces-ref-in-cell.tsx: Managing an array of piece references with navigation
+  - **Data types**: array of piece objects
   - **Keywords**: lift, cell, navigateTo, array operations, isInitialized flag,
     map
 
 - chatbot-list-view.tsx: Chat application with sidebar list of chat sessions
-  - **Data types**: array of objects (CharmEntry with ID and charm), selected
-    charm object
+  - **Data types**: array of objects (CharmEntry with ID and piece), selected
+    piece object
   - **Keywords**: lift, handler, navigateTo, ct-select, ct-render,
     ct-autolayout, wish, [ID]
 
 - chatbot.tsx: Full-featured chatbot with LLM integration and attachments
   - **Data types**: array of LLM messages, array of attachments (objects), array
-    of charms
+    of pieces
   - **Keywords**: llmDialog, handler, derive, wish, ct-chat, ct-prompt-input,
     ct-select, Stream, generateObject
 
@@ -91,9 +91,9 @@ keywords/features.
   - **Data types**: array of strings
   - **Keywords**: ct-tags, handler, onct-change, array of strings
 
-- system/default-app.tsx: Default application with charm management and
+- system/default-app.tsx: Default application with piece management and
   navigation
-  - **Data types**: array of charms (MentionableCharm objects)
+  - **Data types**: array of pieces (MentionableCharm objects)
   - **Keywords**: wish, derive, navigateTo, handler, ct-table, ct-button,
     multiple recipe instantiation
 
@@ -106,7 +106,7 @@ keywords/features.
   - **Keywords**: fetchData, lift, derive, ct-input, $value, string parsing
 
 - instantiate-recipe.tsx: Factory pattern for creating counter instances
-  - **Data types**: number, charm references
+  - **Data types**: number, piece references
   - **Keywords**: navigateTo, handler, recipe instantiation, factory pattern
 
 - linkedlist-in-cell.tsx: Linked list data structure implementation
@@ -114,9 +114,9 @@ keywords/features.
   - **Keywords**: cell, derive, handler, custom data structure, recursive
     structure
 
-- system/link-tool.tsx: Tool for creating data links between charm cells
+- system/link-tool.tsx: Tool for creating data links between piece cells
   - **Data types**: string (source path), string (target path)
-  - **Keywords**: link built-in, handler, charm navigation, cell linking, path
+  - **Keywords**: link built-in, handler, piece navigation, cell linking, path
     parsing
 
 - list-operations.tsx: Advanced array operations with ID-based tracking
@@ -134,7 +134,7 @@ keywords/features.
     template, handler
 
 - notes/note.tsx: Note-taking app with backlinks and mentions
-  - **Data types**: string (title/content), array of charms
+  - **Data types**: string (title/content), array of pieces
     (mentioned/backlinks)
   - **Keywords**: wish, handler, navigateTo, ct-code-editor, $mentionable,
     $mentioned, backlinks, cell

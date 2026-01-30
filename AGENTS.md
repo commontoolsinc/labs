@@ -16,8 +16,8 @@ Common Tools product.
 1. Foundation: api, runtime, identity, memory
 2. System: schema-generator, iframe-sandbox, ts-transformers, js-compiler,
    js-sandbox
-3. Capabilities: charm, html, llm
-4. Operation: background-charm-service, cli
+3. Capabilities: piece, html, llm
+4. Operation: background-piece-service, cli
 5. Deployed Product: toolshed, shell
 6. User Interface: ui
 7. End-User Programs: home-schemas, patterns

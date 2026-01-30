@@ -108,36 +108,36 @@ $ cd ./packages/shell
 $ deno task dev-local
 ```
 
-Now the servers should be running and you can navigate to [http://localhost:8000/](http://localhost:8000/) to see a not-too-exciting-yet charm.
+Now the servers should be running and you can navigate to [http://localhost:8000/](http://localhost:8000/) to see a not-too-exciting-yet piece.
 
-(deploy_charms)=
-## How to deploy charms
-To deploy your first charm, you will run the `ct` CLI tool.
+(deploy_pieces)=
+## How to deploy pieces
+To deploy your first piece, you will run the `ct` CLI tool.
 You'll need to create an identity for yourself. Run the following command at the project root:
 ```
 $ deno task ct id new > my.key
 ```
-This will create a key for you. We'll refer to this in the next command which actually deploys a charm. We'll deploy the `counter.tsx` charm. You can explore other charms in the same directory.
+This will create a key for you. We'll refer to this in the next command which actually deploys a piece. We'll deploy the `counter.tsx` piece. You can explore other pieces in the same directory.
 
 ```
-$ deno task ct charm new --identity my.key --url http://localhost:8000/test_space ./packages/patterns/counter.tsx
-Task ct ROOT=$(pwd) && cd $INIT_CWD && deno run --allow-net --allow-ffi --allow-read --allow-write --allow-env "$ROOT/packages/cli/mod.ts" "charm" "new" "--identity" "my.key" "--url" "http://localhost:8000/test_space" "./packages/patterns/counter.tsx"
+$ deno task ct piece new --identity my.key --url http://localhost:8000/test_space ./packages/patterns/counter.tsx
+Task ct ROOT=$(pwd) && cd $INIT_CWD && deno run --allow-net --allow-ffi --allow-read --allow-write --allow-env "$ROOT/packages/cli/mod.ts" "piece" "new" "--identity" "my.key" "--url" "http://localhost:8000/test_space" "./packages/patterns/counter.tsx"
 Warning experimentalDecorators compiler option is deprecated and may be removed at any time
 baedreihr5yyujte22cd7oogtqldt4miifj356zj7ivgk4eom264ldsu5pm
 ```
 
-Notice the last line from the deploy output. This is the charm ID that you just deployed. We will use it to navigate to this charm.
+Notice the last line from the deploy output. This is the piece ID that you just deployed. We will use it to navigate to this piece.
 Here is the URL; replace <CHARM_ID> with
   the value from your command output: `http://localhost:8000/test_space/<CHARM_ID>`
 
 Notice the format. Port 8000 is where you access the application (toolshed proxies to shell).
 `test_space` is the SPACE that you are deploying to. You can think of it as a namespace for permissions.
 Any SPACE that doesn't exist already is dynamically created when you visit it.
-Lastly, we see the charm ID that was created when you deployed the charm.
+Lastly, we see the piece ID that was created when you deployed the piece.
 
 :::{admonition} Don't forget!
-You will need to run the `deno task ct charm new` command each time you want to deploy a new charm.
+You will need to run the `deno task ct piece new` command each time you want to deploy a new piece.
 
-You will also need to keep the Toolshed and Shell servers running in order to run the deploy command and also to visit the charm on your browser.
+You will also need to keep the Toolshed and Shell servers running in order to run the deploy command and also to visit the piece on your browser.
 :::
 
