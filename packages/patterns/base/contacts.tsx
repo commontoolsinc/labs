@@ -26,13 +26,13 @@ import {
 
 // Import shared types
 import type {
-  ContactCharm,
+  ContactPiece,
   ContactGroup,
   FamilyMember,
   Person,
 } from "./contact-types.tsx";
 
-// Import patterns (they return charms with [UI])
+// Import patterns (they return pieces with [UI])
 import PersonPattern from "./person.tsx";
 import FamilyMemberPattern from "./family-member.tsx";
 
@@ -41,27 +41,27 @@ import FamilyMemberPattern from "./family-member.tsx";
 // ============================================================================
 
 interface Input {
-  // Store charm results, not raw data
-  contacts: Writable<Default<ContactCharm[], []>>;
+  // Store piece results, not raw data
+  contacts: Writable<Default<ContactPiece[], []>>;
   groups: Writable<Default<ContactGroup[], []>>;
 }
 
 interface Output {
   [NAME]: string;
   [UI]: VNode;
-  contacts: ContactCharm[];
+  contacts: ContactPiece[];
   groups: ContactGroup[];
   count: number;
 }
 
 // ============================================================================
-// Handlers - Instantiate patterns here, push charm results
+// Handlers - Instantiate patterns here, push piece results
 // ============================================================================
 
 const addPerson = handler<
   unknown,
   {
-    contacts: Writable<ContactCharm[]>;
+    contacts: Writable<ContactPiece[]>;
     selectedIndex: Writable<number>;
   }
 >((_event, { contacts, selectedIndex }) => {
@@ -87,14 +87,14 @@ const addPerson = handler<
     sameAs: contacts,
   });
   const newIndex = (contacts.get() || []).length;
-  contacts.push(charm as ContactCharm);
+  contacts.push(charm as ContactPiece);
   selectedIndex.set(newIndex);
 });
 
 const addFamilyMember = handler<
   unknown,
   {
-    contacts: Writable<ContactCharm[]>;
+    contacts: Writable<ContactPiece[]>;
     selectedIndex: Writable<number>;
   }
 >((_event, { contacts, selectedIndex }) => {
@@ -114,14 +114,14 @@ const addFamilyMember = handler<
     sameAs: contacts,
   });
   const newIndex = (contacts.get() || []).length;
-  contacts.push(charm as ContactCharm);
+  contacts.push(charm as ContactPiece);
   selectedIndex.set(newIndex);
 });
 
 const removeContact = handler<
   unknown,
   {
-    contacts: Writable<ContactCharm[]>;
+    contacts: Writable<ContactPiece[]>;
     groups: Writable<ContactGroup[]>;
     index: number;
     selectedIndex: Writable<number>;
@@ -273,7 +273,7 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
 
           <ct-resizable-handle />
 
-          {/* Right: Detail View - just render the charm's [UI] */}
+          {/* Right: Detail View - just render the piece's [UI] */}
           <ct-resizable-panel default-size="65" min-size="30">
             {computed(() => {
               const idx = selectedIndex.get();
@@ -286,9 +286,9 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
                 );
               }
 
-              const charm = contacts.key(idx);
+              const piece = contacts.key(idx);
 
-              // Charm already has [UI] - just render it with wrapper
+              // Piece already has [UI] - just render it with wrapper
               return (
                 <ct-vstack style="height: 100%;">
                   <ct-hstack style="padding: 8px 16px; border-bottom: 1px solid #e5e7eb; justify-content: flex-end;">
@@ -301,7 +301,7 @@ export default pattern<Input, Output>(({ contacts, groups }) => {
                     </ct-button>
                   </ct-hstack>
 
-                  <ct-render $cell={charm} />
+                  <ct-render $cell={piece} />
                 </ct-vstack>
               );
             })}

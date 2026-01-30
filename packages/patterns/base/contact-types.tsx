@@ -93,13 +93,13 @@ export interface FamilyMember extends PersonLike {
 }
 
 // ============================================================================
-// ContactCharm - What the container stores in its contacts array
+// ContactPiece - What the container stores in its contacts array
 // ============================================================================
 
 /**
- * A contact charm has [NAME], [UI], and either person or member data.
+ * A contact piece has [NAME], [UI], and either person or member data.
  */
-export interface ContactCharm {
+export interface ContactPiece {
   [NAME]: string;
   [UI]: VNode;
   person?: Person;

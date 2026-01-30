@@ -1,4 +1,4 @@
-import type { CharmResult, ExecutedScenario } from "./interfaces.ts";
+import type { ExecutedScenario, PieceResult } from "./interfaces.ts";
 import { dirname, fromFileUrl, join } from "@std/path";
 
 // FIXME(ja): we should just use handlebars or something...  claude built a custom template engine for this...
@@ -54,7 +54,7 @@ export async function generateReport(
   const totalScenarios = executedScenarios.length;
 
   // Flatten all results to calculate overall statistics
-  const allResults: CharmResult[] = executedScenarios.flatMap((es) =>
+  const allResults: PieceResult[] = executedScenarios.flatMap((es) =>
     es.results
   );
   const totalSteps = allResults.length;

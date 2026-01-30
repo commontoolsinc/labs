@@ -32,7 +32,7 @@ import {
   createSubPiece,
   getDefinition,
   getFieldToTypeMapping as getFullFieldMapping,
-  SUB_CHARM_REGISTRY,
+  SUB_PIECE_REGISTRY,
 } from "../registry.ts";
 import type { SubPieceEntry, TrashedSubPieceEntry } from "../types.ts";
 import type {
@@ -312,7 +312,7 @@ function getPrimaryFieldName(
   fieldName: string,
   moduleType: string,
 ): string {
-  const def = SUB_CHARM_REGISTRY[moduleType];
+  const def = SUB_PIECE_REGISTRY[moduleType];
   if (!def?.fieldMapping || def.fieldMapping.length === 0) {
     return fieldName; // No mapping, use as-is
   }
@@ -781,7 +781,7 @@ function buildPreview(
   // Handle array extraction mode (e.g., customFields for custom-field module)
   // Modules with extractionMode: "array" extract an array where each item
   // becomes a separate module instance
-  for (const def of Object.values(SUB_CHARM_REGISTRY)) {
+  for (const def of Object.values(SUB_PIECE_REGISTRY)) {
     if (def.extractionMode !== "array" || !def.fieldMapping) continue;
 
     // Get the array field name (first entry in fieldMapping)
