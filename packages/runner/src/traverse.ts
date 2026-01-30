@@ -889,7 +889,7 @@ function getTrackerKey(
  * source docs as read if needed.
  *
  * I can't just use resolveLink, since I need to also track all the
- * intermediate docuemnts if we includeSource.
+ * intermediate documents if we includeSource.
  *
  * @param tx - IStorageTransaction that can be used to read data
  * @param doc - IAttestation for the current document
@@ -974,7 +974,7 @@ function followPointer(
     // If we had an unexpected error, or didn't find the doc at all, return.
     if (error.name === "NotFoundError" && error.path.length === 0) {
       // If the object we're pointing to is a retracted fact, just return undefined.
-      logger.warn(
+      logger.info(
         "traverse",
         () => ["followPointer found missing/retracted fact", valueEntry],
       );
