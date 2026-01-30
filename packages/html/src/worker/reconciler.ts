@@ -280,7 +280,25 @@ export class WorkerReconciler {
   }
 
   /**
+   * Extract the underlying VNode from a WorkerRenderNode.
+   * Follows [UI] chains and returns the VNode, or null if not a VNode.
+   */
+  private extractVNode(node: WorkerRenderNode): WorkerVNode | null {
+    if (isWorkerVNode(node)) return node;
+
+    // Follow [UI] chain
+    let current: unknown = node;
+    while (current && typeof current === "object" && UI in current) {
+      // deno-lint-ignore no-explicit-any
+      current = (current as any)[UI];
+    }
+
+    return isWorkerVNode(current) ? current : null;
+  }
+
+  /**
    * Reconcile a VNode into a wrapper (for reactive roots).
+   * Diffs old vs new VNodes and updates in place when possible.
    */
   private reconcileIntoWrapper(
     ctx: ReconcileContext,
@@ -291,7 +309,62 @@ export class WorkerReconciler {
     },
     node: WorkerRenderNode,
   ): void {
-    // Clean up previous child
+    const newVNode = this.extractVNode(node);
+    const oldState = wrapper.currentChild;
+
+    // Get old element's tag name (if it exists and is an element)
+    const oldTagName = oldState && "tagName" in oldState
+      ? oldState.tagName
+      : null;
+    const newTagName = newVNode?.name ?? null;
+
+    // Case 1: Same element type AND we have a full NodeState - update in place
+    if (
+      oldState &&
+      oldTagName &&
+      newTagName &&
+      oldTagName === newTagName &&
+      "children" in oldState // Has full NodeState (not just ChildNodeState)
+    ) {
+      const elementState = oldState as NodeState;
+
+      // Save the children map before cancel clears it
+      const savedChildren = new Map(elementState.children);
+
+      // Cancel old subscriptions
+      wrapper.cancel();
+
+      // Restore the children map so keyed reconciliation can work
+      elementState.children = savedChildren;
+
+      // Clear old event handlers (they'll be re-registered by bindProps)
+      for (const handlerId of elementState.eventHandlers.values()) {
+        ctx.unregisterHandler(handlerId);
+      }
+      elementState.eventHandlers.clear();
+
+      // Set up new subscriptions
+      const [cancel, addCancel] = useCancelGroup();
+
+      // Update props
+      const sanitized = this.sanitizeNode(newVNode!);
+      if (sanitized) {
+        addCancel(this.bindProps(ctx, elementState, sanitized.props));
+
+        // Update children using existing keyed reconciliation
+        // This will reuse existing children where possible via keying
+        if (sanitized.children !== undefined) {
+          addCancel(
+            this.bindChildren(ctx, elementState, sanitized.children, new Set()),
+          );
+        }
+      }
+
+      wrapper.cancel = cancel;
+      return;
+    }
+
+    // Case 2: Different type, text node, array, or no previous - destroy and recreate
     if (wrapper.currentChild) {
       wrapper.cancel();
       this.cleanupNodeHandlers(wrapper.currentChild);
