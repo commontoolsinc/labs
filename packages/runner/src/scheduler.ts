@@ -210,6 +210,21 @@ export class Scheduler {
   private actionParent = new WeakMap<Action, Action>();
   private actionChildren = new WeakMap<Action, Set<Action>>();
 
+  /**
+   * Temporarily set the executing action so that any child actions created
+   * during `fn` are registered as children of `action`. Restores the previous
+   * executing action afterwards (stack-like nesting).
+   */
+  withExecutingAction<T>(action: Action, fn: () => T): T {
+    const prev = this.executingAction;
+    this.executingAction = action;
+    try {
+      return fn();
+    } finally {
+      this.executingAction = prev;
+    }
+  }
+
   // Dependency population callbacks for first-time subscriptions
   // Called in execute() to discover what cells the action will read
   private populateDependenciesCallbacks = new WeakMap<

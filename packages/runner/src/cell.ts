@@ -1549,9 +1549,10 @@ function subscribeToReferencedDocs<T>(
   (action as Action & { src?: string }).src = sinkName;
 
   // Call action once immediately, which also defines what docs need to be
-  // subscribed to.
+  // subscribed to. Wrap with withExecutingAction so that any child sinks
+  // created during the callback see this action as their parent.
   const tx = runtime.edit();
-  action(tx);
+  runtime.scheduler.withExecutingAction(action, () => action(tx));
   const log = txToReactivityLog(tx);
 
   // Technically unnecessary since we don't expect/allow callbacks to sink to
