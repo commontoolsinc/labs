@@ -8,7 +8,7 @@ import {
   toDeepStorableValue,
   toStorableValue,
 } from "@commontools/memory/storable-value";
-import type { MemorySpace } from "@commontools/memory/interface";
+import type { MemorySpace, StorableValue } from "@commontools/memory/interface";
 import { getTopFrame, recipe } from "./builder/recipe.ts";
 import { createNodeFactory } from "./builder/module.ts";
 import {
@@ -324,7 +324,8 @@ interface CauseContainer {
  * CellImpl - Unified cell implementation that handles both regular cells and
  * streams.
  */
-export class CellImpl<T> implements ICell<T>, IStreamable<T> {
+export class CellImpl<T extends StorableValue>
+  implements ICell<T>, IStreamable<T> {
   private readOnlyReason: string | undefined;
 
   // Stream-specific fields
@@ -872,10 +873,12 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
   remove(
     ref: T extends (infer U)[] ? (U | AnyCell<U>) : never,
   ): void {
-    const array = this.get();
-    if (!Array.isArray(array)) {
+    type ElemT = T extends (infer U)[] ? U : never;
+    const got = this.get();
+    if (!Array.isArray(got)) {
       throw new Error("Can't remove from non-array value");
     }
+    const array = got as ElemT[];
     const index = typeof ref === "object"
       ? array.findIndex((item) =>
         areLinksSame(
@@ -887,24 +890,28 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
           this.runtime,
         )
       )
-      : array.indexOf(ref);
+      : array.indexOf(ref as ElemT);
     if (index === -1) {
       return;
     }
+    // Cast needed: TS can't prove ElemT[] reconstitutes to T
     const newArray = [
       ...array.slice(0, index),
       ...array.slice(index + 1),
-    ] as T;
+    ] as unknown as T;
     this.set(newArray);
   }
 
   removeAll(
     ref: T extends (infer U)[] ? (U | AnyCell<U>) : never,
   ): void {
-    const array = this.get();
-    if (!Array.isArray(array)) {
+    type ElemT = T extends (infer U)[] ? U : never;
+    const got = this.get();
+    if (!Array.isArray(got)) {
       throw new Error("Can't remove from non-array value");
     }
+    const array = got as ElemT[];
+    // Cast needed: TS can't prove ElemT[] reconstitutes to T
     const newArray = array.filter((item) =>
       typeof ref === "object"
         ? !areLinksSame(
@@ -916,7 +923,7 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
           this.runtime,
         )
         : item !== ref
-    ) as T;
+    ) as unknown as T;
     this.set(newArray);
   }
 
@@ -1347,8 +1354,9 @@ export class CellImpl<T> implements ICell<T>, IStreamable<T> {
       rootSchema: this.rootSchema ?? this.schema,
       nodes: cellNodes.get(this._causeContainer.cell) ?? new Set(),
       frame: this._frame,
+      // Cast needed: stream sentinel marker isn't actually of type T
       value: this._kind === "stream"
-        ? { $stream: true } as T
+        ? { $stream: true } as unknown as T
         : this._initialValue,
       name: this._causeContainer.cause as string | undefined,
       external: this._link.id
