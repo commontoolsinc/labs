@@ -13,6 +13,7 @@
  */
 
 import {
+  areLinksSame,
   type Cancel,
   type Cell,
   convertCellsToLinks,
@@ -25,6 +26,7 @@ import {
 import type {
   ChildNodeState,
   NodeState,
+  PropState,
   ReconcileContext,
   WorkerProps,
   WorkerReconcilerOptions,
@@ -282,13 +284,20 @@ export class WorkerReconciler {
   /**
    * Extract the underlying VNode from a WorkerRenderNode.
    * Follows [UI] chains and returns the VNode, or null if not a VNode.
+   * Includes cycle detection to prevent infinite loops.
    */
   private extractVNode(node: WorkerRenderNode): WorkerVNode | null {
     if (isWorkerVNode(node)) return node;
 
-    // Follow [UI] chain
+    // Follow [UI] chain with cycle detection
+    const visited = new Set<object>();
     let current: unknown = node;
     while (current && typeof current === "object" && UI in current) {
+      if (visited.has(current as object)) {
+        // Cycle detected, return null
+        return null;
+      }
+      visited.add(current as object);
       // deno-lint-ignore no-explicit-any
       current = (current as any)[UI];
     }
@@ -327,40 +336,21 @@ export class WorkerReconciler {
       "children" in oldState // Has full NodeState (not just ChildNodeState)
     ) {
       const elementState = oldState as NodeState;
-
-      // Save the children map before cancel clears it
-      const savedChildren = new Map(elementState.children);
-
-      // Cancel old subscriptions
-      wrapper.cancel();
-
-      // Restore the children map so keyed reconciliation can work
-      elementState.children = savedChildren;
-
-      // Clear old event handlers (they'll be re-registered by bindProps)
-      for (const handlerId of elementState.eventHandlers.values()) {
-        ctx.unregisterHandler(handlerId);
-      }
-      elementState.eventHandlers.clear();
-
-      // Set up new subscriptions
-      const [cancel, addCancel] = useCancelGroup();
-
-      // Update props
       const sanitized = this.sanitizeNode(newVNode!);
       if (sanitized) {
-        addCancel(this.bindProps(ctx, elementState, sanitized.props));
+        // Update props in place with proper diffing
+        this.updatePropsInPlace(ctx, elementState, sanitized.props);
 
-        // Update children using existing keyed reconciliation
-        // This will reuse existing children where possible via keying
+        // Update children in place with proper diffing
         if (sanitized.children !== undefined) {
-          addCancel(
-            this.bindChildren(ctx, elementState, sanitized.children, new Set()),
+          this.updateChildrenInPlace(
+            ctx,
+            elementState,
+            sanitized.children,
+            new Set(),
           );
         }
       }
-
-      wrapper.cancel = cancel;
       return;
     }
 
@@ -389,6 +379,314 @@ export class WorkerReconciler {
       wrapper.currentChild = state;
       // Use the state's cancel function directly - it owns all child subscriptions
       wrapper.cancel = state.cancel;
+    }
+  }
+
+  /**
+   * Update props in place with proper diffing.
+   * - Same Cell (via areLinksSame) → leave subscription alone
+   * - Different Cell → cancel old subscription, set up new one
+   * - Missing prop → cancel subscription, remove prop from DOM
+   */
+  private updatePropsInPlace(
+    ctx: ReconcileContext,
+    state: NodeState,
+    newProps: WorkerProps | Cell<WorkerProps> | null,
+  ): void {
+    // Handle Cell<Props> - if same cell, do nothing; otherwise re-subscribe
+    if (isCell(newProps)) {
+      const existingState = state.propSubscriptions.get("__cellProps__");
+      if (existingState?.cell && areLinksSame(existingState.cell, newProps)) {
+        // Same Cell, leave subscription in place
+        return;
+      }
+      // Different Cell - cancel old and set up new
+      if (existingState) {
+        existingState.cancel();
+        state.propSubscriptions.delete("__cellProps__");
+      }
+      // Clear all individual prop subscriptions since we're switching to Cell<Props>
+      for (const [key, propState] of state.propSubscriptions) {
+        if (key !== "__cellProps__") {
+          propState.cancel();
+        }
+      }
+      state.propSubscriptions.clear();
+
+      // Set up new Cell<Props> subscription
+      let currentPropsCancel: Cancel | undefined;
+      const cancel = newProps.sink((resolvedProps) => {
+        if (currentPropsCancel) {
+          currentPropsCancel();
+          currentPropsCancel = undefined;
+        }
+        if (resolvedProps) {
+          // When Cell<Props> emits, update individual props
+          this.updatePropsInPlace(ctx, state, resolvedProps as WorkerProps);
+        }
+      });
+      state.propSubscriptions.set("__cellProps__", {
+        cell: newProps as Cell<unknown>,
+        cancel,
+      });
+      return;
+    }
+
+    // Handle static props object
+    if (!newProps || typeof newProps !== "object") {
+      // No props - remove all existing
+      this.removeAllProps(ctx, state);
+      return;
+    }
+
+    const newPropKeys = new Set(Object.keys(newProps));
+
+    // Find props to remove (exist in old but not in new)
+    for (const [key, propState] of state.propSubscriptions) {
+      if (key === "__cellProps__") continue;
+      if (!newPropKeys.has(key)) {
+        // Prop removed - cancel subscription and remove from DOM
+        propState.cancel();
+        state.propSubscriptions.delete(key);
+        // Unregister event handler if it was an event
+        if (state.eventHandlers.has(key)) {
+          ctx.unregisterHandler(state.eventHandlers.get(key)!);
+          state.eventHandlers.delete(key);
+        }
+        // Send remove op (set to null/undefined)
+        this.queueOps([{
+          op: "set-prop",
+          nodeId: state.nodeId,
+          key,
+          value: null,
+        }]);
+      }
+    }
+
+    // Update or add props
+    for (const [key, value] of Object.entries(newProps)) {
+      const existingState = state.propSubscriptions.get(key);
+
+      if (isEventProp(key)) {
+        // Event handlers - always re-register (they don't have Cell diffing)
+        this.updateEventProp(ctx, state, key, value, existingState);
+      } else if (isBindingProp(key)) {
+        // Bindings - check if Cell is same
+        this.updateBindingProp(ctx, state, key, value, existingState);
+      } else if (isCell(value)) {
+        // Reactive prop - check if Cell is same
+        if (existingState?.cell && areLinksSame(existingState.cell, value)) {
+          // Same Cell, leave subscription in place
+          continue;
+        }
+        // Different Cell - cancel old and set up new
+        if (existingState) {
+          existingState.cancel();
+        }
+        const cancel = (value as Cell<unknown>).sink((resolvedValue) => {
+          const propValue = this.transformPropValue(key, resolvedValue);
+          this.queueOps([{
+            op: "set-prop",
+            nodeId: state.nodeId,
+            key,
+            value: propValue,
+          }]);
+        });
+        state.propSubscriptions.set(key, {
+          cell: value as Cell<unknown>,
+          cancel,
+        });
+      } else {
+        // Static prop - just set it (cancel any existing subscription)
+        if (existingState) {
+          existingState.cancel();
+        }
+        const propValue = this.transformPropValue(key, value);
+        this.queueOps([{
+          op: "set-prop",
+          nodeId: state.nodeId,
+          key,
+          value: propValue,
+        }]);
+        state.propSubscriptions.set(key, {
+          cell: undefined,
+          cancel: () => {},
+        });
+      }
+    }
+  }
+
+  /**
+   * Remove all props from a node.
+   */
+  private removeAllProps(ctx: ReconcileContext, state: NodeState): void {
+    for (const [key, propState] of state.propSubscriptions) {
+      propState.cancel();
+      if (state.eventHandlers.has(key)) {
+        ctx.unregisterHandler(state.eventHandlers.get(key)!);
+        state.eventHandlers.delete(key);
+      }
+      if (key !== "__cellProps__") {
+        this.queueOps([{
+          op: "set-prop",
+          nodeId: state.nodeId,
+          key,
+          value: null,
+        }]);
+      }
+    }
+    state.propSubscriptions.clear();
+  }
+
+  /**
+   * Update an event prop.
+   */
+  private updateEventProp(
+    ctx: ReconcileContext,
+    state: NodeState,
+    key: string,
+    value: unknown,
+    existingState: PropState | undefined,
+  ): void {
+    const eventType = getEventType(key);
+
+    // Cancel existing subscription
+    if (existingState) {
+      existingState.cancel();
+    }
+
+    // Unregister old handler
+    if (state.eventHandlers.has(eventType)) {
+      ctx.unregisterHandler(state.eventHandlers.get(eventType)!);
+      state.eventHandlers.delete(eventType);
+    }
+
+    if (isStream(value)) {
+      const stream = value as Stream<unknown>;
+      const handlerId = ctx.registerHandler((event: unknown) => {
+        stream.send(event);
+      });
+      state.eventHandlers.set(eventType, handlerId);
+      this.queueOps([{
+        op: "set-event",
+        nodeId: state.nodeId,
+        eventType,
+        handlerId,
+      }]);
+      state.propSubscriptions.set(key, { cell: undefined, cancel: () => {} });
+    } else if (isEventHandler(value)) {
+      const handlerId = ctx.registerHandler(value);
+      state.eventHandlers.set(eventType, handlerId);
+      this.queueOps([{
+        op: "set-event",
+        nodeId: state.nodeId,
+        eventType,
+        handlerId,
+      }]);
+      state.propSubscriptions.set(key, { cell: undefined, cancel: () => {} });
+    } else if (isCell(value)) {
+      const cancel = (value as Cell<(event: unknown) => void>).sink(
+        (handler) => {
+          if (handler) {
+            const handlerId = ctx.registerHandler(
+              handler as (event: unknown) => void,
+            );
+            state.eventHandlers.set(eventType, handlerId);
+            this.queueOps([{
+              op: "set-event",
+              nodeId: state.nodeId,
+              eventType,
+              handlerId,
+            }]);
+          }
+        },
+      );
+      state.propSubscriptions.set(key, {
+        cell: value as Cell<unknown>,
+        cancel,
+      });
+    }
+  }
+
+  /**
+   * Update a binding prop ($prop).
+   */
+  private updateBindingProp(
+    _ctx: ReconcileContext,
+    state: NodeState,
+    key: string,
+    value: unknown,
+    existingState: PropState | undefined,
+  ): void {
+    const propName = getBindingPropName(key);
+
+    if (isCell(value)) {
+      // Check if same Cell
+      if (existingState?.cell && areLinksSame(existingState.cell, value)) {
+        return; // Same binding, leave it alone
+      }
+
+      // Different Cell - update binding
+      if (existingState) {
+        existingState.cancel();
+      }
+      const cellRef = (value as Cell<unknown>).getAsNormalizedFullLink();
+      this.queueOps([{
+        op: "set-binding",
+        nodeId: state.nodeId,
+        propName,
+        cellRef,
+      }]);
+      state.propSubscriptions.set(key, {
+        cell: value as Cell<unknown>,
+        cancel: () => {},
+      });
+    }
+  }
+
+  /**
+   * Update children in place with proper diffing.
+   * If children Cell is the same, leave subscription in place.
+   */
+  private updateChildrenInPlace(
+    ctx: ReconcileContext,
+    state: NodeState,
+    children: WorkerRenderNode | WorkerRenderNode[],
+    visited: Set<object>,
+  ): void {
+    // Handle Cell<children> - check if same Cell
+    if (isCell(children)) {
+      const existingState = state.childrenState;
+      if (existingState?.cell && areLinksSame(existingState.cell, children)) {
+        // Same Cell, leave subscription in place
+        return;
+      }
+
+      // Different Cell - cancel old subscription
+      if (existingState) {
+        existingState.cancel();
+      }
+
+      // Set up new subscription
+      const cancel = (children as Cell<WorkerRenderNode | WorkerRenderNode[]>)
+        .sink(
+          (resolvedChildren) => {
+            this.updateChildren(ctx, state, resolvedChildren, visited);
+          },
+        );
+
+      state.childrenState = {
+        cell: children as Cell<unknown>,
+        cancel,
+      };
+    } else {
+      // Static children - cancel any existing Cell subscription
+      if (state.childrenState) {
+        state.childrenState.cancel();
+        state.childrenState = undefined;
+      }
+      // Update children directly
+      this.updateChildren(ctx, state, children, visited);
     }
   }
 
@@ -618,6 +916,7 @@ export class WorkerReconciler {
 
   /**
    * Bind props to an element, handling reactive values and events.
+   * Tracks Cell references in propSubscriptions for later diffing.
    */
   private bindProps(
     ctx: ReconcileContext,
@@ -631,22 +930,26 @@ export class WorkerReconciler {
     // Handle Cell<Props>
     if (isCell(props)) {
       let currentPropsCancel: Cancel | undefined;
-      addCancel(
-        props.sink((resolvedProps) => {
-          if (currentPropsCancel) {
-            currentPropsCancel();
-            currentPropsCancel = undefined;
-          }
-          if (resolvedProps) {
-            currentPropsCancel = this.bindProps(
-              ctx,
-              state,
-              resolvedProps as WorkerProps,
-            );
-            addCancel(currentPropsCancel);
-          }
-        }),
-      );
+      const sinkCancel = props.sink((resolvedProps) => {
+        if (currentPropsCancel) {
+          currentPropsCancel();
+          currentPropsCancel = undefined;
+        }
+        if (resolvedProps) {
+          currentPropsCancel = this.bindProps(
+            ctx,
+            state,
+            resolvedProps as WorkerProps,
+          );
+          addCancel(currentPropsCancel);
+        }
+      });
+      addCancel(sinkCancel);
+      // Track the Cell<Props> for diffing
+      state.propSubscriptions.set("__cellProps__", {
+        cell: props as Cell<unknown>,
+        cancel: sinkCancel,
+      });
       return cancel;
     }
 
@@ -672,6 +975,10 @@ export class WorkerReconciler {
             eventType,
             handlerId,
           }]);
+          state.propSubscriptions.set(key, {
+            cell: undefined,
+            cancel: () => {},
+          });
         } else if (isEventHandler(value)) {
           // Plain function event handler
           const handlerId = ctx.registerHandler(value);
@@ -682,11 +989,15 @@ export class WorkerReconciler {
             eventType,
             handlerId,
           }]);
+          state.propSubscriptions.set(key, {
+            cell: undefined,
+            cancel: () => {},
+          });
         } else if (isCell(value)) {
           // Cell containing event handler - not common but handle it
           const eventType = getEventType(key);
-          addCancel(
-            (value as Cell<(event: unknown) => void>).sink((handler) => {
+          const sinkCancel = (value as Cell<(event: unknown) => void>).sink(
+            (handler) => {
               if (handler) {
                 // Cast handler to mutable function type for registration
                 const handlerId = ctx.registerHandler(
@@ -700,8 +1011,13 @@ export class WorkerReconciler {
                   handlerId,
                 }]);
               }
-            }),
+            },
           );
+          addCancel(sinkCancel);
+          state.propSubscriptions.set(key, {
+            cell: value as Cell<unknown>,
+            cancel: sinkCancel,
+          });
         }
       } else if (isBindingProp(key)) {
         // Bidirectional binding ($prop)
@@ -714,20 +1030,27 @@ export class WorkerReconciler {
             propName,
             cellRef,
           }]);
+          state.propSubscriptions.set(key, {
+            cell: value as Cell<unknown>,
+            cancel: () => {},
+          });
         }
       } else if (isCell(value)) {
         // Reactive prop value
-        addCancel(
-          (value as Cell<unknown>).sink((resolvedValue) => {
-            const propValue = this.transformPropValue(key, resolvedValue);
-            this.queueOps([{
-              op: "set-prop",
-              nodeId: state.nodeId,
-              key,
-              value: propValue,
-            }]);
-          }),
-        );
+        const sinkCancel = (value as Cell<unknown>).sink((resolvedValue) => {
+          const propValue = this.transformPropValue(key, resolvedValue);
+          this.queueOps([{
+            op: "set-prop",
+            nodeId: state.nodeId,
+            key,
+            value: propValue,
+          }]);
+        });
+        addCancel(sinkCancel);
+        state.propSubscriptions.set(key, {
+          cell: value as Cell<unknown>,
+          cancel: sinkCancel,
+        });
       } else {
         // Static prop value
         const propValue = this.transformPropValue(key, value);
@@ -737,6 +1060,7 @@ export class WorkerReconciler {
           key,
           value: propValue,
         }]);
+        state.propSubscriptions.set(key, { cell: undefined, cancel: () => {} });
       }
     }
 
@@ -819,6 +1143,7 @@ export class WorkerReconciler {
 
   /**
    * Bind children to an element with keyed reconciliation.
+   * Tracks the children Cell for later diffing.
    */
   private bindChildren(
     ctx: ReconcileContext,
@@ -830,16 +1155,21 @@ export class WorkerReconciler {
 
     // Handle Cell<children>
     if (isCell(children)) {
-      addCancel(
-        (children as Cell<WorkerRenderNode | WorkerRenderNode[]>).sink(
-          (resolvedChildren) => {
-            this.updateChildren(ctx, state, resolvedChildren, visited);
-          },
-        ),
-      );
+      const sinkCancel = (
+        children as Cell<WorkerRenderNode | WorkerRenderNode[]>
+      ).sink((resolvedChildren) => {
+        this.updateChildren(ctx, state, resolvedChildren, visited);
+      });
+      addCancel(sinkCancel);
+      // Track the children Cell for diffing
+      state.childrenState = {
+        cell: children as Cell<unknown>,
+        cancel: sinkCancel,
+      };
     } else {
       // Static children
       this.updateChildren(ctx, state, children, visited);
+      state.childrenState = undefined;
     }
 
     // When this cancel is called, also cancel all current children.
@@ -850,6 +1180,7 @@ export class WorkerReconciler {
         childState.cancel();
       }
       state.children.clear();
+      state.childrenState = undefined;
     });
 
     return cancel;
