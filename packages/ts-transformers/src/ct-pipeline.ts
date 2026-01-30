@@ -1,5 +1,6 @@
 import {
   CastValidationTransformer,
+  HtmlCommentValidationTransformer,
   ModuleScopeValidationTransformer,
   OpaqueGetValidationTransformer,
   OpaqueRefJSXTransformer,
@@ -39,7 +40,8 @@ export class CommonToolsTransformerPipeline extends Pipeline {
       new CastValidationTransformer(sharedOps),
       new OpaqueGetValidationTransformer(sharedOps),
       new PatternContextValidationTransformer(sharedOps),
-      // SES validation: ensures module-scope statements are SES-safe
+      // SES validation
+      new HtmlCommentValidationTransformer(sharedOps),
       new ModuleScopeValidationTransformer(sharedOps),
       // Then the regular transformation pipeline
       new OpaqueRefJSXTransformer(sharedOps),

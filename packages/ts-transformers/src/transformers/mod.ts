@@ -1,4 +1,5 @@
 export { CastValidationTransformer } from "./cast-validation.ts";
+export { HtmlCommentValidationTransformer } from "./html-comment-validation.ts";
 export { ModuleScopeValidationTransformer } from "./module-scope-validation.ts";
 export { OpaqueGetValidationTransformer } from "./opaque-get-validation.ts";
 export { OpaqueRefJSXTransformer } from "./opaque-ref-jsx.ts";
