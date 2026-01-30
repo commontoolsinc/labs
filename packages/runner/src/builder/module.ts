@@ -333,9 +333,15 @@ export function derive<In, Out>(...args: any[]): OpaqueRef<any> {
   return lift(f)(input);
 }
 
-// unsafe closures: like derive, but doesn't need any arguments
+// unsafe closures: like derive, but doesn't need any arguments.
+// Uses argumentSchema: false to signal "takes no input" so the action
+// validation doesn't skip it due to undefined arguments.
 export const computed: <T>(fn: () => T) => OpaqueRef<T> = <T>(fn: () => T) =>
-  lift<any, T>(fn)(undefined);
+  createNodeFactory<any, T>({
+    type: "javascript",
+    implementation: fn,
+    argumentSchema: false,
+  })(undefined);
 
 /**
  * action: Creates a handler that doesn't use the state parameter.
