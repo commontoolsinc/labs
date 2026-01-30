@@ -27,9 +27,9 @@ Goal: implement the task below
    directly as regular tool calls. DO NOT use the Skill tool for Playwright.
 
    Testing steps: a. Navigate to
-   http://localhost:8000/ralph${RALPH_ID}/<CHARM_ID> using
+   http://localhost:8000/ralph${RALPH_ID}/<PIECE_ID> using
    `mcp__playwright__browser_navigate` b. If you see a login page (first time
-   only), complete registration c. Test the charm's functionality using
+   only), complete registration c. Test the piece's functionality using
    Playwright MCP tools:
    - Take screenshots to verify it loaded (name them
      ralph_${RALPH_ID}-<description>.png, e.g., ralph_1-initial.png)

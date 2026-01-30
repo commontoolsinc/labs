@@ -61,7 +61,7 @@ export default recipe("state test", () => {
 ```
 The `{characterName}` snippet creates a reactive node behind the scenes. This means the rendered character name is updated whenever the cell changes.
 
-We can now deploy the code. See the section {ref}`deploy_charms` for how to do this.
+We can now deploy the code. See the section {ref}`deploy_pieces` for how to do this.
 
 It'll look a bit like this:
 ![](./images/state_charname.png)

@@ -34,7 +34,7 @@ delivering a clean, useful implementation with appropriate features.
 - For form handling, use `onClick` handlers instead of `onSubmit`
   </code_structure>
 
-<charm_api>
+<piece_api>
 
 - **useReactiveCell(keyPath: string[])** - Persistent data storage with reactive
   updates
@@ -75,7 +75,7 @@ delivering a clean, useful implementation with appropriate features.
       root.render(<MyApp />);
     }
     ```
-  </use_reactive_cell> </charm_api>
+  </use_reactive_cell> </piece_api>
 
 <importing_libraries>
 
@@ -88,7 +88,7 @@ delivering a clean, useful implementation with appropriate features.
 {{SECURITY}}
 </security>
 
-<schema description="The pre-generated schema this Charm operates on.">
+<schema description="The pre-generated schema this Piece operates on.">
 {{SCHEMA}}
 </schema>
 

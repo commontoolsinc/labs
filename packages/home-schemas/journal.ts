@@ -10,10 +10,10 @@ import type { Schema } from "@commontools/api/schema";
  * Journal entry event types - the significant events we track
  */
 export const journalEventTypes = [
-  "charm:favorited",
-  "charm:unfavorited",
-  "charm:created",
-  "charm:modified",
+  "piece:favorited",
+  "piece:unfavorited",
+  "piece:created",
+  "piece:modified",
   "space:entered",
 ] as const;
 

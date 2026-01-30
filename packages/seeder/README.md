@@ -1,7 +1,7 @@
-# Charm Seeder
+# Piece Seeder
 
-"42 charms" project runs a collection of workflows/prompts to create and verify
-charms.
+"42 pieces" project runs a collection of workflows/prompts to create and verify
+pieces.
 
 ## Setup requirements
 

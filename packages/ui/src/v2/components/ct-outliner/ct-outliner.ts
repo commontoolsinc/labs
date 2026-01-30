@@ -1568,17 +1568,17 @@ export class CTOutliner extends BaseElement
       return;
     }
 
-    const charm = this.mentionController.decodeCharmFromHref(href);
-    if (!charm) {
-      console.warn("Could not decode charm from href:", href);
+    const piece = this.mentionController.decodePieceFromHref(href);
+    if (!piece) {
+      console.warn("Could not decode piece from href:", href);
       return;
     }
 
-    // Emit the charm-link-click event
-    this.emit("charm-link-click", {
+    // Emit the piece-link-click event
+    this.emit("piece-link-click", {
       href,
       text: text || "",
-      charm,
+      piece,
     });
   }
 

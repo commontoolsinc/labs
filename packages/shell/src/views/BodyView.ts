@@ -46,7 +46,7 @@ export class XBodyView extends BaseView {
       flex: 1;
     }
 
-    ct-charm,
+    ct-piece,
     ct-render[slot="main"] {
       display: flex;
       flex-direction: column;
@@ -88,7 +88,7 @@ export class XBodyView extends BaseView {
   spaceRootPattern?: PageHandle;
 
   @property()
-  showShellCharmListView = false;
+  showShellPieceListView = false;
 
   @property({ type: Boolean })
   showSidebar = false;
@@ -124,15 +124,15 @@ export class XBodyView extends BaseView {
     const mainContent = this.patternError
       ? html`
         <div slot="main" class="pattern-error">
-          <h2>Failed to load charm</h2>
+          <h2>Failed to load piece</h2>
           <p>${this.patternError.message}</p>
         </div>
       `
       : this.activePattern
       ? html`
-        <ct-charm slot="main" .pieceId="${this.activePattern.id()}">
+        <ct-piece slot="main" .pieceId="${this.activePattern.id()}">
           <ct-render .cell="${this.activePattern.cell()}"></ct-render>
-        </ct-charm>
+        </ct-piece>
       `
       : null;
 

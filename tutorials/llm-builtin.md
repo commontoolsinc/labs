@@ -59,19 +59,19 @@ export default recipe("LLM Test", () => {
 });
 ```
 
-Note that we are using `export` on line 1, this is because a single recipe source file may have multiple recipes in it. When the system is building a charm from the source file, it needs the main entry point, which will be the recipe that you export.
+Note that we are using `export` on line 1, this is because a single recipe source file may have multiple recipes in it. When the system is building a piece from the source file, it needs the main entry point, which will be the recipe that you export.
 
-The [NAME] symbol is used as a property in the created charm. It is used for displaying the charm and also often for debugging.
+The [NAME] symbol is used as a property in the created piece. It is used for displaying the piece and also often for debugging.
 
-The [UI] property has all the information to render the charm in the browser. It contains a mix of JSX and interpolated function calls using `{some_function()}` syntax. The results of these functions are inserted into display for rendering. We'll learn more about what works in the UI property in future sections.
+The [UI] property has all the information to render the piece in the browser. It contains a mix of JSX and interpolated function calls using `{some_function()}` syntax. The results of these functions are inserted into display for rendering. We'll learn more about what works in the UI property in future sections.
 
-When you deploy and browse to your charm, you should see something that looks like this:
+When you deploy and browse to your piece, you should see something that looks like this:
 
 ![](./images/llmv1.png)
 **Figure**: Placeholder Recipe
 
 ## Add User Input
-Now that we have a working deployed charm, let's continue to iterate and add a user input form.
+Now that we have a working deployed piece, let's continue to iterate and add a user input form.
 This will eventually serve as the user's input to the LLM call.
 
 We'll update our `recipe` function to create a `Cell` to hold the value of the user input, add the JSX component that gets user text input, and also display the user input.
@@ -135,7 +135,7 @@ Now that we've told `handler` what to expect as types, we can send the actual pa
 
 Our function body is just a single line (line 5). It simply sets the value of the `userMessage` cell to the user input. Cells have set() and get() functions. There are other functions which we'll discover in other chapters.
 
-After deploying your charm, you should see something like this:
+After deploying your piece, you should see something like this:
 
 ![](./images/llm_handler.png)
 **Figure**: Recipe with Handler
@@ -226,7 +226,7 @@ When the system first loads, it executes the body of the recipe() function, whic
 
 Technically, the `llm()` built-in is called once with the undefined userMessage upon its initialization.
 
-The charm then renders the code in the [UI] section and the system sets the reactive node to display the llmResponse with the conditional expression we wrote (`{llmResponse.result ? ... : ""}`) and the user's message with `{userMessage}`.
+The piece then renders the code in the [UI] section and the system sets the reactive node to display the llmResponse with the conditional expression we wrote (`{llmResponse.result ? ... : ""}`) and the user's message with `{userMessage}`.
 These initially don't show anything since the values are undefined.
 
 The user types a prompt into the `<ct-message-input>` component which triggers the `textInputHandler()`. The handler gets passed in the event, which contains the user's message (as a normal js object), and also the `userMessage` which is a Cell. The handler sets the cell's value with the event message.

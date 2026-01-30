@@ -9,7 +9,7 @@ import { FileSystemProgramResolver } from "@commontools/js-compiler";
 
 const { API_URL, SPACE_NAME, FRONTEND_URL } = env;
 
-describe("shell charm tests", () => {
+describe("shell piece tests", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
@@ -36,18 +36,18 @@ describe("shell charm tests", () => {
       .resolve(
         new FileSystemProgramResolver(sourcePath),
       );
-    const charm = await cc.create(
+    const piece = await cc.create(
       program,
       { start: false },
     );
-    pieceId = charm.id;
+    pieceId = piece.id;
   });
 
   afterAll(async () => {
     if (cc) await cc.dispose();
   });
 
-  it("can view and interact with a charm", async () => {
+  it("can view and interact with a piece", async () => {
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,

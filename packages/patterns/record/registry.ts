@@ -5,7 +5,7 @@
 // ADDING A NEW MODULE? You need to update THREE places:
 // =============================================================================
 // 1. Import the module and its metadata below
-// 2. Add it to SUB_CHARM_REGISTRY (around line 90)
+// 2. Add it to SUB_PIECE_REGISTRY (around line 90)
 // 3. Add it to SubPieceType in ./types.ts
 //
 // AI extraction schema is discovered dynamically from pattern.resultSchema
@@ -144,7 +144,7 @@ function fromMetadata(
 
 // Static registry - defines available sub-piece types
 // Now built from peer pattern metadata
-export const SUB_CHARM_REGISTRY: Record<string, SubPieceDefinition> = {
+export const SUB_PIECE_REGISTRY: Record<string, SubPieceDefinition> = {
   // Notes is special - must be created in record.tsx with linkPattern
   notes: {
     type: "notes",
@@ -251,18 +251,18 @@ export const SUB_CHARM_REGISTRY: Record<string, SubPieceDefinition> = {
 
 // Helper functions
 export function getAvailableTypes(): SubPieceDefinition[] {
-  return Object.values(SUB_CHARM_REGISTRY);
+  return Object.values(SUB_PIECE_REGISTRY);
 }
 
 // Get types available for "Add" dropdown (excludes internal modules like type-picker)
 export function getAddableTypes(): SubPieceDefinition[] {
-  return Object.values(SUB_CHARM_REGISTRY).filter((def) => !def.internal);
+  return Object.values(SUB_PIECE_REGISTRY).filter((def) => !def.internal);
 }
 
 export function getDefinition(
   type: SubPieceType | string,
 ): SubPieceDefinition | undefined {
-  return SUB_CHARM_REGISTRY[type];
+  return SUB_PIECE_REGISTRY[type];
 }
 
 // Create a new sub-piece instance by type, optionally with initial values
@@ -271,7 +271,7 @@ export function createSubPiece(
   type: string,
   initialValues?: Record<string, unknown>,
 ): unknown {
-  const def = SUB_CHARM_REGISTRY[type];
+  const def = SUB_PIECE_REGISTRY[type];
   if (!def) {
     throw new Error(`Unknown sub-piece type: ${type}`);
   }
@@ -293,7 +293,7 @@ export function buildExtractionSchema(): {
     },
   };
 
-  for (const def of Object.values(SUB_CHARM_REGISTRY)) {
+  for (const def of Object.values(SUB_PIECE_REGISTRY)) {
     if (!def.schema) continue;
 
     // Add primary schema fields
@@ -343,7 +343,7 @@ export function getFieldToTypeMapping(): Record<string, string> {
   // "name" extracts to "record-title" pseudo-type, handled specially in applySelected
   fieldToType["name"] = "record-title";
 
-  for (const def of Object.values(SUB_CHARM_REGISTRY)) {
+  for (const def of Object.values(SUB_PIECE_REGISTRY)) {
     if (def.fieldMapping) {
       for (const field of def.fieldMapping) {
         fieldToType[field] = def.type;

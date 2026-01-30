@@ -10,8 +10,8 @@ guideline:
 
 ### Component Files
 
-- `packages/charm/src/iframe/recipe.ts`
-- `packages/charm/src/commands.ts`
+- `packages/piece/src/iframe/recipe.ts`
+- `packages/piece/src/commands.ts`
 - `packages/html/src/render.ts`
 - `packages/html/src/path.ts`
 - `packages/memory/clock.ts` - `export default new Clock();`

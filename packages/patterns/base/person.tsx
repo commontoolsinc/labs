@@ -23,10 +23,10 @@ import {
   Writable,
 } from "commontools";
 
-import type { ContactCharm, Person, PersonLike } from "./contact-types.tsx";
+import type { ContactPiece, Person, PersonLike } from "./contact-types.tsx";
 
 // Re-export for backwards compatibility
-export type { ContactCharm, Person, PersonLike } from "./contact-types.tsx";
+export type { ContactPiece, Person, PersonLike } from "./contact-types.tsx";
 
 // ============================================================================
 // Constants
@@ -205,7 +205,7 @@ interface Input {
     >
   >;
   // Optional: reactive source of sibling contacts for sameAs linking.
-  sameAs?: Writable<ContactCharm[]>;
+  sameAs?: Writable<ContactPiece[]>;
 }
 
 interface Output {

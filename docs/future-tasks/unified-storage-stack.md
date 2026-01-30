@@ -343,10 +343,10 @@ cause errors. We shouldn't block building the above on resolving this though.
 
 - Blobs: See upcoming doc, noting here as it's building on moving to the
   `{ "@": { <type>: { ... }}}` notation of links/etc
-- Charms: Add `{ "@": { process: { ... }}}` for charms, and make result just
+- Pieces: Add `{ "@": { process: { ... }}}` for pieces, and make result just
   data within that (as it's always a few static aliases anyway). System code
-  that deals with charms should probably directly operate on cells of processes
-  like this. And code where charms are just pointers to results (most current
+  that deals with pieces should probably directly operate on cells of processes
+  like this. And code where pieces are just pointers to results (most current
   code and all userland code) inherit the behavior from the now clear
   containment.
 - Streams: Currently `{ $stream: true }` should also transition. I don't think
@@ -356,11 +356,11 @@ cause errors. We shouldn't block building the above on resolving this though.
 ### Save scheduling information in storage as meta data, remove extra `value`
 
 Currently data in storage is actually
-`{ value?: <the actual value>, source?: <id of process charm, if any> }`. It
+`{ value?: <the actual value>, source?: <id of process piece, if any> }`. It
 should just be the value.
 
 We also don't store any information that the scheduler generates about
-dependencies, and so when loading a charm we have to recompute all reactive
+dependencies, and so when loading a piece we have to recompute all reactive
 functions just to regenerate that.
 
 Instead we could save scheduling information as meta data, i.e. as a separate

@@ -8,13 +8,13 @@ deno task ct check pattern.tsx --no-run
 deno task ct check pattern.tsx
 
 # Deploy
-deno task ct charm new ... pattern.tsx
+deno task ct piece new ... pattern.tsx
 
 # Update existing (faster iteration)
-deno task ct charm setsrc ... --charm CHARM_ID pattern.tsx
+deno task ct piece setsrc ... --piece PIECE_ID pattern.tsx
 
 # Inspect data
-deno task ct charm inspect ... --charm CHARM_ID
+deno task ct piece inspect ... --piece PIECE_ID
 ```
 
 **Tips:**

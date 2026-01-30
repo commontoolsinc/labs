@@ -17,29 +17,29 @@ deno task ct check pattern.tsx --show-transformed
 
 ```bash
 # Deploy
-deno task ct charm new --identity key.json --api-url URL --space SPACE pattern.tsx
-# Returns: charm-id
+deno task ct piece new --identity key.json --api-url URL --space SPACE pattern.tsx
+# Returns: piece-id
 
 # Set test data
 echo '{"title": "Test", "done": false}' | \
-  deno task ct charm set --identity key.json --api-url URL --space SPACE --charm ID testItem
+  deno task ct piece set --identity key.json --api-url URL --space SPACE --piece ID testItem
 
 # Inspect full state
-deno task ct charm inspect --identity key.json --api-url URL --space SPACE --charm ID
+deno task ct piece inspect --identity key.json --api-url URL --space SPACE --piece ID
 
 # Get specific field
-deno task ct charm get --identity key.json --api-url URL --space SPACE --charm ID items/0/title
+deno task ct piece get --identity key.json --api-url URL --space SPACE --piece ID items/0/title
 ```
 
 ## Iterate Quickly with setsrc
 
-Use `setsrc` to update existing charm without creating new one:
+Use `setsrc` to update existing piece without creating new one:
 
 ```bash
-deno task ct charm setsrc --identity key.json --api-url URL --space SPACE --charm ID pattern.tsx
+deno task ct piece setsrc --identity key.json --api-url URL --space SPACE --piece ID pattern.tsx
 ```
 
-This keeps you working with the same charm instance, preserving any test data you've set up.
+This keeps you working with the same piece instance, preserving any test data you've set up.
 
 ## See Also
 

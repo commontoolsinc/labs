@@ -96,7 +96,7 @@ interface BacklinkInfo {
   to: number; // End of ]]
   nameFrom: number; // Start of name (after [[)
   nameTo: number; // End of name (before " (id)" or "]]")
-  id: string; // The charm ID (empty string if incomplete)
+  id: string; // The piece ID (empty string if incomplete)
   name: string; // The display name text
 }
 
@@ -272,7 +272,7 @@ const backlinkEditFilter = EditorState.transactionFilter.of((tr) => {
  * @attr {string} timingStrategy - Input timing strategy: "immediate" | "debounce" | "throttle" | "blur"
  * @attr {number} timingDelay - Delay in milliseconds for debounce/throttle (default: 500)
  * @attr {CellHandle<MentionableArray>} mentionable - Cell of mentionable items for @/@[[ completion
- * @attr {Array} mentioned - Optional Cell of live Charms mentioned in content
+ * @attr {Array} mentioned - Optional Cell of live Pieces mentioned in content
  * @attr {boolean} wordWrap - Enable soft line wrapping (default: true)
  * @attr {boolean} lineNumbers - Show line numbers gutter (default: false)
  * @attr {number} maxLineWidth - Optional max line width in ch units
@@ -284,10 +284,10 @@ const backlinkEditFilter = EditorState.transactionFilter.of((tr) => {
  * @fires ct-change - Fired when content changes with detail: { value, oldValue, language }
  * @fires ct-focus - Fired on focus
  * @fires ct-blur - Fired on blur
- * @fires backlink-click - Fired when a backlink is clicked with Cmd/Ctrl+Enter with detail: { text, charm }
+ * @fires backlink-click - Fired when a backlink is clicked with Cmd/Ctrl+Enter with detail: { text, piece }
  * @fires backlink-create - Fired when a novel backlink is activated (Cmd/Ctrl+Click)
  *   or confirmed with Enter during autocomplete with no matches. Detail:
- *   { text: string, pieceId: any, charm: Cell<MentionableCharm>, navigate: boolean }
+ *   { text: string, pieceId: any, piece: Cell<MentionablePiece>, navigate: boolean }
  *
  * @example
  * <ct-code-editor language="text/javascript" placeholder="Enter code..."></ct-code-editor>
@@ -348,10 +348,10 @@ export class CTCodeEditor extends BaseElement {
   private _cleanupFns: Array<() => void> = [];
   private _mentionableUnsub: (() => void) | null = null;
   private _mentionedUnsub: (() => void) | null = null;
-  // Track previous backlink names to detect changes for syncing to charm NAME
+  // Track previous backlink names to detect changes for syncing to piece NAME
   private _previousBacklinkNames = new Map<string, string>();
-  // Track subscriptions to charm NAME cells for bidirectional sync
-  private _charmNameSubscriptions = new Map<string, () => void>();
+  // Track subscriptions to piece NAME cells for bidirectional sync
+  private _pieceNameSubscriptions = new Map<string, () => void>();
 
   // Transaction annotation to mark Cell-originated updates.
   // This is the idiomatic CodeMirror 6 way to distinguish programmatic
@@ -428,12 +428,12 @@ export class CTCodeEditor extends BaseElement {
       const hasAutoCloseBrackets = afterCursor.startsWith("]]");
 
       // Build options from existing mentionable items
-      const options: Completion[] = mentionable.map((charm) => {
-        const pieceId = charm.id();
-        const charmName = charm.key(NAME).get() || "";
-        const insertText = `${charmName} (${pieceId})`;
+      const options: Completion[] = mentionable.map((piece) => {
+        const pieceId = piece.id();
+        const pieceName = piece.key(NAME).get() || "";
+        const insertText = `${pieceName} (${pieceId})`;
         return {
-          label: charmName,
+          label: pieceName,
           // Use apply function to handle auto-closed brackets
           apply: (view, _completion, from, to) => {
             // If auto-close added ]], extend replacement to include them
@@ -444,12 +444,12 @@ export class CTCodeEditor extends BaseElement {
             });
           },
           type: "text",
-          info: "Link to " + charmName,
+          info: "Link to " + pieceName,
         };
       });
 
-      // Only show existing charms - no "Create" option
-      // Enter will complete with exact match or create new charm
+      // Only show existing pieces - no "Create" option
+      // Enter will complete with exact match or create new piece
       return {
         from: backlink.from + 2, // Start after [[ (original behavior)
         options,
@@ -526,7 +526,7 @@ export class CTCodeEditor extends BaseElement {
   private _completeBacklinkWithId(
     view: EditorView,
     _queryText: string,
-    charmName: string,
+    pieceName: string,
     pieceId: string,
   ): void {
     // Find the [[ start position
@@ -542,7 +542,7 @@ export class CTCodeEditor extends BaseElement {
     const hasAutoClose = afterCursor === "]]";
 
     // Build the complete backlink
-    const fullBacklink = `[[${charmName} (${pieceId})]]`;
+    const fullBacklink = `[[${pieceName} (${pieceId})]]`;
 
     // Calculate replacement range
     const replaceFrom = bracketPos;
@@ -577,7 +577,7 @@ export class CTCodeEditor extends BaseElement {
 
   /**
    * Handle backlink clicks:
-   * - Click on pill: navigate to linked charm
+   * - Click on pill: navigate to linked piece
    * - Click when expanded (editing mode): places cursor normally
    */
   private createBacklinkClickHandler() {
@@ -597,7 +597,7 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Handle click on a collapsed backlink pill - navigate to the linked charm
+   * Handle click on a collapsed backlink pill - navigate to the linked piece
    */
   private async handlePillClick(
     view: EditorView,
@@ -638,7 +638,7 @@ export class CTCodeEditor extends BaseElement {
         this.emit("backlink-click", {
           id,
           text: innerText,
-          charm: cell,
+          piece: cell,
         });
         return;
       }
@@ -674,12 +674,12 @@ export class CTCodeEditor extends BaseElement {
         // Extract ID from "Name (id)" format
         const idMatch = backlinkText.match(/\(([^)]+)\)$/);
         const backlinkId = idMatch ? idMatch[1] : undefined;
-        const charm = backlinkId ? this.findCharmById(backlinkId) : null;
-        if (charm) {
+        const piece = backlinkId ? this.findPieceById(backlinkId) : null;
+        if (piece) {
           this.emit("backlink-click", {
             id: backlinkId,
             text: backlinkText,
-            charm,
+            piece,
           });
           return true;
         }
@@ -721,7 +721,7 @@ export class CTCodeEditor extends BaseElement {
 
       const page = await rt.createPage(pattern, inputs);
       if (!page) {
-        throw new Error("Could not create charm.");
+        throw new Error("Could not create piece.");
       }
       const pieceId = page.id();
 
@@ -733,7 +733,7 @@ export class CTCodeEditor extends BaseElement {
       this.emit("backlink-create", {
         text: backlinkText,
         pieceId,
-        charm: page.cell(),
+        piece: page.cell(),
         navigate,
       });
     } catch (error) {
@@ -790,9 +790,9 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Find a charm by ID in the mentionable list
+   * Find a piece by ID in the mentionable list
    */
-  private findCharmById(id: string): CellHandle<Mentionable> | null {
+  private findPieceById(id: string): CellHandle<Mentionable> | null {
     if (!this.mentionable) return null;
 
     const rawMentionable = this.mentionable.get();
@@ -806,12 +806,12 @@ export class CTCodeEditor extends BaseElement {
     if (mentionableData.length === 0) return null;
 
     for (let i = 0; i < mentionableData.length; i++) {
-      const charmValue = mentionableData[i];
-      if (!charmValue) continue;
-      const charmCell = this.mentionable.key(i) as CellHandle<Mentionable>;
-      const pieceId = charmCell.id();
+      const pieceValue = mentionableData[i];
+      if (!pieceValue) continue;
+      const pieceCell = this.mentionable.key(i) as CellHandle<Mentionable>;
+      const pieceId = pieceCell.id();
       if (pieceId === id) {
-        return charmCell;
+        return pieceCell;
       }
     }
 
@@ -824,7 +824,7 @@ export class CTCodeEditor extends BaseElement {
    * - When cursor is adjacent/inside: show [[Name]] with visible brackets (ID never visible)
    * - Incomplete backlinks show as pending pills or [[text]] when editing
    *
-   * The charm ID is never shown to the user - it's stored in the document
+   * The piece ID is never shown to the user - it's stored in the document
    * as [[Name (id)]] but displayed as [[Name]] when editing or just Name when collapsed.
    */
   private createBacklinkDecorationPlugin() {
@@ -974,7 +974,7 @@ export class CTCodeEditor extends BaseElement {
       annotations: CTCodeEditor._cellSyncAnnotation.of(true),
     });
 
-    // Ensure mentioned charms reflect external value changes
+    // Ensure mentioned pieces reflect external value changes
     this._updateMentionedFromContent();
   }
 
@@ -1012,7 +1012,7 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Subscribe to mentionable changes to re-resolve mentioned charms when
+   * Subscribe to mentionable changes to re-resolve mentioned pieces when
    * the source list updates.
    */
   private _setupMentionableSyncHandler(): void {
@@ -1042,15 +1042,15 @@ export class CTCodeEditor extends BaseElement {
     if (!this.mentioned) return;
     const unsubscribe = this.mentioned
       .subscribe((_value) => {
-        // Re-sync charm name subscriptions when mentioned list changes externally
-        this._setupCharmNameSubscriptions();
+        // Re-sync piece name subscriptions when mentioned list changes externally
+        this._setupPieceNameSubscriptions();
       });
     this._mentionedUnsub = unsubscribe;
   }
 
   private _cleanup(): void {
     this._cleanupCellSyncHandler();
-    this._cleanupCharmNameSubscriptions();
+    this._cleanupPieceNameSubscriptions();
     if (this._mentionableUnsub) {
       this._mentionableUnsub();
       this._mentionableUnsub = null;
@@ -1216,7 +1216,7 @@ export class CTCodeEditor extends BaseElement {
     this._initializeBacklinkNameTracking();
 
     // Set up subscriptions for bidirectional NAME sync
-    this._setupCharmNameSubscriptions();
+    this._setupPieceNameSubscriptions();
   }
 
   /**
@@ -1289,10 +1289,10 @@ export class CTCodeEditor extends BaseElement {
           this.setValue(value);
           // Keep $mentioned current as user types
           this._updateMentionedFromContent();
-          // Sync name changes to linked charms
+          // Sync name changes to linked pieces
           this._detectAndSyncNameChanges();
           // Refresh subscriptions for any new backlinks
-          this._setupCharmNameSubscriptions();
+          this._setupPieceNameSubscriptions();
         }
       }),
       // Handle focus/blur events
@@ -1363,11 +1363,11 @@ export class CTCodeEditor extends BaseElement {
               if (exactMatch) {
                 // Found exact match - insert complete backlink with ID
                 const pieceId = exactMatch.id();
-                const charmName = exactMatch.key(NAME).get() || text;
-                this._completeBacklinkWithId(view, text, charmName, pieceId);
+                const pieceName = exactMatch.key(NAME).get() || text;
+                this._completeBacklinkWithId(view, text, pieceName, pieceId);
               } else if (this.pattern) {
-                // No exact match - create new charm without navigating
-                // First complete the backlink text, then create the charm
+                // No exact match - create new piece without navigating
+                // First complete the backlink text, then create the piece
                 this._completeBacklinkText(view);
                 // createBacklinkFromPattern will insert the ID and emit event
                 this.createBacklinkFromPattern(text, false);
@@ -1432,10 +1432,10 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Extract mentioned charms from current content and write to `$mentioned`.
+   * Extract mentioned pieces from current content and write to `$mentioned`.
    *
    * Link syntax: [[Name (id)]]. We parse ids and resolve them against
-   * `$mentionable` to produce live Charm instances.
+   * `$mentionable` to produce live Piece instances.
    */
   private _updateMentionedFromContent(): void {
     if (!this.mentioned) return;
@@ -1461,13 +1461,13 @@ export class CTCodeEditor extends BaseElement {
     }
 
     // Resolve IDs to Mentionable values and update the cell
-    const newMentioned = this._extractMentionedCharms(content);
+    const newMentioned = this._extractMentionedPieces(content);
     this.mentioned.set(newMentioned);
-    this._setupCharmNameSubscriptions();
+    this._setupPieceNameSubscriptions();
   }
 
   /**
-   * Extract unique charm IDs from content backlinks.
+   * Extract unique piece IDs from content backlinks.
    */
   private _extractMentionedIds(content: string): Set<string> {
     const ids = new Set<string>();
@@ -1481,7 +1481,7 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Get IDs of currently mentioned charms by looking them up in mentionable.
+   * Get IDs of currently mentioned pieces by looking them up in mentionable.
    */
   private _getCurrentMentionedIds(): Set<string> {
     const curIds = new Set<string>();
@@ -1510,8 +1510,8 @@ export class CTCodeEditor extends BaseElement {
       if (!mentionedValue) continue;
       for (let i = 0; i < mentionableData.length; i++) {
         if (mentionableData[i] === mentionedValue) {
-          const charmCell = this.mentionable.key(i) as CellHandle<Mentionable>;
-          const pieceId = charmCell.id();
+          const pieceCell = this.mentionable.key(i) as CellHandle<Mentionable>;
+          const pieceId = pieceCell.id();
           if (pieceId) curIds.add(pieceId);
           break;
         }
@@ -1522,13 +1522,13 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Set up subscriptions to charm TITLE cells for bidirectional sync.
+   * Set up subscriptions to piece TITLE cells for bidirectional sync.
    * We subscribe to title (not NAME) because:
    * - We UPDATE title when user edits backlink in doc
    * - NAME is computed from title, so subscribing to NAME would cause feedback loops
    * - By subscribing to title with same changeGroup, our own edits are filtered out
    */
-  private _setupCharmNameSubscriptions(): void {
+  private _setupPieceNameSubscriptions(): void {
     if (!this._editorView) return;
 
     const backlinks = this._editorView.state.field(backlinkField);
@@ -1539,44 +1539,44 @@ export class CTCodeEditor extends BaseElement {
       activeIds.add(bl.id);
 
       // Skip if already subscribed
-      if (this._charmNameSubscriptions.has(bl.id)) continue;
+      if (this._pieceNameSubscriptions.has(bl.id)) continue;
 
-      const charmCell = this.findCharmById(bl.id);
-      if (!charmCell) continue;
+      const pieceCell = this.findPieceById(bl.id);
+      if (!pieceCell) continue;
 
       // Subscribe to TITLE cell (not NAME) - this is what we update
-      const titleCell = charmCell.key("title");
+      const titleCell = pieceCell.key("title");
       const pieceId = bl.id;
 
       // Subscribe with changeGroup so our own edits are filtered out
       const unsub = titleCell.subscribe(() => {
-        this._handleExternalTitleChange(pieceId, charmCell);
+        this._handleExternalTitleChange(pieceId, pieceCell);
       });
 
-      this._charmNameSubscriptions.set(pieceId, unsub);
+      this._pieceNameSubscriptions.set(pieceId, unsub);
     }
 
-    // Clean up subscriptions for charms no longer in document
-    for (const [id, unsub] of this._charmNameSubscriptions) {
+    // Clean up subscriptions for pieces no longer in document
+    for (const [id, unsub] of this._pieceNameSubscriptions) {
       if (!activeIds.has(id)) {
         unsub();
-        this._charmNameSubscriptions.delete(id);
+        this._pieceNameSubscriptions.delete(id);
       }
     }
   }
 
   /**
-   * Handle external title change from a charm - update the pill text in the document.
-   * This is called when a charm's title field changes externally (not from our own edit).
+   * Handle external title change from a piece - update the pill text in the document.
+   * This is called when a piece's title field changes externally (not from our own edit).
    */
   private _handleExternalTitleChange(
     pieceId: string,
-    charmCell: CellHandle<Mentionable>,
+    pieceCell: CellHandle<Mentionable>,
   ): void {
     if (!this._editorView) return;
 
-    // Get the charm's title (without emoji prefix)
-    const title = charmCell.key("title").get() as string;
+    // Get the piece's title (without emoji prefix)
+    const title = pieceCell.key("title").get() as string;
     if (!title) return;
 
     // Find backlink in document
@@ -1591,11 +1591,11 @@ export class CTCodeEditor extends BaseElement {
     if (docNameStripped === title) return;
 
     // Get the full NAME (with emoji) to insert into document
-    const currentName = charmCell.key(NAME).get() as string;
+    const currentName = pieceCell.key(NAME).get() as string;
     if (!currentName) return;
 
     // Update tracking map BEFORE dispatch so _detectAndSyncNameChanges doesn't
-    // try to sync this change back to the charm (it runs synchronously during dispatch)
+    // try to sync this change back to the piece (it runs synchronously during dispatch)
     this._previousBacklinkNames.set(pieceId, currentName);
 
     // Update document with annotation to prevent updateListener from calling setValue
@@ -1612,19 +1612,19 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Clean up all charm NAME subscriptions.
+   * Clean up all piece NAME subscriptions.
    */
-  private _cleanupCharmNameSubscriptions(): void {
-    for (const unsub of this._charmNameSubscriptions.values()) {
+  private _cleanupPieceNameSubscriptions(): void {
+    for (const unsub of this._pieceNameSubscriptions.values()) {
       unsub();
     }
-    this._charmNameSubscriptions.clear();
+    this._pieceNameSubscriptions.clear();
   }
 
   /**
-   * Parse content to a list of unique Charms referenced by [[...]] links.
+   * Parse content to a list of unique Pieces referenced by [[...]] links.
    */
-  private _extractMentionedCharms(content: string): Mentionable[] {
+  private _extractMentionedPieces(content: string): Mentionable[] {
     if (!content || !this.mentionable) return [];
 
     const ids: string[] = [];
@@ -1635,13 +1635,13 @@ export class CTCodeEditor extends BaseElement {
       if (id) ids.push(id);
     }
 
-    // Resolve unique ids to charms using mentionable list
+    // Resolve unique ids to pieces using mentionable list
     const seen = new Set<string>();
     const result: Mentionable[] = [];
     for (const id of ids) {
       if (seen.has(id)) continue;
-      const charm = this.findCharmById(id);
-      const value = charm?.get();
+      const piece = this.findPieceById(id);
+      const value = piece?.get();
       if (value) {
         result.push(value);
         seen.add(id);
@@ -1651,7 +1651,7 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Detect name changes in backlinks and sync them to linked charm's NAME property.
+   * Detect name changes in backlinks and sync them to linked piece's NAME property.
    * Called when document changes.
    */
   private _detectAndSyncNameChanges(): void {
@@ -1666,8 +1666,8 @@ export class CTCodeEditor extends BaseElement {
 
       const previousName = this._previousBacklinkNames.get(bl.id);
       if (previousName !== undefined && previousName !== bl.name) {
-        // Name changed! Update the charm's NAME property
-        this._updateCharmName(bl.id, bl.name, previousName);
+        // Name changed! Update the piece's NAME property
+        this._updatePieceName(bl.id, bl.name, previousName);
       }
     }
 
@@ -1675,19 +1675,19 @@ export class CTCodeEditor extends BaseElement {
   }
 
   /**
-   * Update a charm's name when the backlink text changes.
+   * Update a piece's name when the backlink text changes.
    * Tries to update 'title' field first (for patterns where NAME is computed),
    * then falls back to NAME directly.
    */
-  private _updateCharmName(
+  private _updatePieceName(
     pieceId: string,
     newName: string,
     oldName: string,
   ): void {
-    const charmCell = this.findCharmById(pieceId);
-    if (!charmCell) {
+    const pieceCell = this.findPieceById(pieceId);
+    if (!pieceCell) {
       console.warn(
-        `[ct-code-editor] Cannot update name: charm ${pieceId} not found`,
+        `[ct-code-editor] Cannot update name: piece ${pieceId} not found`,
       );
       return;
     }
@@ -1698,13 +1698,13 @@ export class CTCodeEditor extends BaseElement {
 
     // Update 'title' field - for note patterns, NAME is computed from title
     // (NAME = `📝 ${title}`) so setting title will update NAME automatically
-    charmCell.key("title").set(titleValue);
+    pieceCell.key("title").set(titleValue);
 
     this.emit("backlink-name-changed", {
       pieceId,
       oldName,
       newName,
-      charm: charmCell,
+      piece: pieceCell,
     });
   }
 }

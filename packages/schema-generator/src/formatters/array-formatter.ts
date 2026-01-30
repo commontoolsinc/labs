@@ -16,7 +16,7 @@ export class ArrayFormatter implements TypeFormatter {
 
   formatType(type: ts.Type, context: GenerationContext): SchemaDefinition {
     // Check for array items override (propagated from wrapper types for array-property-only access)
-    // This allows patterns like `allCharms.length` to generate `items: { not: true, asCell/asOpaque: true }`
+    // This allows patterns like `allPieces.length` to generate `items: { not: true, asCell/asOpaque: true }`
     if (context.arrayItemsOverride !== undefined) {
       return {
         type: "array",

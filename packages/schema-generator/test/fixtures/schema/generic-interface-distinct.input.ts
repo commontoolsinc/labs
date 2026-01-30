@@ -1,7 +1,7 @@
 // Test that generic interface instantiations with different type arguments
 // are NOT collapsed into a single shared $def.
 // This was a bug where PatternToolResult<{ mentionable: X }> and
-// PatternToolResult<{ recentCharms: Y }> were both mapped to the same
+// PatternToolResult<{ recentPieces: Y }> were both mapped to the same
 // $ref: "#/$defs/PatternToolResult" definition.
 
 interface GenericResult<E> {

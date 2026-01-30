@@ -1,6 +1,6 @@
 # ifElse with Composed Pattern Cells
 
-**Symptom:** Charm never renders, no errors, blank UI
+**Symptom:** Piece never renders, no errors, blank UI
 
 ```typescript
 // WRONG - May hang - cell from composed pattern

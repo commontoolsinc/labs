@@ -90,14 +90,14 @@ export class RuntimeInternals extends EventTarget {
     return this.#favorites;
   }
 
-  async createCharm<T>(
+  async createPiece<T>(
     source: URL | Program | string,
     options?: { argument?: JSONValue; run?: boolean },
   ): Promise<PageHandle<T>> {
     this.#check();
     const page = await this.#client.createPage<T>(source, options);
     if (!page) {
-      throw new Error("Could not create charm");
+      throw new Error("Could not create piece");
     }
     return page;
   }
@@ -158,7 +158,7 @@ export class RuntimeInternals extends EventTarget {
   #onConsole = (e: RuntimeClientEvents["console"][0]) => {
     const { metadata, method, args } = e;
     if (metadata?.pieceId) {
-      console.log(`Charm(${metadata.pieceId}) [${method}]:`, ...args);
+      console.log(`Piece(${metadata.pieceId}) [${method}]:`, ...args);
     } else {
       console.log(`Console [${method}]:`, ...args);
     }
@@ -167,7 +167,7 @@ export class RuntimeInternals extends EventTarget {
   #onNavigateRequest = (e: RuntimeClientEvents["navigaterequest"][0]) => {
     const { cell } = e;
     const pieceId = cell.id();
-    logger.log("navigate", `Navigating to charm: ${pieceId}`);
+    logger.log("navigate", `Navigating to piece: ${pieceId}`);
 
     if (cell.space() === this.#space && this.#spaceName) {
       navigate({

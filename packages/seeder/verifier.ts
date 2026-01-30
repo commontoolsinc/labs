@@ -1,6 +1,6 @@
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
-import { CharmResult } from "./interfaces.ts";
+import { PieceResult } from "./interfaces.ts";
 import { sleep } from "@commontools/utils/sleep";
 import { Browser, Page, pipeConsole } from "@commontools/integration";
 import { Identity } from "@commontools/identity";
@@ -52,7 +52,7 @@ export class Verifier {
 
   async verify(
     { id, prompt, name }: { id: string; prompt: string; name: string },
-  ): Promise<CharmResult> {
+  ): Promise<PieceResult> {
     // FIXME(ja): can we navigate without causing a page reload?
     await this.page.goto(new URL(`/${name!}/${id}`, this.apiUrl).toString());
     await this.page.applyConsoleFormatter();
@@ -60,7 +60,7 @@ export class Verifier {
     await addErrorListeners(this.page);
     await login(this.page, this.identity);
 
-    // FIXME(ja): perhaps charm can emit a "ready" event and we can wait for it?
+    // FIXME(ja): perhaps piece can emit a "ready" event and we can wait for it?
     await sleep(10000);
     const screenshotPath = `results/${name}/${id}.png`;
     await this.page.screenshot(screenshotPath);
@@ -75,8 +75,8 @@ export class Verifier {
       };
     }
 
-    const verdict = await llmVerifyCharm(prompt, screenshotPath);
-    console.log(`Charm verified: ${id} - ${verdict}`);
+    const verdict = await llmVerifyPiece(prompt, screenshotPath);
+    console.log(`Piece verified: ${id} - ${verdict}`);
 
     const parsedVerdict = JSON.parse(verdict);
     return {
@@ -93,14 +93,14 @@ export class Verifier {
   }
 }
 
-async function llmVerifyCharm(
+async function llmVerifyPiece(
   prompt: string,
   filename: string,
 ): Promise<string> {
   // Lazily load so we don't need an API key when not verifying
   const { generateObject } = await import("ai");
 
-  const system = `You are a helpful assistant that verifies charm screenshots.
+  const system = `You are a helpful assistant that verifies piece screenshots.
   
   Your task is to evaluate how well the screenshot represents what the user asked for in the prompt.
   
@@ -138,7 +138,7 @@ async function llmVerifyCharm(
 async function checkPageForErrors(page: Page): Promise<Array<unknown>> {
   const errors = await page.evaluate(() => {
     // @ts-ignore: this code is stringified and sent to browser context
-    return globalThis.charmRuntimeErrors;
+    return globalThis.pieceRuntimeErrors;
   });
   if (!Array.isArray(errors)) {
     throw new Error("Page errors malformed.");
@@ -149,10 +149,10 @@ async function checkPageForErrors(page: Page): Promise<Array<unknown>> {
 async function addErrorListeners(page: Page): Promise<unknown> {
   return await page.evaluate(() => {
     // @ts-ignore: this code is stringified and sent to browser context
-    globalThis.charmRuntimeErrors = [];
+    globalThis.pieceRuntimeErrors = [];
     globalThis.addEventListener("common-iframe-error", (e) => {
       // @ts-ignore: this code is stringified and sent to browser context
-      globalThis.charmRuntimeErrors.push(e.detail.description);
+      globalThis.pieceRuntimeErrors.push(e.detail.description);
     });
   });
 }

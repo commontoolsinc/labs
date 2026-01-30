@@ -1,6 +1,6 @@
 import type {
-  CharmResult,
   ExecutedScenario,
+  PieceResult,
   Scenario,
   Step,
 } from "./interfaces.ts";
@@ -12,22 +12,22 @@ import { isRecord } from "@commontools/utils/types";
 
 export class Processor {
   private cache: boolean;
-  private charmManager: PieceManager;
+  private pieceManager: PieceManager;
   private name: string;
   private model: string;
   private verifier?: Verifier;
 
   constructor(
-    { name, model, cache, charmManager, verifier }: {
+    { name, model, cache, pieceManager, verifier }: {
       name: string;
       model: string;
       cache: boolean;
-      charmManager: PieceManager;
+      pieceManager: PieceManager;
       verifier?: Verifier;
     },
   ) {
     this.cache = cache;
-    this.charmManager = charmManager;
+    this.pieceManager = pieceManager;
     this.model = model;
     this.name = name;
     this.verifier = verifier;
@@ -53,9 +53,9 @@ export class Processor {
   }
 
   private async processScenario(scenario: Scenario): Promise<ExecutedScenario> {
-    const results: CharmResult[] = [];
+    const results: PieceResult[] = [];
 
-    let prevCharmId: string | undefined;
+    let prevPieceId: string | undefined;
     let failed = false;
     for (const step of scenario.steps) {
       if (failed) {
@@ -67,11 +67,11 @@ export class Processor {
         });
         continue;
       }
-      let result: CharmResult;
+      let result: PieceResult;
       try {
         result = await this.processCommand({
           step,
-          prevCharmId,
+          prevPieceId,
         });
         results.push(result);
       } catch (error: unknown) {
@@ -88,7 +88,7 @@ export class Processor {
         continue;
       }
       if (result.id) {
-        prevCharmId = result.id;
+        prevPieceId = result.id;
       }
     }
     return { scenario, results };
@@ -96,17 +96,17 @@ export class Processor {
 
   private async processCommand({
     step,
-    prevCharmId,
+    prevPieceId,
   }: {
     step: Step;
-    prevCharmId: string | undefined;
-  }): Promise<CharmResult> {
+    prevPieceId: string | undefined;
+  }): Promise<PieceResult> {
     const { type, prompt } = step;
 
     switch (type) {
       case CommandType.New: {
         console.log(`Adding: "${prompt}"`);
-        const form = await processWorkflow(prompt, this.charmManager, {
+        const form = await processWorkflow(prompt, this.pieceManager, {
           cache: this.cache,
           model: this.model,
           prefill: {
@@ -118,9 +118,9 @@ export class Processor {
           },
         });
 
-        const charm = form.generation?.piece;
-        if (charm) {
-          const id = charm.entityId;
+        const piece = form.generation?.piece;
+        if (piece) {
+          const id = piece.entityId;
           if (id) {
             return this.verify({ id: id["/"], prompt, name: this.name });
           }
@@ -130,17 +130,17 @@ export class Processor {
           id: null,
           prompt,
           status: "FAIL",
-          summary: `Charm not generated during 'New' workflow: ${prompt}`,
+          summary: `Piece not generated during 'New' workflow: ${prompt}`,
         };
       }
       case CommandType.Extend: {
         console.log(`Extending: "${prompt}"`);
-        if (!prevCharmId) {
-          throw new Error("Previous charm ID is undefined.");
+        if (!prevPieceId) {
+          throw new Error("Previous piece ID is undefined.");
         }
-        const charm = await this.charmManager.get(prevCharmId);
-        const form = await processWorkflow(prompt, this.charmManager, {
-          existingPiece: charm,
+        const piece = await this.pieceManager.get(prevPieceId);
+        const form = await processWorkflow(prompt, this.pieceManager, {
+          existingPiece: piece,
           cache: this.cache,
           model: this.model,
           prefill: {
@@ -164,7 +164,7 @@ export class Processor {
           id: null,
           prompt,
           status: "FAIL",
-          summary: `Charm not generated during 'Extend' workflow: ${prompt}`,
+          summary: `Piece not generated during 'Extend' workflow: ${prompt}`,
         };
       }
       case CommandType.ImportJSON: {
@@ -173,17 +173,17 @@ export class Processor {
           throw new Error("Missing data for JSON import.");
         }
 
-        const charm = await createDataPiece(
-          this.charmManager,
+        const piece = await createDataPiece(
+          this.pieceManager,
           step.data,
           step.dataSchema,
           prompt,
         );
 
-        const id = charm.entityId;
-        console.log(`Charm added from JSON import`, { id });
+        const id = piece.entityId;
+        console.log(`Piece added from JSON import`, { id });
         if (id) {
-          console.log(`Charm added from JSON import: ${id["/"]}`);
+          console.log(`Piece added from JSON import: ${id["/"]}`);
           return this.verify({
             id: id["/"],
             prompt: "shows a jsonschema for " + prompt,
@@ -204,7 +204,7 @@ export class Processor {
 
   async verify(
     { id, prompt, name }: { id: string; prompt: string; name: string },
-  ): Promise<CharmResult> {
+  ): Promise<PieceResult> {
     return await (this.verifier ? this.verifier.verify({ id, prompt, name }) : {
       id,
       prompt,

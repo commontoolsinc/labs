@@ -1,13 +1,13 @@
-Export a `mentionable` property to make child charms appear in `[[` autocomplete:
+Export a `mentionable` property to make child pieces appear in `[[` autocomplete:
 
 ```tsx
 export default pattern<Input, Output>(({ ... }) => {
-  const childCharm = ChildPattern({ ... });
+  const childPiece = ChildPattern({ ... });
 
   return {
     [NAME]: "Parent",
     [UI]: <div>...</div>,
-    mentionable: [childCharm],  // Makes childCharm discoverable via [[
+    mentionable: [childPiece],  // Makes childPiece discoverable via [[
   };
 });
 ```
@@ -15,19 +15,19 @@ export default pattern<Input, Output>(({ ... }) => {
 For dynamic collections, use a Writable:
 
 ```tsx
-const createdCharms = Writable.of<any[]>([]);
+const createdPieces = Writable.of<any[]>([]);
 
-const create = handler((_, { createdCharms }) => {
-  createdCharms.push(ChildPattern({ name: "New" }));
+const create = handler((_, { createdPieces }) => {
+  createdPieces.push(ChildPattern({ name: "New" }));
 });
 
 return {
-  [UI]: <ct-button onClick={create({ createdCharms })}>Create</ct-button>,
-  mentionable: createdCharms,
+  [UI]: <ct-button onClick={create({ createdPieces })}>Create</ct-button>,
+  mentionable: createdPieces,
 };
 ```
 
 **Notes:**
 - Exported mentionables appear in `[[` autocomplete
-- They do NOT appear in the sidebar charm list
-- Use this instead of writing to `allCharms` directly
+- They do NOT appear in the sidebar piece list
+- Use this instead of writing to `allPieces` directly

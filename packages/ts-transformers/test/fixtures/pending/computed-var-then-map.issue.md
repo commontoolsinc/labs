@@ -25,7 +25,7 @@ messages.map((msg) => {
 deno task ct check packages/ts-transformers/test/fixtures/pending/computed-var-then-map.input.tsx --no-run
 
 # Runtime error
-deno task ct charm new packages/ts-transformers/test/fixtures/pending/computed-var-then-map.input.tsx \
+deno task ct piece new packages/ts-transformers/test/fixtures/pending/computed-var-then-map.input.tsx \
   -a http://localhost:8000 -s test -i claude.key
 ```
 

@@ -22,11 +22,11 @@ environment. Recipes can:
 - React to changes from linked recipes
 - Connect to external APIs
 
-**Charms** are deployed instances of recipes running in CommonTools spaces.
-Charms can be linked together to create complex workflows where data flows
+**Pieces** are deployed instances of patterns running in CommonTools spaces.
+Pieces can be linked together to create complex workflows where data flows
 automatically between connected components.
 
-**Spaces** are collaborative environments where charms live and interact. Users
+**Spaces** are collaborative environments where pieces live and interact. Users
 can run their own spaces or use hosted versions.
 
 ## Quick Start (Development)
@@ -44,7 +44,7 @@ written in Deno2, that provides the distributed runtime and storage.
 **Frontend ([Shell](./packages/shell))**: A web client interface written with
 Lit Web Components for interacting with CommonTools spaces.
 
-**CLI (ct)**: Command-line interface for managing charms, linking patterns, and
+**CLI (ct)**: Command-line interface for managing pieces, linking patterns, and
 deploying to spaces. Run `deno task ct --help` for command reference.
 
 **UI Components ([packages/ui](./packages/ui))**: Custom VDOM layer and `ct-`

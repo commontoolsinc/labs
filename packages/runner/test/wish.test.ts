@@ -5,7 +5,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
-import { ALL_CHARMS_ID } from "../src/builtins/well-known.ts";
+import { ALL_PIECES_ID } from "../src/builtins/well-known.ts";
 import { UI } from "../src/builder/types.ts";
 import { parseWishTarget } from "../src/builtins/wish.ts";
 
@@ -41,7 +41,7 @@ describe("wish built-in", () => {
   it("resolves the well known all pieces cell", async () => {
     const allPiecesCell = runtime.getCellFromEntityId<unknown[]>(
       space,
-      { "/": ALL_CHARMS_ID },
+      { "/": ALL_PIECES_ID },
       [],
       undefined,
       tx,
@@ -90,13 +90,13 @@ describe("wish built-in", () => {
 
     expect(result.key("allPieces").get()).toEqual(piecesData);
     expect(result.key("firstPieceTitle").get()).toEqual(piecesData[0].title);
-    expect(linkData?.id).toEqual(`of:${ALL_CHARMS_ID}`);
+    expect(linkData?.id).toEqual(`of:${ALL_PIECES_ID}`);
   });
 
   it("resolves semantic wishes with # prefixes", async () => {
     const allPiecesCell = runtime.getCellFromEntityId(
       space,
-      { "/": ALL_CHARMS_ID },
+      { "/": ALL_PIECES_ID },
       [],
       undefined,
       tx,
@@ -408,7 +408,7 @@ describe("wish built-in", () => {
     it("resolves allPieces using tag parameter", async () => {
       const allPiecesCell = runtime.getCellFromEntityId<unknown[]>(
         space,
-        { "/": ALL_CHARMS_ID },
+        { "/": ALL_PIECES_ID },
         [],
         undefined,
         tx,
@@ -455,7 +455,7 @@ describe("wish built-in", () => {
     it("resolves nested paths using tag and path parameters", async () => {
       const allPiecesCell = runtime.getCellFromEntityId<unknown[]>(
         space,
-        { "/": ALL_CHARMS_ID },
+        { "/": ALL_PIECES_ID },
         [],
         undefined,
         tx,

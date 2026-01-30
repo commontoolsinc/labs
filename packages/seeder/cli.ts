@@ -57,13 +57,13 @@ const runtime = new Runtime({
   apiUrl: new URL(apiUrl),
 });
 
-const charmManager = new PieceManager(session, runtime);
+const pieceManager = new PieceManager(session, runtime);
 
 const verifier =
   await (noVerify
     ? undefined
     : Verifier.initialize({ apiUrl, headless, identity }));
-const processor = new Processor({ name, model, cache, charmManager, verifier });
+const processor = new Processor({ name, model, cache, pieceManager, verifier });
 
 let processed: ExecutedScenario[] | undefined;
 try {

@@ -2913,7 +2913,7 @@ interface CTGoogleOAuthElement extends CTHTMLElement {}
 interface CTCanvasElement extends CTHTMLElement {}
 interface CTDraggableElement extends CTHTMLElement {}
 interface CTPlaidLinkElement extends CTHTMLElement {}
-interface CTCharmElement extends CTHTMLElement {}
+interface CTPieceElement extends CTHTMLElement {}
 interface CTIFrameElement extends CTHTMLElement {}
 interface CTVoiceInputElement extends CTHTMLElement {}
 interface CTAudioVisualizerElement extends CTHTMLElement {}
@@ -2991,8 +2991,8 @@ interface CTUpdaterAttributes<T> extends CTHTMLAttributes<T> {
   "$state"?: CellLike<any>;
 }
 
-interface CTCharmAttributes<T> extends CTHTMLAttributes<T> {
-  "charm-id"?: string;
+interface CTPieceAttributes<T> extends CTHTMLAttributes<T> {
+  "piece-id"?: string;
   "space-name"?: string;
 }
 
@@ -4609,9 +4609,9 @@ declare global {
         CTHTMLAttributes<CTHTMLElement>,
         CTHTMLElement
       >;
-      "ct-charm": CTDOM.DetailedHTMLProps<
-        CTCharmAttributes<CTCharmElement>,
-        CTCharmElement
+      "ct-piece": CTDOM.DetailedHTMLProps<
+        CTPieceAttributes<CTPieceElement>,
+        CTPieceElement
       >;
       "ct-voice-input": CTDOM.DetailedHTMLProps<
         CTVoiceInputAttributes<CTVoiceInputElement>,

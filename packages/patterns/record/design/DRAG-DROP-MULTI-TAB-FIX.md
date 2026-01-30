@@ -40,7 +40,7 @@ occurs when dragging modules with multiple browser tabs open.
 **This is the main issue that needs careful handling.**
 
 The framework's sync mechanism creates a **race condition** when two browser
-tabs are open to the same charm:
+tabs are open to the same piece:
 
 ```
 Tab A: User drags module    →  subCharms.set([...reordered])  →  Write to server
@@ -60,21 +60,21 @@ atomically:
 
 ```typescript
 // Under the hood, this becomes multiple writes:
-subCharms.set([{ charm: link, type: "notes", name: "My Notes" }]);
-// → Write: modules[0].charm = link
+subCharms.set([{ piece: link, type: "notes", name: "My Notes" }]);
+// → Write: modules[0].piece = link
 // → Write: modules[0].type = "notes"    // ← Can be lost in conflict!
 // → Write: modules[0].name = "My Notes"
 ```
 
 If a conflict occurs between writes, some properties may not persist. The
-`charm` link tends to survive (it's the first/primary property), but `type` gets
+`piece` link tends to survive (it's the first/primary property), but `type` gets
 lost.
 
 ### Symptoms of Corruption
 
 - Modules show "📋" fallback icon instead of proper icon (📝, 📧, etc.)
 - Module header shows "📋 Unknown" or similar
-- The `charm` link still works (sub-charm data is intact)
+- The `piece` link still works (sub-piece data is intact)
 - Only the metadata in the parent's `subCharms` array is corrupted
 
 ---
@@ -82,7 +82,7 @@ lost.
 ## Problem Statement
 
 When dragging modules in the Record pattern with TWO tabs open to the same
-charm:
+piece:
 
 - Modules lose their `type` property
 - Shows fallback "📋" icon instead of proper labels like "📝 Notes" or "📧
@@ -116,7 +116,7 @@ The framework's `diffAndUpdate` writes each property individually:
 
 ### Evidence
 
-Corrupted modules show "📋" (fallback when `type` is undefined) while `charm`
+Corrupted modules show "📋" (fallback when `type` is undefined) while `piece`
 reference survives. This is consistent with partial writes where only some
 properties made it through.
 
@@ -156,7 +156,7 @@ const insertAtPosition = handler<
   // Find the ACTUAL entry in current array using Writable.equals() for proper link identity
   // This ensures we have complete, fresh data even if sourceCell is stale from multi-tab conflicts
   const fromIndex = current.findIndex((e) =>
-    e?.charm && sourceCell.equals(e.charm)
+    e?.piece && sourceCell.equals(e.piece)
   );
   if (fromIndex === -1) return; // Entry not found (removed by another tab), bail
 
@@ -180,8 +180,8 @@ const insertAtPosition = handler<
     insertIndex = 0;
   } else {
     const afterIndex = withoutDragged.findIndex((e) =>
-      e?.charm && insertAfterEntry?.charm &&
-      (e.charm as Writable<unknown>).equals(insertAfterEntry.charm)
+      e?.piece && insertAfterEntry?.piece &&
+      (e.piece as Writable<unknown>).equals(insertAfterEntry.piece)
     );
     insertIndex = afterIndex >= 0 ? afterIndex + 1 : withoutDragged.length;
   }
@@ -201,8 +201,8 @@ const insertAtPosition = handler<
 
 | Original                                            | Fixed                                                           |
 | --------------------------------------------------- | --------------------------------------------------------------- |
-| `e?.charm === draggedEntry?.charm`                  | `sourceCell.equals(e.charm)`                                    |
-| `e?.charm === insertAfterEntry?.charm`              | `(e.charm as Writable<unknown>).equals(insertAfterEntry.charm)` |
+| `e?.piece === draggedEntry?.piece`                  | `sourceCell.equals(e.piece)`                                    |
+| `e?.piece === insertAfterEntry?.piece`              | `(e.piece as Writable<unknown>).equals(insertAfterEntry.piece)` |
 | Spread `draggedEntry` (from stale sourceCell.get()) | Spread `actualEntry` (fresh from current array)                 |
 
 ### Why We Think This Fix Should Work (UNTESTED)
@@ -271,7 +271,7 @@ Location: Around line 654-659 in record.tsx
 When implementing:
 
 - [ ] Single tab: Drag modules around, verify type persists
-- [ ] Two tabs: Open same charm in two tabs, drag in one, verify no corruption
+- [ ] Two tabs: Open same piece in two tabs, drag in one, verify no corruption
 - [ ] Last drop zone: Can easily drop items at end of column
 - [ ] All existing drag functionality still works
 - [ ] Modules retain type after server restart (existing repair logic)
