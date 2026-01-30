@@ -988,6 +988,17 @@ export class WorkerReconciler {
       }),
     );
 
+    // When the cancel group fires (parent teardown), also cancel the current
+    // rendered content. Without this, deeper sinks (e.g. children/props of the
+    // rendered content) leak because currentCancel is only called on re-fire
+    // inside the sink callback, not on teardown.
+    addCancel(() => {
+      if (currentCancel) {
+        currentCancel();
+        currentCancel = undefined;
+      }
+    });
+
     return childState;
   }
 
