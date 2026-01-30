@@ -269,8 +269,7 @@ describe("Cell value isolation", () => {
       cell.set({ foo: "bar" });
       const result = cell.get();
 
-      // Attempting to mutate should either throw or silently fail
-      // (depending on strict mode / proxy behavior)
+      // QueryResultProxy's set trap throws when writable=false
       expect(() => {
         (result as { foo: string }).foo = "MUTATED";
       }).toThrow();
@@ -287,7 +286,7 @@ describe("Cell value isolation", () => {
       cell.set({ outer: { inner: 42 } });
       const result = cell.get();
 
-      // Attempting to mutate nested property should throw
+      // QueryResultProxy's set trap throws when writable=false
       expect(() => {
         (result.outer as { inner: number }).inner = 999;
       }).toThrow();
