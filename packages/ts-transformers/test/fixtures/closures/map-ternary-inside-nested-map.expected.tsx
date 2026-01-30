@@ -241,154 +241,7 @@ export default pattern(({ items, showInactive }) => {
                     }
                 }
             }
-        } as const satisfies __ctHelpers.JSONSchema, hasItems, __ctHelpers.derive({
-            type: "object",
-            properties: {
-                items: {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Item"
-                    },
-                    asCell: true
-                },
-                showInactive: {
-                    type: "boolean",
-                    asOpaque: true
-                }
-            },
-            required: ["items", "showInactive"],
-            $defs: {
-                Item: {
-                    type: "object",
-                    properties: {
-                        label: {
-                            type: "string"
-                        },
-                        tags: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Tag"
-                            }
-                        }
-                    },
-                    required: ["label", "tags"]
-                },
-                Tag: {
-                    type: "object",
-                    properties: {
-                        name: {
-                            type: "string"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["name", "active"]
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            type: "array",
-            items: {
-                $ref: "#/$defs/UIRenderable"
-            },
-            asOpaque: true,
-            $defs: {
-                UIRenderable: {
-                    type: "object",
-                    properties: {
-                        $UI: {
-                            $ref: "#/$defs/VNode"
-                        }
-                    },
-                    required: ["$UI"]
-                },
-                VNode: {
-                    type: "object",
-                    properties: {
-                        type: {
-                            type: "string",
-                            "enum": ["vnode"]
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        props: {
-                            $ref: "#/$defs/Props"
-                        },
-                        children: {
-                            $ref: "#/$defs/RenderNode"
-                        },
-                        $UI: {
-                            $ref: "#/$defs/VNode"
-                        }
-                    },
-                    required: ["type", "name", "props"]
-                },
-                RenderNode: {
-                    anyOf: [{
-                            type: "string"
-                        }, {
-                            type: "number"
-                        }, {
-                            type: "boolean",
-                            "enum": [false]
-                        }, {
-                            type: "boolean",
-                            "enum": [true]
-                        }, {
-                            $ref: "#/$defs/VNode"
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }, {
-                            $ref: "#/$defs/UIRenderable",
-                            asOpaque: true
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }, {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/RenderNode"
-                            }
-                        }, {
-                            type: "null"
-                        }]
-                },
-                Props: {
-                    type: "object",
-                    properties: {},
-                    additionalProperties: {
-                        anyOf: [{
-                                type: "string"
-                            }, {
-                                type: "number"
-                            }, {
-                                type: "boolean",
-                                "enum": [false]
-                            }, {
-                                type: "boolean",
-                                "enum": [true]
-                            }, {
-                                type: "object",
-                                additionalProperties: true
-                            }, {
-                                type: "array",
-                                items: true
-                            }, {
-                                asCell: true
-                            }, {
-                                asStream: true
-                            }, {
-                                type: "null"
-                            }]
-                    }
-                }
-            }
-        } as const satisfies __ctHelpers.JSONSchema, {
-            items: items,
-            showInactive: showInactive
-        }, ({ items, showInactive }) => (items.mapWithPattern(__ctHelpers.recipe({
+        } as const satisfies __ctHelpers.JSONSchema, hasItems, items.mapWithPattern(__ctHelpers.recipe({
             type: "object",
             properties: {
                 element: {
@@ -575,7 +428,33 @@ export default pattern(({ items, showInactive }) => {
                 tags: {
                     length: item.tags.length
                 }
-            } }, ({ item }) => item.tags.length > 0), item.label, "No tags")}</strong>
+            } }, ({ item }) => __ctHelpers.derive({
+            type: "object",
+            properties: {
+                item: {
+                    type: "object",
+                    properties: {
+                        tags: {
+                            type: "object",
+                            properties: {
+                                length: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["length"]
+                        }
+                    },
+                    required: ["tags"]
+                }
+            },
+            required: ["item"]
+        } as const satisfies __ctHelpers.JSONSchema, {
+            type: "boolean"
+        } as const satisfies __ctHelpers.JSONSchema, { item: {
+                tags: {
+                    length: item.tags.length
+                }
+            } }, ({ item }) => item.tags.length > 0)), item.label, "No tags")}</strong>
               <ul>
                 {item.tags.mapWithPattern(__ctHelpers.recipe({
                 type: "object",
@@ -750,14 +629,41 @@ export default pattern(({ items, showInactive }) => {
                 tag: {
                     name: tag.name
                 }
-            }, ({ showInactive, tag }) => showInactive ? `(${tag.name})` : ""))}
+            }, ({ showInactive, tag }) => __ctHelpers.ifElse({
+                type: "boolean"
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __ctHelpers.JSONSchema, showInactive, __ctHelpers.derive({
+                type: "object",
+                properties: {
+                    tag: {
+                        type: "object",
+                        properties: {
+                            name: {
+                                type: "string",
+                                asOpaque: true
+                            }
+                        },
+                        required: ["name"]
+                    }
+                },
+                required: ["tag"]
+            } as const satisfies __ctHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __ctHelpers.JSONSchema, { tag: {
+                    name: tag.name
+                } }, ({ tag }) => `(${tag.name})`), "")))}
                   </li>)), {
                 showInactive: showInactive
             })}
               </ul>
             </div>)), {
             showInactive: showInactive
-        }))), <p>No items</p>)}
+        }), <p>No items</p>)}
       </div>),
     };
 }, {

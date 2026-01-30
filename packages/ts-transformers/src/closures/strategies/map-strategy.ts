@@ -1,10 +1,17 @@
 import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
-import { isOpaqueRefType } from "../../transformers/opaque-ref/opaque-ref.ts";
+import {
+  getCellKind,
+  isOpaqueRefType,
+} from "../../transformers/opaque-ref/opaque-ref.ts";
 import {
   getTypeAtLocationWithFallback,
+  isDeriveCall,
   isFunctionLikeExpression,
+  isInsideSafeCallbackWrapper,
+  isReactiveArrayMapCall,
+  registerSyntheticCallType,
 } from "../../ast/mod.ts";
 import { buildHierarchicalParamsValue } from "../../utils/capture-tree.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
@@ -50,74 +57,11 @@ export class MapStrategy implements ClosureTransformationStrategy {
 }
 
 /**
- * Helper to check if a type's type argument is an array.
- * Handles unions and intersections recursively, similar to isOpaqueRefType.
- */
-function hasArrayTypeArgument(
-  type: ts.Type,
-  checker: ts.TypeChecker,
-): boolean {
-  // Handle unions - check if any member has an array type argument
-  if (type.flags & ts.TypeFlags.Union) {
-    return (type as ts.UnionType).types.some((t: ts.Type) =>
-      hasArrayTypeArgument(t, checker)
-    );
-  }
-
-  // Handle intersections - check if any member has an array type argument
-  if (type.flags & ts.TypeFlags.Intersection) {
-    return (type as ts.IntersectionType).types.some((t: ts.Type) =>
-      hasArrayTypeArgument(t, checker)
-    );
-  }
-
-  // Handle object types with type references (e.g., OpaqueRef<T[]>)
-  if (type.flags & ts.TypeFlags.Object) {
-    const objectType = type as ts.ObjectType;
-    if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-      const typeRef = objectType as ts.TypeReference;
-      if (typeRef.typeArguments && typeRef.typeArguments.length > 0) {
-        const innerType = typeRef.typeArguments[0];
-        if (!innerType) return false;
-        // Check if inner type is an array or tuple
-        return checker.isArrayType(innerType) || checker.isTupleType(innerType);
-      }
-    }
-  }
-
-  return false;
-}
-
-/**
- * Check if an expression is a derive call (synthetic or user-written).
- * derive() always returns OpaqueRef<T> at runtime, but we register the
- * unwrapped callback return type in the type registry. This helper lets
- * us detect derive calls syntactically to work around that limitation.
- */
-function isDeriveCall(expr: ts.Expression): boolean {
-  if (!ts.isCallExpression(expr)) return false;
-
-  const callee = expr.expression;
-
-  // Check for `derive(...)` direct call
-  if (ts.isIdentifier(callee) && callee.text === "derive") {
-    return true;
-  }
-
-  // Check for `__ctHelpers.derive(...)` qualified call
-  if (
-    ts.isPropertyAccessExpression(callee) &&
-    callee.name.text === "derive"
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-/**
  * Checks if this is an OpaqueRef<T[]> or Cell<T[]> map call.
  * Only transforms map calls on reactive arrays (OpaqueRef/Cell), not plain arrays.
+ *
+ * @deprecated Use isReactiveArrayMapCall from ast/mod.ts instead.
+ * This is kept for backwards compatibility but delegates to the shared implementation.
  */
 export function isOpaqueRefArrayMapCall(
   node: ts.CallExpression,
@@ -125,33 +69,7 @@ export function isOpaqueRefArrayMapCall(
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
   logger?: (message: string) => void,
 ): boolean {
-  // Check if this is a property access expression with name "map"
-  if (!ts.isPropertyAccessExpression(node.expression)) return false;
-  if (node.expression.name.text !== "map") return false;
-
-  // Get the type of the target (what we're calling .map on)
-  const target = node.expression.expression;
-
-  // Special case: derive() always returns OpaqueRef<T> at runtime.
-  // We can't register OpaqueRef<T> in the type registry (only the unwrapped T),
-  // so detect derive calls syntactically.
-  if (isDeriveCall(target)) {
-    return true;
-  }
-
-  const targetType = getTypeAtLocationWithFallback(
-    target,
-    checker,
-    typeRegistry,
-    logger,
-  );
-  if (!targetType) {
-    return false;
-  }
-
-  // Type-based check: target is OpaqueRef<T[]> or Cell<T[]>
-  return isOpaqueRefType(targetType, checker) &&
-    hasArrayTypeArgument(targetType, checker);
+  return isReactiveArrayMapCall(node, checker, typeRegistry, logger);
 }
 
 /**
@@ -177,13 +95,12 @@ export function buildCapturePropertyAssignments(
 /**
  * Check if a map call should be transformed to mapWithPattern.
  *
- * Type-based approach with one special case:
+ * Type-based approach with context awareness (CT-1186 fix):
  * 1. derive() calls always return OpaqueRef at runtime -> TRANSFORM
- * 2. Otherwise, transform iff the target has an opaque type -> TRANSFORM
- *
- * The derive special case exists because we register the unwrapped callback
- * return type in the type registry (not OpaqueRef<T>), so type-based detection
- * doesn't work for derive results.
+ * 2. Inside safe wrappers (computed/derive/etc), OpaqueRef gets auto-unwrapped
+ *    to a plain array, so we should NOT transform OpaqueRef .map() calls there.
+ *    However, Cell and Stream do NOT get auto-unwrapped, so we still transform those.
+ * 3. Outside safe wrappers, transform all cell-like types (OpaqueRef, Cell, Stream).
  */
 function shouldTransformMap(
   mapCall: ts.CallExpression,
@@ -208,8 +125,22 @@ function shouldTransformMap(
 
   if (!targetType) return false;
 
-  // Transform iff the target is a cell-like type
-  return isOpaqueRefType(targetType, context.checker);
+  // Check if this is a cell-like type at all
+  if (!isOpaqueRefType(targetType, context.checker)) {
+    return false;
+  }
+
+  // Inside safe wrappers (computed, derive, action, lift, handler),
+  // OpaqueRef gets auto-unwrapped to plain values, so we should NOT transform.
+  // Cell and Stream do NOT get auto-unwrapped, so we still transform those.
+  if (isInsideSafeCallbackWrapper(mapCall, context.checker)) {
+    // Only transform Cell and Stream (not auto-unwrapped), not OpaqueRef (auto-unwrapped)
+    const cellKind = getCellKind(targetType, context.checker);
+    return cellKind === "cell" || cellKind === "stream";
+  }
+
+  // Outside safe wrappers, transform all cell-like types
+  return true;
 }
 
 /**
@@ -416,11 +347,21 @@ function createRecipeCallWithParams(
     }
   }
 
-  return factory.createCallExpression(
+  const mapWithPatternCall = factory.createCallExpression(
     mapWithPatternAccess,
     mapCall.typeArguments,
     args,
   );
+
+  // Register the result type for the mapWithPattern call so schema injection
+  // can find it when this call is used inside ifElse branches
+  if (typeRegistry) {
+    // The result type of mapWithPattern is the same as the original map call
+    const mapResultType = context.checker.getTypeAtLocation(mapCall);
+    registerSyntheticCallType(mapWithPatternCall, mapResultType, typeRegistry);
+  }
+
+  return mapWithPatternCall;
 }
 
 /**

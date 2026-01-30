@@ -16,5 +16,8 @@ export const emitContainerExpression = ({
   rewriteChildren,
 }: EmitterContext) => {
   if (!isContainerExpression(expression)) return undefined;
+
+  // In safe contexts, still rewrite children to handle nested when/unless
+  // but the container itself doesn't need wrapping
   return rewriteChildren(expression);
 };
