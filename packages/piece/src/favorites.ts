@@ -86,7 +86,7 @@ export async function addFavorite(
     try {
       await addJournalEntry(
         runtime,
-        "charm:favorited",
+        "piece:favorited",
         piece,
         runtime.userIdentityDID,
       );
@@ -124,7 +124,7 @@ export async function removeFavorite(
     try {
       await addJournalEntry(
         runtime,
-        "charm:unfavorited",
+        "piece:unfavorited",
         piece,
         runtime.userIdentityDID,
       );

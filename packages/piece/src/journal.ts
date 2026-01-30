@@ -89,10 +89,10 @@ async function generateNarrative(
   const client = new LLMClient();
 
   const eventDescriptions: Record<JournalEventType, string> = {
-    "charm:favorited": "favorited",
-    "charm:unfavorited": "unfavorited",
-    "charm:created": "created",
-    "charm:modified": "modified",
+    "piece:favorited": "favorited",
+    "piece:unfavorited": "unfavorited",
+    "piece:created": "created",
+    "piece:modified": "modified",
     "space:entered": "entered a space",
   };
 

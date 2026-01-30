@@ -48,7 +48,7 @@ export class XAppView extends BaseView {
   keyStore?: KeyStore;
 
   @state()
-  charmTitle?: string;
+  pieceTitle?: string;
 
   @property({ attribute: false })
   private titleSubscription?: CellEventTarget<string>;
@@ -143,18 +143,18 @@ export class XAppView extends BaseView {
     ],
   });
 
-  #setTitleSubscription(activeCharm?: PageHandle<NameSchema>) {
-    if (!activeCharm) {
+  #setTitleSubscription(activePiece?: PageHandle<NameSchema>) {
+    if (!activePiece) {
       if (this.titleSubscription) {
         this.titleSubscription.removeEventListener(
           "update",
-          this.#onCharmTitleChange,
+          this.#onPieceTitleChange,
         );
       }
       this.titleSubscription = undefined;
-      this.charmTitle = "Untitled";
+      this.pieceTitle = "Untitled";
     } else {
-      const cell = activeCharm.cell().key(NAME).asSchema<string>(stringSchema);
+      const cell = activePiece.cell().key(NAME).asSchema<string>(stringSchema);
       if (
         this.titleSubscription && cell.equals(this.titleSubscription.cell())
       ) {
@@ -162,24 +162,24 @@ export class XAppView extends BaseView {
       }
       this.titleSubscription = new CellEventTarget(cell);
       try {
-        this.charmTitle = cell.get();
+        this.pieceTitle = cell.get();
       } catch {
         // Cell not synced yet
-        this.charmTitle = undefined;
+        this.pieceTitle = undefined;
       }
     }
   }
 
-  #onCharmTitleChange = (e: Event) => {
+  #onPieceTitleChange = (e: Event) => {
     const event = e as CellUpdateEvent<string | undefined>;
-    this.charmTitle = event.detail ?? "";
+    this.pieceTitle = event.detail ?? "";
   };
 
   override updated(changedProperties: Map<string, unknown>) {
     super.updated(changedProperties);
 
-    if (changedProperties.has("charmTitle")) {
-      updatePageTitle(this.charmTitle ?? "");
+    if (changedProperties.has("pieceTitle")) {
+      updatePageTitle(this.pieceTitle ?? "");
     }
 
     if (changedProperties.has("titleSubscription")) {
@@ -188,10 +188,10 @@ export class XAppView extends BaseView {
         "titleSubscription",
       ) as CellEventTarget<string | undefined> | undefined;
       if (prev) {
-        prev.removeEventListener("update", this.#onCharmTitleChange);
+        prev.removeEventListener("update", this.#onPieceTitleChange);
       }
       if (current) {
-        current.addEventListener("update", this.#onCharmTitleChange);
+        current.addEventListener("update", this.#onPieceTitleChange);
       }
     }
 
@@ -234,7 +234,7 @@ export class XAppView extends BaseView {
         .activePattern="${activePattern}"
         .spaceRootPattern="${spaceRootPattern}"
         .patternError="${this._patternError}"
-        .showShellCharmListView="${config.showShellCharmListView ?? false}"
+        .showShellPieceListView="${config.showShellPieceListView ?? false}"
         .showSidebar="${config.showSidebar ?? false}"
       ></x-body-view>
     `;
@@ -257,10 +257,10 @@ export class XAppView extends BaseView {
           .spaceName="${spaceName}"
           .rt="${this.rt}"
           .keyStore="${this.keyStore}"
-          .charmTitle="${this.charmTitle}"
+          .pieceTitle="${this.pieceTitle}"
           .pieceId="${pieceId}"
           .isViewingDefaultPattern="${isViewingDefaultPattern}"
-          .showShellCharmListView="${config.showShellCharmListView ?? false}"
+          .showShellPieceListView="${config.showShellPieceListView ?? false}"
           .showDebuggerView="${config.showDebuggerView ?? false}"
           .showSidebar="${config.showSidebar ?? false}"
           @pattern-recreated="${this.#handlePatternRecreated}"

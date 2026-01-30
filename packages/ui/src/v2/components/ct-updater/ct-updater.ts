@@ -1,10 +1,10 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
-import { CTCharm } from "../ct-charm/ct-charm.ts";
+import { CTPiece } from "../ct-piece/ct-piece.ts";
 import { CellHandle } from "@commontools/runtime-client";
 
 /**
- * CTUpdater - Button component for registering charms for background updates
+ * CTUpdater - Button component for registering pieces for background updates
  *
  * @element ct-updater
  *
@@ -102,9 +102,9 @@ export class CTUpdater extends BaseElement {
     this.updateState = "pending";
     this.requestUpdate();
 
-    const container = CTCharm.findCharmContainer(this);
+    const container = CTPiece.findPieceContainer(this);
     if (!container) {
-      throw new Error("No <ct-charm> container.");
+      throw new Error("No <ct-piece> container.");
     }
     const { pieceId } = container;
     const space = this.state.space;
@@ -143,7 +143,7 @@ export class CTUpdater extends BaseElement {
 
   override render() {
     const buttonText = {
-      idle: "Register Charm for Updates",
+      idle: "Register Piece for Updates",
       pending: "Registering...",
       success: "Successfully Registered!",
       error: "Registration Failed",

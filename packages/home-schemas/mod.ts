@@ -2,7 +2,7 @@
  * Home space schemas package.
  *
  * Contains schema definitions for home space data structures:
- * - Favorites: user's favorited charms
+ * - Favorites: user's favorited pieces
  * - Journal: user's activity log
  * - Learned: user's learned profile data
  *

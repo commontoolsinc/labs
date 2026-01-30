@@ -50,10 +50,10 @@ function formatTimestamp(timestamp: number | undefined): string {
 function eventTypeLabel(eventType: string | undefined): string {
   if (!eventType) return "Unknown";
   const labels: Record<string, string> = {
-    "charm:favorited": "Favorited",
-    "charm:unfavorited": "Unfavorited",
-    "charm:created": "Created",
-    "charm:modified": "Modified",
+    "piece:favorited": "Favorited",
+    "piece:unfavorited": "Unfavorited",
+    "piece:created": "Created",
+    "piece:modified": "Modified",
     "space:entered": "Entered space",
   };
   return labels[eventType] || eventType;
@@ -62,10 +62,10 @@ function eventTypeLabel(eventType: string | undefined): string {
 function eventTypeEmoji(eventType: string | undefined): string {
   if (!eventType) return "\u2022";
   const emojis: Record<string, string> = {
-    "charm:favorited": "\u2b50",
-    "charm:unfavorited": "\u2606",
-    "charm:created": "\u2795",
-    "charm:modified": "\u270f\ufe0f",
+    "piece:favorited": "\u2b50",
+    "piece:unfavorited": "\u2606",
+    "piece:created": "\u2795",
+    "piece:modified": "\u270f\ufe0f",
     "space:entered": "\u27a1\ufe0f",
   };
   return emojis[eventType] || "\u2022";

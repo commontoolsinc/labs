@@ -1,6 +1,6 @@
 /**
  * Favorites schemas for home space data.
- * These define the structure of user's favorited charms.
+ * These define the structure of user's favorited pieces.
  */
 
 import type { JSONSchema } from "@commontools/api";

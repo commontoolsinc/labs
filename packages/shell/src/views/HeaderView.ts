@@ -136,7 +136,7 @@ export class XHeaderView extends BaseView {
   private rt?: RuntimeInternals;
 
   @property({ attribute: false })
-  charmTitle?: string;
+  pieceTitle?: string;
 
   @property({ attribute: false })
   pieceId?: string;
@@ -221,18 +221,18 @@ export class XHeaderView extends BaseView {
   override render() {
     const spaceLink = this.spaceName
       ? html`
-        <x-charm-link id="header-space-link" .spaceName="${this.spaceName}"
+        <x-piece-link id="header-space-link" .spaceName="${this.spaceName}"
         >${this
-          .spaceName}</x-charm-link>
+          .spaceName}</x-piece-link>
       `
       : null;
-    const charmLink = this.pieceId && this.spaceName
+    const pieceLink = this.pieceId && this.spaceName
       ? html`
-        <x-charm-link
+        <x-piece-link
           id="header-piece-link"
           .pieceId="${this.pieceId}"
           .spaceName="${this.spaceName}"
-        >${this.charmTitle || this.pieceId}</x-charm-link>
+        >${this.pieceTitle || this.pieceId}</x-piece-link>
       `
       : null;
     const reloadIcon = this.isViewingDefaultPattern && this.isLoggedIn
@@ -253,7 +253,7 @@ export class XHeaderView extends BaseView {
 
     const title = html`
       <h1 id="page-title">
-        ${spaceLink}${charmLink ? " / " : ""}${charmLink}
+        ${spaceLink}${pieceLink ? " / " : ""}${pieceLink}
       </h1>
     `;
 

@@ -6,7 +6,7 @@ import { Task } from "@lit/task";
 import { navigate } from "../../shared/mod.ts";
 import { PageHandle } from "@commontools/runtime-client";
 
-type CharmItem = { id: string; name: string };
+type PieceItem = { id: string; name: string };
 
 export class XQuickJumpView extends BaseView {
   static override styles = css`
@@ -101,26 +101,26 @@ export class XQuickJumpView extends BaseView {
 
   private inputEl?: HTMLInputElement | null;
 
-  private _charms = new Task(this, {
+  private _pieces = new Task(this, {
     task: async ([rt]) => {
       if (!rt) return undefined;
       await rt.synced();
 
-      const charmsListCell = await rt.getPiecesListCell();
-      await charmsListCell.sync();
+      const piecesListCell = await rt.getPiecesListCell();
+      await piecesListCell.sync();
 
-      const charmsList = charmsListCell.get() as any[];
-      if (!charmsList) return [];
+      const piecesList = piecesListCell.get() as any[];
+      if (!piecesList) return [];
 
       // @TODO(runtime-worker-refactor)
       /*
       const handles: PageHandle[] = [];
-      for (const charmData of charmsList) {
-        const id = isCellHandle(charmData) ? charmData.id() : charmData?.$ID;
+      for (const pieceData of piecesList) {
+        const id = isCellHandle(pieceData) ? pieceData.id() : pieceData?.$ID;
         if (id) {
-          const charm = await rt.getPattern(id);
-          if (charm) {
-            handles.push(charm);
+          const piece = await rt.getPattern(id);
+          if (piece) {
+            handles.push(piece);
           }
         }
       }
@@ -133,7 +133,7 @@ export class XQuickJumpView extends BaseView {
   override updated(changed: Map<string, unknown>) {
     super.updated(changed);
     if (changed.has("rt")) {
-      this._charms.run();
+      this._pieces.run();
     }
     if (changed.has("visible") && this.visible) {
       // Focus input when opened
@@ -155,11 +155,11 @@ export class XQuickJumpView extends BaseView {
     });
   }
 
-  private getItems(): CharmItem[] {
-    const list = this._charms.value || [];
+  private getItems(): PieceItem[] {
+    const list = this._pieces.value || [];
     return list.map((c: PageHandle) => ({
       id: c.id(),
-      name: c.name() ?? "Untitled Charm",
+      name: c.name() ?? "Untitled Piece",
     }));
   }
 
@@ -167,7 +167,7 @@ export class XQuickJumpView extends BaseView {
     return a.toLowerCase().includes(b.toLowerCase());
   }
 
-  private score(item: CharmItem, q: string): number {
+  private score(item: PieceItem, q: string): number {
     if (!q) return 0;
     const n = item.name.toLowerCase();
     const i = item.id.toLowerCase();
@@ -186,7 +186,7 @@ export class XQuickJumpView extends BaseView {
     return s;
   }
 
-  private filtered(): CharmItem[] {
+  private filtered(): PieceItem[] {
     const items = this.getItems();
     const q = this.query.trim();
     if (!q) return items.slice(0, 20);
@@ -268,7 +268,7 @@ export class XQuickJumpView extends BaseView {
         <input
           class="input"
           type="text"
-          placeholder="Jump to charm…"
+          placeholder="Jump to piece…"
           .value="${this.query}"
           @input="${this.onInput}"
         />

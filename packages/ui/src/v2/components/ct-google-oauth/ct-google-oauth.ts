@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { CellHandle } from "@commontools/runtime-client";
-import { CTCharm } from "../ct-charm/ct-charm.ts";
+import { CTPiece } from "../ct-piece/ct-piece.ts";
 
 export interface AuthData {
   token?: string;
@@ -65,14 +65,14 @@ export class CTGoogleOauth extends BaseElement {
 
     const authCellId = JSON.stringify(this.auth.ref());
 
-    const container = CTCharm.findCharmContainer(this);
+    const container = CTPiece.findPieceContainer(this);
     if (!container) {
-      throw new Error("No <ct-charm> container.");
+      throw new Error("No <ct-piece> container.");
     }
     const { pieceId } = container;
     const payload = {
       authCellId,
-      integrationCharmId: pieceId,
+      integrationPieceId: pieceId,
       scopes: this.scopes,
     };
 
