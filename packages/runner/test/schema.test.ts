@@ -1645,6 +1645,130 @@ describe("Schema Support", () => {
           expect((children[2] as Cell<any>).get()).toBe("or just text");
         }
       });
+
+      it("asCell boundaries prevent parent reads from descending into inline array items", () => {
+        // Regression test: when array items have asCell and are stored inline
+        // (not as links), the parent .get() should NOT record reads for the
+        // nested item contents - only for the array itself.
+        const parentCell = runtime.getCell<{
+          children: any[];
+        }>(
+          space,
+          "ascell-array-inline-items",
+          undefined,
+          tx,
+        );
+        parentCell.setRaw({
+          children: [
+            { type: "text", value: "hello" },
+            { type: "text", value: "world" },
+          ],
+        });
+
+        const schema = {
+          type: "object",
+          properties: {
+            children: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  type: { type: "string" },
+                  value: { type: "string" },
+                },
+                asCell: true,
+              },
+              asCell: true,
+            },
+          },
+        } as const satisfies JSONSchema;
+
+        const cell = parentCell.asSchema(schema);
+        const result = cell.get() as any;
+
+        // children should be a Cell (asCell on the array)
+        expect(isCell(result.children)).toBe(true);
+        const children = result.children.get();
+        expect(children.length).toBe(2);
+
+        // Each item should be a Cell (asCell on items)
+        expect(isCell(children[0])).toBe(true);
+        expect(isCell(children[1])).toBe(true);
+
+        const log = txToReactivityLog(tx);
+        const reads = sortAndCompactPaths(log.reads);
+        const entityId = toURI(parentCell.entityId!);
+
+        // Parent should read the root and children path, but NOT
+        // children/0/value, children/1/value etc.
+        const deepReads = reads.filter(
+          (r) =>
+            r.id === entityId &&
+            r.path.length >= 2 &&
+            r.path[0] === "children" &&
+            typeof r.path[1] === "number",
+        );
+        expect(deepReads).toEqual([]);
+      });
+
+      it("asCell boundaries prevent parent reads from descending into inline object properties", () => {
+        // Regression test: when object properties have asCell and are stored
+        // inline (not as links), the parent .get() should NOT record reads
+        // for the nested property contents.
+        const parentCell = runtime.getCell<{
+          props: { style: { color: string }; className: string };
+        }>(
+          space,
+          "ascell-object-inline-props",
+          undefined,
+          tx,
+        );
+        parentCell.setRaw({
+          props: {
+            style: { color: "red" },
+            className: "foo",
+          },
+        });
+
+        const schema = {
+          type: "object",
+          properties: {
+            props: {
+              type: "object",
+              additionalProperties: { asCell: true },
+            },
+          },
+        } as const satisfies JSONSchema;
+
+        const cell = parentCell.asSchema(schema);
+        const result = cell.get() as any;
+
+        // Props should not itself be a Cell, but each property should be
+        expect(isCell(result.props)).toBe(false);
+        expect(isCell(result.props.style)).toBe(true);
+        expect(isCell(result.props.className)).toBe(true);
+        expect(result.props.style.get().color).toBe("red");
+        expect(result.props.className.get()).toBe("foo");
+
+        const log = txToReactivityLog(tx);
+        const reads = sortAndCompactPaths(log.reads);
+        const entityId = toURI(parentCell.entityId!);
+
+        // Parent should NOT have reads for props/style/color etc.
+        const deepReads = reads.filter(
+          (r) =>
+            r.id === entityId &&
+            r.path.length >= 2 &&
+            r.path[0] === "props" &&
+            typeof r.path[1] === "string" &&
+            r.path[1] !== "",
+        );
+        // The reads should stop at props level - not descend into style/color
+        // or className's value
+        for (const read of deepReads) {
+          expect(read.path.length).toBeLessThanOrEqual(2);
+        }
+      });
     });
   });
 
