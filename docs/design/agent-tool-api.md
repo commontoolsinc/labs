@@ -409,7 +409,7 @@ Sandbox operations are **built-ins** at the same level as `computed()`,
 - Compose freely with `computed()` and each other
 
 ```tsx
-import { exec, readSandboxFile, writeSandboxFile, sandbox } from "commontools";
+import { exec, sandbox } from "commontools";
 ```
 
 #### `exec()` — the core built-in
@@ -421,7 +421,7 @@ params, returns `{ pending, result, error }`.
 exec(params: Opaque<{
   command: string | string[];     // single command or sequence
   image?: string;                 // default: "node:22"
-  files?: string[];               // paths to extract after execution
+  files?: Record<string, Cell | string>;  // cell↔file bindings
   result?: ExecResult;            // type hint for result schema
 }>) → OpaqueRef<{ pending: boolean; result: ExecResult; error: any }>
 ```
@@ -433,9 +433,31 @@ interface ExecResult {
   stdout: string;
   stderr: string;
   exit_code: number;
-  files?: Record<string, string>; // populated if `files` was specified
+  files: Record<string, string>;  // populated from output bindings
 }
 ```
+
+The `files` map is the key idea: it declares **bindings between cells and
+sandbox files**. Before execution, cell values are written into the sandbox at
+the given paths. After execution, file contents are read back out into
+`result.files`. The direction is determined by the value type:
+
+```tsx
+exec({
+  command: "python3 process.py",
+  files: {
+    // Cell → file (input): cell value is written to this path before exec
+    "/tmp/input.csv": csvData,
+
+    // string → file (output): file is read back after exec into result.files
+    "/tmp/output.json": "json",    // parsed as JSON
+    "/tmp/chart.svg": "text",      // read as raw text
+  },
+});
+```
+
+This replaces `readSandboxFile` and `writeSandboxFile` entirely. File I/O is
+just a declaration on the `exec` call — no separate built-ins needed.
 
 Usage is identical to `fetchData` — you call it in the pattern body, it returns
 a reactive reference, and you read `.result`, `.pending`, `.error` in JSX or
@@ -466,18 +488,17 @@ export default pattern<{ code: string }>(({ code }) => {
 });
 ```
 
-##### Multi-step with file extraction
+##### File bindings in practice
 
 ```tsx
 export default pattern<{ sourceCode: string }>(({ sourceCode }) => {
   const build = exec({
-    command: [
-      "npm init -y",
-      "npm install typescript",
-      computed(() => `cat <<'SRC' > index.ts\n${sourceCode.get()}\nSRC`),
-      "npx tsc --outDir dist",
-    ],
-    files: ["dist/index.js", "dist/index.d.ts"],
+    command: ["npm init -y", "npm install typescript", "npx tsc --outDir dist"],
+    files: {
+      "/home/user/index.ts": sourceCode,          // input: cell → file
+      "/home/user/dist/index.js": "text",          // output: file → result
+      "/home/user/dist/index.d.ts": "text",        // output: file → result
+    },
     image: "node:22",
   });
 
@@ -489,16 +510,57 @@ export default pattern<{ sourceCode: string }>(({ sourceCode }) => {
         {build.result?.files && (
           <div>
             <h3>Compiled JS</h3>
-            <pre>{build.result.files["dist/index.js"]}</pre>
+            <pre>{build.result.files["/home/user/dist/index.js"]}</pre>
           </div>
         )}
       </div>
     ),
-    js: computed(() => build.result?.files?.["dist/index.js"] ?? ""),
-    dts: computed(() => build.result?.files?.["dist/index.d.ts"] ?? ""),
+    js: computed(() => build.result?.files?.["/home/user/dist/index.js"] ?? ""),
+    dts: computed(() => build.result?.files?.["/home/user/dist/index.d.ts"] ?? ""),
   };
 });
 ```
+
+No `cat <<'SRC'` shell escaping — the runtime writes the cell value to
+`/home/user/index.ts` before running the commands. When `sourceCode` changes,
+the whole exec re-runs with the new file content.
+
+##### Data processing with file bindings
+
+```tsx
+export default pattern<{ csvData: string }>(({ csvData }) => {
+  const analysis = exec({
+    command: "python3 /tmp/process.py",
+    files: {
+      "/tmp/input.csv": csvData,                   // input
+      "/tmp/process.py": `                          // input (static script)
+import csv, json, sys
+with open('/tmp/input.csv') as f:
+    rows = list(csv.DictReader(f))
+with open('/tmp/output.json', 'w') as f:
+    json.dump({'count': len(rows), 'columns': list(rows[0].keys()) if rows else []}, f)
+`,
+      "/tmp/output.json": "json",                  // output
+    },
+    image: "python:3.12",
+  });
+
+  return {
+    [NAME]: "CSV Analyzer",
+    [UI]: (
+      <div>
+        {analysis.pending && <ct-loader />}
+        <pre>{JSON.stringify(analysis.result?.files?.["/tmp/output.json"], null, 2)}</pre>
+      </div>
+    ),
+  };
+});
+```
+
+Both the data (`csvData` cell) and the script (a plain string) are written as
+files. The output is read back as parsed JSON. The pattern author never thinks
+about sandbox file I/O as a separate concern — it's just the input/output
+declaration of the exec call.
 
 ##### Composing exec with computed and fetchData
 
@@ -544,42 +606,37 @@ export default pattern<{ repoUrl: string }>(({ repoUrl }) => {
 
 No special wiring — `exec` is just another node in the reactive graph.
 
-#### `readSandboxFile()` and `writeSandboxFile()`
-
-For when you only need file I/O without running commands. Same shape as
-`fetchData`.
-
-```tsx
-readSandboxFile(params: Opaque<{
-  sandbox: string;                // sandbox name (from a persistent sandbox)
-  path: string;
-  mode?: "text" | "json";
-}>) → OpaqueRef<{ pending: boolean; result: string | object; error: any }>
-
-writeSandboxFile(params: Opaque<{
-  sandbox: string;
-  path: string;
-  content: string;
-}>) → OpaqueRef<{ pending: boolean; result: { ok: true }; error: any }>
-```
-
 #### `sandbox()` — persistent sandbox built-in
 
 For long-lived containers. Returns a handle with `.exec()` that itself returns
-the same `{ pending, result, error }` shape.
+the same `{ pending, result, error }` shape. File bindings work the same way.
 
 ```tsx
 sandbox(params: Opaque<{
   image?: string;
+  files?: Record<string, Cell | string>;  // persistent cell↔file bindings
 }>) → OpaqueRef<SandboxHandle>
+```
 
+The `files` map on a persistent sandbox sets up **continuous bindings**:
+
+- **Cell → file:** whenever the cell changes, the file is updated in the
+  sandbox. The runtime writes the new value automatically.
+- **`"text"` / `"json"` → cell:** the runtime watches the file (poll or
+  inotify) and updates `result.files[path]` when it changes.
+
+This turns the sandbox filesystem into a reactive surface — cells and files
+stay in sync for the lifetime of the sandbox.
+
+```tsx
 interface SandboxHandle {
   status: "running" | "sleeping" | "destroyed";
   name: string;
-  exec(command: string): OpaqueRef<{ pending: boolean; result: ExecResult; error: any }>;
-  readFile(path: string): OpaqueRef<{ pending: boolean; result: string; error: any }>;
-  writeFile(path: string, content: string): OpaqueRef<{ pending: boolean; result: { ok: true }; error: any }>;
-  tools(): Record<string, LLMToolSchema>;  // for generateText integration
+  files: Record<string, any>;     // live file contents from output bindings
+  exec(command: string, opts?: {
+    files?: Record<string, Cell | string>;  // per-command bindings
+  }): OpaqueRef<{ pending: boolean; result: ExecResult; error: any }>;
+  tools(): Record<string, LLMToolSchema>;
 }
 ```
 
@@ -600,7 +657,6 @@ export default pattern<
 
   const run = handler<{ command: string }>(({ command }) => {
     const result = sb.exec(command);
-    // result has .pending, .result, .error — same as exec()
     history.push(result.result);
   });
 
@@ -623,6 +679,46 @@ export default pattern<
 });
 ```
 
+##### Persistent sandbox with live file bindings
+
+```tsx
+export default pattern<
+  { config: { port: number; debug: boolean } },
+  { logs: string }
+>(({ config }) => {
+  const sb = sandbox({
+    image: "node:22",
+    files: {
+      // Input: cell → file. Synced continuously.
+      // When config changes, /app/config.json is rewritten in the sandbox.
+      "/app/config.json": computed(() => JSON.stringify(config.get())),
+
+      // Output: file → cell. Watched continuously.
+      "/app/server.log": "text",
+    },
+  });
+
+  // Start the server once
+  sb.exec("cd /app && node server.js &");
+
+  return {
+    [NAME]: "Dev Server",
+    [UI]: (
+      <div>
+        <div>Status: {sb.status}</div>
+        <pre>{sb.files["/app/server.log"]}</pre>
+      </div>
+    ),
+    logs: computed(() => sb.files["/app/server.log"] ?? ""),
+  };
+});
+```
+
+The config cell updates → runtime rewrites the JSON file in the sandbox →
+the running Node process can pick it up (via fs.watch or polling). The log
+file grows in the sandbox → runtime detects changes → `sb.files` cell
+updates → UI re-renders. No imperative read/write calls at all.
+
 ##### Pipeline: exec → computed → exec
 
 Chaining sandbox calls through `computed` is the natural way to build
@@ -633,27 +729,35 @@ export default pattern<{ csvUrl: string }>(({ csvUrl }) => {
   // Stage 1: fetch CSV
   const csv = fetchData({ url: csvUrl, mode: "text" });
 
-  // Stage 2: process with Python (only runs when csv.result is ready)
+  // Stage 2: process with Python
   const analysis = exec({
-    command: computed(() => {
-      const data = csv.result;
-      if (!data) return "echo 'waiting for data'";
-      return `python3 -c "
-import json, csv, io, sys
-rows = list(csv.DictReader(io.StringIO('''${data}''')))
-print(json.dumps({'count': len(rows), 'cols': list(rows[0].keys()) if rows else []}))"`;
-    }),
+    command: "python3 /tmp/analyze.py",
+    files: {
+      "/tmp/data.csv": computed(() => csv.result ?? ""),
+      "/tmp/analyze.py": `
+import csv, json
+with open('/tmp/data.csv') as f:
+    rows = list(csv.DictReader(f))
+with open('/tmp/result.json', 'w') as f:
+    json.dump({'count': len(rows), 'cols': list(rows[0].keys()) if rows else []}, f)`,
+      "/tmp/result.json": "json",
+    },
     image: "python:3.12",
   });
 
-  // Stage 3: generate chart with R (only runs when analysis is ready)
+  // Stage 3: chart with R
   const chart = exec({
-    command: computed(() => {
-      const stats = analysis.result;
-      if (!stats || stats.exit_code !== 0) return "echo 'waiting'";
-      return `Rscript -e "cat(jsonlite::toJSON(list(ready=TRUE)))"`;
-    }),
-    files: ["/tmp/chart.svg"],
+    command: "Rscript /tmp/chart.R",
+    files: {
+      "/tmp/stats.json": computed(() => JSON.stringify(analysis.result?.files?.["/tmp/result.json"] ?? {})),
+      "/tmp/chart.R": `
+library(jsonlite)
+stats <- fromJSON('/tmp/stats.json')
+svg('/tmp/chart.svg')
+barplot(stats$count, main='Row Count')
+dev.off()`,
+      "/tmp/chart.svg": "text",
+    },
     image: "r-base:latest",
   });
 
@@ -661,7 +765,7 @@ print(json.dumps({'count': len(rows), 'cols': list(rows[0].keys()) if rows else 
     [NAME]: "CSV Analyzer",
     [UI]: (
       <div>
-        {csv.pending && <div>Fetching CSV... <ct-loader /></div>}
+        {csv.pending && <div>Fetching... <ct-loader /></div>}
         {analysis.pending && <div>Analyzing... <ct-loader /></div>}
         {chart.pending && <div>Charting... <ct-loader /></div>}
         {chart.result?.files && (
@@ -673,8 +777,9 @@ print(json.dumps({'count': len(rows), 'cols': list(rows[0].keys()) if rows else 
 });
 ```
 
-Each stage waits for its upstream dependency through `computed()`. No special
-sequencing — the reactive graph handles it.
+Each stage declares its inputs (cells or static strings) and outputs
+(`"text"` / `"json"`) in the `files` map. No shell escaping, no manual
+file I/O. The reactive graph handles sequencing.
 
 ##### With LLM tools
 
@@ -700,10 +805,12 @@ const answer = generateText({
 |----------|-------------|--------|---------|
 | `computed(fn)` | — | closure over cells | `OpaqueRef<T>` |
 | `fetchData({ url })` | — | reactive URL | `OpaqueRef<{ pending, result, error }>` |
-| `exec({ command })` | `fetchData` | reactive command + image | `OpaqueRef<{ pending, result, error }>` |
-| `readSandboxFile({ sandbox, path })` | `fetchData` | sandbox name + path | `OpaqueRef<{ pending, result, error }>` |
-| `writeSandboxFile({ sandbox, path, content })` | `fetchData` | sandbox name + path + content | `OpaqueRef<{ pending, result, error }>` |
-| `sandbox({ image })` | `Writable.of()` | reactive image | `OpaqueRef<SandboxHandle>` |
+| `exec({ command, files })` | `fetchData` | reactive command + file bindings | `OpaqueRef<{ pending, result, error }>` |
+| `sandbox({ image, files })` | `Writable.of()` | reactive image + persistent file bindings | `OpaqueRef<SandboxHandle>` |
+
+`files` map values: `Cell` or `OpaqueRef` = input (cell→file), `"text"` or
+`"json"` = output (file→cell). On `exec`, bindings are one-shot. On `sandbox`,
+bindings are continuous.
 
 All follow the same contract: reactive inputs in, `OpaqueRef` out, automatic
 re-execution on dependency change, `pending`/`result`/`error` for async status.
