@@ -175,7 +175,7 @@ const joinAsPlayer = handler<
   // Add join event
   const existingEvents = parseGameEventsJson(gameEventsJson.get());
   existingEvents.push({
-    id: `event-${crypto.randomUUID()}`,
+    id: `event-${randomUUID()}`,
     type: "join",
     player: name,
     details: `${name} joined as Player ${playerSlot + 1}`,

@@ -160,14 +160,14 @@ export function createRuntimeGlobals(
     // Temporal API (SES-safe replacement for Date.now() and new Date())
     Temporal,
 
-    // Web Crypto
-    crypto,
-
     // SES-safe replacement for Math.random() — returns [0, 1) like Math.random()
     // TODO(seefeld): Replace with something that is seeded consistently,
     // e.g. with the current frame from handlers.
     secureRandom: () =>
       crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000,
+
+    // SES-safe replacement for crypto.randomUUID()
+    randomUUID: () => crypto.randomUUID(),
 
     // SES utility - harden is available after lockdown
     harden: typeof harden === "function" ? harden : Object.freeze,

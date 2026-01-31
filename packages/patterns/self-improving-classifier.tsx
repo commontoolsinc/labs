@@ -299,7 +299,7 @@ function getCachedRegex(
 
 /** Generate a unique ID */
 function generateId(): string {
-  return crypto.randomUUID();
+  return randomUUID();
 }
 
 /** Validate a regex pattern and return validation result */

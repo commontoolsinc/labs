@@ -76,7 +76,7 @@ const resetLobby = handler<
 >((_event, { messages, users, sessionId }) => {
   console.log("[resetLobby] Resetting all chat state...");
   // Generate new session ID to invalidate all existing chat room connections
-  const newSessionId = `session-${crypto.randomUUID()}`;
+  const newSessionId = `session-${randomUUID()}`;
   sessionId.set(newSessionId);
   messages.set([]);
   users.set([]);
@@ -107,7 +107,7 @@ const joinChat = handler<
   // Initialize session ID if not set (first user joining)
   let currentSessionId = sessionId.get();
   if (!currentSessionId) {
-    currentSessionId = `session-${crypto.randomUUID()}`;
+    currentSessionId = `session-${randomUUID()}`;
     sessionId.set(currentSessionId);
     console.log("[joinChat] Initialized new session:", currentSessionId);
   }
@@ -132,7 +132,7 @@ const joinChat = handler<
     messages.set([
       ...existingMessages,
       {
-        id: `msg-${crypto.randomUUID()}`,
+        id: `msg-${randomUUID()}`,
         author: "System",
         content: `${name} joined the chat`,
         timestamp: Temporal.Now.instant().epochMilliseconds,

@@ -105,7 +105,7 @@ const submitQuery = handler<
   }
 
   // Create new query entry and push to array
-  const queryId = crypto.randomUUID();
+  const queryId = randomUUID();
   state.queries.push({
     id: queryId,
     agentTypeUrl: input.agentTypeUrl,

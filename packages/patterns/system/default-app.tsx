@@ -13,7 +13,7 @@ import {
 
 import { default as Note } from "../notes/note.tsx";
 
-const generateId = () => crypto.randomUUID();
+const generateId = () => randomUUID();
 
 // Maximum number of recent pieces to track
 const MAX_RECENT_CHARMS = 10;

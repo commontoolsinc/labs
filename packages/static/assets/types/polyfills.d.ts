@@ -43,3 +43,7 @@ declare namespace Temporal {
 // --- secureRandom (SES-safe replacement for Math.random) ---
 
 declare function secureRandom(): number;
+
+// --- randomUUID (SES-safe replacement for crypto.randomUUID) ---
+
+declare function randomUUID(): string;

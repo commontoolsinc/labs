@@ -177,7 +177,7 @@ export function listTool<Fields extends string>(
       } else {
         const id =
           `${state.idPrefix}-${Temporal.Now.instant().epochMilliseconds}-${
-            crypto.randomUUID().slice(0, 8)
+            randomUUID().slice(0, 8)
           }`;
         const newRecord = {
           ...input,

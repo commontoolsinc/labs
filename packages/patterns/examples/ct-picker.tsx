@@ -4,7 +4,7 @@ import { computed, NAME, recipe, UI, Writable } from "commontools";
 import Counter from "../counter/counter.tsx";
 import Note from "../notes/note.tsx";
 
-const generateId = () => crypto.randomUUID();
+const generateId = () => randomUUID();
 
 type Input = Record<string, never>;
 

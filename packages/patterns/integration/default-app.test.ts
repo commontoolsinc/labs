@@ -11,7 +11,7 @@ describe("default-app flow test", () => {
   shell.bindLifecycle();
 
   let identity: Identity;
-  const spaceName = `test-space-${crypto.randomUUID()}`;
+  const spaceName = `test-space-${randomUUID()}`;
 
   it("should create a note via default app and see it in the space list", async () => {
     identity = await Identity.generate({ implementation: "noble" });

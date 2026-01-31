@@ -26,7 +26,7 @@ type MentionablePiece = {
   backlinks: MentionablePiece[];
 };
 
-const generateId = () => crypto.randomUUID();
+const generateId = () => randomUUID();
 
 type NotePiece = {
   [NAME]?: string;

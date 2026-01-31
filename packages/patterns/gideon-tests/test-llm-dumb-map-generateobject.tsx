@@ -66,7 +66,7 @@ const addItem = handler<
 
     items.push({
       id: `item-${Temporal.Now.instant().epochMilliseconds}-${
-        crypto.randomUUID().slice(0, 9)
+        randomUUID().slice(0, 9)
       }`,
       content,
     });

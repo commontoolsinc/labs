@@ -8,7 +8,7 @@ import { FileSystemProgramResolver } from "@commontools/js-compiler";
 import { join } from "@std/path";
 
 const { API_URL, FRONTEND_URL } = env;
-const SPACE_NAME = `calendar-e2e-${crypto.randomUUID().slice(0, 8)}`;
+const SPACE_NAME = `calendar-e2e-${randomUUID().slice(0, 8)}`;
 
 // Extended timeout for manual OAuth completion
 const OAUTH_TIMEOUT = 120000; // 2 minutes for user to complete OAuth

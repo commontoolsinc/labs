@@ -1067,7 +1067,7 @@ const submitTurn = handler<
   const bonusStr = turnScore.bingoBonus ? " + BINGO!" : "";
   const parsedEvents = parseGameEventsJson(gameEventsJson.get());
   parsedEvents.push({
-    id: `evt-${crypto.randomUUID()}`,
+    id: `evt-${randomUUID()}`,
     type: "word",
     player: myName,
     details: `${myName}: ${wordsStr} (+${turnScore.total}${bonusStr})`,

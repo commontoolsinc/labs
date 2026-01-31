@@ -653,7 +653,7 @@ const searchGmailHandler = handler<
         state.lastExecutedQueryIdCell.set(existing.id);
       } else if (emails.length > 0) {
         // Only add new query if it found results
-        const newQueryId = crypto.randomUUID();
+        const newQueryId = randomUUID();
         const newQuery: LocalQuery = {
           id: newQueryId,
           query: input.query,

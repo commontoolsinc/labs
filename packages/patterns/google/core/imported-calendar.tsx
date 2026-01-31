@@ -87,7 +87,7 @@ const COLORS = [
 ];
 
 // Simple random ID generator
-const generateId = () => crypto.randomUUID();
+const generateId = () => randomUUID();
 
 // ============ STYLES ============
 

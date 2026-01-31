@@ -548,7 +548,7 @@ Return valid JSON matching the schema.`,
       const newQuestions = result.questions
         .filter((q) => !existingQuestionTexts.has(q.question))
         .map((q) => ({
-          id: crypto.randomUUID(),
+          id: randomUUID(),
           question: q.question,
           category: q.category,
           priority: q.priority,

@@ -19,7 +19,7 @@ import Notebook from "./notebook.tsx";
 // PHASE 1: Core Data & Types
 // ============================================================================
 
-const generateId = () => crypto.randomUUID();
+const generateId = () => randomUUID();
 
 // Types for notes and notebooks in the space
 type NotePiece = {

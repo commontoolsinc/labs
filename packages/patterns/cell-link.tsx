@@ -2,7 +2,7 @@
 import { Default, NAME, pattern, UI } from "commontools";
 import Note from "./notes/note.tsx";
 
-const generateId = () => crypto.randomUUID();
+const generateId = () => randomUUID();
 
 export default pattern<{ title: Default<string, "Suggestion Tester"> }>(
   ({ title }) => {

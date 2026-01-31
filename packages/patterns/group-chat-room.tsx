@@ -83,7 +83,7 @@ const sendMessage = handler<
   if (!content || !myName) return;
 
   messages.push({
-    id: `msg-${crypto.randomUUID()}`,
+    id: `msg-${randomUUID()}`,
     author: myName,
     content,
     timestamp: Temporal.Now.instant().epochMilliseconds,
@@ -108,7 +108,7 @@ const sendImageMessage = handler<
 
   const image = images[0];
   messages.push({
-    id: `msg-${crypto.randomUUID()}`,
+    id: `msg-${randomUUID()}`,
     author: myName,
     content: "",
     imageUrl: image.url,

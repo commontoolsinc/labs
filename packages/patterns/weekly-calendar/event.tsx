@@ -19,7 +19,7 @@ import {
 } from "commontools";
 
 // Simple random ID generator
-const generateId = () => crypto.randomUUID();
+const generateId = () => randomUUID();
 
 // Available colors for events
 const COLORS: string[] = [
