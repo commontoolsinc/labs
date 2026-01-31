@@ -2211,10 +2211,30 @@ export class SchemaObjectTraverser<V extends JSONValue>
         },
         value: propValue,
       };
-      const val = this.traverseWithSchemaContext(elementDoc, {
-        schema: propSchema ?? true,
-        rootSchema: schemaContext.rootSchema,
-      });
+      // When the property schema says asCell/asStream and the value is not a
+      // link, create a Cell directly without descending. This prevents the
+      // parent sink from accumulating reactive dependencies on nested data
+      // that child sinks should own. Link values are handled by
+      // traversePointerWithSchema which already has this check.
+      let val: Immutable<StorableValue>;
+      if (
+        !this.traverseCells &&
+        propSchema !== undefined && propSchema !== true &&
+        SchemaObjectTraverser.asCellOrStream(propSchema) &&
+        !isPrimitiveCellLink(propValue)
+      ) {
+        const cellLink = getNormalizedLink(
+          elementDoc.address,
+          propSchema,
+          schemaContext.rootSchema,
+        );
+        val = this.objectCreator.createObject(cellLink, propValue);
+      } else {
+        val = this.traverseWithSchemaContext(elementDoc, {
+          schema: propSchema ?? true,
+          rootSchema: schemaContext.rootSchema,
+        });
+      }
       if (val !== undefined) {
         filteredObj[propKey] = val;
       }
