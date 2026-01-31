@@ -399,360 +399,314 @@ async function agentLoop(
 
 ### Integration with Common Tools Patterns
 
-Sandboxes map into the reactive pattern system at two levels:
+Sandbox operations are **built-ins** at the same level as `computed()`,
+`fetchData()`, and `lift()`. They follow the same conventions:
 
-1. **One-off sandboxes** — fire-and-forget execution, result flows into a cell.
-   The sandbox is discarded after the command completes. Think `computed()` but
-   backed by a container.
-
-2. **Persistent sandboxes** — a long-lived cell that represents a running
-   container. The agent (or pattern) can issue commands over time. Think
-   `Writable<>` — you read its state and send it commands.
-
-#### Primitive: `sandbox()` capability
-
-A new built-in capability alongside `generateText` and `generateObject`:
+- Imported from `"commontools"`
+- Accept reactive inputs (cells / `OpaqueRef`)
+- Return `OpaqueRef<{ pending, result, error }>` (like `fetchData`)
+- Re-execute when reactive inputs change
+- Compose freely with `computed()` and each other
 
 ```tsx
-import { sandbox } from "common:capabilities/sandbox";
+import { exec, readSandboxFile, writeSandboxFile, sandbox } from "commontools";
 ```
 
-##### One-off execution
+#### `exec()` — the core built-in
 
-Returns a reactive cell that resolves to the command output. The container is
-created, runs the command, and is destroyed. No sandbox management required.
+The direct analog of `fetchData()` but for shell commands. Takes reactive
+params, returns `{ pending, result, error }`.
 
 ```tsx
-// Simple: run a command, get stdout as a cell
-const result = sandbox({
-  command: "python3 -c 'print(2**256)'",
-  image: "python:3.12",
-});
-// result.get() → { stdout: "115792...", stderr: "", exit_code: 0 }
+exec(params: Opaque<{
+  command: string | string[];     // single command or sequence
+  image?: string;                 // default: "node:22"
+  files?: string[];               // paths to extract after execution
+  result?: ExecResult;            // type hint for result schema
+}>) → OpaqueRef<{ pending: boolean; result: ExecResult; error: any }>
 ```
 
-This is sugar for: create sandbox → exec → read result → destroy. The cell is
-pending until the command completes, then reactive updates stop.
-
-Internally this compiles to a handler that calls the Worker API. The runtime
-treats it like any other async cell — UI shows a loading state until it
-resolves.
-
-##### One-off with file I/O
-
-For commands that produce file artifacts, use `files` to declare what to
-extract:
-
-```tsx
-const build = sandbox({
-  commands: [
-    "npm init -y",
-    "npm install typescript",
-    "echo 'export const x: number = 42;' > index.ts",
-    "npx tsc --outDir dist",
-  ],
-  files: ["dist/index.js", "dist/index.d.ts"],
-  image: "node:22",
-});
-// build.get() → {
-//   stdout: "...",
-//   exit_code: 0,
-//   files: {
-//     "dist/index.js": "\"use strict\";\nObject.defineProperty...",
-//     "dist/index.d.ts": "export declare const x: number;\n"
-//   }
-// }
-```
-
-The `files` array tells the runtime which paths to `readFile` before tearing
-down the container. Results land in the cell as a `Record<string, string>`.
-
-##### No-LLM patterns: sandbox as a reactive shell
-
-Most sandbox use doesn't need an LLM. A pattern can use `sandbox()` the same
-way it uses `computed()` — as a reactive building block that happens to run in
-a container.
-
-**Data transformation pipeline:**
-
-```tsx
-export default pattern<
-  { csvData: string },
-  { summary: Cell<string>; chart: Cell<string> }
->(({ csvData }) => {
-  // Run a Python script over user-provided CSV data.
-  // Re-runs automatically when csvData changes (reactive).
-  const summary = sandbox({
-    command: computed(
-      () => `echo '${csvData.get()}' | python3 -c "
-import sys, csv, io, json
-reader = csv.DictReader(io.StringIO(sys.stdin.read()))
-rows = list(reader)
-print(json.dumps({'count': len(rows), 'columns': list(rows[0].keys()) if rows else []}))"`,
-    ),
-    image: "python:3.12",
-  });
-
-  return {
-    [NAME]: "CSV Summary",
-    [UI]: <pre>{summary.stdout}</pre>,
-    summary,
-  };
-});
-```
-
-Because the `command` is wrapped in `computed()`, the sandbox re-executes
-whenever `csvData` changes. Each execution spins up a fresh container.
-
-**Image processing:**
-
-```tsx
-export default pattern<
-  { sourceImage: string },  // base64 PNG
-  { thumbnail: Cell<string> }
->(({ sourceImage }) => {
-  const thumbnail = sandbox({
-    commands: [
-      computed(() => `echo '${sourceImage.get()}' | base64 -d > /tmp/input.png`),
-      "convert /tmp/input.png -resize 128x128 /tmp/thumb.png",
-    ],
-    files: ["/tmp/thumb.png"],
-    image: "imagemagick:latest",
-  });
-
-  return {
-    [NAME]: "Thumbnail Generator",
-    [UI]: <img src={computed(() => `data:image/png;base64,${btoa(thumbnail.files?.["/tmp/thumb.png"] ?? "")}`)} />,
-    thumbnail,
-  };
-});
-```
-
-**Git-based data source:**
-
-```tsx
-export default pattern<
-  { repoUrl: string; filePath: string },
-  { content: Cell<string> }
->(({ repoUrl, filePath }) => {
-  const file = sandbox({
-    commands: [
-      computed(() => `git clone --depth 1 ${repoUrl.get()} /tmp/repo`),
-      computed(() => `cat /tmp/repo/${filePath.get()}`),
-    ],
-    image: "alpine/git",
-  });
-
-  return {
-    [NAME]: "Git File Viewer",
-    [UI]: <pre>{file.stdout}</pre>,
-    content: file,
-  };
-});
-```
-
-**Persistent sandbox without LLM — interactive REPL:**
-
-```tsx
-export default pattern<
-  { language: "python" | "node" },
-  { output: Cell<ExecResult[]> }
->(({ language }) => {
-  const sb = sandbox.persistent({
-    image: computed(() => language.get() === "python" ? "python:3.12" : "node:22"),
-  });
-
-  const history = Writable.of<ExecResult[]>([]);
-
-  const runCommand = handler<{ command: string }>(({ command }) => {
-    const result = sb.exec(command);
-    // Append each result to history as it completes
-    history.push(result.get());
-  });
-
-  return {
-    [NAME]: "Shell",
-    [UI]: (
-      <div>
-        <div>
-          {history.map((entry) => (
-            <div>
-              <pre class="stdout">{entry.stdout}</pre>
-              {entry.stderr && <pre class="stderr">{entry.stderr}</pre>}
-            </div>
-          ))}
-        </div>
-        <common-input onsubmit={runCommand} placeholder="$ " />
-      </div>
-    ),
-    output: history,
-    run: runCommand,
-  };
-});
-```
-
-This is just a terminal. No LLM involved — the user (or another pattern)
-sends commands via the `run` handler, results accumulate in the `history`
-cell, and the UI renders them.
-
-##### Persistent sandbox as a cell
-
-A persistent sandbox is a `Writable` cell. It stays alive and accepts commands
-over time via a `Stream`. This is the natural fit for an LLM agent that needs
-to issue many commands in a loop.
-
-```tsx
-import { sandbox, type SandboxCell } from "common:capabilities/sandbox";
-
-export default pattern<{ task: string }, { sandbox: SandboxCell }>(
-  ({ task }) => {
-    // Create a persistent sandbox — stays alive across handler calls
-    const sb = sandbox.persistent({ image: "node:22" });
-
-    // sb is a cell with shape:
-    // {
-    //   status: "running" | "sleeping" | "destroyed",
-    //   history: Array<{ command: string, stdout: string, exit_code: number }>,
-    //   previewUrl: string | null,
-    // }
-
-    // Issue commands via the exec stream
-    const setupResult = sb.exec("git clone https://github.com/user/repo && cd repo && npm install");
-
-    // Use in LLM tools — this is the key integration point
-    const answer = generateText({
-      prompt: task,
-      tools: {
-        shell: sb.tool("shell"),      // pre-bound to this sandbox
-        readFile: sb.tool("read_file"),
-        writeFile: sb.tool("write_file"),
-        browse: sb.tool("browse"),
-      },
-    });
-
-    return {
-      [NAME]: "Dev Agent",
-      [UI]: (
-        <div>
-          <div>{answer}</div>
-          <div>Sandbox: {sb.status}</div>
-          {sb.previewUrl && <iframe src={sb.previewUrl} />}
-        </div>
-      ),
-      sandbox: sb,
-      answer,
-    };
-  },
-);
-```
-
-The `.tool(name)` method returns a tool definition compatible with
-`generateText`'s `tools` parameter — it has the right `description`,
-`inputSchema`, and a `handler` that routes to this specific sandbox instance.
-This means the LLM's tool calls go directly to the right container without
-the agent needing to specify a sandbox name.
-
-#### Multi-sandbox pattern
-
-For agents that need multiple sandboxes, use `sandbox.pool()`:
-
-```tsx
-const pool = sandbox.pool();
-
-// The LLM gets sandbox management tools automatically
-const answer = generateText({
-  prompt: "Build a frontend in Node and a backend in Python, then combine them",
-  tools: {
-    ...pool.tools(),
-    // Expands to: shell, read_file, write_file, glob, browse,
-    //             sandbox_create, sandbox_list, transfer
-    // Each tool accepts the `sandbox` param from the schema above
-  },
-});
-```
-
-`pool.tools()` returns all 8 tool definitions from the Tool Definitions section
-above. The LLM controls which sandboxes exist and routes commands to them via
-the `sandbox` parameter in each tool call.
-
-The pool itself is a cell:
-
-```tsx
-pool.get()
-// → {
-//   sandboxes: {
-//     "frontend": { status: "running", image: "node:22" },
-//     "backend": { status: "running", image: "python:3.12" },
-//   }
-// }
-```
-
-#### Extracting files into cells
-
-The bridge between sandbox filesystems and the cell world:
-
-```tsx
-// Watch a file in a persistent sandbox — cell updates when file changes
-const config = sb.watch("/home/user/app/config.json", { parse: "json" });
-// config.get() → { port: 3000, debug: true }
-
-// One-time read into a cell
-const readme = sb.readFile("/home/user/app/README.md");
-// readme.get() → "# My App\n..."
-
-// Write a cell's value into the sandbox
-sb.writeFile("/home/user/app/data.json", JSON.stringify(someCell.get()));
-```
-
-`sb.watch()` is reactive — it polls or uses inotify under the hood. When the
-file changes in the sandbox, the cell updates, which can trigger downstream
-`computed()` or re-render UI. This connects the sandbox's mutable filesystem
-to the pattern's reactive graph.
-
-#### Summary of API surface in patterns
-
-| API | Mode | Returns | Sandbox lifetime |
-|-----|------|---------|-----------------|
-| `sandbox({ command })` | One-off | `Cell<ExecResult>` | Destroyed after command |
-| `sandbox({ commands, files })` | One-off | `Cell<ExecResult & { files }>` | Destroyed after extraction |
-| `sandbox.persistent({ image })` | Persistent | `SandboxCell` | Until pattern is destroyed |
-| `sandbox.pool()` | Multi | `SandboxPoolCell` | Until pattern is destroyed |
-| `sb.exec(cmd)` | — | `Cell<ExecResult>` | — |
-| `sb.tool(name)` | — | Tool definition for `generateText` | — |
-| `sb.watch(path)` | — | `Cell<string>` (reactive) | — |
-| `sb.readFile(path)` | — | `Cell<string>` | — |
-| `sb.writeFile(path, content)` | — | `void` | — |
-| `pool.tools()` | — | All 8 tool definitions | — |
-
-#### Type definitions
+Where:
 
 ```typescript
 interface ExecResult {
   stdout: string;
   stderr: string;
   exit_code: number;
-}
-
-interface SandboxCell extends Cell<SandboxState> {
-  exec(command: string): Cell<ExecResult>;
-  tool(name: "shell" | "read_file" | "write_file" | "glob" | "browse"): LLMToolSchema;
-  watch(path: string, opts?: { parse?: "json" | "text" }): Cell<unknown>;
-  readFile(path: string): Cell<string>;
-  writeFile(path: string, content: string): void;
-  destroy(): void;
-}
-
-interface SandboxState {
-  status: "running" | "sleeping" | "destroyed";
-  history: ExecResult[];
-  previewUrl: string | null;
-}
-
-interface SandboxPoolCell extends Cell<{ sandboxes: Record<string, SandboxState> }> {
-  get(name: string): SandboxCell;
-  tools(): Record<string, LLMToolSchema>;
+  files?: Record<string, string>; // populated if `files` was specified
 }
 ```
+
+Usage is identical to `fetchData` — you call it in the pattern body, it returns
+a reactive reference, and you read `.result`, `.pending`, `.error` in JSX or
+downstream `computed()` calls.
+
+##### Basic examples
+
+```tsx
+import { exec, computed } from "commontools";
+
+export default pattern<{ code: string }>(({ code }) => {
+  // Runs Python. Re-executes when `code` changes.
+  const run = exec({
+    command: computed(() => `python3 -c '${code.get()}'`),
+    image: "python:3.12",
+  });
+
+  return {
+    [NAME]: "Python Runner",
+    [UI]: (
+      <div>
+        {run.pending && <ct-loader />}
+        {run.result && <pre>{run.result.stdout}</pre>}
+        {run.error && <pre class="error">{run.error}</pre>}
+      </div>
+    ),
+  };
+});
+```
+
+##### Multi-step with file extraction
+
+```tsx
+export default pattern<{ sourceCode: string }>(({ sourceCode }) => {
+  const build = exec({
+    command: [
+      "npm init -y",
+      "npm install typescript",
+      computed(() => `cat <<'SRC' > index.ts\n${sourceCode.get()}\nSRC`),
+      "npx tsc --outDir dist",
+    ],
+    files: ["dist/index.js", "dist/index.d.ts"],
+    image: "node:22",
+  });
+
+  return {
+    [NAME]: "TypeScript Compiler",
+    [UI]: (
+      <div>
+        {build.pending && <ct-loader show-elapsed />}
+        {build.result?.files && (
+          <div>
+            <h3>Compiled JS</h3>
+            <pre>{build.result.files["dist/index.js"]}</pre>
+          </div>
+        )}
+      </div>
+    ),
+    js: computed(() => build.result?.files?.["dist/index.js"] ?? ""),
+    dts: computed(() => build.result?.files?.["dist/index.d.ts"] ?? ""),
+  };
+});
+```
+
+##### Composing exec with computed and fetchData
+
+These built-ins compose the same way `computed` and `fetchData` do — through
+reactive dependencies:
+
+```tsx
+export default pattern<{ repoUrl: string }>(({ repoUrl }) => {
+  // 1. Fetch the repo metadata (existing built-in)
+  const meta = fetchData({
+    url: computed(() => `https://api.github.com/repos/${repoUrl.get()}`),
+    mode: "json",
+  });
+
+  // 2. Clone and count lines (sandbox built-in)
+  const stats = exec({
+    command: computed(() =>
+      `git clone --depth 1 https://github.com/${repoUrl.get()} /tmp/repo && ` +
+      `find /tmp/repo -name '*.ts' | xargs wc -l | tail -1`
+    ),
+    image: "alpine/git",
+  });
+
+  // 3. Combine both with computed (plain built-in)
+  const summary = computed(() => ({
+    name: meta.result?.name ?? "loading...",
+    stars: meta.result?.stargazers_count ?? 0,
+    tsLines: parseInt(stats.result?.stdout ?? "0"),
+  }));
+
+  return {
+    [NAME]: computed(() => `Repo: ${summary.get().name}`),
+    [UI]: (
+      <div>
+        <p>Stars: {summary.stars}</p>
+        <p>TypeScript lines: {summary.tsLines}</p>
+      </div>
+    ),
+    summary,
+  };
+});
+```
+
+No special wiring — `exec` is just another node in the reactive graph.
+
+#### `readSandboxFile()` and `writeSandboxFile()`
+
+For when you only need file I/O without running commands. Same shape as
+`fetchData`.
+
+```tsx
+readSandboxFile(params: Opaque<{
+  sandbox: string;                // sandbox name (from a persistent sandbox)
+  path: string;
+  mode?: "text" | "json";
+}>) → OpaqueRef<{ pending: boolean; result: string | object; error: any }>
+
+writeSandboxFile(params: Opaque<{
+  sandbox: string;
+  path: string;
+  content: string;
+}>) → OpaqueRef<{ pending: boolean; result: { ok: true }; error: any }>
+```
+
+#### `sandbox()` — persistent sandbox built-in
+
+For long-lived containers. Returns a handle with `.exec()` that itself returns
+the same `{ pending, result, error }` shape.
+
+```tsx
+sandbox(params: Opaque<{
+  image?: string;
+}>) → OpaqueRef<SandboxHandle>
+
+interface SandboxHandle {
+  status: "running" | "sleeping" | "destroyed";
+  name: string;
+  exec(command: string): OpaqueRef<{ pending: boolean; result: ExecResult; error: any }>;
+  readFile(path: string): OpaqueRef<{ pending: boolean; result: string; error: any }>;
+  writeFile(path: string, content: string): OpaqueRef<{ pending: boolean; result: { ok: true }; error: any }>;
+  tools(): Record<string, LLMToolSchema>;  // for generateText integration
+}
+```
+
+##### Interactive REPL pattern
+
+```tsx
+import { sandbox, handler, Writable } from "commontools";
+
+export default pattern<
+  { language: "python" | "node" },
+  { history: ExecResult[] }
+>(({ language }) => {
+  const sb = sandbox({
+    image: computed(() => language.get() === "python" ? "python:3.12" : "node:22"),
+  });
+
+  const history = Writable.of<ExecResult[]>([]);
+
+  const run = handler<{ command: string }>(({ command }) => {
+    const result = sb.exec(command);
+    // result has .pending, .result, .error — same as exec()
+    history.push(result.result);
+  });
+
+  return {
+    [NAME]: "Shell",
+    [UI]: (
+      <div>
+        {history.map((entry) => (
+          <div>
+            <pre>{entry.stdout}</pre>
+            {entry.stderr && <pre class="stderr">{entry.stderr}</pre>}
+          </div>
+        ))}
+        <common-input onsubmit={run} placeholder="$ " />
+      </div>
+    ),
+    history,
+    run,
+  };
+});
+```
+
+##### Pipeline: exec → computed → exec
+
+Chaining sandbox calls through `computed` is the natural way to build
+multi-stage pipelines:
+
+```tsx
+export default pattern<{ csvUrl: string }>(({ csvUrl }) => {
+  // Stage 1: fetch CSV
+  const csv = fetchData({ url: csvUrl, mode: "text" });
+
+  // Stage 2: process with Python (only runs when csv.result is ready)
+  const analysis = exec({
+    command: computed(() => {
+      const data = csv.result;
+      if (!data) return "echo 'waiting for data'";
+      return `python3 -c "
+import json, csv, io, sys
+rows = list(csv.DictReader(io.StringIO('''${data}''')))
+print(json.dumps({'count': len(rows), 'cols': list(rows[0].keys()) if rows else []}))"`;
+    }),
+    image: "python:3.12",
+  });
+
+  // Stage 3: generate chart with R (only runs when analysis is ready)
+  const chart = exec({
+    command: computed(() => {
+      const stats = analysis.result;
+      if (!stats || stats.exit_code !== 0) return "echo 'waiting'";
+      return `Rscript -e "cat(jsonlite::toJSON(list(ready=TRUE)))"`;
+    }),
+    files: ["/tmp/chart.svg"],
+    image: "r-base:latest",
+  });
+
+  return {
+    [NAME]: "CSV Analyzer",
+    [UI]: (
+      <div>
+        {csv.pending && <div>Fetching CSV... <ct-loader /></div>}
+        {analysis.pending && <div>Analyzing... <ct-loader /></div>}
+        {chart.pending && <div>Charting... <ct-loader /></div>}
+        {chart.result?.files && (
+          <div innerHTML={chart.result.files["/tmp/chart.svg"]} />
+        )}
+      </div>
+    ),
+  };
+});
+```
+
+Each stage waits for its upstream dependency through `computed()`. No special
+sequencing — the reactive graph handles it.
+
+##### With LLM tools
+
+A persistent sandbox plugs into `generateText` the same way `patternTool`
+does:
+
+```tsx
+const sb = sandbox({ image: "node:22" });
+
+const answer = generateText({
+  prompt: task,
+  tools: {
+    ...sb.tools(),
+    // Expands to: shell, read_file, write_file, glob, browse
+    // Each pre-bound to this sandbox instance
+  },
+});
+```
+
+#### Summary: built-in family
+
+| Built-in | Analogous to | Inputs | Returns |
+|----------|-------------|--------|---------|
+| `computed(fn)` | — | closure over cells | `OpaqueRef<T>` |
+| `fetchData({ url })` | — | reactive URL | `OpaqueRef<{ pending, result, error }>` |
+| `exec({ command })` | `fetchData` | reactive command + image | `OpaqueRef<{ pending, result, error }>` |
+| `readSandboxFile({ sandbox, path })` | `fetchData` | sandbox name + path | `OpaqueRef<{ pending, result, error }>` |
+| `writeSandboxFile({ sandbox, path, content })` | `fetchData` | sandbox name + path + content | `OpaqueRef<{ pending, result, error }>` |
+| `sandbox({ image })` | `Writable.of()` | reactive image | `OpaqueRef<SandboxHandle>` |
+
+All follow the same contract: reactive inputs in, `OpaqueRef` out, automatic
+re-execution on dependency change, `pending`/`result`/`error` for async status.
 
 ## Design Notes
 
