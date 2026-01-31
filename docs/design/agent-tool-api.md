@@ -397,35 +397,233 @@ async function agentLoop(
 }
 ```
 
-### Integration with Common Tools runtime
+### Integration with Common Tools Patterns
 
-To expose this as a pattern tool (using the existing `generateText` API):
+Sandboxes map into the reactive pattern system at two levels:
+
+1. **One-off sandboxes** — fire-and-forget execution, result flows into a cell.
+   The sandbox is discarded after the command completes. Think `computed()` but
+   backed by a container.
+
+2. **Persistent sandboxes** — a long-lived cell that represents a running
+   container. The agent (or pattern) can issue commands over time. Think
+   `Writable<>` — you read its state and send it commands.
+
+#### Primitive: `sandbox()` capability
+
+A new built-in capability alongside `generateText` and `generateObject`:
 
 ```tsx
-import { generateText } from "common:capabilities/llm";
+import { sandbox } from "common:capabilities/sandbox";
+```
 
-// A sandbox-backed tool exposed to the pattern's LLM call
-const result = generateText({
-  prompt: "Set up a Node.js project and run the tests",
+##### One-off execution
+
+Returns a reactive cell that resolves to the command output. The container is
+created, runs the command, and is destroyed. No sandbox management required.
+
+```tsx
+// Simple: run a command, get stdout as a cell
+const result = sandbox({
+  command: "python3 -c 'print(2**256)'",
+  image: "python:3.12",
+});
+// result.get() → { stdout: "115792...", stderr: "", exit_code: 0 }
+```
+
+This is sugar for: create sandbox → exec → read result → destroy. The cell is
+pending until the command completes, then reactive updates stop.
+
+Internally this compiles to a handler that calls the Worker API. The runtime
+treats it like any other async cell — UI shows a loading state until it
+resolves.
+
+##### One-off with file I/O
+
+For commands that produce file artifacts, use `files` to declare what to
+extract:
+
+```tsx
+const build = sandbox({
+  commands: [
+    "npm init -y",
+    "npm install typescript",
+    "echo 'export const x: number = 42;' > index.ts",
+    "npx tsc --outDir dist",
+  ],
+  files: ["dist/index.js", "dist/index.d.ts"],
+  image: "node:22",
+});
+// build.get() → {
+//   stdout: "...",
+//   exit_code: 0,
+//   files: {
+//     "dist/index.js": "\"use strict\";\nObject.defineProperty...",
+//     "dist/index.d.ts": "export declare const x: number;\n"
+//   }
+// }
+```
+
+The `files` array tells the runtime which paths to `readFile` before tearing
+down the container. Results land in the cell as a `Record<string, string>`.
+
+##### Persistent sandbox as a cell
+
+A persistent sandbox is a `Writable` cell. It stays alive and accepts commands
+over time via a `Stream`. This is the natural fit for an LLM agent that needs
+to issue many commands in a loop.
+
+```tsx
+import { sandbox, type SandboxCell } from "common:capabilities/sandbox";
+
+export default pattern<{ task: string }, { sandbox: SandboxCell }>(
+  ({ task }) => {
+    // Create a persistent sandbox — stays alive across handler calls
+    const sb = sandbox.persistent({ image: "node:22" });
+
+    // sb is a cell with shape:
+    // {
+    //   status: "running" | "sleeping" | "destroyed",
+    //   history: Array<{ command: string, stdout: string, exit_code: number }>,
+    //   previewUrl: string | null,
+    // }
+
+    // Issue commands via the exec stream
+    const setupResult = sb.exec("git clone https://github.com/user/repo && cd repo && npm install");
+
+    // Use in LLM tools — this is the key integration point
+    const answer = generateText({
+      prompt: task,
+      tools: {
+        shell: sb.tool("shell"),      // pre-bound to this sandbox
+        readFile: sb.tool("read_file"),
+        writeFile: sb.tool("write_file"),
+        browse: sb.tool("browse"),
+      },
+    });
+
+    return {
+      [NAME]: "Dev Agent",
+      [UI]: (
+        <div>
+          <div>{answer}</div>
+          <div>Sandbox: {sb.status}</div>
+          {sb.previewUrl && <iframe src={sb.previewUrl} />}
+        </div>
+      ),
+      sandbox: sb,
+      answer,
+    };
+  },
+);
+```
+
+The `.tool(name)` method returns a tool definition compatible with
+`generateText`'s `tools` parameter — it has the right `description`,
+`inputSchema`, and a `handler` that routes to this specific sandbox instance.
+This means the LLM's tool calls go directly to the right container without
+the agent needing to specify a sandbox name.
+
+#### Multi-sandbox pattern
+
+For agents that need multiple sandboxes, use `sandbox.pool()`:
+
+```tsx
+const pool = sandbox.pool();
+
+// The LLM gets sandbox management tools automatically
+const answer = generateText({
+  prompt: "Build a frontend in Node and a backend in Python, then combine them",
   tools: {
-    shell: {
-      description: "Run a shell command",
-      inputSchema: {
-        type: "object",
-        properties: { command: { type: "string" } },
-        required: ["command"],
-      },
-      handler: async ({ command }) => {
-        // Delegate to sandbox via service binding
-        const res = await env.AGENT_SANDBOX.fetch("/tool/shell", {
-          method: "POST",
-          body: JSON.stringify({ command }),
-        });
-        return res.json();
-      },
-    },
+    ...pool.tools(),
+    // Expands to: shell, read_file, write_file, glob, browse,
+    //             sandbox_create, sandbox_list, transfer
+    // Each tool accepts the `sandbox` param from the schema above
   },
 });
+```
+
+`pool.tools()` returns all 8 tool definitions from the Tool Definitions section
+above. The LLM controls which sandboxes exist and routes commands to them via
+the `sandbox` parameter in each tool call.
+
+The pool itself is a cell:
+
+```tsx
+pool.get()
+// → {
+//   sandboxes: {
+//     "frontend": { status: "running", image: "node:22" },
+//     "backend": { status: "running", image: "python:3.12" },
+//   }
+// }
+```
+
+#### Extracting files into cells
+
+The bridge between sandbox filesystems and the cell world:
+
+```tsx
+// Watch a file in a persistent sandbox — cell updates when file changes
+const config = sb.watch("/home/user/app/config.json", { parse: "json" });
+// config.get() → { port: 3000, debug: true }
+
+// One-time read into a cell
+const readme = sb.readFile("/home/user/app/README.md");
+// readme.get() → "# My App\n..."
+
+// Write a cell's value into the sandbox
+sb.writeFile("/home/user/app/data.json", JSON.stringify(someCell.get()));
+```
+
+`sb.watch()` is reactive — it polls or uses inotify under the hood. When the
+file changes in the sandbox, the cell updates, which can trigger downstream
+`computed()` or re-render UI. This connects the sandbox's mutable filesystem
+to the pattern's reactive graph.
+
+#### Summary of API surface in patterns
+
+| API | Mode | Returns | Sandbox lifetime |
+|-----|------|---------|-----------------|
+| `sandbox({ command })` | One-off | `Cell<ExecResult>` | Destroyed after command |
+| `sandbox({ commands, files })` | One-off | `Cell<ExecResult & { files }>` | Destroyed after extraction |
+| `sandbox.persistent({ image })` | Persistent | `SandboxCell` | Until pattern is destroyed |
+| `sandbox.pool()` | Multi | `SandboxPoolCell` | Until pattern is destroyed |
+| `sb.exec(cmd)` | — | `Cell<ExecResult>` | — |
+| `sb.tool(name)` | — | Tool definition for `generateText` | — |
+| `sb.watch(path)` | — | `Cell<string>` (reactive) | — |
+| `sb.readFile(path)` | — | `Cell<string>` | — |
+| `sb.writeFile(path, content)` | — | `void` | — |
+| `pool.tools()` | — | All 8 tool definitions | — |
+
+#### Type definitions
+
+```typescript
+interface ExecResult {
+  stdout: string;
+  stderr: string;
+  exit_code: number;
+}
+
+interface SandboxCell extends Cell<SandboxState> {
+  exec(command: string): Cell<ExecResult>;
+  tool(name: "shell" | "read_file" | "write_file" | "glob" | "browse"): LLMToolSchema;
+  watch(path: string, opts?: { parse?: "json" | "text" }): Cell<unknown>;
+  readFile(path: string): Cell<string>;
+  writeFile(path: string, content: string): void;
+  destroy(): void;
+}
+
+interface SandboxState {
+  status: "running" | "sleeping" | "destroyed";
+  history: ExecResult[];
+  previewUrl: string | null;
+}
+
+interface SandboxPoolCell extends Cell<{ sandboxes: Record<string, SandboxState> }> {
+  get(name: string): SandboxCell;
+  tools(): Record<string, LLMToolSchema>;
+}
 ```
 
 ## Design Notes
