@@ -467,6 +467,134 @@ const build = sandbox({
 The `files` array tells the runtime which paths to `readFile` before tearing
 down the container. Results land in the cell as a `Record<string, string>`.
 
+##### No-LLM patterns: sandbox as a reactive shell
+
+Most sandbox use doesn't need an LLM. A pattern can use `sandbox()` the same
+way it uses `computed()` — as a reactive building block that happens to run in
+a container.
+
+**Data transformation pipeline:**
+
+```tsx
+export default pattern<
+  { csvData: string },
+  { summary: Cell<string>; chart: Cell<string> }
+>(({ csvData }) => {
+  // Run a Python script over user-provided CSV data.
+  // Re-runs automatically when csvData changes (reactive).
+  const summary = sandbox({
+    command: computed(
+      () => `echo '${csvData.get()}' | python3 -c "
+import sys, csv, io, json
+reader = csv.DictReader(io.StringIO(sys.stdin.read()))
+rows = list(reader)
+print(json.dumps({'count': len(rows), 'columns': list(rows[0].keys()) if rows else []}))"`,
+    ),
+    image: "python:3.12",
+  });
+
+  return {
+    [NAME]: "CSV Summary",
+    [UI]: <pre>{summary.stdout}</pre>,
+    summary,
+  };
+});
+```
+
+Because the `command` is wrapped in `computed()`, the sandbox re-executes
+whenever `csvData` changes. Each execution spins up a fresh container.
+
+**Image processing:**
+
+```tsx
+export default pattern<
+  { sourceImage: string },  // base64 PNG
+  { thumbnail: Cell<string> }
+>(({ sourceImage }) => {
+  const thumbnail = sandbox({
+    commands: [
+      computed(() => `echo '${sourceImage.get()}' | base64 -d > /tmp/input.png`),
+      "convert /tmp/input.png -resize 128x128 /tmp/thumb.png",
+    ],
+    files: ["/tmp/thumb.png"],
+    image: "imagemagick:latest",
+  });
+
+  return {
+    [NAME]: "Thumbnail Generator",
+    [UI]: <img src={computed(() => `data:image/png;base64,${btoa(thumbnail.files?.["/tmp/thumb.png"] ?? "")}`)} />,
+    thumbnail,
+  };
+});
+```
+
+**Git-based data source:**
+
+```tsx
+export default pattern<
+  { repoUrl: string; filePath: string },
+  { content: Cell<string> }
+>(({ repoUrl, filePath }) => {
+  const file = sandbox({
+    commands: [
+      computed(() => `git clone --depth 1 ${repoUrl.get()} /tmp/repo`),
+      computed(() => `cat /tmp/repo/${filePath.get()}`),
+    ],
+    image: "alpine/git",
+  });
+
+  return {
+    [NAME]: "Git File Viewer",
+    [UI]: <pre>{file.stdout}</pre>,
+    content: file,
+  };
+});
+```
+
+**Persistent sandbox without LLM — interactive REPL:**
+
+```tsx
+export default pattern<
+  { language: "python" | "node" },
+  { output: Cell<ExecResult[]> }
+>(({ language }) => {
+  const sb = sandbox.persistent({
+    image: computed(() => language.get() === "python" ? "python:3.12" : "node:22"),
+  });
+
+  const history = Writable.of<ExecResult[]>([]);
+
+  const runCommand = handler<{ command: string }>(({ command }) => {
+    const result = sb.exec(command);
+    // Append each result to history as it completes
+    history.push(result.get());
+  });
+
+  return {
+    [NAME]: "Shell",
+    [UI]: (
+      <div>
+        <div>
+          {history.map((entry) => (
+            <div>
+              <pre class="stdout">{entry.stdout}</pre>
+              {entry.stderr && <pre class="stderr">{entry.stderr}</pre>}
+            </div>
+          ))}
+        </div>
+        <common-input onsubmit={runCommand} placeholder="$ " />
+      </div>
+    ),
+    output: history,
+    run: runCommand,
+  };
+});
+```
+
+This is just a terminal. No LLM involved — the user (or another pattern)
+sends commands via the `run` handler, results accumulate in the `history`
+cell, and the UI renders them.
+
 ##### Persistent sandbox as a cell
 
 A persistent sandbox is a `Writable` cell. It stays alive and accepts commands
