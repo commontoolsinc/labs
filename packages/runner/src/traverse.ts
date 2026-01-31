@@ -2103,12 +2103,15 @@ export class SchemaObjectTraverser<V extends JSONValue>
         curSelector.path = curDoc.address.path;
       }
       // If we've asked for cells in the array and we don't need to traverse cells,
-      // add the created cell instead.
+      // add the created cell instead. We check asCellOrStream regardless of
+      // whether the value is a link — inline objects should also become cells
+      // when the schema says asCell, to avoid reading nested data on the
+      // parent's reactive transaction.
       if (
         !this.traverseCells &&
         SchemaObjectTraverser.asCellOrStream(
           curSelector.schemaContext?.schema,
-        ) && isPrimitiveCellLink(curDoc.value)
+        )
       ) {
         // For my cell link, lastRedirDoc currently points to the last redirect
         // target, but we want cell properties to be based on the link value at
