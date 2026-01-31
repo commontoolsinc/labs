@@ -63,14 +63,14 @@ const recipeProgram: RuntimeProgram = {
   ],
 };
 
-const inputDataSchema = {
+const inputDataSchema: JSONSchema = {
   type: "object",
   properties: {
     values: { type: "array", items: { type: "number" } },
     label: { type: "string" },
   },
   required: ["values", "label"],
-} as const satisfies JSONSchema;
+};
 
 async function testRecipeAndDataPersistence() {
   console.log("\n=== TEST: Recipe and Data Persistence ===");
