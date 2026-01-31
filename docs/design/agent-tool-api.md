@@ -608,17 +608,34 @@ No special wiring — `exec` is just another node in the reactive graph.
 
 #### `sandbox()` — persistent sandbox built-in
 
-For long-lived containers. Returns a handle with `.exec()` that itself returns
-the same `{ pending, result, error }` shape. File bindings work the same way.
+For long-lived containers. Like `llmDialog`, the result includes **streams**
+that act as event targets — you `.send()` to them to trigger commands. This
+follows the same `{ $stream: true }` convention that `llmDialog` uses for
+`addMessage` and `cancelGeneration`.
 
 ```tsx
 sandbox(params: Opaque<{
   image?: string;
   files?: Record<string, Cell | string>;  // persistent cell↔file bindings
-}>) → OpaqueRef<SandboxHandle>
+}>) → OpaqueRef<{
+  // Reactive state — read these
+  pending: boolean;
+  status: "running" | "sleeping" | "destroyed";
+  history: Array<ExecResult & { command: string }>;
+  files: Record<string, any>;       // live contents of output-bound files
+
+  // Streams — send to these (like addMessage in llmDialog)
+  run: Stream<{ command: string; files?: Record<string, Cell | string> }>;
+  destroy: Stream<void>;
+}>
 ```
 
-The `files` map on a persistent sandbox sets up **continuous bindings**:
+`run` is a `Stream` — the same primitive as `addMessage` in `llmDialog`. You
+`.send()` a command to it, the runtime executes it in the container, appends
+the result to `history`, and toggles `pending`. This is the idiomatic way to
+trigger async side effects in the pattern system.
+
+The `files` map on `sandbox()` sets up **continuous bindings**:
 
 - **Cell → file:** whenever the cell changes, the file is updated in the
   sandbox. The runtime writes the new value automatically.
@@ -628,56 +645,62 @@ The `files` map on a persistent sandbox sets up **continuous bindings**:
 This turns the sandbox filesystem into a reactive surface — cells and files
 stay in sync for the lifetime of the sandbox.
 
-```tsx
-interface SandboxHandle {
-  status: "running" | "sleeping" | "destroyed";
-  name: string;
-  files: Record<string, any>;     // live file contents from output bindings
-  exec(command: string, opts?: {
-    files?: Record<string, Cell | string>;  // per-command bindings
-  }): OpaqueRef<{ pending: boolean; result: ExecResult; error: any }>;
-  tools(): Record<string, LLMToolSchema>;
-}
-```
+##### Comparison with llmDialog
+
+| | `llmDialog` | `sandbox` |
+|---|---|---|
+| Event target | `addMessage: Stream<Message>` | `run: Stream<{ command, files? }>` |
+| Cancel/stop | `cancelGeneration: Stream<void>` | `destroy: Stream<void>` |
+| Async state | `pending: boolean` | `pending: boolean` |
+| Accumulator | `messages: Message[]` | `history: ExecResult[]` |
+| Result | `result: string` (latest) | `files: Record<string, any>` (live) |
+
+Same shape, different domain. A pattern author who knows `llmDialog` already
+knows how `sandbox` works.
 
 ##### Interactive REPL pattern
 
 ```tsx
-import { sandbox, handler, Writable } from "commontools";
+import { sandbox } from "commontools";
 
 export default pattern<
   { language: "python" | "node" },
-  { history: ExecResult[] }
+  {}
 >(({ language }) => {
   const sb = sandbox({
     image: computed(() => language.get() === "python" ? "python:3.12" : "node:22"),
-  });
-
-  const history = Writable.of<ExecResult[]>([]);
-
-  const run = handler<{ command: string }>(({ command }) => {
-    const result = sb.exec(command);
-    history.push(result.result);
   });
 
   return {
     [NAME]: "Shell",
     [UI]: (
       <div>
-        {history.map((entry) => (
+        {sb.history.map((entry) => (
           <div>
+            <pre class="command">$ {entry.command}</pre>
             <pre>{entry.stdout}</pre>
             {entry.stderr && <pre class="stderr">{entry.stderr}</pre>}
           </div>
         ))}
-        <common-input onsubmit={run} placeholder="$ " />
+        {sb.pending && <ct-loader />}
+        <common-input
+          onsubmit={(e) => sb.run.send({ command: e.detail.value })}
+          placeholder="$ "
+          disabled={sb.pending}
+        />
       </div>
     ),
-    history,
-    run,
+    // Expose the run stream so other patterns can send commands too
+    run: sb.run,
+    history: sb.history,
   };
 });
 ```
+
+No intermediate `handler` or `Writable` needed. The `run` stream on the
+sandbox result *is* the event target — `.send()` to it from UI events,
+from other patterns, or from LLM tool calls. History accumulates
+automatically.
 
 ##### Persistent sandbox with live file bindings
 
@@ -690,7 +713,6 @@ export default pattern<
     image: "node:22",
     files: {
       // Input: cell → file. Synced continuously.
-      // When config changes, /app/config.json is rewritten in the sandbox.
       "/app/config.json": computed(() => JSON.stringify(config.get())),
 
       // Output: file → cell. Watched continuously.
@@ -698,8 +720,8 @@ export default pattern<
     },
   });
 
-  // Start the server once
-  sb.exec("cd /app && node server.js &");
+  // Start the server — just send to the run stream
+  sb.run.send({ command: "cd /app && node server.js &" });
 
   return {
     [NAME]: "Dev Server",
@@ -714,22 +736,56 @@ export default pattern<
 });
 ```
 
-The config cell updates → runtime rewrites the JSON file in the sandbox →
-the running Node process can pick it up (via fs.watch or polling). The log
-file grows in the sandbox → runtime detects changes → `sb.files` cell
-updates → UI re-renders. No imperative read/write calls at all.
+##### Composing sandbox streams with other patterns
+
+Because `run` is a standard `Stream`, it composes with the rest of the system:
+
+```tsx
+// Pattern A exposes its sandbox's run stream
+const devServer = piece(DevServerPattern, { config });
+
+// Pattern B sends commands to it
+const deploy = handler<{ branch: string }>(({ branch }) => {
+  devServer.run.send({ command: `git pull origin ${branch} && npm run build && pm2 restart all` });
+});
+```
+
+A parent pattern can wire one pattern's output into another pattern's sandbox
+`run` stream. The sandbox becomes a shared resource with a well-typed event
+interface.
+
+##### With LLM tools
+
+The `run` stream is also what LLM tool calls route through. `sb.tools()`
+returns tool definitions where each tool's handler sends to the appropriate
+stream:
+
+```tsx
+const sb = sandbox({ image: "node:22" });
+
+const answer = generateText({
+  prompt: task,
+  tools: {
+    ...sb.tools(),
+    // shell tool handler internally does: sb.run.send({ command })
+    // read_file tool handler internally does: sb.run.send({ command: `cat ${path}` })
+    // etc.
+  },
+});
+```
+
+The LLM, the UI, other patterns, and handlers all use the same `run` stream
+to interact with the sandbox. One event target, many producers.
 
 ##### Pipeline: exec → computed → exec
 
-Chaining sandbox calls through `computed` is the natural way to build
-multi-stage pipelines:
+For stateless pipelines, `exec()` is still the right choice — no streams
+needed when the data flow is purely reactive:
 
 ```tsx
 export default pattern<{ csvUrl: string }>(({ csvUrl }) => {
-  // Stage 1: fetch CSV
   const csv = fetchData({ url: csvUrl, mode: "text" });
 
-  // Stage 2: process with Python
   const analysis = exec({
     command: "python3 /tmp/analyze.py",
     files: {
@@ -745,7 +801,6 @@ with open('/tmp/result.json', 'w') as f:
     image: "python:3.12",
   });
 
-  // Stage 3: chart with R
   const chart = exec({
     command: "Rscript /tmp/chart.R",
     files: {
@@ -777,43 +832,29 @@ dev.off()`,
 });
 ```
 
-Each stage declares its inputs (cells or static strings) and outputs
-(`"text"` / `"json"`) in the `files` map. No shell escaping, no manual
-file I/O. The reactive graph handles sequencing.
+#### When to use `exec()` vs `sandbox()`
 
-##### With LLM tools
-
-A persistent sandbox plugs into `generateText` the same way `patternTool`
-does:
-
-```tsx
-const sb = sandbox({ image: "node:22" });
-
-const answer = generateText({
-  prompt: task,
-  tools: {
-    ...sb.tools(),
-    // Expands to: shell, read_file, write_file, glob, browse
-    // Each pre-bound to this sandbox instance
-  },
-});
-```
+| | `exec()` | `sandbox()` |
+|---|---|---|
+| Lifetime | One-shot, destroyed after | Persistent, stays alive |
+| Interaction | Declarative (reactive re-run) | Imperative (`run.send()`) |
+| State | Stateless between runs | Stateful (filesystem persists) |
+| File bindings | One-shot: write → exec → read | Continuous: synced for lifetime |
+| Use case | Data pipelines, builds, transforms | REPLs, dev servers, LLM agents |
+| Analogy | `fetchData()` | `llmDialog()` |
 
 #### Summary: built-in family
 
-| Built-in | Analogous to | Inputs | Returns |
-|----------|-------------|--------|---------|
-| `computed(fn)` | — | closure over cells | `OpaqueRef<T>` |
-| `fetchData({ url })` | — | reactive URL | `OpaqueRef<{ pending, result, error }>` |
-| `exec({ command, files })` | `fetchData` | reactive command + file bindings | `OpaqueRef<{ pending, result, error }>` |
-| `sandbox({ image, files })` | `Writable.of()` | reactive image + persistent file bindings | `OpaqueRef<SandboxHandle>` |
+| Built-in | Analogous to | Event target | Returns |
+|----------|-------------|--------------|---------|
+| `computed(fn)` | — | — | `OpaqueRef<T>` |
+| `fetchData({ url })` | — | — | `OpaqueRef<{ pending, result, error }>` |
+| `exec({ command, files })` | `fetchData` | — | `OpaqueRef<{ pending, result, error }>` |
+| `sandbox({ image, files })` | `llmDialog` | `run: Stream<{ command }>` | `OpaqueRef<{ pending, history, files, run, destroy }>` |
 
-`files` map values: `Cell` or `OpaqueRef` = input (cell→file), `"text"` or
-`"json"` = output (file→cell). On `exec`, bindings are one-shot. On `sandbox`,
-bindings are continuous.
-
-All follow the same contract: reactive inputs in, `OpaqueRef` out, automatic
-re-execution on dependency change, `pending`/`result`/`error` for async status.
+`exec` is declarative — reactive inputs trigger re-execution. `sandbox` is
+imperative — you send commands via the `run` stream. Both use `files` maps
+for cell↔file bindings (one-shot vs continuous).
 
 ## Design Notes
 
