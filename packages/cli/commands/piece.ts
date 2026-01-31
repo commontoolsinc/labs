@@ -57,6 +57,24 @@ const EX_COMP = `--api-url ${RAW_EX_COMP.apiUrl} --space ${RAW_EX_COMP.space}`;
 const EX_COMP_PIECE = `${EX_COMP} --piece ${RAW_EX_COMP.piece!}`;
 
 // Enhanced description with workflow tips
+function pieceEnvStatus(): string {
+  const identity = Deno.env.get("CT_IDENTITY");
+  const apiUrl = Deno.env.get("CT_API_URL");
+  if (!identity && !apiUrl) return "";
+  const lines: string[] = ["", "ENVIRONMENT:"];
+  if (identity) {
+    lines.push(
+      `  CT_IDENTITY = ${identity} (set, no need to pass --identity)`,
+    );
+  }
+  if (apiUrl) {
+    lines.push(
+      `  CT_API_URL  = ${apiUrl} (set, no need to pass --api-url)`,
+    );
+  }
+  return lines.join("\n");
+}
+
 const pieceDescription = `Interact with pieces running on a server.
 
 COMMON WORKFLOWS:
@@ -64,7 +82,7 @@ COMMON WORKFLOWS:
   Update:    ct piece setsrc --piece <ID> ./pattern.tsx -i ./claude.key -a http://localhost:8000 -s my-space
   Test:      ct piece call --piece <ID> handlerName -i ./claude.key -a http://localhost:8000 -s my-space
   Inspect:   ct piece inspect --piece <ID> -i ./claude.key -a http://localhost:8000 -s my-space
-
+${pieceEnvStatus()}
 TIPS:
   • Use 'setsrc' for iteration, not repeated 'new' (avoids clutter)
   • After 'set', run 'step' to trigger computed value updates
