@@ -29,7 +29,7 @@ const addItem = handler<
     const newItem: Item = {
       title: `Item-${Temporal.Now.instant().epochMilliseconds}`,
       value: Math.floor(
-        (crypto.getRandomValues(new Uint32Array(1))[0] / 0xFFFFFFFF) * 100,
+        secureRandom() * 100,
       ),
     };
     items.push(newItem);

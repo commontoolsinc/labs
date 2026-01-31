@@ -47,7 +47,7 @@ function getRandomColor(): string {
   ];
   return colors[
     Math.floor(
-      crypto.getRandomValues(new Uint32Array(1))[0] / 0xFFFFFFFF *
+      secureRandom() *
         colors.length,
     )
   ];

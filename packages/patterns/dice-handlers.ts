@@ -10,7 +10,7 @@ export const roll = handler<
     const floored = Math.floor(Number(rawSides));
     const sides = Number.isFinite(floored) && floored > 0 ? floored : 6;
     const rolled = Math.floor(
-      (crypto.getRandomValues(new Uint32Array(1))[0] / 0xFFFFFFFF) * sides,
+      secureRandom() * sides,
     ) + 1;
     state.value.set(rolled);
   },

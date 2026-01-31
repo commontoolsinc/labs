@@ -75,7 +75,7 @@ type InputEvent = { detail: { message: string } };
 const newCounter = handler<InputEvent, Record<string, never>>((_, __) => {
   const piece = Counter({
     value: Math.round(
-      (crypto.getRandomValues(new Uint32Array(1))[0] / 0xFFFFFFFF) * 10,
+      secureRandom() * 10,
     ),
   });
   return navigateTo(piece);

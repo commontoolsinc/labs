@@ -52,8 +52,7 @@ const updateNames = handler<
   { firstName: Writable<string>; lastName: Writable<string> }
 >((_event, { firstName, lastName }) => {
   const names = ["Alice", "Bob", "Charlie", "Diana"];
-  const randomIndex = crypto.getRandomValues(new Uint32Array(1))[0] %
-    names.length;
+  const randomIndex = Math.floor(secureRandom() * names.length);
   const randomName = names[randomIndex];
   firstName.set(randomName);
   lastName.set(`Smith-${Temporal.Now.instant().epochMilliseconds % 1000}`);
