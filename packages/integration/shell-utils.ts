@@ -66,7 +66,9 @@ export class ShellIntegration {
   #config: ShellIntegrationConfig;
 
   constructor(config: ShellIntegrationConfig = {}) {
-    this.#config = config;
+    this.#config = {
+      pipeConsole: config.pipeConsole ?? env.PIPE_CONSOLE,
+    };
   }
 
   bindLifecycle() {
