@@ -170,6 +170,18 @@ describe("shadow DOM component test", () => {
 4. **Use pierce strategy consistently**: It works for both finding and
    interacting with elements
 
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `HEADLESS` | Set to `true` or `1` to run browser headlessly (default: visible) |
+| `PIPE_CONSOLE` | Set to `true` or `1` to forward browser console output to the test runner |
+| `API_URL` | Server URL (default: `http://localhost:8000`) |
+| `FRONTEND_URL` | Frontend URL (default: `API_URL`) |
+| `SPACE_NAME` | Target a specific space (default: random UUID) |
+
+Example: `PIPE_CONSOLE=1 deno task integration`
+
 ## Debugging Tips
 
 If pierce strategy isn't finding your element:
