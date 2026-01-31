@@ -2211,16 +2211,20 @@ export class SchemaObjectTraverser<V extends JSONValue>
         },
         value: propValue,
       };
-      // When the property schema says asCell/asStream and the value is not a
-      // link, create a Cell directly without descending. This prevents the
-      // parent sink from accumulating reactive dependencies on nested data
-      // that child sinks should own. Link values are handled by
-      // traversePointerWithSchema which already has this check.
+      // When the property schema is a simple asCell/asStream marker (no type
+      // or structural keywords) and the value is not a link, create a Cell
+      // directly without descending. This prevents the parent sink from
+      // accumulating reactive dependencies on nested data that child sinks
+      // should own. We only do this for "leaf" asCell schemas (like
+      // additionalProperties: { asCell: true }) — complex schemas with type,
+      // items, properties etc. still need full traversal to resolve links and
+      // nested structures.
       let val: Immutable<StorableValue>;
       if (
         !this.traverseCells &&
         propSchema !== undefined && propSchema !== true &&
         SchemaObjectTraverser.asCellOrStream(propSchema) &&
+        ContextualFlowControl.isTrueSchema(propSchema) &&
         !isPrimitiveCellLink(propValue)
       ) {
         const cellLink = getNormalizedLink(
