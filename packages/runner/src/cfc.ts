@@ -4,6 +4,10 @@ import { getLogger } from "@commontools/utils/logger";
 import type { JSONSchema } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
 import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
+import { TrustLattice } from "./cfc/trust-lattice.ts";
+import { SpacePolicyManager } from "./cfc/space-policy.ts";
+import type { ActionTaintContext } from "./cfc/action-context.ts";
+import { createActionContext } from "./cfc/action-context.ts";
 
 const logger = getLogger("cfc");
 
@@ -156,10 +160,14 @@ class KahnTopologicalSort {
 // These preferences are likely per user/space combination.
 export class ContextualFlowControl {
   private reachable: Map<string, Set<string>>;
+  readonly trustLattice: TrustLattice;
+  readonly spacePolicies: SpacePolicyManager;
   constructor(
     private lattice: Map<string, string[]> = classificationLattice,
   ) {
     this.reachable = ContextualFlowControl.reachableNodes(lattice);
+    this.trustLattice = new TrustLattice(lattice);
+    this.spacePolicies = new SpacePolicyManager();
   }
 
   /**
@@ -787,5 +795,11 @@ export class ContextualFlowControl {
 
   static isFalseSchema(schema: JSONSchema): boolean {
     return schema === false || (isObject(schema) && schema["not"] === true);
+  }
+
+  /** Create an action taint context for the given principal and space. */
+  createActionContext(options: { userDid: string; space: string; codeHash?: string }): ActionTaintContext {
+    const policy = this.spacePolicies.getPolicy(options.space);
+    return createActionContext({ ...options, policy });
   }
 }

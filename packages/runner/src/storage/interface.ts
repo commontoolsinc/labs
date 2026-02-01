@@ -71,6 +71,10 @@ export interface IReadOptions {
 // Currently, the only supported type is the classification.
 export type Labels = {
   classification?: string[];
+  /** CNF confidentiality: outer=AND (clauses), inner=OR (alternatives) */
+  confidentiality?: import("../cfc/atoms.ts").Atom[][];
+  /** Integrity: conjunction of endorsement atoms */
+  integrity?: import("../cfc/atoms.ts").Atom[];
 };
 
 /** Immutable storage value container. */
