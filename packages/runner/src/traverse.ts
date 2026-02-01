@@ -565,24 +565,32 @@ export abstract class BaseObjectTraverser {
           },
           value: item,
         };
+
+        // We follow the first link in array elements so we don't have
+        // strangeness with setting item at 0 to item at 1
+
+        // We follow the first link in array elements so we don't have
+        // strangeness with setting item at 0 to item at 1
+
         // We follow the first link in array elements so we don't have
         // strangeness with setting item at 0 to item at 1
         if (isPrimitiveCellLink(item)) {
-          const [redirDoc, redirSelector] = this.getDocAtPath(
-            docItem,
-            [],
-            DefaultSelector,
-            "writeRedirect",
-          );
-          const [linkDoc, _selector] = this.nextLink(redirDoc, redirSelector);
-          // our item link should point one past the last redirect, but it may
-          // be invalid (in which case, we should base the link on redirDoc).
-          itemLink = getNormalizedLink(
-            linkDoc.value !== undefined ? linkDoc.address : redirDoc.address,
-          );
+          const [linkDoc, _selector, redirDoc, _redirSelector] = this
+            .resolveArrayItem(docItem, DefaultSelector);
+
+          // our item link should point one past the last redirect.
+          // linkDoc is the resolved Item.
+          if (linkDoc.value !== undefined) {
+            itemLink = getNormalizedLink(linkDoc.address);
+          } else {
+            // Fallback to the redirect document (the link itself) if the target is missing
+            itemLink = getNormalizedLink(redirDoc.address);
+          }
+
           // We can follow all the links, since we don't need to track cells
           const [valueDoc, _] = this.getDocAtPath(linkDoc, [], DefaultSelector);
           docItem = valueDoc;
+
           if (docItem.value === undefined) {
             logger.debug(
               "traverse",
@@ -738,6 +746,38 @@ export abstract class BaseObjectTraverser {
       );
     }
     return [doc, selector];
+  }
+
+  /**
+   * Resolve a document as an array item.
+   *
+   * Arrays have special behavior where we follow all write redirects, AND
+   * follow one regular link step. This allows [link] to behave like [value].
+   *
+
+   * @returns [resolvedDoc, resolvedSelector, redirectDoc, redirectSelector]
+   * where redirectDoc/Selector are the state before the final link follow.
+   */
+  protected resolveArrayItem(
+    doc: IMemorySpaceAttestation,
+    selector?: SchemaPathSelector,
+  ): [
+    IMemorySpaceAttestation,
+    SchemaPathSelector | undefined,
+    IMemorySpaceAttestation,
+    SchemaPathSelector | undefined,
+  ] {
+    const [redirDoc, redirSelector] = this.getDocAtPath(
+      doc,
+      [],
+      selector,
+      "writeRedirect",
+    );
+    // redirDoc has only followed redirects.
+    // If our redirDoc is a link, resolve one step, and use that value instead
+    // because arrays dereference one more link.
+    const [linkDoc, linkSelector] = this.nextLink(redirDoc, redirSelector);
+    return [linkDoc, linkSelector, redirDoc, redirSelector];
   }
 }
 
@@ -2053,26 +2093,27 @@ export class SchemaObjectTraverser<V extends JSONValue>
       // work as expected. Handle boolean items values for element schema
       // let createdDataURI = false;
       // const maybeLink = parseLink(item, arrayLink);
+
       if (isPrimitiveCellLink(item)) {
-        const [redirDoc, selector] = this.getDocAtPath(
-          curDoc,
-          [],
-          curSelector,
-          "writeRedirect",
-        );
-        curDoc = redirDoc;
-        curSelector = selector!;
-        // redirDoc has only followed redirects.
-        // If our redirDoc is a link, resolve one step, and use that value instead
-        // because arrays dereference one more link.
-        const [linkDoc, linkSelector] = this.nextLink(redirDoc, curSelector);
+        const [linkDoc, linkSelector, redirDoc, redirSelector] = this
+          .resolveArrayItem(curDoc, curSelector);
         curDoc = linkDoc;
         curSelector = linkSelector!;
+
         if (curDoc.value === undefined) {
           logger.debug(
             "traverse",
             () => ["Value is undefined following array element link", curDoc],
           );
+          // If the link target is missing, fallback to the link itself for cell creation
+          // to avoid getNextCellLink crashing on empty path.
+          curDoc = redirDoc;
+          // We must ensure the selector matches the fallback doc if schemas differ,
+          // but here we are primarily concerned with address validness for asCell.
+          // IMPORTANT: If we fallback to redirDoc, we MUST fallback to redirSelector
+          // because linkSelector might have a different path (or empty path if notFound)
+          // and traverseWithSelector enforces that doc path is not longer than selector path.
+          curSelector = redirSelector!;
         }
       } else if (
         isRecord(item) &&
