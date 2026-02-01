@@ -15,6 +15,7 @@ import type {
   CompoundCommand,
   Redirection,
   Word,
+  WordPart,
 } from "./ast.ts";
 import { tokenize, type Token, type TokenType } from "./lexer.ts";
 
@@ -69,7 +70,7 @@ export class Parser {
     // Skip leading newlines
     this.skipNewlines();
 
-    while (!this.atEnd() && !this.check("Fi") && !this.check("Done") && !this.check("Elif") && !this.check("Else") && !this.check("RParen") && !this.check("RBrace")) {
+    while (!this.atEnd() && !this.check("Fi") && !this.check("Done") && !this.check("Elif") && !this.check("Else") && !this.check("Then") && !this.check("Do") && !this.check("RParen") && !this.check("RBrace")) {
       const pipeline = this.parsePipeline();
 
       let connector: "&&" | "||" | ";" | "&" | undefined;
@@ -420,7 +421,7 @@ export class Parser {
 
   // Helper: extract assignment value from word (everything after =)
   private extractAssignmentValue(word: Word): Word {
-    const parts = [];
+    const parts: WordPart[] = [];
     let foundEq = false;
 
     for (const part of word.parts) {
@@ -430,7 +431,7 @@ export class Parser {
           foundEq = true;
           const afterEq = part.value.substring(eqIndex + 1);
           if (afterEq) {
-            parts.push({ type: "Literal", value: afterEq });
+            parts.push({ type: "Literal" as const, value: afterEq });
           }
         } else if (foundEq) {
           parts.push(part);
@@ -445,10 +446,13 @@ export class Parser {
 
   // Helper: extract literal value if word is a simple literal
   private extractLiteralValue(word: Word): string | null {
-    if (word.parts.length !== 1 || word.parts[0].type !== "Literal") {
-      return null;
+    // All parts must be Literal (handles per-character tokenization)
+    let result = "";
+    for (const part of word.parts) {
+      if (part.type !== "Literal") return null;
+      result += part.value;
     }
-    return word.parts[0].value;
+    return result || null;
   }
 
   // Token navigation helpers

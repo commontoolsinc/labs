@@ -245,9 +245,9 @@ export async function xargs(args: string[], ctx: CommandContext): Promise<Comman
     for (const line of lines) {
       let finalArgs = [...cmdArgs];
 
-      if (replaceStr) {
+      if (replaceStr !== null) {
         // Replace occurrences of replaceStr with the line
-        finalArgs = finalArgs.map(arg => arg.replace(replaceStr, line));
+        finalArgs = finalArgs.map(arg => arg.replace(replaceStr!, line));
       } else {
         // Append line as argument
         finalArgs.push(line);

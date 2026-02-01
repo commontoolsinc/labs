@@ -216,7 +216,7 @@ class Lexer {
         // Single-quoted string
         const sq = this.readSingleQuoted();
         parts.push(sq);
-        rawValue += "'" + sq.value + "'";
+        rawValue += "'" + (sq as { type: "SingleQuoted"; value: string }).value + "'";
       } else if (ch === '"') {
         // Double-quoted string
         const dq = this.readDoubleQuoted();
@@ -239,12 +239,19 @@ class Lexer {
         // Glob pattern
         const glob = this.readGlobPattern();
         parts.push(glob);
-        rawValue += glob.pattern;
+        rawValue += (glob as { type: "Glob"; pattern: string }).pattern;
       } else {
-        // Literal character
-        const lit = this.advance();
-        parts.push({ type: "Literal", value: lit });
-        rawValue += lit;
+        // Literal characters - accumulate consecutive literals
+        let lit = "";
+        while (!this.isAtEnd() && !this.isWordBoundary()) {
+          const c = this.peek();
+          if (c === "'" || c === '"' || c === "\\" || c === "$" || c === "*" || c === "?" || c === "[") break;
+          lit += this.advance();
+        }
+        if (lit) {
+          parts.push({ type: "Literal", value: lit });
+          rawValue += lit;
+        }
       }
     }
 
@@ -326,8 +333,13 @@ class Lexer {
   }
 
   private extractLiteralValue(parts: WordPart[]): string | null {
-    if (parts.length !== 1 || parts[0].type !== "Literal") return null;
-    return parts[0].value;
+    // All parts must be Literal (handles per-character tokenization)
+    let result = "";
+    for (const part of parts) {
+      if (part.type !== "Literal") return null;
+      result += part.value;
+    }
+    return result || null;
   }
 
   private keywordToTokenType(keyword: string): TokenType {
@@ -401,8 +413,12 @@ class Lexer {
         const cmd = this.readBacktick();
         parts.push(cmd);
       } else {
-        // Literal character
-        parts.push({ type: "Literal", value: this.advance() });
+        // Literal characters - accumulate consecutive
+        let lit = "";
+        while (!this.isAtEnd() && this.peek() !== '"' && this.peek() !== "\\" && this.peek() !== "$" && this.peek() !== "`") {
+          lit += this.advance();
+        }
+        if (lit) parts.push({ type: "Literal", value: lit });
       }
     }
 
@@ -488,7 +504,11 @@ class Lexer {
             if (this.peek() === "$") {
               argParts.push(this.readExpansion());
             } else {
-              argParts.push({ type: "Literal", value: this.advance() });
+              let lit = "";
+              while (!this.isAtEnd() && this.peek() !== "}" && this.peek() !== "$") {
+                lit += this.advance();
+              }
+              if (lit) argParts.push({ type: "Literal", value: lit });
             }
           }
           if (argParts.length > 0) {

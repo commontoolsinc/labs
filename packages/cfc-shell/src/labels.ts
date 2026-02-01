@@ -214,6 +214,30 @@ function endorse(label: Label, ...atoms: Atom[]): Label {
 }
 
 /**
+ * taintConfidentiality - join confidentiality but preserve the first label's integrity.
+ * Used for PC taint from control flow (if/for/while).
+ *
+ * When data flows through a conditional or loop, the PC (program counter) label
+ * taints the confidentiality (adds restrictions) but should NOT strip integrity.
+ * This is because the integrity comes from the data itself, not the control flow.
+ *
+ * Example: if grep -q "secret" file.txt; then echo "found" > out.txt; fi
+ * - "found" is a constant with no integrity
+ * - But the output should carry file.txt's confidentiality (PC taint)
+ * - Using join() would give empty integrity (intersection with PC's empty integrity)
+ * - Using taintConfidentiality() preserves the echo's output integrity
+ */
+function taintConfidentiality(data: Label, pc: Label): Label {
+  return {
+    confidentiality: deduplicateClauses([
+      ...data.confidentiality,
+      ...pc.confidentiality,
+    ]),
+    integrity: data.integrity, // preserve data's integrity, don't intersect with PC
+  };
+}
+
+/**
  * hasIntegrity - check if label has a specific integrity atom
  */
 function hasIntegrity(label: Label, atom: Atom): boolean {
@@ -304,6 +328,7 @@ export const labels = {
   meet,
   joinAll,
   endorse,
+  taintConfidentiality,
   hasIntegrity,
   hasAnyIntegrity,
   flowsTo,

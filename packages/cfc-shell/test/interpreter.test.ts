@@ -18,7 +18,7 @@ import { createSession, ShellSession } from "../src/session.ts";
 import { CommandRegistry } from "../src/commands/registry.ts";
 import { CommandContext, CommandResult } from "../src/commands/context.ts";
 import { VFS } from "../src/vfs.ts";
-import { labels } from "../src/labels.ts";
+import { labels, type Label } from "../src/labels.ts";
 import { cat } from "../src/commands/read.ts";
 
 // ============================================================================
@@ -474,8 +474,8 @@ Deno.test("interpreter: PC label taints output in conditional", async () => {
   const session = createTestSession();
 
   // Create a file with tainted data
-  const taintedLabel = {
-    confidentiality: [[{ kind: "Custom", tag: "tainted" }]],
+  const taintedLabel: Label = {
+    confidentiality: [[{ kind: "Custom" as const, tag: "tainted" }]],
     integrity: [],
   };
 

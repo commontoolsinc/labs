@@ -539,10 +539,11 @@ Deno.test("parse escaped characters in double quotes", () => {
   const part = cmd.args[0].parts[0];
   assertEquals(part.type, "DoubleQuoted");
   if (part.type === "DoubleQuoted") {
-    assertEquals(part.parts.length, 3);
+    assertEquals(part.parts.length, 4);
     assertEquals(part.parts[0], { type: "Literal", value: "hello " });
     assertEquals(part.parts[1], { type: "Literal", value: '"' });
     assertEquals(part.parts[2], { type: "Literal", value: "world" });
+    assertEquals(part.parts[3], { type: "Literal", value: '"' });
   }
 });
 

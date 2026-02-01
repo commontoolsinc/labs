@@ -49,7 +49,8 @@ export async function execute(
 
 async function executeProgram(
   node: Program,
-  session: ShellSession
+  session: ShellSession,
+  stdio?: { stdout: LabeledStream; stderr: LabeledStream }
 ): Promise<CommandResult> {
   let lastResult: CommandResult = {
     exitCode: 0,
@@ -60,7 +61,7 @@ async function executeProgram(
     const { pipeline, connector } = connectedPipeline;
 
     // Execute the pipeline
-    lastResult = await executePipeline(pipeline, session);
+    lastResult = await executePipeline(pipeline, session, stdio);
 
     // Update session state
     session.lastExitCode = lastResult.exitCode;
@@ -93,7 +94,8 @@ async function executeProgram(
 
 async function executePipeline(
   node: Pipeline,
-  session: ShellSession
+  session: ShellSession,
+  stdio?: { stdout: LabeledStream; stderr: LabeledStream }
 ): Promise<CommandResult> {
   if (node.commands.length === 0) {
     return { exitCode: 0, label: labels.bottom() };
@@ -102,8 +104,8 @@ async function executePipeline(
   // Single command - execute directly with session streams
   if (node.commands.length === 1) {
     const stdin = LabeledStream.empty();
-    const stdout = new LabeledStream();
-    const stderr = new LabeledStream();
+    const stdout = stdio?.stdout ?? new LabeledStream();
+    const stderr = stdio?.stderr ?? new LabeledStream();
 
     const result = await executeCommand(
       node.commands[0],
@@ -113,9 +115,13 @@ async function executePipeline(
       stderr
     );
 
-    // Close streams
-    stdout.close();
-    stderr.close();
+    // Close streams only if we created them (not provided by caller)
+    if (!stdio?.stdout) {
+      stdout.close();
+    }
+    if (!stdio?.stderr) {
+      stderr.close();
+    }
 
     // Apply negation if needed
     if (node.negated) {
@@ -146,21 +152,25 @@ async function executePipeline(
 
     // Determine stdout
     const stdout = i === node.commands.length - 1
-      ? new LabeledStream()
+      ? (stdio?.stdout ?? new LabeledStream())
       : pipes[i];
 
     // Stderr is per-command
-    const stderr = new LabeledStream();
+    const stderr = i === node.commands.length - 1
+      ? (stdio?.stderr ?? new LabeledStream())
+      : new LabeledStream();
 
     // Execute command
     const result = await executeCommand(command, session, stdin, stdout, stderr);
     results.push(result);
 
-    // Close stderr
-    stderr.close();
+    // Close stderr (unless it was provided by caller on last command)
+    if (i !== node.commands.length - 1 || !stdio?.stderr) {
+      stderr.close();
+    }
 
-    // Close stdout if this is the last command
-    if (i === node.commands.length - 1) {
+    // Close stdout if this is the last command (unless it was provided by caller)
+    if (i === node.commands.length - 1 && !stdio?.stdout) {
       stdout.close();
     }
   }
@@ -271,7 +281,11 @@ async function executeSimpleCommand(
     stdin: effectiveStdin,
     stdout: effectiveStdout,
     stderr: effectiveStderr,
-    pcLabel: labels.join(session.pcLabel, expandedName.label),
+    pcLabel: labels.joinAll([
+      session.pcLabel,
+      expandedName.label,
+      ...expandedArgs.map((a) => a.label),
+    ]),
     requestIntent: session.requestIntent,
   };
 
@@ -394,21 +408,12 @@ async function expandWordPart(
 
       const substdout = new LabeledStream();
       const substderr = new LabeledStream();
-      const substdin = LabeledStream.empty();
 
-      // Execute the subcommand
-      const ctx: CommandContext = {
-        vfs: session.vfs,
-        env: session.env,
-        stdin: substdin,
+      // Execute program with captured stdout/stderr
+      const result = await executeProgram(part.body, session, {
         stdout: substdout,
         stderr: substderr,
-        pcLabel: session.pcLabel,
-        requestIntent: session.requestIntent,
-      };
-
-      // Execute program (create a temporary "session" context)
-      const result = await executeProgram(part.body, session);
+      });
 
       // Close streams
       substdout.close();
@@ -521,7 +526,7 @@ async function executeIf(
   if (conditionResult.exitCode === 0) {
     // Execute then branch
     branchResult = await executeProgram(node.then, session);
-  } else {
+  } else{
     // Try elifs
     let elifExecuted = false;
 
@@ -721,7 +726,9 @@ async function applyRedirections(
 
         flushers.push(async () => {
           const output = await captureStream.readAll();
-          session.vfs.writeFile(targetPath, output.value, output.label);
+          // Taint confidentiality with PC (preserve output's integrity)
+          const writeLabel = labels.taintConfidentiality(output.label, session.pcLabel);
+          session.vfs.writeFile(targetPath, output.value, writeLabel);
         });
         break;
       }
@@ -746,9 +753,10 @@ async function applyRedirections(
             // File doesn't exist - that's okay
           }
 
-          // Append new content
+          // Append new content; taint confidentiality with PC (preserve integrity)
           const newContent = existingContent + output.value;
-          const newLabel = labels.join(existingLabel, output.label);
+          const combinedLabel = labels.join(existingLabel, output.label);
+          const newLabel = labels.taintConfidentiality(combinedLabel, session.pcLabel);
 
           session.vfs.writeFile(targetPath, newContent, newLabel);
         });
@@ -762,7 +770,8 @@ async function applyRedirections(
 
         flushers.push(async () => {
           const output = await captureStream.readAll();
-          session.vfs.writeFile(targetPath, output.value, output.label);
+          const writeLabel = labels.taintConfidentiality(output.label, session.pcLabel);
+          session.vfs.writeFile(targetPath, output.value, writeLabel);
         });
         break;
       }
@@ -787,9 +796,10 @@ async function applyRedirections(
             // File doesn't exist - that's okay
           }
 
-          // Append new content
+          // Append new content; taint confidentiality with PC (preserve integrity)
           const newContent = existingContent + output.value;
-          const newLabel = labels.join(existingLabel, output.label);
+          const combinedLabel = labels.join(existingLabel, output.label);
+          const newLabel = labels.taintConfidentiality(combinedLabel, session.pcLabel);
 
           session.vfs.writeFile(targetPath, newContent, newLabel);
         });
@@ -804,7 +814,8 @@ async function applyRedirections(
 
         flushers.push(async () => {
           const output = await captureStream.readAll();
-          session.vfs.writeFile(targetPath, output.value, output.label);
+          const writeLabel = labels.taintConfidentiality(output.label, session.pcLabel);
+          session.vfs.writeFile(targetPath, output.value, writeLabel);
         });
         break;
       }
