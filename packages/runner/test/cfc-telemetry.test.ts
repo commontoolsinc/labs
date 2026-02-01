@@ -1,15 +1,16 @@
-import { describe, it, expect } from "vitest";
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
 import {
   createActionContext,
   accumulateTaint,
   checkWrite,
   checkClearance,
   CFCViolationError,
-} from "../action-context.ts";
-import { emptyLabel, labelFromClassification, labelFromSchemaIfc, type Label } from "../labels.ts";
-import { userAtom } from "../atoms.ts";
-import { formatLabel, describeViolation, type CFCViolation } from "../violations.ts";
-import { emptyIntegrity } from "../integrity.ts";
+} from "../src/cfc/action-context.ts";
+import { emptyLabel, labelFromClassification, labelFromSchemaIfc, type Label } from "../src/cfc/labels.ts";
+import { userAtom } from "../src/cfc/atoms.ts";
+import { formatLabel, describeViolation, type CFCViolation } from "../src/cfc/violations.ts";
+import { emptyIntegrity } from "../src/cfc/integrity.ts";
 
 describe("Taint accumulation", () => {
   it("starts with empty taint", () => {
@@ -65,11 +66,7 @@ describe("Exchange rule declassification", () => {
     };
     accumulateTaint(ctx, userLabel);
 
-    // Without rules, writing to empty target fails
     expect(() => checkWrite(ctx, emptyLabel(), [])).toThrow(CFCViolationError);
-
-    // With a rule that adds an alternative to User clauses, it can succeed
-    // This is a simplified test — real rules would be more structured
   });
 });
 

@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
 import {
   // Atoms
   canonicalizeAtom,
@@ -32,7 +33,7 @@ import {
   labelLeq,
   labelFromClassification,
   labelFromSchemaIfc,
-} from "../index.ts";
+} from "../src/cfc/index.ts";
 
 // =========================================================================
 // 1. Atom tests
@@ -124,7 +125,6 @@ describe("Confidentiality", () => {
     const a = [[alice]];
     const b = [[work]];
     const joined = joinConfidentiality(a, b);
-    // Should have both clauses
     expect(joined.length).toBe(2);
   });
 
@@ -140,7 +140,6 @@ describe("Confidentiality", () => {
     const a = [[alice]];
     const b = [[bob]];
     const met = meetConfidentiality(a, b);
-    // meet should be leq both a and b
     expect(confidentialityLeq(met, a)).toBe(true);
     expect(confidentialityLeq(met, b)).toBe(true);
   });
@@ -148,9 +147,7 @@ describe("Confidentiality", () => {
   it("leq: single clause vs multi-clause", () => {
     const single = [[alice]];
     const multi = [[alice], [work]];
-    // single <= multi (multi is more restrictive)
     expect(confidentialityLeq(single, multi)).toBe(true);
-    // multi is NOT <= single
     expect(confidentialityLeq(multi, single)).toBe(false);
   });
 
@@ -162,11 +159,10 @@ describe("Confidentiality", () => {
     });
 
     it("removes subsumed clauses", () => {
-      // [alice] is a subset of [alice, bob], so [alice, bob] is subsumed
       const label = [[alice], [alice, bob]];
       const normalized = normalizeConfidentiality(label);
       expect(normalized.length).toBe(1);
-      expect(normalized[0].length).toBe(1); // only [alice] remains
+      expect(normalized[0].length).toBe(1);
     });
 
     it("deduplicates atoms within a clause", () => {
@@ -184,7 +180,6 @@ describe("Confidentiality", () => {
     it("single-atom clauses", () => {
       const a = [[secret]];
       const b = [[topSecret]];
-      // Different single-atom clauses are not comparable
       expect(confidentialityLeq(a, b)).toBe(false);
       expect(confidentialityLeq(b, a)).toBe(false);
     });
@@ -204,12 +199,6 @@ describe("Integrity", () => {
   it("emptyIntegrity is top (leq from everything)", () => {
     const top = emptyIntegrity();
     const label = integrityFromAtoms([hashA, alice]);
-    // everything <= top (empty set is top because fewer endorsements = lower,
-    // but empty is the weakest — everything is leq to... wait: a <= b iff a.atoms ⊆ b.atoms)
-    // empty.atoms = [], so empty <= everything
-    // Actually empty is BOTTOM for subset ordering, but the lattice says empty = top (weakest).
-    // integrityLeq checks a.atoms ⊆ b.atoms, so:
-    // emptyIntegrity <= everything because [] ⊆ anything
     expect(integrityLeq(top, label)).toBe(true);
     expect(integrityLeq(top, emptyIntegrity())).toBe(true);
   });
@@ -223,7 +212,6 @@ describe("Integrity", () => {
     const a = integrityFromAtoms([hashA, alice]);
     const b = integrityFromAtoms([hashA, bob]);
     const joined = joinIntegrity(a, b);
-    // Only hashA is in both
     expect(joined.atoms.length).toBe(1);
     expect(integrityContains(joined, hashA)).toBe(true);
     expect(integrityContains(joined, alice)).toBe(false);
@@ -277,9 +265,7 @@ describe("Composite Label", () => {
       ]),
     };
     const joined = joinLabel(a, b);
-    // Confidentiality: both clauses present
     expect(joined.confidentiality.length).toBe(2);
-    // Integrity: intersection — only codeHashAtom("abc123")
     expect(joined.integrity.atoms.length).toBe(1);
   });
 
@@ -314,7 +300,6 @@ describe("Composite Label", () => {
       confidentiality: [[classificationAtom("secret")]],
       integrity: integrityFromAtoms([codeHashAtom("abc123")]),
     };
-    // a.conf <= b.conf (empty <= anything), but a.integrity NOT <= b.integrity
     expect(labelLeq(a, b)).toBe(false);
   });
 
@@ -389,7 +374,6 @@ describe("Lattice properties", () => {
       const a = integrityFromAtoms([hashA, alice]);
       const b = integrityFromAtoms([hashA, bob]);
       const joined = joinIntegrity(a, b);
-      // joined <= a and joined <= b (intersection is subset of both)
       expect(integrityLeq(joined, a)).toBe(true);
       expect(integrityLeq(joined, b)).toBe(true);
     });

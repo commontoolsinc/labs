@@ -1,41 +1,34 @@
-import { describe, it, expect } from "vitest";
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
 import {
-  // Atoms
   userAtom,
   spaceAtom,
   classificationAtom,
   hasRoleAtom,
   codeHashAtom,
   atomEquals,
-  // Trust lattice
   TrustLattice,
-  // Labels
   emptyLabel,
   labelFromClassification,
   joinLabel,
   type Label,
-  // Confidentiality
   emptyConfidentiality,
-  // Integrity
   emptyIntegrity,
   integrityFromAtoms,
-  // Exchange rules
   matchAtomPattern,
   matchPrecondition,
   applyRule,
   evaluateRules,
   type AtomPattern,
   type ExchangeRule,
-  // Policy
   createPolicy,
   hashPolicy,
   DEFAULT_POLICY,
-  // Action context
   createActionContext,
   accumulateTaint,
   checkWrite,
   CFCViolationError,
-} from "../index.ts";
+} from "../src/cfc/index.ts";
 
 // ---------------------------------------------------------------------------
 // TrustLattice
@@ -49,13 +42,11 @@ describe("TrustLattice", () => {
     expect(lattice.classificationLeq("confidential", "secret")).toBe(true);
     expect(lattice.classificationLeq("secret", "topsecret")).toBe(true);
     expect(lattice.classificationLeq("unclassified", "topsecret")).toBe(true);
-    // Not the reverse
     expect(lattice.classificationLeq("topsecret", "unclassified")).toBe(false);
     expect(lattice.classificationLeq("secret", "confidential")).toBe(false);
   });
 
   it("classificationLeq is transitive", () => {
-    // unclassified <= confidential and confidential <= secret implies unclassified <= secret
     expect(lattice.classificationLeq("unclassified", "confidential")).toBe(true);
     expect(lattice.classificationLeq("confidential", "secret")).toBe(true);
     expect(lattice.classificationLeq("unclassified", "secret")).toBe(true);
@@ -88,7 +79,6 @@ describe("TrustLattice", () => {
       confidentiality: [[classificationAtom("unclassified")], [classificationAtom("secret")]],
       integrity: emptyIntegrity(),
     };
-    // low has fewer constraints, so low <= high
     expect(lattice.compareLabels(low, high)).toBe("below");
     expect(lattice.compareLabels(high, low)).toBe("above");
     expect(lattice.compareLabels(low, low)).toBe("equal");
@@ -184,7 +174,6 @@ describe("Exchange Rules", () => {
     };
     const bindings = new Map([["$X", "my-space"]]);
     const result = applyRule(label, rule, bindings);
-    // The clause should now contain both Space(my-space) and User(did:example:bob)
     expect(result.confidentiality.length).toBe(1);
     const clause = result.confidentiality[0];
     expect(clause.length).toBe(2);
@@ -204,7 +193,6 @@ describe("Exchange Rules", () => {
       integrity: emptyIntegrity(),
     };
     const result = evaluateRules(label, [rule]);
-    // Should have added User(bob) as alternative
     expect(result.confidentiality[0].length).toBe(2);
   });
 
@@ -272,15 +260,12 @@ describe("ActionTaintContext", () => {
       userDid: "did:example:alice",
       space: "space-1",
     });
-    // principal integrity should have AuthoredBy(alice)
     expect(ctx.principal.integrity.atoms.length).toBe(1);
     expect(ctx.principal.integrity.atoms[0]).toEqual({
       kind: "AuthoredBy",
       did: "did:example:alice",
     });
-    // clearance should have User and Space clauses
     expect(ctx.clearance.confidentiality.length).toBe(2);
-    // taint should be empty
     expect(ctx.accumulatedTaint.confidentiality).toEqual([]);
     expect(ctx.accumulatedTaint.integrity.atoms).toEqual([]);
   });
@@ -297,7 +282,6 @@ describe("ActionTaintContext", () => {
     accumulateTaint(ctx, readLabel);
     expect(ctx.accumulatedTaint.confidentiality.length).toBe(1);
 
-    // Accumulate another
     const readLabel2: Label = {
       confidentiality: [[userAtom("did:example:bob")]],
       integrity: emptyIntegrity(),
@@ -311,7 +295,6 @@ describe("ActionTaintContext", () => {
       userDid: "did:example:alice",
       space: "space-1",
     });
-    // Taint is empty, so any target should pass
     const target: Label = {
       confidentiality: [[spaceAtom("space-1")]],
       integrity: emptyIntegrity(),
@@ -324,12 +307,10 @@ describe("ActionTaintContext", () => {
       userDid: "did:example:alice",
       space: "space-1",
     });
-    // Accumulate high taint
     accumulateTaint(ctx, {
       confidentiality: [[spaceAtom("space-1")], [userAtom("did:example:bob")]],
       integrity: emptyIntegrity(),
     });
-    // Try to write to a less restrictive target
     const target = emptyLabel();
     expect(() => checkWrite(ctx, target, [])).toThrow(CFCViolationError);
   });
@@ -340,22 +321,16 @@ describe("ActionTaintContext", () => {
       space: "space-1",
     });
 
-    // Set taint to Space(space-1) confidentiality with empty integrity
     ctx.accumulatedTaint = {
       confidentiality: [[spaceAtom("space-1")]],
       integrity: emptyIntegrity(),
     };
 
-    // Write target allows Space(space-1) OR User(alice)
     const target: Label = {
       confidentiality: [[spaceAtom("space-1"), userAtom("did:example:alice")]],
       integrity: emptyIntegrity(),
     };
 
-    // Without rules, taint [[Space(space-1)]] is NOT <= [[Space(space-1), User(alice)]]
-    // because the target clause {Space, User} is not a subset of taint clause {Space}.
-    // With a rule that adds User(alice) to Space clauses, taint becomes
-    // [[Space(space-1), User(alice)]] which IS <= target.
     const rule: ExchangeRule = {
       confidentialityPre: [{ kind: "Space", params: { space: "space-1" } }],
       integrityPre: [],
@@ -363,9 +338,7 @@ describe("ActionTaintContext", () => {
       variables: [],
     };
 
-    // Verify it would fail without rules
     expect(() => checkWrite(ctx, target, [])).toThrow(CFCViolationError);
-    // With the declassification rule, it passes
     expect(() => checkWrite(ctx, target, [rule])).not.toThrow();
   });
 
@@ -374,9 +347,7 @@ describe("ActionTaintContext", () => {
       userDid: "did:example:alice",
       space: "space-1",
     });
-    // Read something with empty label
     accumulateTaint(ctx, emptyLabel());
-    // Write to empty label target
     expect(() => checkWrite(ctx, emptyLabel(), [])).not.toThrow();
   });
 });

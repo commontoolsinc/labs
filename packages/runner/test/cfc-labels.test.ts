@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
 import {
   userAtom,
   spaceAtom,
@@ -14,14 +15,13 @@ import {
   emptyLabel,
   labelFromStoredLabels,
   toLabelStorage,
-  joinLabel,
   emptyConfidentiality,
   emptyIntegrity,
   integrityFromAtoms,
-} from "../index.ts";
-import type { Atom } from "../atoms.ts";
-import type { Labels } from "../../storage/interface.ts";
-import type { Label } from "../labels.ts";
+} from "../src/cfc/index.ts";
+import type { Atom } from "../src/cfc/atoms.ts";
+import type { Labels } from "../src/storage/interface.ts";
+import type { Label } from "../src/cfc/labels.ts";
 
 // =========================================================================
 // 1. Discriminated union atoms serialize cleanly through JSON round-trip
@@ -112,7 +112,6 @@ describe("labelFromStoredLabels", () => {
     };
     const label = labelFromStoredLabels(stored);
 
-    // confidentiality field takes precedence
     expect(label.confidentiality).toEqual([[userAtom("did:owner")]]);
   });
 });
