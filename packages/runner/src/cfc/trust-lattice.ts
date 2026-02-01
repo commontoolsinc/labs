@@ -26,6 +26,141 @@ const DEFAULT_CLASSIFICATION_ORDER: Map<string, string[]> = new Map([
 ]);
 
 // ---------------------------------------------------------------------------
+// Graph Algorithms - Tarjan SCC and Kahn Topological Sort
+// ---------------------------------------------------------------------------
+
+/**
+ * Tarjan's Strongly Connected Components algorithm.
+ * Groups nodes such that there's a path from every node to every other node
+ * within the same group. This is used for identifying cycles in directed graphs.
+ * Time complexity: O(V+E)
+ *
+ * Groups are ordered such that if we have an edge [0,1], we get [[0], [1]]
+ */
+export class TarjanSCC {
+  private index: number = 0;
+  private vertexIndices: number[];
+  private vertexLowLink: number[];
+  private vertexOnStack: boolean[];
+  private stack: number[] = [];
+  private adjacency: number[][];
+  private sorted: number[][];
+
+  constructor(nodeCount: number, edges: [number, number][]) {
+    // Build an array with each item having the list of nodes that point to it.
+    this.adjacency = Array.from({ length: nodeCount }, () => []);
+    for (const [from, to] of edges) {
+      this.adjacency[from].push(to);
+    }
+    this.sorted = [];
+    this.vertexIndices = new Array(nodeCount);
+    this.vertexLowLink = new Array(nodeCount);
+    this.vertexOnStack = new Array(nodeCount);
+    for (let v = 0; v < nodeCount; v++) {
+      if (this.vertexIndices[v] === undefined) {
+        this.strongConnect(v);
+      }
+    }
+    this.sorted.reverse();
+  }
+
+  get result() {
+    return this.sorted;
+  }
+
+  private strongConnect(v: number) {
+    this.vertexIndices[v] = this.index;
+    this.vertexLowLink[v] = this.index;
+    this.index = this.index + 1;
+    this.stack.push(v);
+    this.vertexOnStack[v] = true;
+
+    for (const w of this.adjacency[v]) {
+      if (this.vertexIndices[w] === undefined) {
+        // vertex w not yet visited
+        this.strongConnect(w);
+        this.vertexLowLink[v] = this.vertexLowLink[v] < this.vertexLowLink[w]
+          ? this.vertexLowLink[v]
+          : this.vertexLowLink[w];
+      } else if (this.vertexOnStack[w]) {
+        // vertex w is on the stack, so it's in our SCC
+        this.vertexLowLink[v] = this.vertexLowLink[v] < this.vertexLowLink[w]
+          ? this.vertexLowLink[v]
+          : this.vertexLowLink[w];
+      }
+    }
+
+    if (this.vertexLowLink[v] === this.vertexIndices[v]) {
+      // this is a new SCC
+      let w;
+      const scc = [];
+      do {
+        w = this.stack.pop()!;
+        this.vertexOnStack[w] = false;
+        scc.push(w);
+      } while (w != v);
+      this.sorted.push(scc);
+    }
+  }
+}
+
+/**
+ * Kahn's topological sort algorithm.
+ * Returns the indexes of the nodes in topological order.
+ * The result is sorted so that a node's children appear after it in the list.
+ * Time complexity: O(V+E)
+ *
+ * Assumes the graph is a DAG (Directed Acyclic Graph).
+ * Items are ordered such that if we have an edge [0,1], we get [0, 1]
+ */
+export class KahnTopologicalSort {
+  private sorted: number[];
+
+  constructor(nodeCount: number, edges: [number, number][]) {
+    // Build an array with each item having the list of nodes that point to it.
+    const adjacency: number[][] = Array.from({ length: nodeCount }, () => []);
+    for (const [from, to] of edges) {
+      adjacency[from].push(to);
+    }
+
+    const indegree = Array(nodeCount).fill(0); // count of incoming edges
+    for (let i = 0; i < nodeCount; i++) {
+      for (const j of adjacency[i]) {
+        indegree[j]++;
+      }
+    }
+
+    const queue: number[] = [];
+    for (let i = 0; i < nodeCount; i++) {
+      if (indegree[i] === 0) queue.push(i);
+    }
+
+    const result = [];
+    while (queue.length > 0) {
+      const node = queue.shift()!;
+      result.push(node);
+
+      for (const neighbor of adjacency[node!]) {
+        indegree[neighbor]--;
+        if (indegree[neighbor] === 0) {
+          queue.push(neighbor);
+        }
+      }
+    }
+
+    if (result.length !== nodeCount) {
+      throw new Error("Graph is not a DAG (cycle detected)");
+    }
+
+    this.sorted = result;
+  }
+
+  get result() {
+    return this.sorted;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // TrustLattice
 // ---------------------------------------------------------------------------
 

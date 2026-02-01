@@ -4,7 +4,7 @@ import { getLogger } from "@commontools/utils/logger";
 import type { JSONSchema } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
 import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
-import { TrustLattice } from "./cfc/trust-lattice.ts";
+import { TrustLattice, KahnTopologicalSort } from "./cfc/trust-lattice.ts";
 import { SpacePolicyManager } from "./cfc/space-policy.ts";
 import type { ActionTaintContext } from "./cfc/action-context.ts";
 import { createActionContext } from "./cfc/action-context.ts";
@@ -33,128 +33,6 @@ const classificationLattice = new Map<string, string[]>([
   [Classification.Secret, [Classification.Confidential]],
   [Classification.TopSecret, [Classification.Secret]],
 ]);
-
-// This class lets me sort with strongly connected components.
-// These are not technically a partial order, since they violate antisymmetry.
-// This uses an implementation of Tarjan's algorithm, which is O(V+E).
-class _TarjanSCC {
-  private index: number = 0;
-  private vertexIndices: number[];
-  private vertexLowLink: number[];
-  private vertexOnStack: boolean[];
-  private stack: number[] = [];
-  private adjacency: number[][];
-  private sorted: number[][];
-  constructor(nodeCount: number, edges: [number, number][]) {
-    // Build an array with each item having the list of nodes that point to it.
-    this.adjacency = Array.from({ length: nodeCount }, () => []);
-    for (const [from, to] of edges) {
-      this.adjacency[from].push(to);
-    }
-    this.sorted = [];
-    this.vertexIndices = new Array(nodeCount);
-    this.vertexLowLink = new Array(nodeCount);
-    this.vertexOnStack = new Array(nodeCount);
-    for (let v = 0; v < nodeCount; v++) {
-      if (this.vertexIndices[v] === undefined) {
-        this.strongConnect(v);
-      }
-    }
-    this.sorted.reverse();
-  }
-
-  // Groups are ordered such that if we have an edge [0,1], we get [[0], [1]]
-  get result() {
-    return this.sorted;
-  }
-
-  private strongConnect(v: number) {
-    this.vertexIndices[v] = this.index;
-    this.vertexLowLink[v] = this.index;
-    this.index = this.index + 1;
-    this.stack.push(v);
-    this.vertexOnStack[v] = true;
-
-    for (const w of this.adjacency[v]) {
-      if (this.vertexIndices[w] === undefined) {
-        // vertex w not yet visited
-        this.strongConnect(w);
-        this.vertexLowLink[v] = this.vertexLowLink[v] < this.vertexLowLink[w]
-          ? this.vertexLowLink[v]
-          : this.vertexLowLink[w];
-      } else if (this.vertexOnStack[w]) {
-        // vertex w is on the stack, so it's in our SCC
-        this.vertexLowLink[v] = this.vertexLowLink[v] < this.vertexLowLink[w]
-          ? this.vertexLowLink[v]
-          : this.vertexLowLink[w];
-      }
-    }
-
-    if (this.vertexLowLink[v] === this.vertexIndices[v]) {
-      // this is a new SCC
-      let w;
-      const scc = [];
-      do {
-        w = this.stack.pop()!;
-        this.vertexOnStack[w] = false;
-        scc.push(w);
-      } while (w != v);
-      this.sorted.push(scc);
-    }
-  }
-}
-
-// Based on the edges, returns the indexes of the nodes in topological order.
-// The result is sorted so the node's children are after it in the list
-// This uses an implementation of Kahn's algorithm, which is O(V+E).
-// It assumes the graph is a DAG (Directed Acyclic Graph)
-// We implement topological sort in other places, but this is a simpler version
-class KahnTopologicalSort {
-  private sorted: number[];
-  constructor(nodeCount: number, edges: [number, number][]) {
-    // Build an array with each item having the list of nodes that poitnt to it.
-    const adjacency: number[][] = Array.from({ length: nodeCount }, () => []);
-    for (const [from, to] of edges) {
-      adjacency[from].push(to);
-    }
-
-    const indegree = Array(nodeCount).fill(0); // count of incoming edges
-    for (let i = 0; i < nodeCount; i++) {
-      for (const j of adjacency[i]) {
-        indegree[j]++;
-      }
-    }
-
-    const queue: number[] = [];
-    for (let i = 0; i < nodeCount; i++) {
-      if (indegree[i] === 0) queue.push(i);
-    }
-
-    const result = [];
-    while (queue.length > 0) {
-      const node = queue.shift()!;
-      result.push(node);
-
-      for (const neighbor of adjacency[node!]) {
-        indegree[neighbor]--;
-        if (indegree[neighbor] === 0) {
-          queue.push(neighbor);
-        }
-      }
-    }
-
-    if (result.length !== nodeCount) {
-      throw new Error("Graph is not a DAG (cycle detected)");
-    }
-
-    this.sorted = result;
-  }
-
-  // Items are ordered such that if we have an edge [0,1], we get [0, 1]
-  get result() {
-    return this.sorted;
-  }
-}
 
 // Class for handling cfc rules.
 // Right now, we just drop this constructor all over, but eventually
