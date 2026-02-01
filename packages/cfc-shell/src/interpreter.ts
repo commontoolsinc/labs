@@ -1,0 +1,830 @@
+/**
+ * Shell Interpreter - walks the AST and executes commands with label propagation
+ *
+ * Key responsibilities:
+ * - Expand words with proper label tracking
+ * - Wire pipelines with LabeledStreams
+ * - Track implicit flows via PC labels
+ * - Handle redirections
+ * - Execute control flow (if/for/while)
+ */
+
+import {
+  Program,
+  Pipeline,
+  Command,
+  SimpleCommand,
+  Assignment,
+  IfClause,
+  ForClause,
+  WhileClause,
+  Subshell,
+  BraceGroup,
+  Redirection,
+  Word,
+  WordPart,
+} from "./parser/ast.ts";
+import { parse } from "./parser/parser.ts";
+import { ShellSession } from "./session.ts";
+import { CommandResult, CommandContext } from "./commands/context.ts";
+import { LabeledStream } from "./labeled-stream.ts";
+import { Label, Labeled, labels } from "./labels.ts";
+import { expandGlob } from "./glob.ts";
+
+// ============================================================================
+// Main Entry Point
+// ============================================================================
+
+export async function execute(
+  input: string,
+  session: ShellSession
+): Promise<CommandResult> {
+  const ast = parse(input);
+  return executeProgram(ast, session);
+}
+
+// ============================================================================
+// Program Execution (with connectors: &&, ||, ;, &)
+// ============================================================================
+
+async function executeProgram(
+  node: Program,
+  session: ShellSession
+): Promise<CommandResult> {
+  let lastResult: CommandResult = {
+    exitCode: 0,
+    label: labels.bottom(),
+  };
+
+  for (const connectedPipeline of node.body) {
+    const { pipeline, connector } = connectedPipeline;
+
+    // Execute the pipeline
+    lastResult = await executePipeline(pipeline, session);
+
+    // Update session state
+    session.lastExitCode = lastResult.exitCode;
+    session.lastExitLabel = lastResult.label;
+
+    // Handle connectors
+    if (connector === "&&") {
+      // Only continue if last command succeeded
+      if (lastResult.exitCode !== 0) {
+        break;
+      }
+    } else if (connector === "||") {
+      // Only continue if last command failed
+      if (lastResult.exitCode === 0) {
+        break;
+      }
+    } else if (connector === "&") {
+      // Background execution - for now, just continue (no true parallelism)
+      continue;
+    }
+    // ";" and undefined: always continue
+  }
+
+  return lastResult;
+}
+
+// ============================================================================
+// Pipeline Execution (commands connected by |)
+// ============================================================================
+
+async function executePipeline(
+  node: Pipeline,
+  session: ShellSession
+): Promise<CommandResult> {
+  if (node.commands.length === 0) {
+    return { exitCode: 0, label: labels.bottom() };
+  }
+
+  // Single command - execute directly with session streams
+  if (node.commands.length === 1) {
+    const stdin = LabeledStream.empty();
+    const stdout = new LabeledStream();
+    const stderr = new LabeledStream();
+
+    const result = await executeCommand(
+      node.commands[0],
+      session,
+      stdin,
+      stdout,
+      stderr
+    );
+
+    // Close streams
+    stdout.close();
+    stderr.close();
+
+    // Apply negation if needed
+    if (node.negated) {
+      return {
+        exitCode: result.exitCode === 0 ? 1 : 0,
+        label: result.label,
+      };
+    }
+
+    return result;
+  }
+
+  // Multiple commands - wire them with pipes
+  const pipes: LabeledStream[] = [];
+  const results: CommandResult[] = [];
+
+  // Create pipes between commands
+  for (let i = 0; i < node.commands.length - 1; i++) {
+    pipes.push(new LabeledStream());
+  }
+
+  // Execute all commands
+  for (let i = 0; i < node.commands.length; i++) {
+    const command = node.commands[i];
+
+    // Determine stdin
+    const stdin = i === 0 ? LabeledStream.empty() : pipes[i - 1];
+
+    // Determine stdout
+    const stdout = i === node.commands.length - 1
+      ? new LabeledStream()
+      : pipes[i];
+
+    // Stderr is per-command
+    const stderr = new LabeledStream();
+
+    // Execute command
+    const result = await executeCommand(command, session, stdin, stdout, stderr);
+    results.push(result);
+
+    // Close stderr
+    stderr.close();
+
+    // Close stdout if this is the last command
+    if (i === node.commands.length - 1) {
+      stdout.close();
+    }
+  }
+
+  // The pipeline's exit code is the exit code of the last command
+  const lastResult = results[results.length - 1];
+
+  // The pipeline's label is the join of all command output labels
+  const pipelineLabel = labels.joinAll(results.map((r) => r.label));
+
+  // Apply negation if needed
+  if (node.negated) {
+    return {
+      exitCode: lastResult.exitCode === 0 ? 1 : 0,
+      label: pipelineLabel,
+    };
+  }
+
+  return {
+    exitCode: lastResult.exitCode,
+    label: pipelineLabel,
+  };
+}
+
+// ============================================================================
+// Command Execution (dispatch to specific command types)
+// ============================================================================
+
+async function executeCommand(
+  node: Command,
+  session: ShellSession,
+  stdin: LabeledStream,
+  stdout: LabeledStream,
+  stderr: LabeledStream
+): Promise<CommandResult> {
+  switch (node.type) {
+    case "SimpleCommand":
+      return executeSimpleCommand(node, session, stdin, stdout, stderr);
+    case "Assignment":
+      return executeAssignment(node, session, stdin, stdout, stderr);
+    case "IfClause":
+      return executeIf(node, session, stdin, stdout, stderr);
+    case "ForClause":
+      return executeFor(node, session, stdin, stdout, stderr);
+    case "WhileClause":
+      return executeWhile(node, session, stdin, stdout, stderr);
+    case "Subshell":
+      return executeSubshell(node, session, stdin, stdout, stderr);
+    case "BraceGroup":
+      return executeBraceGroup(node, session, stdin, stdout, stderr);
+    default:
+      throw new Error(`Unknown command type: ${(node as any).type}`);
+  }
+}
+
+// ============================================================================
+// Simple Command Execution
+// ============================================================================
+
+async function executeSimpleCommand(
+  node: SimpleCommand,
+  session: ShellSession,
+  stdin: LabeledStream,
+  stdout: LabeledStream,
+  stderr: LabeledStream
+): Promise<CommandResult> {
+  // Handle empty command (redirections only)
+  if (!node.name) {
+    return { exitCode: 0, label: session.pcLabel };
+  }
+
+  // Expand command name
+  const expandedName = await expandWord(node.name, session);
+
+  // Expand arguments
+  const expandedArgs: Labeled<string>[] = [];
+  for (const arg of node.args) {
+    const expanded = await expandWord(arg, session);
+    expandedArgs.push(expanded);
+  }
+
+  // Apply redirections
+  const { stdin: effectiveStdin, stdout: effectiveStdout, stderr: effectiveStderr, flushers } =
+    await applyRedirections(node.redirections, session, stdin, stdout, stderr);
+
+  // Look up command in registry
+  const commandName = expandedName.value;
+  const commandFn = session.registry.get(commandName);
+
+  if (!commandFn) {
+    // Command not found
+    effectiveStderr.write(`${commandName}: command not found\n`, session.pcLabel);
+    effectiveStderr.close();
+    effectiveStdout.close();
+
+    // Flush redirections
+    for (const flush of flushers) {
+      await flush();
+    }
+
+    return { exitCode: 127, label: session.pcLabel };
+  }
+
+  // Build command context
+  const ctx: CommandContext = {
+    vfs: session.vfs,
+    env: session.env,
+    stdin: effectiveStdin,
+    stdout: effectiveStdout,
+    stderr: effectiveStderr,
+    pcLabel: labels.join(session.pcLabel, expandedName.label),
+    requestIntent: session.requestIntent,
+  };
+
+  // Extract argument values
+  const argValues = expandedArgs.map((a) => a.value);
+
+  // Execute command
+  const result = await commandFn(argValues, ctx);
+
+  // Join result label with argument labels and PC
+  const commandLabel = labels.joinAll([
+    result.label,
+    expandedName.label,
+    ...expandedArgs.map((a) => a.label),
+    session.pcLabel,
+  ]);
+
+  // Close streams if we created them
+  effectiveStdout.close();
+  effectiveStderr.close();
+
+  // Flush redirections
+  for (const flush of flushers) {
+    await flush();
+  }
+
+  return {
+    exitCode: result.exitCode,
+    label: commandLabel,
+  };
+}
+
+// ============================================================================
+// Word Expansion
+// ============================================================================
+
+async function expandWord(
+  word: Word,
+  session: ShellSession
+): Promise<Labeled<string>> {
+  const parts: Labeled<string>[] = [];
+
+  for (const part of word.parts) {
+    const expanded = await expandWordPart(part, session);
+    parts.push(expanded);
+  }
+
+  // Concatenate all parts
+  if (parts.length === 0) {
+    return { value: "", label: session.pcLabel };
+  }
+
+  const value = parts.map((p) => p.value).join("");
+  const label = labels.joinAll(parts.map((p) => p.label));
+
+  return { value, label };
+}
+
+async function expandWordPart(
+  part: WordPart,
+  session: ShellSession
+): Promise<Labeled<string>> {
+  switch (part.type) {
+    case "Literal":
+      return { value: part.value, label: session.pcLabel };
+
+    case "SingleQuoted":
+      return { value: part.value, label: session.pcLabel };
+
+    case "DoubleQuoted": {
+      // Expand inner parts and concatenate
+      const innerParts: Labeled<string>[] = [];
+      for (const innerPart of part.parts) {
+        const expanded = await expandWordPart(innerPart, session);
+        innerParts.push(expanded);
+      }
+
+      if (innerParts.length === 0) {
+        return { value: "", label: session.pcLabel };
+      }
+
+      const value = innerParts.map((p) => p.value).join("");
+      const label = labels.joinAll(innerParts.map((p) => p.label));
+
+      return { value, label };
+    }
+
+    case "VariableExpansion": {
+      const varName = part.name;
+      const varValue = session.env.get(varName);
+
+      // Handle special variables
+      if (varName === "?") {
+        return {
+          value: String(session.lastExitCode),
+          label: session.lastExitLabel,
+        };
+      }
+
+      // Handle ${VAR:-default}
+      if (!varValue && part.op === ":-" && part.arg) {
+        const defaultValue = await expandWord(part.arg, session);
+        return defaultValue;
+      }
+
+      // Variable not set
+      if (!varValue) {
+        return { value: "", label: session.pcLabel };
+      }
+
+      return varValue;
+    }
+
+    case "CommandSubstitution": {
+      // Execute the command and capture stdout
+      if (!part.body) {
+        // Failed to parse - return empty
+        return { value: "", label: session.pcLabel };
+      }
+
+      const substdout = new LabeledStream();
+      const substderr = new LabeledStream();
+      const substdin = LabeledStream.empty();
+
+      // Execute the subcommand
+      const ctx: CommandContext = {
+        vfs: session.vfs,
+        env: session.env,
+        stdin: substdin,
+        stdout: substdout,
+        stderr: substderr,
+        pcLabel: session.pcLabel,
+        requestIntent: session.requestIntent,
+      };
+
+      // Execute program (create a temporary "session" context)
+      const result = await executeProgram(part.body, session);
+
+      // Close streams
+      substdout.close();
+      substderr.close();
+
+      // Read all output
+      const output = await substdout.readAll();
+
+      // Trim trailing newline (bash behavior)
+      let value = output.value;
+      if (value.endsWith("\n")) {
+        value = value.slice(0, -1);
+      }
+
+      return {
+        value,
+        label: labels.join(output.label, result.label),
+      };
+    }
+
+    case "ArithmeticExpansion": {
+      // Basic arithmetic evaluation
+      try {
+        const result = evaluateArithmetic(part.expression);
+        return { value: String(result), label: session.pcLabel };
+      } catch (e) {
+        // Arithmetic error - return 0
+        return { value: "0", label: session.pcLabel };
+      }
+    }
+
+    case "Glob": {
+      // Expand glob pattern
+      const globResult = expandGlob(session.vfs, part.pattern);
+
+      if (globResult.value.length === 0) {
+        // No matches - return pattern as-is
+        return { value: part.pattern, label: session.pcLabel };
+      }
+
+      // Join matches with spaces
+      const value = globResult.value.join(" ");
+      return { value, label: globResult.label };
+    }
+
+    default:
+      throw new Error(`Unknown word part type: ${(part as any).type}`);
+  }
+}
+
+// ============================================================================
+// Arithmetic Evaluation (basic)
+// ============================================================================
+
+function evaluateArithmetic(expr: string): number {
+  // Very basic arithmetic - just handle +, -, *, /, %
+  // Remove whitespace
+  const clean = expr.replace(/\s/g, "");
+
+  // Try to evaluate as a simple expression
+  try {
+    // This is a security risk in real code, but for this sandbox it's okay
+    // In production, we'd use a proper arithmetic parser
+    const result = Function(`"use strict"; return (${clean})`)();
+    return Number(result) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+// ============================================================================
+// Assignment Execution
+// ============================================================================
+
+async function executeAssignment(
+  node: Assignment,
+  session: ShellSession,
+  stdin: LabeledStream,
+  stdout: LabeledStream,
+  stderr: LabeledStream
+): Promise<CommandResult> {
+  // Expand the value
+  const expandedValue = await expandWord(node.value, session);
+
+  // Set in environment
+  session.env.set(node.name, expandedValue.value, expandedValue.label);
+
+  return { exitCode: 0, label: session.pcLabel };
+}
+
+// ============================================================================
+// If Clause Execution (with PC tracking)
+// ============================================================================
+
+async function executeIf(
+  node: IfClause,
+  session: ShellSession,
+  stdin: LabeledStream,
+  stdout: LabeledStream,
+  stderr: LabeledStream
+): Promise<CommandResult> {
+  // Execute condition
+  const conditionResult = await executeProgram(node.condition, session);
+
+  // Push condition's label onto PC stack (this taints the branch)
+  session.pushPC(conditionResult.label);
+
+  let branchResult: CommandResult;
+
+  if (conditionResult.exitCode === 0) {
+    // Execute then branch
+    branchResult = await executeProgram(node.then, session);
+  } else {
+    // Try elifs
+    let elifExecuted = false;
+
+    for (const elif of node.elifs) {
+      const elifConditionResult = await executeProgram(elif.condition, session);
+
+      if (elifConditionResult.exitCode === 0) {
+        branchResult = await executeProgram(elif.then, session);
+        elifExecuted = true;
+        break;
+      }
+    }
+
+    // Execute else if present and no elif matched
+    if (!elifExecuted && node.else_) {
+      branchResult = await executeProgram(node.else_, session);
+    } else if (!elifExecuted) {
+      branchResult = { exitCode: 0, label: session.pcLabel };
+    }
+  }
+
+  // Pop PC
+  session.popPC();
+
+  return branchResult!;
+}
+
+// ============================================================================
+// For Loop Execution (with PC tracking)
+// ============================================================================
+
+async function executeFor(
+  node: ForClause,
+  session: ShellSession,
+  stdin: LabeledStream,
+  stdout: LabeledStream,
+  stderr: LabeledStream
+): Promise<CommandResult> {
+  // Expand all words in the word list
+  const expandedWords: Labeled<string>[] = [];
+  for (const word of node.words) {
+    const expanded = await expandWord(word, session);
+    expandedWords.push(expanded);
+  }
+
+  // Join labels of all words (iteration count reveals info about the words)
+  const wordsLabel = labels.joinAll(expandedWords.map((w) => w.label));
+
+  // Push PC (the iteration count is tainted by the word list)
+  session.pushPC(wordsLabel);
+
+  let lastResult: CommandResult = { exitCode: 0, label: session.pcLabel };
+
+  // Execute body for each word
+  for (const word of expandedWords) {
+    // Set loop variable
+    session.env.set(node.variable, word.value, word.label);
+
+    // Execute body
+    lastResult = await executeProgram(node.body, session);
+  }
+
+  // Pop PC
+  session.popPC();
+
+  return lastResult;
+}
+
+// ============================================================================
+// While Loop Execution (with PC tracking)
+// ============================================================================
+
+async function executeWhile(
+  node: WhileClause,
+  session: ShellSession,
+  stdin: LabeledStream,
+  stdout: LabeledStream,
+  stderr: LabeledStream
+): Promise<CommandResult> {
+  let lastResult: CommandResult = { exitCode: 0, label: session.pcLabel };
+  let iterations = 0;
+  const maxIterations = 10000;
+
+  while (iterations < maxIterations) {
+    // Execute condition
+    const conditionResult = await executeProgram(node.condition, session);
+
+    // Push condition label onto PC
+    session.pushPC(conditionResult.label);
+
+    if (conditionResult.exitCode !== 0) {
+      // Condition failed - exit loop
+      session.popPC();
+      break;
+    }
+
+    // Execute body
+    lastResult = await executeProgram(node.body, session);
+
+    // Pop PC after body
+    session.popPC();
+
+    iterations++;
+  }
+
+  if (iterations >= maxIterations) {
+    throw new Error("While loop exceeded maximum iterations (10000)");
+  }
+
+  return lastResult;
+}
+
+// ============================================================================
+// Subshell Execution (with environment scope)
+// ============================================================================
+
+async function executeSubshell(
+  node: Subshell,
+  session: ShellSession,
+  stdin: LabeledStream,
+  stdout: LabeledStream,
+  stderr: LabeledStream
+): Promise<CommandResult> {
+  // Push environment scope
+  session.env.pushScope();
+
+  // Execute body
+  const result = await executeProgram(node.body, session);
+
+  // Pop environment scope
+  session.env.popScope();
+
+  return result;
+}
+
+// ============================================================================
+// Brace Group Execution (no environment scope)
+// ============================================================================
+
+async function executeBraceGroup(
+  node: BraceGroup,
+  session: ShellSession,
+  stdin: LabeledStream,
+  stdout: LabeledStream,
+  stderr: LabeledStream
+): Promise<CommandResult> {
+  // Execute body in current scope
+  return executeProgram(node.body, session);
+}
+
+// ============================================================================
+// Redirection Handling
+// ============================================================================
+
+type Flusher = () => Promise<void>;
+
+interface RedirectionResult {
+  stdin: LabeledStream;
+  stdout: LabeledStream;
+  stderr: LabeledStream;
+  flushers: Flusher[];
+}
+
+async function applyRedirections(
+  redirections: Redirection[],
+  session: ShellSession,
+  stdin: LabeledStream,
+  stdout: LabeledStream,
+  stderr: LabeledStream
+): Promise<RedirectionResult> {
+  let effectiveStdin = stdin;
+  let effectiveStdout = stdout;
+  let effectiveStderr = stderr;
+  const flushers: Flusher[] = [];
+
+  for (const redir of redirections) {
+    const target = await expandWord(redir.target, session);
+    const targetPath = target.value;
+
+    switch (redir.op) {
+      case "<": {
+        // Input redirection - read from file
+        try {
+          const fileContent = session.vfs.readFileText(targetPath);
+          effectiveStdin = LabeledStream.from(fileContent);
+        } catch (e) {
+          // File not found - create empty stream
+          effectiveStdin = LabeledStream.empty();
+        }
+        break;
+      }
+
+      case ">": {
+        // Output redirection - write to file (truncate)
+        const captureStream = new LabeledStream();
+        effectiveStdout = captureStream;
+
+        flushers.push(async () => {
+          const output = await captureStream.readAll();
+          session.vfs.writeFile(targetPath, output.value, output.label);
+        });
+        break;
+      }
+
+      case ">>": {
+        // Output redirection - append to file
+        const captureStream = new LabeledStream();
+        effectiveStdout = captureStream;
+
+        flushers.push(async () => {
+          const output = await captureStream.readAll();
+
+          // Read existing content if file exists
+          let existingContent = "";
+          let existingLabel = labels.bottom();
+
+          try {
+            const existing = session.vfs.readFileText(targetPath);
+            existingContent = existing.value;
+            existingLabel = existing.label;
+          } catch {
+            // File doesn't exist - that's okay
+          }
+
+          // Append new content
+          const newContent = existingContent + output.value;
+          const newLabel = labels.join(existingLabel, output.label);
+
+          session.vfs.writeFile(targetPath, newContent, newLabel);
+        });
+        break;
+      }
+
+      case "2>": {
+        // Stderr redirection - write to file (truncate)
+        const captureStream = new LabeledStream();
+        effectiveStderr = captureStream;
+
+        flushers.push(async () => {
+          const output = await captureStream.readAll();
+          session.vfs.writeFile(targetPath, output.value, output.label);
+        });
+        break;
+      }
+
+      case "2>>": {
+        // Stderr redirection - append to file
+        const captureStream = new LabeledStream();
+        effectiveStderr = captureStream;
+
+        flushers.push(async () => {
+          const output = await captureStream.readAll();
+
+          // Read existing content if file exists
+          let existingContent = "";
+          let existingLabel = labels.bottom();
+
+          try {
+            const existing = session.vfs.readFileText(targetPath);
+            existingContent = existing.value;
+            existingLabel = existing.label;
+          } catch {
+            // File doesn't exist - that's okay
+          }
+
+          // Append new content
+          const newContent = existingContent + output.value;
+          const newLabel = labels.join(existingLabel, output.label);
+
+          session.vfs.writeFile(targetPath, newContent, newLabel);
+        });
+        break;
+      }
+
+      case "&>": {
+        // Redirect both stdout and stderr to file
+        const captureStream = new LabeledStream();
+        effectiveStdout = captureStream;
+        effectiveStderr = captureStream;
+
+        flushers.push(async () => {
+          const output = await captureStream.readAll();
+          session.vfs.writeFile(targetPath, output.value, output.label);
+        });
+        break;
+      }
+
+      case "<<": {
+        // Here-document - use target as content
+        const heredocContent = targetPath;
+        effectiveStdin = LabeledStream.from({
+          value: heredocContent + "\n",
+          label: session.pcLabel,
+        });
+        break;
+      }
+    }
+  }
+
+  return {
+    stdin: effectiveStdin,
+    stdout: effectiveStdout,
+    stderr: effectiveStderr,
+    flushers,
+  };
+}

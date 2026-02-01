@@ -1,0 +1,9 @@
+{
+  "name": "@commontools/cfc-shell",
+  "tasks": {
+    "test": "deno test --allow-env --allow-read --allow-write --allow-run test/"
+  },
+  "exports": {
+    ".": "./mod.ts"
+  }
+}

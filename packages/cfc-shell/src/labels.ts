@@ -1,0 +1,314 @@
+/**
+ * CFC Label Algebra for the cfc-shell package.
+ *
+ * This module implements the label system from the CFC spec, providing:
+ * - Atom types for provenance and authority tracking
+ * - Confidentiality (CNF) and Integrity (set of attestations)
+ * - Label lattice operations (join, meet, flowsTo)
+ * - Helper constructors for common label patterns
+ */
+
+// ============================================================================
+// Atom Types
+// ============================================================================
+
+export type Atom =
+  | { kind: "Origin"; url: string }
+  | { kind: "CodeHash"; hash: string }
+  | { kind: "EndorsedBy"; principal: string }
+  | { kind: "AuthoredBy"; principal: string }
+  | { kind: "LLMGenerated"; model?: string }
+  | { kind: "UserInput" }
+  | { kind: "NetworkProvenance"; tls: boolean; host: string }
+  | { kind: "TransformedBy"; command: string }
+  | { kind: "Space"; id: string }
+  | { kind: "PersonalSpace"; did: string }
+  | { kind: "SandboxedExec" }
+  | { kind: "Custom"; tag: string; value?: string };
+
+// ============================================================================
+// Label Structure
+// ============================================================================
+
+/**
+ * Clause - a disjunction of atoms (OR)
+ * For data to satisfy a clause, it must have at least one of the atoms
+ */
+export type Clause = Atom[];
+
+/**
+ * Confidentiality - Conjunctive Normal Form (CNF) of clauses
+ * For data to satisfy confidentiality, it must satisfy ALL clauses
+ * (each clause requires at least one atom to be present)
+ *
+ * Empty confidentiality = [] = public (no restrictions)
+ */
+export type Confidentiality = Clause[];
+
+/**
+ * Integrity - set of attestations (AND)
+ * These are positive statements about the data's provenance
+ * More atoms = higher integrity
+ *
+ * Empty integrity = [] = no provenance claims
+ */
+export type Integrity = Atom[];
+
+/**
+ * Label - combines confidentiality and integrity
+ */
+export interface Label {
+  confidentiality: Confidentiality;
+  integrity: Integrity;
+}
+
+/**
+ * Labeled - a value paired with its label
+ */
+export interface Labeled<T> {
+  value: T;
+  label: Label;
+}
+
+// ============================================================================
+// Atom Equality and Set Operations
+// ============================================================================
+
+function atomEqual(a: Atom, b: Atom): boolean {
+  if (a.kind !== b.kind) return false;
+
+  switch (a.kind) {
+    case "Origin":
+      return (b as typeof a).url === a.url;
+    case "CodeHash":
+      return (b as typeof a).hash === a.hash;
+    case "EndorsedBy":
+      return (b as typeof a).principal === a.principal;
+    case "AuthoredBy":
+      return (b as typeof a).principal === a.principal;
+    case "LLMGenerated":
+      return (b as typeof a).model === a.model;
+    case "UserInput":
+      return true;
+    case "NetworkProvenance":
+      return (b as typeof a).tls === a.tls && (b as typeof a).host === a.host;
+    case "TransformedBy":
+      return (b as typeof a).command === a.command;
+    case "Space":
+      return (b as typeof a).id === a.id;
+    case "PersonalSpace":
+      return (b as typeof a).did === a.did;
+    case "SandboxedExec":
+      return true;
+    case "Custom":
+      return (b as typeof a).tag === a.tag && (b as typeof a).value === a.value;
+  }
+}
+
+function clauseEqual(a: Clause, b: Clause): boolean {
+  if (a.length !== b.length) return false;
+  // Clauses are sets, so order doesn't matter
+  return a.every(atomA => b.some(atomB => atomEqual(atomA, atomB)));
+}
+
+function deduplicateAtoms(atoms: Atom[]): Atom[] {
+  const result: Atom[] = [];
+  for (const atom of atoms) {
+    if (!result.some(a => atomEqual(a, atom))) {
+      result.push(atom);
+    }
+  }
+  return result;
+}
+
+function deduplicateClauses(clauses: Clause[]): Clause[] {
+  const result: Clause[] = [];
+  for (const clause of clauses) {
+    if (!result.some(c => clauseEqual(c, clause))) {
+      result.push(clause);
+    }
+  }
+  return result;
+}
+
+function atomSetContains(atoms: Atom[], atom: Atom): boolean {
+  return atoms.some(a => atomEqual(a, atom));
+}
+
+// ============================================================================
+// Label Operations
+// ============================================================================
+
+/**
+ * bottom - empty label (public, no provenance)
+ */
+function bottom(): Label {
+  return {
+    confidentiality: [],
+    integrity: [],
+  };
+}
+
+/**
+ * join - Least Upper Bound (LUB)
+ * Combines two labels to represent data derived from both sources
+ *
+ * Confidentiality: union of clauses (more restrictive - must satisfy both)
+ * Integrity: intersection of atoms (less provenance - only shared attestations)
+ */
+function join(a: Label, b: Label): Label {
+  // Union of confidentiality clauses
+  const confidentiality = deduplicateClauses([
+    ...a.confidentiality,
+    ...b.confidentiality,
+  ]);
+
+  // Intersection of integrity atoms
+  const integrity = deduplicateAtoms(
+    a.integrity.filter(atom => atomSetContains(b.integrity, atom))
+  );
+
+  return { confidentiality, integrity };
+}
+
+/**
+ * meet - Greatest Lower Bound (GLB)
+ * Combines two labels to represent the minimum restrictions needed
+ *
+ * Confidentiality: intersection of clauses (less restrictive)
+ * Integrity: union of atoms (more provenance)
+ */
+function meet(a: Label, b: Label): Label {
+  // Intersection of confidentiality clauses
+  const confidentiality = deduplicateClauses(
+    a.confidentiality.filter(clauseA =>
+      b.confidentiality.some(clauseB => clauseEqual(clauseA, clauseB))
+    )
+  );
+
+  // Union of integrity atoms
+  const integrity = deduplicateAtoms([
+    ...a.integrity,
+    ...b.integrity,
+  ]);
+
+  return { confidentiality, integrity };
+}
+
+/**
+ * joinAll - fold join over an array of labels
+ */
+function joinAll(labels: Label[]): Label {
+  if (labels.length === 0) return bottom();
+  return labels.reduce(join);
+}
+
+/**
+ * endorse - add integrity atoms to a label without changing confidentiality
+ */
+function endorse(label: Label, ...atoms: Atom[]): Label {
+  return {
+    confidentiality: label.confidentiality,
+    integrity: deduplicateAtoms([...label.integrity, ...atoms]),
+  };
+}
+
+/**
+ * hasIntegrity - check if label has a specific integrity atom
+ */
+function hasIntegrity(label: Label, atom: Atom): boolean {
+  return atomSetContains(label.integrity, atom);
+}
+
+/**
+ * hasAnyIntegrity - check if label has any of the given integrity atoms
+ */
+function hasAnyIntegrity(label: Label, atoms: Atom[]): boolean {
+  return atoms.some(atom => hasIntegrity(label, atom));
+}
+
+/**
+ * flowsTo - check if data at label 'a' can flow to context with label 'b'
+ *
+ * This is true if a's confidentiality requirements are a subset of b's
+ * (every clause in a appears in b, meaning b is at least as restrictive)
+ *
+ * Integrity is not checked here - that's handled by exchange rules
+ */
+function flowsTo(a: Label, b: Label): boolean {
+  // Every clause in a must appear in b
+  return a.confidentiality.every(clauseA =>
+    b.confidentiality.some(clauseB => clauseEqual(clauseA, clauseB))
+  );
+}
+
+// ============================================================================
+// Label Constructors
+// ============================================================================
+
+/**
+ * userInput - data from user input (high integrity, public)
+ */
+function userInput(): Label {
+  return {
+    confidentiality: [],
+    integrity: [{ kind: "UserInput" }],
+  };
+}
+
+/**
+ * fromNetwork - data fetched from network (origin integrity, public)
+ */
+function fromNetwork(url: string, tls: boolean): Label {
+  const host = new URL(url).host;
+  return {
+    confidentiality: [],
+    integrity: [
+      { kind: "Origin", url },
+      { kind: "NetworkProvenance", tls, host },
+    ],
+  };
+}
+
+/**
+ * llmGenerated - data generated by LLM (low integrity, public)
+ */
+function llmGenerated(model?: string): Label {
+  return {
+    confidentiality: [],
+    integrity: [{ kind: "LLMGenerated", model }],
+  };
+}
+
+/**
+ * fromFile - data from file (space confidentiality if spaceId given)
+ */
+function fromFile(path: string, spaceId?: string): Label {
+  const confidentiality: Confidentiality = spaceId
+    ? [[{ kind: "Space", id: spaceId }]]
+    : [];
+
+  return {
+    confidentiality,
+    integrity: [],
+  };
+}
+
+// ============================================================================
+// Export namespace
+// ============================================================================
+
+export const labels = {
+  bottom,
+  join,
+  meet,
+  joinAll,
+  endorse,
+  hasIntegrity,
+  hasAnyIntegrity,
+  flowsTo,
+  userInput,
+  fromNetwork,
+  llmGenerated,
+  fromFile,
+};

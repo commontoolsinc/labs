@@ -2,6 +2,7 @@
   "workspace": [
     "./packages/api",
     "./packages/background-charm-service",
+    "./packages/cfc-shell",
     "./packages/piece",
     "./packages/cli",
     "./packages/deno-web-test",
