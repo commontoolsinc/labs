@@ -34,7 +34,7 @@ This is pure data structures and algorithms with no runtime integration yet.
 
 ### 1.1 Atom Representation
 
-- [ ] Define `Atom` type as discriminated union with canonical serialization
+- [x] Define `Atom` type as discriminated union with canonical serialization
   ```
   Confidentiality atoms: User(did), Space(id), Resource(class, subject),
     Service(id), Classification(level), Expires(timestamp),
@@ -42,48 +42,48 @@ This is pure data structures and algorithms with no runtime integration yet.
   Integrity atoms: CodeHash(hash), AuthoredBy(did), EndorsedBy(did),
     HasRole(principal, space, role)
   ```
-- [ ] Implement `canonicalizeAtom(atom: Atom): string` for equality comparison
+- [x] Implement `canonicalizeAtom(atom: Atom): string` for equality comparison
   (deterministic JSON with sorted keys)
-- [ ] Implement `atomEquals(a: Atom, b: Atom): boolean` via canonical form
-- [ ] Add atom constructors: `userAtom(did)`, `spaceAtom(id)`, etc.
+- [x] Implement `atomEquals(a: Atom, b: Atom): boolean` via canonical form
+- [x] Add atom constructors: `userAtom(did)`, `spaceAtom(id)`, etc.
 
 **File:** new `packages/runner/src/cfc/atoms.ts`
 
 ### 1.2 CNF Confidentiality Labels
 
-- [ ] Define `ConfidentialityLabel` as array of clauses, each clause an array
+- [x] Define `ConfidentialityLabel` as array of clauses, each clause an array
   of atom alternatives: `Atom[][]` (outer = AND, inner = OR)
-- [ ] Implement `joinConfidentiality(a, b)` — concatenate clauses (union of
+- [x] Implement `joinConfidentiality(a, b)` — concatenate clauses (union of
   constraints)
-- [ ] Implement `meetConfidentiality(a, b)` — clause-wise intersection
-- [ ] Implement `confidentialityLeq(a, b)` — a ≤ b iff every clause in a is
+- [x] Implement `meetConfidentiality(a, b)` — clause-wise intersection
+- [x] Implement `confidentialityLeq(a, b)` — a ≤ b iff every clause in a is
   satisfied when every clause in b is satisfied (for each clause in a, there
   exists a clause in b that is a subset)
-- [ ] Implement `emptyConfidentiality()` — bottom element (no restrictions)
-- [ ] Normalize clauses: deduplicate atoms within clauses, sort clauses
+- [x] Implement `emptyConfidentiality()` — bottom element (no restrictions)
+- [x] Normalize clauses: deduplicate atoms within clauses, sort clauses
   canonically, remove subsumed clauses
 
 **File:** new `packages/runner/src/cfc/confidentiality.ts`
 
 ### 1.3 Integrity Labels
 
-- [ ] Define `IntegrityLabel` as a set of atoms (conjunction): `Set<Atom>` by
+- [x] Define `IntegrityLabel` as a set of atoms (conjunction): `Set<Atom>` by
   canonical string
-- [ ] Implement `joinIntegrity(a, b)` — intersection (weaker claims)
-- [ ] Implement `meetIntegrity(a, b)` — union (stronger claims)
-- [ ] Implement `integrityLeq(a, b)` — a ≤ b iff a ⊇ b (more endorsements =
+- [x] Implement `joinIntegrity(a, b)` — intersection (weaker claims)
+- [x] Implement `meetIntegrity(a, b)` — union (stronger claims)
+- [x] Implement `integrityLeq(a, b)` — a ≤ b iff a ⊇ b (more endorsements =
   higher integrity)
-- [ ] Implement `emptyIntegrity()` — top element (no endorsements required)
+- [x] Implement `emptyIntegrity()` — top element (no endorsements required)
 
 **File:** new `packages/runner/src/cfc/integrity.ts`
 
 ### 1.4 Composite Labels
 
-- [ ] Define `Label = { confidentiality: ConfidentialityLabel, integrity: IntegrityLabel }`
-- [ ] Implement `joinLabel(a, b)` — join both components
-- [ ] Implement `labelLeq(a, b)` — both components ≤
-- [ ] Implement `emptyLabel()` — bottom confidentiality, top integrity
-- [ ] Implement `labelFromSchema(schema, rootSchema, cfc)` — bridge from
+- [x] Define `Label = { confidentiality: ConfidentialityLabel, integrity: IntegrityLabel }`
+- [x] Implement `joinLabel(a, b)` — join both components
+- [x] Implement `labelLeq(a, b)` — both components ≤
+- [x] Implement `emptyLabel()` — bottom confidentiality, top integrity
+- [x] Implement `labelFromSchema(schema, rootSchema, cfc)` — bridge from
   existing `ifc.classification` annotations to new `Label` type. Maps flat
   strings through the existing classification lattice, then wraps as
   `Classification(level)` atoms.
@@ -92,14 +92,14 @@ This is pure data structures and algorithms with no runtime integration yet.
 
 ### 1.5 Tests for Label Algebra
 
-- [ ] Unit tests for atom canonicalization and equality
-- [ ] Unit tests for CNF join, meet, leq (including edge cases: empty labels,
+- [x] Unit tests for atom canonicalization and equality
+- [x] Unit tests for CNF join, meet, leq (including edge cases: empty labels,
   single clause, overlapping alternatives)
-- [ ] Unit tests for integrity join/meet/leq
-- [ ] Unit tests for composite label operations
-- [ ] Property: `join(a, b) >= a` and `join(a, b) >= b`
-- [ ] Property: `leq(a, join(a, b))` always true
-- [ ] Backwards compatibility: flat classification strings round-trip through
+- [x] Unit tests for integrity join/meet/leq
+- [x] Unit tests for composite label operations
+- [x] Property: `join(a, b) >= a` and `join(a, b) >= b`
+- [x] Property: `leq(a, join(a, b))` always true
+- [x] Backwards compatibility: flat classification strings round-trip through
   `labelFromSchema`
 
 **File:** new `packages/runner/src/cfc/__tests__/labels.test.ts`
@@ -110,78 +110,78 @@ This is pure data structures and algorithms with no runtime integration yet.
 
 ### 2.1 Trust Lattice
 
-- [ ] Define `TrustLattice` class that owns the atom kind relationships
-- [ ] Hardcode the classification sub-lattice (existing 4-level:
+- [x] Define `TrustLattice` class that owns the atom kind relationships
+- [x] Hardcode the classification sub-lattice (existing 4-level:
   unclassified < confidential < secret < topsecret)
-- [ ] Hardcode atom kind rules:
+- [x] Hardcode atom kind rules:
   - `Classification` atoms ordered by the sub-lattice
   - `User(a)` and `User(b)` are incomparable unless a = b
   - `Space(x)` and `Space(y)` are incomparable unless x = y
   - Conjunction of atoms is higher than each individual atom
-- [ ] Expose `compare(a: Label, b: Label): "above" | "below" | "equal" | "incomparable"`
-- [ ] Accept optional configuration in constructor (for future user-defined
+- [x] Expose `compare(a: Label, b: Label): "above" | "below" | "equal" | "incomparable"`
+- [x] Accept optional configuration in constructor (for future user-defined
   lattices), but default to hardcoded values
-- [ ] Migrate existing `classificationLattice` from `cfc.ts` into `TrustLattice`
+- [x] Migrate existing `classificationLattice` from `cfc.ts` into `TrustLattice`
   as one sub-component
 
 **File:** new `packages/runner/src/cfc/trust-lattice.ts`
 
 ### 2.2 Exchange Rules
 
-- [ ] Define `ExchangeRule` type:
+- [x] Define `ExchangeRule` type:
   ```
   { precondition: { confidentiality: AtomPattern[], integrity: AtomPattern[] },
     postcondition: { addAlternatives: AtomPattern[] },
     variables: string[] }
   ```
-- [ ] Implement `AtomPattern` — atom template with variable bindings
+- [x] Implement `AtomPattern` — atom template with variable bindings
   (e.g., `User($principal)` where `$principal` binds to any DID)
-- [ ] Implement `matchPrecondition(label, rule)` — returns all valid variable
+- [x] Implement `matchPrecondition(label, rule)` — returns all valid variable
   bindings
-- [ ] Implement `applyRule(label, rule, bindings)` — add alternatives per
+- [x] Implement `applyRule(label, rule, bindings)` — add alternatives per
   postcondition
-- [ ] Implement `evaluateRules(label, rules)` — fixpoint iteration: apply all
+- [x] Implement `evaluateRules(label, rules)` — fixpoint iteration: apply all
   matching rules until no label change, with cycle detection (max iterations)
 
 **File:** new `packages/runner/src/cfc/exchange-rules.ts`
 
 ### 2.3 Policy Records
 
-- [ ] Define `PolicyRecord` type:
+- [x] Define `PolicyRecord` type:
   ```
   { id: string (content hash),
     exchangeRules: ExchangeRule[],
     spaceRoles: Map<DID, Role[]>,
     version: number }
   ```
-- [ ] Implement `hashPolicy(policy)` — deterministic content-addressed ID
-- [ ] Define well-known schema for space policy cells
-- [ ] Implement `loadPolicyFromCell(cell)` — deserialize policy from a cell value
-- [ ] Hardcode a default policy record that encodes the existing 4-level
+- [x] Implement `hashPolicy(policy)` — deterministic content-addressed ID
+- [x] Define well-known schema for space policy cells
+- [x] Implement `loadPolicyFromCell(cell)` — deserialize policy from a cell value
+- [x] Hardcode a default policy record that encodes the existing 4-level
   classification behavior (backwards compatible)
 
 **File:** new `packages/runner/src/cfc/policy.ts`
 
 ### 2.4 Space Policy Cells
 
-- [ ] Define well-known address for policy cell within a space
+- [x] Define well-known address for policy cell within a space
   (e.g., `{space, id: "cfc:policy", path: []}`)
-- [ ] In `Runtime` or `Runner`, when a space is opened, load its policy cell
-- [ ] Subscribe to policy cell changes (reactive policy updates)
-- [ ] Cache resolved policy per space on the CFC instance
-- [ ] Fallback to default policy when no policy cell exists
+- [x] In `Runtime` or `Runner`, when a space is opened, load its policy cell
+- [x] Subscribe to policy cell changes (reactive policy updates)
+- [x] Cache resolved policy per space on the CFC instance
+- [x] Fallback to default policy when no policy cell exists
 
 **File:** modifications to `packages/runner/src/runtime.ts` and new
 `packages/runner/src/cfc/space-policy.ts`
 
 ### 2.5 Tests for Trust Lattice and Policies
 
-- [ ] Unit tests for trust lattice comparison operations
-- [ ] Unit tests for exchange rule matching and application
-- [ ] Unit tests for fixpoint evaluation (including convergence)
-- [ ] Test: default policy produces same results as current flat classification
-- [ ] Test: space policy cell load/subscribe/update cycle
-- [ ] Test: exchange rule with variable bindings across User/Space atoms
+- [x] Unit tests for trust lattice comparison operations
+- [x] Unit tests for exchange rule matching and application
+- [x] Unit tests for fixpoint evaluation (including convergence)
+- [x] Test: default policy produces same results as current flat classification
+- [x] Test: space policy cell load/subscribe/update cycle
+- [x] Test: exchange rule with variable bindings across User/Space atoms
 
 **File:** new `packages/runner/src/cfc/__tests__/policy.test.ts`
 
@@ -193,7 +193,7 @@ Wire the label algebra into the scheduler's action execution.
 
 ### 3.1 Action Taint Context
 
-- [ ] Define `ActionTaintContext`:
+- [x] Define `ActionTaintContext`:
   ```
   { principal: Label,           // who is executing (User + Space)
     clearance: Label,           // max label this action may read
@@ -201,20 +201,20 @@ Wire the label algebra into the scheduler's action execution.
     policy: PolicyRecord,       // active policy for this space
     integrityBasis: IntegrityLabel }  // code hash + endorsements
   ```
-- [ ] Create taint context at action start in `Scheduler.execute()`:
+- [x] Create taint context at action start in `Scheduler.execute()`:
   - Principal from `runtime.userIdentityDID` → `User(did)` atom
   - Space from action's target cell → `Space(id)` atom
   - Clearance = principal label (user can read their own data)
   - IntegrityBasis = `CodeHash(recipeHash)` for the running recipe
-- [ ] Store taint context on the action or frame, accessible during execution
-- [ ] At action end, the accumulated taint is the label for implicit outputs
+- [x] Store taint context on the action or frame, accessible during execution
+- [x] At action end, the accumulated taint is the label for implicit outputs
 
 **File:** new `packages/runner/src/cfc/action-context.ts`, modifications to
 `packages/runner/src/scheduler.ts`
 
 ### 3.2 Read-Time Taint Accumulation
 
-- [ ] In `validateAndTransform` (`schema.ts`), after computing the label at the
+- [x] In `validateAndTransform` (`schema.ts`), after computing the label at the
   read path via `cfc.lubSchema()` / `cfc.schemaAtPath()`:
   - Convert the classification string to a `Label` via `labelFromSchema()`
   - Join it into the action's `accumulatedTaint`
@@ -225,7 +225,7 @@ Wire the label algebra into the scheduler's action execution.
 - [ ] For `StorageValue.labels` returned from storage: if labels exist on the
   stored value, join those into taint as well (runtime labels override/augment
   schema-derived labels)
-- [ ] Thread `ActionTaintContext` through the transaction or make it available
+- [x] Thread `ActionTaintContext` through the transaction or make it available
   via the runtime/frame stack
 
 **File:** modifications to `packages/runner/src/schema.ts`,
@@ -233,17 +233,17 @@ Wire the label algebra into the scheduler's action execution.
 
 ### 3.3 Write-Time Label Check
 
-- [ ] In `CellImpl.set()` and all write paths (`push`, `remove`, `update`),
+- [x] In `CellImpl.set()` and all write paths (`push`, `remove`, `update`),
   before committing:
   - Compute the label at the write target path
   - Check: `accumulatedTaint ≤ writeTargetLabel` (no write-down)
   - If violated: **throw an error** and abort the transaction
 - [ ] In `diffAndUpdate`, after computing the changeset but before
   `applyChangeSet`: run the label check for each changed path
-- [ ] For exchange rules: before the write check, attempt to apply matching
+- [x] For exchange rules: before the write check, attempt to apply matching
   exchange rules from the active policy. If rules declassify the taint
   sufficiently, the write is allowed.
-- [ ] Log violations with: action identity, read label, write label, paths
+- [x] Log violations with: action identity, read label, write label, paths
   involved
 
 **File:** modifications to `packages/runner/src/cell.ts`,
@@ -251,15 +251,15 @@ Wire the label algebra into the scheduler's action execution.
 
 ### 3.4 Handle `sample()` as Taint Source
 
-- [ ] `sample()` currently uses `createNonReactiveTransaction` which hides
+- [x] `sample()` currently uses `createNonReactiveTransaction` which hides
   reads from the scheduler
-- [ ] For IFC: `sample()` must still accumulate taint even though it doesn't
+- [x] For IFC: `sample()` must still accumulate taint even though it doesn't
   create reactive dependencies
-- [ ] Option A: make `sample()` use the action's taint context directly
+- [x] Option A: make `sample()` use the action's taint context directly
   (separate from reactivity tracking)
 - [ ] Option B: prohibit `sample()` during taint-tracked actions (breaking
   change)
-- [ ] Decision: **Option A** — `sample()` accumulates taint but does not
+- [x] Decision: **Option A** — `sample()` accumulates taint but does not
   create reactive subscriptions. The taint context is orthogonal to reactivity.
 
 **File:** modifications to `packages/runner/src/cell.ts`
@@ -291,7 +291,7 @@ Wire the label algebra into the scheduler's action execution.
 
 ### 4.1 Extend `Labels` Type
 
-- [ ] Replace `Labels = { classification?: string[] }` with:
+- [x] Replace `Labels = { classification?: string[] }` with:
   ```
   Labels = {
     classification?: string[],          // backwards compat
@@ -299,7 +299,7 @@ Wire the label algebra into the scheduler's action execution.
     integrity?: Atom[],                 // conjunction
   }
   ```
-- [ ] Update `StorageValue` interface — no structural change needed, just the
+- [x] Update `StorageValue` interface — no structural change needed, just the
   `Labels` type widens
 - [ ] Update storage serialization (`application/label+json` facts) to handle
   new atom types
@@ -311,7 +311,7 @@ Wire the label algebra into the scheduler's action execution.
 
 ### 4.2 Schema `ifc` Extension
 
-- [ ] Extend `ifc` annotation on JSON schemas to support parameterized atoms:
+- [x] Extend `ifc` annotation on JSON schemas to support parameterized atoms:
   ```
   ifc: {
     classification?: string[],          // existing (backwards compat)
@@ -319,7 +319,7 @@ Wire the label algebra into the scheduler's action execution.
     integrity?: Atom[],                 // new: conjunction
   }
   ```
-- [ ] Update `labelFromSchema()` to handle both old and new formats
+- [x] Update `labelFromSchema()` to handle both old and new formats
 - [ ] Update `ContextualFlowControl.joinSchema()` to collect parameterized
   atoms in addition to flat classification strings
 - [ ] Update `ContextualFlowControl.lubSchema()` to compute LUB over
@@ -361,7 +361,7 @@ backwards compatibility.
 
 ### 5.1 Module Structure
 
-- [ ] Create `packages/runner/src/cfc/` directory with:
+- [x] Create `packages/runner/src/cfc/` directory with:
   ```
   index.ts            — re-exports, ContextualFlowControl class
   atoms.ts            — atom types and canonicalization
@@ -376,29 +376,29 @@ backwards compatibility.
   ```
 - [ ] Move graph algorithms (Tarjan SCC, Kahn topological sort) into
   `trust-lattice.ts` — they serve the lattice, not general use
-- [ ] `ContextualFlowControl` class becomes a facade over the new modules:
+- [x] `ContextualFlowControl` class becomes a facade over the new modules:
   - Keeps all existing public methods (`lubSchema`, `joinSchema`,
     `schemaAtPath`, `getSchemaAtPath`, `resolveSchemaRefs`, etc.)
   - Adds new methods: `createActionContext()`, `checkWrite()`,
     `accumulateTaint()`
   - Internally delegates to `TrustLattice`, label operations, policy
     evaluation
-- [ ] Update all imports across the runner package
+- [x] Update all imports across the runner package
 
 ### 5.2 Backwards Compatibility
 
-- [ ] Existing `Classification` constant export unchanged
-- [ ] Existing `schema.ifc.classification` annotations work unchanged
-- [ ] `lubSchema()` returns same results for schemas without parameterized atoms
-- [ ] All existing tests pass without modification
-- [ ] No changes to builder/recipe authoring API — patterns are unaware of
+- [x] Existing `Classification` constant export unchanged
+- [x] Existing `schema.ifc.classification` annotations work unchanged
+- [x] `lubSchema()` returns same results for schemas without parameterized atoms
+- [x] All existing tests pass without modification
+- [x] No changes to builder/recipe authoring API — patterns are unaware of
   enforcement until they hit a violation
 
 ### 5.3 Migration Tests
 
-- [ ] Run full existing test suite — no regressions
-- [ ] Existing `cfc.test.ts` tests pass against new module
-- [ ] Existing integration tests pass (no enforcement triggered for
+- [x] Run full existing test suite — no regressions
+- [x] Existing `cfc.test.ts` tests pass against new module
+- [x] Existing integration tests pass (no enforcement triggered for
   unlabeled data)
 
 ---
@@ -407,18 +407,18 @@ backwards compatibility.
 
 ### 6.1 Wire Principal into Runtime
 
-- [ ] At `Runtime` construction, derive principal label from
+- [x] At `Runtime` construction, derive principal label from
   `userIdentityDID`:
   ```
   principal = { confidentiality: [], integrity: [UserAtom(did)] }
   ```
-- [ ] At action execution start (in `Scheduler`), construct
+- [x] At action execution start (in `Scheduler`), construct
   `ActionTaintContext` with:
   - `principal` from runtime
   - `space` from the action's target cell's space
   - `clearance` from space policy (role-based)
   - `integrityBasis` from recipe code hash
-- [ ] Pass action context through to cell reads/writes (via frame, transaction
+- [x] Pass action context through to cell reads/writes (via frame, transaction
   metadata, or thread-local-like mechanism on the scheduler)
 
 **File:** modifications to `packages/runner/src/runtime.ts`,
@@ -429,13 +429,13 @@ backwards compatibility.
 - [ ] When opening a space, look up the user's role in that space's policy
 - [ ] Compute clearance: `User(self) ∧ Space(current) ∧ HasRole(self, space, role)`
 - [ ] Clearance determines the maximum label the user can read from that space
-- [ ] For now, default policy grants owner full access to their own space
+- [x] For now, default policy grants owner full access to their own space
 - [ ] Cross-space reads: clearance is the meet of the user's clearance in each
   space (conservative)
 
 ### 6.3 Tests for Principal Wiring
 
-- [ ] Test: action context created with correct principal from runtime DID
+- [x] Test: action context created with correct principal from runtime DID
 - [ ] Test: space policy grants reader role, clearance computed correctly
 - [ ] Test: cross-space read with insufficient clearance → fails
 - [ ] Test: owner of space has full clearance
@@ -446,7 +446,7 @@ backwards compatibility.
 
 ### 7.1 Violation Reporting
 
-- [ ] Define `CFCViolation` error type with structured fields:
+- [x] Define `CFCViolation` error type with structured fields:
   ```
   { kind: "write-down" | "read-up" | "clearance-exceeded",
     action: string,
@@ -455,7 +455,7 @@ backwards compatibility.
     accumulatedTaint: Label,
     paths: { reads: string[], write: string } }
   ```
-- [ ] On violation, throw `CFCViolation` — this aborts the transaction
+- [x] On violation, throw `CFCViolation` — this aborts the transaction
 - [ ] Log violations via existing `getLogger("cfc")` at error level
 - [ ] Emit telemetry event for violations (via `RuntimeTelemetry`)
 
@@ -468,7 +468,7 @@ backwards compatibility.
 
 ### 7.3 Tests
 
-- [ ] Test: violation error contains correct structured data
+- [x] Test: violation error contains correct structured data
 - [ ] Test: dry-run mode logs but doesn't throw
 - [ ] Test: debug mode produces expected log output
 
