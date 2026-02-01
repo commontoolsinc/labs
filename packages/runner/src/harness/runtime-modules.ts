@@ -52,19 +52,23 @@ export const getTypes = (() => {
   };
 })();
 
+// Fallback for when SES is not active (testing/unsafe mode)
+// deno-lint-ignore no-explicit-any
+const harden = (globalThis as any).harden || ((x: any) => Object.freeze(x));
+
 export function getExports() {
   const { commontools, exportsCallback } = createBuilder();
   return {
     runtimeExports: {
-      "commontools": commontools,
+      "commontools": harden(commontools),
       // commontools/schema only exports types, no runtime values needed
       "commontools/schema": {},
       // __esModule lets this load in the AMD loader
       // when finding the "default"
       "turndown": { default: turndown, __esModule: true },
-      "@commontools/html": commontools,
-      "@commontools/builder": commontools,
-      "@commontools/runner": commontools,
+      "@commontools/html": harden(commontools),
+      "@commontools/builder": harden(commontools),
+      "@commontools/runner": harden(commontools),
     },
     exportsCallback,
   };

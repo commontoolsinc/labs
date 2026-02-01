@@ -41,46 +41,46 @@ export function createRuntimeGlobals(
   // Build the globals object
   const globals: RuntimeGlobals = {
     // CommonTools builders
-    recipe: commontools.recipe,
-    pattern: commontools.pattern,
-    patternTool: commontools.patternTool,
-    lift: commontools.lift,
-    handler: commontools.handler,
-    action: commontools.action,
-    derive: commontools.derive,
-    computed: commontools.computed,
+    recipe: harden(commontools.recipe),
+    pattern: harden(commontools.pattern),
+    patternTool: harden(commontools.patternTool),
+    lift: harden(commontools.lift),
+    handler: harden(commontools.handler),
+    action: harden(commontools.action),
+    derive: harden(commontools.derive),
+    computed: harden(commontools.computed),
 
     // Cell constructors
-    Cell: commontools.Cell,
-    Writable: commontools.Writable,
-    OpaqueCell: commontools.OpaqueCell,
-    Stream: commontools.Stream,
-    ComparableCell: commontools.ComparableCell,
-    ReadonlyCell: commontools.ReadonlyCell,
-    WriteonlyCell: commontools.WriteonlyCell,
-    cell: commontools.cell,
-    equals: commontools.equals,
+    Cell: harden(commontools.Cell),
+    Writable: harden(commontools.Writable),
+    OpaqueCell: harden(commontools.OpaqueCell),
+    Stream: harden(commontools.Stream),
+    ComparableCell: harden(commontools.ComparableCell),
+    ReadonlyCell: harden(commontools.ReadonlyCell),
+    WriteonlyCell: harden(commontools.WriteonlyCell),
+    cell: harden(commontools.cell),
+    equals: harden(commontools.equals),
 
     // Built-in modules
-    str: commontools.str,
-    ifElse: commontools.ifElse,
-    when: commontools.when,
-    unless: commontools.unless,
-    llm: commontools.llm,
-    llmDialog: commontools.llmDialog,
-    generateObject: commontools.generateObject,
-    generateText: commontools.generateText,
-    fetchData: commontools.fetchData,
-    fetchProgram: commontools.fetchProgram,
-    streamData: commontools.streamData,
-    compileAndRun: commontools.compileAndRun,
-    navigateTo: commontools.navigateTo,
-    wish: commontools.wish,
+    str: harden(commontools.str),
+    ifElse: harden(commontools.ifElse),
+    when: harden(commontools.when),
+    unless: harden(commontools.unless),
+    llm: harden(commontools.llm),
+    llmDialog: harden(commontools.llmDialog),
+    generateObject: harden(commontools.generateObject),
+    generateText: harden(commontools.generateText),
+    fetchData: harden(commontools.fetchData),
+    fetchProgram: harden(commontools.fetchProgram),
+    streamData: harden(commontools.streamData),
+    compileAndRun: harden(commontools.compileAndRun),
+    navigateTo: harden(commontools.navigateTo),
+    wish: harden(commontools.wish),
 
     // Utilities
-    byRef: commontools.byRef,
-    getRecipeEnvironment: commontools.getRecipeEnvironment,
-    getEntityId: commontools.getEntityId,
+    byRef: harden(commontools.byRef),
+    getRecipeEnvironment: harden(commontools.getRecipeEnvironment),
+    getEntityId: harden(commontools.getEntityId),
 
     // Constants
     ID: commontools.ID,
@@ -91,62 +91,24 @@ export function createRuntimeGlobals(
     UI: commontools.UI,
 
     // Schema utilities
-    schema: commontools.schema,
-    toSchema: commontools.toSchema,
-    AuthSchema: commontools.AuthSchema,
+    schema: harden(commontools.schema),
+    toSchema: harden(commontools.toSchema),
+    AuthSchema: harden(commontools.AuthSchema),
 
     // Render utilities
-    h: commontools.h,
+    h: harden(commontools.h),
 
     // Sandboxed console
     console: sandboxedConsole,
 
-    // Standard JavaScript globals (frozen copies)
-    JSON,
-    Math,
-    Date,
-    String,
-    Number,
-    Boolean,
-    Array,
-    Object,
-    Map,
-    Set,
-    WeakMap,
-    WeakSet,
-    Promise,
-    Error,
-    TypeError,
-    RangeError,
-    SyntaxError,
-    RegExp,
-    Symbol,
-    Proxy,
-    Reflect,
+    // Note: Standard JavaScript globals (JSON, Math, Date, Map, etc.) are
+    // provided by SES intrinsics automatically. We don't need to pass them explicitly.
+    //
+    // Math.random() and Date.now() / new Date() will throw in the sandbox by default
+    // to prevent non-determinism and fingerprinting.
+    // Patterns must use secureRandom() and Temporal instead.
 
-    // TypedArrays
-    Uint8Array,
-    Int8Array,
-    Uint16Array,
-    Int16Array,
-    Uint32Array,
-    Int32Array,
-    Float32Array,
-    Float64Array,
-    BigInt64Array,
-    BigUint64Array,
-    ArrayBuffer,
-    DataView,
-
-    // Global functions
-    parseInt,
-    parseFloat,
-    isNaN,
-    isFinite,
-    encodeURI,
-    decodeURI,
-    encodeURIComponent,
-    decodeURIComponent,
+    // Global functions are also provided by SES (parseInt, isNaN, etc.)
 
     // Network access with deprecation warning
     // TODO(seefeld): Remove direct fetch access once patterns migrate to fetchData
@@ -158,7 +120,7 @@ export function createRuntimeGlobals(
     }) as typeof fetch,
 
     // Temporal API (SES-safe replacement for Date.now() and new Date())
-    Temporal,
+    Temporal: harden(Temporal),
 
     // SES-safe replacement for Math.random() — returns [0, 1) like Math.random()
     // TODO(seefeld): Replace with something that is seeded consistently,
@@ -186,34 +148,11 @@ export function createMinimalGlobals(
 ): Pick<
   RuntimeGlobals,
   | "console"
-  | "JSON"
-  | "Math"
-  | "Date"
-  | "String"
-  | "Number"
-  | "Boolean"
-  | "Array"
-  | "Object"
-  | "Map"
-  | "Set"
-  | "Promise"
-  | "Error"
   | "harden"
 > {
   return {
     console: customConsole ?? console,
-    JSON,
-    Math,
-    Date,
-    String,
-    Number,
-    Boolean,
-    Array,
-    Object,
-    Map,
-    Set,
-    Promise,
-    Error,
+    // Standard globals (JSON, Math, etc.) provided by SES
     harden: typeof harden === "function" ? harden : Object.freeze,
   };
 }

@@ -123,7 +123,6 @@
     "npm:pino@^9.6.0": "9.14.0",
     "npm:plaid@36": "36.0.0",
     "npm:quickjs-emscripten-core@*": "0.31.0",
-    "npm:ses@1.10.0": "1.10.0",
     "npm:ses@1.14.0": "1.14.0",
     "npm:ses@^1.14.0": "1.14.0",
     "npm:source-map-js@^1.2.1": "1.2.1",

@@ -131,53 +131,8 @@ export interface RuntimeGlobals {
   // Render utilities
   readonly h: unknown;
 
-  // Standard globals (frozen)
+  // Standard globals (JSON, Math, Date, etc.) are provided by SES intrinsics
   readonly console: Console;
-  readonly JSON: typeof JSON;
-  readonly Math: typeof Math;
-  readonly Date: typeof Date;
-  readonly String: typeof String;
-  readonly Number: typeof Number;
-  readonly Boolean: typeof Boolean;
-  readonly Array: typeof Array;
-  readonly Object: typeof Object;
-  readonly Map: typeof Map;
-  readonly Set: typeof Set;
-  readonly WeakMap: typeof WeakMap;
-  readonly WeakSet: typeof WeakSet;
-  readonly Promise: typeof Promise;
-  readonly Error: typeof Error;
-  readonly TypeError: typeof TypeError;
-  readonly RangeError: typeof RangeError;
-  readonly SyntaxError: typeof SyntaxError;
-  readonly RegExp: typeof RegExp;
-  readonly Symbol: typeof Symbol;
-  readonly Proxy: typeof Proxy;
-  readonly Reflect: typeof Reflect;
-
-  // TypedArrays
-  readonly Uint8Array: typeof Uint8Array;
-  readonly Int8Array: typeof Int8Array;
-  readonly Uint16Array: typeof Uint16Array;
-  readonly Int16Array: typeof Int16Array;
-  readonly Uint32Array: typeof Uint32Array;
-  readonly Int32Array: typeof Int32Array;
-  readonly Float32Array: typeof Float32Array;
-  readonly Float64Array: typeof Float64Array;
-  readonly BigInt64Array: typeof BigInt64Array;
-  readonly BigUint64Array: typeof BigUint64Array;
-  readonly ArrayBuffer: typeof ArrayBuffer;
-  readonly DataView: typeof DataView;
-
-  // Global functions
-  readonly parseInt: typeof parseInt;
-  readonly parseFloat: typeof parseFloat;
-  readonly isNaN: typeof isNaN;
-  readonly isFinite: typeof isFinite;
-  readonly encodeURI: typeof encodeURI;
-  readonly decodeURI: typeof decodeURI;
-  readonly encodeURIComponent: typeof encodeURIComponent;
-  readonly decodeURIComponent: typeof decodeURIComponent;
 
   // Temporal API (SES-safe replacement for Date.now() and new Date())
   readonly Temporal: typeof TemporalType;
