@@ -9,6 +9,7 @@ import { type Label, emptyLabel, joinLabel, labelLeq } from "./labels.ts";
 import type { IntegrityLabel } from "./integrity.ts";
 import { type ExchangeRule, evaluateRules } from "./exchange-rules.ts";
 import { type PolicyRecord, DEFAULT_POLICY } from "./policy.ts";
+import { formatLabel } from "./violations.ts";
 
 // ---------------------------------------------------------------------------
 // Error
@@ -20,7 +21,7 @@ export class CFCViolationError extends Error {
     public readonly accumulatedTaint: Label,
     public readonly writeTargetLabel: Label,
   ) {
-    super(`CFC violation: ${kind}`);
+    super(`CFC violation: ${kind} — taint ${formatLabel(accumulatedTaint)} cannot flow to ${formatLabel(writeTargetLabel)}`);
     this.name = "CFCViolationError";
   }
 }
