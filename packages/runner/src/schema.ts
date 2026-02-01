@@ -17,7 +17,7 @@ import {
 } from "./query-result-proxy.ts";
 import { toCell } from "./back-to-cell.ts";
 import { recordTaintedRead } from "./cfc/taint-tracking.ts";
-import { labelFromSchemaIfc, labelFromStoredLabels } from "./cfc/labels.ts";
+import { labelFromSchemaIfc, labelFromStoredLabels, joinLabel } from "./cfc/labels.ts";
 import {
   combineSchema,
   IObjectCreator,
@@ -438,17 +438,22 @@ export function validateAndTransform(
   const address = { space, id, type, path: ["value", ...path] };
   const doc = { address, value: tx!.readValueOrThrow(ref) };
 
-  // CFC: record read taint from schema classification
+  // CFC: record read taint from merged schema + stored labels
   if (tx) {
     const readSchema = ref.schema ?? link.schema;
-    if (readSchema && typeof readSchema === "object" && readSchema.ifc) {
-      const label = labelFromSchemaIfc(readSchema.ifc);
-      recordTaintedRead(tx, label);
-    }
-    // CFC: record read taint from stored labels
+    const schemaLabel = (readSchema && typeof readSchema === "object" && readSchema.ifc)
+      ? labelFromSchemaIfc(readSchema.ifc)
+      : undefined;
     const storedLabels = tx.readLabelOrUndefined(ref);
-    if (storedLabels) {
-      recordTaintedRead(tx, labelFromStoredLabels(storedLabels));
+    const storedLabel = storedLabels
+      ? labelFromStoredLabels(storedLabels)
+      : undefined;
+
+    if (schemaLabel || storedLabel) {
+      const effectiveLabel = schemaLabel && storedLabel
+        ? joinLabel(schemaLabel, storedLabel)
+        : (schemaLabel ?? storedLabel)!;
+      recordTaintedRead(tx, effectiveLabel);
     }
   }
 

@@ -25,7 +25,7 @@ import {
 import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { recordTaintedRead } from "./cfc/taint-tracking.ts";
-import { labelFromSchemaIfc, labelFromStoredLabels } from "./cfc/labels.ts";
+import { labelFromSchemaIfc, labelFromStoredLabels, joinLabel } from "./cfc/labels.ts";
 import type { JSONObject, JSONSchema } from "./builder/types.ts";
 import {
   createDataCellURI,
@@ -1683,20 +1683,26 @@ export class SchemaObjectTraverser<V extends JSONValue>
     }
     const schemaObj = resolved;
 
-    // CFC: accumulate taint from schema ifc annotations
-    if (schemaObj.ifc && this.tx) {
-      recordTaintedRead(this.tx, labelFromSchemaIfc(schemaObj.ifc as { classification?: string[] }));
-    }
-    // CFC: accumulate taint from stored labels
+    // CFC: accumulate taint from merged schema + stored labels
     if (this.tx) {
+      const schemaLabel = schemaObj.ifc
+        ? labelFromSchemaIfc(schemaObj.ifc as { classification?: string[] })
+        : undefined;
       const storedLabels = this.tx.readLabelOrUndefined({
         space: doc.address.space,
         id: doc.address.id,
         type: doc.address.type,
         path: [],
       });
-      if (storedLabels) {
-        recordTaintedRead(this.tx, labelFromStoredLabels(storedLabels));
+      const storedLabel = storedLabels
+        ? labelFromStoredLabels(storedLabels)
+        : undefined;
+
+      if (schemaLabel || storedLabel) {
+        const effectiveLabel = schemaLabel && storedLabel
+          ? joinLabel(schemaLabel, storedLabel)
+          : (schemaLabel ?? storedLabel)!;
+        recordTaintedRead(this.tx, effectiveLabel);
       }
     }
 
