@@ -218,9 +218,9 @@ Wire the label algebra into the scheduler's action execution.
   read path via `cfc.lubSchema()` / `cfc.schemaAtPath()`:
   - Convert the classification string to a `Label` via `labelFromSchema()`
   - Join it into the action's `accumulatedTaint`
-- [ ] In `SchemaObjectTraverser.traverse()` (`traverse.ts`), same: accumulate
+- [x] In `SchemaObjectTraverser.traverse()` (`traverse.ts`), same: accumulate
   label from schema + path into taint context
-- [ ] For reads marked `markReadAsPotentialWrite` (in `diffAndUpdate`), also
+- [x] For reads marked `markReadAsPotentialWrite` (in `diffAndUpdate`), also
   accumulate taint — these are reads that happen during writes
 - [ ] For `StorageValue.labels` returned from storage: if labels exist on the
   stored value, join those into taint as well (runtime labels override/augment
@@ -238,7 +238,7 @@ Wire the label algebra into the scheduler's action execution.
   - Compute the label at the write target path
   - Check: `accumulatedTaint ≤ writeTargetLabel` (no write-down)
   - If violated: **throw an error** and abort the transaction
-- [ ] In `diffAndUpdate`, after computing the changeset but before
+- [x] In `diffAndUpdate`, after computing the changeset but before
   `applyChangeSet`: run the label check for each changed path
 - [x] For exchange rules: before the write check, attempt to apply matching
   exchange rules from the active policy. If rules declassify the taint
@@ -303,7 +303,7 @@ Wire the label algebra into the scheduler's action execution.
   `Labels` type widens
 - [ ] Update storage serialization (`application/label+json` facts) to handle
   new atom types
-- [ ] Ensure old labels (flat `classification` strings) are read correctly and
+- [x] Ensure old labels (flat `classification` strings) are read correctly and
   mapped to `Classification(level)` atoms on load
 
 **File:** modifications to `packages/runner/src/storage/interface.ts`,
@@ -320,10 +320,10 @@ Wire the label algebra into the scheduler's action execution.
   }
   ```
 - [x] Update `labelFromSchema()` to handle both old and new formats
-- [ ] Update `ContextualFlowControl.joinSchema()` to collect parameterized
-  atoms in addition to flat classification strings
-- [ ] Update `ContextualFlowControl.lubSchema()` to compute LUB over
-  parameterized atoms using `TrustLattice`
+- [x] Update `ContextualFlowControl.joinSchema()` to collect parameterized
+  atoms in addition to flat classification strings (via new `labelForSchema()`)
+- [x] Update `ContextualFlowControl.lubSchema()` to compute LUB over
+  parameterized atoms using `TrustLattice` (via new `collectParameterizedLabels()`)
 
 **File:** modifications to `packages/runner/src/cfc.ts` (or its replacement
 module)
@@ -456,14 +456,14 @@ backwards compatibility.
     paths: { reads: string[], write: string } }
   ```
 - [x] On violation, throw `CFCViolation` — this aborts the transaction
-- [ ] Log violations via existing `getLogger("cfc")` at error level
+- [x] Log violations via existing `getLogger("cfc")` at error level
 - [ ] Emit telemetry event for violations (via `RuntimeTelemetry`)
 
 ### 7.2 Debug Mode
 
-- [ ] Add `cfc.debug` flag (off by default) that logs every taint accumulation:
+- [x] Add `cfc.debug` flag (off by default) that logs every taint accumulation:
   "read path X, label Y, taint now Z"
-- [ ] Add `cfc.dryRun` flag that logs violations but doesn't fail (for gradual
+- [x] Add `cfc.dryRun` flag that logs violations but doesn't fail (for gradual
   rollout)
 
 ### 7.3 Tests
