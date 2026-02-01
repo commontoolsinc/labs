@@ -133,17 +133,18 @@ export function toLabelStorage(label: Label): Labels {
 
 export function labelFromSchemaIfc(ifc: {
   classification?: string[];
+  confidentiality?: Atom[][];
+  integrity?: Atom[];
 }): Label {
-  if (!ifc.classification || ifc.classification.length === 0) {
-    return emptyLabel();
-  }
+  const confidentiality: ConfidentialityLabel =
+    ifc.confidentiality ??
+    (ifc.classification && ifc.classification.length > 0
+      ? ifc.classification.map((level) => [classificationAtom(level)])
+      : emptyConfidentiality());
 
-  const confidentiality: ConfidentialityLabel = ifc.classification.map(
-    (level) => [classificationAtom(level)],
-  );
+  const integrity: IntegrityLabel = ifc.integrity
+    ? { atoms: ifc.integrity }
+    : emptyIntegrity();
 
-  return {
-    confidentiality,
-    integrity: emptyIntegrity(),
-  };
+  return { confidentiality, integrity };
 }

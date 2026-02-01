@@ -74,8 +74,8 @@ export function matchAtomPattern(
   const updated = new Map(bindings);
 
   for (const [key, patternValue] of Object.entries(pattern.params)) {
-    const atomValue = String(params[key] ?? "");
     if (!(key in params)) return null;
+    const atomValue = String(params[key]);
 
     if (isVariable(patternValue)) {
       const existing = updated.get(patternValue);
@@ -106,7 +106,9 @@ export function instantiatePattern(
       if (bound === undefined) {
         throw new Error(`Unbound variable ${value} in pattern`);
       }
-      result[key] = bound;
+      // Preserve numeric types for atoms like ExpiresAtom.timestamp
+      const asNum = Number(bound);
+      result[key] = !isNaN(asNum) && bound === String(asNum) ? asNum : bound;
     } else {
       result[key] = value;
     }

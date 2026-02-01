@@ -257,7 +257,7 @@ export class ContextualFlowControl {
       const reachableFrom = new Set<T>();
       for (const to of tos) {
         // Add the elements in tos to reachableFrom
-        for (const tutu of reachable.get(to)!) {
+        for (const tutu of reachable.get(to) ?? []) {
           reachableFrom.add(tutu);
         }
         reachableFrom.add(to);
@@ -277,7 +277,7 @@ export class ContextualFlowControl {
       const reachableFrom = new Set<T>();
       for (const to of tos) {
         // Add the elements in tos to reachableFrom
-        for (const tutu of reachable.get(to)!) {
+        for (const tutu of reachable.get(to) ?? []) {
           reachableFrom.add(tutu);
         }
         reachableFrom.add(to);
