@@ -5,6 +5,7 @@ import type {
   StorableObject,
   StorableValue,
 } from "@commontools/memory/interface";
+import type { Labels } from "./interface.ts";
 import type {
   CommitError,
   IAttestation,
@@ -104,6 +105,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       { ...address, path: ["value", ...address.path] },
       options,
     );
+  }
+
+  readLabelOrUndefined(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): Labels | undefined {
+    const result = this.tx.read(
+      { ...address, path: ["label"] },
+      options,
+    );
+    logResult("readLabelOrUndefined", result, address, options);
+    if (result.error) return undefined;
+    return result.ok?.value as Labels | undefined;
   }
 
   writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
@@ -327,6 +341,16 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     options?: IReadOptions,
   ): StorableValue {
     return this.wrapped.readValueOrThrow(
+      address,
+      this.transformReadOptions(options),
+    );
+  }
+
+  readLabelOrUndefined(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): Labels | undefined {
+    return this.wrapped.readLabelOrUndefined(
       address,
       this.transformReadOptions(options),
     );

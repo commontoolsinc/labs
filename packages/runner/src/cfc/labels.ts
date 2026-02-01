@@ -6,7 +6,7 @@
  * lattice used by the CFC enforcement layer.
  */
 
-import { classificationAtom } from "./atoms.ts";
+import { type Atom, classificationAtom } from "./atoms.ts";
 import {
   type ConfidentialityLabel,
   emptyConfidentiality,
@@ -21,6 +21,7 @@ import {
   meetIntegrity,
   integrityLeq,
 } from "./integrity.ts";
+import type { Labels } from "../storage/interface.ts";
 
 // ---------------------------------------------------------------------------
 // Type
@@ -96,6 +97,25 @@ export function labelFromClassification(level: string): Label {
  * If `ifc.classification` has multiple strings, each becomes a separate
  * clause (they are AND'd — you need ALL those clearances).
  */
+/**
+ * Convert stored `Labels` (from the `label/` document path) into a composite
+ * `Label`.  Prefers the rich `confidentiality`/`integrity` fields when present
+ * and falls back to the legacy `classification` strings.
+ */
+export function labelFromStoredLabels(labels: Labels): Label {
+  const confidentiality: ConfidentialityLabel =
+    labels.confidentiality ??
+    (labels.classification
+      ? labels.classification.map((level) => [classificationAtom(level)])
+      : emptyConfidentiality());
+
+  const integrity: IntegrityLabel = labels.integrity
+    ? { atoms: labels.integrity }
+    : emptyIntegrity();
+
+  return { confidentiality, integrity };
+}
+
 export function labelFromSchemaIfc(ifc: {
   classification?: string[];
 }): Label {

@@ -17,7 +17,7 @@ import {
 } from "./query-result-proxy.ts";
 import { toCell } from "./back-to-cell.ts";
 import { recordTaintedRead } from "./cfc/taint-tracking.ts";
-import { labelFromSchemaIfc } from "./cfc/labels.ts";
+import { labelFromSchemaIfc, labelFromStoredLabels } from "./cfc/labels.ts";
 import {
   combineSchema,
   IObjectCreator,
@@ -444,6 +444,11 @@ export function validateAndTransform(
     if (readSchema && typeof readSchema === "object" && readSchema.ifc) {
       const label = labelFromSchemaIfc(readSchema.ifc);
       recordTaintedRead(tx, label);
+    }
+    // CFC: record read taint from stored labels
+    const storedLabels = tx.readLabelOrUndefined(ref);
+    if (storedLabels) {
+      recordTaintedRead(tx, labelFromStoredLabels(storedLabels));
     }
   }
 

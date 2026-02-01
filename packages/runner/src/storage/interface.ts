@@ -585,6 +585,15 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   ): StorableValue;
 
   /**
+   * Reads the label document for the given address.  Returns `undefined` when
+   * no label has been stored (labels are optional).
+   */
+  readLabelOrUndefined(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): Labels | undefined;
+
+  /**
    * Writes a value into a storage at a given address, including creating parent
    * entries in the document if a path is provided or throws an error.
    *
