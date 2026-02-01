@@ -222,24 +222,20 @@ Wire the label algebra into the scheduler's action execution.
   label from schema + path into taint context
 - [x] For reads marked `markReadAsPotentialWrite` (in `diffAndUpdate`), also
   accumulate taint — these are reads that happen during writes
-- [ ] For `StorageValue.labels` returned from storage: if labels exist on the
-  stored value, join those into taint as well (runtime labels override/augment
-  schema-derived labels)
-  - [ ] **3.2a** Extend `Provider.get()` (`cache.ts:1910-1916`) to also fetch
-    the `"application/label+json"` fact for the same entity URI and return a
-    `StorageValue` (value + labels) instead of bare `StorableDatum`
-  - [ ] **3.2b** Add `readLabels(uri)` helper on `Provider` that queries
-    `workspace.get({ id: uri, type: "application/label+json" })` and returns
-    `Labels | undefined`
-  - [ ] **3.2c** Thread labels from `Provider.get()` through the cache layers:
-    `Replica.get()` → `Chronicle.read()` → `TransactionReader.read()` so that
-    `IAttestation` (or a sibling type) carries optional labels
-  - [ ] **3.2d** In `readValueOrThrow` (or its callers in schema.ts /
-    traverse.ts), when labels are present on the read result, call
+- [ ] For stored labels: if labels exist at the `label/` path on the document,
+  join those into taint as well (runtime labels override/augment schema-derived
+  labels). Labels are stored at the `label/` path prefix on the same document,
+  analogous to `value/` and `source/` — no separate facet/fact needed.
+  - [ ] **3.2a** Add `readLabelOrUndefined(address)` on
+    `ExtendedStorageTransaction` — reads `{ ...address, path: ["label"] }`
+    via the existing `read()` path and returns `Labels | undefined`
+  - [ ] **3.2b** In `readValueOrThrow` callers (schema.ts / traverse.ts),
+    after reading the value, also call `readLabelOrUndefined()` for the same
+    address. If labels are present, call
     `recordTaintedRead(tx, labelFromStoredLabels(labels))` to join stored
     labels into the action's taint
-  - [ ] **3.2e** Add `labelFromStoredLabels(labels: Labels): Label` in
-    `labels.ts` — converts the stored `Labels` (classification strings +
+  - [ ] **3.2c** Add `labelFromStoredLabels(labels: Labels): Label` in
+    `labels.ts` — converts stored `Labels` (classification strings +
     parameterized atoms) into a composite `Label` for taint accumulation
 - [x] Thread `ActionTaintContext` through the transaction or make it available
   via the runtime/frame stack
@@ -317,16 +313,15 @@ Wire the label algebra into the scheduler's action execution.
   ```
 - [x] Update `StorageValue` interface — no structural change needed, just the
   `Labels` type widens
-- [ ] Update storage serialization (`application/label+json` facts) to handle
-  new atom types
-  - [ ] **4.1a** Verify `Provider.send()` (`cache.ts:1920-1976`) correctly
-    serializes `Labels` with `confidentiality: Atom[][]` and
-    `integrity: Atom[]` via `JSON.parse(JSON.stringify(...))` round-trip —
-    atoms use discriminated unions which should serialize cleanly
-  - [ ] **4.1b** Add deserialization in `Provider.readLabels()` (from 3.2b):
-    parse stored `StorableDatum` back into `Labels`, validating atom shapes
-  - [ ] **4.1c** Write round-trip test: serialize atoms → store as
-    `"application/label+json"` → read back → verify structural equality
+- [ ] Verify storage serialization handles new atom types at the `label/` path
+  - [ ] **4.1a** Labels stored at the `label/` path are plain JSON objects
+    (`Labels` type with `confidentiality: Atom[][]` and `integrity: Atom[]`).
+    Since they go through the same `write()`/`read()` path as values, JSON
+    round-trip is automatic. Verify discriminated union atoms serialize cleanly.
+  - [ ] **4.1b** Add `labelFromStoredLabels()` validation: when reading from
+    `label/` path, validate atom shapes (guard against corrupted data)
+  - [ ] **4.1c** Write round-trip test: write labels at `label/` path → read
+    back → verify structural equality with original atoms
 - [x] Ensure old labels (flat `classification` strings) are read correctly and
   mapped to `Classification(level)` atoms on load
 
@@ -354,32 +349,27 @@ module)
 
 ### 4.3 Persist Runtime Labels on Write
 
-- [ ] When a cell is written, compute the label for the written value:
-  - Start with the write target's schema-derived label
-  - Include the action's accumulated taint (which was checked in Phase 3.3)
-  - Store as `StorageValue.labels` with the new parameterized format
-  - [ ] **4.3a** Extend `writeValueOrThrow` (`extended-storage-transaction.ts:193-198`)
-    to accept an optional `Labels` parameter alongside the value
-  - [ ] **4.3b** Thread labels through the write chain:
-    `writeValueOrThrow` → `writeOrThrow` → `tx.write()` →
-    `TransactionWriter.write()` → `Chronicle.write()`. The chronicle's
-    working copy needs to store labels alongside the written value, emitted
-    as a separate `"application/label+json"` fact at commit time
-  - [ ] **4.3c** Alternative simpler approach: after `applyChangeSet()` in
-    `data-updating.ts`, call a new `persistLabels(tx, location, label)`
-    helper that writes a separate label fact through `Provider.send()` or
-    a dedicated label-write method on the transaction. This avoids
-    modifying the entire write chain.
-  - [ ] **4.3d** In `cell.ts` `set()` / `push()` / `remove()`, after the
-    taint write-check passes, compute the label to persist:
-    `joinLabel(schemaLabel, accumulatedTaint)` — this is the effective
-    label the written data carries
-  - [ ] **4.3e** Decide on approach: modify write chain (4.3b) vs. separate
-    label write (4.3c). Recommend **4.3c** (separate write) for minimal
-    invasiveness — the label fact is already a separate entity in storage
+- [ ] When a cell is written, persist the effective label at the `label/` path.
+  Labels live at `label/` on the same document, alongside `value/` and
+  `source/`. This uses the existing transaction write infrastructure — no new
+  facet types or Provider changes needed.
+  - [ ] **4.3a** Add `writeLabelOrThrow(address, labels: Labels)` on
+    `ExtendedStorageTransaction` — writes
+    `{ ...address, path: ["label"] }` via the existing `writeOrThrow()`.
+    This is symmetric with `writeValueOrThrow`.
+  - [ ] **4.3b** In `cell.ts` `set()` / `push()` / `remove()`, after the
+    taint write-check passes, compute the effective label:
+    `joinLabel(schemaLabel, accumulatedTaint)` — this is the label the
+    written data carries. Call `tx.writeLabelOrThrow(address, toLabels(effectiveLabel))`
+  - [ ] **4.3c** In `data-updating.ts` after `applyChangeSet()`, call
+    `tx.writeLabelOrThrow()` with the same computed label. This covers
+    the `diffAndUpdate` write path.
+  - [ ] **4.3d** Add `toLabelStorage(label: Label): Labels` helper in
+    `labels.ts` — converts a `Label` (runtime type) to `Labels` (storage
+    type with `confidentiality` and `integrity` arrays)
 - [ ] On read, merge schema-derived labels with stored runtime labels (take
   the join — stored labels can only raise the classification, not lower it)
-  - [ ] **4.3f** In `recordTaintedRead` callers (schema.ts, traverse.ts),
+  - [ ] **4.3e** In `recordTaintedRead` callers (schema.ts, traverse.ts),
     compute `joinLabel(schemaLabel, storedLabel)` and use that as the
     effective read label. Stored labels can only raise, never lower.
 - [ ] This means labels persist across runtime restarts — a cell that received
