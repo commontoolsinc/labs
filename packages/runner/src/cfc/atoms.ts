@@ -105,7 +105,7 @@ export function canonicalizeAtom(atom: Atom): string {
     entries.push(
       JSON.stringify(key) +
         ":" +
-        JSON.stringify((atom as Record<string, unknown>)[key]),
+        JSON.stringify((atom as unknown as Record<string, unknown>)[key]),
     );
   }
   return "{" + entries.join(",") + "}";

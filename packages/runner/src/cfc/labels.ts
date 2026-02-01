@@ -126,7 +126,7 @@ export function toLabelStorage(label: Label): Labels {
     result.confidentiality = label.confidentiality;
   }
   if (label.integrity.atoms.length > 0) {
-    result.integrity = label.integrity.atoms;
+    result.integrity = [...label.integrity.atoms];
   }
   return result;
 }
@@ -134,7 +134,7 @@ export function toLabelStorage(label: Label): Labels {
 export function labelFromSchemaIfc(ifc: {
   classification?: string[];
   confidentiality?: Atom[][];
-  integrity?: Atom[];
+  integrity?: Atom[] | string[];
 }): Label {
   const confidentiality: ConfidentialityLabel =
     ifc.confidentiality ??
@@ -142,9 +142,14 @@ export function labelFromSchemaIfc(ifc: {
       ? ifc.classification.map((level) => [classificationAtom(level)])
       : emptyConfidentiality());
 
-  const integrity: IntegrityLabel = ifc.integrity
-    ? { atoms: ifc.integrity }
-    : emptyIntegrity();
+  // integrity may be Atom[] (new parameterized) or string[] (legacy schema type).
+  // Only treat as atoms if the first element is an object.
+  const integrity: IntegrityLabel =
+    ifc.integrity &&
+      ifc.integrity.length > 0 &&
+      typeof ifc.integrity[0] === "object"
+      ? { atoms: ifc.integrity as Atom[] }
+      : emptyIntegrity();
 
   return { confidentiality, integrity };
 }
