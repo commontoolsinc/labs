@@ -697,6 +697,7 @@ export class Scheduler {
       attachTaintContext(tx, ctx, {
         debug: this.runtime.cfcDebug,
         dryRun: this.runtime.cfcDryRun,
+        telemetry: this.runtime.telemetry,
       });
     }
 
@@ -2134,6 +2135,7 @@ export class Scheduler {
           attachTaintContext(tx, ctx, {
             debug: this.runtime.cfcDebug,
             dryRun: this.runtime.cfcDryRun,
+            telemetry: this.runtime.telemetry,
           });
         }
 

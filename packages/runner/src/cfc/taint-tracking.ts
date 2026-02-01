@@ -1,21 +1,23 @@
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { ActionTaintContext } from "./action-context.ts";
 import type { Label } from "./labels.ts";
-import { accumulateTaint, checkWrite } from "./action-context.ts";
+import { accumulateTaint, checkWrite, CFCViolationError } from "./action-context.ts";
 import type { ExchangeRule } from "./exchange-rules.ts";
 import { formatLabel } from "./violations.ts";
 import { getLogger } from "@commontools/utils/logger";
+import type { RuntimeTelemetry } from "../telemetry.ts";
 
 const logger = getLogger("cfc");
 
 /**
- * Associates ActionTaintContext with transactions, along with debug/dryRun flags.
+ * Associates ActionTaintContext with transactions, along with debug/dryRun flags and telemetry.
  * This avoids modifying the IExtendedStorageTransaction interface.
  */
 type TaintEntry = {
   ctx: ActionTaintContext;
   debug: boolean;
   dryRun: boolean;
+  telemetry?: RuntimeTelemetry;
 };
 
 const taintEntries = new WeakMap<IExtendedStorageTransaction, TaintEntry>();
@@ -24,12 +26,13 @@ const taintEntries = new WeakMap<IExtendedStorageTransaction, TaintEntry>();
 export function attachTaintContext(
   tx: IExtendedStorageTransaction,
   ctx: ActionTaintContext,
-  options?: { debug?: boolean; dryRun?: boolean },
+  options?: { debug?: boolean; dryRun?: boolean; telemetry?: RuntimeTelemetry },
 ): void {
   taintEntries.set(tx, {
     ctx,
     debug: options?.debug ?? false,
     dryRun: options?.dryRun ?? false,
+    telemetry: options?.telemetry,
   });
 }
 
@@ -74,13 +77,36 @@ export function checkTaintedWrite(
     try {
       checkWrite(entry.ctx, writeTargetLabel, exchangeRules ?? entry.ctx.policy.exchangeRules);
     } catch (e) {
-      if (entry.dryRun) {
+      if (e instanceof CFCViolationError) {
+        const violation = {
+          kind: e.kind,
+          accumulatedTaint: formatLabel(e.accumulatedTaint),
+          writeTargetLabel: formatLabel(e.writeTargetLabel),
+          summary: e.message,
+          isDryRun: entry.dryRun,
+        };
+
+        // Emit telemetry event for CFC violation
+        if (entry.telemetry) {
+          entry.telemetry.submit({
+            type: "cfc.violation",
+            ...violation,
+          });
+        }
+
+        // Log the violation
         logger.warn("cfc-violation", () => [
-          `[DRY RUN] ${(e as Error).message}`,
+          `${entry.dryRun ? "[DRY RUN] " : ""}${e.message}`,
         ]);
-        return;
+
+        // In dry-run mode, don't throw; in normal mode, rethrow
+        if (!entry.dryRun) {
+          throw e;
+        }
+      } else {
+        // Re-throw if it's not a CFCViolationError
+        throw e;
       }
-      throw e;
     }
   }
 }

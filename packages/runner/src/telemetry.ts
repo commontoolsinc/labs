@@ -125,6 +125,14 @@ export type RuntimeTelemetryMarker = {
   actionId: string;
   reads: string[]; // cell paths this action reads
   writes: string[]; // cell paths this action writes
+} | {
+  type: "cfc.violation";
+  kind: "write-down" | "clearance-exceeded";
+  accumulatedTaint: string; // human-readable formatted label
+  writeTargetLabel: string; // human-readable formatted label
+  summary: string; // human-readable violation description
+  isDryRun: boolean;
+  error?: string;
 };
 
 export type RuntimeTelemetryMarkerResult = RuntimeTelemetryMarker & {
