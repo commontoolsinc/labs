@@ -568,12 +568,6 @@ export abstract class BaseObjectTraverser {
 
         // We follow the first link in array elements so we don't have
         // strangeness with setting item at 0 to item at 1
-
-        // We follow the first link in array elements so we don't have
-        // strangeness with setting item at 0 to item at 1
-
-        // We follow the first link in array elements so we don't have
-        // strangeness with setting item at 0 to item at 1
         if (isPrimitiveCellLink(item)) {
           const [linkDoc, _selector, redirDoc, _redirSelector] = this
             .resolveArrayItem(docItem, DefaultSelector);
