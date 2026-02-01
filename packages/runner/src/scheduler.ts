@@ -44,6 +44,8 @@ import type {
   SchedulerGraphSnapshot,
 } from "./telemetry.ts";
 import { ensureNotRenderThread } from "@commontools/utils/env";
+import { attachTaintContext, detachTaintContext } from "./cfc/taint-tracking.ts";
+import { createActionContext } from "./cfc/action-context.ts";
 ensureNotRenderThread();
 
 const logger = getLogger("scheduler", {
@@ -686,6 +688,16 @@ export class Scheduler {
     if (this.runningPromise) await this.runningPromise;
 
     const tx = this.runtime.edit();
+
+    // CFC taint tracking: attach context to transaction
+    if (this.runtime.cfcEnabled) {
+      const ctx = createActionContext({
+        userDid: this.runtime.userIdentityDID ?? "anonymous",
+        space: "default", // TODO: derive from action's target cell
+      });
+      attachTaintContext(tx, ctx);
+    }
+
     const actionStartTime = performance.now();
 
     let result: any;
@@ -704,6 +716,9 @@ export class Scheduler {
             this.handleError(error as Error, action);
           }
         } finally {
+          // CFC taint tracking: detach context from transaction
+          detachTaintContext(tx);
+
           // Set up new reactive subscriptions after the action runs
 
           // Commit the transaction. The code continues synchronously after
@@ -2069,6 +2084,9 @@ export class Scheduler {
           try {
             if (error) this.handleError(error as Error, action);
           } finally {
+            // CFC taint tracking: detach context from transaction
+            detachTaintContext(tx);
+
             tx.commit().then(({ error }) => {
               // If the transaction failed, and we have retries left, queue the
               // event again at the beginning of the queue. This isn't guaranteed
@@ -2104,6 +2122,16 @@ export class Scheduler {
           }
         };
         const tx = this.runtime.edit();
+
+        // CFC taint tracking: attach context to transaction
+        if (this.runtime.cfcEnabled) {
+          const ctx = createActionContext({
+            userDid: this.runtime.userIdentityDID ?? "anonymous",
+            space: "default", // TODO: derive from action's target cell
+          });
+          attachTaintContext(tx, ctx);
+        }
+
         const actionId = this.getActionId(action);
 
         try {

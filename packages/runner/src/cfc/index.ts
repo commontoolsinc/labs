@@ -7,3 +7,5 @@ export * from "./exchange-rules.ts";
 export * from "./policy.ts";
 export * from "./action-context.ts";
 export * from "./space-policy.ts";
+export * from "./taint-tracking.ts";
+export * from "./violations.ts";

@@ -88,11 +88,21 @@ import {
 } from "./storage/extended-storage-transaction.ts";
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { checkTaintedWrite } from "./cfc/taint-tracking.ts";
+import { type Label, labelFromSchemaIfc, emptyLabel } from "./cfc/labels.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { ensureNotRenderThread } from "@commontools/utils/env";
 ensureNotRenderThread();
 
 const logger = getLogger("cell");
+
+/** Compute the CFC label for a cell's schema at its current path. */
+function labelFromCellSchema(schema: JSONSchema | undefined): Label {
+  if (schema && typeof schema === "object" && schema.ifc) {
+    return labelFromSchemaIfc(schema.ifc);
+  }
+  return emptyLabel();
+}
 
 type SinkOptions = {
   changeGroup?: ChangeGroup;
@@ -698,6 +708,12 @@ export class CellImpl<T extends StorableValue>
       // Looks for arrays and makes sure each object gets its own doc.
       const transformedValue = recursivelyAddIDIfNeeded(newValue, this._frame);
 
+      // CFC: check write is allowed given accumulated taint
+      if (this.tx) {
+        const writeLabel = labelFromCellSchema(this.schema);
+        checkTaintedWrite(this.tx, writeLabel);
+      }
+
       // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
       diffAndUpdate(
         this.runtime,
@@ -815,6 +831,12 @@ export class CellImpl<T extends StorableValue>
         "Cell.push() requires transaction and array value\n" +
           "help: use in handlers only, ensure cell is typed as array",
       );
+    }
+
+    // CFC: check write is allowed given accumulated taint
+    if (this.tx) {
+      const writeLabel = labelFromCellSchema(this.schema);
+      checkTaintedWrite(this.tx, writeLabel);
     }
 
     // If there is no array yet, create it first. We have to do this as a

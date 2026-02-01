@@ -16,6 +16,8 @@ import {
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { toCell } from "./back-to-cell.ts";
+import { recordTaintedRead } from "./cfc/taint-tracking.ts";
+import { labelFromSchemaIfc } from "./cfc/labels.ts";
 import {
   combineSchema,
   IObjectCreator,
@@ -435,6 +437,16 @@ export function validateAndTransform(
   const { space, id, type, path } = ref;
   const address = { space, id, type, path: ["value", ...path] };
   const doc = { address, value: tx!.readValueOrThrow(ref) };
+
+  // CFC: record read taint from schema classification
+  if (tx) {
+    const readSchema = ref.schema ?? link.schema;
+    if (readSchema && typeof readSchema === "object" && readSchema.ifc) {
+      const label = labelFromSchemaIfc(readSchema.ifc);
+      recordTaintedRead(tx, label);
+    }
+  }
+
   // If we have a ref with a schema, use that; otherwise, use the link's schema
   const selector = {
     path: doc.address.path,
