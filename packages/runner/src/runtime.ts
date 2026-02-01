@@ -78,6 +78,8 @@ export interface RuntimeOptions {
   debug?: boolean;
   telemetry?: RuntimeTelemetry;
   cfcEnabled?: boolean;
+  cfcDebug?: boolean;
+  cfcDryRun?: boolean;
 }
 
 /**
@@ -128,6 +130,8 @@ export class Runtime {
   readonly navigateCallback?: NavigateCallback;
   readonly cfc: ContextualFlowControl;
   readonly cfcEnabled: boolean;
+  readonly cfcDebug: boolean;
+  readonly cfcDryRun: boolean;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
   readonly telemetry: RuntimeTelemetry;
@@ -154,6 +158,8 @@ export class Runtime {
     this.runner = new Runner(this);
     this.cfc = new ContextualFlowControl();
     this.cfcEnabled = options.cfcEnabled ?? false;
+    this.cfcDebug = options.cfcDebug ?? false;
+    this.cfcDryRun = options.cfcDryRun ?? false;
 
     // Create core services with dependencies injected
     this.scheduler = new Scheduler(

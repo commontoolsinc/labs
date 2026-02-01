@@ -98,6 +98,28 @@ export function accumulateTaint(
   ctx.accumulatedTaint = joinLabel(ctx.accumulatedTaint, readLabel);
 }
 
+/**
+ * Check if a read label exceeds the action's clearance.
+ * Throws CFCViolationError if the action doesn't have sufficient clearance.
+ *
+ * Note: checkClearance is not called automatically during accumulateTaint
+ * because clearance semantics require exchange rules to bridge between
+ * Classification atoms and User/Space atoms. This will be enabled when
+ * space policies define the mapping.
+ */
+export function checkClearance(
+  ctx: ActionTaintContext,
+  readLabel: Label,
+): void {
+  if (!labelLeq(readLabel, ctx.clearance)) {
+    throw new CFCViolationError(
+      "clearance-exceeded",
+      readLabel,
+      ctx.clearance,
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Write check
 // ---------------------------------------------------------------------------

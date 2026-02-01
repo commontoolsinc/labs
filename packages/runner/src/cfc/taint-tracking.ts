@@ -3,26 +3,41 @@ import type { ActionTaintContext } from "./action-context.ts";
 import type { Label } from "./labels.ts";
 import { accumulateTaint, checkWrite } from "./action-context.ts";
 import type { ExchangeRule } from "./exchange-rules.ts";
+import { formatLabel } from "./violations.ts";
+import { getLogger } from "@commontools/utils/logger";
+
+const logger = getLogger("cfc");
 
 /**
- * Associates ActionTaintContext with transactions.
+ * Associates ActionTaintContext with transactions, along with debug/dryRun flags.
  * This avoids modifying the IExtendedStorageTransaction interface.
  */
-const taintContexts = new WeakMap<IExtendedStorageTransaction, ActionTaintContext>();
+type TaintEntry = {
+  ctx: ActionTaintContext;
+  debug: boolean;
+  dryRun: boolean;
+};
+
+const taintEntries = new WeakMap<IExtendedStorageTransaction, TaintEntry>();
 
 /** Attach a taint context to a transaction. Called at action start. */
 export function attachTaintContext(
   tx: IExtendedStorageTransaction,
   ctx: ActionTaintContext,
+  options?: { debug?: boolean; dryRun?: boolean },
 ): void {
-  taintContexts.set(tx, ctx);
+  taintEntries.set(tx, {
+    ctx,
+    debug: options?.debug ?? false,
+    dryRun: options?.dryRun ?? false,
+  });
 }
 
 /** Get the taint context for a transaction, if any. */
 export function getTaintContext(
   tx: IExtendedStorageTransaction,
 ): ActionTaintContext | undefined {
-  return taintContexts.get(tx);
+  return taintEntries.get(tx)?.ctx;
 }
 
 /**
@@ -33,9 +48,14 @@ export function recordTaintedRead(
   tx: IExtendedStorageTransaction,
   label: Label,
 ): void {
-  const ctx = taintContexts.get(tx);
-  if (ctx) {
-    accumulateTaint(ctx, label);
+  const entry = taintEntries.get(tx);
+  if (entry) {
+    if (entry.debug) {
+      logger.info("cfc-read", () => [
+        `Taint accumulated:`, formatLabel(label),
+      ]);
+    }
+    accumulateTaint(entry.ctx, label);
   }
 }
 
@@ -49,9 +69,19 @@ export function checkTaintedWrite(
   writeTargetLabel: Label,
   exchangeRules?: ExchangeRule[],
 ): void {
-  const ctx = taintContexts.get(tx);
-  if (ctx) {
-    checkWrite(ctx, writeTargetLabel, exchangeRules ?? ctx.policy.exchangeRules);
+  const entry = taintEntries.get(tx);
+  if (entry) {
+    try {
+      checkWrite(entry.ctx, writeTargetLabel, exchangeRules ?? entry.ctx.policy.exchangeRules);
+    } catch (e) {
+      if (entry.dryRun) {
+        logger.warn("cfc-violation", () => [
+          `[DRY RUN] ${(e as Error).message}`,
+        ]);
+        return;
+      }
+      throw e;
+    }
   }
 }
 
@@ -59,5 +89,5 @@ export function checkTaintedWrite(
 export function detachTaintContext(
   tx: IExtendedStorageTransaction,
 ): void {
-  taintContexts.delete(tx);
+  taintEntries.delete(tx);
 }

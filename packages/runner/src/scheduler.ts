@@ -694,7 +694,10 @@ export class Scheduler {
         userDid: this.runtime.userIdentityDID ?? "anonymous",
         space: "default", // TODO: derive from action's target cell
       });
-      attachTaintContext(tx, ctx);
+      attachTaintContext(tx, ctx, {
+        debug: this.runtime.cfcDebug,
+        dryRun: this.runtime.cfcDryRun,
+      });
     }
 
     const actionStartTime = performance.now();
@@ -2128,7 +2131,10 @@ export class Scheduler {
             userDid: this.runtime.userIdentityDID ?? "anonymous",
             space: "default", // TODO: derive from action's target cell
           });
-          attachTaintContext(tx, ctx);
+          attachTaintContext(tx, ctx, {
+            debug: this.runtime.cfcDebug,
+            dryRun: this.runtime.cfcDryRun,
+          });
         }
 
         const actionId = this.getActionId(action);

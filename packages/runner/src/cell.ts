@@ -88,7 +88,7 @@ import {
 } from "./storage/extended-storage-transaction.ts";
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { checkTaintedWrite } from "./cfc/taint-tracking.ts";
+import { checkTaintedWrite, recordTaintedRead } from "./cfc/taint-tracking.ts";
 import { type Label, labelFromSchemaIfc, emptyLabel } from "./cfc/labels.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { ensureNotRenderThread } from "@commontools/utils/env";
@@ -563,6 +563,10 @@ export class CellImpl<T extends StorableValue>
       [],
       options,
     );
+    // CFC: accumulate taint from schema on get()
+    if (this.tx && this.schema && typeof this.schema === "object" && this.schema.ifc) {
+      recordTaintedRead(this.tx, labelFromSchemaIfc(this.schema.ifc));
+    }
     const elapsed = logger.timeEnd("cell", "get")!;
     if (elapsed > 50) {
       logger.warn(
@@ -591,7 +595,15 @@ export class CellImpl<T extends StorableValue>
     const readTx = this.runtime.readTx(this.tx);
     const nonReactiveTx = createNonReactiveTransaction(readTx);
 
-    return validateAndTransform(this.runtime, nonReactiveTx, this.link);
+    const value = validateAndTransform(this.runtime, nonReactiveTx, this.link);
+    // CFC: sample() still accumulates taint even though it's non-reactive
+    if (this.tx) {
+      const readSchema = this.schema;
+      if (readSchema && typeof readSchema === "object" && readSchema.ifc) {
+        recordTaintedRead(this.tx, labelFromSchemaIfc(readSchema.ifc));
+      }
+    }
+    return value;
   }
 
   /**
@@ -722,6 +734,9 @@ export class CellImpl<T extends StorableValue>
         transformedValue,
         this._frame?.cause,
       );
+
+      // TODO(cfc): Persist accumulated taint as StorageValue.labels on the written value.
+      // This requires extending the transaction write path to accept labels.
 
       // Register commit callback if provided
       if (onCommit) {

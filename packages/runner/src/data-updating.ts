@@ -32,6 +32,8 @@ import type {
 import { type Runtime } from "./runtime.ts";
 import { toURI } from "./uri-utils.ts";
 import { markReadAsPotentialWrite } from "./scheduler.ts";
+import { recordTaintedRead, checkTaintedWrite } from "./cfc/taint-tracking.ts";
+import { labelFromSchemaIfc } from "./cfc/labels.ts";
 
 const diffLogger = getLogger("normalizeAndDiff", {
   enabled: false,
@@ -80,6 +82,13 @@ export function diffAndUpdate(
     "diff",
     () => `[diffAndUpdate] changes: ${JSON.stringify(changes)}`,
   );
+  // CFC: check that accumulated taint (including reads during diff) allows this write
+  if (tx) {
+    const writeSchema = link.schema;
+    if (writeSchema && typeof writeSchema === "object" && writeSchema.ifc) {
+      checkTaintedWrite(tx, labelFromSchemaIfc(writeSchema.ifc));
+    }
+  }
   applyChangeSet(tx, changes);
   return changes.length > 0;
 }
@@ -268,6 +277,11 @@ export function normalizeAndDiff(
   let currentValue = precomputedCurrent === NO_PRECOMPUTED
     ? tx.readValueOrThrow(link, options)
     : precomputedCurrent;
+
+  // CFC: reads during diff accumulate taint
+  if (tx && link.schema && typeof link.schema === "object" && link.schema.ifc) {
+    recordTaintedRead(tx, labelFromSchemaIfc(link.schema.ifc));
+  }
 
   // A new alias can overwrite a previous alias. No-op if the same.
   if (isWriteRedirectLink(newValue)) {

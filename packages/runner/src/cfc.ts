@@ -8,6 +8,9 @@ import { TrustLattice } from "./cfc/trust-lattice.ts";
 import { SpacePolicyManager } from "./cfc/space-policy.ts";
 import type { ActionTaintContext } from "./cfc/action-context.ts";
 import { createActionContext } from "./cfc/action-context.ts";
+import type { Atom } from "./cfc/atoms.ts";
+import type { Label } from "./cfc/labels.ts";
+import { labelFromSchemaIfc, joinLabel, emptyLabel } from "./cfc/labels.ts";
 
 const logger = getLogger("cfc");
 
@@ -290,6 +293,68 @@ export class ContextualFlowControl {
       ifc: { classification: [this.lub(joined)] },
     };
     return restrictedSchema;
+  }
+
+  /**
+   * Get the full parameterized Label for a schema, including both
+   * flat classification strings and parameterized atoms.
+   * Falls back to lubSchema() for the classification component.
+   */
+  public labelForSchema(
+    schema: JSONSchema,
+    rootSchema: JSONSchema = schema,
+  ): Label {
+    // Start with the flat classification if any
+    const lubClassification = this.lubSchema(schema, rootSchema);
+    let label = emptyLabel();
+
+    // Add flat classification as atoms
+    if (lubClassification) {
+      label = joinLabel(label, labelFromSchemaIfc({ classification: [lubClassification] }));
+    }
+
+    // Collect parameterized atoms from ifc fields
+    const collected = this.collectParameterizedLabels(schema, rootSchema);
+    label = joinLabel(label, collected);
+
+    return label;
+  }
+
+  /**
+   * Walk the schema tree collecting parameterized atom labels.
+   */
+  private collectParameterizedLabels(
+    schema: JSONSchema,
+    rootSchema: JSONSchema,
+    seen: Set<string> = new Set(),
+  ): Label {
+    if (typeof schema === "boolean") return emptyLabel();
+
+    const key = JSON.stringify(schema);
+    if (seen.has(key)) return emptyLabel();
+    seen.add(key);
+
+    let label = emptyLabel();
+
+    if (schema.ifc) {
+      label = joinLabel(label, labelFromSchemaIfc(schema.ifc));
+    }
+
+    if (schema.properties && typeof schema.properties === "object") {
+      for (const value of Object.values(schema.properties)) {
+        label = joinLabel(label, this.collectParameterizedLabels(value as JSONSchema, rootSchema, seen));
+      }
+    }
+    if (schema.additionalProperties && typeof schema.additionalProperties === "object") {
+      label = joinLabel(label, this.collectParameterizedLabels(schema.additionalProperties as JSONSchema, rootSchema, seen));
+    } else if (schema.items && typeof schema.items === "object") {
+      label = joinLabel(label, this.collectParameterizedLabels(schema.items as JSONSchema, rootSchema, seen));
+    } else if (schema.$ref) {
+      const resolved = ContextualFlowControl.resolveSchemaRefsOrThrow(rootSchema, schema);
+      label = joinLabel(label, this.collectParameterizedLabels(resolved, rootSchema, seen));
+    }
+
+    return label;
   }
 
   /**

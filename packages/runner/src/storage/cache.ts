@@ -37,6 +37,8 @@ import { isBrowser } from "@commontools/utils/env";
 import { isObject, isRecord } from "@commontools/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { classificationAtom } from "../cfc/atoms.ts";
+import type { Atom } from "../cfc/atoms.ts";
 import { deepEqual } from "@commontools/utils/deep-equal";
 import { BaseMemoryAddress, MapSet } from "../traverse.ts";
 import type {
@@ -50,6 +52,7 @@ import type {
   IStorageTransaction,
   IStoreError,
   ITransaction,
+  Labels,
   OptStorageValue,
   PullError,
   PushError,
@@ -2227,12 +2230,27 @@ export const getChanges = (
   return changes;
 };
 
-// Given an Assert statement with labels, return a Schema with the ifc tags
+/** Migrate old flat classification labels to include parameterized atom format. */
+function migrateLabels(labels: Labels): Labels {
+  if (labels.confidentiality || labels.integrity) {
+    return labels; // Already in new format
+  }
+  if (!labels.classification || labels.classification.length === 0) {
+    return labels; // Nothing to migrate
+  }
+  // Convert each classification string to a Classification atom clause
+  const confidentiality: Atom[][] = labels.classification.map(
+    (level: string) => [classificationAtom(level)],
+  );
+  return { ...labels, confidentiality };
+}
+
+// Given an Assert statement with labels, return a SchemaContext with the ifc tags
 const _generateSchemaFromLabels = (
   change: Assert | Retract | Claim,
 ): JSONSchema | undefined => {
   if (isObject(change?.is) && "labels" in change.is) {
-    return { ifc: change.is.labels } as JSONSchema;
+    return { ifc: migrateLabels(change.is.labels as Labels) } as JSONSchema;
   }
   return undefined;
 };

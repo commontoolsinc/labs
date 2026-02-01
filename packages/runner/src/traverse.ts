@@ -24,6 +24,8 @@ import {
 } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { recordTaintedRead } from "./cfc/taint-tracking.ts";
+import { labelFromSchemaIfc } from "./cfc/labels.ts";
 import type { JSONObject, JSONSchema } from "./builder/types.ts";
 import {
   createDataCellURI,
@@ -1680,6 +1682,11 @@ export class SchemaObjectTraverser<V extends JSONValue>
       return undefined;
     }
     const schemaObj = resolved;
+
+    // CFC: accumulate taint from schema ifc annotations
+    if (schemaObj.ifc && this.tx) {
+      recordTaintedRead(this.tx, labelFromSchemaIfc(schemaObj.ifc as { classification?: string[] }));
+    }
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
