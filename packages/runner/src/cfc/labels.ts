@@ -116,6 +116,21 @@ export function labelFromStoredLabels(labels: Labels): Label {
   return { confidentiality, integrity };
 }
 
+/**
+ * Convert a runtime `Label` to the storage `Labels` type for persistence.
+ * Skips empty arrays to keep storage clean.
+ */
+export function toLabelStorage(label: Label): Labels {
+  const result: Labels = {};
+  if (label.confidentiality.length > 0) {
+    result.confidentiality = label.confidentiality;
+  }
+  if (label.integrity.atoms.length > 0) {
+    result.integrity = label.integrity.atoms;
+  }
+  return result;
+}
+
 export function labelFromSchemaIfc(ifc: {
   classification?: string[];
 }): Label {

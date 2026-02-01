@@ -618,6 +618,18 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
     address: IMemorySpaceAddress,
     value: StorableValue,
   ): void;
+
+  /**
+   * Writes a label document at the `label/` path prefix for the given address.
+   * Symmetric with `writeValueOrThrow` but targets the label path.
+   *
+   * @param address - Entity address (space + id) to write the label for.
+   * @param labels - The labels to persist.
+   */
+  writeLabelOrThrow(
+    address: IMemorySpaceAddress,
+    labels: Labels,
+  ): void;
 }
 
 export interface ITransactionReader {

@@ -88,8 +88,8 @@ import {
 } from "./storage/extended-storage-transaction.ts";
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { checkTaintedWrite, recordTaintedRead } from "./cfc/taint-tracking.ts";
-import { type Label, labelFromSchemaIfc, emptyLabel } from "./cfc/labels.ts";
+import { checkTaintedWrite, getTaintContext, recordTaintedRead } from "./cfc/taint-tracking.ts";
+import { type Label, joinLabel, labelFromSchemaIfc, emptyLabel, toLabelStorage } from "./cfc/labels.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { ensureNotRenderThread } from "@commontools/utils/env";
 ensureNotRenderThread();
@@ -735,8 +735,22 @@ export class CellImpl<T extends StorableValue>
         this._frame?.cause,
       );
 
-      // TODO(cfc): Persist accumulated taint as StorageValue.labels on the written value.
-      // This requires extending the transaction write path to accept labels.
+      // CFC: persist effective label (schema label ⊔ accumulated taint)
+      {
+        const schemaLabel = labelFromCellSchema(this.schema);
+        const taintCtx = getTaintContext(this.tx);
+        const effectiveLabel = taintCtx
+          ? joinLabel(schemaLabel, taintCtx.accumulatedTaint)
+          : schemaLabel;
+        const storage = toLabelStorage(effectiveLabel);
+        if (Object.keys(storage).length > 0) {
+          const writeLink = resolveLink(this.runtime, this.tx, this.link, "writeRedirect");
+          this.tx.writeLabelOrThrow(
+            { space: writeLink.space, id: writeLink.id, type: writeLink.type, path: [] },
+            storage,
+          );
+        }
+      }
 
       // Register commit callback if provided
       if (onCommit) {
@@ -884,6 +898,22 @@ export class CellImpl<T extends StorableValue>
       recursivelyAddIDIfNeeded([...array, ...value], this._frame),
       cause,
     );
+
+    // CFC: persist effective label (schema label ⊔ accumulated taint)
+    {
+      const schemaLabel = labelFromCellSchema(this.schema);
+      const taintCtx = getTaintContext(this.tx);
+      const effectiveLabel = taintCtx
+        ? joinLabel(schemaLabel, taintCtx.accumulatedTaint)
+        : schemaLabel;
+      const storage = toLabelStorage(effectiveLabel);
+      if (Object.keys(storage).length > 0) {
+        this.tx.writeLabelOrThrow(
+          { space: resolvedLink.space, id: resolvedLink.id, type: resolvedLink.type, path: [] },
+          storage,
+        );
+      }
+    }
   }
 
   remove(

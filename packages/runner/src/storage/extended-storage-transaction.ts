@@ -211,6 +211,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.writeOrThrow({ ...address, path: ["value", ...address.path] }, value);
   }
 
+  writeLabelOrThrow(
+    address: IMemorySpaceAddress,
+    labels: Labels,
+  ): void {
+    this.writeOrThrow({ ...address, path: ["label"] }, labels as any);
+  }
+
   abort(reason?: any): Result<any, InactiveTransactionError> {
     return this.tx.abort(reason);
   }
@@ -379,6 +386,13 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     value: StorableValue,
   ): void {
     return this.wrapped.writeValueOrThrow(address, value);
+  }
+
+  writeLabelOrThrow(
+    address: IMemorySpaceAddress,
+    labels: Labels,
+  ): void {
+    return this.wrapped.writeLabelOrThrow(address, labels);
   }
 
   abort(reason?: unknown): Result<Unit, InactiveTransactionError> {
