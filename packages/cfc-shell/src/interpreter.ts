@@ -32,6 +32,18 @@ import { Label, Labeled, labels } from "./labels.ts";
 import { expandGlob } from "./glob.ts";
 
 // ============================================================================
+// Loop Control Signals
+// ============================================================================
+
+class BreakSignal {
+  constructor(public readonly levels: number = 1) {}
+}
+
+class ContinueSignal {
+  constructor(public readonly levels: number = 1) {}
+}
+
+// ============================================================================
 // Main Entry Point
 // ============================================================================
 
@@ -244,6 +256,20 @@ async function executeSimpleCommand(
 
   // Expand command name
   const expandedName = await expandWord(node.name, session);
+
+  // Handle break/continue as special builtins (they affect loop control flow)
+  if (expandedName.value === "break") {
+    const levels = node.args.length > 0
+      ? parseInt((await expandWord(node.args[0], session)).value, 10) || 1
+      : 1;
+    throw new BreakSignal(levels);
+  }
+  if (expandedName.value === "continue") {
+    const levels = node.args.length > 0
+      ? parseInt((await expandWord(node.args[0], session)).value, 10) || 1
+      : 1;
+    throw new ContinueSignal(levels);
+  }
 
   // Expand arguments
   const expandedArgs: Labeled<string>[] = [];
@@ -586,7 +612,19 @@ async function executeFor(
     session.env.set(node.variable, word.value, word.label);
 
     // Execute body
-    lastResult = await executeProgram(node.body, session);
+    try {
+      lastResult = await executeProgram(node.body, session);
+    } catch (e) {
+      if (e instanceof BreakSignal) {
+        if (e.levels > 1) throw new BreakSignal(e.levels - 1);
+        break;
+      }
+      if (e instanceof ContinueSignal) {
+        if (e.levels > 1) throw new ContinueSignal(e.levels - 1);
+        continue;
+      }
+      throw e;
+    }
   }
 
   // Pop PC
@@ -624,7 +662,21 @@ async function executeWhile(
     }
 
     // Execute body
-    lastResult = await executeProgram(node.body, session);
+    try {
+      lastResult = await executeProgram(node.body, session);
+    } catch (e) {
+      session.popPC();
+      if (e instanceof BreakSignal) {
+        if (e.levels > 1) throw new BreakSignal(e.levels - 1);
+        break;
+      }
+      if (e instanceof ContinueSignal) {
+        if (e.levels > 1) throw new ContinueSignal(e.levels - 1);
+        iterations++;
+        continue;
+      }
+      throw e;
+    }
 
     // Pop PC after body
     session.popPC();
