@@ -702,14 +702,31 @@ async function executeSubshell(
   stdout: LabeledStream,
   stderr: LabeledStream
 ): Promise<CommandResult> {
+  // Apply redirections on the subshell itself
+  const { stdin: effectiveStdin, stdout: effectiveStdout, stderr: effectiveStderr, flushers } =
+    await applyRedirections(node.redirections, session, stdin, stdout, stderr);
+
   // Push environment scope
   session.env.pushScope();
 
-  // Execute body
-  const result = await executeProgram(node.body, session);
+  // Execute body with effective stdio
+  const result = await executeProgram(node.body, session, {
+    stdout: effectiveStdout,
+    stderr: effectiveStderr,
+  });
 
   // Pop environment scope
   session.env.popScope();
+
+  // Close redirected streams and flush redirections
+  if (node.redirections.length > 0) {
+    effectiveStdout.close();
+    effectiveStderr.close();
+
+    for (const flush of flushers) {
+      await flush();
+    }
+  }
 
   return result;
 }
