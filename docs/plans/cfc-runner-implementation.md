@@ -278,24 +278,24 @@ Wire the label algebra into the scheduler's action execution.
 
 ### 3.5 Tests for Taint Tracking
 
-- [ ] Integration test: recipe reads a secret-labeled cell, writes to an
+- [x] Integration test: recipe reads a secret-labeled cell, writes to an
   unclassified cell → **fails**
-- [ ] Integration test: recipe reads a secret-labeled cell, writes to a
+- [x] Integration test: recipe reads a secret-labeled cell, writes to a
   secret-labeled cell → **succeeds**
-- [ ] Integration test: recipe reads unclassified, writes to secret → succeeds
+- [x] Integration test: recipe reads unclassified, writes to secret → succeeds
   (write-up is fine)
 - [ ] Integration test: `cell.push()` on a secret array, pushing unclassified
   data → succeeds (write is to secret target)
 - [ ] Integration test: `cell.remove()` on a secret array, result written to
   unclassified cell → fails (internal read of secret array taints action)
 - [ ] Integration test: `sample()` of secret cell taints subsequent writes
-- [ ] Integration test: exchange rule declassifies taint, write succeeds
-- [ ] Integration test: multi-space action — reads from space A (confidential),
+- [x] Integration test: exchange rule declassifies taint, write succeeds
+- [x] Integration test: multi-space action — reads from space A (confidential),
   writes to space B (unclassified) → fails unless policy allows
-- [ ] Backwards compatibility test: recipes without any `ifc` annotations
+- [x] Backwards compatibility test: recipes without any `ifc` annotations
   behave exactly as today (empty labels, no restrictions)
 
-**File:** new `packages/runner/src/integration/cfc_enforcement.test.ts`
+**File:** `packages/runner/test/cfc-integration.test.ts`
 
 ---
 
@@ -410,7 +410,7 @@ backwards compatibility.
   space-policy.ts     — space policy cell integration
   action-context.ts   — ActionTaintContext
   ```
-- [ ] Move graph algorithms (Tarjan SCC, Kahn topological sort) into
+- [x] Move graph algorithms (Tarjan SCC, Kahn topological sort) into
   `trust-lattice.ts` — they serve the lattice, not general use
 - [x] `ContextualFlowControl` class becomes a facade over the new modules:
   - Keeps all existing public methods (`lubSchema`, `joinSchema`,
@@ -493,7 +493,7 @@ backwards compatibility.
   ```
 - [x] On violation, throw `CFCViolation` — this aborts the transaction
 - [x] Log violations via existing `getLogger("cfc")` at error level
-- [ ] Emit telemetry event for violations (via `RuntimeTelemetry`)
+- [x] Emit telemetry event for violations (via `RuntimeTelemetry`)
 
 ### 7.2 Debug Mode
 
@@ -505,7 +505,7 @@ backwards compatibility.
 ### 7.3 Tests
 
 - [x] Test: violation error contains correct structured data
-- [ ] Test: dry-run mode logs but doesn't throw
+- [x] Test: dry-run mode logs but doesn't throw
 - [ ] Test: debug mode produces expected log output
 
 ---
