@@ -5,3 +5,4 @@ export * from "./protocol.ts";
 export * from "./policy.ts";
 export * from "./agent-session.ts";
 export * from "./cli.ts";
+export * from "./llm-loop.ts";
