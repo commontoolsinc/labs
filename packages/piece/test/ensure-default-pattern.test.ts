@@ -97,6 +97,69 @@ describe("PiecesController.ensureDefaultPattern", () => {
       expect(initialValue?.get()).toBeUndefined();
     });
   });
+
+  describe("linkDefaultPattern idempotence", () => {
+    it("should succeed when linking the same pattern twice", async () => {
+      // Create a mock piece cell
+      const mockPieceCell = runtime.getImmutableCell(
+        manager.getSpace(),
+        { name: "MockDefaultPattern" },
+      );
+
+      // Link it as the default pattern
+      await manager.linkDefaultPattern(mockPieceCell);
+
+      // Link the same pattern again - should be idempotent (no error)
+      await manager.linkDefaultPattern(mockPieceCell);
+
+      // Verify the pattern is still linked correctly by checking space cell
+      const spaceCell = runtime.getCell(
+        manager.getSpace(),
+        manager.getSpace(),
+      );
+      const defaultPatternCell = spaceCell.key("defaultPattern");
+      const value = defaultPatternCell.get();
+      expect(value).toBeDefined();
+    });
+
+    it("should replace existing pattern when linking a different one", async () => {
+      // Create first mock piece cell
+      const mockPieceCell1 = runtime.getImmutableCell(
+        manager.getSpace(),
+        { name: "MockDefaultPattern1" },
+      );
+
+      // Create second mock piece cell
+      const mockPieceCell2 = runtime.getImmutableCell(
+        manager.getSpace(),
+        { name: "MockDefaultPattern2" },
+      );
+
+      // Link first pattern
+      await manager.linkDefaultPattern(mockPieceCell1);
+
+      // Capture first link by serializing
+      const spaceCell = runtime.getCell(
+        manager.getSpace(),
+        manager.getSpace(),
+      );
+      const defaultPatternCell = spaceCell.key("defaultPattern");
+      const firstValue = defaultPatternCell.get();
+      expect(firstValue).toBeDefined();
+      const firstJson = JSON.stringify(firstValue);
+
+      // Link second pattern (replacing first)
+      await manager.linkDefaultPattern(mockPieceCell2);
+
+      // Verify second pattern is now linked
+      const secondValue = defaultPatternCell.get();
+      expect(secondValue).toBeDefined();
+      const secondJson = JSON.stringify(secondValue);
+
+      // The links should be different (different patterns)
+      expect(firstJson).not.toEqual(secondJson);
+    });
+  });
 });
 
 describe("PiecesController.recreateDefaultPattern", () => {
