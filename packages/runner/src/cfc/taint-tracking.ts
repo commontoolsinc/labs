@@ -1,6 +1,16 @@
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+} from "../storage/interface.ts";
 import type { ActionTaintContext } from "./action-context.ts";
 import type { Label } from "./labels.ts";
+import {
+  emptyLabel,
+  joinLabel,
+  labelFromSchemaIfc,
+  labelFromStoredLabels,
+  toLabelStorage,
+} from "./labels.ts";
 import {
   accumulateTaint,
   CFCViolationError,
@@ -10,6 +20,7 @@ import type { ExchangeRule } from "./exchange-rules.ts";
 import { formatLabel } from "./violations.ts";
 import { getLogger } from "@commontools/utils/logger";
 import type { RuntimeTelemetry } from "../telemetry.ts";
+import type { JSONSchema } from "../builder/types.ts";
 
 const logger = getLogger("cfc");
 
@@ -117,6 +128,74 @@ export function checkTaintedWrite(
         throw e;
       }
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Convenience helpers — reduce duplication across cell.ts, data-updating.ts,
+// schema.ts, and traverse.ts.
+// ---------------------------------------------------------------------------
+
+/** Compute a CFC label from a JSON schema's `ifc` field, or empty. */
+export function labelFromSchema(
+  schema: JSONSchema | undefined,
+): Label {
+  if (schema && typeof schema === "object" && schema.ifc) {
+    return labelFromSchemaIfc(schema.ifc);
+  }
+  return emptyLabel();
+}
+
+/**
+ * Record a read from a schema-annotated cell. Merges schema ifc with stored
+ * labels (when CFC is active). No-op when tx has no taint context.
+ */
+export function recordSchemaRead(
+  tx: IExtendedStorageTransaction,
+  schema: JSONSchema | undefined,
+  address?: IMemorySpaceAddress,
+): void {
+  const entry = taintEntries.get(tx);
+  if (!entry) return;
+
+  const schemaLabel = (schema && typeof schema === "object" && schema.ifc)
+    ? labelFromSchemaIfc(schema.ifc)
+    : undefined;
+
+  const storedLabels = (schemaLabel || entry) && address
+    ? tx.readLabelOrUndefined(address)
+    : undefined;
+  const storedLabel = storedLabels
+    ? labelFromStoredLabels(storedLabels)
+    : undefined;
+
+  if (schemaLabel || storedLabel) {
+    const effectiveLabel = schemaLabel && storedLabel
+      ? joinLabel(schemaLabel, storedLabel)
+      : (schemaLabel ?? storedLabel)!;
+    recordTaintedRead(tx, effectiveLabel);
+  }
+}
+
+/**
+ * Check write is allowed, then persist the effective label (schema ⊔ taint)
+ * to the label/ path. No-op when tx has no taint context and schema has no ifc.
+ */
+export function checkWriteAndPersistLabel(
+  tx: IExtendedStorageTransaction,
+  schema: JSONSchema | undefined,
+  address: IMemorySpaceAddress,
+): void {
+  const writeLabel = labelFromSchema(schema);
+  checkTaintedWrite(tx, writeLabel);
+
+  const taintCtx = getTaintContext(tx);
+  const effectiveLabel = taintCtx
+    ? joinLabel(writeLabel, taintCtx.accumulatedTaint)
+    : writeLabel;
+  const storage = toLabelStorage(effectiveLabel);
+  if (Object.keys(storage).length > 0) {
+    tx.writeLabelOrThrow(address, storage);
   }
 }
 

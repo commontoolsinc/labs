@@ -24,12 +24,7 @@ import {
 } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { getTaintContext, recordTaintedRead } from "./cfc/taint-tracking.ts";
-import {
-  joinLabel,
-  labelFromSchemaIfc,
-  labelFromStoredLabels,
-} from "./cfc/labels.ts";
+import { recordSchemaRead } from "./cfc/taint-tracking.ts";
 import type { JSONObject, JSONSchema } from "./builder/types.ts";
 import {
   createDataCellURI,
@@ -1687,34 +1682,14 @@ export class SchemaObjectTraverser<V extends JSONValue>
     }
     const schemaObj = resolved;
 
-    // CFC: accumulate taint from merged schema + stored labels.
-    // When CFC is active (taint context on tx), always check stored labels
-    // even without schema ifc — a cell may have been tainted at runtime.
+    // CFC: accumulate taint from merged schema + stored labels
     if (this.tx) {
-      const cfcActive = !!getTaintContext(this.tx);
-      const schemaLabel = schemaObj.ifc
-        ? labelFromSchemaIfc(schemaObj.ifc as { classification?: string[] })
-        : undefined;
-      // Read stored labels when schema has ifc OR when CFC is active.
-      // Skip for non-CFC paths to avoid phantom reactive dependencies.
-      const storedLabels = (schemaLabel || cfcActive)
-        ? this.tx.readLabelOrUndefined({
-          space: doc.address.space,
-          id: doc.address.id,
-          type: doc.address.type,
-          path: [],
-        })
-        : undefined;
-      const storedLabel = storedLabels
-        ? labelFromStoredLabels(storedLabels)
-        : undefined;
-
-      if (schemaLabel || storedLabel) {
-        const effectiveLabel = schemaLabel && storedLabel
-          ? joinLabel(schemaLabel, storedLabel)
-          : (schemaLabel ?? storedLabel)!;
-        recordTaintedRead(this.tx, effectiveLabel);
-      }
+      recordSchemaRead(this.tx, schemaObj, {
+        space: doc.address.space,
+        id: doc.address.id,
+        type: doc.address.type,
+        path: [],
+      });
     }
 
     if (doc.value === undefined) {

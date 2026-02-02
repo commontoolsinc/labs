@@ -33,11 +33,9 @@ import { type Runtime } from "./runtime.ts";
 import { toURI } from "./uri-utils.ts";
 import { markReadAsPotentialWrite } from "./scheduler.ts";
 import {
-  checkTaintedWrite,
-  getTaintContext,
-  recordTaintedRead,
+  checkWriteAndPersistLabel,
+  recordSchemaRead,
 } from "./cfc/taint-tracking.ts";
-import { joinLabel, labelFromSchemaIfc, toLabelStorage } from "./cfc/labels.ts";
 
 const diffLogger = getLogger("normalizeAndDiff", {
   enabled: false,
@@ -86,33 +84,11 @@ export function diffAndUpdate(
     "diff",
     () => `[diffAndUpdate] changes: ${JSON.stringify(changes)}`,
   );
-  // CFC: check that accumulated taint (including reads during diff) allows this write
+  // CFC: check write + persist effective label
   if (tx) {
-    const writeSchema = link.schema;
-    if (writeSchema && typeof writeSchema === "object" && writeSchema.ifc) {
-      checkTaintedWrite(tx, labelFromSchemaIfc(writeSchema.ifc));
-    }
+    checkWriteAndPersistLabel(tx, link.schema, link);
   }
   applyChangeSet(tx, changes);
-
-  // CFC: persist effective label on written entities
-  if (
-    changes.length > 0 && link.schema && typeof link.schema === "object" &&
-    link.schema.ifc
-  ) {
-    const schemaLabel = labelFromSchemaIfc(link.schema.ifc);
-    const taintCtx = getTaintContext(tx);
-    const effectiveLabel = taintCtx
-      ? joinLabel(schemaLabel, taintCtx.accumulatedTaint)
-      : schemaLabel;
-    const storage = toLabelStorage(effectiveLabel);
-    if (Object.keys(storage).length > 0) {
-      tx.writeLabelOrThrow(
-        { space: link.space, id: link.id, type: link.type, path: [] },
-        storage,
-      );
-    }
-  }
 
   return changes.length > 0;
 }
@@ -303,8 +279,8 @@ export function normalizeAndDiff(
     : precomputedCurrent;
 
   // CFC: reads during diff accumulate taint
-  if (tx && link.schema && typeof link.schema === "object" && link.schema.ifc) {
-    recordTaintedRead(tx, labelFromSchemaIfc(link.schema.ifc));
+  if (tx) {
+    recordSchemaRead(tx, link.schema);
   }
 
   // A new alias can overwrite a previous alias. No-op if the same.

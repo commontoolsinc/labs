@@ -89,30 +89,14 @@ import {
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import {
-  checkTaintedWrite,
-  getTaintContext,
-  recordTaintedRead,
+  checkWriteAndPersistLabel,
+  recordSchemaRead,
 } from "./cfc/taint-tracking.ts";
-import {
-  emptyLabel,
-  joinLabel,
-  type Label,
-  labelFromSchemaIfc,
-  toLabelStorage,
-} from "./cfc/labels.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { ensureNotRenderThread } from "@commontools/utils/env";
 ensureNotRenderThread();
 
 const logger = getLogger("cell");
-
-/** Compute the CFC label for a cell's schema at its current path. */
-function labelFromCellSchema(schema: JSONSchema | undefined): Label {
-  if (schema && typeof schema === "object" && schema.ifc) {
-    return labelFromSchemaIfc(schema.ifc);
-  }
-  return emptyLabel();
-}
 
 type SinkOptions = {
   changeGroup?: ChangeGroup;
@@ -574,11 +558,8 @@ export class CellImpl<T extends StorableValue>
       options,
     );
     // CFC: accumulate taint from schema on get()
-    if (
-      this.tx && this.schema && typeof this.schema === "object" &&
-      this.schema.ifc
-    ) {
-      recordTaintedRead(this.tx, labelFromSchemaIfc(this.schema.ifc));
+    if (this.tx) {
+      recordSchemaRead(this.tx, this.schema);
     }
     const elapsed = logger.timeEnd("cell", "get")!;
     if (elapsed > 50) {
@@ -611,10 +592,7 @@ export class CellImpl<T extends StorableValue>
     const value = validateAndTransform(this.runtime, nonReactiveTx, this.link);
     // CFC: sample() still accumulates taint even though it's non-reactive
     if (this.tx) {
-      const readSchema = this.schema;
-      if (readSchema && typeof readSchema === "object" && readSchema.ifc) {
-        recordTaintedRead(this.tx, labelFromSchemaIfc(readSchema.ifc));
-      }
+      recordSchemaRead(this.tx, this.schema);
     }
     return value;
   }
@@ -733,47 +711,26 @@ export class CellImpl<T extends StorableValue>
       // Looks for arrays and makes sure each object gets its own doc.
       const transformedValue = recursivelyAddIDIfNeeded(newValue, this._frame);
 
-      // CFC: check write is allowed given accumulated taint
+      // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
+      const writeLink = resolveLink(
+        this.runtime,
+        this.tx,
+        this.link,
+        "writeRedirect",
+      );
+
+      // CFC: check write + persist effective label
       if (this.tx) {
-        const writeLabel = labelFromCellSchema(this.schema);
-        checkTaintedWrite(this.tx, writeLabel);
+        checkWriteAndPersistLabel(this.tx, this.schema, writeLink);
       }
 
-      // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
       diffAndUpdate(
         this.runtime,
         this.tx,
-        resolveLink(this.runtime, this.tx, this.link, "writeRedirect"),
+        writeLink,
         transformedValue,
         this._frame?.cause,
       );
-
-      // CFC: persist effective label (schema label ⊔ accumulated taint)
-      {
-        const schemaLabel = labelFromCellSchema(this.schema);
-        const taintCtx = getTaintContext(this.tx);
-        const effectiveLabel = taintCtx
-          ? joinLabel(schemaLabel, taintCtx.accumulatedTaint)
-          : schemaLabel;
-        const storage = toLabelStorage(effectiveLabel);
-        if (Object.keys(storage).length > 0) {
-          const writeLink = resolveLink(
-            this.runtime,
-            this.tx,
-            this.link,
-            "writeRedirect",
-          );
-          this.tx.writeLabelOrThrow(
-            {
-              space: writeLink.space,
-              id: writeLink.id,
-              type: writeLink.type,
-              path: [],
-            },
-            storage,
-          );
-        }
-      }
 
       // Register commit callback if provided
       if (onCommit) {
@@ -885,10 +842,9 @@ export class CellImpl<T extends StorableValue>
       );
     }
 
-    // CFC: check write is allowed given accumulated taint
+    // CFC: check write + persist effective label
     if (this.tx) {
-      const writeLabel = labelFromCellSchema(this.schema);
-      checkTaintedWrite(this.tx, writeLabel);
+      checkWriteAndPersistLabel(this.tx, this.schema, resolvedLink);
     }
 
     // If there is no array yet, create it first. We have to do this as a
@@ -921,27 +877,6 @@ export class CellImpl<T extends StorableValue>
       recursivelyAddIDIfNeeded([...array, ...value], this._frame),
       cause,
     );
-
-    // CFC: persist effective label (schema label ⊔ accumulated taint)
-    {
-      const schemaLabel = labelFromCellSchema(this.schema);
-      const taintCtx = getTaintContext(this.tx);
-      const effectiveLabel = taintCtx
-        ? joinLabel(schemaLabel, taintCtx.accumulatedTaint)
-        : schemaLabel;
-      const storage = toLabelStorage(effectiveLabel);
-      if (Object.keys(storage).length > 0) {
-        this.tx.writeLabelOrThrow(
-          {
-            space: resolvedLink.space,
-            id: resolvedLink.id,
-            type: resolvedLink.type,
-            path: [],
-          },
-          storage,
-        );
-      }
-    }
   }
 
   remove(

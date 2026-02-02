@@ -16,12 +16,7 @@ import {
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { toCell } from "./back-to-cell.ts";
-import { getTaintContext, recordTaintedRead } from "./cfc/taint-tracking.ts";
-import {
-  joinLabel,
-  labelFromSchemaIfc,
-  labelFromStoredLabels,
-} from "./cfc/labels.ts";
+import { recordSchemaRead } from "./cfc/taint-tracking.ts";
 import {
   combineSchema,
   IObjectCreator,
@@ -442,29 +437,10 @@ export function validateAndTransform(
   const address = { space, id, type, path: ["value", ...path] };
   const doc = { address, value: tx!.readValueOrThrow(ref) };
 
-  // CFC: record read taint from merged schema + stored labels.
-  // When CFC is active, always check stored labels even without schema ifc.
+  // CFC: record read taint from merged schema + stored labels
   if (tx) {
-    const cfcActive = !!getTaintContext(tx);
     const readSchema = ref.schema ?? link.schema;
-    const schemaLabel =
-      (readSchema && typeof readSchema === "object" && readSchema.ifc)
-        ? labelFromSchemaIfc(readSchema.ifc)
-        : undefined;
-    // Read stored labels when schema has ifc OR when CFC is active.
-    const storedLabels = (schemaLabel || cfcActive)
-      ? tx.readLabelOrUndefined(ref)
-      : undefined;
-    const storedLabel = storedLabels
-      ? labelFromStoredLabels(storedLabels)
-      : undefined;
-
-    if (schemaLabel || storedLabel) {
-      const effectiveLabel = schemaLabel && storedLabel
-        ? joinLabel(schemaLabel, storedLabel)
-        : (schemaLabel ?? storedLabel)!;
-      recordTaintedRead(tx, effectiveLabel);
-    }
+    recordSchemaRead(tx, readSchema, ref);
   }
 
   // If we have a ref with a schema, use that; otherwise, use the link's schema
