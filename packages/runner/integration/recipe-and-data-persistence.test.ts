@@ -153,10 +153,10 @@ async function phase1SaveRecipeAndData(
   console.log(`Recipe saved with ID: ${recipeId}`);
 
   // Save initial data for Phase 2's instance
+  const dataCell = getInputCell(ctx.runtime, space, INPUT_CELL_ID_PHASE_2);
   const initialData: InputData = { values: [1, 2, 3, 4, 5], label: "Numbers" };
   const tx = ctx.runtime.edit();
-  const dataCell = getInputCell(ctx.runtime, space, INPUT_CELL_ID_PHASE_2, tx);
-  dataCell.set(initialData);
+  dataCell.withTx(tx).set(initialData);
   await tx.commit();
   await ctx.runtime.storageManager.synced();
   console.log("Data saved:", initialData);
