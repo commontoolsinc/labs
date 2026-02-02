@@ -923,7 +923,7 @@ function followPointer(
     // Also insert the portions of target.path, so selector is relative to
     // new target doc. We do this even if the target doc is the same doc, since
     // we want the selector path to match.
-    selector = narrowSchema(doc.address.path, selector, targe.path, cfc);
+    selector = narrowSchema(doc.address.path, selector, target.path, cfc);
     // When traversing links, we combine the schema
     selector.schema = combineOptionalSchema(selector.schema, link.schema);
   }
