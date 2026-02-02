@@ -47,12 +47,18 @@ export { addCommonIDfromObjectID } from "./data-updating.ts";
 export { resolveLink } from "./link-resolution.ts";
 export {
   areLinksSame,
+  createLLMFriendlyLink,
   isCellLink as isLink,
   isWriteRedirectLink,
   parseLink,
   parseLinkOrThrow,
   parseLLMFriendlyLink,
 } from "./link-utils.ts";
+export {
+  type DiscoveredLink,
+  discoverLinksFrom,
+  traverseCellLinks,
+} from "./link-discovery.ts";
 export * from "./recipe-manager.ts";
 
 // Builder functionality (migrated from @commontools/builder package)
