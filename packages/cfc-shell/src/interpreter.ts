@@ -322,12 +322,20 @@ async function executeSimpleCommand(
   const result = await commandFn(argValues, ctx);
 
   // Join result label with argument labels and PC
-  const commandLabel = labels.joinAll([
+  let commandLabel = labels.joinAll([
     result.label,
     expandedName.label,
     ...expandedArgs.map((a) => a.label),
     session.pcLabel,
   ]);
+
+  // Fixed-output-format commands produce structurally safe output (e.g. numbers,
+  // fixed strings). The content cannot contain injection regardless of input,
+  // so we attest InjectionFree. InfluenceClean is preserved from the join —
+  // these are deterministic transforms, not LLMs.
+  if (result.fixedOutputFormat) {
+    commandLabel = labels.endorse(commandLabel, { kind: "InjectionFree" });
+  }
 
   // Close streams if we created them
   effectiveStdout.close();

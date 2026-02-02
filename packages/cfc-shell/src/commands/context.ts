@@ -183,6 +183,11 @@ export interface CommandContext {
 export interface CommandResult {
   exitCode: number;
   label: Label;  // label of the output produced
+  /** If true, the command's output format is structurally fixed (e.g. numbers,
+   *  fixed strings) and cannot contain injection regardless of input content.
+   *  The interpreter will attest InjectionFree on the output label.
+   *  InfluenceClean is preserved as-is (deterministic transform). */
+  fixedOutputFormat?: boolean;
 }
 
 /**
