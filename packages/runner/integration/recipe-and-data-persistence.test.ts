@@ -21,7 +21,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import type { Cell, JSONSchema, MemorySpace } from "@commontools/runner";
 import { env } from "@commontools/integration";
 
-const { API_URL } = env;
+const API_URL = new URL(env.API_URL);
 
 const TIMEOUT_MS = 180000; // 3 minutes timeout
 
@@ -91,13 +91,13 @@ interface TestContext {
   storageManager: ReturnType<typeof StorageManager.open>;
 }
 
-function createTestContext(identity: Identity, apiUrl: URL): TestContext {
+function createTestContext(identity: Identity): TestContext {
   const storageManager = StorageManager.open({
     as: identity,
-    address: new URL("/api/storage/memory", apiUrl),
+    address: new URL("/api/storage/memory", API_URL),
   });
   const runtime = new Runtime({
-    apiUrl,
+    apiUrl: API_URL,
     storageManager,
   });
   return { runtime, storageManager };
@@ -136,11 +136,10 @@ function getResultCell(
 async function phase1SaveRecipeAndData(
   identity: Identity,
   space: MemorySpace,
-  apiUrl: URL,
 ): Promise<string> {
   console.log("\n--- Phase 1: Save recipe and data ---");
 
-  const ctx = createTestContext(identity, apiUrl);
+  const ctx = createTestContext(identity);
 
   // Compile and save the recipe
   const compiled = await ctx.runtime.recipeManager.compileRecipe(recipeProgram);
@@ -172,12 +171,11 @@ async function phase1SaveRecipeAndData(
 async function phase2LoadAndVerify(
   identity: Identity,
   space: MemorySpace,
-  apiUrl: URL,
   recipeId: string,
 ): Promise<void> {
   console.log("\n--- Phase 2: Load recipe and data from storage ---");
 
-  const ctx = createTestContext(identity, apiUrl);
+  const ctx = createTestContext(identity);
   const tx = ctx.runtime.edit();
 
   // Load recipe from storage (fresh cache)
@@ -226,12 +224,11 @@ async function phase2LoadAndVerify(
 async function phase3ReactivityWithinSession(
   identity: Identity,
   space: MemorySpace,
-  apiUrl: URL,
   recipeId: string,
 ): Promise<void> {
   console.log("\n--- Phase 3: Reload, observe, update, verify reactivity ---");
 
-  const ctx = createTestContext(identity, apiUrl);
+  const ctx = createTestContext(identity);
   let tx = ctx.runtime.edit();
 
   // Load recipe from storage (fresh cache)
@@ -319,12 +316,11 @@ async function phase3ReactivityWithinSession(
 async function phase4CrossSessionReactivity(
   identity: Identity,
   space: MemorySpace,
-  apiUrl: URL,
   recipeId: string,
 ): Promise<void> {
   console.log("\n--- Phase 4: Cross-session reactivity ---");
 
-  const ctx = createTestContext(identity, apiUrl);
+  const ctx = createTestContext(identity);
   let tx = ctx.runtime.edit();
 
   // Load recipe from storage (needed so runtime knows about it)
@@ -405,12 +401,11 @@ async function testRecipeAndDataPersistence() {
     keyConfig,
   );
   const space = identity.did();
-  const apiUrl = new URL(API_URL);
 
-  const recipeId = await phase1SaveRecipeAndData(identity, space, apiUrl);
-  await phase2LoadAndVerify(identity, space, apiUrl, recipeId);
-  await phase3ReactivityWithinSession(identity, space, apiUrl, recipeId);
-  await phase4CrossSessionReactivity(identity, space, apiUrl, recipeId);
+  const recipeId = await phase1SaveRecipeAndData(identity, space);
+  await phase2LoadAndVerify(identity, space, recipeId);
+  await phase3ReactivityWithinSession(identity, space, recipeId);
+  await phase4CrossSessionReactivity(identity, space, recipeId);
 
   console.log("\n=== TEST PASSED ===");
 }
