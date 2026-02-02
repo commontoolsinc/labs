@@ -379,3 +379,95 @@ describe("CFC integration: schema ifc to label flow", () => {
     detachTaintContext(tx);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Integration: push/remove/sample scenarios
+// ---------------------------------------------------------------------------
+
+describe("CFC integration: push, remove, and sample taint scenarios", () => {
+  it("push to secret array succeeds (write target is secret)", () => {
+    const tx = mockTx();
+    const ctx = createActionContext({ userDid: "did:alice", space: "space:work" });
+    attachTaintContext(tx, ctx);
+
+    // Reading unclassified data, then pushing to a secret array
+    recordTaintedRead(tx, emptyLabel());
+
+    // Write target is the secret array — write-up is fine
+    expect(() => checkTaintedWrite(tx, labelFromClassification("secret"))).not.toThrow();
+
+    detachTaintContext(tx);
+  });
+
+  it("push to secret array after reading secret succeeds (same level)", () => {
+    const tx = mockTx();
+    const ctx = createActionContext({ userDid: "did:alice", space: "space:work" });
+    attachTaintContext(tx, ctx);
+
+    // Reading secret data, then pushing to a secret array — same level
+    recordTaintedRead(tx, labelFromClassification("secret"));
+    expect(() => checkTaintedWrite(tx, labelFromClassification("secret"))).not.toThrow();
+
+    detachTaintContext(tx);
+  });
+
+  it("remove from secret array then write to unclassified fails (get taints)", () => {
+    const tx = mockTx();
+    const ctx = createActionContext({ userDid: "did:alice", space: "space:work" });
+    attachTaintContext(tx, ctx);
+
+    // remove() calls get() on the secret array, which taints the action
+    recordTaintedRead(tx, labelFromClassification("secret"));
+
+    // Then set() writes the filtered array — if the target cell is
+    // unclassified, this is a write-down violation
+    expect(() => checkTaintedWrite(tx, emptyLabel())).toThrow(CFCViolationError);
+
+    detachTaintContext(tx);
+  });
+
+  it("remove from secret array then write back to secret succeeds", () => {
+    const tx = mockTx();
+    const ctx = createActionContext({ userDid: "did:alice", space: "space:work" });
+    attachTaintContext(tx, ctx);
+
+    // remove() reads the secret array
+    recordTaintedRead(tx, labelFromClassification("secret"));
+
+    // set() writes back to the same secret array — same level, OK
+    expect(() => checkTaintedWrite(tx, labelFromClassification("secret"))).not.toThrow();
+
+    detachTaintContext(tx);
+  });
+
+  it("sample() of secret cell taints subsequent writes", () => {
+    const tx = mockTx();
+    const ctx = createActionContext({ userDid: "did:alice", space: "space:work" });
+    attachTaintContext(tx, ctx);
+
+    // sample() accumulates taint just like get()
+    recordTaintedRead(tx, labelFromClassification("secret"));
+
+    // Write to unclassified after sampling secret → violation
+    expect(() => checkTaintedWrite(tx, emptyLabel())).toThrow(CFCViolationError);
+
+    // Write to secret after sampling secret → OK
+    expect(() => checkTaintedWrite(tx, labelFromClassification("secret"))).not.toThrow();
+
+    detachTaintContext(tx);
+  });
+
+  it("sample() of unclassified does not taint", () => {
+    const tx = mockTx();
+    const ctx = createActionContext({ userDid: "did:alice", space: "space:work" });
+    attachTaintContext(tx, ctx);
+
+    // sample() of unclassified — no taint
+    recordTaintedRead(tx, emptyLabel());
+
+    // Write to unclassified — fine
+    expect(() => checkTaintedWrite(tx, emptyLabel())).not.toThrow();
+
+    detachTaintContext(tx);
+  });
+});

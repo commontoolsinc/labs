@@ -269,8 +269,6 @@ Wire the label algebra into the scheduler's action execution.
   create reactive dependencies
 - [x] Option A: make `sample()` use the action's taint context directly
   (separate from reactivity tracking)
-- [ ] Option B: prohibit `sample()` during taint-tracked actions (breaking
-  change)
 - [x] Decision: **Option A** — `sample()` accumulates taint but does not
   create reactive subscriptions. The taint context is orthogonal to reactivity.
 
@@ -284,11 +282,11 @@ Wire the label algebra into the scheduler's action execution.
   secret-labeled cell → **succeeds**
 - [x] Integration test: recipe reads unclassified, writes to secret → succeeds
   (write-up is fine)
-- [ ] Integration test: `cell.push()` on a secret array, pushing unclassified
+- [x] Integration test: `cell.push()` on a secret array, pushing unclassified
   data → succeeds (write is to secret target)
-- [ ] Integration test: `cell.remove()` on a secret array, result written to
+- [x] Integration test: `cell.remove()` on a secret array, result written to
   unclassified cell → fails (internal read of secret array taints action)
-- [ ] Integration test: `sample()` of secret cell taints subsequent writes
+- [x] Integration test: `sample()` of secret cell taints subsequent writes
 - [x] Integration test: exchange rule declassifies taint, write succeeds
 - [x] Integration test: multi-space action — reads from space A (confidential),
   writes to space B (unclassified) → fails unless policy allows
@@ -384,9 +382,9 @@ module)
 - [x] Test: old-format `{ classification: ["secret"] }` loads as
   `{ confidentiality: [[Classification("secret")]] }`
 - [x] Test: schema label + stored label joined correctly (stored can only raise)
-- [ ] Test: label persistence across simulated runtime restart
+- [x] Test: label persistence across simulated runtime restart
 
-**File:** new `packages/runner/src/cfc/__tests__/storage.test.ts`
+**File:** `packages/runner/test/cfc-runtime.test.ts`
 
 ---
 

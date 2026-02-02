@@ -6,8 +6,17 @@ import { Runtime } from "../src/runtime.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { CFCViolationError } from "../src/cfc/action-context.ts";
+import {
+  createActionContext,
+  CFCViolationError,
+} from "../src/cfc/action-context.ts";
 import { RuntimeTelemetry } from "../src/telemetry.ts";
+import {
+  attachTaintContext,
+  recordTaintedRead,
+  checkTaintedWrite,
+} from "../src/cfc/taint-tracking.ts";
+import { labelFromSchemaIfc } from "../src/cfc/labels.ts";
 
 const signer = await Identity.fromPassphrase("cfc test operator");
 const space = signer.did();
@@ -264,5 +273,50 @@ describe("CFC Runtime: disabled mode", () => {
 
     const value = await resultCell.pull();
     expect(value).toMatchObject({ value: "secret-no-enforcement" });
+  });
+});
+
+describe("CFC Runtime: label persistence across restart", () => {
+  it("cell value and ifc enforcement survive runtime dispose and re-create", async () => {
+    // Use shared storage manager across two runtime lifecycles
+    const storageManager = StorageManager.emulate({ as: signer });
+
+    // --- First runtime lifecycle: write a cell with secret data ---
+    let runtime1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnabled: true,
+    });
+    let tx1 = runtime1.edit();
+
+    const cellId = "cfc-persist-test-1";
+    const cell1 = runtime1.getCell(space, cellId, secretSchema, tx1);
+    cell1.set({ value: "persistent-secret" });
+    tx1.commit();
+    await cell1.pull();
+    await runtime1.dispose();
+
+    // --- Second runtime lifecycle: read the cell, verify data persists ---
+    let runtime2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnabled: true,
+    });
+    let tx2 = runtime2.edit();
+
+    const cell2 = runtime2.getCell(space, cellId, secretSchema, tx2);
+    const value = await cell2.pull();
+    expect(value).toMatchObject({ value: "persistent-secret" });
+
+    // CFC enforcement still works — read the secret cell, then check
+    // that a taint context on this transaction would block write-down
+    const ctx = createActionContext({ userDid: "did:test", space });
+    attachTaintContext(tx2, ctx);
+    recordTaintedRead(tx2, labelFromSchemaIfc(secretSchema.ifc));
+    expect(() => checkTaintedWrite(tx2, labelFromSchemaIfc({ classification: [] }))).toThrow(CFCViolationError);
+
+    tx2.commit();
+    await runtime2.dispose();
+    await storageManager.close();
   });
 });
