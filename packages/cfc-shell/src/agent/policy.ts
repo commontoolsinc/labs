@@ -24,14 +24,14 @@ export interface AgentPolicy {
 
 /** Pre-built policies */
 export const policies = {
-  /** Main agent: can see injection-free data OR data transformed by a sub-agent */
+  /** Main agent: can only see injection-free data */
   main(): AgentPolicy {
     return {
       name: "main-agent",
-      requiredIntegrity: [{ kind: "InjectionFree" }, { kind: "TransformedBy", command: "*" }],
-      mode: "any",
+      requiredIntegrity: [{ kind: "InjectionFree" }],
+      mode: "all",
       canSpawnSubAgents: true,
-      description: "Can see injection-free data or sub-agent transformed results",
+      description: "Can only see data attested as injection-free",
     };
   },
 
@@ -71,12 +71,7 @@ export function checkVisibility(
   }
 
   const hasAtom = (required: Atom) =>
-    label.integrity.some((a) => {
-      if (a.kind !== required.kind) return false;
-      // TransformedBy with "*" matches any TransformedBy atom
-      if (a.kind === "TransformedBy" && (required as typeof a).command === "*") return true;
-      return a.kind === required.kind; // already true from above
-    });
+    label.integrity.some((a) => a.kind === required.kind);
 
   if (policy.mode === "all") {
     for (const required of policy.requiredIntegrity) {

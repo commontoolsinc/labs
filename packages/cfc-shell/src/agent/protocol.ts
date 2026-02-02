@@ -36,5 +36,6 @@ export type AgentEvent =
   | { type: "sub-agent-started"; agentId: string; policy: string }
   | { type: "sub-agent-ended"; agentId: string; exitLabel: Label }
   | { type: "policy-violation"; command: string; reason: string; label: Label }
-  | { type: "return-result"; agentId: string; path: string; label: Label }
+  | { type: "ballot-provided"; agentId: string; path: string; options: string[] }
+  | { type: "ballot-selected"; agentId: string; path: string; key: string }
   | { type: "label-info"; path: string; label: Label };

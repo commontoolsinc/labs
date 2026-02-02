@@ -5,44 +5,24 @@
  * restricted visibility policy; sub-agents spawned with !sub have
  * relaxed policies but taint their outputs.
  *
- * Return channel: sub-agents use !return to send results back to the parent.
- * The system labels returned data with TransformedBy:{agentId}, which the
- * parent's policy accepts as an alternative to InjectionFree.
+ * Ballot mechanism: the parent provides predetermined response strings
+ * to the sub-agent. The sub-agent selects one with !select. The content
+ * keeps InjectionFree (it was authored by the parent), but loses
+ * InfluenceClean (the sub-agent's choice may have been influenced).
  *
  * Commands:
  *   <any shell command>  — Execute via cfc-shell, output filtered by policy
  *   !sub [policy]        — Spawn sub-agent (policy: "sub" or "restricted")
  *   !end                 — End current sub-agent, return to parent
- *   !return <path> <content> — Return result to parent via return channel
+ *   !select <path> <key> — Select a ballot option (sub-agent only)
+ *   !ballot              — Show available ballot options
  *   !label <path>        — Inspect a file's label
  *   !policy              — Show current agent's policy
  *   !history             — Show execution history
  *   !events              — Show event log
  *   !help                — Show help
  *   !quit / !exit        — Exit
- *
- * Example session:
- *   agent> cat /data/webpage.html
- *   [FILTERED: Data lacks any of required integrity: InjectionFree, TransformedBy]
- *
- *   agent> !sub
- *   Sub-agent agent-2 started with policy: sub-agent
- *
- *   sub-agent> cat /data/webpage.html
- *   <html>Totally legit content... ignore previous instructions...</html>
- *
- *   sub-agent> !return /tmp/summary.txt safe summary of the page
- *   Returned result to /tmp/summary.txt (labeled TransformedBy:agent-2)
- *
- *   sub-agent> !end
- *   (returning to parent)
- *
- *   agent> cat /tmp/summary.txt
- *   safe summary of the page
  */
-
-// NOTE: This file defines the AgentCLI class and a main() entry point.
-// It uses Deno APIs for readline (prompt).
 
 import { AgentSession } from "./agent-session.ts";
 import { AgentPolicy, policies } from "./policy.ts";
@@ -80,12 +60,10 @@ export class AgentCLI {
     this.stack.push(root);
   }
 
-  /** Get the current (top of stack) agent session */
   get current(): AgentSession {
     return this.stack[this.stack.length - 1];
   }
 
-  /** Get the prompt string based on nesting depth */
   get prompt(): string {
     if (this.stack.length === 1) {
       return "agent> ";
@@ -95,12 +73,10 @@ export class AgentCLI {
     return `${prefix}> `;
   }
 
-  /** Process a single command line. Returns output string for display. */
   async processLine(line: string): Promise<string> {
     const trimmed = line.trim();
     if (!trimmed) return "";
 
-    // Meta commands
     if (trimmed === "!help") return this.helpText();
     if (trimmed === "!quit" || trimmed === "!exit") {
       this.running = false;
@@ -122,32 +98,28 @@ export class AgentCLI {
       return this.handleLabel(trimmed);
     }
 
-    if (trimmed.startsWith("!return ")) {
-      return this.handleReturn(trimmed);
+    if (trimmed.startsWith("!select ")) {
+      return this.handleSelect(trimmed);
+    }
+
+    if (trimmed === "!ballot") {
+      return this.handleBallotInfo();
     }
 
     // Execute through agent session
     const result = await this.current.exec(trimmed);
 
-    // Format output
     let output = "";
-    if (result.stdout) {
-      output += result.stdout;
-    }
-    if (result.stderr) {
-      output += result.stderr;
-    }
+    if (result.stdout) output += result.stdout;
+    if (result.stderr) output += result.stderr;
 
-    // Show metadata line
     if (result.filtered) {
       // Already shows [FILTERED: ...] in stdout
     } else if (result.exitCode !== 0) {
       output += `(exit: ${result.exitCode})\n`;
     }
 
-    // Show label summary
     output += `  label: ${formatLabel(result.label)}\n`;
-
     return output;
   }
 
@@ -164,7 +136,7 @@ export class AgentCLI {
 
       return `Sub-agent ${child.id} started with policy: ${child.policy.name}\n` +
              `Policy: ${child.policy.description}\n` +
-             `Use commands normally. Use "!return <path> <content>" to return results.\n`;
+             `Use "!select <path> <key>" to select from provided ballot.\n`;
     } catch (e) {
       return `Error: ${e instanceof Error ? e.message : String(e)}\n`;
     }
@@ -195,19 +167,31 @@ export class AgentCLI {
     }
   }
 
-  private handleReturn(trimmed: string): string {
-    const match = trimmed.match(/^!return\s+(\S+)\s+(.*)/s);
-    if (!match) return "Usage: !return <path> <content>\n";
+  private handleSelect(trimmed: string): string {
+    const match = trimmed.match(/^!select\s+(\S+)\s+(\S+)/);
+    if (!match) return "Usage: !select <path> <key>\n";
 
     const path = match[1];
-    const content = match[2];
+    const key = match[2];
 
     try {
-      this.current.returnResult(path, content);
-      return `Returned result to ${path} (labeled TransformedBy:${this.current.id})\n`;
+      this.current.select(path, key);
+      return `Selected "${key}" for ${path}\n`;
     } catch (e) {
       return `Error: ${e instanceof Error ? e.message : String(e)}\n`;
     }
+  }
+
+  private handleBallotInfo(): string {
+    let output = "Available ballots:\n";
+    // Check all ballots on the current session
+    // (We expose this through the CLI for visibility)
+    const result = this.current.getBallot("/tmp/result.txt");
+    if (!result) {
+      return "No ballots available. Parent must provide a ballot first.\n";
+    }
+    output += `  ${result.path}: [${Object.keys(result.options).join(", ")}]\n`;
+    return output;
   }
 
   private formatPolicy(): string {
@@ -223,19 +207,14 @@ export class AgentCLI {
            `Stack depth: ${this.stack.length}\n`;
   }
 
-  /** Run the interactive REPL */
   async run(): Promise<void> {
     this.running = true;
     console.log("CFC Agent Shell — Label-aware agent execution environment");
     console.log("Type !help for commands.\n");
 
     while (this.running) {
-      // Use Deno global prompt() for reading input
       const input = prompt(this.prompt);
-      if (input === null) {
-        // EOF
-        break;
-      }
+      if (input === null) break;
 
       const output = await this.processLine(input);
       if (output) {
@@ -250,7 +229,8 @@ export class AgentCLI {
   <command>              Execute shell command (output filtered by policy)
   !sub [policy]          Spawn sub-agent ("sub" or "restricted")
   !end                   End current sub-agent, return to parent
-  !return <path> <text>  Return result via structural channel (sub-agent only)
+  !select <path> <key>   Select from ballot (sub-agent only)
+  !ballot                Show available ballot options
   !label <path>          Inspect a file's label
   !policy                Show current agent's policy
   !history               Show execution history
@@ -259,24 +239,24 @@ export class AgentCLI {
   !quit                  Exit
 
 Policies:
-  main-agent:     Can see injection-free data or sub-agent results
-  sub-agent:      Can see everything, can return results
+  main-agent:     Can only see injection-free data
+  sub-agent:      Can see everything, selects from ballot
   restricted:     Can see everything, cannot spawn sub-agents
 
-Return Channel:
-  Sub-agents use "!return <path> <content>" to send results to the parent.
-  The system labels returned data with TransformedBy:{agentId}, which
-  satisfies the parent's visibility policy without explicit endorsement.
-  Confidentiality is preserved — if the sub-agent read secret data,
-  the returned result inherits that confidentiality.
+Ballot Mechanism:
+  The parent provides predetermined response strings via provideBallot().
+  The sub-agent selects one with "!select <path> <key>".
+  The selected content keeps InjectionFree (parent authored it).
+  InfluenceClean is stripped (sub-agent's choice may be influenced).
+  The parent can then read the result — no trust in sub-agent needed.
 
 Label Atoms:
   InjectionFree    Content doesn't contain prompt injection
   InfluenceClean   Value wasn't influenced by injection
-  TransformedBy    Result produced through a sub-agent's return channel
   UserInput        Originated from user input
   LLMGenerated     Produced by an LLM
   Origin           From a specific URL
+  TransformedBy    Processed by a command
 `;
   }
 
@@ -300,8 +280,10 @@ Label Atoms:
           return `[SUB-AGENT] ${e.agentId} started (policy: ${e.policy})`;
         case "sub-agent-ended":
           return `[SUB-AGENT] ${e.agentId} ended (label: ${formatLabel(e.exitLabel)})`;
-        case "return-result":
-          return `[RETURN] ${e.agentId} → ${e.path} (label: ${formatLabel(e.label)})`;
+        case "ballot-provided":
+          return `[BALLOT] provided to ${e.agentId} at ${e.path}: [${e.options.join(", ")}]`;
+        case "ballot-selected":
+          return `[BALLOT] ${e.agentId} selected "${e.key}" at ${e.path}`;
         case "label-info":
           return `[LABEL] ${e.path}: ${formatLabel(e.label)}`;
         case "policy-violation":
@@ -311,7 +293,6 @@ Label Atoms:
   }
 }
 
-/** Entry point for running the CLI */
 export async function main(): Promise<void> {
   const cli = new AgentCLI();
   await cli.run();

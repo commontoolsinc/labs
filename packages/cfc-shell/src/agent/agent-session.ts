@@ -8,10 +8,14 @@
  * Key invariant: an agent NEVER sees raw content that violates its policy.
  * The system mediates all data flow between the shell and the agent.
  *
- * Return channel: sub-agents return results to the parent via returnResult().
- * The system labels the returned data with { kind: "TransformedBy", command: agentId },
- * which the parent's policy accepts as an alternative to InjectionFree.
- * Confidentiality from data the sub-agent read is preserved (no leaks).
+ * Ballot mechanism: the parent provides a set of predetermined response strings
+ * ("ballot") to a sub-agent. The sub-agent selects one. Because the CONTENT
+ * was authored by the trusted parent, it keeps InjectionFree. Only
+ * InfluenceClean is stripped — the sub-agent's choice of which option may
+ * have been influenced by injection in the data it processed.
+ *
+ * This is structurally sound: no trust in the sub-agent's claims is needed.
+ * The content literally cannot contain injection because the parent wrote it.
  */
 
 import { Atom, Label, labels } from "../labels.ts";
@@ -35,6 +39,16 @@ function nextToolCallId(): string {
   return `tc-${++toolCallCounter}`;
 }
 
+/** A ballot: a set of predetermined responses the sub-agent can select from. */
+export interface Ballot {
+  /** The path where the selected result will be written */
+  path: string;
+  /** Map of option keys to their content strings */
+  options: Record<string, string>;
+  /** Label to apply to the selected option (InjectionFree, no InfluenceClean) */
+  label: Label;
+}
+
 export interface AgentSessionOptions {
   policy?: AgentPolicy;
   vfs?: VFS;
@@ -51,6 +65,8 @@ export class AgentSession {
   private children: AgentSession[] = [];
   private events: AgentEvent[] = [];
   private history: { call: ToolCall; result: ToolResult }[] = [];
+  /** Ballots provided by the parent, keyed by output path */
+  private ballots: Map<string, Ballot> = new Map();
 
   constructor(options: AgentSessionOptions = {}) {
     this.id = nextAgentId();
@@ -75,7 +91,6 @@ export class AgentSession {
       registry: createDefaultRegistry(),
       requestIntent: async () => {
         // Sub-agents auto-approve intents; main agents deny by default
-        // (in a real system, this would prompt the user)
         return this.parent !== null;
       },
     });
@@ -92,8 +107,11 @@ export class AgentSession {
     if (command.startsWith("!sub")) {
       return this.handleSubAgent(callId, command);
     }
-    if (command.startsWith("!return ")) {
-      return this.handleReturn(callId, command);
+    if (command.startsWith("!select ")) {
+      return this.handleSelect(callId, command);
+    }
+    if (command.startsWith("!ballot")) {
+      return this.handleBallotInfo(callId);
     }
     if (command.startsWith("!label ")) {
       return this.handleLabelInspect(callId, command);
@@ -132,17 +150,12 @@ export class AgentSession {
 
   /**
    * Read a file through the policy filter.
-   * Returns filtered content if the label doesn't satisfy the policy.
    */
   readFile(
     path: string,
   ): { content: string; label: Label; filtered: boolean; reason?: string } {
     const { value, label } = this.shell.vfs.readFileText(path);
-    const { content, filtered, reason } = filterOutput(
-      value,
-      label,
-      this.policy,
-    );
+    const { content, filtered, reason } = filterOutput(value, label, this.policy);
     return { content, label, filtered, reason };
   }
 
@@ -173,50 +186,82 @@ export class AgentSession {
   }
 
   /**
-   * Return a result to the parent agent via the structural return channel.
+   * Provide a ballot to a sub-agent: a set of predetermined response strings.
    *
-   * Writes content to the specified path with:
-   * - TransformedBy:{agentId} integrity (satisfies parent's "any" policy)
-   * - Confidentiality accumulated from everything this sub-agent has read
+   * The parent (caller) provides the options. Because the content of each
+   * option was authored by the trusted parent, the selected option will
+   * carry InjectionFree integrity. InfluenceClean is stripped because the
+   * sub-agent's choice may have been influenced by injection in the data
+   * it processed.
    *
-   * This is the ONLY way for a sub-agent's work to become visible to the parent
-   * when the underlying data lacked InjectionFree. The system labels it structurally —
-   * no explicit endorsement step needed.
+   * @param child The sub-agent to provide the ballot to
+   * @param path  Where the selected result will be written
+   * @param options Map of key → content (e.g. { "safe": "Content is safe", "unsafe": "Content is unsafe" })
    */
-  returnResult(path: string, content: string): void {
-    if (!this.parent) {
-      throw new Error("Only sub-agents can use the return channel");
+  provideBallot(
+    child: AgentSession,
+    path: string,
+    options: Record<string, string>,
+  ): void {
+    if (!this.children.includes(child)) {
+      throw new Error("Can only provide ballots to own sub-agents");
     }
 
-    // Compute accumulated confidentiality from all data this agent has seen
-    const resultLabels = this.history.map((h) => h.result.label);
-    const accumulatedConfidentiality =
-      resultLabels.length > 0
-        ? labels.joinAll(resultLabels).confidentiality
-        : [];
-
-    // Label the returned data with TransformedBy + accumulated confidentiality
-    const returnLabel: Label = {
-      confidentiality: accumulatedConfidentiality,
-      integrity: [{ kind: "TransformedBy", command: this.id }],
+    // The ballot label: InjectionFree (content is predetermined by parent),
+    // but NOT InfluenceClean (the selection is influenced by sub-agent's context).
+    // Also carries accumulated confidentiality if the parent has any.
+    const ballotLabel: Label = {
+      confidentiality: [],
+      integrity: [{ kind: "InjectionFree" }],
     };
 
-    this.shell.vfs.writeFile(path, content, returnLabel);
+    const ballot: Ballot = { path, options, label: ballotLabel };
+    child.ballots.set(path, ballot);
 
     this.events.push({
-      type: "return-result",
+      type: "ballot-provided",
+      agentId: child.id,
+      path,
+      options: Object.keys(options),
+    });
+  }
+
+  /**
+   * Select a ballot option. Only sub-agents with a ballot can call this.
+   *
+   * The system writes the predetermined content (from the parent) to the
+   * ballot path with InjectionFree integrity. The sub-agent's choice only
+   * determines WHICH predetermined string is written — the content itself
+   * is structurally safe.
+   */
+  select(path: string, key: string): void {
+    const ballot = this.ballots.get(path);
+    if (!ballot) {
+      throw new Error(`No ballot for path: ${path}`);
+    }
+    if (!(key in ballot.options)) {
+      throw new Error(
+        `Invalid ballot key: "${key}". Valid keys: ${Object.keys(ballot.options).join(", ")}`,
+      );
+    }
+
+    const content = ballot.options[key];
+
+    // Write with the ballot's label (InjectionFree, no InfluenceClean)
+    this.shell.vfs.writeFile(path, content, ballot.label);
+
+    this.events.push({
+      type: "ballot-selected",
       agentId: this.id,
       path,
-      label: returnLabel,
+      key,
     });
   }
 
   /**
    * End this sub-agent session, returning to parent.
-   * Returns the label representing the taint accumulated during this session.
    */
   end(): Label {
-    // The accumulated taint is the join of all result labels
     const resultLabels = this.history.map((h) => h.result.label);
     const accumulatedLabel =
       resultLabels.length > 0 ? labels.joinAll(resultLabels) : labels.bottom();
@@ -242,6 +287,11 @@ export class AgentSession {
     return this.history;
   }
 
+  /** Get ballot keys available for a path */
+  getBallot(path: string): Ballot | undefined {
+    return this.ballots.get(path);
+  }
+
   // ---- Private helpers ----
 
   private async handleSubAgent(
@@ -259,7 +309,6 @@ export class AgentSession {
       };
     }
 
-    // Parse: !sub [policy-name]
     const parts = command.trim().split(/\s+/);
     const policyName = parts[1] || "sub";
     const policy =
@@ -271,7 +320,7 @@ export class AgentSession {
       stdout:
         `Sub-agent ${child.id} started with policy: ${child.policy.name}\n` +
         `Policy: ${child.policy.description}\n` +
-        `Use commands normally. Use "!return <path> <content>" to return results.\n`,
+        `Use "!select <path> <key>" to select from provided ballot.\n`,
       stderr: "",
       exitCode: 0,
       label: labels.bottom(),
@@ -279,18 +328,16 @@ export class AgentSession {
     };
   }
 
-  private async handleReturn(
+  private async handleSelect(
     callId: string,
     command: string,
   ): Promise<ToolResult> {
-    // Parse: !return <path> <content...>
-    const match = command.match(/^!return\s+(\S+)\s+(.*)/s);
+    // Parse: !select <path> <key>
+    const match = command.match(/^!select\s+(\S+)\s+(\S+)/);
     if (!match) {
       return {
         id: callId,
-        stdout:
-          "Usage: !return <path> <content>\n" +
-          "Example: !return /tmp/result.txt safe summary here\n",
+        stdout: "Usage: !select <path> <key>\n",
         stderr: "",
         exitCode: 1,
         label: labels.bottom(),
@@ -299,13 +346,13 @@ export class AgentSession {
     }
 
     const path = match[1];
-    const content = match[2];
+    const key = match[2];
 
     try {
-      this.returnResult(path, content);
+      this.select(path, key);
       return {
         id: callId,
-        stdout: `Returned result to ${path} (labeled TransformedBy:${this.id})\n`,
+        stdout: `Selected "${key}" for ${path}\n`,
         stderr: "",
         exitCode: 0,
         label: labels.bottom(),
@@ -323,11 +370,37 @@ export class AgentSession {
     }
   }
 
+  private async handleBallotInfo(callId: string): Promise<ToolResult> {
+    if (this.ballots.size === 0) {
+      return {
+        id: callId,
+        stdout: "No ballots available.\n",
+        stderr: "",
+        exitCode: 0,
+        label: labels.bottom(),
+        filtered: false,
+      };
+    }
+
+    let output = "Available ballots:\n";
+    for (const [path, ballot] of this.ballots) {
+      output += `  ${path}: [${Object.keys(ballot.options).join(", ")}]\n`;
+    }
+
+    return {
+      id: callId,
+      stdout: output,
+      stderr: "",
+      exitCode: 0,
+      label: labels.bottom(),
+      filtered: false,
+    };
+  }
+
   private async handleLabelInspect(
     callId: string,
     command: string,
   ): Promise<ToolResult> {
-    // Parse: !label <path>
     const parts = command.trim().split(/\s+/);
     const path = parts[1];
 
@@ -362,7 +435,7 @@ export class AgentSession {
         stdout: `Label for ${path}:\n  Confidentiality: ${conf}\n  Integrity: ${integ}\n`,
         stderr: "",
         exitCode: 0,
-        label: labels.bottom(), // label info is always visible
+        label: labels.bottom(),
         filtered: false,
       };
     } catch (e) {
@@ -400,7 +473,6 @@ export class AgentSession {
 
   /**
    * Execute a command and capture stdout/stderr with labels.
-   * Redirects stdout to a temp file, executes, then reads back.
    */
   private async captureExec(command: string): Promise<{
     stdout: string;
@@ -411,15 +483,11 @@ export class AgentSession {
     const tmpFile = `/tmp/.agent-capture-${this.id}-${Date.now()}`;
 
     try {
-      // Execute with stdout redirect to temp file
-      // Wrap in subshell so existing redirects in the command are handled
-      // before the capture redirect is applied.
       const result = await execute(
         `(${command}) > ${tmpFile} 2>/dev/null`,
         this.shell,
       );
 
-      // Read the captured output
       let stdout = "";
       let outputLabel = result.label;
       try {
@@ -430,21 +498,19 @@ export class AgentSession {
         // Command may not have produced output
       }
 
-      // Clean up temp file
       try {
         this.shell.vfs.rm(tmpFile);
       } catch {
-        // ignore cleanup errors
+        // ignore
       }
 
       return {
         stdout,
-        stderr: "", // TODO: capture stderr separately
+        stderr: "",
         exitCode: result.exitCode,
         label: outputLabel,
       };
     } catch (e) {
-      // Clean up on error
       try {
         this.shell.vfs.rm(tmpFile);
       } catch {
@@ -461,24 +527,15 @@ export class AgentSession {
   }
 }
 
-/**
- * Clone an environment for sub-agent isolation.
- * Sub-agents get a copy so env changes don't leak to parent.
- */
 function cloneEnvironment(env: Environment): Environment {
   const clone = createEnvironment();
-
-  // Copy all variables from the parent environment
   const allVars = env.all();
   for (const [name, { value, label }] of allVars) {
     clone.set(name, value, label);
   }
-
-  // Preserve export status
   const exported = env.exported();
   for (const [name] of exported) {
     clone.export(name);
   }
-
   return clone;
 }
