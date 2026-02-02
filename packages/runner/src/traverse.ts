@@ -1929,9 +1929,29 @@ export class SchemaObjectTraverser<V extends JSONValue>
         !this.traverseCells &&
         SchemaObjectTraverser.asCellOrStream(curSelector.schema)
       ) {
-        // TODO(@ubik2): Removed the isPrimitiveCellLink(curDoc.value) check
-        // here, but I'm not sure that's correct -- it does remove some read
-        // reactivity.
+        // For inline objects (not links), we need to create a DataCellURI-style
+        // address with path: ["value"] so that getNextCellLink can generate a
+        // proper normalized link.
+        if (!isPrimitiveCellLink(item) && isRecord(item)) {
+          const elementLink: NormalizedFullLink = {
+            space: curDoc.address.space,
+            id: curDoc.address.id,
+            type: curDoc.address.type,
+            path: curDoc.address.path.slice(
+              curDoc.address.path[0] === "value" ? 1 : 0,
+            ),
+            schema: curSelector.schema,
+          };
+          curDoc = {
+            ...curDoc,
+            address: {
+              ...curDoc.address,
+              id: createDataCellURI(curDoc.value, elementLink),
+              path: ["value"],
+            },
+          };
+          curSelector.path = curDoc.address.path;
+        }
         // For my cell link, lastRedirDoc currently points to the last redirect
         // target, but we want cell properties to be based on the link value at
         // that location, so we effectively follow one more link if available.
