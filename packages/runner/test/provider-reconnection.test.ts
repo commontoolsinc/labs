@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { JSONSchema } from "commontools";
 import { Identity } from "@commontools/identity";
-import { Provider } from "../src/storage/cache.ts";
 import * as Memory from "@commontools/memory";
 import * as Consumer from "@commontools/memory/consumer";
-import type { SchemaContext, URI } from "@commontools/memory/interface";
+import type { URI } from "@commontools/memory/interface";
+import type { BaseMemoryAddress } from "@commontools/runner/traverse";
+import { Provider } from "../src/storage/cache.ts";
 import * as Subscription from "../src/storage/subscription.ts";
-import { BaseMemoryAddress } from "@commontools/runner/traverse";
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -38,20 +39,17 @@ describe("Provider Reconnection", () => {
 
   describe("reestablishSubscriptions", () => {
     it("should re-issue pull for all tracked subscriptions", async () => {
-      const schema1: SchemaContext = {
-        schema: { type: "object", properties: { name: { type: "string" } } },
-        rootSchema: {
-          type: "object",
-          properties: { name: { type: "string" } },
-        },
+      const schema1: JSONSchema = {
+        type: "object",
+        properties: { name: { type: "string" } },
       };
-      const selector1 = { path: [], schemaContext: schema1 };
+      const selector1 = { path: [], schema: schema1 };
 
-      const schema2: SchemaContext = {
-        schema: { type: "object", properties: { age: { type: "number" } } },
-        rootSchema: { type: "object", properties: { age: { type: "number" } } },
+      const schema2: JSONSchema = {
+        type: "object",
+        properties: { age: { type: "number" } },
       };
-      const selector2 = { path: [], schemaContext: schema2 };
+      const selector2 = { path: [], schema: schema2 };
 
       const uri1: URI = "of:user-1";
       const uri2: URI = "of:user-2";
@@ -105,16 +103,10 @@ describe("Provider Reconnection", () => {
     });
 
     it("should handle pull failures gracefully", async () => {
-      const schema: SchemaContext = {
-        schema: { type: "object" },
-        rootSchema: { type: "object" },
-      };
+      const schema: JSONSchema = { type: "object" };
 
-      await provider.sync("of:good-entity", {
-        path: [],
-        schemaContext: schema,
-      });
-      await provider.sync("of:bad-entity", { path: [], schemaContext: schema });
+      await provider.sync("of:good-entity", { path: [], schema });
+      await provider.sync("of:bad-entity", { path: [], schema });
 
       // Make pull fail
       const _originalPull = provider.workspace.pull.bind(provider.workspace);

@@ -158,11 +158,7 @@ export function resolveLink(
           let { schema, ...restLink } = nextLink;
           if (schema !== undefined && remainingPath.length > 0) {
             const cfc = new ContextualFlowControl();
-            schema = cfc.getSchemaAtPath(
-              schema,
-              remainingPath,
-              nextLink.rootSchema,
-            );
+            schema = cfc.getSchemaAtPath(schema, remainingPath);
           }
           nextLink = {
             ...restLink,
@@ -180,7 +176,6 @@ export function resolveLink(
         link = {
           ...nextLink,
           schema: link.schema,
-          rootSchema: link.rootSchema,
         };
       } else {
         link = nextLink;

@@ -103,15 +103,16 @@ function normalizeInputSchema(schemaLike: unknown): JSONSchema {
  */
 function getCellSchema(
   cell: Cell<unknown>,
-): { schema?: JSONSchema; rootSchema?: JSONSchema } | undefined {
+): JSONSchema | undefined {
   // Extract schema from cell, including from resultSchema of associated pattern
-  const { schema, rootSchema } = cell.asSchemaFromLinks()
-    .getAsNormalizedFullLink();
+  const { schema } = cell.asSchemaFromLinks().getAsNormalizedFullLink();
 
-  if (schema !== undefined) return { schema, rootSchema };
+  if (schema !== undefined) {
+    return schema;
+  }
 
   // Fall back to minimal schema based on current value
-  return { schema: buildMinimalSchemaFromValue(cell) };
+  return buildMinimalSchemaFromValue(cell);
 }
 
 function buildMinimalSchemaFromValue(piece: Cell<any>): JSONSchema | undefined {
@@ -270,7 +271,6 @@ function simplifySchemaForContext(
  *
  * @param value - The value to traverse and serialize
  * @param schema - The schema for the value
- * @param rootSchema - The root schema for reference resolution
  * @param seen - Set of already-visited values (for cycle detection)
  * @param contextSpace - The current execution space (for cross-space link encoding)
  * @returns The serialized value
@@ -278,7 +278,6 @@ function simplifySchemaForContext(
 function traverseAndSerialize(
   value: unknown,
   schema: JSONSchema | undefined,
-  rootSchema: JSONSchema | undefined = schema,
   seen: Set<unknown> = new Set(),
   contextSpace?: MemorySpace,
 ): unknown {
@@ -301,7 +300,6 @@ function traverseAndSerialize(
       return traverseAndSerialize(
         value.get(),
         schema,
-        rootSchema,
         seen,
         contextSpace,
       );
@@ -318,7 +316,6 @@ function traverseAndSerialize(
       return traverseAndSerialize(
         getCellOrThrow(value),
         schema,
-        rootSchema,
         seen,
         contextSpace,
       );
@@ -335,12 +332,11 @@ function traverseAndSerialize(
   if (Array.isArray(value)) {
     return value.map((v, index) => {
       const linkSchema = schema !== undefined
-        ? cfc.schemaAtPath(schema, [index.toString()], rootSchema)
+        ? cfc.schemaAtPath(schema, [index.toString()])
         : undefined;
       let result = traverseAndSerialize(
         v,
         linkSchema,
-        rootSchema,
         seen,
         contextSpace,
       );
@@ -370,10 +366,7 @@ function traverseAndSerialize(
           key,
           traverseAndSerialize(
             value,
-            schema !== undefined
-              ? cfc.schemaAtPath(schema, [key], rootSchema)
-              : undefined,
-            rootSchema,
+            schema !== undefined ? cfc.schemaAtPath(schema, [key]) : undefined,
             seen,
             contextSpace,
           ),
@@ -925,18 +918,9 @@ function buildAvailableCellsDocumentation(
 
         let entry = `## ${name} (${path})\n`;
 
-        if (schemaInfo?.schema) {
-          // Convert schema to TypeScript-like string for readability
-          const defs = (schemaInfo.schema as Record<string, unknown>).$defs as
-            | Record<string, JSONSchema>
-            | undefined;
-          let schemaStr = schemaToTypeString(schemaInfo.schema, { defs });
+        if (schemaInfo !== undefined) {
+          const schemaStr = getSchemaTypeString(schemaInfo);
 
-          const MAX_SCHEMA_LENGTH = 1000;
-          if (schemaStr.length > MAX_SCHEMA_LENGTH) {
-            schemaStr = schemaStr.substring(0, MAX_SCHEMA_LENGTH) +
-              "\n  // ... truncated";
-          }
           entry += `- Schema: \`\`\`typescript\n${schemaStr}\n\`\`\`\n`;
         }
 
@@ -944,8 +928,7 @@ function buildAvailableCellsDocumentation(
           const value = resolvedCell.get();
           const serialized = traverseAndSerialize(
             value,
-            schemaInfo?.schema,
-            schemaInfo?.rootSchema,
+            schemaInfo,
             new Set(),
             space,
           );
@@ -1001,18 +984,8 @@ function buildAvailableCellsDocumentation(
       let entry = `## ${pinnedCell.name} (${pinnedCell.path})\n`;
 
       // Add schema if available
-      if (schemaInfo?.schema) {
-        // Convert schema to TypeScript-like string for readability
-        const defs = (schemaInfo.schema as Record<string, unknown>).$defs as
-          | Record<string, JSONSchema>
-          | undefined;
-        let schemaStr = schemaToTypeString(schemaInfo.schema, { defs });
-
-        const MAX_SCHEMA_LENGTH = 1000;
-        if (schemaStr.length > MAX_SCHEMA_LENGTH) {
-          schemaStr = schemaStr.substring(0, MAX_SCHEMA_LENGTH) +
-            "\n  // ... truncated";
-        }
+      if (schemaInfo !== undefined) {
+        const schemaStr = getSchemaTypeString(schemaInfo);
         entry += `- Schema: \`\`\`typescript\n${schemaStr}\n\`\`\`\n`;
       }
 
@@ -1021,8 +994,7 @@ function buildAvailableCellsDocumentation(
         const value = resolvedCell.get();
         const serialized = traverseAndSerialize(
           value,
-          schemaInfo?.schema,
-          schemaInfo?.rootSchema,
+          schemaInfo,
           new Set(),
           space,
         );
@@ -1527,13 +1499,12 @@ function handleRead(
 ): { type: string; value: unknown } {
   let cell = resolved.cellRef;
   if (!cell.schema) {
-    cell = cell.asSchema(getCellSchema(cell)?.schema);
+    cell = cell.asSchema(getCellSchema(cell));
   }
 
   const schema = cell.schema;
   const serialized = traverseAndSerialize(
     cell.get(),
-    schema,
     schema,
     new Set(),
     space,
@@ -1690,12 +1661,11 @@ async function handleInvoke(
         "@resultLocation": resultLink,
         result: traverseAndSerialize(
           result.get(),
-          resultSchema?.schema,
-          resultSchema?.rootSchema,
+          resultSchema,
           new Set(),
           space,
         ),
-        schema: resultSchema?.schema,
+        schema: resultSchema,
       },
     };
   }
@@ -1712,12 +1682,11 @@ async function handleInvoke(
           "@resultLocation": resultLink,
           result: traverseAndSerialize(
             resultValue,
-            resultSchema?.schema,
-            resultSchema?.rootSchema,
+            resultSchema,
             new Set(),
             space,
           ),
-          schema: resultSchema?.schema,
+          schema: resultSchema,
         },
       };
     }
@@ -2325,4 +2294,21 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
         pending.withTx(tx).set(false);
       });
     });
+}
+
+function getSchemaTypeString(schema: JSONSchema): string {
+  let defs;
+  if (isObject(schema)) {
+    // Convert schema to TypeScript-like string for readability
+    defs = (schema as Record<string, unknown>).$defs as
+      | Record<string, JSONSchema>
+      | undefined;
+  }
+  let schemaStr = schemaToTypeString(schema, { defs });
+  const MAX_SCHEMA_LENGTH = 1000;
+  if (schemaStr.length > MAX_SCHEMA_LENGTH) {
+    schemaStr = schemaStr.substring(0, MAX_SCHEMA_LENGTH) +
+      "\n  // ... truncated";
+  }
+  return schemaStr;
 }

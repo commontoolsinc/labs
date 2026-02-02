@@ -441,18 +441,24 @@ describe("Cell", () => {
   });
 
   it("should translate circular references into links", () => {
+    const schema = {
+      $ref: "#/$defs/Root",
+      $defs: {
+        Root: {
+          type: "object",
+          properties: {
+            x: { type: "number" },
+            y: { type: "number" },
+            z: { $ref: "#/$defs/Root" },
+          },
+          required: ["x", "y", "z"],
+        },
+      },
+    } as const satisfies JSONSchema;
     const c = runtime.getCell(
       space,
       "should translate circular references into links",
-      {
-        type: "object",
-        properties: {
-          x: { type: "number" },
-          y: { type: "number" },
-          z: { $ref: "#" },
-        },
-        required: ["x", "y", "z"],
-      } as const satisfies JSONSchema,
+      schema,
       tx,
     );
     const data: any = { x: 1, y: 2 };
@@ -470,24 +476,30 @@ describe("Cell", () => {
   });
 
   it("should translate circular references into links across cells", () => {
+    const schema = {
+      $ref: "#/$defs/Root",
+      $defs: {
+        Root: {
+          type: "object",
+          properties: {
+            list: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: { parent: { $ref: "#/$defs/Root" } },
+                asCell: true,
+                required: ["parent"],
+              },
+            },
+          },
+          required: ["list"],
+        },
+      },
+    } as const satisfies JSONSchema;
     const c = runtime.getCell(
       space,
       "should translate circular references into links",
-      {
-        type: "object",
-        properties: {
-          list: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: { parent: { $ref: "#" } },
-              asCell: true,
-              required: ["parent"],
-            },
-          },
-        },
-        required: ["list"],
-      } as const satisfies JSONSchema,
+      schema,
       tx,
     );
     const inner: any = { [ID]: 1 }; // ID will turn this into a separate cell
@@ -1491,15 +1503,20 @@ describe("asCell with schema", () => {
     });
 
     const schema = {
-      type: "object",
-      properties: {
-        name: { type: "string" },
-        children: {
-          type: "array",
-          items: { $ref: "#" },
+      $ref: "#/$defs/Root",
+      $defs: {
+        Root: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            children: {
+              type: "array",
+              items: { $ref: "#/$defs/Root" },
+            },
+          },
+          required: ["name", "children"],
         },
       },
-      required: ["name", "children"],
     } as const satisfies JSONSchema;
 
     const value = c.asSchema(schema).get();
@@ -3479,10 +3496,15 @@ describe("toCell and toOpaqueRef hooks", () => {
 
     it("should handle circular references gracefully", () => {
       const schema = {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-          self: { $ref: "#" },
+        $ref: "#/$defs/Root",
+        $defs: {
+          Root: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              self: { $ref: "#/$defs/Root" },
+            },
+          },
         },
       } as const satisfies JSONSchema;
 

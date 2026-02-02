@@ -470,11 +470,9 @@ export function normalizeAndDiff(
     const currentArray = Array.isArray(currentValue) ? currentValue : undefined;
 
     for (let i = 0; i < newValue.length; i++) {
-      const childSchema = runtime.cfc.getSchemaAtPath(
-        link.schema,
-        [i.toString()],
-        link.rootSchema,
-      );
+      const childSchema = runtime.cfc.getSchemaAtPath(link.schema, [
+        i.toString(),
+      ]);
       const nestedChanges = normalizeAndDiff(
         runtime,
         tx,
@@ -482,7 +480,6 @@ export function normalizeAndDiff(
           ...link,
           path: [...link.path, i.toString()],
           schema: childSchema,
-          rootSchema: link.rootSchema,
         },
         newValue[i],
         context,
@@ -497,7 +494,7 @@ export function normalizeAndDiff(
     if (Array.isArray(currentValue) && currentValue.length != newValue.length) {
       // We need to add the schema here, since the array may be secret, so the length should be too
       const lub = (link.schema !== undefined)
-        ? runtime.cfc.lubSchema(link.schema, link.rootSchema)
+        ? runtime.cfc.lubSchema(link.schema)
         : undefined;
       // We have to cast these, since the type could be changed to another value
       const childSchema = (lub !== undefined)
@@ -546,11 +543,7 @@ export function normalizeAndDiff(
         return `[DIFF_RECURSE] Recursing into key='${key}' childPath=${childPath}`;
       });
 
-      const childSchema = runtime.cfc.getSchemaAtPath(
-        link.schema,
-        [key],
-        link.rootSchema,
-      );
+      const childSchema = runtime.cfc.getSchemaAtPath(link.schema, [key]);
       const nestedChanges = normalizeAndDiff(
         runtime,
         tx,

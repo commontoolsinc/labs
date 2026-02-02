@@ -7,12 +7,9 @@
 
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "../src/storage/cache.ts";
-import type {
-  SchemaContext,
-  StorableObject,
-  URI,
-} from "@commontools/memory/interface";
+import type { StorableObject, URI } from "@commontools/memory/interface";
 import { env } from "@commontools/integration";
+import type { JSONSchema } from "@commontools/api";
 const { API_URL } = env;
 
 const MEMORY_WS_URL = `${
@@ -42,25 +39,15 @@ Deno.test({
     console.log(`Connected to memory server`);
 
     // Define test schema
-    const testSchemaContext: SchemaContext = {
-      schema: {
-        type: "object",
-        properties: {
-          value: { type: "number" },
-          timestamp: { type: "string" },
-        },
-        required: ["value"],
+    const testSchema: JSONSchema = {
+      type: "object",
+      properties: {
+        value: { type: "number" },
+        timestamp: { type: "string" },
       },
-      rootSchema: {
-        type: "object",
-        properties: {
-          value: { type: "number" },
-          timestamp: { type: "string" },
-        },
-        required: ["value"],
-      },
+      required: ["value"],
     };
-    const testSelector = { path: [], schemaContext: testSchemaContext };
+    const testSelector = { path: [], schema: testSchema };
 
     interface UpdateValue extends StorableObject {
       value: number;

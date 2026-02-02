@@ -36,7 +36,7 @@ export function applyArgumentIfcToResult(
   if (argumentSchema !== undefined) {
     const cfc = new ContextualFlowControl();
     const joined = new Set<string>();
-    ContextualFlowControl.joinSchema(joined, argumentSchema, argumentSchema);
+    ContextualFlowControl.joinSchema(joined, argumentSchema);
     return (joined.size !== 0)
       ? cfc.schemaWithLub(resultSchema ?? true, cfc.lub(joined))
       : resultSchema;
@@ -53,13 +53,9 @@ export function applyInputIfcToOutput<T, R>(
   const cfc = new ContextualFlowControl();
   traverseValue(inputs, (item: unknown) => {
     if (isCell(item)) {
-      const { schema: inputSchema, rootSchema } = item.export();
+      const { schema: inputSchema } = item.export();
       if (inputSchema !== undefined) {
-        ContextualFlowControl.joinSchema(
-          collectedClassifications,
-          inputSchema,
-          rootSchema ?? inputSchema,
-        );
+        ContextualFlowControl.joinSchema(collectedClassifications, inputSchema);
       }
     }
   });
@@ -81,7 +77,7 @@ function attachCfcToOutputs<T, R>(
     const outputSchema = exported.schema ?? true;
     // we may have fields in the output schema, so incorporate those
     const joined = new Set<string>([lubClassification]);
-    ContextualFlowControl.joinSchema(joined, outputSchema, outputSchema);
+    ContextualFlowControl.joinSchema(joined, outputSchema);
     const ifc = (isObject(outputSchema) && outputSchema.ifc !== undefined)
       ? { ...outputSchema.ifc }
       : {};

@@ -32,6 +32,7 @@ import type {
   Reference,
   Result,
   Revision,
+  SchemaContextPathSelector,
   SchemaPathSelector,
   SchemaQuery,
   SchemaQueryArgs,
@@ -65,7 +66,6 @@ import { fromStringStream } from "./receipt.ts";
 import * as Settings from "./settings.ts";
 export * from "./interface.ts";
 import { toRevision } from "./commit.ts";
-import { SchemaNone } from "./schema.ts";
 import { getLogger } from "@commontools/utils/logger";
 
 const logger = getLogger("memory-consumer", {
@@ -385,11 +385,13 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
   private static asSelectSchema(queryArg: QueryArgs): SchemaQueryArgs {
     const selectSchema: Select<
       URI,
-      Select<MIME, Select<CauseString, SchemaPathSelector>>
+      Select<MIME, Select<CauseString, SchemaContextPathSelector>>
     > = {};
     for (const [of, attributes] of Object.entries(queryArg.select)) {
-      const entityEntry: Select<MIME, Select<CauseString, SchemaPathSelector>> =
-        {};
+      const entityEntry: Select<
+        MIME,
+        Select<CauseString, SchemaContextPathSelector>
+      > = {};
       selectSchema[of as URI | SelectAll] = entityEntry;
       let attrEntries = Object.entries(attributes);
       // A Selector may not have a "the", but SchemaSelector needs all three levels
@@ -397,7 +399,8 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
         attrEntries = [["_", {}]];
       }
       for (const [the, causes] of attrEntries) {
-        const attributeEntry: Select<CauseString, SchemaPathSelector> = {};
+        const attributeEntry: Select<CauseString, SchemaContextPathSelector> =
+          {};
         entityEntry[the as MIME | SelectAll] = attributeEntry;
         // A Selector may not have a cause, but SchemaSelector needs all three levels
         let causeEntries = Object.entries(causes);
@@ -405,9 +408,9 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
           causeEntries = [["_", {}]];
         }
         for (const [cause, selector] of causeEntries) {
-          const causeEntry: SchemaPathSelector = {
+          const causeEntry: SchemaContextPathSelector = {
             path: [],
-            schemaContext: SchemaNone,
+            schemaContext: { schema: false },
             ...selector.is ? { is: selector.is } : {},
           };
           attributeEntry[cause as CauseString | SelectAll] = causeEntry;
@@ -613,7 +616,10 @@ class QueryView<
   // If the fact was included from another fact, it will not have a schemaContext.
   getSchemaPathSelector(fact: Revision<Fact>): SchemaPathSelector | undefined {
     const factSelector = this.selector as SchemaSelector;
-    return getSelectorRevision(factSelector, fact.of, fact.the);
+    const value = getSelectorRevision(factSelector, fact.of, fact.the);
+    return value !== undefined
+      ? { path: value?.path, schema: value?.schemaContext.schema }
+      : undefined;
   }
 }
 

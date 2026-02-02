@@ -1,6 +1,6 @@
 import { assert, assertEquals, assertExists, assertMatch } from "@std/assert";
 import { refer } from "merkle-reference";
-import { JSONSchema, SchemaContext } from "@commontools/runner";
+import type { JSONSchema } from "@commontools/runner";
 import * as Changes from "../changes.ts";
 import * as Commit from "../commit.ts";
 import * as Fact from "../fact.ts";
@@ -8,8 +8,8 @@ import * as Selection from "../selection.ts";
 import * as Space from "../space.ts";
 import * as Transaction from "../transaction.ts";
 import { createTemporaryDirectory } from "../util.ts";
-import { Conflict } from "../interface.ts";
-import { SchemaSelector } from "../space.ts";
+import type { Conflict } from "../interface.ts";
+import type { SchemaSelector } from "../space.ts";
 import { alice, space } from "./principal.ts";
 
 const the = "application/json";
@@ -1190,21 +1190,10 @@ test("list single fact with schema query", DB, async (session) => {
   assert(write.ok);
   const commit = Commit.toRevision(write.ok);
 
-  const subscriptions: SchemaContext = {
-    schema: { "type": "number" },
-    rootSchema: {
-      "type": "object",
-      "properties": { "v": { "type": "number" } },
-    },
-  };
-
   const sampleSchemaSelector: SchemaSelector = {
     [doc]: {
       [the]: {
-        _: {
-          path: ["v"],
-          schemaContext: subscriptions,
-        },
+        _: { path: ["v"], schemaContext: { schema: { "type": "number" } } },
       },
     },
   };
@@ -1320,14 +1309,6 @@ test(
             path: ["address"],
             schemaContext: {
               schema: {
-                "type": "object",
-                "properties": {
-                  "name": { "type": "string" },
-                  "street": { "type": "string" },
-                  "city": { "type": "string" },
-                },
-              },
-              rootSchema: {
                 "type": "object",
                 "properties": {
                   "name": { "type": "string" },
@@ -1457,14 +1438,6 @@ test(
             path: ["address"],
             schemaContext: {
               schema: {
-                "type": "object",
-                "properties": {
-                  "street": { "type": "string" },
-                  "city": { "type": "string" },
-                },
-                "additionalProperties": false,
-              },
-              rootSchema: {
                 "type": "object",
                 "properties": {
                   "street": { "type": "string" },
@@ -1602,25 +1575,7 @@ test(
         [the]: {
           _: {
             path: ["emergency_contacts", "0", "first"],
-            schemaContext: {
-              schema: { "type": "string" },
-              rootSchema: {
-                "type": "object",
-                "properties": {
-                  "emergency-contacts": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "title": { "type": "string" },
-                        "first": { "type": "string" },
-                        "last": { "type": "string" },
-                      },
-                    },
-                  },
-                },
-              },
-            },
+            schemaContext: { schema: { "type": "string" } },
           },
         },
       },
@@ -1690,25 +1645,24 @@ test(
     assert(write2.ok);
     const _c2 = Commit.toRevision(write2.ok);
 
-    const rootSchema: JSONSchema = {
-      "type": "object",
-      "properties": {
-        "name": { "type": "string" },
-        "left": { "$ref": "#" },
-        "right": { "$ref": "#" },
+    const schema: JSONSchema = {
+      "$ref": "#/$defs/Node",
+      "$defs": {
+        "Node": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "left": { "$ref": "#/$defs/Node" },
+            "right": { "$ref": "#/$defs/Node" },
+          },
+          "required": ["name"],
+        },
       },
-      "required": ["name"],
     };
     const schemaSelector: SchemaSelector = {
       [doc2]: {
         [the]: {
-          _: {
-            path: ["left"],
-            schemaContext: {
-              schema: rootSchema,
-              rootSchema: rootSchema,
-            },
-          },
+          _: { path: ["left"], schemaContext: { schema } },
         },
       },
     };
@@ -1776,7 +1730,7 @@ test(
     assert(write2.ok);
     const _c2 = Commit.toRevision(write2.ok);
 
-    const rootSchema: JSONSchema = {
+    const schema: JSONSchema = {
       "definitions": {
         "TreeNode": {
           "type": "object",
@@ -1793,13 +1747,7 @@ test(
     const schemaSelector: SchemaSelector = {
       [doc2]: {
         [the]: {
-          _: {
-            path: ["left"],
-            schemaContext: {
-              schema: rootSchema,
-              rootSchema: rootSchema,
-            },
-          },
+          _: { path: ["left"], schemaContext: { schema } },
         },
       },
     };
@@ -1905,7 +1853,6 @@ test(
                 },
                 "required": ["name", "street", "city"],
               },
-              rootSchema: {}, // not bothering with this spec
             },
           },
         },
@@ -1940,13 +1887,7 @@ test(
         selectSchema: {
           [doc]: {
             [the]: {
-              _: {
-                path: [],
-                schemaContext: {
-                  schema: {},
-                  rootSchema: {},
-                },
-              },
+              _: { path: [], schemaContext: { schema: {} } },
             },
           },
         },
@@ -2061,16 +2002,7 @@ test(
         [the]: {
           _: {
             path: [],
-            schemaContext: {
-              schema: {
-                "type": "object",
-                "properties": {},
-              },
-              rootSchema: {
-                "type": "object",
-                "properties": {},
-              },
-            },
+            schemaContext: { schema: { "type": "object", "properties": {} } },
           },
         },
       },
@@ -2105,13 +2037,7 @@ test(
         selectSchema: {
           [doc1]: {
             [the]: {
-              _: {
-                path: [],
-                schemaContext: {
-                  schema: {},
-                  rootSchema: {},
-                },
-              },
+              _: { path: [], schemaContext: { schema: {} } },
             },
           },
         },
@@ -2142,7 +2068,6 @@ test(
                 path: [],
                 schemaContext: {
                   schema: { type: "object", additionalProperties: true },
-                  rootSchema: { type: "object", additionalProperties: true },
                 },
               },
             },
@@ -2229,13 +2154,7 @@ test(
     const schemaSelector: SchemaSelector = {
       [doc3]: {
         [the]: {
-          _: {
-            path: [],
-            schemaContext: {
-              schema: pieceListSchema,
-              rootSchema: pieceListSchema,
-            },
-          },
+          _: { path: [], schemaContext: { schema: pieceListSchema } },
         },
       },
     };

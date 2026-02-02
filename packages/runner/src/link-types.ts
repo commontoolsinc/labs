@@ -26,7 +26,6 @@ export type NormalizedLink = {
   space?: MemorySpace;
   type?: string; // Default is "application/json"
   schema?: JSONSchema;
-  rootSchema?: JSONSchema;
   overwrite?: "redirect"; // "this" gets normalized away to undefined
 };
 
@@ -187,7 +186,6 @@ export function parseLinkPrimitive(
       ...(resolvedSpace && { space: resolvedSpace }),
       type: "application/json",
       ...(link.schema !== undefined && { schema: link.schema }),
-      ...(link.rootSchema !== undefined && { rootSchema: link.rootSchema }),
       ...(link.overwrite === "redirect" && { overwrite: "redirect" }),
     };
   } else if (isJSONCellLink(value)) {
@@ -228,7 +226,6 @@ export function parseLinkPrimitive(
       ...(base?.space && { space: base.space }),
       type: "application/json",
       ...(alias.schema !== undefined && { schema: alias.schema }),
-      ...(alias.rootSchema !== undefined && { rootSchema: alias.rootSchema }),
       overwrite: "redirect",
     };
   }

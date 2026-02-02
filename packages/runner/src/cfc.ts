@@ -170,13 +170,13 @@ export class ContextualFlowControl {
    *
    * @param joined set to which we will add any classification tags
    * @param schema the schema with tags
-   * @param rootSchema the root schema
+   * @param fullSchema the full schema with any $defs needed
    * @param cycleTracker used to avoid reference cycles
    */
   static joinSchema(
     joined: Set<string>,
     schema: JSONSchema,
-    rootSchema: JSONSchema,
+    fullSchema: JSONSchema = schema,
     cycleTracker: CycleTracker<string> = new CycleTracker<string>(true),
   ): Set<string> {
     if (typeof schema === "boolean") {
@@ -202,7 +202,7 @@ export class ContextualFlowControl {
         ContextualFlowControl.joinSchema(
           joined,
           value,
-          rootSchema,
+          fullSchema,
           cycleTracker,
         );
       }
@@ -214,26 +214,26 @@ export class ContextualFlowControl {
       ContextualFlowControl.joinSchema(
         joined,
         schema.additionalProperties,
-        rootSchema,
+        fullSchema,
         cycleTracker,
       );
     } else if (schema.items && typeof schema.items === "object") {
       ContextualFlowControl.joinSchema(
         joined,
         schema.items,
-        rootSchema,
+        fullSchema,
         cycleTracker,
       );
     } else if (schema.$ref) {
       // Follow the references
       const resolvedSchema = ContextualFlowControl.resolveSchemaRefsOrThrow(
-        rootSchema,
         schema,
+        fullSchema,
       );
       ContextualFlowControl.joinSchema(
         joined,
         resolvedSchema,
-        rootSchema,
+        fullSchema,
         cycleTracker,
       );
     }
@@ -243,13 +243,12 @@ export class ContextualFlowControl {
   // Get the least upper bound classification from the schema.
   public lubSchema(
     schema: JSONSchema,
-    rootSchema: JSONSchema = schema,
     extraClassifications?: Set<string>,
   ): string | undefined {
     const classifications = (extraClassifications !== undefined)
       ? new Set<string>(extraClassifications)
       : new Set<string>();
-    ContextualFlowControl.joinSchema(classifications, schema, rootSchema);
+    ContextualFlowControl.joinSchema(classifications, schema);
 
     return (classifications.size === 0) ? undefined : this.lub(classifications);
   }
@@ -347,16 +346,16 @@ export class ContextualFlowControl {
    * This doesn't currently handle $anchor tags or external documents
    * This will follow the $ref until the top level object is not a $ref.
    *
-   * @param rootSchema Top level document for the schema which will be used
-   *     to resolve the $ref.
    * @param schemaObj an object containing the $ref, which may have properties
    *     that override those in the object pointed to by the $ref.
+   * @param fullSchema Top level document for the schema which will be used
+   *     to resolve the $ref. This should have the $defs.
    * @returns an updated JSONSchema, with a schema that points to the
    *     $ref's final target or undefined if the $ref could not be resolved.
    */
   static resolveSchemaRefs(
-    rootSchema: JSONSchema,
     schemaObj: JSONSchemaObj,
+    fullSchema: JSONSchema = schemaObj,
   ): JSONSchema | undefined {
     // Track seen refs to avoid cycles
     const seenRefs = new Set<string>();
@@ -370,7 +369,7 @@ export class ContextualFlowControl {
       }
       seenRefs.add($ref);
       const resolved = ContextualFlowControl.resolveSchemaRef(
-        rootSchema,
+        fullSchema,
         $ref,
       );
       if (resolved === undefined) { // Non-existent ref
@@ -410,14 +409,14 @@ export class ContextualFlowControl {
    * If the schemaRef points to an object that is also a $ref, this will not
    * follow that link. Use resolveSchemaRefs for that behavior.
    *
-   * @param rootSchema Top level document for the schema which will be used
+   * @param fullSchema Top level document for the schema which will be used
    *     to resolve the $ref.
    * @param schemaRef the string value of the $ref
-   * @returns an updated SchemaContext, with a schema that points to the
+   * @returns an updated JSONSchema, with a schema that points to the
    *     $ref's target or undefined if the $ref could not be resolved.
    */
   static resolveSchemaRef(
-    rootSchema: JSONSchema,
+    fullSchema: JSONSchema,
     schemaRef: string,
   ): JSONSchema | undefined {
     // We only support schemaRefs that are URI fragments
@@ -437,33 +436,95 @@ export class ContextualFlowControl {
       );
       return undefined;
     }
-    let schemaCursor: unknown = rootSchema;
+    let schemaCursor: unknown = fullSchema;
     // start at 1, since the 0 element is "#"
     for (let i = 1; i < pathToDef.length; i++) {
       if (!isRecord(schemaCursor) || !(pathToDef[i] in schemaCursor)) {
         logger.warn(
           "cfc",
-          () => ["Unresolved $ref in schema: ", schemaRef, rootSchema],
+          () => ["Unresolved $ref in schema: ", schemaRef, fullSchema],
         );
         return undefined;
       }
       schemaCursor = schemaCursor[pathToDef[i]];
     }
+    // If our schema cursor is an object, carry the $defs in
+    if (typeof schemaCursor === "object") {
+      const schemaRefs = new Set<string>();
+      this.findRefs(schemaCursor as JSONSchema, schemaRefs);
+      // TODO(@ubik2): We could just carry in the $defs we need
+      if (schemaRefs.size > 0) {
+        schemaCursor = {
+          ...schemaCursor,
+          ...(isObject(fullSchema) && fullSchema.$defs &&
+            { $defs: fullSchema.$defs }),
+        };
+      }
+    }
     return schemaCursor as JSONSchema;
   }
 
+  /**
+   * Traverse a schema finding any $ref links.
+   *
+   * This does not scan the $defs, so a $ref that points to a $defs entry that
+   * then references another $defs entry would not have that second reference
+   * included.
+   *
+   * @param schema
+   * @param refSet
+   */
+  static findRefs(
+    schema: JSONSchema,
+    refSet: Set<string> = new Set<string>(),
+  ): void {
+    if (typeof schema === "boolean") {
+      return;
+    }
+    if (schema.$ref !== undefined) {
+      refSet.add(schema.$ref);
+    }
+    if (schema.type === "array") {
+      if (schema.items !== undefined) {
+        ContextualFlowControl.findRefs(schema.items, refSet);
+      }
+      if (schema.prefixItems != undefined) {
+        for (const item of schema.prefixItems) {
+          ContextualFlowControl.findRefs(item, refSet);
+        }
+      }
+    } else if (schema.type === "object") {
+      if (schema.additionalProperties !== undefined) {
+        ContextualFlowControl.findRefs(schema.additionalProperties, refSet);
+      }
+      if (schema.properties !== undefined) {
+        for (const [_key, propSchema] of Object.entries(schema.properties)) {
+          ContextualFlowControl.findRefs(propSchema, refSet);
+        }
+      }
+    }
+    const optSchemas = [
+      ...(schema.anyOf ? schema.anyOf : []),
+      ...(schema.oneOf ? schema.oneOf : []),
+      ...(schema.allOf ? schema.allOf : []),
+    ];
+    for (const optSchema of optSchemas) {
+      ContextualFlowControl.findRefs(optSchema, refSet);
+    }
+  }
+
   static resolveSchemaRefsOrThrow(
-    rootSchema: JSONSchema | undefined,
     schemaObj: JSONSchemaObj,
+    fullSchema: JSONSchema = schemaObj,
   ) {
-    if (!isObject(rootSchema)) {
-      // We'd need a rootSchema to make this work
+    if (!isObject(fullSchema)) {
+      // We'd need a fullSchema to make this work
       // We don't need to do real cycle detection, since the path is limited
-      throw new Error("Found $ref without rootSchema object");
+      throw new Error("Found $ref without fullSchema object");
     }
     const resolved = ContextualFlowControl.resolveSchemaRefs(
-      rootSchema,
       schemaObj,
+      fullSchema,
     );
     if (resolved === undefined) {
       throw new Error(`Failed to resolve $ref in ${JSON.stringify(schemaObj)}`);
@@ -476,18 +537,12 @@ export class ContextualFlowControl {
   getSchemaAtPath(
     schema: JSONSchema | undefined,
     path: string[],
-    rootSchema: JSONSchema | undefined = schema,
     extraClassifications?: Set<string>,
   ): JSONSchema | undefined {
     if (schema === undefined) {
       return undefined;
     }
-    const result = this.schemaAtPath(
-      schema,
-      path,
-      rootSchema,
-      extraClassifications,
-    );
+    const result = this.schemaAtPath(schema, path, extraClassifications);
     return result === false ? undefined : result === true ? {} : result;
   }
 
@@ -512,13 +567,38 @@ export class ContextualFlowControl {
    * an object with an empty properties map and no additional properties.
    * The JSON-Schema spec would default this to true, but we often want to
    * use it to exclude properties that we don't care about without failing.
+   * We also allow you to provide a special string value, so the caller can detect
+   * that this has happened.
+   *
+   * While we will handle $ref links as needed while getting to the schema,
+   * the returned object will retain those $ref links.
    */
   schemaAtPath(
     schema: JSONSchema,
     path: readonly string[],
-    rootSchema?: JSONSchema,
     extraClassifications?: Set<string>,
-    additionalPropertiesDefault = true,
+    defaultEmptyProperties: JSONSchema = true,
+    defaultMissingProperty: JSONSchema = true,
+  ): JSONSchema {
+    // Take defs from schema if available
+    const defs = isObject(schema) && schema.$defs ? schema.$defs : undefined;
+    return this.schemaAtPathInternal(
+      schema,
+      path,
+      defs,
+      extraClassifications,
+      defaultEmptyProperties,
+      defaultMissingProperty,
+    );
+  }
+
+  private schemaAtPathInternal(
+    schema: JSONSchema,
+    path: readonly string[],
+    defs: Record<string, JSONSchema> | undefined,
+    extraClassifications: Set<string> | undefined,
+    defaultEmptyProperties: JSONSchema,
+    defaultMissingProperty: JSONSchema,
   ): JSONSchema {
     const joined = (extraClassifications !== undefined)
       ? new Set<string>(extraClassifications)
@@ -533,21 +613,29 @@ export class ContextualFlowControl {
       if (isObject(cursor) && "$ref" in cursor) {
         // Follow the reference
         cursor = ContextualFlowControl.resolveSchemaRefsOrThrow(
-          rootSchema,
           cursor,
+          { $defs: defs },
         );
       }
       if (isObject(cursor) && ("anyOf" in cursor || "oneOf" in cursor)) {
         const subSchemas: JSONSchema[] = [];
         const subSchemaStrings: string[] = [];
-        for (const entry of cursor.anyOf!) {
-          const subSchema = this.schemaAtPath(
+        const options = (cursor.anyOf && cursor.oneOf)
+          ? [...cursor.anyOf, ...cursor.oneOf]
+          : cursor.anyOf ?? cursor.oneOf ?? [];
+        for (const entry of options) {
+          const optSchema = this.schemaAtPathInternal(
             entry,
             path.slice(index),
-            rootSchema,
+            defs,
             extraClassifications,
-            additionalPropertiesDefault,
+            defaultEmptyProperties,
+            defaultMissingProperty,
           );
+          if (typeof optSchema !== "boolean" && typeof optSchema !== "object") {
+            return optSchema;
+          }
+          const subSchema = optSchema as JSONSchema | boolean;
           if (subSchema === false) {
             continue;
           } else if (ContextualFlowControl.isTrueSchema(subSchema)) {
@@ -602,7 +690,11 @@ export class ContextualFlowControl {
         } else if (
           cursor.properties && Object.keys(cursor.properties).length === 0
         ) {
-          cursor = additionalPropertiesDefault;
+          // We'll often ignore, but validate in this case
+          cursor = defaultEmptyProperties;
+        } else if (cursor.properties) {
+          // We'll generally include these, but sometimes we don't
+          cursor = defaultMissingProperty;
         } else { // no additionalProperties field is the same as having one that is true
           cursor = true;
         }
@@ -622,14 +714,6 @@ export class ContextualFlowControl {
         return false;
       }
     }
-    // If the cursor is a $ref, get the target location
-    if (isObject(cursor) && "$ref" in cursor) {
-      // Follow the reference
-      cursor = ContextualFlowControl.resolveSchemaRefsOrThrow(
-        rootSchema,
-        cursor,
-      );
-    }
     if (
       isObject(cursor) && cursor.ifc !== undefined &&
       cursor.ifc?.classification !== undefined
@@ -638,22 +722,20 @@ export class ContextualFlowControl {
         joined.add(classification);
       }
     }
-    if (joined.size === 0) {
-      return cursor; // no need for classification tags
-    }
     if (typeof cursor === "boolean") {
       if (!cursor) {
         return false; // no need to attach tags -- we'll never match
+      } else if (joined.size === 0) {
+        return true; // no ifc tags -- can just return true
       }
       cursor = {}; // change to use the empty object schema, so we can attach ifc.
     }
     // If we've encountered any classification tags while walking down the schema, we need to add them to the returned object
-    const existingIfc = cursor.ifc ? cursor.ifc : {};
-    const ifc = {
-      ...existingIfc,
-      classification: [this.lub(joined)],
-    };
-    return { ...cursor, ifc: ifc };
+    const ifc = (joined.size !== 0)
+      ? { ...cursor.ifc, classification: [this.lub(joined)] }
+      : cursor.ifc;
+    // Merge any ifc and defs
+    return { ...cursor, ...(ifc && { ifc }), ...(defs && { $defs: defs }) };
   }
 
   private static sortedGraphNodes<T>(graph: Map<T, T[]>) {
@@ -692,7 +774,7 @@ export class ContextualFlowControl {
     }
     return isObject(schema) &&
       Object.keys(schema).every((k) =>
-        this.isInternalSchemaKey(k) || k === "default"
+        this.isInternalSchemaKey(k) || k === "default" || k === "$defs"
       );
   }
 
