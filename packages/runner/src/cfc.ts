@@ -743,6 +743,7 @@ export class ContextualFlowControl {
   /** Create an action taint context for the given principal and space. */
   createActionContext(options: { userDid: string; space: string; codeHash?: string }): ActionTaintContext {
     const policy = this.spacePolicies.getPolicy(options.space);
-    return createActionContext({ ...options, policy });
+    const clearance = this.spacePolicies.getClearance(options.userDid, options.space);
+    return createActionContext({ ...options, policy, clearance });
   }
 }

@@ -460,9 +460,9 @@ backwards compatibility.
 
 ### 6.2 Space-Aware Clearance
 
-- [ ] When opening a space, look up the user's role in that space's policy
-- [ ] Compute clearance: `User(self) ∧ Space(current) ∧ HasRole(self, space, role)`
-- [ ] Clearance determines the maximum label the user can read from that space
+- [x] When opening a space, look up the user's role in that space's policy
+- [x] Compute clearance: `User(self) ∧ Space(current) ∧ HasRole(self, space, role)`
+- [x] Clearance determines the maximum label the user can read from that space
 - [x] For now, default policy grants owner full access to their own space
 - [ ] Cross-space reads: clearance is the meet of the user's clearance in each
   space (conservative)
@@ -470,9 +470,9 @@ backwards compatibility.
 ### 6.3 Tests for Principal Wiring
 
 - [x] Test: action context created with correct principal from runtime DID
-- [ ] Test: space policy grants reader role, clearance computed correctly
-- [ ] Test: cross-space read with insufficient clearance → fails
-- [ ] Test: owner of space has full clearance
+- [x] Test: space policy grants reader role, clearance computed correctly
+- [x] Test: cross-space read with insufficient clearance → fails
+- [x] Test: owner of space has full clearance
 
 ---
 
@@ -504,7 +504,7 @@ backwards compatibility.
 
 - [x] Test: violation error contains correct structured data
 - [x] Test: dry-run mode logs but doesn't throw
-- [ ] Test: debug mode produces expected log output
+- [x] Test: debug mode produces expected log output
 
 ---
 

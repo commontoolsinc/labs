@@ -30,6 +30,9 @@ import {
 import { emptyConfidentiality } from "../src/cfc/confidentiality.ts";
 import type { ExchangeRule } from "../src/cfc/exchange-rules.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { checkClearance } from "../src/cfc/action-context.ts";
+import { SpacePolicyManager } from "../src/cfc/space-policy.ts";
+import { ContextualFlowControl } from "../src/cfc.ts";
 
 /**
  * Create a minimal mock transaction object that satisfies the WeakMap key
@@ -467,6 +470,159 @@ describe("CFC integration: push, remove, and sample taint scenarios", () => {
 
     // Write to unclassified — fine
     expect(() => checkTaintedWrite(tx, emptyLabel())).not.toThrow();
+
+    detachTaintContext(tx);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 6.2/6.3: Space-aware clearance
+// ---------------------------------------------------------------------------
+
+describe("CFC integration: space-aware clearance", () => {
+  it("space policy grants reader role, clearance computed correctly", () => {
+    const pm = new SpacePolicyManager();
+    pm.grantRole("space:work", "did:alice", "reader");
+
+    const clearance = pm.getClearance("did:alice", "space:work");
+
+    // Clearance should have User and Space confidentiality clauses
+    expect(clearance.confidentiality).toEqual([
+      [userAtom("did:alice")],
+      [spaceAtom("space:work")],
+    ]);
+
+    // Integrity should include HasRole atom
+    expect(clearance.integrity.atoms).toEqual([
+      hasRoleAtom("did:alice", "space:work", "reader"),
+    ]);
+  });
+
+  it("owner of space has full clearance with owner role", () => {
+    const pm = new SpacePolicyManager();
+    // No explicit role grant — owner is detected by did === space
+    const clearance = pm.getClearance("space:mine", "space:mine");
+
+    expect(clearance.confidentiality).toEqual([
+      [userAtom("space:mine")],
+      [spaceAtom("space:mine")],
+    ]);
+
+    // Owner gets implicit "owner" role
+    expect(clearance.integrity.atoms).toEqual([
+      hasRoleAtom("space:mine", "space:mine", "owner"),
+    ]);
+  });
+
+  it("user without role gets empty integrity in clearance", () => {
+    const pm = new SpacePolicyManager();
+    const clearance = pm.getClearance("did:bob", "space:work");
+
+    expect(clearance.confidentiality).toEqual([
+      [userAtom("did:bob")],
+      [spaceAtom("space:work")],
+    ]);
+    expect(clearance.integrity.atoms).toEqual([]);
+  });
+
+  it("cross-space read with insufficient clearance fails", () => {
+    // User has clearance for space:a but reads data labeled for space:b
+    const pm = new SpacePolicyManager();
+    pm.grantRole("space:a", "did:alice", "reader");
+    const clearance = pm.getClearance("did:alice", "space:a");
+
+    const ctx = createActionContext({
+      userDid: "did:alice",
+      space: "space:a",
+      clearance,
+    });
+
+    // Data labeled with space:b — not in alice's clearance for space:a
+    const crossSpaceLabel: Label = {
+      confidentiality: [[spaceAtom("space:b")]],
+      integrity: emptyIntegrity(),
+    };
+
+    expect(() => checkClearance(ctx, crossSpaceLabel)).toThrow(CFCViolationError);
+  });
+
+  it("same-space read within clearance succeeds", () => {
+    const pm = new SpacePolicyManager();
+    pm.grantRole("space:a", "did:alice", "reader");
+    const clearance = pm.getClearance("did:alice", "space:a");
+
+    const ctx = createActionContext({
+      userDid: "did:alice",
+      space: "space:a",
+      clearance,
+    });
+
+    // Data labeled with space:a — within alice's clearance
+    const sameSpaceLabel: Label = {
+      confidentiality: [[spaceAtom("space:a")]],
+      integrity: emptyIntegrity(),
+    };
+
+    expect(() => checkClearance(ctx, sameSpaceLabel)).not.toThrow();
+  });
+
+  it("ContextualFlowControl.createActionContext uses space policy clearance", () => {
+    const cfc = new ContextualFlowControl();
+    cfc.spacePolicies.grantRole("space:work", "did:alice", "editor");
+
+    const ctx = cfc.createActionContext({
+      userDid: "did:alice",
+      space: "space:work",
+    });
+
+    // Clearance should include the editor role in integrity
+    expect(ctx.clearance.integrity.atoms).toEqual([
+      hasRoleAtom("did:alice", "space:work", "editor"),
+    ]);
+  });
+
+  it("multiple roles combine in clearance integrity", () => {
+    const pm = new SpacePolicyManager();
+    pm.grantRole("space:work", "did:alice", "reader");
+    pm.grantRole("space:work", "did:alice", "editor");
+
+    const clearance = pm.getClearance("did:alice", "space:work");
+    expect(clearance.integrity.atoms.length).toBe(2);
+    expect(clearance.integrity.atoms).toContainEqual(
+      hasRoleAtom("did:alice", "space:work", "reader"),
+    );
+    expect(clearance.integrity.atoms).toContainEqual(
+      hasRoleAtom("did:alice", "space:work", "editor"),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 7.3: Debug mode logging
+// ---------------------------------------------------------------------------
+
+describe("CFC integration: debug mode logging", () => {
+  it("debug mode logs taint accumulation without errors", () => {
+    const tx = mockTx();
+    const ctx = createActionContext({ userDid: "did:alice", space: "space:work" });
+
+    // Debug flag enables verbose logging via getLogger("cfc")
+    attachTaintContext(tx, ctx, { debug: true });
+
+    // Verify debug path doesn't throw and taint accumulates normally
+    recordTaintedRead(tx, labelFromClassification("secret"));
+    expect(() => checkTaintedWrite(tx, labelFromClassification("secret"))).not.toThrow();
+
+    detachTaintContext(tx);
+  });
+
+  it("debug mode off does not crash", () => {
+    const tx = mockTx();
+    const ctx = createActionContext({ userDid: "did:alice", space: "space:work" });
+    attachTaintContext(tx, ctx, { debug: false });
+
+    recordTaintedRead(tx, labelFromClassification("secret"));
+    expect(() => checkTaintedWrite(tx, labelFromClassification("secret"))).not.toThrow();
 
     detachTaintContext(tx);
   });

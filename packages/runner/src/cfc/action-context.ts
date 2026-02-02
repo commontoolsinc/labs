@@ -60,6 +60,7 @@ export function createActionContext(options: {
   space: string;
   codeHash?: string;
   policy?: PolicyRecord;
+  clearance?: Label;
 }): ActionTaintContext {
   const { userDid, space, codeHash, policy } = options;
 
@@ -68,7 +69,7 @@ export function createActionContext(options: {
     integrity: integrityFromAtoms([authoredByAtom(userDid)]),
   };
 
-  const clearance: Label = {
+  const clearance: Label = options.clearance ?? {
     confidentiality: [[userAtom(userDid)], [spaceAtom(space)]],
     integrity: emptyIntegrity(),
   };
