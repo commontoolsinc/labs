@@ -177,19 +177,48 @@ Deno.test("exec blocks low-integrity content", async () => {
   assertEquals(errorOutput.value.includes("integrity"), true);
 });
 
-Deno.test("curl stub blocks with explanation", async () => {
+Deno.test("curl fails gracefully without network access", async () => {
   const registry = createDefaultRegistry();
   const { ctx, stderr } = createTestContext();
 
   const curl = registry.get("curl")!;
+  // fetch will throw due to no --allow-net in test runner
   const result = await curl(["https://example.com"], ctx);
 
-  // Should be blocked
+  // Should fail with connection error (exit 6)
+  assertEquals(result.exitCode, 6);
+
+  stderr.close();
+  const errorOutput = await stderr.readAll();
+  assertEquals(errorOutput.value.includes("curl: (6)"), true);
+});
+
+Deno.test("curl rejects invalid URL", async () => {
+  const registry = createDefaultRegistry();
+  const { ctx, stderr } = createTestContext();
+
+  const curl = registry.get("curl")!;
+  const result = await curl(["not-a-url"], ctx);
+
+  assertEquals(result.exitCode, 3);
+
+  stderr.close();
+  const errorOutput = await stderr.readAll();
+  assertEquals(errorOutput.value.includes("URL rejected"), true);
+});
+
+Deno.test("curl reports no URL specified", async () => {
+  const registry = createDefaultRegistry();
+  const { ctx, stderr } = createTestContext();
+
+  const curl = registry.get("curl")!;
+  const result = await curl([], ctx);
+
   assertEquals(result.exitCode, 1);
 
   stderr.close();
   const errorOutput = await stderr.readAll();
-  assertEquals(errorOutput.value.includes("sandboxed execution"), true);
+  assertEquals(errorOutput.value.includes("no URL specified"), true);
 });
 
 Deno.test("test/[ evaluates conditions correctly", async () => {
