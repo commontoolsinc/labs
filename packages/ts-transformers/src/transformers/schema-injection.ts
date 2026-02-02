@@ -931,15 +931,9 @@ export class SchemaInjectionTransformer extends Transformer {
           }
         } else if (args.length > 0) {
           // Infer from value argument - widen literal types
-          // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g., mapWithPattern calls)
-          // which have their types registered in the typeRegistry by ClosureTransformer
           const valueArg = args[0];
           if (valueArg) {
-            const valueType = getTypeAtLocationWithFallback(
-              valueArg,
-              checker,
-              typeRegistry,
-            ) ?? checker.getTypeAtLocation(valueArg);
+            const valueType = checker.getTypeAtLocation(valueArg);
             if (valueType && !isAnyOrUnknownType(valueType)) {
               // Widen literal types (e.g., 10 → number) for more flexible schemas
               type = widenLiteralType(valueType, checker);
