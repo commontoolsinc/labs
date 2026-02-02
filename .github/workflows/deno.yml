@@ -16,7 +16,7 @@ env:
 jobs:
   build:
     name: "Test and Build"
-    runs-on: ubuntu-24.04-32-core
+    runs-on: ubuntu-24.04-64-core
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
