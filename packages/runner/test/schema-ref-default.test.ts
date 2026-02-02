@@ -165,8 +165,17 @@ describe("$ref with default support", () => {
       const option1 = resolveSchema(s1, false);
       const option2 = resolveSchema(s2, false);
 
-      expect(option1).toEqual({ type: "string", default: "string-default" });
-      expect(option2).toEqual({ type: "number", default: 42 });
+      // resolveSchema doesn't remove $defs
+      expect(option1).toEqual({
+        type: "string",
+        default: "string-default",
+        $defs: rootSchema.$defs,
+      });
+      expect(option2).toEqual({
+        type: "number",
+        default: 42,
+        $defs: rootSchema.$defs,
+      });
     });
 
     it("should apply ref site default to anyOf union as a whole", () => {
@@ -211,7 +220,9 @@ describe("$ref with default support", () => {
         $defs: rootSchema.$defs,
       }, false);
 
+      // Resolve schema doesn't remove $defs
       expect(option1).toEqual({
+        $defs: rootSchema.$defs,
         type: "string",
         default: "cell-default",
         asCell: true,
