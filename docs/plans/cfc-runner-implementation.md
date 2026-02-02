@@ -627,15 +627,15 @@ This means field-to-field taint tracking largely comes for free:
 
 **Implementation:**
 
-- [ ] Verify that `diffAndUpdate`'s cell-to-link conversion preserves the
+- [x] Verify that `diffAndUpdate`'s cell-to-link conversion preserves the
   output document's path-level label structure — links should not inherit
   the linked-to cell's label until dereferenced
-- [ ] In `recordTaintedRead`, distinguish between "read a link pointer" (low
+- [x] In `recordTaintedRead`, distinguish between "read a link pointer" (low
   taint) and "dereferenced a link and read the value" (inherits linked cell's
   label)
-- [ ] Ensure `OpaqueCell` usage in a lift context does not trigger
+- [x] Ensure `OpaqueCell` usage in a lift context does not trigger
   `recordTaintedRead` — no `.get()` means no taint
-- [ ] Document the pattern: lift authors should use `OpaqueCell` for
+- [x] Document the pattern: lift authors should use `OpaqueCell` for
   pass-through fields to minimize taint. This is the idiomatic way to build
   request objects where secrets go into specific fields.
 
@@ -672,8 +672,8 @@ link writes), `packages/runner/src/cfc/taint-tracking.ts`
 - [x] Unit: recordTaintedRead with path produces path-level entry
 - [x] Integration: read object with secret field + non-secret field, only
   secret field path carries taint
-- [ ] Integration: lift that reads only the non-secret field → output untainted
-- [ ] Integration: lift that reads the secret field → output tainted
+- [x] Integration: lift that reads only the non-secret field → output untainted
+- [x] Integration: lift that reads the secret field → output tainted
 - [x] Backwards compat: all existing CFC tests pass unchanged
 
 **File:** `packages/runner/test/cfc-path-taint.test.ts`
