@@ -1,6 +1,12 @@
 import { css, html } from "lit";
 import { customElement, property, query } from "lit/decorators.js";
+import { provide } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
+import {
+  type FieldRegistration,
+  type FormContext,
+  formContext,
+} from "../form-context.ts";
 
 /**
  * CTForm Component
@@ -8,12 +14,18 @@ import { BaseElement } from "../../core/base-element.ts";
  * A form wrapper component that provides consistent layout and spacing for forms.
  * Emits a custom ct-submit event when the form is submitted.
  *
+ * Provides FormContext to descendant fields for coordinated submission with:
+ * - Field validation before submit
+ * - Atomic flushing of buffered values on submit
+ * - Coordinated reset of all fields
+ *
  * @element ct-form
  *
  * @attr {string} method - HTTP method for form submission (GET or POST)
  * @attr {string} action - URL for form submission
  *
- * @event ct-submit - Fired when the form is submitted (includes form data in detail)
+ * @event ct-submit - Fired when the form is submitted and all fields are valid (includes form data in detail)
+ * @event ct-form-invalid - Fired when submit is attempted but validation fails (includes errors in detail)
  *
  * @slot - Form content (inputs, labels, buttons, etc.)
  *
@@ -133,6 +145,27 @@ export class CTForm extends BaseElement {
   @query("form")
   private _form!: HTMLFormElement;
 
+  /** Track registered fields for coordinated submit/reset */
+  private _fields = new Map<HTMLElement, FieldRegistration>();
+
+  /** Provide FormContext to descendant fields */
+  @provide({ context: formContext })
+  private _formContext: FormContext = {
+    registerField: (reg) => this._registerField(reg),
+  };
+
+  /**
+   * Register a field with the form
+   * @param reg - Field registration with buffer and validation handlers
+   * @returns Unregister function to call on disconnectedCallback
+   */
+  private _registerField(reg: FieldRegistration): () => void {
+    this._fields.set(reg.element, reg);
+    return () => {
+      this._fields.delete(reg.element);
+    };
+  }
+
   override render() {
     return html`
       <form method="${this.method}" action="${this.action}" @submit="${this
@@ -148,6 +181,26 @@ export class CTForm extends BaseElement {
     event.stopPropagation();
 
     if (!this._form) return;
+
+    // Validate all registered fields
+    const errors: Array<{ element: HTMLElement; message?: string }> = [];
+    for (const [element, field] of this._fields) {
+      const result = field.validate();
+      if (!result.valid) {
+        errors.push({ element, message: result.message });
+      }
+    }
+
+    // If any fields are invalid, emit error event and return early
+    if (errors.length > 0) {
+      this.emit("ct-form-invalid", { errors });
+      return;
+    }
+
+    // Flush all registered fields (write buffered values to cells)
+    for (const field of this._fields.values()) {
+      field.flush();
+    }
 
     // Collect form data
     const formData = new FormData(this._form);
@@ -205,6 +258,11 @@ export class CTForm extends BaseElement {
    * Reset the form
    */
   reset(): void {
+    // Reset all registered fields to their initial cell values
+    for (const field of this._fields.values()) {
+      field.reset();
+    }
+
     if (this._form) {
       this._form.reset();
     }

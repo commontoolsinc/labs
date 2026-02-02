@@ -1,6 +1,8 @@
 import { css, html } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
+import { consume } from "@lit/context";
+import { type FormContext, formContext } from "../form-context.ts";
 import { type CellHandle } from "@commontools/runtime-client";
 import { booleanSchema } from "@commontools/runner/schemas";
 import { createBooleanCellController } from "../../core/cell-controller.ts";
@@ -185,6 +187,14 @@ export class CTCheckbox extends BaseElement {
       },
     });
 
+    // Form context integration
+    @consume({ context: formContext, subscribe: false })
+    private _formContext?: FormContext;
+
+    private _buffer: boolean | undefined;
+    private _initialValue: boolean | undefined;
+    private _formUnregister?: () => void;
+
     constructor() {
       super();
       this.checked = false;
@@ -195,11 +205,21 @@ export class CTCheckbox extends BaseElement {
     }
 
     private getChecked(): boolean {
+      // If in form context, use buffer instead of cell value
+      if (this._formContext && this._buffer !== undefined) {
+        return this._buffer;
+      }
       return this._checkedCellController.getValue();
     }
 
     private setChecked(newValue: boolean): void {
-      this._checkedCellController.setValue(newValue);
+      // If in form context, update buffer instead of cell
+      if (this._formContext) {
+        this._buffer = newValue;
+        this.requestUpdate();
+      } else {
+        this._checkedCellController.setValue(newValue);
+      }
     }
 
     override connectedCallback() {
@@ -213,6 +233,40 @@ export class CTCheckbox extends BaseElement {
       // Add event listeners to the host element to make entire component clickable
       this.addEventListener("click", this._handleClick);
       this.addEventListener("keydown", this._handleKeydown);
+
+      // Register with form after binding is complete
+      this._registerWithForm();
+    }
+
+    private _registerWithForm() {
+      // Only register if we have both a form context and a cell checked binding
+      if (this._formContext && this.checked) {
+        // Read initial value from cell
+        this._initialValue = this._checkedCellController.getValue();
+        // Initialize buffer with initial value
+        this._buffer = this._initialValue;
+
+        // Register with form
+        this._formUnregister = this._formContext.registerField({
+          element: this,
+          getValue: () => this._buffer,
+          setValue: (v) => {
+            this._buffer = v as boolean;
+            this.requestUpdate();
+          },
+          flush: () => {
+            this._checkedCellController.setValue(this._buffer ?? false);
+          },
+          reset: () => {
+            this._buffer = this._initialValue;
+            this.requestUpdate();
+          },
+          validate: () => ({
+            valid: true, // Checkboxes don't have built-in validation
+            message: undefined,
+          }),
+        });
+      }
     }
 
     override disconnectedCallback() {
@@ -220,6 +274,10 @@ export class CTCheckbox extends BaseElement {
       // Clean up event listeners
       this.removeEventListener("click", this._handleClick);
       this.removeEventListener("keydown", this._handleKeydown);
+
+      // Unregister from form if registered
+      this._formUnregister?.();
+      this._formUnregister = undefined;
     }
 
     override willUpdate(
