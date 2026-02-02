@@ -3,7 +3,6 @@ import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Runtime, spaceCellSchema } from "../src/runtime.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { isCell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("test space cell");
@@ -12,7 +11,6 @@ const space = signer.did();
 describe("Runtime.getSpaceCell", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
-  let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -20,26 +18,24 @@ describe("Runtime.getSpaceCell", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
-    tx = runtime.edit();
   });
 
   afterEach(async () => {
-    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
 
   describe("baseline state for new space", () => {
     it("should return a cell with undefined value for a fresh space", () => {
-      const spaceCell = runtime.getSpaceCell(space, undefined, tx);
+      const spaceCell = runtime.getSpaceCell(space);
       // A fresh space cell should have no stored data yet
       const value = spaceCell.get();
       expect(value).toBeUndefined();
     });
 
     it("should return same cell link for same space (identity)", () => {
-      const spaceCell1 = runtime.getSpaceCell(space, undefined, tx);
-      const spaceCell2 = runtime.getSpaceCell(space, undefined, tx);
+      const spaceCell1 = runtime.getSpaceCell(space);
+      const spaceCell2 = runtime.getSpaceCell(space);
       // Same cell link expected since cause (space DID) is identical
       const link1 = spaceCell1.getAsNormalizedFullLink();
       const link2 = spaceCell2.getAsNormalizedFullLink();
@@ -51,7 +47,7 @@ describe("Runtime.getSpaceCell", () => {
       // When the space cell itself is undefined, accessing defaultPattern
       // via the schema (which has asCell: true) returns a Cell reference,
       // but that cell's value should be undefined for a fresh space
-      const spaceCell = runtime.getSpaceCell(space, undefined, tx);
+      const spaceCell = runtime.getSpaceCell(space);
       const defaultPatternCell = spaceCell.key("defaultPattern");
       // The key accessor returns a cell (due to asCell schema)
       expect(isCell(defaultPatternCell)).toBe(true);
@@ -67,7 +63,7 @@ describe("Runtime.getSpaceCell", () => {
     });
 
     it("should use space DID as both space and cause", () => {
-      const spaceCell = runtime.getSpaceCell(space, undefined, tx);
+      const spaceCell = runtime.getSpaceCell(space);
       const link = spaceCell.getAsNormalizedFullLink();
       // The space cell uses the space DID as its space
       expect(link.space).toBe(space);
@@ -79,26 +75,20 @@ describe("Runtime.getSpaceCell", () => {
 
   describe("persisting defaultPattern", () => {
     it("should persist defaultPattern when set", async () => {
-      const spaceCell = runtime.getSpaceCell(space, undefined, tx);
+      const spaceCell = runtime.getSpaceCell(space);
+      const mockPiece = runtime.getCell(space, "mock-piece");
 
-      // Create a mock piece cell to use as defaultPattern
-      const mockPiece = runtime.getCell(space, "mock-piece", undefined, tx);
-      mockPiece.set({ name: "TestDefaultPattern" });
-
-      // Set defaultPattern on space cell
-      const defaultPatternCell = spaceCell.key("defaultPattern");
-      defaultPatternCell.set(mockPiece);
-
+      // Write requires transaction
+      const tx = runtime.edit();
+      mockPiece.withTx(tx).set({ name: "TestDefaultPattern" });
+      spaceCell.key("defaultPattern").withTx(tx).set(mockPiece);
       await tx.commit();
 
-      // Create new transaction to verify persistence
-      const tx2 = runtime.edit();
-      const spaceCell2 = runtime.getSpaceCell(space, undefined, tx2);
+      // Verify persistence (read doesn't need transaction)
+      const spaceCell2 = runtime.getSpaceCell(space);
       const loadedDefaultPattern = spaceCell2.key("defaultPattern");
       const loadedValue = loadedDefaultPattern.get();
-
       expect(loadedValue).toBeDefined();
-      await tx2.commit();
     });
 
     it("should return different space cells for different spaces", async () => {
@@ -108,8 +98,8 @@ describe("Runtime.getSpaceCell", () => {
       const signer2 = await Identity.fromPassphrase("test space cell other");
       const space2 = signer2.did();
 
-      const spaceCell1 = runtime.getSpaceCell(space, undefined, tx);
-      const spaceCell2 = runtime.getSpaceCell(space2, undefined, tx);
+      const spaceCell1 = runtime.getSpaceCell(space);
+      const spaceCell2 = runtime.getSpaceCell(space2);
 
       const link1 = spaceCell1.getAsNormalizedFullLink();
       const link2 = spaceCell2.getAsNormalizedFullLink();
@@ -141,7 +131,7 @@ describe("Runtime.getSpaceCell", () => {
         },
       };
 
-      const spaceCell = runtime.getSpaceCell(space, customSchema, tx);
+      const spaceCell = runtime.getSpaceCell(space, customSchema);
       // Should not throw when using custom schema
       expect(spaceCell).toBeDefined();
     });
