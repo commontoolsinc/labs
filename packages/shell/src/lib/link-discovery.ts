@@ -5,7 +5,12 @@
  * which contain CellHandle instances where there are cell references.
  */
 
-import { type CellHandle, isCellHandle } from "@commontools/runtime-client";
+import {
+  type CellHandle,
+  isCellHandle,
+  NAME,
+  UI,
+} from "@commontools/runtime-client";
 import type { NormalizedFullLink } from "@commontools/runtime-client";
 import type { DID } from "@commontools/identity";
 
@@ -15,6 +20,8 @@ import type { DID } from "@commontools/identity";
 export type DiscoveredLink = {
   link: NormalizedFullLink;
   path: string[]; // where the link was found in the source
+  /** The CellHandle for this link (used for checking if it's a navigable piece) */
+  cellHandle: CellHandle<unknown>;
 };
 
 /**
@@ -74,7 +81,11 @@ function cellHandleToLink(cell: CellHandle<unknown>): NormalizedFullLink {
  */
 export function traverseCellLinks(
   value: unknown,
-  visitor: (link: NormalizedFullLink, path: string[]) => void,
+  visitor: (
+    link: NormalizedFullLink,
+    path: string[],
+    cellHandle: CellHandle<unknown>,
+  ) => void,
   seen: Set<unknown> = new Set(),
   path: string[] = [],
 ): void {
@@ -83,7 +94,7 @@ export function traverseCellLinks(
     const link = cellHandleToLink(value);
     if (!link.id.startsWith("data:")) {
       // Found a cell reference - invoke visitor and stop traversing
-      visitor(link, path);
+      visitor(link, path, value);
     }
     return;
   }
@@ -131,16 +142,43 @@ export function discoverLinksFromValue(value: unknown): DiscoveredLink[] {
   const linkKey = (link: NormalizedFullLink) => `${link.space}:${link.id}`;
   const seen = new Map<string, DiscoveredLink>();
 
-  traverseCellLinks(value, (link, path) => {
+  traverseCellLinks(value, (link, path, cellHandle) => {
     const key = linkKey(link);
 
     // Only keep the first occurrence of each unique link
     if (!seen.has(key)) {
-      const discoveredLink: DiscoveredLink = { link, path };
+      const discoveredLink: DiscoveredLink = { link, path, cellHandle };
       seen.set(key, discoveredLink);
       discovered.push(discoveredLink);
     }
   });
 
   return discovered;
+}
+
+/**
+ * Check if a cell is a navigable piece (has $NAME and $UI properties).
+ * This determines whether the cell can be displayed as a clickable link.
+ *
+ * @param cellHandle - The cell handle to check
+ * @returns Promise that resolves to true if the cell is a navigable piece
+ */
+export async function isNavigablePiece(
+  cellHandle: CellHandle<unknown>,
+): Promise<boolean> {
+  try {
+    // Use a broad schema to get all properties
+    const fullCell = cellHandle.asSchema<Record<string, unknown>>(true as any);
+    await fullCell.sync();
+    const value = fullCell.get();
+
+    if (!value || typeof value !== "object") {
+      return false;
+    }
+
+    // Check for $NAME and $UI properties (using the symbols)
+    return NAME in value && UI in value;
+  } catch {
+    return false;
+  }
 }

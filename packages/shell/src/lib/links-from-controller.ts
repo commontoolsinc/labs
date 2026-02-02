@@ -3,6 +3,7 @@ import type { CellHandle } from "@commontools/runtime-client";
 import {
   type DiscoveredLink,
   discoverLinksFromValue,
+  isNavigablePiece,
 } from "./link-discovery.ts";
 
 /**
@@ -100,9 +101,10 @@ export class LinksFromController implements ReactiveController {
 
   /**
    * Discover links from the current cell and update the links array.
-   * Triggers a host update if the links have changed.
+   * Only includes navigable pieces (cells with $NAME and $UI).
+   * Triggers a host update when links change.
    */
-  private discoverLinks(): void {
+  private async discoverLinks(): Promise<void> {
     if (!this.cell) {
       this.links = [];
       return;
@@ -115,8 +117,21 @@ export class LinksFromController implements ReactiveController {
       return;
     }
 
-    // Discover links from the value (CellHandle instances are embedded in the value)
-    this.links = discoverLinksFromValue(value);
+    // Discover all links from the value
+    const allLinks = discoverLinksFromValue(value);
+
+    // Filter to only navigable pieces (those with $NAME and $UI)
+    const navigableChecks = await Promise.all(
+      allLinks.map(async (link) => ({
+        link,
+        isNavigable: await isNavigablePiece(link.cellHandle),
+      })),
+    );
+
+    this.links = navigableChecks
+      .filter((check) => check.isNavigable)
+      .map((check) => check.link);
+
     this.host.requestUpdate();
   }
 
