@@ -99,6 +99,41 @@ export async function curl(
     return { exitCode: 3, label: ctx.pcLabel };
   }
 
+  // Outbound confidentiality check: if the pcLabel carries confidential data
+  // (e.g., from variable expansion of secrets), block the request unless
+  // exchange rules declassify it for this destination.
+  if (ctx.pcLabel.confidentiality.length > 0) {
+    const hasAuthHeader = headers.has("Authorization");
+    const policies = ctx.policies ?? [];
+    const outboundIntegrity: Integrity = [
+      { kind: "Origin", url },
+      ...(hasAuthHeader
+        ? [{ kind: "IntegrityToken", name: "AuthorizedRequest" } as Atom]
+        : []),
+      ...(tls
+        ? [{ kind: "IntegrityToken", name: "NetworkProvenance" } as Atom]
+        : []),
+    ];
+    const afterExchange = policies.length > 0
+      ? evalExchangeRules(policies, outboundIntegrity, ctx.pcLabel)
+      : ctx.pcLabel;
+
+    // Only block if Space-level confidentiality remains — User atoms are
+    // provenance, not secrecy constraints.
+    const hasSpaceConfidentiality = afterExchange.confidentiality.some(
+      (clause) => clause.some((atom) => atom.kind === "Space"),
+    );
+    if (hasSpaceConfidentiality) {
+      if (!silent || showError) {
+        ctx.stderr.write(
+          `curl: blocked — request carries confidential data that cannot be declassified for ${url}\n`,
+          ctx.pcLabel,
+        );
+      }
+      return { exitCode: 7, label: ctx.pcLabel };
+    }
+  }
+
   // Perform fetch
   let response: Response;
   try {

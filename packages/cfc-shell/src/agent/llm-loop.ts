@@ -106,6 +106,8 @@ export interface AgentLoopOptions {
   system?: string;
   /** Maximum number of loop iterations (tool-call rounds). Default: 20 */
   maxIterations?: number;
+  /** Prior conversation history to prepend (for multi-turn sessions) */
+  history?: Message[];
   /** Called before each tool execution */
   onToolCall?: (toolName: string, input: Record<string, unknown>) => void;
   /** Called after each exec with the tool result */
@@ -142,6 +144,7 @@ export async function runAgentLoop(
   } = options;
 
   const messages: Message[] = [
+    ...(options.history ?? []),
     { role: "user", content: userMessage },
   ];
 

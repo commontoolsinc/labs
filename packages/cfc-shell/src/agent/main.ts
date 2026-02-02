@@ -19,6 +19,7 @@ import {
   type LLMClient,
   type LLMRequest,
   type LLMResponse,
+  type Message,
   runAgentLoop,
 } from "./llm-loop.ts";
 import { VFS } from "../vfs.ts";
@@ -157,14 +158,16 @@ async function runOnce(
   llm: LLMClient,
   model: string,
   write: (s: string) => Promise<unknown>,
-): Promise<void> {
+  history?: Message[],
+): Promise<Message[]> {
   let eventCursor = agent.getEvents().length;
 
-  await runAgentLoop(input, {
+  const result = await runAgentLoop(input, {
     llm,
     agent,
     model,
     system: SYSTEM_PROMPT,
+    history,
     onToolCall: async (_toolName, input) => {
       await write(`\n  $ ${input.command}\n`);
     },
@@ -194,6 +197,7 @@ async function runOnce(
 
   // Text was already streamed to stdout by readStream
   await write("\n");
+  return result.messages;
 }
 
 async function main(): Promise<void> {
@@ -220,6 +224,8 @@ async function main(): Promise<void> {
   await write(`Model: ${model}\n`);
   await write("Type your message. Ctrl-D or 'exit' to quit.\n\n");
 
+  let history: Message[] = [];
+
   while (true) {
     const input = prompt("user>");
     if (input === null || input.trim() === "exit") {
@@ -231,7 +237,7 @@ async function main(): Promise<void> {
     await write("\n---\n");
 
     try {
-      await runOnce(input, agent, llm, model, write);
+      history = await runOnce(input, agent, llm, model, write, history);
       await write("\n");
     } catch (e) {
       await write(

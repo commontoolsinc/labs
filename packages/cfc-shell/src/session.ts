@@ -45,6 +45,8 @@ export interface ShellSession {
   lastExitLabel: Label;
   requestIntent: IntentCallback;
   audit: AuditEntry[];
+  /** Mock fetch for testing — if set, curl uses this instead of global fetch */
+  mockFetch?: (url: string, init?: RequestInit) => Promise<Response>;
 
   pushPC(label: Label): void;
   popPC(): void;

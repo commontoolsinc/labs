@@ -332,6 +332,7 @@ async function executeSimpleCommand(
       ...expandedArgs.map((a) => a.label),
     ]),
     requestIntent: session.requestIntent,
+    mockFetch: session.mockFetch,
   };
 
   // Extract argument values

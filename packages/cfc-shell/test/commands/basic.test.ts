@@ -195,9 +195,11 @@ Deno.test("exec blocks low-integrity content", async () => {
 Deno.test("curl fails gracefully without network access", async () => {
   const registry = createDefaultRegistry();
   const { ctx, stderr } = createTestContext();
+  ctx.mockFetch = () => {
+    throw new TypeError("NetworkError: no network access");
+  };
 
   const curl = registry.get("curl")!;
-  // fetch will throw due to no --allow-net in test runner
   const result = await curl(["https://example.com"], ctx);
 
   // Should fail with connection error (exit 6)
