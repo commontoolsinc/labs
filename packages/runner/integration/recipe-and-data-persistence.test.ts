@@ -316,16 +316,11 @@ async function phase3ReactivityWithinSession(
 async function phase4CrossSessionReactivity(
   identity: Identity,
   space: MemorySpace,
-  recipeId: string,
 ): Promise<void> {
   console.log("\n--- Phase 4: Cross-session reactivity ---");
 
   const ctx = createTestContext(identity);
   let tx = ctx.runtime.edit();
-
-  // Load recipe from storage (needed so runtime knows about it)
-  await ctx.runtime.recipeManager.loadRecipe(recipeId, space, tx);
-  console.log("Recipe loaded from storage (fourth runtime)");
 
   // Load the result cell from Phase 3 (by the same cause/ID)
   const resultCell = getResultCell(
@@ -405,7 +400,7 @@ async function testRecipeAndDataPersistence() {
   const recipeId = await phase1SaveRecipeAndData(identity, space);
   await phase2LoadAndVerify(identity, space, recipeId);
   await phase3ReactivityWithinSession(identity, space, recipeId);
-  await phase4CrossSessionReactivity(identity, space, recipeId);
+  await phase4CrossSessionReactivity(identity, space);
 
   console.log("\n=== TEST PASSED ===");
 }
