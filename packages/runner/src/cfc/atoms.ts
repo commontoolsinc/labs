@@ -81,11 +81,17 @@ export interface HasRoleAtom {
   role: string;
 }
 
+export interface AuthorizedRequestAtom {
+  kind: "AuthorizedRequest";
+  sink: string;
+}
+
 export type IntegrityAtom =
   | CodeHashAtom
   | AuthoredByAtom
   | EndorsedByAtom
-  | HasRoleAtom;
+  | HasRoleAtom
+  | AuthorizedRequestAtom;
 
 // ---------------------------------------------------------------------------
 // Discriminated union of all atoms
@@ -135,6 +141,7 @@ const INTEGRITY_KINDS: ReadonlySet<string> = new Set([
   "AuthoredBy",
   "EndorsedBy",
   "HasRole",
+  "AuthorizedRequest",
 ]);
 
 export function isConfidentialityAtom(atom: Atom): atom is ConfidentialityAtom {
@@ -195,4 +202,8 @@ export function hasRoleAtom(
   role: string,
 ): HasRoleAtom {
   return { kind: "HasRole", principal, space, role };
+}
+
+export function authorizedRequestAtom(sink: string): AuthorizedRequestAtom {
+  return { kind: "AuthorizedRequest", sink };
 }

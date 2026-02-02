@@ -20,7 +20,8 @@ import {
 } from "./action-context.ts";
 import type { ExchangeRule } from "./exchange-rules.ts";
 import { evaluateRules } from "./exchange-rules.ts";
-import { applySinkDeclassification } from "./sink-gate.ts";
+import { applySinkDeclassificationWithResult } from "./sink-gate.ts";
+import { authorizedRequestAtom } from "./atoms.ts";
 import { formatLabel } from "./violations.ts";
 import { getLogger } from "@commontools/utils/logger";
 import type { RuntimeTelemetry } from "../telemetry.ts";
@@ -241,14 +242,19 @@ export function checkSinkAndWrite(
   const rules = exchangeRules ?? ctx.policy.exchangeRules;
 
   // Step 1: Apply sink declassification to get a label with allowed atoms stripped.
-  const sinkDeclassified = applySinkDeclassification(
+  const sinkResult = applySinkDeclassificationWithResult(
     ctx.taintMap,
     sinkName,
     ctx.policy.sinkRules,
   );
 
+  // Step 1b: If sink rules fired, record AuthorizedRequest integrity atom.
+  if (sinkResult.fired) {
+    ctx.acquiredIntegrity.push(authorizedRequestAtom(sinkName));
+  }
+
   // Step 2: Apply standard exchange rules on the sink-declassified label.
-  const fullyDeclassified = evaluateRules(sinkDeclassified, rules);
+  const fullyDeclassified = evaluateRules(sinkResult.label, rules);
 
   // Step 3: Check flow.
   if (!labelLeq(fullyDeclassified, writeTargetLabel)) {

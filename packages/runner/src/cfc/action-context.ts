@@ -3,7 +3,13 @@
  * action (read/compute/write sequence) and enforces CFC write checks.
  */
 
-import { authoredByAtom, codeHashAtom, spaceAtom, userAtom } from "./atoms.ts";
+import {
+  type Atom,
+  authoredByAtom,
+  codeHashAtom,
+  spaceAtom,
+  userAtom,
+} from "./atoms.ts";
 import { emptyIntegrity, integrityFromAtoms } from "./integrity.ts";
 import { emptyLabel, joinLabel, type Label, labelLeq } from "./labels.ts";
 import type { IntegrityLabel } from "./integrity.ts";
@@ -48,6 +54,8 @@ export type ActionTaintContext = {
   readonly policy: PolicyRecord;
   /** Code hash + endorsements. */
   readonly integrityBasis: IntegrityLabel;
+  /** Integrity atoms acquired during execution (e.g. AuthorizedRequest). */
+  readonly acquiredIntegrity: Atom[];
 };
 
 // ---------------------------------------------------------------------------
@@ -92,6 +100,7 @@ export function createActionContext(options: {
     taintMap: new TaintMap(),
     policy: policy ?? DEFAULT_POLICY,
     integrityBasis,
+    acquiredIntegrity: [],
   };
 }
 

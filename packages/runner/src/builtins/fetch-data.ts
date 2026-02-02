@@ -10,6 +10,8 @@ import {
   tryClaimMutex,
   tryWriteResult,
 } from "./fetch-utils.ts";
+import { checkSinkAndWrite } from "../cfc/taint-tracking.ts";
+import { emptyLabel } from "../cfc/labels.ts";
 
 /**
  * Fetch data from a URL.
@@ -126,6 +128,11 @@ export function fetchData(
 
     const { url } = inputsCell.getAsQueryResult([], tx);
     const inputHash = computeInputHash(tx, inputsCell);
+
+    // CFC sink gate: check taint on fetchData inputs before consuming them.
+    // This applies sink declassification rules (e.g. stripping Service(google-auth)
+    // at options.headers.Authorization) then validates against the write target.
+    checkSinkAndWrite(tx, emptyLabel(), "fetchData");
 
     if (!url) {
       // Only update if values actually need to change to reduce transaction conflicts

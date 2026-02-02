@@ -690,7 +690,7 @@ the builtin enforces it at the point of consumption.
 
 ### 9.1 Sink Declassification Rules
 
-- [ ] Define `SinkDeclassificationRule` type:
+- [x] Define `SinkDeclassificationRule` type:
   ```
   {
     /** Atom pattern to match on taint */
@@ -703,8 +703,8 @@ the builtin enforces it at the point of consumption.
     variables: string[],
   }
   ```
-- [ ] Add `sinkRules: SinkDeclassificationRule[]` to `PolicyRecord`
-- [ ] Default policy: empty (no sink declassification — backwards compat)
+- [x] Add `sinkRules: SinkDeclassificationRule[]` to `PolicyRecord`
+- [x] Default policy: empty (no sink declassification — backwards compat)
 
 **File:** new `packages/runner/src/cfc/sink-rules.ts`, modifications to
 `packages/runner/src/cfc/policy.ts`
@@ -713,17 +713,17 @@ the builtin enforces it at the point of consumption.
 
 When a builtin like `fetchData` is about to consume its inputs:
 
-- [ ] Inspect the taint on each input path (via `taintAtPath`)
-- [ ] For each path that carries confidentiality atoms:
+- [x] Inspect the taint on each input path (via `taintAtPath`)
+- [x] For each path that carries confidentiality atoms:
   - Look up sink declassification rules for this builtin
   - If the path matches an allowed sink path and the taint matches the atom
     pattern → strip the matched atom (authority-only consumption)
   - If no rule matches → the taint remains, and if it exceeds the output
     label the write is blocked
-- [ ] Emit `AuthorizedRequest` integrity atom when a sink rule fires — this
+- [x] Emit `AuthorizedRequest` integrity atom when a sink rule fires — this
   provides the integrity evidence that the spec requires for exchange rules
   downstream
-- [ ] For `fetchData` specifically: check taint on `options.headers.*`,
+- [x] For `fetchData` specifically: check taint on `options.headers.*`,
   `options.body`, `url` separately. Only `headers.Authorization` gets
   declassification for `Service(google-auth)`.
 
@@ -732,7 +732,7 @@ new helper in `packages/runner/src/cfc/sink-gate.ts`
 
 ### 9.3 Auth Policy for Gmail Example
 
-- [ ] Define a Google auth policy record with:
+- [x] Define a Google auth policy record with:
   ```
   sinkRules: [{
     taintPattern: { kind: "Service", params: { id: "google-auth" } },
@@ -769,14 +769,14 @@ when path-level labels are available.
 
 ### 9.5 Tests for Sink Declassification
 
-- [ ] Unit: SinkDeclassificationRule matching against path + atom
+- [x] Unit: SinkDeclassificationRule matching against path + atom
 - [ ] Integration: Gmail read path — token in Authorization header, request
   succeeds, response untainted by Service atom
 - [ ] Integration: token in request body → request blocked (no sink rule for
   body path)
 - [ ] Integration: token in wrong header (e.g., X-Token) → blocked
 - [ ] Integration: non-secret field (email) in body → allowed
-- [ ] Integration: AuthorizedRequest integrity atom emitted on success
+- [x] Integration: AuthorizedRequest integrity atom emitted on success
 - [ ] Backwards compat: fetchData without any ifc works unchanged
 
 **File:** `packages/runner/test/cfc-sink-rules.test.ts`,

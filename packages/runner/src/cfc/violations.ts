@@ -51,6 +51,8 @@ function formatAtom(atom: Atom): string {
       return `EndorsedBy(${atom.did})`;
     case "HasRole":
       return `HasRole(${atom.principal}, ${atom.space}, ${atom.role})`;
+    case "AuthorizedRequest":
+      return `AuthorizedRequest(${atom.sink})`;
   }
 }
 

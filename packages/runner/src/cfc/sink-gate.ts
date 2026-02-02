@@ -13,6 +13,11 @@ import { matchAtomPattern } from "./exchange-rules.ts";
 import { canonicalizeAtom } from "./atoms.ts";
 import { normalizeConfidentiality } from "./confidentiality.ts";
 
+export type SinkDeclassificationResult = {
+  label: Label;
+  fired: boolean;
+};
+
 /**
  * Apply sink declassification rules to a taint map.
  *
@@ -20,15 +25,19 @@ import { normalizeConfidentiality } from "./confidentiality.ts";
  * path. If the taint at that path contains atoms matching the rule's pattern,
  * strip those atoms' clauses from the flat label.
  *
- * Returns the declassified label.
+ * Returns the declassified label. Also available as `.fired` to indicate
+ * whether any atoms were actually stripped.
+ *
+ * The function is also callable with the old signature (returns Label directly)
+ * via the overloaded wrapper below.
  */
-export function applySinkDeclassification(
+function applySinkDeclassificationImpl(
   taintMap: TaintMap,
   sinkName: string,
   rules: SinkDeclassificationRule[],
-): Label {
+): SinkDeclassificationResult {
   const flat = taintMap.flatLabel();
-  if (rules.length === 0) return flat;
+  if (rules.length === 0) return { label: flat, fired: false };
 
   // Collect canonical atoms that should be stripped.
   const strippedAtoms = new Set<string>();
@@ -57,7 +66,7 @@ export function applySinkDeclassification(
     }
   }
 
-  if (strippedAtoms.size === 0) return flat;
+  if (strippedAtoms.size === 0) return { label: flat, fired: false };
 
   // Remove clauses from the flat label where any atom was matched for stripping.
   const newConfidentiality = flat.confidentiality.filter((clause) =>
@@ -65,7 +74,33 @@ export function applySinkDeclassification(
   );
 
   return {
-    confidentiality: normalizeConfidentiality(newConfidentiality),
-    integrity: flat.integrity,
+    label: {
+      confidentiality: normalizeConfidentiality(newConfidentiality),
+      integrity: flat.integrity,
+    },
+    fired: true,
   };
+}
+
+/**
+ * Apply sink declassification rules to a taint map.
+ * Returns the declassified label (without the `fired` metadata).
+ */
+export function applySinkDeclassification(
+  taintMap: TaintMap,
+  sinkName: string,
+  rules: SinkDeclassificationRule[],
+): Label {
+  return applySinkDeclassificationImpl(taintMap, sinkName, rules).label;
+}
+
+/**
+ * Apply sink declassification and also report whether any rules fired.
+ */
+export function applySinkDeclassificationWithResult(
+  taintMap: TaintMap,
+  sinkName: string,
+  rules: SinkDeclassificationRule[],
+): SinkDeclassificationResult {
+  return applySinkDeclassificationImpl(taintMap, sinkName, rules);
 }
