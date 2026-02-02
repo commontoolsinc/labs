@@ -20,7 +20,7 @@ import {
 } from "commontools";
 
 import type {
-  ContactCharm,
+  ContactPiece,
   FamilyMember,
   PersonLike,
 } from "./contact-types.tsx";
@@ -72,7 +72,7 @@ interface Input {
     >
   >;
   // Optional: reactive source of sibling contacts for sameAs linking.
-  sameAs?: Writable<ContactCharm[]>;
+  sameAs?: Writable<ContactPiece[]>;
 }
 
 interface Output {

@@ -29,10 +29,10 @@ Use `<ct-cell-context>` for on-demand value inspection:
 
 Hold **Alt** and hover to access debugging toolbar (val, id, watch/unwatch).
 
-### 4. Inspect Deployed Charm
+### 4. Inspect Deployed Piece
 
 ```bash
-deno task ct charm inspect --identity key.json --api-url URL --space SPACE --charm ID
+deno task ct piece inspect --identity key.json --api-url URL --space SPACE --piece ID
 ```
 
 ### 5. Simplify Until It Works

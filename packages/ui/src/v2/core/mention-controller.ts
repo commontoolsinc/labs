@@ -258,7 +258,7 @@ export class MentionController implements ReactiveController {
    * Insert a mention at the current cursor position
    */
   insertMention(mention: CellHandle<Mentionable>): void {
-    const markdown = this.encodeCharmAsMarkdown(mention);
+    const markdown = this.encodePieceAsMarkdown(mention);
     this.config.onInsert(markdown, mention);
     this.hide();
   }
@@ -282,19 +282,19 @@ export class MentionController implements ReactiveController {
   }
 
   /**
-   * Encode a charm as markdown link [name](#entityId)
+   * Encode a piece as markdown link [name](#entityId)
    */
-  private encodeCharmAsMarkdown(charm: CellHandle<Mentionable>): string {
+  private encodePieceAsMarkdown(piece: CellHandle<Mentionable>): string {
     // Only call .get() when we need the actual values
-    const name = charm.get()?.[NAME] || "Unknown";
-    const href = encodeURIComponent(charm.id()) || "";
+    const name = piece.get()?.[NAME] || "Unknown";
+    const href = encodeURIComponent(piece.id()) || "";
     return `[${name}](${href})`;
   }
 
   /**
-   * Decode charm reference from href (entity ID)
+   * Decode piece reference from href (entity ID)
    */
-  decodeCharmFromHref(href: string | null): CellHandle<Mentionable> | null {
+  decodePieceFromHref(href: string | null): CellHandle<Mentionable> | null {
     if (!href) return null;
 
     const all = this.readMentionables();
@@ -319,7 +319,7 @@ export class MentionController implements ReactiveController {
 
     while ((match = linkRegex.exec(text)) !== null) {
       const href = match[2];
-      const mention = this.decodeCharmFromHref(href);
+      const mention = this.decodePieceFromHref(href);
       if (mention) {
         mentions.push(mention);
       }

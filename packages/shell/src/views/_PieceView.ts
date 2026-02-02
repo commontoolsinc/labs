@@ -3,7 +3,7 @@ import { property } from "lit/decorators.js";
 import { BaseView } from "./BaseView.ts";
 import { PieceController } from "@commontools/piece/ops";
 
-export class XCharmView extends BaseView {
+export class XPieceView extends BaseView {
   static override styles = css`
     :host {
       display: flex;
@@ -13,7 +13,7 @@ export class XCharmView extends BaseView {
       min-height: 0; /* Important for flex children */
     }
 
-    ct-charm {
+    ct-piece {
       flex: 1;
       display: flex;
       flex-direction: column;
@@ -30,23 +30,23 @@ export class XCharmView extends BaseView {
   `;
 
   @property({ attribute: false })
-  charm?: PieceController;
+  piece?: PieceController;
 
   override render() {
-    if (!this.charm) {
+    if (!this.piece) {
       return html`
         <x-spinner></x-spinner>
       `;
     }
 
-    const cell = this.charm.getCell();
+    const cell = this.piece.getCell();
 
     return html`
-      <ct-charm .pieceId="${this.charm.id}">
+      <ct-piece .pieceId="${this.piece.id}">
         <ct-render .cell="${cell}"></ct-render>
-      </ct-charm>
+      </ct-piece>
     `;
   }
 }
 
-globalThis.customElements.define("x-charm-view", XCharmView);
+globalThis.customElements.define("x-piece-view", XPieceView);

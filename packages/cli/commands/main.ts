@@ -7,6 +7,20 @@ import { piece } from "./piece.ts";
 import { identity } from "./identity.ts";
 import { test } from "./test.ts";
 
+function envStatus(): string {
+  const identity = Deno.env.get("CT_IDENTITY");
+  const apiUrl = Deno.env.get("CT_API_URL");
+  if (!identity && !apiUrl) return "";
+  const lines: string[] = ["", "ENVIRONMENT:"];
+  if (identity) {
+    lines.push(`  CT_IDENTITY = ${identity} (set, no need to pass --identity)`);
+  }
+  if (apiUrl) {
+    lines.push(`  CT_API_URL  = ${apiUrl} (set, no need to pass --api-url)`);
+  }
+  return lines.join("\n");
+}
+
 const mainDescription = `Tool for running programs on common fabric.
 
 QUICK START:
@@ -22,7 +36,7 @@ FIRST TIME SETUP:
 LOCAL DEVELOPMENT:
   ./scripts/start-local-dev.sh      # Start local servers
   ./scripts/stop-local-dev.sh       # Stop local servers
-
+${envStatus()}
 Run 'ct <command> --help' for command-specific help.`;
 
 export const main = new Command()
@@ -48,4 +62,15 @@ export const main = new Command()
   .command("dev", dev)
   .command("id", identity)
   .command("init", init)
-  .command("test", test);
+  .command("test", test)
+  .command(
+    "deploy",
+    new Command()
+      .description("Use 'ct piece new' instead.")
+      .hidden()
+      .action(() => {
+        console.log(
+          "The 'deploy' command does not exist. Use 'ct piece new' to deploy a pattern.",
+        );
+      }),
+  );

@@ -975,13 +975,13 @@ export interface ITypeMismatchError extends IStorageError {
  */
 export interface IAttestation {
   readonly address: IMemoryAddress;
-  readonly value?: StorableDatum;
+  readonly value?: Immutable<StorableDatum>;
 }
 
 // An IAttestation where the address is an IMemorySpaceAddress
 export interface IMemorySpaceAttestation {
   readonly address: IMemorySpaceAddress;
-  readonly value?: StorableDatum;
+  readonly value?: Immutable<StorableDatum>;
 }
 
 // Re-export transaction wrapper utilities from implementation

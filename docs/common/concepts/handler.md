@@ -6,7 +6,7 @@ Use `handler()` when you need to define event-handling logic once and bind it to
 
 1. **Same logic, different state** - You want to reuse identical handler logic with different state
 2. **Exported streams** - Other patterns need to call your handler via linking
-3. **CLI testing** - You want to test handlers via `ct charm call` before building UI
+3. **CLI testing** - You want to test handlers via `ct piece call` before building UI
 
 ## Basic Structure
 
@@ -142,13 +142,13 @@ Export handlers to test them via CLI during development:
 
 ```bash
 # Call a handler with JSON payload
-deno task ct charm call addItem '{"title": "Test"}' --charm <ID>
+deno task ct piece call addItem '{"title": "Test"}' --piece <ID>
 
 # Step to process
-deno task ct charm step --charm <ID>
+deno task ct piece step --piece <ID>
 
 # Verify state
-deno task ct charm inspect --charm <ID>
+deno task ct piece inspect --piece <ID>
 ```
 
 See [Testing Handlers via CLI](../workflows/handlers-cli-testing.md) for the full workflow.

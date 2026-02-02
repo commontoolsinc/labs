@@ -499,7 +499,7 @@ const result = compileAndRun({
   input: { name: "John Smith", email: "john@example.com" }  // existing data
 });
 
-// result.result is the running charm - replaces the original record
+// result.result is the running piece - replaces the original record
 ```
 
 ### Each Forked Pattern:

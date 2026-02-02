@@ -13,6 +13,9 @@ export const FRONTEND_URL = ensureTrailing(
 
 export const HEADLESS = envToBool(Deno.env.get("HEADLESS"));
 
+// Pipe browser console output to the test runner's console.
+export const PIPE_CONSOLE = envToBool(Deno.env.get("PIPE_CONSOLE"));
+
 // Some tests take a SPACE_NAME, targeting a specific space.
 // If not defined, uses a random UUID.
 export const SPACE_NAME = Deno.env.get("SPACE_NAME") ??

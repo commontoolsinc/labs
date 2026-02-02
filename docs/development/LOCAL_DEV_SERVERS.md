@@ -35,7 +35,7 @@ When accessing a space for the first time, you'll need to register:
 
 For Playwright testing, use:
 ```javascript
-await page.goto("http://localhost:8000/<SPACE>/<CHARM_ID>");
+await page.goto("http://localhost:8000/<SPACE>/<PIECE_ID>");
 ```
 
 ---
@@ -165,9 +165,9 @@ When editing `ct-*` components in `packages/ui/`, restart the local dev server t
 
 ---
 
-## Background Charm Service (Optional)
+## Background Piece Service (Optional)
 
-The background-charm-service polls registered charms and triggers their `bgUpdater` handlers server-side. This is **optional** - only needed if you're testing background/scheduled charm execution.
+The background-charm-service polls registered pieces and triggers their `bgUpdater` handlers server-side. This is **optional** - only needed if you're testing background/scheduled piece execution.
 
 ### Quick Setup
 
@@ -187,9 +187,9 @@ cd /path/to/labs
 OPERATOR_PASS="implicit trust" API_URL="http://localhost:8000" ./dist/bg-charm-service
 ```
 
-### Registering a Charm for Background Updates
+### Registering a Piece for Background Updates
 
-Charms must be registered to receive background polling:
+Pieces must be registered to receive background polling:
 
 ```bash
 # Via curl
@@ -198,14 +198,14 @@ curl -X POST http://localhost:8000/api/integrations/bg \
   -d '{"pieceId":"baedrei...","space":"did:key:z6Mk...","integration":"my-integration"}'
 ```
 
-Or use the `<ct-updater>` component in your charm's UI.
+Or use the `<ct-updater>` component in your piece's UI.
 
 ### Key Details
 
 - **Polling interval**: 60 seconds (default)
 - **Identity**: Must match toolshed's identity (in dev mode: `OPERATOR_PASS="implicit trust"`)
-- **bgUpdater triggers**: Service sends `{}` to the charm's `bgUpdater` Stream
-- **Logs**: Watch service output for `Successfully executed charm` messages
+- **bgUpdater triggers**: Service sends `{}` to the piece's `bgUpdater` Stream
+- **Logs**: Watch service output for `Successfully executed piece` messages
 
 ### Troubleshooting
 
@@ -213,6 +213,6 @@ Or use the `<ct-updater>` component in your charm's UI.
 |---------|-------|-----|
 | `CompilerError: no exported member 'pattern'` | Binary version mismatch | Run `deno task build-binaries` |
 | `AuthorizationError` on system space | Admin charm not set up | Run `add-admin-charm` step |
-| Charm not polling | Not registered | Register via `/api/integrations/bg` |
+| Piece not polling | Not registered | Register via `/api/integrations/bg` |
 
 See `packages/background-charm-service/CLAUDE.md` for more details.

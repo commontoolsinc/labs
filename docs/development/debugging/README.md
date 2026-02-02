@@ -13,7 +13,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | "Type 'string' is not assignable to type 'CSSProperties'" | String style on HTML element | Use object syntax `style={{ ... }}` ([style-errors](style-errors.md)) |
 | Type mismatch binding item to `$checked` | Binding whole item, not property | Bind `item.done`, not `item` ([type-errors](type-errors.md)) |
 | "ReadOnlyAddressError" | onClick inside computed() | Move button outside, use disabled ([gotchas/onclick-inside-computed](gotchas/onclick-inside-computed.md)) |
-| Charm hangs, never renders | ifElse with composed pattern cell | Use local computed cell ([gotchas/ifelse-composed-pattern-cells](gotchas/ifelse-composed-pattern-cells.md)) |
+| Piece hangs, never renders | ifElse with composed pattern cell | Use local computed cell ([gotchas/ifelse-composed-pattern-cells](gotchas/ifelse-composed-pattern-cells.md)) |
 | Data not updating | Missing `$` prefix or wrong event | Use `$checked`, `$value` ([reactivity-issues](reactivity-issues.md)) |
 | Filtered list not updating | Need computed() | Wrap in `computed()` ([reactivity-issues](reactivity-issues.md)) |
 | lift() returns 0/empty | Passing cell directly to lift() | Use `computed()` or pass as object param ([gotchas/lift-returns-stale-data](gotchas/lift-returns-stale-data.md)) |
@@ -21,7 +21,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | Stream.subscribe doesn't exist | Using Stream.of()/subscribe() | Bound handler IS the stream ([gotchas/stream-subscribe-dont-exist](gotchas/stream-subscribe-dont-exist.md)) |
 | Can't access variable in nested scope | Variable scoping limitation | Pre-compute grouped data or use lift() with explicit params ([reactivity-issues](reactivity-issues.md#variable-scoping-in-reactive-contexts)) |
 | "Cannot access cell via closure" | Using lift() with closure | Pass all reactive deps as params to lift() ([@reactivity](../../common/concepts/reactivity.md)) |
-| CLI `get` returns stale computed values | `charm set` doesn't trigger recompute | Run `charm step` after `set` to trigger re-evaluation ([cli-debugging](cli-debugging.md#stale-computed-values-after-charm-set)) |
+| CLI `get` returns stale computed values | `piece set` doesn't trigger recompute | Run `piece step` after `set` to trigger re-evaluation ([cli-debugging](cli-debugging.md#stale-computed-values-after-piece-set)) |
 | "handler() should be defined at module scope" | handler() inside pattern body | Move handler() outside pattern ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | "Function creation is not allowed in pattern context" | Helper function inside pattern | Move function to module scope ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | "lift() should not be immediately invoked inside a pattern" | `lift(...)(args)` inside pattern | Use `computed()` instead, or define lift() at module scope ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
@@ -40,7 +40,7 @@ These issues compile without errors but fail at runtime.
 - [filter/map/find is Not a Function](gotchas/filter-map-find-not-a-function.md) - Value isn't an array yet
 - [Reactive Reference Outside Context](gotchas/reactive-reference-outside-context.md) - Use `lift()` for object indexing
 - [onClick Inside computed()](gotchas/onclick-inside-computed.md) - ReadOnlyAddressError
-- [ifElse with Composed Pattern Cells](gotchas/ifelse-composed-pattern-cells.md) - Charm hangs
+- [ifElse with Composed Pattern Cells](gotchas/ifelse-composed-pattern-cells.md) - Piece hangs
 - [lift() Returns Stale/Empty Data](gotchas/lift-returns-stale-data.md) - Closure limitations
 - [Handler Binding Error](gotchas/handler-binding-error.md) - Two-step binding pattern
 - [Stream.of() / .subscribe() Don't Exist](gotchas/stream-subscribe-dont-exist.md) - Bound handlers ARE streams

@@ -6,7 +6,7 @@ user-invocable: false
 
 # Debug Pattern
 
-Use `Skill("ct")` for ct CLI documentation if debugging deployment or charm issues.
+Use `Skill("ct")` for ct CLI documentation if debugging deployment or piece issues.
 
 ## Read First
 - `docs/development/debugging/workflow.md` - 5-step debugging process

@@ -14,14 +14,14 @@ This specification defines a **pattern-native testing system** where tests are t
 
 1. **Patterns all the way down** - Tests are patterns, proving the system works
 2. **Fast feedback loops** - Tests run with emulated storage (~10ms setup)
-3. **Debuggability** - Inspect test patterns via CLI (`ct charm inspect`, `ct charm get`)
-4. **Minimal infrastructure** - Reuse existing `charm step` machinery
+3. **Debuggability** - Inspect test patterns via CLI (`ct piece inspect`, `ct piece get`)
+4. **Minimal infrastructure** - Reuse existing `piece step` machinery
 5. **Self-contained tests** - Test logic lives inside actions, not external scripts
 
 ## Non-Goals
 
 - Replacing existing CI integration tests
-- Testing cross-charm linking (requires deployment)
+- Testing cross-piece linking (requires deployment)
 - Testing UI rendering (requires browser)
 - External test runners (Jest, Vitest, etc.)
 
@@ -224,7 +224,7 @@ expense-tracker.test.tsx
 async function runTestPattern(testPath: string, options: TestOptions): Promise<TestResults> {
   const TIMEOUT = options.timeout ?? 5000;
 
-  // 1. Create emulated runtime (same as charm step)
+  // 1. Create emulated runtime (same as piece step)
   const identity = await Identity.fromPassphrase("test-runner");
   const storageManager = StorageManager.emulate({ as: identity });
   const runtime = new Runtime({
@@ -440,7 +440,7 @@ return {
 
 The v1 approach (external test harness with `@commontools/pattern-testing` package) has been deprecated and removed. The pattern-native approach provides:
 
-- **Better debugging** - Deploy test pattern as charm
+- **Better debugging** - Deploy test pattern as piece
 - **Consistency** - Tests use the same patterns as production
 - **Simplicity** - No separate test harness to maintain
 
@@ -454,7 +454,7 @@ The `@commontools/pattern-testing` package has been removed from the codebase.
 
 1. **Dogfooding** - If patterns can't test themselves, something is wrong
 2. **Debuggability** - Inspect test pattern state via CLI commands
-3. **Minimal infrastructure** - Reuse `charm step` machinery
+3. **Minimal infrastructure** - Reuse `piece step` machinery
 4. **Composability** - Test patterns can link to other patterns
 
 ### Why discriminated union format?
@@ -486,7 +486,7 @@ The `@commontools/pattern-testing` package has been removed from the codebase.
 ## Success Criteria
 
 1. **Test patterns run in < 100ms** for typical patterns
-2. **Test patterns can be deployed as charms** for debugging
+2. **Test patterns can be deployed as pieces** for debugging
 3. **The runner correctly detects Stream vs Cell<boolean>**
 4. **Timeouts prevent infinite loops from hanging CI**
 5. **Error messages identify which assertion failed and why**

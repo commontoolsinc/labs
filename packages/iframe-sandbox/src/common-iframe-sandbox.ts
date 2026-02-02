@@ -28,7 +28,7 @@ const HEALTH_CHECK_LOAD_DELAY = 5000;
 // in order to pass the health check.
 
 // Should be rather low, but currently it's too likely for a
-// charm to spend a lot of time processing.
+// piece to spend a lot of time processing.
 const HEALTH_CHECK_TIMEOUT = 3000;
 
 type CommonIframeLoadState = "" | "loading" | "loaded";
@@ -210,8 +210,8 @@ export class CommonIframeSandboxElement extends LitElement {
           : message.data;
 
         // TODO(seefeld): Remove this and make this default true on 3/31/2025 or
-        // whenever we delete all charms anyway. This is just a stopgap to not
-        // break existing charms.
+        // whenever we delete all pieces anyway. This is just a stopgap to not
+        // break existing pieces.
         const doNotSendMyDataBack = Array.isArray(message.data);
 
         for (const key of keys) {
@@ -465,7 +465,7 @@ export class CommonIframeSandboxElement extends LitElement {
   }
 
   // In lieu of versioning, check the content to see
-  // if there is a ping handler; otherwise, older charms
+  // if there is a ping handler; otherwise, older pieces
   // will always fail health check, as it cannot respond
   // to the ping.
   private contentSupportsHealthCheck() {
@@ -494,7 +494,7 @@ export class CommonIframeSandboxElement extends LitElement {
     if (this.crashed) {
       return html`
         <div id="crash-message">
-          <div class="message">🤨 Charm crashed! 🤨</div>
+          <div class="message">🤨 Piece crashed! 🤨</div>
           <button @click="${this.onCrashReload}">Reload</button>
         </div>
       `;

@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { CellHandle } from "@commontools/runtime-client";
-import { CTCharm } from "../ct-charm/ct-charm.ts";
+import { CTPiece } from "../ct-piece/ct-piece.ts";
 
 declare global {
   var Plaid: any;
@@ -124,15 +124,15 @@ export class CTPlaidLink extends BaseElement {
 
     const authCellId = JSON.stringify(this.auth?.ref());
 
-    const container = CTCharm.findCharmContainer(this);
+    const container = CTPiece.findPieceContainer(this);
     if (!container) {
-      throw new Error("No <ct-charm> container.");
+      throw new Error("No <ct-piece> container.");
     }
     const { pieceId } = container;
 
     const payload = {
       authCellId,
-      integrationCharmId: pieceId,
+      integrationPieceId: pieceId,
       products: this.products,
     };
 
@@ -175,7 +175,7 @@ export class CTPlaidLink extends BaseElement {
   private initializePlaidLink(
     linkToken: string,
     authCellId: string,
-    integrationCharmId?: string,
+    integrationPieceId?: string,
   ) {
     if (this.plaidHandler) {
       this.plaidHandler.destroy();
@@ -188,7 +188,7 @@ export class CTPlaidLink extends BaseElement {
         await this.handlePublicToken(
           publicToken,
           authCellId,
-          integrationCharmId,
+          integrationPieceId,
         );
       },
       onExit: (error: any, _metadata: any) => {
@@ -221,7 +221,7 @@ export class CTPlaidLink extends BaseElement {
   private async handlePublicToken(
     publicToken: string,
     authCellId: string,
-    integrationCharmId?: string,
+    integrationPieceId?: string,
   ) {
     this.isLoading = true;
     this.authStatus = "Exchanging token...";
@@ -237,7 +237,7 @@ export class CTPlaidLink extends BaseElement {
           body: JSON.stringify({
             publicToken,
             authCellId,
-            integrationCharmId,
+            integrationPieceId,
           }),
         },
       );

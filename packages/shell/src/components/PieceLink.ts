@@ -3,7 +3,7 @@ import { property } from "lit/decorators.js";
 import { type DID } from "@commontools/identity";
 import { navigate } from "../../shared/mod.ts";
 
-export class CharmLinkElement extends LitElement {
+export class PieceLinkElement extends LitElement {
   static override styles = css`
     a, a:visited {
       color: var(--primary-font, "#000");
@@ -52,10 +52,10 @@ export class CharmLinkElement extends LitElement {
   override render() {
     const href = this.asHref();
     return html`
-      <a class="charm-link" href="${href}" @click="${this
+      <a class="piece-link" href="${href}" @click="${this
         .#onClick}"><slot></slot></a>
     `;
   }
 }
 
-globalThis.customElements.define("x-charm-link", CharmLinkElement);
+globalThis.customElements.define("x-piece-link", PieceLinkElement);

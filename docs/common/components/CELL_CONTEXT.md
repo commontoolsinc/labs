@@ -4,7 +4,7 @@
 
 # Automatic Injection
 
-Every `[UI]` render is automatically wrapped in `ct-cell-context`. You get top-level charm debugging for free without any code changes.
+Every `[UI]` render is automatically wrapped in `ct-cell-context`. You get top-level piece debugging for free without any code changes.
 
 # When to Use Manually
 

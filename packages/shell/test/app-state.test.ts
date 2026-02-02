@@ -75,12 +75,12 @@ describe("AppState", () => {
     assert(state.identity?.did() === identity.did(), "deserializes identity.");
   });
 
-  it("clears charm list view when activating a charm", () => {
+  it("clears piece list view when activating a piece", () => {
     const initial: AppState = {
       apiUrl: new URL(API_URL),
       view: { builtin: "home" },
       config: {
-        showShellCharmListView: true,
+        showShellPieceListView: true,
       },
     };
 
@@ -92,6 +92,6 @@ describe("AppState", () => {
       },
     });
 
-    assert(next.config.showShellCharmListView === false);
+    assert(next.config.showShellPieceListView === false);
   });
 });

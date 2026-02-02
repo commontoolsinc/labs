@@ -8,14 +8,14 @@ Cells are reactive data containers from the Common Tools runtime (`@commontools/
 - Reactive updates via subscriptions
 - Transactional mutations
 - Path-based access to nested data
-- Runtime integration for charm execution
+- Runtime integration for piece execution
 
 ## When to Use Cell Integration
 
 Use Cell integration when:
 - The component needs to render reactive data from the runtime
 - The component allows users to edit data that should sync back to the runtime
-- The component is part of a pattern/recipe UI that manipulates charm state
+- The component is part of a pattern/recipe UI that manipulates piece state
 
 Do NOT use Cell integration for:
 - Simple presentational components

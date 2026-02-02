@@ -1,33 +1,33 @@
 import { html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 
-const TAG_NAME = "ct-charm";
+const TAG_NAME = "ct-piece";
 
 /**
- * CTCharm - Container element that provides charm context to child components
+ * CTPiece - Container element that provides piece context to child components
  *
- * @element ct-charm
+ * @element ct-piece
  *
- * @attr {string} charm-id - The ID of the charm
+ * @attr {string} piece-id - The ID of the piece
  * @attr {string} space-name - The name of the space
  *
- * @slot - Default slot for charm content
+ * @slot - Default slot for piece content
  *
  * @example
- * <ct-charm charm-id="abc123" space-name="my-space">
+ * <ct-piece piece-id="abc123" space-name="my-space">
  *   <ct-button>Click Me</ct-button>
- * </ct-charm>
+ * </ct-piece>
  */
-export class CTCharm extends BaseElement {
+export class CTPiece extends BaseElement {
   declare pieceId: string | null;
   declare spaceName: string | null;
 
-  static findCharmContainer(element: HTMLElement): CTCharm | null {
+  static findPieceContainer(element: HTMLElement): CTPiece | null {
     const tagName = TAG_NAME.toUpperCase();
     let currentNode: HTMLElement | null = element;
     while (currentNode) {
       if (currentNode.tagName === tagName) {
-        return currentNode as CTCharm;
+        return currentNode as CTPiece;
       }
       const parent: HTMLElement | null = currentNode.parentElement;
       if (parent) {
@@ -47,7 +47,7 @@ export class CTCharm extends BaseElement {
   }
 
   static override properties = {
-    pieceId: { required: true, type: String, attribute: "charm-id" },
+    pieceId: { required: true, type: String, attribute: "piece-id" },
     spaceName: { required: true, type: String, attribute: "space-name" },
   };
 
@@ -64,4 +64,4 @@ export class CTCharm extends BaseElement {
   }
 }
 
-globalThis.customElements.define("ct-charm", CTCharm);
+globalThis.customElements.define("ct-piece", CTPiece);

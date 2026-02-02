@@ -237,7 +237,7 @@ private mentionController = new MentionController(this);
 // In firstUpdated
 this.mentionController.setup({
   mentionableCell: this.mentionable,
-  onMentionSelect: (charm) => {
+  onMentionSelect: (piece) => {
     // Handle mention selection
   },
 });

@@ -19,19 +19,19 @@ A security model combining information flow control with contextual integrity;
 enforces policies on how data is used, attached to schemas and validated both
 statically and dynamically.
 
-## Charm
+## Piece
 
-Charm is a [spell] invocation binding set of [cell]s as inputs and set of
+Piece is a [spell] invocation binding set of [cell]s as inputs and set of
 [cell]s as outputs, creating an execution graph. It may help to think of [spell]
-as an open electric circuit, in this case [charm] would be a closed electric
+as an open electric circuit, in this case [piece] would be a closed electric
 circuit as current will flow through it. Different analogy could be to think of
-[charm] as a process, where's [spell] would be a program and [cell]s would be
+[piece] as a process, where's [spell] would be a program and [cell]s would be
 program inputs and outputs.
 
-There are a few more specific terms for [some cells](charm-cell-diagram.md) within the charm.
-- Result Cell -- This is the main charm cell. The UI will be built here.
-- Process Cell -- This holds much of the working state of the charm.
-- Recipe Cell -- Contains the recipe source code.
+There are a few more specific terms for [some cells](piece-cell-diagram.md) within the piece.
+- Result Cell -- This is the main piece cell. The UI will be built here.
+- Process Cell -- This holds much of the working state of the piece.
+- Pattern Cell -- Contains the pattern source code.
 
 ## CRDT (Conflict-free Replicated Data Type)
 
@@ -202,7 +202,7 @@ turns into rendered HTML.
 
 [spell]: #spell
 [cell]: #cell
-[charm]: #charm
+[piece]: #piece
 [acl]: #acl-access-control-list
 [cfc]: #cfc-contextual-flow-control
 [cts]: #cts-common-typescript

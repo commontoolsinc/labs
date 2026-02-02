@@ -14,7 +14,7 @@ Cell-based reactive data structure with proper link resolution support.
 interface Node {
   body: string; // Text content of the node
   children: Node[]; // Child nodes
-  attachments: Attachment[]; // File/charm attachments
+  attachments: Attachment[]; // File/piece attachments
   [ID]: string; // Required for Cell array operations
 }
 ```
@@ -177,9 +177,9 @@ updates and `.getAsQueryResult()` for link resolution.
     value: Tree;
   }
   ```
-- `charm-link-click`: Fired when clicking charm references
+- `piece-link-click`: Fired when clicking piece references
   ```typescript
-  detail: { href: string, text: string, charm: Charm }
+  detail: { href: string, text: string, piece: Piece }
   ```
 
 ### Internal Event Flow
@@ -247,7 +247,7 @@ change propagation and link resolution:
 ### Extension Points
 
 - `MentionableItem` interface for @ completion
-- `Attachment` interface for file/charm references
+- `Attachment` interface for file/piece references
 - Custom keyboard command registration
 - Theme/styling customization
 
@@ -265,6 +265,6 @@ Recent fixes (December 2024):
 
 - Fixed all `.get()` calls to use `.getAsQueryResult()` for proper link
   resolution
-- Added type casting for Charm[] in attachment rendering
+- Added type casting for Piece[] in attachment rendering
 - Removed unused debug files and utilities
 - Updated to follow Cell API best practices

@@ -1,6 +1,6 @@
 <!-- @reviewed 2025-12-10 docs-rationalization -->
 
-Charms can be favorites and added to your [[HOME_SPACE]]. These charms can be accessed from _any_ space, via this list.
+Pieces can be favorites and added to your [[HOME_SPACE]]. These pieces can be accessed from _any_ space, via this list.
 
 # Accessing the Favorites list
 
@@ -11,9 +11,9 @@ type Favorite = { cell: { [NAME]?: string }; tag: string };
 const wishResult = wish<Array<Favorite>>({ query: "#favorites" });
 ```
 
-The `tag` field contains the serialized `resultSchema` of the charm pointed to by `cell`. This is automatically populated when adding a favorite and is used for tag-based searching in the wish system.
+The `tag` field contains the serialized `resultSchema` of the piece pointed to by `cell`. This is automatically populated when adding a favorite and is used for tag-based searching in the wish system.
 
-# Wishing for A Specific Charm
+# Wishing for A Specific Piece
 
 See `system/wish.tsx` for a full example. 
 
@@ -21,8 +21,8 @@ In `note.tsx` I decorate my schema with a jsdoc comment containing "#note":
 ```tsx
 /** Represents a small #note a user took to remember some text. */
 type Output = {
-  mentioned: Default<Array<MentionableCharm>, []>;
-  backlinks: MentionableCharm[];
+  mentioned: Default<Array<MentionablePiece>, []>;
+  backlinks: MentionablePiece[];
 
   content: Default<string, "">;
   grep: Stream<{ query: string }>;
@@ -44,12 +44,12 @@ Always call `wish()` at the pattern body level, not inside `computed()` or other
 ```tsx
 export default pattern<Input>(({ enableSearch }) => {
   // ✅ Call wish() once at pattern level
-  const searchCharm = wish<SearchOutput>({ query: "#search" });
+  const searchPiece = wish<SearchOutput>({ query: "#search" });
 
   // Use computed() to conditionally process the result
   const searchData = computed(() => {
     if (!enableSearch) return null;
-    return searchCharm?.result?.data;
+    return searchPiece?.result?.data;
   });
 
   return { searchData, [UI]: <div>{searchData}</div> };
@@ -60,7 +60,7 @@ This ensures the wish is established once. Conditional logic belongs in how you 
 
 # Intended Usage
 
-Keep a handle to important information in a charm, e.g. google auth, user preferences/biography, cross-cutting data (calendar).
+Keep a handle to important information in a piece, e.g. google auth, user preferences/biography, cross-cutting data (calendar).
 
 # Future Plans
 

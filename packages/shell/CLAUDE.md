@@ -26,7 +26,7 @@ Tests should be run from the workspace root:
 
 The shell package is a web-based shell application built with Lit Web
 Components. It provides a browser-based interface for interacting with Common
-Tools' charm runtime system.
+Tools' piece runtime system.
 
 ### Core Architecture Pattern
 
@@ -47,7 +47,7 @@ RootView (authentication wrapper)
   └─ AppView (main application)
       ├─ HeaderView (navigation/auth UI)
       └─ BodyView (main content area)
-          └─ [Dynamic charm content]
+          └─ [Dynamic piece content]
 ```
 
 ### Key Systems
@@ -62,8 +62,8 @@ RootView (authentication wrapper)
    - Root keys stored in browser KeyStore
    - Session state managed in AppState
 
-3. **Charm Integration**:
-   - PiecesController (`src/contexts/charms-controller.ts`) manages lifecycle
+3. **Piece Integration**:
+   - Runtime integration via `src/lib/runtime.ts` manages lifecycle
    - Runtime provided by `@commontools/runner`
    - Storage via StorageManager for persistent data
 
@@ -87,7 +87,7 @@ RootView (authentication wrapper)
 - `src/lib/` - Core application logic
   - `app/` - State management and types
   - `commands.ts` - Command definitions
-  - `runtime.ts` - Charm runtime integration
+  - `runtime.ts` - Piece runtime integration
 
 ### Build Configuration
 

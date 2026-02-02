@@ -7,7 +7,7 @@ import type { FavoriteEntry } from "@commontools/home-schemas";
 /**
  * Favorite button component.
  *
- * Allows users to add/remove charms from their favorites list.
+ * Allows users to add/remove pieces from their favorites list.
  * Favorites are stored in the user's home space defaultPattern.
  *
  * Uses reactive subscription to favorites so the button updates

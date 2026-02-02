@@ -4,16 +4,16 @@ This guide explains how to programmatically invoke a handler stream from `Runtim
 
 ## Steps
 
-### 1. Get the charm cell
+### 1. Get the piece cell
 
 ```typescript
-const charmCell = someCell.resolveAsCell();
+const pieceCell = someCell.resolveAsCell();
 ```
 
 ### 2. Apply schema with `{ asStream: true }` on the handler property
 
 ```typescript
-const cell = charmCell.asSchema({
+const cell = pieceCell.asSchema({
   type: "object",
   properties: {
     handlerName: { asStream: true },  // <-- THIS IS THE KEY

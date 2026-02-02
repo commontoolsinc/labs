@@ -195,18 +195,18 @@ Deploy the test pattern and use CLI commands to inspect state:
 
 ```bash
 # Deploy the test pattern
-deno task ct charm new ./main.test.tsx
+deno task ct piece new ./main.test.tsx
 
-# Get the charm ID from the output, then inspect
-deno task ct charm inspect --charm <CHARM_ID>
+# Get the piece ID from the output, then inspect
+deno task ct piece inspect --piece <PIECE_ID>
 
 # Get specific values
-deno task ct charm get subject/items --charm <CHARM_ID>
+deno task ct piece get subject/items --piece <PIECE_ID>
 
 # Step through manually
-deno task ct charm call tests/0/action --charm <CHARM_ID>
-deno task ct charm step --charm <CHARM_ID>
-deno task ct charm get tests/1/assertion --charm <CHARM_ID>
+deno task ct piece call tests/0/action --piece <PIECE_ID>
+deno task ct piece step --piece <PIECE_ID>
+deno task ct piece get tests/1/assertion --piece <PIECE_ID>
 ```
 
 ### 3. Expose Debug Data

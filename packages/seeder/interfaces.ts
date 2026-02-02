@@ -21,7 +21,7 @@ export type Command = {
   data: unknown;
 };
 
-export type CharmResult = {
+export type PieceResult = {
   id: string | null;
   prompt: string;
   screenshotPath?: string;
@@ -44,5 +44,5 @@ export type Scenario = {
 
 export interface ExecutedScenario {
   scenario: Scenario;
-  results: CharmResult[];
+  results: PieceResult[];
 }

@@ -9,7 +9,7 @@ import type { TreeOperationResult } from "./tree-diff.ts";
  */
 export interface MentionableItem {
   name: string;
-  charm: unknown;
+  piece: unknown;
 }
 
 /**

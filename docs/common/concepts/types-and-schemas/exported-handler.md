@@ -14,7 +14,7 @@ interface Output {
 
 **Why Stream<T>?**
 - `Stream<T>` represents a write-only channel for triggering actions
-- Other charms can call these handlers via `.send()` when linked
+- Other pieces can call these handlers via `.send()` when linked
 
 ### Creating Streams (Bound Handlers)
 
@@ -50,4 +50,4 @@ export default pattern<Record<string, never>, Output>(_ => {
 })
 ```
 
-The bound handler is the stream. Other patterns or charms can send events to it via linking.
+The bound handler is the stream. Other patterns or pieces can send events to it via linking.

@@ -16,7 +16,7 @@ export interface AppState {
 }
 
 export interface AppStateConfig {
-  showShellCharmListView?: boolean;
+  showShellPieceListView?: boolean;
   showDebuggerView?: boolean;
   showQuickJumpView?: boolean;
   showSidebar?: boolean;
@@ -34,7 +34,7 @@ export function isAppStateConfigKey(
 ): value is AppStateConfigKey {
   if (typeof value !== "string") return false;
   switch (value) {
-    case "showShellCharmListView":
+    case "showShellPieceListView":
     case "showDebuggerView":
     case "showQuickJumpView":
     case "showSidebar":
@@ -73,7 +73,7 @@ export function applyCommand(
     case "set-view": {
       next.view = command.view;
       if ("pieceId" in command.view && command.view.pieceId) {
-        next.config.showShellCharmListView = false;
+        next.config.showShellPieceListView = false;
       }
       break;
     }

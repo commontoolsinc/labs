@@ -1,5 +1,5 @@
 // @ts-nocheck - This test file is disabled and uses the old PieceController API
-// that has been replaced by CharmHandle with the RuntimeClient implementation.
+// that has been replaced by PieceHandle with the RuntimeClient implementation.
 /**
  * Integration test for iframe counter recipe.
  *
@@ -10,7 +10,7 @@
  * - Center third: Count display
  * - Right third: Increment area (green)
  *
- * State verification is done through the charm controller API rather than
+ * State verification is done through the piece controller API rather than
  * DOM inspection, as the iframe content is not directly accessible.
  */
 
@@ -56,8 +56,8 @@ async function clickDecrementBtn(counterIframe: ElementHandle): Promise<void> {
   });
 }
 
-// Helper function to get the active charm's result from the app
-async function getCharmResult(page: Page): Promise<{ count: number }> {
+// Helper function to get the active piece's result from the app
+async function getPieceResult(page: Page): Promise<{ count: number }> {
   // First get the app view element using pierce selector
   const appView = await page.$("x-app-view", { strategy: "pierce" });
   if (!appView) {
@@ -67,24 +67,24 @@ async function getCharmResult(page: Page): Promise<{ count: number }> {
   // Use the element handle to evaluate in its context
   return await appView.evaluate(async (element: XAppView) => {
     // Access the private _patterns property
-    const activeCharmTask = element._patterns;
+    const activePieceTask = element._patterns;
 
-    if (!activeCharmTask) {
-      throw new Error("No _activeCharm property found on element");
+    if (!activePieceTask) {
+      throw new Error("No _activePiece property found on element");
     }
 
-    if (!activeCharmTask.value) {
-      throw new Error("No active charm value found");
+    if (!activePieceTask.value) {
+      throw new Error("No active piece value found");
     }
 
-    // Get the charm controller from the Task's value
-    const charmController = activeCharmTask.value.activePattern;
-    if (!charmController) {
-      throw new Error("No active charm controller found");
+    // Get the piece controller from the Task's value
+    const pieceController = activePieceTask.value.activePattern;
+    if (!pieceController) {
+      throw new Error("No active piece controller found");
     }
 
-    // Get the result from the charm controller
-    const result = await charmController.result.get();
+    // Get the result from the piece controller
+    const result = await pieceController.result.get();
 
     return result as { count: number };
   });
@@ -96,7 +96,7 @@ describe("shell iframe counter tests", () => {
 
   let identity: Identity;
   let cc: PiecesController;
-  let charm: PieceController;
+  let piece: PieceController;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
@@ -105,7 +105,7 @@ describe("shell iframe counter tests", () => {
       apiUrl: new URL(API_URL),
       identity: identity,
     });
-    charm = await cc.create(
+    piece = await cc.create(
       await Deno.readTextFile(
         join(
           import.meta.dirname!,
@@ -126,7 +126,7 @@ describe("shell iframe counter tests", () => {
       frontendUrl: FRONTEND_URL,
       view: {
         spaceName: SPACE_NAME,
-        pieceId: charm.id,
+        pieceId: piece.id,
       },
       identity,
     });
@@ -141,7 +141,7 @@ describe("shell iframe counter tests", () => {
     // views are rendered, wait after the iframe's contents have been loaded.
     await sleep(2000);
 
-    // The charm uses nested iframes with sandbox restrictions, requiring coordinate-based interaction
+    // The piece uses nested iframes with sandbox restrictions, requiring coordinate-based interaction
     // Click the right third of the iframe 5 times to increment (starting from 0)
     console.log("Clicking increment area 5 times...");
     for (let i = 0; i < 5; i++) {
@@ -160,14 +160,14 @@ describe("shell iframe counter tests", () => {
 
     await sleep(1000);
 
-    // Get the charm's result and verify the count
-    console.log("Getting charm result to verify count...");
-    const charmResult = await getCharmResult(page);
-    console.log("Charm result:", charmResult);
+    // Get the piece's result and verify the count
+    console.log("Getting piece result to verify count...");
+    const pieceResult = await getPieceResult(page);
+    console.log("Piece result:", pieceResult);
 
     // Verify the count is 2
     assertEquals(
-      charmResult.count,
+      pieceResult.count,
       2,
       "Count should be 2 after 5 increments and 3 decrements",
     );
@@ -179,7 +179,7 @@ describe("shell iframe counter tests", () => {
       frontendUrl: FRONTEND_URL,
       view: {
         spaceName: SPACE_NAME,
-        pieceId: charm.id,
+        pieceId: piece.id,
       },
       identity,
     });
@@ -205,14 +205,14 @@ describe("shell iframe counter tests", () => {
 
     await sleep(1000);
 
-    // Get the charm's result and verify the count is now 6
-    console.log("Getting charm result after reload and increments...");
-    const charmResultAfterReload = await getCharmResult(page);
-    console.log("Charm result after reload:", charmResultAfterReload);
+    // Get the piece's result and verify the count is now 6
+    console.log("Getting piece result after reload and increments...");
+    const pieceResultAfterReload = await getPieceResult(page);
+    console.log("Piece result after reload:", pieceResultAfterReload);
 
     // Verify the count is 6 (2 + 4)
     assertEquals(
-      charmResultAfterReload.count,
+      pieceResultAfterReload.count,
       6,
       "Count should be 6 after reload (2 + 4 increments)",
     );

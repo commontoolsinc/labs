@@ -145,7 +145,7 @@ const addFavorite = handler<
     const snapshot = captureSnapshot(piece, schemaTag);
     journal.push({
       timestamp: Date.now(),
-      eventType: "charm:favorited",
+      eventType: "piece:favorited",
       subject: piece as any,
       snapshot,
       narrative: "",
@@ -174,7 +174,7 @@ const removeFavorite = handler<
     // Add journal entry for the unfavorite action
     journal.push({
       timestamp: Date.now(),
-      eventType: "charm:unfavorited",
+      eventType: "piece:unfavorited",
       subject: piece as any,
       snapshot,
       narrative: "",
@@ -276,10 +276,10 @@ export default pattern((_) => {
 
   // Event type descriptions for narrative generation
   const eventDescriptions: Record<string, string> = {
-    "charm:favorited": "favorited",
-    "charm:unfavorited": "unfavorited",
-    "charm:created": "created",
-    "charm:modified": "modified",
+    "piece:favorited": "favorited",
+    "piece:unfavorited": "unfavorited",
+    "piece:created": "created",
+    "piece:modified": "modified",
     "space:entered": "entered a space",
   };
 

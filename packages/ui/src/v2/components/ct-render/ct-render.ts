@@ -11,7 +11,7 @@ import "../ct-loader/ct-loader.ts";
 const DEBUG_LOGGING = false;
 
 /**
- * UI variant types for rendering different representations of a charm.
+ * UI variant types for rendering different representations of a piece.
  * Each variant maps to a property name that patterns can export.
  *
  * - `default`: The main [UI] export. Full standalone rendering.
@@ -32,7 +32,7 @@ export type UIVariant =
   | "settings";
 
 /**
- * Maps variant names to the property key to look for on the charm.
+ * Maps variant names to the property key to look for on the piece.
  * null means use the default [UI] rendering via render().
  */
 const _VARIANT_TO_KEY: Record<UIVariant, VariantCellKey | null> = {
@@ -54,26 +54,26 @@ type VariantCellKey =
   | "settingsUI";
 
 /**
- * CTRender - Renders a cell that contains a charm recipe with UI
+ * CTRender - Renders a cell that contains a piece pattern with UI
  *
  * @element ct-render
  *
- * @property {CellHandle} cell - The cell containing the charm to render
+ * @property {CellHandle} cell - The cell containing the piece to render
  * @property {UIVariant} variant - UI variant to render: "default" | "preview" | "thumbnail" | "sidebar" | "fab" | "settings" | "embedded"
- *   Each variant maps to a property on the charm (e.g., "preview" -> "previewUI", "embedded" -> "embeddedUI").
+ *   Each variant maps to a property on the piece (e.g., "preview" -> "previewUI", "embedded" -> "embeddedUI").
  *   Falls back to default [UI] if the variant property doesn't exist.
  *
  * @example
  * // Default rendering
- * <ct-render .cell=${myCharmCell}></ct-render>
+ * <ct-render .cell=${myPieceCell}></ct-render>
  *
  * @example
  * // Render preview variant (uses previewUI if available, falls back to [UI])
- * <ct-render .cell=${myCharmCell} variant="preview"></ct-render>
+ * <ct-render .cell=${myPieceCell} variant="preview"></ct-render>
  *
  * @example
  * // Render embedded variant (uses embeddedUI - minimal UI without chrome)
- * <ct-render .cell=${noteCharm} variant="embedded"></ct-render>
+ * <ct-render .cell=${notePiece} variant="embedded"></ct-render>
  */
 export class CTRender extends BaseElement {
   static override styles = css`

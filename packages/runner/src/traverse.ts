@@ -555,8 +555,11 @@ export abstract class BaseObjectTraverser {
             "writeRedirect",
           );
           const [linkDoc, _selector] = this.nextLink(redirDoc, redirSelector);
-          // our item link should point one past the last redirect
-          itemLink = getNormalizedLink(linkDoc.address);
+          // our item link should point one past the last redirect, but it may
+          // be invalid (in which case, we should base the link on redirDoc).
+          itemLink = getNormalizedLink(
+            linkDoc.value !== undefined ? linkDoc.address : redirDoc.address,
+          );
           // We can follow all the links, since we don't need to track cells
           const [valueDoc, _] = this.getDocAtPath(linkDoc, [], DefaultSelector);
           docItem = valueDoc;
@@ -865,6 +868,9 @@ function getTrackerKey(
  * We'll handle tracking of the docs, combining schema, and marking the linked
  * source docs as read if needed.
  *
+ * I can't just use resolveLink, since I need to also track all the
+ * intermediate documents if we includeSource.
+ *
  * @param tx - IStorageTransaction that can be used to read data
  * @param doc - IAttestation for the current document
  * @param path - Property/index path to follow
@@ -907,18 +913,17 @@ function followPointer(
     space: link.space,
     id: link.id,
     type: "application/json",
-    path: [],
+    // The link.path doesn't include the initial "value", so prepend it
+    path: ["value", ...link.path as string[]],
   };
-  // The link.path doesn't include the initial "value", so prepend it
-  const targetPath = ["value", ...link.path as string[]];
   if (selector !== undefined) {
     // We'll need to re-root the selector for the target doc
     // Remove the portions of doc.path from selector.path, limiting schema if
     // needed.
-    // Also insert the portions of cellTarget.path, so selector is relative to
+    // Also insert the portions of target.path, so selector is relative to
     // new target doc. We do this even if the target doc is the same doc, since
     // we want the selector path to match.
-    selector = narrowSchema(doc.address.path, selector, targetPath, cfc);
+    selector = narrowSchema(doc.address.path, selector, targe.path, cfc);
     // When traversing links, we combine the schema
     selector.schema = combineOptionalSchema(selector.schema, link.schema);
   }
@@ -929,51 +934,81 @@ function followPointer(
     logger.warn("traverse", () => ["Encountered cycle!", doc.value]);
     return [notFound(doc.address), selector];
   }
+  // Attempt to read the actual link location. This will often fail because
+  // there is an intermediate link, but we'll handle that below
   // Load the data from the manager.
   const { ok: valueEntry, error } = tx.read(target);
-  if (error) {
-    logger.warn("traverse", () => ["Read error!", target, error]);
-    return [notFound(doc.address), selector];
-  }
-  if (link.id !== undefined) {
-    // We have a reference to a different doc, so track the dependency
-    // and update our targetDoc
-    if (selector !== undefined) {
-      schemaTracker.add(getTrackerKey(target), selector);
+
+  if (error !== undefined) {
+    // If we had an unexpected error, or didn't find the doc at all, return.
+    if (error.name === "NotFoundError" && error.path.length === 0) {
+      // If the object we're pointing to is a retracted fact, just return undefined.
+      logger.info(
+        "traverse",
+        () => ["followPointer found missing/retracted fact", valueEntry],
+      );
+      // We include the path in the address, so that information is available,
+      return [notFound(target), selector];
+    } else if (error.name !== "NotFoundError") {
+      // Unexpected error
+      logger.warn("traverse", () => ["Read error!", target, error]);
+      return [notFound(target), selector];
     }
-    // Load the sources/recipes recursively unless we're a retracted fact.
-    if (valueEntry.value !== undefined && includeSource) {
-      loadSource(
+  }
+
+  // If we followed a link to a doc, and the doc exists, track our visit
+  // We do this even if the id is the same, since the path may differ.
+  if (link.id !== undefined) {
+    trackVisitedDoc(tx, target, schemaTracker, selector, includeSource);
+  }
+
+  // If we got a NotFoundError, or an undefined because the last element
+  // wasn't found, back up and try again
+  if (
+    error !== undefined ||
+    (valueEntry != undefined && valueEntry.value === undefined)
+  ) {
+    // If the doc exists, but we don't have our entire path to the link target,
+    // see if we can get there through intermediate documents.
+    const lastPath = (error !== undefined)
+      ? error.path
+      : valueEntry.address.path;
+    if (valueEntry === undefined || valueEntry.value === undefined) {
+      const lastExisting = lastPath.slice(0, -1);
+      const remaining = target.path.slice(lastExisting.length);
+      const partialTarget = { ...target, path: lastExisting };
+      const lastValue = tx.readOrThrow(partialTarget)!;
+      // We can continue with the target, but provide the top level target doc
+      // to getAtPath.
+      // An assertion fact.is will be an object with a value property, and
+      // that's what our schema is relative to.
+      const partialTargetDoc = {
+        address: partialTarget,
+        value: lastValue,
+      };
+      // We've loaded the linked doc, so walk the path to get to the right part of that doc (or whatever doc that path leads to),
+      // then the provided path from the arguments.
+      return getAtPath(
         tx,
-        {
-          address: target,
-          value: valueEntry.value,
-        },
-        new Set<string>(),
+        partialTargetDoc,
+        [...remaining, ...path],
+        tracker,
+        cfc,
         schemaTracker,
+        selector,
+        includeSource,
+        lastNode,
       );
     }
   }
-  // If the object we're pointing to is a retracted fact, just return undefined.
-  if (valueEntry.value === undefined) {
-    logger.info(
-      "traverse",
-      () => ["followPointer found missing/retracted fact", valueEntry, target],
-    );
-    // We include the path in the address, so that information is available,
-    // even though our read was a top level doc read.
-    return [
-      { address: { ...target, path: targetPath }, value: undefined },
-      selector,
-    ];
-  }
+
   // We can continue with the target, but provide the top level target doc
   // to getAtPath.
   // An assertion fact.is will be an object with a value property, and
   // that's what our schema is relative to.
   const targetDoc = {
-    address: { ...target, path: [] },
-    value: (valueEntry.value as Immutable<JSONObject>),
+    address: target,
+    value: valueEntry.value,
   };
 
   // We've loaded the linked doc, so walk the path to get to the right part of that doc (or whatever doc that path leads to),
@@ -981,7 +1016,7 @@ function followPointer(
   return getAtPath(
     tx,
     targetDoc,
-    [...targetPath, ...path],
+    path,
     tracker,
     cfc,
     schemaTracker,
@@ -989,6 +1024,36 @@ function followPointer(
     includeSource,
     lastNode,
   );
+}
+function trackVisitedDoc(
+  tx: IExtendedStorageTransaction,
+  target: IMemorySpaceAddress,
+  schemaTracker: MapSet<string, SchemaPathSelector>,
+  selector: SchemaPathSelector | undefined,
+  includeSource: boolean = false,
+) {
+  // We have a reference to a different doc, so track the dependency
+  // and update our targetDoc
+  if (selector !== undefined) {
+    schemaTracker.add(getTrackerKey(target), selector);
+  }
+  // Load the sources/recipes recursively unless we're a retracted fact.
+  if (includeSource) {
+    // Loading source requires the full doc. This could be narrowed, but it
+    // happens in a non-reactive context.
+    const { ok: fullDoc } = tx.read({ ...target, path: [] });
+    if (fullDoc) {
+      loadSource(
+        tx,
+        {
+          address: { ...fullDoc.address, space: target.space },
+          value: fullDoc.value,
+        },
+        new Set<string>(),
+        schemaTracker,
+      );
+    }
+  }
 }
 
 // Recursively load the source from the doc ()
@@ -1856,12 +1921,17 @@ export class SchemaObjectTraverser<V extends JSONValue>
         curSelector.path = curDoc.address.path;
       }
       // If we've asked for cells in the array and we don't need to traverse cells,
-      // add the created cell instead.
+      // add the created cell instead. We check asCellOrStream regardless of
+      // whether the value is a link — inline objects should also become cells
+      // when the schema says asCell, to avoid reading nested data on the
+      // parent's reactive transaction.
       if (
         !this.traverseCells &&
-        SchemaObjectTraverser.asCellOrStream(curSelector.schema) &&
-        isPrimitiveCellLink(curDoc.value)
+        SchemaObjectTraverser.asCellOrStream(curSelector.schema)
       ) {
+        // TODO(@ubik2): Removed the isPrimitiveCellLink(curDoc.value) check
+        // here, but I'm not sure that's correct -- it does remove some read
+        // reactivity.
         // For my cell link, lastRedirDoc currently points to the last redirect
         // target, but we want cell properties to be based on the link value at
         // that location, so we effectively follow one more link if available.

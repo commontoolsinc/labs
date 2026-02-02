@@ -48,7 +48,7 @@ export default Node;
 ## Key Rules
 
 - **Both type params required:** Use `pattern<Input, Output>()` - single param `pattern<Input>()` will error if you access SELF
-- **`self` is typed as the output** - the instantiated charm itself, enabling recursive structures
+- **`self` is typed as the output** - the instantiated piece itself, enabling recursive structures
 
 ## See Also
 

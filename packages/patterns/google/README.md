@@ -84,7 +84,7 @@ You need your own Google OAuth credentials:
 
 Tokens expire after ~1 hour. When expired:
 
-1. Find your google-auth charm (in favorites or homespace)
+1. Find your google-auth piece (in favorites or homespace)
 2. Click "Refresh Token" button
 3. Other patterns automatically get the refreshed token
 
@@ -228,47 +228,47 @@ The patterns request various scopes depending on their needs:
 - `https://www.googleapis.com/auth/calendar.events` - Manage calendar events
 - `https://www.googleapis.com/auth/documents.readonly` - Read Google Docs
 
-## Manual Charm Linking
+## Manual Piece Linking
 
 When `wish()` isn't working (e.g., favorites disabled), you can manually link
-charms via CLI.
+pieces via CLI.
 
 ### Steps
 
-#### 1. Deploy both charms
+#### 1. Deploy both pieces
 
 ```bash
 # Deploy google-auth
-ct charm new google-auth.tsx
+ct piece new google-auth.tsx
 
 # Deploy gmail-importer
-ct charm new gmail-importer.tsx
+ct piece new gmail-importer.tsx
 ```
 
-#### 2. Authenticate with Google Auth charm
+#### 2. Authenticate with Google Auth piece
 
-Navigate to the google-auth charm in browser and complete OAuth flow.
+Navigate to the google-auth piece in browser and complete OAuth flow.
 
-#### 3. Link the charms
+#### 3. Link the pieces
 
 ```bash
 # Format: source/path target/path
-ct charm link \
-  GOOGLE_AUTH_CHARM_ID/auth \
-  GMAIL_IMPORTER_CHARM_ID/overrideAuth
+ct piece link \
+  GOOGLE_AUTH_PIECE_ID/auth \
+  GMAIL_IMPORTER_PIECE_ID/overrideAuth
 ```
 
 **Critical paths:**
 
-- Source: `GOOGLE_AUTH_CHARM_ID/auth` - the auth result from google-auth
-- Target: `GMAIL_IMPORTER_CHARM_ID/overrideAuth` - the overrideAuth input of
+- Source: `GOOGLE_AUTH_PIECE_ID/auth` - the auth result from google-auth
+- Target: `GMAIL_IMPORTER_PIECE_ID/overrideAuth` - the overrideAuth input of
   gmail-importer
 
 #### 4. Verify the link
 
 ```bash
 # Check that overrideAuth is populated
-ct charm inspect --charm GMAIL_IMPORTER_CHARM_ID
+ct piece inspect --piece GMAIL_IMPORTER_PIECE_ID
 ```
 
 You should see `overrideAuth` in the Source (Inputs) with token, user info, etc.
@@ -277,7 +277,7 @@ You should see `overrideAuth` in the Source (Inputs) with token, user info, etc.
 
 1. **Path format**: Use forward slashes, e.g., `pieceId/auth` not `pieceId.auth`
 
-2. **Link direction**: Source -> Target. The target charm "reads from" the
+2. **Link direction**: Source -> Target. The target piece "reads from" the
    source.
 
 3. **The pattern must support overrideAuth**: The gmail-importer has:
@@ -286,10 +286,10 @@ You should see `overrideAuth` in the Source (Inputs) with token, user info, etc.
    ```
    This optional input is what receives the linked auth data.
 
-4. **Check "Reading From" in inspect**: After linking, `ct charm inspect` shows:
+4. **Check "Reading From" in inspect**: After linking, `ct piece inspect` shows:
    ```
    --- Reading From ---
-     - sourceCharmId (Google Auth (email@example.com))
+     - sourcePieceId (Google Auth (email@example.com))
    ```
 
 ## Troubleshooting
@@ -299,7 +299,7 @@ You should see `overrideAuth` in the Source (Inputs) with token, user info, etc.
 - The pattern might be showing both the "Connect Google Account" UI AND using
   overrideAuth
 - Check that the pattern's logic correctly uses overrideAuth when available
-- The charm name should show the email if overrideAuth is working (e.g., "GMail
+- The piece name should show the email if overrideAuth is working (e.g., "GMail
   Importer email@example.com")
 
 ### Settings not being read in handler
