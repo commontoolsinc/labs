@@ -18,23 +18,20 @@ export interface AgentPolicy {
   mode: "all" | "any";
   /** If true, agent can spawn sub-agents with relaxed policies */
   canSpawnSubAgents: boolean;
-  /** If true, agent can endorse data (add integrity atoms) */
-  canEndorse: boolean;
   /** Description for audit/display */
   description: string;
 }
 
 /** Pre-built policies */
 export const policies = {
-  /** Main agent: can only see injection-free data */
+  /** Main agent: can see injection-free data OR data transformed by a sub-agent */
   main(): AgentPolicy {
     return {
       name: "main-agent",
-      requiredIntegrity: [{ kind: "InjectionFree" }],
-      mode: "all",
+      requiredIntegrity: [{ kind: "InjectionFree" }, { kind: "TransformedBy", command: "*" }],
+      mode: "any",
       canSpawnSubAgents: true,
-      canEndorse: false,
-      description: "Can only see data attested as injection-free",
+      description: "Can see injection-free data or sub-agent transformed results",
     };
   },
 
@@ -45,20 +42,18 @@ export const policies = {
       requiredIntegrity: [],
       mode: "all",
       canSpawnSubAgents: true,
-      canEndorse: true,
       description: "Can see all data including injection-tainted content",
     };
   },
 
-  /** Restricted sub-agent: can see everything but cannot endorse or spawn */
+  /** Restricted sub-agent: can see everything but cannot spawn */
   restricted(): AgentPolicy {
     return {
       name: "restricted-sub-agent",
       requiredIntegrity: [],
       mode: "all",
       canSpawnSubAgents: false,
-      canEndorse: false,
-      description: "Can see all data but cannot endorse or spawn sub-agents",
+      description: "Can see all data but cannot spawn sub-agents",
     };
   },
 };
@@ -76,7 +71,12 @@ export function checkVisibility(
   }
 
   const hasAtom = (required: Atom) =>
-    label.integrity.some((a) => a.kind === required.kind);
+    label.integrity.some((a) => {
+      if (a.kind !== required.kind) return false;
+      // TransformedBy with "*" matches any TransformedBy atom
+      if (a.kind === "TransformedBy" && (required as typeof a).command === "*") return true;
+      return a.kind === required.kind; // already true from above
+    });
 
   if (policy.mode === "all") {
     for (const required of policy.requiredIntegrity) {

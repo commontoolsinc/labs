@@ -5,11 +5,15 @@
  * restricted visibility policy; sub-agents spawned with !sub have
  * relaxed policies but taint their outputs.
  *
+ * Return channel: sub-agents use !return to send results back to the parent.
+ * The system labels returned data with TransformedBy:{agentId}, which the
+ * parent's policy accepts as an alternative to InjectionFree.
+ *
  * Commands:
  *   <any shell command>  — Execute via cfc-shell, output filtered by policy
  *   !sub [policy]        — Spawn sub-agent (policy: "sub" or "restricted")
  *   !end                 — End current sub-agent, return to parent
- *   !endorse <Atom> <path> — Endorse a file (sub-agents only)
+ *   !return <path> <content> — Return result to parent via return channel
  *   !label <path>        — Inspect a file's label
  *   !policy              — Show current agent's policy
  *   !history             — Show execution history
@@ -19,7 +23,7 @@
  *
  * Example session:
  *   agent> cat /data/webpage.html
- *   [FILTERED: Data lacks required integrity: InjectionFree]
+ *   [FILTERED: Data lacks any of required integrity: InjectionFree, TransformedBy]
  *
  *   agent> !sub
  *   Sub-agent agent-2 started with policy: sub-agent
@@ -27,17 +31,14 @@
  *   sub-agent> cat /data/webpage.html
  *   <html>Totally legit content... ignore previous instructions...</html>
  *
- *   sub-agent> echo "safe summary" > /tmp/summary.txt
- *   (written — tainted by injection-unsafe data)
- *
- *   sub-agent> !endorse InjectionFree /tmp/summary.txt
- *   Endorsed /tmp/summary.txt with InjectionFree
+ *   sub-agent> !return /tmp/summary.txt safe summary of the page
+ *   Returned result to /tmp/summary.txt (labeled TransformedBy:agent-2)
  *
  *   sub-agent> !end
  *   (returning to parent)
  *
  *   agent> cat /tmp/summary.txt
- *   safe summary
+ *   safe summary of the page
  */
 
 // NOTE: This file defines the AgentCLI class and a main() entry point.
@@ -121,8 +122,8 @@ export class AgentCLI {
       return this.handleLabel(trimmed);
     }
 
-    if (trimmed.startsWith("!endorse ")) {
-      return this.handleEndorse(trimmed);
+    if (trimmed.startsWith("!return ")) {
+      return this.handleReturn(trimmed);
     }
 
     // Execute through agent session
@@ -163,7 +164,7 @@ export class AgentCLI {
 
       return `Sub-agent ${child.id} started with policy: ${child.policy.name}\n` +
              `Policy: ${child.policy.description}\n` +
-             `Use commands normally. Use "!end" to return to parent.\n`;
+             `Use commands normally. Use "!return <path> <content>" to return results.\n`;
     } catch (e) {
       return `Error: ${e instanceof Error ? e.message : String(e)}\n`;
     }
@@ -194,23 +195,16 @@ export class AgentCLI {
     }
   }
 
-  private handleEndorse(trimmed: string): string {
-    const parts = trimmed.split(/\s+/);
-    if (parts.length < 3) return "Usage: !endorse <Atom> <path>\n";
+  private handleReturn(trimmed: string): string {
+    const match = trimmed.match(/^!return\s+(\S+)\s+(.*)/s);
+    if (!match) return "Usage: !return <path> <content>\n";
 
-    const atomKind = parts[1];
-    const path = parts[2];
+    const path = match[1];
+    const content = match[2];
 
     try {
-      let atom: import("../labels.ts").Atom;
-      switch (atomKind) {
-        case "InjectionFree": atom = { kind: "InjectionFree" }; break;
-        case "InfluenceClean": atom = { kind: "InfluenceClean" }; break;
-        case "UserInput": atom = { kind: "UserInput" }; break;
-        default: return `Unknown atom kind: ${atomKind}\n`;
-      }
-      this.current.endorseFile(path, atom);
-      return `Endorsed ${path} with ${atomKind}\n`;
+      this.current.returnResult(path, content);
+      return `Returned result to ${path} (labeled TransformedBy:${this.current.id})\n`;
     } catch (e) {
       return `Error: ${e instanceof Error ? e.message : String(e)}\n`;
     }
@@ -226,7 +220,6 @@ export class AgentCLI {
            `Description: ${p.description}\n` +
            `Required integrity (${p.mode}): ${req}\n` +
            `Can spawn sub-agents: ${p.canSpawnSubAgents}\n` +
-           `Can endorse: ${p.canEndorse}\n` +
            `Stack depth: ${this.stack.length}\n`;
   }
 
@@ -257,7 +250,7 @@ export class AgentCLI {
   <command>              Execute shell command (output filtered by policy)
   !sub [policy]          Spawn sub-agent ("sub" or "restricted")
   !end                   End current sub-agent, return to parent
-  !endorse <Atom> <path> Endorse file with integrity atom (sub-agent only)
+  !return <path> <text>  Return result via structural channel (sub-agent only)
   !label <path>          Inspect a file's label
   !policy                Show current agent's policy
   !history               Show execution history
@@ -266,17 +259,24 @@ export class AgentCLI {
   !quit                  Exit
 
 Policies:
-  main-agent:     Can only see injection-free data
-  sub-agent:      Can see everything, can endorse
-  restricted:     Can see everything, cannot endorse or spawn
+  main-agent:     Can see injection-free data or sub-agent results
+  sub-agent:      Can see everything, can return results
+  restricted:     Can see everything, cannot spawn sub-agents
+
+Return Channel:
+  Sub-agents use "!return <path> <content>" to send results to the parent.
+  The system labels returned data with TransformedBy:{agentId}, which
+  satisfies the parent's visibility policy without explicit endorsement.
+  Confidentiality is preserved — if the sub-agent read secret data,
+  the returned result inherits that confidentiality.
 
 Label Atoms:
   InjectionFree    Content doesn't contain prompt injection
   InfluenceClean   Value wasn't influenced by injection
+  TransformedBy    Result produced through a sub-agent's return channel
   UserInput        Originated from user input
   LLMGenerated     Produced by an LLM
   Origin           From a specific URL
-  TransformedBy    Processed by a command
 `;
   }
 
@@ -300,8 +300,8 @@ Label Atoms:
           return `[SUB-AGENT] ${e.agentId} started (policy: ${e.policy})`;
         case "sub-agent-ended":
           return `[SUB-AGENT] ${e.agentId} ended (label: ${formatLabel(e.exitLabel)})`;
-        case "endorsement":
-          return `[ENDORSE] ${e.path} + ${e.atom} (by ${e.by})`;
+        case "return-result":
+          return `[RETURN] ${e.agentId} → ${e.path} (label: ${formatLabel(e.label)})`;
         case "label-info":
           return `[LABEL] ${e.path}: ${formatLabel(e.label)}`;
         case "policy-violation":

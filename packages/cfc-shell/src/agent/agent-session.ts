@@ -7,6 +7,11 @@
  *
  * Key invariant: an agent NEVER sees raw content that violates its policy.
  * The system mediates all data flow between the shell and the agent.
+ *
+ * Return channel: sub-agents return results to the parent via returnResult().
+ * The system labels the returned data with { kind: "TransformedBy", command: agentId },
+ * which the parent's policy accepts as an alternative to InjectionFree.
+ * Confidentiality from data the sub-agent read is preserved (no leaks).
  */
 
 import { Atom, Label, labels } from "../labels.ts";
@@ -87,8 +92,8 @@ export class AgentSession {
     if (command.startsWith("!sub")) {
       return this.handleSubAgent(callId, command);
     }
-    if (command.startsWith("!endorse ")) {
-      return this.handleEndorse(callId, command);
+    if (command.startsWith("!return ")) {
+      return this.handleReturn(callId, command);
     }
     if (command.startsWith("!label ")) {
       return this.handleLabelInspect(callId, command);
@@ -168,6 +173,45 @@ export class AgentSession {
   }
 
   /**
+   * Return a result to the parent agent via the structural return channel.
+   *
+   * Writes content to the specified path with:
+   * - TransformedBy:{agentId} integrity (satisfies parent's "any" policy)
+   * - Confidentiality accumulated from everything this sub-agent has read
+   *
+   * This is the ONLY way for a sub-agent's work to become visible to the parent
+   * when the underlying data lacked InjectionFree. The system labels it structurally —
+   * no explicit endorsement step needed.
+   */
+  returnResult(path: string, content: string): void {
+    if (!this.parent) {
+      throw new Error("Only sub-agents can use the return channel");
+    }
+
+    // Compute accumulated confidentiality from all data this agent has seen
+    const resultLabels = this.history.map((h) => h.result.label);
+    const accumulatedConfidentiality =
+      resultLabels.length > 0
+        ? labels.joinAll(resultLabels).confidentiality
+        : [];
+
+    // Label the returned data with TransformedBy + accumulated confidentiality
+    const returnLabel: Label = {
+      confidentiality: accumulatedConfidentiality,
+      integrity: [{ kind: "TransformedBy", command: this.id }],
+    };
+
+    this.shell.vfs.writeFile(path, content, returnLabel);
+
+    this.events.push({
+      type: "return-result",
+      agentId: this.id,
+      path,
+      label: returnLabel,
+    });
+  }
+
+  /**
    * End this sub-agent session, returning to parent.
    * Returns the label representing the taint accumulated during this session.
    */
@@ -186,28 +230,6 @@ export class AgentSession {
     }
 
     return accumulatedLabel;
-  }
-
-  /**
-   * Endorse a file with an integrity atom (only if policy allows).
-   * This is how a sub-agent attests "I've verified this content is safe".
-   */
-  endorseFile(path: string, atom: Atom): void {
-    if (!this.policy.canEndorse) {
-      throw new Error("This agent's policy does not allow endorsement");
-    }
-
-    const { value, label } = this.shell.vfs.readFileText(path);
-    const endorsed = labels.endorse(label, atom);
-    // Write back with endorsed label (monotonicity allows adding integrity)
-    this.shell.vfs.writeFile(path, value, endorsed);
-
-    this.events.push({
-      type: "endorsement",
-      path,
-      atom: atom.kind,
-      by: this.id,
-    });
   }
 
   /** Get the event log */
@@ -249,7 +271,7 @@ export class AgentSession {
       stdout:
         `Sub-agent ${child.id} started with policy: ${child.policy.name}\n` +
         `Policy: ${child.policy.description}\n` +
-        `Use commands normally. Use "!end" to return to parent.\n`,
+        `Use commands normally. Use "!return <path> <content>" to return results.\n`,
       stderr: "",
       exitCode: 0,
       label: labels.bottom(),
@@ -257,18 +279,18 @@ export class AgentSession {
     };
   }
 
-  private async handleEndorse(
+  private async handleReturn(
     callId: string,
     command: string,
   ): Promise<ToolResult> {
-    // Parse: !endorse <AtomKind> <path>
-    const parts = command.trim().split(/\s+/);
-    if (parts.length < 3) {
+    // Parse: !return <path> <content...>
+    const match = command.match(/^!return\s+(\S+)\s+(.*)/s);
+    if (!match) {
       return {
         id: callId,
         stdout:
-          "Usage: !endorse <AtomKind> <path>\n" +
-          "Example: !endorse InjectionFree /tmp/verified.txt\n",
+          "Usage: !return <path> <content>\n" +
+          "Example: !return /tmp/result.txt safe summary here\n",
         stderr: "",
         exitCode: 1,
         label: labels.bottom(),
@@ -276,48 +298,14 @@ export class AgentSession {
       };
     }
 
-    const atomKind = parts[1];
-    const path = parts[2];
-
-    if (!this.policy.canEndorse) {
-      return {
-        id: callId,
-        stdout: "Error: policy does not allow endorsement\n",
-        stderr: "",
-        exitCode: 1,
-        label: labels.bottom(),
-        filtered: false,
-      };
-    }
-
-    // Map string to atom
-    let atom: Atom;
-    switch (atomKind) {
-      case "InjectionFree":
-        atom = { kind: "InjectionFree" };
-        break;
-      case "InfluenceClean":
-        atom = { kind: "InfluenceClean" };
-        break;
-      case "UserInput":
-        atom = { kind: "UserInput" };
-        break;
-      default:
-        return {
-          id: callId,
-          stdout: `Unknown atom kind: ${atomKind}\nAllowed: InjectionFree, InfluenceClean, UserInput\n`,
-          stderr: "",
-          exitCode: 1,
-          label: labels.bottom(),
-          filtered: false,
-        };
-    }
+    const path = match[1];
+    const content = match[2];
 
     try {
-      this.endorseFile(path, atom);
+      this.returnResult(path, content);
       return {
         id: callId,
-        stdout: `Endorsed ${path} with ${atomKind}\n`,
+        stdout: `Returned result to ${path} (labeled TransformedBy:${this.id})\n`,
         stderr: "",
         exitCode: 0,
         label: labels.bottom(),
@@ -402,8 +390,7 @@ export class AgentSession {
         `Policy: ${this.policy.name}\n` +
         `Description: ${this.policy.description}\n` +
         `Required integrity (${this.policy.mode}): ${req}\n` +
-        `Can spawn sub-agents: ${this.policy.canSpawnSubAgents}\n` +
-        `Can endorse: ${this.policy.canEndorse}\n`,
+        `Can spawn sub-agents: ${this.policy.canSpawnSubAgents}\n`,
       stderr: "",
       exitCode: 0,
       label: labels.bottom(),

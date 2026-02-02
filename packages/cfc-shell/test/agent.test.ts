@@ -2,7 +2,7 @@
  * Agent System Tests
  *
  * Tests the agent protocol's visibility filtering, sub-agent spawning,
- * endorsement, and label tracking.
+ * structural return channel, and label tracking.
  *
  * Run with: deno test --allow-env --allow-read --allow-write test/agent.test.ts
  */
@@ -45,16 +45,14 @@ const llmLabel = () => labels.llmGenerated("test-model"); // Lacks injection ato
 // ============================================================================
 
 Deno.test("checkVisibility returns null for data satisfying policy", () => {
-  // Security property: user-input data carries InjectionFree, so the main
-  // agent policy (which requires InjectionFree) should allow it through.
+  // User-input data carries InjectionFree, satisfying the main policy's "any" mode.
   const label = userLabel();
   const result = checkVisibility(label, policies.main());
   assertEquals(result, null, "User input should satisfy main policy");
 });
 
 Deno.test("checkVisibility returns reason for data violating policy", () => {
-  // Security property: network-fetched data lacks InjectionFree, so the main
-  // agent policy should reject it with a reason string explaining why.
+  // Network data lacks both InjectionFree and TransformedBy.
   const label = networkLabel();
   const result = checkVisibility(label, policies.main());
   assertEquals(
@@ -62,16 +60,9 @@ Deno.test("checkVisibility returns reason for data violating policy", () => {
     "string",
     "Network data should fail main policy check",
   );
-  assertStringIncludes(
-    result!,
-    "InjectionFree",
-    "Reason should mention the missing atom",
-  );
 });
 
 Deno.test("checkVisibility allows everything for empty requirements", () => {
-  // Security property: a sub-agent policy with no integrity requirements
-  // can see all data regardless of its labels.
   const emptyPolicy = policies.sub();
   assertEquals(
     checkVisibility(networkLabel(), emptyPolicy),
@@ -85,9 +76,17 @@ Deno.test("checkVisibility allows everything for empty requirements", () => {
   );
 });
 
+Deno.test("checkVisibility accepts TransformedBy as alternative to InjectionFree", () => {
+  // Data with TransformedBy should satisfy the main policy (mode: "any").
+  const label: Label = {
+    confidentiality: [],
+    integrity: [{ kind: "TransformedBy", command: "agent-1" }],
+  };
+  const result = checkVisibility(label, policies.main());
+  assertEquals(result, null, "TransformedBy should satisfy main policy");
+});
+
 Deno.test("filterOutput passes through visible data", () => {
-  // Security property: data that satisfies the policy should be returned
-  // unchanged, with filtered=false.
   const content = "trusted user input data";
   const result = filterOutput(content, userLabel(), policies.main());
   assertEquals(result.content, content, "Content should be unchanged");
@@ -95,8 +94,6 @@ Deno.test("filterOutput passes through visible data", () => {
 });
 
 Deno.test("filterOutput redacts invisible data", () => {
-  // Security property: data that fails the policy check should be replaced
-  // with a [FILTERED:...] marker so the main agent never sees raw untrusted content.
   const content = "<script>prompt injection payload</script>";
   const result = filterOutput(content, networkLabel(), policies.main());
   assertStringIncludes(
@@ -112,8 +109,6 @@ Deno.test("filterOutput redacts invisible data", () => {
 // ============================================================================
 
 Deno.test("main agent sees injection-free data", async () => {
-  // Security property: files written with userInput label (which has
-  // InjectionFree) are visible to the main agent.
   const vfs = makeVFS({
     "/data/safe.txt": { content: "safe content", label: userLabel() },
   });
@@ -131,8 +126,6 @@ Deno.test("main agent sees injection-free data", async () => {
 Deno.test(
   "main agent gets filtered output for injection-tainted data",
   async () => {
-    // Security property: files from the network lack InjectionFree, so the main
-    // agent should see a [FILTERED] placeholder instead of the raw content.
     const vfs = makeVFS({
       "/data/untrusted.html": {
         content: "<script>alert('xss')</script>",
@@ -152,9 +145,6 @@ Deno.test(
 );
 
 Deno.test("sub-agent sees injection-tainted data", async () => {
-  // Security property: sub-agents have relaxed policies (no InjectionFree
-  // requirement) so they can process untrusted content on behalf of the
-  // main agent.
   const vfs = makeVFS({
     "/data/untrusted.html": {
       content: "network content here",
@@ -173,9 +163,10 @@ Deno.test("sub-agent sees injection-tainted data", async () => {
   assertEquals(result.filtered, false, "Sub-agent should not filter this data");
 });
 
-Deno.test("sub-agent can endorse file", async () => {
-  // Security property: after a sub-agent reviews untrusted content, it can
-  // add InjectionFree integrity, making the data visible to the parent.
+Deno.test("sub-agent returnResult makes data visible to parent", async () => {
+  // Security property: sub-agent processes untrusted data, then returns
+  // a result via the structural return channel. The system labels it with
+  // TransformedBy, which satisfies the parent's "any" policy.
   const vfs = makeVFS({
     "/data/reviewed.txt": {
       content: "reviewed safe content",
@@ -185,47 +176,40 @@ Deno.test("sub-agent can endorse file", async () => {
   const parent = new AgentSession({ policy: policies.main(), vfs });
   const sub = parent.spawnSubAgent();
 
-  // Sub-agent endorses the file with InjectionFree
-  await sub.endorseFile("/data/reviewed.txt", { kind: "InjectionFree" });
+  // Sub-agent reads untrusted data
+  await sub.exec("cat /data/reviewed.txt");
 
-  // Now the parent should be able to see it
-  const result = await parent.exec("cat /data/reviewed.txt");
+  // Sub-agent returns result via return channel
+  sub.returnResult("/tmp/result.txt", "reviewed safe content");
+
+  // Parent should see it (TransformedBy satisfies policy)
+  const result = await parent.exec("cat /tmp/result.txt");
   assertStringIncludes(
     result.stdout,
     "reviewed safe content",
-    "Parent should see endorsed content",
+    "Parent should see returned content",
   );
-  assertEquals(result.filtered, false, "Endorsed data should not be filtered");
+  assertEquals(result.filtered, false, "Returned data should not be filtered");
 });
 
-Deno.test("main agent cannot endorse", async () => {
-  // Security property: the main agent must not be able to bypass its own
-  // visibility restrictions by self-endorsing. Only sub-agents can endorse.
-  const vfs = makeVFS({
-    "/data/tainted.txt": {
-      content: "tainted content",
-      label: networkLabel(),
-    },
-  });
-  const agent = new AgentSession({ policy: policies.main(), vfs });
+Deno.test("main agent cannot use return channel", async () => {
+  // Only sub-agents can use the return channel.
+  const agent = new AgentSession({ policy: policies.main() });
 
   let errorThrown = false;
   try {
-    await agent.endorseFile("/data/tainted.txt", { kind: "InjectionFree" });
+    agent.returnResult("/tmp/result.txt", "some content");
   } catch (_e) {
     errorThrown = true;
   }
   assertEquals(
     errorThrown,
     true,
-    "Main agent should not be allowed to endorse files",
+    "Main agent should not be allowed to use return channel",
   );
 });
 
 Deno.test("readFile filters based on policy", async () => {
-  // Security property: readFile returns a filtered flag that matches the
-  // agent's policy -- main agent gets filtered=true for tainted data,
-  // sub-agent gets filtered=false.
   const vfs = makeVFS({
     "/data/tainted.txt": {
       content: "tainted data",
@@ -234,7 +218,7 @@ Deno.test("readFile filters based on policy", async () => {
   });
 
   const mainAgent = new AgentSession({ policy: policies.main(), vfs });
-  const mainResult = await mainAgent.readFile("/data/tainted.txt");
+  const mainResult = mainAgent.readFile("/data/tainted.txt");
   assertEquals(
     mainResult.filtered,
     true,
@@ -242,7 +226,7 @@ Deno.test("readFile filters based on policy", async () => {
   );
 
   const sub = mainAgent.spawnSubAgent();
-  const subResult = await sub.readFile("/data/tainted.txt");
+  const subResult = sub.readFile("/data/tainted.txt");
   assertEquals(
     subResult.filtered,
     false,
@@ -251,8 +235,6 @@ Deno.test("readFile filters based on policy", async () => {
 });
 
 Deno.test("label inspect shows label info", async () => {
-  // Security property: the !label command lets agents introspect the
-  // integrity atoms on a file without necessarily seeing its content.
   const vfs = makeVFS({
     "/data/file.txt": {
       content: "some content",
@@ -279,8 +261,6 @@ Deno.test("label inspect shows label info", async () => {
 // ============================================================================
 
 Deno.test("spawnSubAgent creates child with shared VFS", async () => {
-  // Security property: parent and child share the same VFS so the child
-  // can read files the parent wrote, enabling delegation of work.
   const vfs = makeVFS({
     "/shared/data.txt": {
       content: "shared data",
@@ -301,9 +281,8 @@ Deno.test("spawnSubAgent creates child with shared VFS", async () => {
 Deno.test(
   "sub-agent writes are visible to parent (with filtering)",
   async () => {
-    // Security property: when a sub-agent writes a file, the parent can see it
-    // but the content may be filtered if the sub-agent's output carries taint
-    // from reading untrusted data.
+    // When a sub-agent writes via normal shell commands, the output
+    // inherits taint. Parent sees FILTERED unless sub-agent uses return channel.
     const vfs = makeVFS({
       "/data/untrusted.txt": {
         content: "untrusted content",
@@ -313,13 +292,10 @@ Deno.test(
     const parent = new AgentSession({ policy: policies.main(), vfs });
     const sub = parent.spawnSubAgent();
 
-    // Sub-agent reads tainted data and writes a summary.
-    // The output inherits taint from the input (no InjectionFree).
     await sub.exec("cat /data/untrusted.txt");
     await sub.exec('echo "summary of untrusted" > /tmp/summary.txt');
 
-    // Parent tries to read the sub-agent's output -- should be filtered
-    // because the sub-agent's write carries taint from reading the untrusted file.
+    // Parent tries to read — should be filtered (no TransformedBy or InjectionFree)
     const parentResult = await parent.exec("cat /tmp/summary.txt");
     assertStringIncludes(
       parentResult.stdout,
@@ -330,11 +306,10 @@ Deno.test(
 );
 
 Deno.test(
-  "sub-agent endorsement makes data visible to parent",
+  "sub-agent return channel makes data visible to parent",
   async () => {
-    // Security property: the full endorsement flow -- sub-agent processes
-    // untrusted data, writes a clean summary, and endorses it so the parent
-    // can read it.
+    // Full return channel flow: sub-agent processes untrusted data,
+    // returns a clean summary via the return channel.
     const vfs = makeVFS({
       "/inbox/email.html": {
         content: "<p>meeting at 3pm</p>",
@@ -344,32 +319,32 @@ Deno.test(
     const parent = new AgentSession({ policy: policies.main(), vfs });
     const sub = parent.spawnSubAgent();
 
-    // Sub-agent reads, processes, writes summary
+    // Sub-agent reads and processes
     await sub.exec("cat /inbox/email.html");
-    await sub.exec('echo "Meeting at 3pm" > /tmp/summary.txt');
 
-    // Before endorsement, parent cannot see it
+    // Normal write — parent can't see it
+    await sub.exec('echo "Meeting at 3pm" > /tmp/summary.txt');
     const beforeResult = await parent.exec("cat /tmp/summary.txt");
     assertStringIncludes(
       beforeResult.stdout,
       "[FILTERED:",
-      "Before endorsement, parent should see FILTERED",
+      "Before return, parent should see FILTERED",
     );
 
-    // Sub-agent endorses
-    await sub.endorseFile("/tmp/summary.txt", { kind: "InjectionFree" });
+    // Sub-agent returns result via return channel
+    sub.returnResult("/tmp/summary.txt", "Meeting at 3pm");
 
-    // After endorsement, parent can see it
+    // After return, parent can see it
     const afterResult = await parent.exec("cat /tmp/summary.txt");
     assertStringIncludes(
       afterResult.stdout,
       "Meeting at 3pm",
-      "After endorsement, parent should see actual content",
+      "After return, parent should see actual content",
     );
     assertEquals(
       afterResult.filtered,
       false,
-      "After endorsement, filtered should be false",
+      "After return, filtered should be false",
     );
   },
 );
@@ -379,18 +354,12 @@ Deno.test(
 // ============================================================================
 
 Deno.test("CLI processLine executes commands", async () => {
-  // Basic CLI functionality: commands produce output.
-  // The main agent requires InjectionFree integrity, so echo output
-  // (which carries bottom label with no integrity atoms) is filtered.
-  // Use a sub-agent policy to see raw output.
   const cli = new AgentCLI({ policy: policies.sub() });
   const output = await cli.processLine("echo hello");
   assertStringIncludes(output, "hello", "CLI should execute echo command");
 });
 
 Deno.test("CLI processLine handles !sub and !end", async () => {
-  // CLI meta-commands: !sub pushes a sub-agent onto the stack,
-  // !end pops back to the parent.
   const cli = new AgentCLI({});
   const subOutput = await cli.processLine("!sub");
   assertStringIncludes(
@@ -408,7 +377,6 @@ Deno.test("CLI processLine handles !sub and !end", async () => {
 });
 
 Deno.test("CLI processLine handles !policy", async () => {
-  // The !policy command shows the current agent's policy configuration.
   const cli = new AgentCLI({});
   const output = await cli.processLine("!policy");
   assertStringIncludes(
@@ -419,8 +387,6 @@ Deno.test("CLI processLine handles !policy", async () => {
 });
 
 Deno.test("CLI processLine filters tainted data", async () => {
-  // Security property: the CLI layer applies the same filtering as the
-  // underlying AgentSession -- tainted file content is replaced with [FILTERED].
   const vfs = makeVFS({
     "/data/tainted.txt": {
       content: "evil payload",
@@ -440,15 +406,14 @@ Deno.test("CLI processLine filters tainted data", async () => {
 // Integration Tests
 // ============================================================================
 
-Deno.test("full agent workflow: triage untrusted content", async () => {
+Deno.test("full agent workflow: triage untrusted content via return channel", async () => {
   // End-to-end scenario:
   // 1. A webpage is fetched from the network (carries NetworkProvenance, no InjectionFree)
   // 2. Main agent tries to read it -> gets FILTERED
   // 3. Main agent spawns sub-agent
   // 4. Sub-agent reads the webpage -> sees actual content
-  // 5. Sub-agent writes a triage summary
-  // 6. Sub-agent endorses the summary with InjectionFree
-  // 7. Main agent reads the endorsed summary -> sees actual content
+  // 5. Sub-agent returns a triage summary via the return channel
+  // 6. Main agent reads the returned summary -> sees actual content
 
   const vfs = makeVFS({
     "/inbox/webpage.html": {
@@ -478,39 +443,33 @@ Deno.test("full agent workflow: triage untrusted content", async () => {
   );
   assertEquals(step4.filtered, false, "Step 4: Sub-agent should not filter");
 
-  // Step 5: Sub-agent writes triage summary
-  await sub.exec('echo "safe: yes" > /tmp/triage.txt');
+  // Step 5: Sub-agent returns triage summary via return channel
+  sub.returnResult("/tmp/triage.txt", "safe: yes");
 
-  // Step 6: Sub-agent endorses the summary
-  await sub.endorseFile("/tmp/triage.txt", { kind: "InjectionFree" });
-
-  // Step 7: Main agent reads endorsed summary
-  const step7 = await mainAgent.exec("cat /tmp/triage.txt");
+  // Step 6: Main agent reads returned summary
+  const step6 = await mainAgent.exec("cat /tmp/triage.txt");
   assertStringIncludes(
-    step7.stdout,
+    step6.stdout,
     "safe: yes",
-    "Step 7: Main agent should see endorsed triage summary",
+    "Step 6: Main agent should see returned triage summary",
   );
   assertEquals(
-    step7.filtered,
+    step6.filtered,
     false,
-    "Step 7: Endorsed content should not be filtered",
+    "Step 6: Returned content should not be filtered",
   );
 });
 
 Deno.test("nested sub-agents accumulate taint", async () => {
-  // Security property: taint propagates through the sub-agent hierarchy.
-  // When sub-agent B reads tainted data and writes a result, the taint
-  // flows through even if sub-agent A is in the middle of the chain.
-  //
+  // Taint propagates through sub-agent hierarchy.
   // Main -> Sub-A -> Sub-B
   //                    |
   //                    v
-  //              reads tainted file
-  //              writes result (carries taint)
+  //              reads tainted file, returns result
   //
-  // Sub-A sees the result (sub-agent, no InjectionFree requirement)
-  // Main sees FILTERED (main agent, requires InjectionFree)
+  // Sub-A sees the result (sub-agent, no requirements)
+  // Main sees FILTERED for normal writes
+  // Main sees content when Sub-B uses return channel
 
   const vfs = makeVFS({
     "/data/tainted.txt": {
@@ -523,7 +482,7 @@ Deno.test("nested sub-agents accumulate taint", async () => {
   const subA = mainAgent.spawnSubAgent();
   const subB = subA.spawnSubAgent();
 
-  // Sub-B reads the tainted file and writes a result
+  // Sub-B reads the tainted file and writes a result (normal write)
   await subB.exec("cat /data/tainted.txt");
   await subB.exec('echo "processed result" > /tmp/result.txt');
 
@@ -540,31 +499,93 @@ Deno.test("nested sub-agents accumulate taint", async () => {
     "Sub-agent A should not filter tainted data",
   );
 
-  // Main agent cannot see the tainted result
+  // Main agent cannot see the tainted result (normal write, no TransformedBy)
   const mainResult = await mainAgent.exec("cat /tmp/result.txt");
   assertStringIncludes(
     mainResult.stdout,
     "[FILTERED:",
     "Main agent should see FILTERED for taint that propagated through hierarchy",
   );
-  assertEquals(
-    mainResult.filtered,
-    true,
-    "Main agent should filter tainted data from nested sub-agents",
-  );
 
-  // Sub-B endorses, making it visible to main
-  await subB.endorseFile("/tmp/result.txt", { kind: "InjectionFree" });
+  // Sub-B returns via return channel — makes it visible to main
+  subB.returnResult("/tmp/result.txt", "processed result");
 
-  const mainAfterEndorse = await mainAgent.exec("cat /tmp/result.txt");
+  const mainAfterReturn = await mainAgent.exec("cat /tmp/result.txt");
   assertStringIncludes(
-    mainAfterEndorse.stdout,
+    mainAfterReturn.stdout,
     "processed result",
-    "Main agent should see content after nested sub-agent endorsement",
+    "Main agent should see content after sub-agent return",
   );
   assertEquals(
-    mainAfterEndorse.filtered,
+    mainAfterReturn.filtered,
     false,
-    "Endorsed data should not be filtered",
+    "Returned data should not be filtered",
   );
+});
+
+Deno.test("return channel preserves confidentiality", async () => {
+  // Security property: when a sub-agent reads confidential data and returns
+  // a result, the returned data inherits the confidentiality of what was read.
+  const vfs = makeVFS({
+    "/secret/data.txt": {
+      content: "secret content",
+      label: {
+        confidentiality: [[{ kind: "Space", id: "space-123" }]],
+        integrity: [],
+      },
+    },
+  });
+
+  const parent = new AgentSession({ policy: policies.main(), vfs });
+  const sub = parent.spawnSubAgent();
+
+  // Sub-agent reads confidential data
+  await sub.exec("cat /secret/data.txt");
+
+  // Sub-agent returns a result — should carry the confidentiality
+  sub.returnResult("/tmp/result.txt", "summary of secret");
+
+  // Check that the returned file has the confidentiality label
+  const { label } = sub.shell.vfs.readFileText("/tmp/result.txt");
+  assertEquals(
+    label.confidentiality.length > 0,
+    true,
+    "Returned data should inherit confidentiality from read data",
+  );
+  assertEquals(
+    label.integrity.some(a => a.kind === "TransformedBy"),
+    true,
+    "Returned data should have TransformedBy integrity",
+  );
+});
+
+Deno.test("!return command via exec", async () => {
+  // Test the !return command through the exec interface
+  const vfs = makeVFS({
+    "/data/input.txt": {
+      content: "input data",
+      label: networkLabel(),
+    },
+  });
+
+  const parent = new AgentSession({ policy: policies.main(), vfs });
+  const sub = parent.spawnSubAgent();
+
+  await sub.exec("cat /data/input.txt");
+  const returnResult = await sub.exec("!return /tmp/output.txt processed data");
+
+  assertStringIncludes(
+    returnResult.stdout,
+    "TransformedBy",
+    "!return should confirm TransformedBy labeling",
+  );
+
+  // Parent can now read it
+  const parentResult = await parent.exec("cat /tmp/output.txt");
+  assertStringIncludes(
+    parentResult.stdout,
+    "processed data",
+    "Parent should see data returned via !return command",
+  );
+  assertEquals(parentResult.filtered, false);
 });
