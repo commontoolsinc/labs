@@ -9,6 +9,7 @@ import {
   joinLabel,
   labelFromSchemaIfc,
   labelFromStoredLabels,
+  labelLeq,
   toLabelStorage,
 } from "./labels.ts";
 import {
@@ -18,6 +19,8 @@ import {
   taintAtPath,
 } from "./action-context.ts";
 import type { ExchangeRule } from "./exchange-rules.ts";
+import { evaluateRules } from "./exchange-rules.ts";
+import { applySinkDeclassification } from "./sink-gate.ts";
 import { formatLabel } from "./violations.ts";
 import { getLogger } from "@commontools/utils/logger";
 import type { RuntimeTelemetry } from "../telemetry.ts";
@@ -212,6 +215,49 @@ export function getTaintAtPath(
     return taintAtPath(entry.ctx, path);
   }
   return emptyLabel();
+}
+
+/**
+ * Check whether a sink write is allowed, applying sink declassification
+ * rules before the standard exchange rule check.
+ *
+ * 1. Gets the taint context from tx
+ * 2. Applies sink declassification (strips allowed atoms at allowed paths)
+ * 3. Then applies standard exchange rules
+ * 4. Checks labelLeq(declassified, writeTargetLabel)
+ *
+ * Throws CFCViolationError on violation. No-op if no taint context attached.
+ */
+export function checkSinkAndWrite(
+  tx: IExtendedStorageTransaction,
+  writeTargetLabel: Label,
+  sinkName: string,
+  exchangeRules?: ExchangeRule[],
+): void {
+  const entry = taintEntries.get(tx);
+  if (!entry) return;
+
+  const { ctx } = entry;
+  const rules = exchangeRules ?? ctx.policy.exchangeRules;
+
+  // Step 1: Apply sink declassification to get a label with allowed atoms stripped.
+  const sinkDeclassified = applySinkDeclassification(
+    ctx.taintMap,
+    sinkName,
+    ctx.policy.sinkRules,
+  );
+
+  // Step 2: Apply standard exchange rules on the sink-declassified label.
+  const fullyDeclassified = evaluateRules(sinkDeclassified, rules);
+
+  // Step 3: Check flow.
+  if (!labelLeq(fullyDeclassified, writeTargetLabel)) {
+    throw new CFCViolationError(
+      "write-down",
+      ctx.accumulatedTaint,
+      writeTargetLabel,
+    );
+  }
 }
 
 /** Remove taint context from transaction (cleanup). */

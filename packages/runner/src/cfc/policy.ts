@@ -4,6 +4,7 @@
  */
 
 import type { ExchangeRule } from "./exchange-rules.ts";
+import type { SinkDeclassificationRule } from "./sink-rules.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -12,6 +13,7 @@ import type { ExchangeRule } from "./exchange-rules.ts";
 export type PolicyRecord = {
   readonly id: string;
   readonly exchangeRules: ExchangeRule[];
+  readonly sinkRules: SinkDeclassificationRule[];
   readonly version: number;
 };
 
@@ -61,8 +63,9 @@ export function hashPolicy(policy: Omit<PolicyRecord, "id">): string {
 export function createPolicy(
   rules: ExchangeRule[],
   version: number = 1,
+  sinkRules: SinkDeclassificationRule[] = [],
 ): PolicyRecord {
-  const body = { exchangeRules: rules, version };
+  const body = { exchangeRules: rules, sinkRules, version };
   return { id: hashPolicy(body), ...body };
 }
 

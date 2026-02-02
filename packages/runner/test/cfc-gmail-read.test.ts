@@ -37,6 +37,7 @@ import {
 } from "../src/cfc/action-context.ts";
 import {
   attachTaintContext,
+  checkSinkAndWrite,
   checkTaintedWrite,
   detachTaintContext,
   recordTaintedRead,
@@ -49,6 +50,8 @@ import {
 import { emptyIntegrity } from "../src/cfc/integrity.ts";
 import { serviceAtom, userAtom } from "../src/cfc/atoms.ts";
 import type { ExchangeRule } from "../src/cfc/exchange-rules.ts";
+import type { SinkDeclassificationRule } from "../src/cfc/sink-rules.ts";
+import { createPolicy } from "../src/cfc/policy.ts";
 
 const signer = await Identity.fromPassphrase("cfc gmail test");
 const space = signer.did();
@@ -411,6 +414,91 @@ describe("CFC Gmail Read Path: exchange rule flow", () => {
       integrity: emptyIntegrity(),
     };
     expect(() => checkTaintedWrite(tx, secretUserTarget)).not.toThrow();
+
+    detachTaintContext(tx);
+  });
+
+  it("sink declassification: token at header path stripped by sink rule", () => {
+    // Google auth policy with sink rule: Service(google-auth) at
+    // Authorization header is allowed for fetchData sink.
+    const sinkRule: SinkDeclassificationRule = {
+      taintPattern: { kind: "Service", params: { id: "google-auth" } },
+      allowedSink: "fetchData",
+      allowedPaths: [["options", "headers", "Authorization"]],
+      variables: [],
+    };
+    const policy = createPolicy([], 1, [sinkRule]);
+
+    const tx = mockTx();
+    const ctx = createActionContext({
+      userDid: "did:alice",
+      space: "space:work",
+      policy,
+    });
+    attachTaintContext(tx, ctx);
+
+    // Read token with path tracking → taint at header path
+    const tokenLabel: Label = {
+      confidentiality: [
+        [userAtom("did:alice")],
+        [serviceAtom("google-auth")],
+      ],
+      integrity: emptyIntegrity(),
+    };
+    recordTaintedRead(tx, tokenLabel, [
+      "options",
+      "headers",
+      "Authorization",
+    ]);
+
+    const userOnlyTarget: Label = {
+      confidentiality: [[userAtom("did:alice")]],
+      integrity: emptyIntegrity(),
+    };
+
+    // checkSinkAndWrite with "fetchData" → Service stripped → succeeds
+    expect(() => checkSinkAndWrite(tx, userOnlyTarget, "fetchData")).not
+      .toThrow();
+
+    detachTaintContext(tx);
+  });
+
+  it("sink declassification: token at body path blocked by sink rule", () => {
+    const sinkRule: SinkDeclassificationRule = {
+      taintPattern: { kind: "Service", params: { id: "google-auth" } },
+      allowedSink: "fetchData",
+      allowedPaths: [["options", "headers", "Authorization"]],
+      variables: [],
+    };
+    const policy = createPolicy([], 1, [sinkRule]);
+
+    const tx = mockTx();
+    const ctx = createActionContext({
+      userDid: "did:alice",
+      space: "space:work",
+      policy,
+    });
+    attachTaintContext(tx, ctx);
+
+    // Read token at body path (NOT allowed)
+    const tokenLabel: Label = {
+      confidentiality: [
+        [userAtom("did:alice")],
+        [serviceAtom("google-auth")],
+      ],
+      integrity: emptyIntegrity(),
+    };
+    recordTaintedRead(tx, tokenLabel, ["options", "body"]);
+
+    const userOnlyTarget: Label = {
+      confidentiality: [[userAtom("did:alice")]],
+      integrity: emptyIntegrity(),
+    };
+
+    // Service(google-auth) NOT stripped at body → blocked
+    expect(() => checkSinkAndWrite(tx, userOnlyTarget, "fetchData")).toThrow(
+      CFCViolationError,
+    );
 
     detachTaintContext(tx);
   });
