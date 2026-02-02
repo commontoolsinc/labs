@@ -57,6 +57,7 @@ export {
 export {
   type DiscoveredLink,
   discoverLinksFrom,
+  discoverLinksFromValue,
   traverseCellLinks,
 } from "./link-discovery.ts";
 export * from "./recipe-manager.ts";

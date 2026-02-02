@@ -1,7 +1,9 @@
 import type { ReactiveController, ReactiveControllerHost } from "lit";
 import type { CellHandle } from "@commontools/runtime-client";
-import type { DiscoveredLink } from "@commontools/runner";
-import { traverseCellLinks } from "@commontools/runner";
+import {
+  type DiscoveredLink,
+  discoverLinksFromValue,
+} from "@commontools/runner";
 
 /**
  * Reactive controller for discovering links from a cell.
@@ -104,35 +106,12 @@ export class LinksFromController implements ReactiveController {
       return;
     }
 
-    // Get the schema from the CellRef
+    // Get the space from the cell ref for context
     const cellRef = this.cell.ref();
-    const schema = cellRef.schema;
+    const contextSpace = cellRef.space;
 
-    // Use a Map to deduplicate by (space, id) combination
-    const linkKey = (link: DiscoveredLink["link"]) =>
-      `${link.space}:${link.id}`;
-    const seen = new Map<string, DiscoveredLink>();
-    const discovered: DiscoveredLink[] = [];
-
-    // Traverse the value to find all cell links
-    traverseCellLinks(
-      value,
-      (linkedCell, path) => {
-        const link = linkedCell.resolveAsCell().getAsNormalizedFullLink();
-        const key = linkKey(link);
-
-        // Only keep the first occurrence of each unique link
-        if (!seen.has(key)) {
-          const discoveredLink: DiscoveredLink = { link, path };
-          seen.set(key, discoveredLink);
-          discovered.push(discoveredLink);
-        }
-      },
-      { schema, rootSchema: schema },
-    );
-
-    // Update links and trigger re-render
-    this.links = discovered;
+    // Discover links from the value
+    this.links = discoverLinksFromValue(value, contextSpace);
     this.host.requestUpdate();
   }
 

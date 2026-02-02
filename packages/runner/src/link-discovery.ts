@@ -1,13 +1,14 @@
+/**
+ * Link discovery utilities for finding cell links in values.
+ *
+ * /!\ This module is designed to be safe for browser use.
+ * /!\ It only imports from shared.ts and other browser-safe modules.
+ */
+
 import { isRecord } from "@commontools/utils/types";
-import type { Cell, MemorySpace } from "./cell.ts";
-import { isCell } from "./cell.ts";
-import type { JSONSchema } from "./builder/types.ts";
-import {
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "./query-result-proxy.ts";
-import { ContextualFlowControl } from "./cfc.ts";
-import type { NormalizedFullLink } from "./link-types.ts";
+import { isSigilLink, type NormalizedFullLink } from "./shared.ts";
+import { LINK_V1_TAG, type SigilLink } from "./sigil-types.ts";
+import type { MemorySpace } from "./storage/interface.ts";
 
 /**
  * A discovered link found during traversal of a cell's value.
@@ -18,125 +19,90 @@ export type DiscoveredLink = {
 };
 
 /**
- * Recursively traverse a value and invoke a visitor callback for each cell link found.
+ * Extract a NormalizedFullLink from a sigil link value.
+ * Returns undefined if the link cannot be fully resolved (missing id or space).
+ */
+function sigilLinkToNormalizedLink(
+  sigilLink: SigilLink,
+  contextSpace?: MemorySpace,
+): NormalizedFullLink | undefined {
+  const linkData = sigilLink["/"][LINK_V1_TAG];
+  const id = linkData.id;
+  const space = linkData.space ?? contextSpace;
+
+  // Need both id and space to create a full link
+  if (!id || !space) return undefined;
+
+  return {
+    id,
+    space,
+    type: "application/json",
+    path: linkData.path ?? [],
+    ...(linkData.schema !== undefined && { schema: linkData.schema }),
+    ...(linkData.rootSchema !== undefined &&
+      { rootSchema: linkData.rootSchema }),
+  };
+}
+
+/**
+ * Recursively traverse a value and invoke a visitor callback for each sigil link found.
  *
- * This is a generic traversal utility that:
- * - Detects cells using isCell() and isCellResultForDereferencing()
+ * This is a browser-safe traversal utility that:
+ * - Detects links using isSigilLink() from shared.ts
  * - Handles cycles using a Set of already-seen values
- * - Uses ContextualFlowControl for schema-aware path navigation
  * - Stops at link boundaries (doesn't traverse INTO linked cells)
  * - Skips data: URI links (they're not useful as external links)
  *
  * @param value - The value to traverse
- * @param visitor - Callback invoked for each cell found (not data: URIs)
- * @param options - Optional configuration
- * @param options.schema - The schema for the current value
- * @param options.rootSchema - The root schema for reference resolution
- * @param options.contextSpace - The current execution space
+ * @param visitor - Callback invoked for each sigil link found (not data: URIs)
+ * @param contextSpace - The current execution space (for resolving links without explicit space)
  * @param seen - Set of already-visited values for cycle detection (internal)
  * @param path - Current path in the traversal (internal)
  */
 export function traverseCellLinks(
   value: unknown,
-  visitor: (cell: Cell<any>, path: string[]) => void,
-  options?: {
-    schema?: JSONSchema;
-    rootSchema?: JSONSchema;
-    contextSpace?: MemorySpace;
-  },
+  visitor: (link: NormalizedFullLink, path: string[]) => void,
+  contextSpace?: MemorySpace,
   seen: Set<unknown> = new Set(),
   path: string[] = [],
 ): void {
-  const schema = options?.schema;
-  const rootSchema = options?.rootSchema ?? schema;
-  const contextSpace = options?.contextSpace;
-
   if (!isRecord(value)) return;
 
-  // If we encounter an `any` schema, turn value into a cell link
-  if (
-    seen.size > 0 && schema !== undefined &&
-    ContextualFlowControl.isTrueSchema(schema) &&
-    isCellResultForDereferencing(value)
-  ) {
-    // Next step will turn this into a link
-    value = getCellOrThrow(value);
-  }
-
-  // Turn cells into a link, unless they are data: URIs
-  if (isCell(value)) {
-    const link = value.resolveAsCell().getAsNormalizedFullLink();
-    if (link.id.startsWith("data:")) {
-      // For data: URIs, traverse into them instead of treating as link
-      return traverseCellLinks(
-        value.get(),
-        visitor,
-        { schema, rootSchema, contextSpace },
-        seen,
-        path,
-      );
-    } else {
-      // Found a cell link - invoke visitor and stop traversing
-      visitor(value, path);
-      return;
+  // Check if this value is a sigil link
+  if (isSigilLink(value)) {
+    const normalizedLink = sigilLinkToNormalizedLink(value, contextSpace);
+    if (normalizedLink && !normalizedLink.id.startsWith("data:")) {
+      // Found a link - invoke visitor and stop traversing (don't go into linked cells)
+      visitor(normalizedLink, path);
     }
+    return;
   }
 
-  // If we've already seen this and it can be mapped to a cell, handle it
+  // Cycle detection
   if (seen.has(value)) {
-    if (isCellResultForDereferencing(value)) {
-      return traverseCellLinks(
-        getCellOrThrow(value),
-        visitor,
-        { schema, rootSchema, contextSpace },
-        seen,
-        path,
-      );
-    } else {
-      // Cycle detected - stop traversing
-      return;
-    }
+    return;
   }
   seen.add(value);
 
-  const cfc = new ContextualFlowControl();
-
   if (Array.isArray(value)) {
     value.forEach((v, index) => {
-      const itemSchema = schema !== undefined
-        ? cfc.schemaAtPath(schema, [index.toString()], rootSchema)
-        : undefined;
-
       traverseCellLinks(
         v,
         visitor,
-        { schema: itemSchema, rootSchema, contextSpace },
+        contextSpace,
         seen,
         [...path, index.toString()],
       );
-
-      // Also check if array entry itself is a cell result proxy
-      if (isCellResultForDereferencing(v)) {
-        const cell = getCellOrThrow(v);
-        const link = cell.resolveAsCell().getAsNormalizedFullLink();
-        if (!link.id.startsWith("data:")) {
-          visitor(cell, [...path, index.toString()]);
-        }
-      }
     });
   } else {
     Object.entries(value as Record<string, unknown>)
       // Skip $-prefixed properties ($UI, $TYPE, etc.) - these are internal/VDOM
       .filter(([key]) => !key.startsWith("$"))
       .forEach(([key, childValue]) => {
-        const propertySchema = schema !== undefined
-          ? cfc.schemaAtPath(schema, [key], rootSchema)
-          : undefined;
-
         traverseCellLinks(
           childValue,
           visitor,
-          { schema: propertySchema, rootSchema, contextSpace },
+          contextSpace,
           seen,
           [...path, key],
         );
@@ -145,24 +111,21 @@ export function traverseCellLinks(
 }
 
 /**
- * Discover all cell links referenced from a given cell's value.
+ * Discover all sigil links in a value.
  *
  * This function:
- * - Reads the cell's current value
- * - Traverses the value recursively to find all cell references
+ * - Traverses the value recursively to find all sigil link references
  * - Deduplicates links by (space, id) identity
  * - Returns links with the path where they were found
  *
- * @param cell - The cell to discover links from
+ * @param value - The value to discover links from (e.g., from CellHandle.get())
  * @param contextSpace - The current execution space (for cross-space link detection)
  * @returns Array of discovered links with their paths
  */
-export function discoverLinksFrom(
-  cell: Cell<any>,
+export function discoverLinksFromValue(
+  value: unknown,
   contextSpace?: MemorySpace,
 ): DiscoveredLink[] {
-  const value = cell.get();
-  const schema = cell.schema;
   const discovered: DiscoveredLink[] = [];
 
   // Use a Map to deduplicate by (space, id) combination
@@ -171,8 +134,7 @@ export function discoverLinksFrom(
 
   traverseCellLinks(
     value,
-    (linkedCell, path) => {
-      const link = linkedCell.resolveAsCell().getAsNormalizedFullLink();
+    (link, path) => {
       const key = linkKey(link);
 
       // Only keep the first occurrence of each unique link
@@ -182,8 +144,11 @@ export function discoverLinksFrom(
         discovered.push(discoveredLink);
       }
     },
-    { schema, rootSchema: schema, contextSpace },
+    contextSpace,
   );
 
   return discovered;
 }
+
+// Keep old function name as alias for backwards compatibility
+export const discoverLinksFrom = discoverLinksFromValue;
