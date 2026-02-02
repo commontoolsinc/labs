@@ -1688,12 +1688,16 @@ export class SchemaObjectTraverser<V extends JSONValue>
       const schemaLabel = schemaObj.ifc
         ? labelFromSchemaIfc(schemaObj.ifc as { classification?: string[] })
         : undefined;
-      const storedLabels = this.tx.readLabelOrUndefined({
-        space: doc.address.space,
-        id: doc.address.id,
-        type: doc.address.type,
-        path: [],
-      });
+      // Only read stored labels when schema has ifc — avoids registering
+      // phantom reactive dependencies on the label/ path for every read.
+      const storedLabels = schemaLabel
+        ? this.tx.readLabelOrUndefined({
+            space: doc.address.space,
+            id: doc.address.id,
+            type: doc.address.type,
+            path: [],
+          })
+        : undefined;
       const storedLabel = storedLabels
         ? labelFromStoredLabels(storedLabels)
         : undefined;

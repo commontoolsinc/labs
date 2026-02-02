@@ -444,7 +444,9 @@ export function validateAndTransform(
     const schemaLabel = (readSchema && typeof readSchema === "object" && readSchema.ifc)
       ? labelFromSchemaIfc(readSchema.ifc)
       : undefined;
-    const storedLabels = tx.readLabelOrUndefined(ref);
+    // Only read stored labels when schema has ifc — avoids registering
+    // phantom reactive dependencies on the label/ path for every read.
+    const storedLabels = schemaLabel ? tx.readLabelOrUndefined(ref) : undefined;
     const storedLabel = storedLabels
       ? labelFromStoredLabels(storedLabels)
       : undefined;
