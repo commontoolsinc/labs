@@ -68,7 +68,7 @@ Deno.test("boxEnd includes └ and summary", () => {
 
 Deno.test("fmtCommand formats with gutter and $ prefix", () => {
   const d0 = fmtCommand("ls", 0);
-  assertEquals(d0, "  $ ls");
+  assertEquals(d0, "$ ls");
 
   const d1 = fmtCommand("cat /file", 1);
   assertEquals(d1.includes("│"), true);

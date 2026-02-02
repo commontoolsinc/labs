@@ -6,19 +6,20 @@
  *
  *   ⏺ Agent response text        ← depth 0 response
  *     continuation line
- *     $ command                   ← depth 0 tool call
- *     output                     ← depth 0 tool result
  *
- *   ┌ sub-agent (sub policy)     ← task start (depth 1)
- *   │ ⏺ Sub-agent response       ← depth 1 response
+ *   $ command                    ← depth 0 tool call ($ aligns with ⏺)
+ *     output                    ← depth 0 tool result (indented 2)
+ *
+ *   ┌ sub-agent (sub policy)    ← task start (depth 1)
+ *   │ ⏺ Sub-agent response      ← depth 1 response
  *   │   continuation
- *   │   $ command                ← depth 1 tool call
- *   │   output                  ← depth 1 tool result
- *   │ ┌ nested sub-agent         ← task start (depth 2)
+ *   │ $ command                 ← depth 1 tool call
+ *   │   output                 ← depth 1 tool result
+ *   │ ┌ nested sub-agent        ← task start (depth 2)
  *   │ │ ⏺ ...
- *   │ │   $ command
- *   │ └ → "result"              ← task end (depth 2)
- *   └ → "result"                ← task end (depth 1)
+ *   │ │ $ command
+ *   │ └ → "result"             ← task end (depth 2)
+ *   └ → "result"               ← task end (depth 1)
  *
  *   ⏺ More root agent text
  */
@@ -123,9 +124,9 @@ export function boxEnd(summary: string, depth: number): string {
 // Line formatting helpers
 // ---------------------------------------------------------------------------
 
-/** Format a shell command line: `gutter + "  $ cmd"` */
+/** Format a shell command line: `gutter + "$ cmd"` ($ aligns with ⏺) */
 export function fmtCommand(cmd: string, depth: number): string {
-  return `${gutter(depth)}  $ ${cmd}`;
+  return `${gutter(depth)}$ ${cmd}`;
 }
 
 /**
@@ -159,27 +160,47 @@ export function createStreamFormatter(
 ): { format: (delta: string) => string; reset: () => void } {
   let responseStart = true;
   let lineStart = false;
+  let col = 0; // current column position (for word wrapping)
 
   return {
     reset() {
       responseStart = true;
       lineStart = false;
+      col = 0;
     },
     format(delta: string): string {
       const depth = getDepth();
+      const tw = getTermWidth();
+      // "⏺ " is 2 visible chars; continuation indent is 2 spaces
+      const prefixWidth = gutterWidth(depth) + 2;
+      const wrapCol = Math.max(20, tw - prefixWidth);
       let out = "";
+
       for (const ch of delta) {
         if (responseStart) {
           out += `\n${gutter(depth)}⏺ `;
           responseStart = false;
           lineStart = false;
+          col = 0;
         } else if (lineStart) {
           out += `${gutter(depth)}  `;
           lineStart = false;
+          col = 0;
         }
+
+        // Soft-wrap at word boundary when approaching terminal width
+        if (ch === " " && col >= wrapCol) {
+          out += `\n${gutter(depth)}  `;
+          col = 0;
+          continue;
+        }
+
         out += ch;
         if (ch === "\n") {
           lineStart = true;
+          col = 0;
+        } else {
+          col++;
         }
       }
       return out;

@@ -264,8 +264,6 @@ async function main(): Promise<void> {
     }
     if (!input.trim()) continue;
 
-    await write("\n---\n");
-
     try {
       history = await runOnce(input, agent, llm, model, write, history);
       await write("\n");
