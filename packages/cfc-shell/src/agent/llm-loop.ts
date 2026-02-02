@@ -13,7 +13,7 @@
  */
 
 import { AgentSession } from "./agent-session.ts";
-import { policies } from "./policy.ts";
+import { filterOutput, policies } from "./policy.ts";
 import { ToolResult } from "./protocol.ts";
 import { type Label, labels } from "../labels.ts";
 
@@ -358,12 +358,21 @@ async function executeTask(
       ballots,
     );
 
-    // Format result with declassification info
+    // Filter declassified result through parent's visibility policy
+    const filtered = filterOutput(
+      declassified.content,
+      declassified.label,
+      parentAgent.policy,
+    );
+
     const labelDesc = declassified.label.integrity.length > 0
       ? declassified.label.integrity.map((a) => a.kind).join(", ")
       : "none";
 
-    const raw = `${declassified.content}\n[integrity: ${labelDesc}]`;
+    const content = filtered.filtered
+      ? `[FILTERED: ${filtered.reason ?? "policy"}]`
+      : filtered.content;
+    const raw = `${content}\n[integrity: ${labelDesc}]`;
     return { text: prefixLines(raw, childDepth), label: declassified.label };
   } catch (e) {
     child.end();
