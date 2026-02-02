@@ -182,7 +182,7 @@ export async function wc(args: string[], ctx: CommandContext): Promise<CommandRe
     }
   }
 
-  return { exitCode, label: outputLabel };
+  return { exitCode, label: outputLabel, fixedOutputFormat: true };
 }
 
 /**

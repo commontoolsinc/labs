@@ -157,5 +157,5 @@ export async function grep(args: string[], ctx: CommandContext): Promise<Command
     }
   }
 
-  return { exitCode, label: outputLabel };
+  return { exitCode, label: outputLabel, fixedOutputFormat: countOnly };
 }

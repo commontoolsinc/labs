@@ -18,14 +18,14 @@ export async function date(_args: string[], ctx: CommandContext): Promise<Comman
  * true - always succeed
  */
 export async function trueCmd(_args: string[], _ctx: CommandContext): Promise<CommandResult> {
-  return { exitCode: 0, label: labels.bottom() };
+  return { exitCode: 0, label: labels.bottom(), fixedOutputFormat: true };
 }
 
 /**
  * false - always fail
  */
 export async function falseCmd(_args: string[], _ctx: CommandContext): Promise<CommandResult> {
-  return { exitCode: 1, label: labels.bottom() };
+  return { exitCode: 1, label: labels.bottom(), fixedOutputFormat: true };
 }
 
 /**
@@ -48,7 +48,7 @@ export async function test(args: string[], ctx: CommandContext): Promise<Command
       outputLabel = labels.join(outputLabel, label);
     });
 
-    return { exitCode: result ? 0 : 1, label: outputLabel };
+    return { exitCode: result ? 0 : 1, label: outputLabel, fixedOutputFormat: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     ctx.stderr.write(`test: ${message}\n`, ctx.pcLabel);

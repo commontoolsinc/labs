@@ -951,17 +951,21 @@ Deno.test("example 32: file stats — wc on untrusted file never exposes content
 
   // The output is "4 /data/access.log\n" — a number, not the file content.
   // The agent gets the line count without ever seeing the injection payload.
-  // But the label correctly tracks that the number's value was influenced
-  // by untrusted data (no InjectionFree in the result).
+  // Because wc has fixedOutputFormat, the output is attested InjectionFree —
+  // its format is structurally fixed (numbers) and can't contain injection.
   assertEquals(
     hasIntegrityKind(result.label, "InjectionFree"),
-    false,
-    "wc output is influenced by untrusted file — no InjectionFree",
+    true,
+    "wc output has InjectionFree — fixed numeric format can't contain injection",
   );
 
-  // The label tracks that the *value* was influenced, but the agent
-  // never had to parse or reason about the file content itself.
-  // It just knows "4 lines" without seeing the injection attempt.
+  // InfluenceClean is NOT attested because the number's value was influenced
+  // by untrusted data (attacker could manipulate line count).
+  assertEquals(
+    hasIntegrityKind(result.label, "InfluenceClean"),
+    false,
+    "wc output lacks InfluenceClean — value influenced by untrusted input",
+  );
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1172,18 +1176,29 @@ Deno.test("example 37: log analysis — count errors in untrusted logs without r
 
   // The agent gets "2" (two ERROR lines) without seeing the SQL injection
   // in the User-Agent or the privilege escalation in the POST body.
+  // grep -c has fixedOutputFormat — its output is a number, structurally safe.
   assertEquals(
     hasIntegrityKind(errorCount.label, "InjectionFree"),
+    true,
+    "grep -c output has InjectionFree — fixed numeric format",
+  );
+  assertEquals(
+    hasIntegrityKind(errorCount.label, "InfluenceClean"),
     false,
-    "count is influenced by untrusted data — number could be manipulated",
+    "grep -c output lacks InfluenceClean — count influenced by untrusted data",
   );
 
-  // Count total lines
+  // Count total lines — wc also has fixedOutputFormat
   const totalLines = await execute("wc -l /logs/server.log", s);
   assertEquals(
     hasIntegrityKind(totalLines.label, "InjectionFree"),
+    true,
+    "wc output has InjectionFree — fixed numeric format",
+  );
+  assertEquals(
+    hasIntegrityKind(totalLines.label, "InfluenceClean"),
     false,
-    "line count is influenced by untrusted data",
+    "wc output lacks InfluenceClean — count influenced by untrusted data",
   );
 });
 
@@ -1275,15 +1290,27 @@ Deno.test("example 39: data pipeline — aggregate untrusted CSV via shell pipes
 
   // The agent gets "6" total lines and "3" completed — numeric aggregates
   // without ever parsing the injection attempt in row 5.
+  // Both wc and grep -c have fixedOutputFormat — output is structurally safe.
   assertEquals(
     hasIntegrityKind(totalResult.label, "InjectionFree"),
-    false,
-    "aggregate is still influence-tainted",
+    true,
+    "wc output has InjectionFree — fixed numeric format",
   );
   assertEquals(
     hasIntegrityKind(completedResult.label, "InjectionFree"),
+    true,
+    "grep -c output has InjectionFree — fixed numeric format",
+  );
+  // But InfluenceClean is absent — values were influenced by untrusted data
+  assertEquals(
+    hasIntegrityKind(totalResult.label, "InfluenceClean"),
     false,
-    "count is still influence-tainted",
+    "wc output lacks InfluenceClean",
+  );
+  assertEquals(
+    hasIntegrityKind(completedResult.label, "InfluenceClean"),
+    false,
+    "grep -c output lacks InfluenceClean",
   );
 });
 
