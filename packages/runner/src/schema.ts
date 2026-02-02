@@ -540,6 +540,12 @@ class TransformObjectCreator
     } else if (isObject(link.schema)) {
       const { asCell, asStream, ...restSchema } = link.schema;
       if (asCell || asStream) {
+        // If the value is already a cell, just return it. This happens when
+        // passing cells as arguments to patterns (where we don't want to
+        // create a new cell pointing to the argument location, but rather use
+        // the passed cell).
+        if (isCell(value)) return value;
+
         // TODO(@ubik2): deal with anyOf/oneOf with asCell/asStream
         // TODO(@ubik2): Figure out if we should purge asCell/asStream from restSchema children
         return createCell(

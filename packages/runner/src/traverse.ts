@@ -2257,10 +2257,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
       let val: Immutable<StorableValue>;
       if (
         !this.traverseCells &&
-        propSchema !== undefined && propSchema !== true &&
-        SchemaObjectTraverser.asCellOrStream(propSchema) &&
-        ContextualFlowControl.isTrueSchema(propSchema) &&
-        !isPrimitiveCellLink(propValue)
+        SchemaObjectTraverser.asCellOrStream(propSchema)
       ) {
         const cellLink = getNormalizedLink(
           elementDoc.address,

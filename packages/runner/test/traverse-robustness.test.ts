@@ -242,4 +242,69 @@ describe("SchemaObjectTraverser Robustness", () => {
     // Checks that we resolve A[0] -> B.
     expect(result).toEqual(["Final Value"]);
   });
+
+  it("traverseDAG: respects asCell even with complex schema when traverseCells=false", () => {
+    // Tests the fix where we relaxed isTrueSchema check for asCell
+    const store = new Map<string, Revision<State>>();
+    const docUri = "of:doc-complex-ascell" as URI;
+    const docValue = {
+      nested: { foo: "bar" },
+    };
+    const rev = makeRevision(docUri, docValue);
+    store.set(`${docUri}/application/json`, rev);
+
+    const schema = {
+      type: "object",
+      properties: {
+        nested: {
+          asCell: true,
+          type: "object",
+          properties: {
+            foo: { type: "string" },
+          },
+        },
+      },
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schemaContext: { schema, rootSchema: schema },
+    }, false); // traverseCells = false
+
+    // Mock objectCreator
+    let createdCellLink: any = null;
+    traverser.objectCreator = {
+      mergeMatches: () => undefined,
+      addOptionalProperty: () => {},
+      applyDefault: () => undefined,
+      createObject: (link, val) => {
+        // If we are creating a cell for the nested property, capture it
+        // The path should end with "nested"
+        const isNested = link.path.length > 0 &&
+          link.path[link.path.length - 1] === "nested";
+        if (isNested) {
+          createdCellLink = link;
+          return "CELL" as any;
+        }
+        // Otherwise pass through the value (mocking normal behavior for non-cells)
+        return val as any;
+      },
+    };
+
+    const result = traverser.traverse({
+      address: {
+        space: "did:null:null",
+        id: docUri,
+        type: "application/json",
+        path: ["value"],
+      },
+      value: docValue,
+    });
+
+    // Should return { nested: "CELL" }
+    // If it didn't respect asCell, it would traverse into nested and result would be { nested: { foo: "bar" } }
+    expect(result).toEqual({ nested: "CELL" });
+    // The link should point to "nested"
+    expect(createdCellLink.path).toEqual(["nested"]);
+  });
 });
