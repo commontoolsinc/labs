@@ -62,6 +62,10 @@ function atomEqual(a: any, b: any): boolean {
       return a.did === b.did;
     case "SandboxedExec":
       return true;
+    case "InjectionFree":
+      return true;
+    case "InfluenceClean":
+      return true;
     case "Custom":
       return a.tag === b.tag && a.value === b.value;
     default:
@@ -599,5 +603,107 @@ Deno.test("Complex: untrusted data should not execute", () => {
   assert(
     labels.hasIntegrity(endorsed, { kind: "EndorsedBy", principal: "user" }),
     "Explicitly endorsed data can execute"
+  );
+});
+
+// ============================================================================
+// Injection / Influence Integrity Tests
+// ============================================================================
+
+Deno.test("clean() has both InjectionFree and InfluenceClean", () => {
+  const label = labels.clean();
+
+  assert(
+    labels.hasIntegrity(label, { kind: "InjectionFree" }),
+    "Should have InjectionFree"
+  );
+  assert(
+    labels.hasIntegrity(label, { kind: "InfluenceClean" }),
+    "Should have InfluenceClean"
+  );
+  assert(
+    labels.hasIntegrity(label, { kind: "UserInput" }),
+    "Should have UserInput"
+  );
+});
+
+Deno.test("userInput() now has InjectionFree and InfluenceClean", () => {
+  const label = labels.userInput();
+
+  assert(
+    labels.hasIntegrity(label, { kind: "UserInput" }),
+    "Should have UserInput"
+  );
+  assert(
+    labels.hasIntegrity(label, { kind: "InjectionFree" }),
+    "Should have InjectionFree"
+  );
+  assert(
+    labels.hasIntegrity(label, { kind: "InfluenceClean" }),
+    "Should have InfluenceClean"
+  );
+});
+
+Deno.test("stripInjectionIntegrity removes both InjectionFree and InfluenceClean", () => {
+  const label = labels.userInput();
+  const stripped = labels.stripInjectionIntegrity(label);
+
+  assert(
+    !labels.hasIntegrity(stripped, { kind: "InjectionFree" }),
+    "Should not have InjectionFree"
+  );
+  assert(
+    !labels.hasIntegrity(stripped, { kind: "InfluenceClean" }),
+    "Should not have InfluenceClean"
+  );
+  assert(
+    labels.hasIntegrity(stripped, { kind: "UserInput" }),
+    "Should still have UserInput"
+  );
+});
+
+Deno.test("stripInfluenceClean removes only InfluenceClean, keeps InjectionFree", () => {
+  const label = labels.userInput();
+  const stripped = labels.stripInfluenceClean(label);
+
+  assert(
+    labels.hasIntegrity(stripped, { kind: "InjectionFree" }),
+    "Should still have InjectionFree"
+  );
+  assert(
+    !labels.hasIntegrity(stripped, { kind: "InfluenceClean" }),
+    "Should not have InfluenceClean"
+  );
+  assert(
+    labels.hasIntegrity(stripped, { kind: "UserInput" }),
+    "Should still have UserInput"
+  );
+});
+
+Deno.test("join(clean, llmGenerated) loses both injection atoms", () => {
+  const c = labels.clean();
+  const llm = labels.llmGenerated("gpt-4");
+  const joined = labels.join(c, llm);
+
+  assert(
+    !labels.hasIntegrity(joined, { kind: "InjectionFree" }),
+    "Should not have InjectionFree after join with LLM"
+  );
+  assert(
+    !labels.hasIntegrity(joined, { kind: "InfluenceClean" }),
+    "Should not have InfluenceClean after join with LLM"
+  );
+});
+
+Deno.test("influenceTainted() has InjectionFree but NOT InfluenceClean", () => {
+  const label = labels.influenceTainted();
+
+  assert(
+    labels.hasIntegrity(label, { kind: "InjectionFree" }),
+    "Should have InjectionFree"
+  );
+  assert(
+    !labels.hasIntegrity(label, { kind: "InfluenceClean" }),
+    "Should not have InfluenceClean"
   );
 });

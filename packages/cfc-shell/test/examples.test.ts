@@ -15,6 +15,8 @@ import { createDefaultRegistry } from "../src/commands/mod.ts";
 import { createEnvironment } from "../src/commands/context.ts";
 import { VFS } from "../src/vfs.ts";
 import { labels, type Label } from "../src/labels.ts";
+import { ExchangeRuleEvaluator } from "../src/exchange.ts";
+import { defaultRules } from "../src/rules/default.ts";
 
 // ---------------------------------------------------------------------------
 // Test helper: create a fully-wired session
@@ -551,5 +553,320 @@ Deno.test("example 22: safe flow — public user data passes through everything"
     hasIntegrityKind(label, "UserInput"),
     true,
     "public user data should preserve UserInput integrity through cat",
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 23. EXIT CODE INFLUENCE — grep on untrusted data loses injection atoms
+// ═══════════════════════════════════════════════════════════════════════════
+
+Deno.test("example 23: exit code influence — grep on untrusted web content loses injection atoms", async () => {
+  const s = session();
+
+  // Untrusted web scrape — has Origin/NetworkProvenance but NO InjectionFree or InfluenceClean
+  s.vfs.writeFile("/data/webpage.html", "<html><body>password: hunter2</body></html>\n", {
+    confidentiality: [],
+    integrity: [
+      { kind: "Origin", url: "https://example.com" },
+      { kind: "NetworkProvenance", tls: true, host: "example.com" },
+    ],
+  });
+
+  // grep -q exits 0 if found, 1 if not — the exit code is determined by untrusted content
+  const result = await execute('grep -q "password" /data/webpage.html', s);
+
+  // The result label comes from joining the command's output with the file's label.
+  // Since the file lacks InjectionFree and InfluenceClean, the join (intersection)
+  // drops those atoms from the result — correctly tracking that the exit code's
+  // value was influenced by untrusted content.
+  assertEquals(
+    hasIntegrityKind(result.label, "InjectionFree"),
+    false,
+    "result should NOT have InjectionFree — web content didn't have it, join removes it",
+  );
+  assertEquals(
+    hasIntegrityKind(result.label, "InfluenceClean"),
+    false,
+    "result should NOT have InfluenceClean — web content influence taints the exit code",
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 24. LLM OUTPUT — loses all injection integrity
+// ═══════════════════════════════════════════════════════════════════════════
+
+Deno.test("example 24: LLM output — joining with LLM response strips injection atoms", async () => {
+  const s = session();
+
+  // User input has InjectionFree + InfluenceClean (trusted)
+  s.vfs.writeFile("/data/user_prompt.txt", "Summarize the following report.\n", labels.userInput());
+
+  // LLM response has NEITHER injection atom — the LLM might output injection
+  s.vfs.writeFile("/data/llm_response.txt", "The report shows revenue growth of 15%.\n", labels.llmGenerated("gpt-4"));
+
+  // Step 1: Write user prompt alone — should keep injection atoms
+  await execute("cat /data/user_prompt.txt > /tmp/combined.txt", s);
+
+  const afterFirst = s.vfs.readFileText("/tmp/combined.txt");
+  assertEquals(
+    hasIntegrityKind(afterFirst.label, "InjectionFree"),
+    true,
+    "after writing only user input, file should have InjectionFree",
+  );
+  assertEquals(
+    hasIntegrityKind(afterFirst.label, "InfluenceClean"),
+    true,
+    "after writing only user input, file should have InfluenceClean",
+  );
+
+  // Step 2: Append LLM response — join with LLM label loses injection atoms
+  await execute("cat /data/llm_response.txt >> /tmp/combined.txt", s);
+
+  const afterAppend = s.vfs.readFileText("/tmp/combined.txt");
+  assertEquals(
+    hasIntegrityKind(afterAppend.label, "InjectionFree"),
+    false,
+    "after appending LLM output, InjectionFree is lost (LLM didn't have it)",
+  );
+  assertEquals(
+    hasIntegrityKind(afterAppend.label, "InfluenceClean"),
+    false,
+    "after appending LLM output, InfluenceClean is lost (LLM didn't have it)",
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 25. PREDEFINED OUTPUT SET — constant output still tainted by condition
+// ═══════════════════════════════════════════════════════════════════════════
+
+Deno.test("example 25: predefined output set — constant echo tainted by untrusted condition", async () => {
+  const s = session();
+
+  // Untrusted input — no injection atoms
+  s.vfs.writeFile("/data/untrusted.txt", "trigger\n", {
+    confidentiality: [],
+    integrity: [{ kind: "Origin", url: "https://evil.com" }],
+  });
+
+  // Even though the output is a fixed string ("ALERT" or "OK"), the DECISION of which
+  // string to emit depends on untrusted data. The PC taint from the grep condition
+  // correctly tracks this influence.
+  await execute(
+    'if grep -q "trigger" /data/untrusted.txt; then echo "ALERT" > /tmp/status.txt; else echo "OK" > /tmp/status.txt; fi',
+    s,
+  );
+
+  const { label } = s.vfs.readFileText("/tmp/status.txt");
+
+  // The echo's output gets its label from ctx.pcLabel, which includes the grep result's
+  // label. Since grep on the untrusted file produces a label that lacks InjectionFree
+  // (join with untrusted file removes it), the pcLabel won't have InjectionFree either.
+  // The file label comes from taintConfidentiality(output.label, session.pcLabel),
+  // where output.label = pcLabel. So the file inherits the untrusted influence.
+  assertEquals(
+    hasIntegrityKind(label, "InjectionFree"),
+    false,
+    "constant output should NOT have InjectionFree — decision was influenced by untrusted data",
+  );
+
+  // Key insight: even though the VALUE is a constant ("ALERT"), the label correctly
+  // tracks that the decision of what to write was influenced by untrusted data.
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 26. stripInjectionIntegrity — simulates LLM pass-through
+// ═══════════════════════════════════════════════════════════════════════════
+
+Deno.test("example 26: stripInjectionIntegrity — models data passing through an LLM", async () => {
+  const s = session();
+
+  // Start with fully trusted user input
+  s.vfs.writeFile("/data/safe_input.txt", "What is the weather today?\n", labels.userInput());
+
+  // Write to pre-LLM file — should retain all integrity
+  await execute("cat /data/safe_input.txt > /tmp/pre_llm.txt", s);
+
+  const preLlm = s.vfs.readFileText("/tmp/pre_llm.txt");
+  assertEquals(
+    hasIntegrityKind(preLlm.label, "InjectionFree"),
+    true,
+    "pre-LLM data should have InjectionFree",
+  );
+  assertEquals(
+    hasIntegrityKind(preLlm.label, "InfluenceClean"),
+    true,
+    "pre-LLM data should have InfluenceClean",
+  );
+
+  // Simulate LLM processing by stripping injection integrity
+  // This models what happens when data passes through an LLM: the output
+  // can no longer be trusted to be injection-free because the LLM might
+  // have been manipulated, and the output is influenced by all LLM inputs.
+  const postLlmLabel = labels.stripInjectionIntegrity(preLlm.label);
+  s.vfs.writeFile("/tmp/post_llm.txt", "The weather is sunny.\n", postLlmLabel);
+
+  const postLlm = s.vfs.readFileText("/tmp/post_llm.txt");
+  assertEquals(
+    hasIntegrityKind(postLlm.label, "InjectionFree"),
+    false,
+    "post-LLM data should NOT have InjectionFree (stripped by LLM pass-through)",
+  );
+  assertEquals(
+    hasIntegrityKind(postLlm.label, "InfluenceClean"),
+    false,
+    "post-LLM data should NOT have InfluenceClean (stripped by LLM pass-through)",
+  );
+  // Crucially, other integrity atoms are preserved
+  assertEquals(
+    hasIntegrityKind(postLlm.label, "UserInput"),
+    true,
+    "stripping injection atoms should NOT remove UserInput integrity",
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 27. EXCHANGE RULE — blocks injection-tainted exec
+// ═══════════════════════════════════════════════════════════════════════════
+
+Deno.test("example 27: exchange rule — blocks exec of network content, allows after endorsement", () => {
+  // Create evaluator with default rules directly (not through shell)
+  const evaluator = new ExchangeRuleEvaluator();
+  evaluator.addRules(defaultRules);
+
+  // Network-fetched script: has Origin + NetworkProvenance but NO InjectionFree
+  const networkLabel: Label = {
+    confidentiality: [],
+    integrity: [
+      { kind: "Origin", url: "https://example.com/script.sh" },
+      { kind: "NetworkProvenance", tls: true, host: "example.com" },
+    ],
+  };
+
+  const pcLabel = labels.userInput(); // normal PC context
+
+  // Attempt to execute — should be blocked because the exec-integrity-gate
+  // requires UserInput, EndorsedBy, or CodeHash, and network content has none of those
+  const verdict1 = evaluator.evaluate("bash", undefined, networkLabel, pcLabel);
+  assertEquals(
+    verdict1.allowed,
+    false,
+    "network-fetched script should be blocked by exec-integrity-gate",
+  );
+  assertEquals(
+    verdict1.action,
+    "block",
+    "violation action should be 'block'",
+  );
+
+  // Now endorse the script — add EndorsedBy to satisfy the rule
+  const endorsedLabel = labels.endorse(networkLabel, { kind: "EndorsedBy", principal: "security-reviewer" });
+
+  const verdict2 = evaluator.evaluate("bash", undefined, endorsedLabel, pcLabel);
+  assertEquals(
+    verdict2.allowed,
+    true,
+    "endorsed script should be allowed (EndorsedBy satisfies exec-integrity-gate)",
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 28. INFLUENCE TRACKING — pipe chain preserves missing injection atoms
+// ═══════════════════════════════════════════════════════════════════════════
+
+Deno.test("example 28: influence tracking — untrusted data through pipe chain loses injection atoms", async () => {
+  const s = session();
+
+  // Network data without injection atoms
+  s.vfs.writeFile("/data/web_data.txt", "important: yes\ntrivial: no\nimportant: also yes\n", {
+    confidentiality: [],
+    integrity: [
+      { kind: "Origin", url: "https://example.com/data" },
+      { kind: "NetworkProvenance", tls: true, host: "example.com" },
+    ],
+  });
+
+  // Pipe chain: cat | sort | grep > file
+  // Each stage joins its output label with its input label. Since the source
+  // data lacks injection atoms, the join (intersection) ensures the output
+  // also lacks them — untrusted influence propagates through the entire chain.
+  await execute(
+    'cat /data/web_data.txt | sort | grep "important" > /tmp/filtered.txt',
+    s,
+  );
+
+  const { label } = s.vfs.readFileText("/tmp/filtered.txt");
+  assertEquals(
+    hasIntegrityKind(label, "InjectionFree"),
+    false,
+    "pipe output should NOT have InjectionFree — source data didn't have it",
+  );
+  assertEquals(
+    hasIntegrityKind(label, "InfluenceClean"),
+    false,
+    "pipe output should NOT have InfluenceClean — source data didn't have it",
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 29. CLEAN USER INPUT — stays clean through simple transforms
+// ═══════════════════════════════════════════════════════════════════════════
+
+Deno.test("example 29: clean user input — injection atoms preserved through cat | sort", async () => {
+  const s = session();
+
+  // User-typed data has InjectionFree + InfluenceClean
+  s.vfs.writeFile("/data/my_notes.txt", "Zebra\nApple\nMango\n", labels.userInput());
+
+  // Simple transforms on trusted data should preserve injection atoms because
+  // all inputs to the join have them — intersection keeps shared atoms
+  await execute("cat /data/my_notes.txt | sort > /tmp/sorted.txt", s);
+
+  const { label } = s.vfs.readFileText("/tmp/sorted.txt");
+  assertEquals(
+    hasIntegrityKind(label, "InjectionFree"),
+    true,
+    "sorted user data should still have InjectionFree (all inputs had it)",
+  );
+  assertEquals(
+    hasIntegrityKind(label, "InfluenceClean"),
+    true,
+    "sorted user data should still have InfluenceClean (all inputs had it)",
+  );
+  assertEquals(
+    hasIntegrityKind(label, "UserInput"),
+    true,
+    "sorted user data should still have UserInput",
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 30. MIXED TRUST — merging trusted and untrusted loses injection atoms
+// ═══════════════════════════════════════════════════════════════════════════
+
+Deno.test("example 30: mixed trust — merging user input with network data loses injection atoms", async () => {
+  const s = session();
+
+  // Trusted user input (has InjectionFree + InfluenceClean)
+  s.vfs.writeFile("/data/trusted.txt", "My analysis: the data looks fine.\n", labels.userInput());
+
+  // Untrusted network data (no injection atoms)
+  s.vfs.writeFile("/data/untrusted.txt", "External report: all systems nominal.\n", labels.fromNetwork("https://example.com", true));
+
+  // Concatenating trusted + untrusted: the join intersects integrity,
+  // so injection atoms are lost because the network data doesn't have them.
+  // This correctly models the security property: if ANY input is untrusted,
+  // the combined output cannot be considered injection-free.
+  await execute("cat /data/trusted.txt /data/untrusted.txt > /tmp/merged.txt", s);
+
+  const { label } = s.vfs.readFileText("/tmp/merged.txt");
+  assertEquals(
+    hasIntegrityKind(label, "InjectionFree"),
+    false,
+    "merged data should NOT have InjectionFree — network data didn't have it",
+  );
+  assertEquals(
+    hasIntegrityKind(label, "InfluenceClean"),
+    false,
+    "merged data should NOT have InfluenceClean — network data didn't have it",
   );
 });

@@ -24,6 +24,8 @@ export type Atom =
   | { kind: "Space"; id: string }
   | { kind: "PersonalSpace"; did: string }
   | { kind: "SandboxedExec" }
+  | { kind: "InjectionFree" }
+  | { kind: "InfluenceClean" }
   | { kind: "Custom"; tag: string; value?: string };
 
 // ============================================================================
@@ -99,6 +101,10 @@ function atomEqual(a: Atom, b: Atom): boolean {
     case "PersonalSpace":
       return (b as typeof a).did === a.did;
     case "SandboxedExec":
+      return true;
+    case "InjectionFree":
+      return true;
+    case "InfluenceClean":
       return true;
     case "Custom":
       return (b as typeof a).tag === a.tag && (b as typeof a).value === a.value;
@@ -276,12 +282,14 @@ function flowsTo(a: Label, b: Label): boolean {
 function userInput(): Label {
   return {
     confidentiality: [],
-    integrity: [{ kind: "UserInput" }],
+    integrity: [{ kind: "UserInput" }, { kind: "InjectionFree" }, { kind: "InfluenceClean" }],
   };
 }
 
 /**
  * fromNetwork - data fetched from network (origin integrity, public)
+ * Network data lacks InjectionFree and InfluenceClean — it is untrusted
+ * and may contain prompt injection payloads.
  */
 function fromNetwork(url: string, tls: boolean): Label {
   const host = new URL(url).host;
@@ -300,6 +308,8 @@ function fromNetwork(url: string, tls: boolean): Label {
 function llmGenerated(model?: string): Label {
   return {
     confidentiality: [],
+    // LLM output has NO InjectionFree or InfluenceClean — it may contain
+    // injection payloads and its content was influenced by all its inputs.
     integrity: [{ kind: "LLMGenerated", model }],
   };
 }
@@ -315,6 +325,40 @@ function fromFile(path: string, spaceId?: string): Label {
   return {
     confidentiality,
     integrity: [],
+  };
+}
+
+/** Label for data that is both injection-free and influence-clean (e.g., user-typed input) */
+function clean(): Label {
+  return {
+    confidentiality: [],
+    integrity: [{ kind: "InjectionFree" }, { kind: "InfluenceClean" }, { kind: "UserInput" }],
+  };
+}
+
+/** Label for data that is injection-free but influence-tainted (e.g., exit code from untrusted grep) */
+function influenceTainted(): Label {
+  return {
+    confidentiality: [],
+    integrity: [{ kind: "InjectionFree" }],
+  };
+}
+
+/** Strip injection-related integrity from a label (e.g., after passing through LLM) */
+function stripInjectionIntegrity(label: Label): Label {
+  return {
+    confidentiality: label.confidentiality,
+    integrity: label.integrity.filter(
+      a => a.kind !== "InjectionFree" && a.kind !== "InfluenceClean"
+    ),
+  };
+}
+
+/** Strip only InfluenceClean (keep InjectionFree) — for derived values like exit codes */
+function stripInfluenceClean(label: Label): Label {
+  return {
+    confidentiality: label.confidentiality,
+    integrity: label.integrity.filter(a => a.kind !== "InfluenceClean"),
   };
 }
 
@@ -336,4 +380,8 @@ export const labels = {
   fromNetwork,
   llmGenerated,
   fromFile,
+  clean,
+  influenceTainted,
+  stripInjectionIntegrity,
+  stripInfluenceClean,
 };

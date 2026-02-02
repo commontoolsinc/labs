@@ -3,10 +3,17 @@
  *
  * Provides a baseline security policy for the CFC shell.
  * These rules defend against:
- * - Prompt injection (exec integrity gate)
+ * - Prompt injection (exec integrity gate, injection-free tracking)
  * - Data exfiltration (network egress gate)
  * - Accidental destructive operations (intent gate)
  * - Control flow integrity (env mutation gate)
+ * - Injection propagation through LLM chains (InjectionFree atom)
+ * - Influence-tainted writes to sensitive paths (InfluenceClean atom)
+ *
+ * The InjectionFree and InfluenceClean integrity atoms enable fine-grained
+ * policies that go beyond simple provenance checks, allowing rules to
+ * distinguish between content that has been verified injection-free and
+ * control flow that has not been influenced by untrusted data.
  */
 
 import { ExchangeRule } from "../exchange.ts";
@@ -92,11 +99,82 @@ export const defaultRules: ExchangeRule[] = [
   },
 
   // ========================================================================
-  // Rule 5: LLM Prompt Data Framing (FUTURE)
+  // Rule 5: LLM Output Exec Gate
+  // ========================================================================
+  // LLM-generated content that lacks InjectionFree cannot be passed as
+  // arguments to exec-type commands, even with endorsement. The content
+  // itself might contain injection. Requires InjectionFree, EndorsedBy,
+  // or CodeHash verification.
+  {
+    name: "llm-injection-exec-gate",
+    match: {
+      commands: ["bash", "sh", "eval", "source", "python", "node"],
+    },
+    requires: {
+      integrity: [
+        { kind: "InjectionFree" },
+        { kind: "EndorsedBy" },
+        { kind: "CodeHash" },
+      ],
+    },
+    onViolation: "block",
+    description: "Executable content must be injection-free, endorsed, or hash-verified",
+    priority: 12,
+  },
+
+  // ========================================================================
+  // Rule 6: Network Egress Injection Gate
+  // ========================================================================
+  // When sending data to LLM APIs, data that is NOT injection-free must be
+  // framed/sandboxed. This prevents prompt injection from propagating
+  // through LLM chains.
+  {
+    name: "network-injection-framing-gate",
+    match: {
+      category: "network-egress",
+    },
+    requires: {
+      integrity: [
+        { kind: "InjectionFree" },
+        { kind: "UserInput" },
+      ],
+    },
+    onViolation: "sandbox",
+    description: "Data sent over network that may contain injection must be sandboxed/framed",
+    priority: 22,
+  },
+
+  // ========================================================================
+  // Rule 7: Influence-Clean Gate for Sensitive Writes
+  // ========================================================================
+  // Writing to sensitive paths (config files, scripts) when the PC was
+  // influenced by untrusted data is suspicious. The PC must have
+  // InfluenceClean to write to sensitive locations.
+  {
+    name: "influence-clean-sensitive-write",
+    match: {
+      category: "destructive-write",
+    },
+    requires: {
+      pcIntegrity: [
+        { kind: "InfluenceClean" },
+        { kind: "UserInput" },
+      ],
+    },
+    onViolation: "request-intent",
+    description: "Writes to sensitive paths from influence-tainted control flow require approval",
+    priority: 35,
+  },
+
+  // ========================================================================
+  // Rule 8: LLM Prompt Data Framing (FUTURE)
   // ========================================================================
   // This is a future rule showing how to handle untrusted data in LLM prompts.
   // When enabled, it would automatically wrap untrusted content in a frame
   // that instructs the LLM to treat it as data, not instructions.
+  // Now that InjectionFree and InfluenceClean atoms are available, this rule
+  // could use InjectionFree to determine whether framing is needed, rather
+  // than relying on generic provenance checks like UserInput or EndorsedBy.
   /*
   {
     name: "llm-prompt-data-framing",
@@ -107,8 +185,8 @@ export const defaultRules: ExchangeRule[] = [
     },
     requires: {
       integrity: [
+        { kind: "InjectionFree" },
         { kind: "UserInput" },
-        { kind: "EndorsedBy" },
       ],
     },
     onViolation: "sandbox",  // Auto-wrap untrusted data
