@@ -280,7 +280,7 @@ export function normalizeAndDiff(
 
   // CFC: reads during diff accumulate taint
   if (tx) {
-    recordSchemaRead(tx, link.schema);
+    recordSchemaRead(tx, link.schema, link);
   }
 
   // A new alias can overwrite a previous alias. No-op if the same.

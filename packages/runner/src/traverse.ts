@@ -1688,7 +1688,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
         space: doc.address.space,
         id: doc.address.id,
         type: doc.address.type,
-        path: [],
+        path: doc.address.path,
       });
     }
 

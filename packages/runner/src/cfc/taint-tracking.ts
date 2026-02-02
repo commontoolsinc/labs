@@ -15,6 +15,7 @@ import {
   accumulateTaint,
   CFCViolationError,
   checkWrite,
+  taintAtPath,
 } from "./action-context.ts";
 import type { ExchangeRule } from "./exchange-rules.ts";
 import { formatLabel } from "./violations.ts";
@@ -65,6 +66,7 @@ export function getTaintContext(
 export function recordTaintedRead(
   tx: IExtendedStorageTransaction,
   label: Label,
+  path?: readonly string[],
 ): void {
   const entry = taintEntries.get(tx);
   if (entry) {
@@ -72,9 +74,10 @@ export function recordTaintedRead(
       logger.info("cfc-read", () => [
         `Taint accumulated:`,
         formatLabel(label),
+        ...(path && path.length > 0 ? [`at path ${path.join(".")}`] : []),
       ]);
     }
-    accumulateTaint(entry.ctx, label);
+    accumulateTaint(entry.ctx, label, path);
   }
 }
 
@@ -173,7 +176,7 @@ export function recordSchemaRead(
     const effectiveLabel = schemaLabel && storedLabel
       ? joinLabel(schemaLabel, storedLabel)
       : (schemaLabel ?? storedLabel)!;
-    recordTaintedRead(tx, effectiveLabel);
+    recordTaintedRead(tx, effectiveLabel, address?.path);
   }
 }
 
@@ -197,6 +200,18 @@ export function checkWriteAndPersistLabel(
   if (Object.keys(storage).length > 0) {
     tx.writeLabelOrThrow(address, storage);
   }
+}
+
+/** Get the taint label at a specific path from the transaction's taint map. */
+export function getTaintAtPath(
+  tx: IExtendedStorageTransaction,
+  path: readonly string[],
+): Label {
+  const entry = taintEntries.get(tx);
+  if (entry) {
+    return taintAtPath(entry.ctx, path);
+  }
+  return emptyLabel();
 }
 
 /** Remove taint context from transaction (cleanup). */

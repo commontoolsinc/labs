@@ -8,6 +8,7 @@ import { emptyIntegrity, integrityFromAtoms } from "./integrity.ts";
 import { emptyLabel, joinLabel, type Label, labelLeq } from "./labels.ts";
 import type { IntegrityLabel } from "./integrity.ts";
 import { evaluateRules, type ExchangeRule } from "./exchange-rules.ts";
+import { TaintMap } from "./taint-map.ts";
 import { DEFAULT_POLICY, type PolicyRecord } from "./policy.ts";
 import { formatLabel } from "./violations.ts";
 
@@ -41,6 +42,8 @@ export type ActionTaintContext = {
   readonly clearance: Label;
   /** Join of all read labels during this action. */
   accumulatedTaint: Label;
+  /** Per-path taint entries for fine-grained tracking. */
+  readonly taintMap: TaintMap;
   /** Active policy for the action's space. */
   readonly policy: PolicyRecord;
   /** Code hash + endorsements. */
@@ -86,6 +89,7 @@ export function createActionContext(options: {
     principal,
     clearance,
     accumulatedTaint: emptyLabel(),
+    taintMap: new TaintMap(),
     policy: policy ?? DEFAULT_POLICY,
     integrityBasis,
   };
@@ -99,8 +103,20 @@ export function createActionContext(options: {
 export function accumulateTaint(
   ctx: ActionTaintContext,
   readLabel: Label,
+  path?: readonly string[],
 ): void {
   ctx.accumulatedTaint = joinLabel(ctx.accumulatedTaint, readLabel);
+  if (path) {
+    ctx.taintMap.add(path, readLabel);
+  }
+}
+
+/** Read the taint label at a specific path from the taint map. */
+export function taintAtPath(
+  ctx: ActionTaintContext,
+  path: readonly string[],
+): Label {
+  return ctx.taintMap.labelAt(path);
 }
 
 /**
