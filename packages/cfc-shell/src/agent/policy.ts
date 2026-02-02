@@ -100,6 +100,10 @@ export function filterOutput(
   label: Label,
   policy: AgentPolicy,
 ): { content: string; filtered: boolean; reason?: string } {
+  // Empty content cannot contain injection — skip filtering.
+  if (content.length === 0) {
+    return { content, filtered: false };
+  }
   const reason = checkVisibility(label, policy);
   if (reason) {
     return {

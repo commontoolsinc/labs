@@ -510,7 +510,21 @@ export class AgentSession {
       try {
         const captured = this.shell.vfs.readFileText(tmpFile);
         stdout = captured.value;
-        outputLabel = captured.label;
+        // The file's label comes from actual stream writes; result.label
+        // includes fixedOutputFormat endorsements. Use whichever has
+        // InjectionFree — the file label tracks actual data flow, while
+        // result.label carries structural endorsements.
+        const fileHasIF = captured.label.integrity.some(
+          (a) => a.kind === "InjectionFree",
+        );
+        const resultHasIF = result.label.integrity.some(
+          (a) => a.kind === "InjectionFree",
+        );
+        if (fileHasIF || resultHasIF) {
+          outputLabel = fileHasIF ? captured.label : result.label;
+        } else {
+          outputLabel = captured.label;
+        }
       } catch {
         // Command may not have produced output
       }
