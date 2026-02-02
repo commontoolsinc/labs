@@ -267,16 +267,10 @@ async function phase3ReactivityAndIsolation(
 
   // Also load and start Phase 2's instance to verify isolation
   // We need to load Phase 2's input cell as well for the recipe to work
-  const dataCell2 = getInputCell(ctx.runtime, space, INPUT_CELL_ID_PHASE_2, tx);
+  const dataCell2 = getInputCell(ctx.runtime, space, INPUT_CELL_ID_PHASE_2);
   await dataCell2.sync();
 
-  const resultCell2 = getResultCell(
-    ctx.runtime,
-    space,
-    RESULT_CELL_ID_PHASE_2,
-    tx,
-  );
-  await resultCell2.sync();
+  const resultCell2 = getResultCell(ctx.runtime, space, RESULT_CELL_ID_PHASE_2);
   await ctx.runtime.start(resultCell2);
   console.log("Started Phase 2's instance for isolation check");
 
