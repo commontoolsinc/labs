@@ -5,6 +5,7 @@
 import { Label, Labeled, labels } from "../labels.ts";
 import { LabeledStream } from "../labeled-stream.ts";
 import { VFS } from "../vfs.ts";
+import type { PolicyRecord } from "../policy.ts";
 
 /**
  * Environment variable with label and metadata
@@ -175,6 +176,8 @@ export interface CommandContext {
   stderr: LabeledStream;
   pcLabel: Label;             // current PC taint
   requestIntent: IntentCallback;
+  /** Policy records for exchange rule evaluation (e.g., at network boundaries) */
+  policies?: PolicyRecord[];
 }
 
 /**

@@ -26,6 +26,10 @@ export type Atom =
   | { kind: "SandboxedExec" }
   | { kind: "InjectionFree" }
   | { kind: "InfluenceClean" }
+  | { kind: "Policy"; name: string; subject: string; hash: string }
+  | { kind: "IntegrityToken"; name: string }
+  | { kind: "HasRole"; principal: string; space: string; role: string }
+  | { kind: "Capability"; capKind: string; resource: string }
   | { kind: "Custom"; tag: string; value?: string };
 
 // ============================================================================
@@ -106,6 +110,14 @@ function atomEqual(a: Atom, b: Atom): boolean {
       return true;
     case "InfluenceClean":
       return true;
+    case "Policy":
+      return (b as typeof a).name === a.name && (b as typeof a).subject === a.subject && (b as typeof a).hash === a.hash;
+    case "IntegrityToken":
+      return (b as typeof a).name === a.name;
+    case "HasRole":
+      return (b as typeof a).principal === a.principal && (b as typeof a).space === a.space && (b as typeof a).role === a.role;
+    case "Capability":
+      return (b as typeof a).capKind === a.capKind && (b as typeof a).resource === a.resource;
     case "Custom":
       return (b as typeof a).tag === a.tag && (b as typeof a).value === a.value;
   }

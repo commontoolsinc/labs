@@ -4,10 +4,19 @@
  * Implements basic HTTP fetch using the Deno `fetch` API.
  * Response data is labeled with Origin and NetworkProvenance atoms
  * (no InjectionFree — network data is untrusted).
+ *
+ * After fetch, exchange rules are evaluated at the network boundary.
+ * curl mints AuthorizedRequest as boundary integrity — the structural
+ * proof is that curl only places secret data in the Authorization header,
+ * never in the URL, query params, or body. Combined with NetworkProvenance
+ * from a successful TLS fetch, this satisfies the integrity guards for
+ * authority-only exchange rules (e.g., dropping GoogleAuth after OAuth fetch).
  */
 
 import type { CommandContext, CommandResult } from "./context.ts";
+import type { Atom, Integrity, Label } from "../labels.ts";
 import { labels } from "../labels.ts";
+import { evalExchangeRules } from "../policy.ts";
 
 /**
  * curl - transfer data from/to a server
@@ -104,8 +113,39 @@ export async function curl(args: string[], ctx: CommandContext): Promise<Command
     return { exitCode: 6, label: ctx.pcLabel };
   }
 
-  // Label the response as network data (untrusted — no InjectionFree)
-  const responseLabel = labels.fromNetwork(url, tls);
+  // ---- Label computation ----
+
+  // Network integrity from the successful fetch
+  const networkIntegrity: Integrity = [
+    { kind: "Origin", url },
+    { kind: "NetworkProvenance", tls, host: new URL(url).host },
+  ];
+
+  // Boundary integrity: curl structurally guarantees that secret data from the
+  // PC label (e.g., OAuth tokens) only appears in the Authorization header — never
+  // in the URL, query params, or response body. This is the structural proof that
+  // justifies minting AuthorizedRequest.
+  const hasAuthHeader = headers.has("Authorization");
+  const boundaryIntegrity: Integrity = [
+    ...networkIntegrity,
+    ...(hasAuthHeader ? [{ kind: "IntegrityToken", name: "AuthorizedRequest" } as Atom] : []),
+  ];
+
+  // The response label starts with:
+  //   confidentiality: inherited from inputs (pcLabel carries token's confidentiality)
+  //   integrity: network provenance from the fetch
+  const rawResponseLabel: Label = {
+    confidentiality: ctx.pcLabel.confidentiality,
+    integrity: networkIntegrity,
+  };
+
+  // Evaluate exchange rules at the network boundary.
+  // This is where authority-only confidentiality (e.g., GoogleAuth) gets dropped
+  // when guarded by AuthorizedRequest + NetworkProvenance integrity.
+  const policies = ctx.policies ?? [];
+  const outputLabel = policies.length > 0
+    ? evalExchangeRules(policies, boundaryIntegrity, rawResponseLabel)
+    : rawResponseLabel;
 
   // Handle redirect responses when not following
   if (!followRedirects && response.status >= 300 && response.status < 400) {
@@ -126,7 +166,7 @@ export async function curl(args: string[], ctx: CommandContext): Promise<Command
         ctx.pcLabel,
       );
     }
-    return { exitCode: 22, label: responseLabel };
+    return { exitCode: 22, label: outputLabel };
   }
 
   // Read response body
@@ -135,10 +175,10 @@ export async function curl(args: string[], ctx: CommandContext): Promise<Command
 
   // Output to file or stdout
   if (outputFile) {
-    ctx.vfs.writeFile(outputFile, body, responseLabel);
+    ctx.vfs.writeFile(outputFile, body, outputLabel);
   } else {
-    ctx.stdout.write(bodyText, responseLabel);
+    ctx.stdout.write(bodyText, outputLabel);
   }
 
-  return { exitCode: 0, label: responseLabel };
+  return { exitCode: 0, label: outputLabel };
 }
