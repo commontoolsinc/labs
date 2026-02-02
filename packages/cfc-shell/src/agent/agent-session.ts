@@ -490,11 +490,13 @@ export class AgentSession {
     exitCode: number;
     label: Label;
   }> {
-    const tmpFile = `/tmp/.agent-capture-${this.id}-${Date.now()}`;
+    const ts = Date.now();
+    const outFile = `/tmp/.agent-out-${this.id}-${ts}`;
+    const errFile = `/tmp/.agent-err-${this.id}-${ts}`;
 
     try {
       const result = await execute(
-        `(${command}) > ${tmpFile} 2>/dev/null`,
+        `(${command}) > ${outFile} 2>${errFile}`,
         this.shell,
       );
 
@@ -506,9 +508,10 @@ export class AgentSession {
       this.shell.pushPC(labels.join(prevPC, result.label));
 
       let stdout = "";
+      let stderr = "";
       let outputLabel = result.label;
       try {
-        const captured = this.shell.vfs.readFileText(tmpFile);
+        const captured = this.shell.vfs.readFileText(outFile);
         stdout = captured.value;
         // The file's label comes from actual stream writes; result.label
         // includes fixedOutputFormat endorsements. Use whichever has
@@ -528,22 +531,31 @@ export class AgentSession {
       } catch {
         // Command may not have produced output
       }
+      try {
+        stderr = this.shell.vfs.readFileText(errFile).value;
+      } catch {
+        // No stderr
+      }
 
       try {
-        this.shell.vfs.rm(tmpFile);
-      } catch {
-        // ignore
-      }
+        this.shell.vfs.rm(outFile);
+      } catch { /* ignore */ }
+      try {
+        this.shell.vfs.rm(errFile);
+      } catch { /* ignore */ }
 
       return {
         stdout,
-        stderr: "",
+        stderr,
         exitCode: result.exitCode,
         label: outputLabel,
       };
     } catch (e) {
       try {
-        this.shell.vfs.rm(tmpFile);
+        this.shell.vfs.rm(outFile);
+      } catch { /* ignore */ }
+      try {
+        this.shell.vfs.rm(errFile);
       } catch {
         // ignore
       }
