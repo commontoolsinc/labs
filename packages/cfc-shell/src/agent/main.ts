@@ -23,6 +23,7 @@ import {
   runAgentLoop,
 } from "./llm-loop.ts";
 import { VFS } from "../vfs.ts";
+import { boxEnd, boxLine, boxStart, getTermWidth } from "./tui.ts";
 
 // ---------------------------------------------------------------------------
 // Minimal fetch-based LLM client (no dependency on @commontools/llm)
@@ -162,7 +163,7 @@ async function runOnce(
   write: (s: string) => Promise<unknown>,
   history?: Message[],
 ): Promise<Message[]> {
-  let eventCursor = agent.getEvents().length;
+  const tw = getTermWidth();
 
   const result = await runAgentLoop(input, {
     llm,
@@ -171,33 +172,52 @@ async function runOnce(
     system: SYSTEM_PROMPT,
     history,
     onToolCall: async (_toolName, input, depth) => {
-      const prefix = depth > 0 ? ">> ".repeat(depth) : "";
-      await write(`\n  ${prefix}$ ${input.command ?? input.task ?? ""}\n`);
+      const cmd = String(input.command ?? input.task ?? "");
+      const line = `  $ ${cmd}`;
+      if (depth > 0) {
+        await write(`${boxLine(line, tw)}\n`);
+      } else {
+        await write(`\n${line}\n`);
+      }
     },
     onToolResult: async (_cmd, res, depth) => {
-      const events = agent.getEvents();
-      for (let i = eventCursor; i < events.length; i++) {
-        const ev = events[i];
-        if (ev.type === "sub-agent-started") {
-          await write(`  [sub-agent started: ${ev.policy}]\n`);
-        } else if (ev.type === "sub-agent-ended") {
-          await write(`  [sub-agent ended]\n`);
+      if (res.filtered) {
+        const msg = `  [filtered: ${res.filterReason}]`;
+        if (depth > 0) {
+          await write(`${boxLine(msg, tw)}\n`);
+        } else {
+          await write(`${msg}\n`);
+        }
+      } else if (res.stdout) {
+        const lines = res.stdout.split("\n").map((l) => l ? `  ${l}` : l)
+          .join("\n");
+        if (depth > 0) {
+          await write(`${boxLine(lines, tw)}\n`);
+        } else {
+          await write(`${lines}\n`);
         }
       }
-      eventCursor = events.length;
-
-      const prefix = depth > 0 ? ">> ".repeat(depth) : "";
-      if (res.filtered) {
-        await write(`  ${prefix}[filtered: ${res.filterReason}]\n`);
-      } else if (res.stdout) {
-        const lines = res.stdout.split("\n").map((l) =>
-          l ? `  ${prefix}${l}` : l
-        ).join("\n");
-        await write(`${lines}\n`);
-      }
       if (res.exitCode !== 0) {
-        await write(`  ${prefix}[exit code: ${res.exitCode}]\n`);
+        const msg = `  [exit code: ${res.exitCode}]`;
+        if (depth > 0) {
+          await write(`${boxLine(msg, tw)}\n`);
+        } else {
+          await write(`${msg}\n`);
+        }
       }
+    },
+    onTaskStart: async (_task, policy, _depth) => {
+      await write(`\n${boxStart(`sub-agent (${policy} policy)`)}\n`);
+    },
+    onTaskEnd: async (response, label, filtered, _depth) => {
+      const labelDesc = label.integrity.length > 0
+        ? label.integrity.map((a) => a.kind).join(", ")
+        : "none";
+      const prefix = filtered ? "[FILTERED] " : "";
+      const summary = `${prefix}"${response.slice(0, 60)}${
+        response.length > 60 ? "…" : ""
+      }" [integrity: ${labelDesc}]`;
+      await write(`${boxEnd(summary)}\n\n`);
     },
   });
 
@@ -233,7 +253,7 @@ async function main(): Promise<void> {
   let history: Message[] = [];
 
   while (true) {
-    const input = prompt("user>");
+    const input = prompt(">");
     if (input === null || input.trim() === "exit") {
       await write("\nGoodbye.\n");
       break;

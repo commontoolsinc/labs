@@ -154,6 +154,19 @@ export interface AgentLoopOptions {
   onToolResult?: (command: string, result: ToolResult, depth: number) => void;
   /** Called with each assistant message */
   onAssistantMessage?: (message: LLMResponse) => void;
+  /** Called when a sub-agent task starts */
+  onTaskStart?: (
+    task: string,
+    policy: string,
+    depth: number,
+  ) => void;
+  /** Called when a sub-agent task ends */
+  onTaskEnd?: (
+    response: string,
+    label: Label,
+    filtered: boolean,
+    depth: number,
+  ) => void;
 }
 
 export interface AgentLoopResult {
@@ -184,6 +197,8 @@ export async function runAgentLoop(
     onToolCall,
     onToolResult,
     onAssistantMessage,
+    onTaskStart,
+    onTaskEnd,
   } = options;
 
   const messages: Message[] = [
@@ -267,6 +282,8 @@ export async function runAgentLoop(
             onToolCall,
             onToolResult,
             onAssistantMessage,
+            onTaskStart,
+            onTaskEnd,
           },
         );
         conversationLabel = labels.join(conversationLabel, taskResult.label);
@@ -335,6 +352,13 @@ async function executeTask(
     ) => void;
     onToolResult?: (command: string, result: ToolResult, depth: number) => void;
     onAssistantMessage?: (message: LLMResponse) => void;
+    onTaskStart?: (task: string, policy: string, depth: number) => void;
+    onTaskEnd?: (
+      response: string,
+      label: Label,
+      filtered: boolean,
+      depth: number,
+    ) => void;
   },
 ): Promise<{ text: string; label: Label }> {
   const policy = policyName === "restricted"
@@ -345,6 +369,8 @@ async function executeTask(
 
   try {
     const childDepth = parentDepth + 1;
+    loopOptions.onTaskStart?.(task, policyName, childDepth);
+
     const result = await runAgentLoop(task, {
       ...loopOptions,
       agent: child,
@@ -369,9 +395,19 @@ async function executeTask(
       ? declassified.label.integrity.map((a) => a.kind).join(", ")
       : "none";
 
-    const content = filtered.filtered
+    const isFiltered = filtered.filtered ?? false;
+    const content = isFiltered
       ? `[FILTERED: ${filtered.reason ?? "policy"}]`
       : filtered.content;
+
+    loopOptions.onTaskEnd?.(
+      content,
+      declassified.label,
+      isFiltered,
+      childDepth,
+    );
+
+    // LLM sees >> prefixed text; TUI display is handled by callbacks
     const raw = `${content}\n[integrity: ${labelDesc}]`;
     return { text: prefixLines(raw, childDepth), label: declassified.label };
   } catch (e) {
