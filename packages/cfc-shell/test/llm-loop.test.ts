@@ -2,14 +2,13 @@
  * Tests for the LLM Agent Loop
  */
 
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals } from "@std/assert";
 import {
-  runAgentLoop,
+  type ContentPart,
   type LLMClient,
   type LLMRequest,
   type LLMResponse,
-  type Message,
-  type ContentPart,
+  runAgentLoop,
 } from "../src/agent/llm-loop.ts";
 import { AgentSession, policies } from "../src/agent/mod.ts";
 import { VFS } from "../src/vfs.ts";
@@ -53,6 +52,7 @@ class MockLLM implements LLMClient {
   }
 
   async sendRequest(request: LLMRequest): Promise<LLMResponse> {
+    await Promise.resolve();
     this.requests.push(request);
     const response = this.responses.shift();
     if (!response) {
@@ -271,7 +271,9 @@ Deno.test("exec tool result is sent back to LLM", async () => {
   const toolMsg = result.messages.find((m) => m.role === "tool");
   assertEquals(toolMsg !== undefined, true);
   const parts = toolMsg!.content as ContentPart[];
-  const resultPart = parts.find((p) => p.type === "tool-result") as ContentPart & { type: "tool-result" };
+  const resultPart = parts.find((p) => p.type === "tool-result") as
+    & ContentPart
+    & { type: "tool-result" };
   // Output includes either the content or a filtered notice + exit code
   assertEquals(resultPart.output.value.includes("exit code"), true);
 });

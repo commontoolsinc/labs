@@ -5,18 +5,17 @@
  * policy exchange rules dropping GoogleAuth authority-only confidentiality.
  */
 
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals } from "@std/assert";
 import { VFS } from "../../src/vfs.ts";
 import type { Atom, Label } from "../../src/labels.ts";
 import { labels } from "../../src/labels.ts";
 import { LabeledStream } from "../../src/labeled-stream.ts";
-import { createEnvironment, type CommandContext } from "../../src/commands/context.ts";
-import { curl } from "../../src/commands/network.ts";
 import {
-  pat,
-  type ExchangeRule,
-  type PolicyRecord,
-} from "../../src/policy.ts";
+  type CommandContext,
+  createEnvironment,
+} from "../../src/commands/context.ts";
+import { curl } from "../../src/commands/network.ts";
+import { type ExchangeRule, pat, type PolicyRecord } from "../../src/policy.ts";
 
 // --- Atoms ---
 
@@ -32,7 +31,12 @@ function googleAuthDropRule(u: string): ExchangeRule {
   return {
     name: "AuthorityOnlyDropGoogleAuth",
     preConf: [
-      { kind: "Policy", name: pat.lit("GoogleAuth"), subject: pat.lit(u), hash: pat.lit("h") },
+      {
+        kind: "Policy",
+        name: pat.lit("GoogleAuth"),
+        subject: pat.lit(u),
+        hash: pat.lit("h"),
+      },
     ],
     preInteg: [
       { kind: "IntegrityToken", name: pat.lit("AuthorizedRequest") },
@@ -52,13 +56,19 @@ function googleAuthPolicy(u: string): PolicyRecord {
 
 // --- Helpers ---
 
-function mockFetch(body: string, status = 200): (url: string, init?: RequestInit) => Promise<Response> {
+function mockFetch(
+  body: string,
+  status = 200,
+): (url: string, init?: RequestInit) => Promise<Response> {
   return (_url: string, _init?: RequestInit) => {
     return Promise.resolve(new Response(body, { status }));
   };
 }
 
-function createGmailContext(alice: string, mock: (url: string, init?: RequestInit) => Promise<Response>): {
+function createGmailContext(
+  alice: string,
+  mock: (url: string, init?: RequestInit) => Promise<Response>,
+): {
   ctx: CommandContext;
   stdout: LabeledStream;
   stderr: LabeledStream;
@@ -82,7 +92,7 @@ function createGmailContext(alice: string, mock: (url: string, init?: RequestIni
     stdout,
     stderr,
     pcLabel,
-    requestIntent: async () => true,
+    requestIntent: () => Promise.resolve(true),
     policies: [googleAuthPolicy(alice)],
     mockFetch: mock,
   };
@@ -94,19 +104,34 @@ function createGmailContext(alice: string, mock: (url: string, init?: RequestIni
 
 Deno.test("curl gmail: authorized fetch drops GoogleAuth confidentiality", async () => {
   const alice = "Alice";
-  const gmailBody = JSON.stringify({ messages: [{ id: "msg1", snippet: "Hello" }] });
+  const gmailBody = JSON.stringify({
+    messages: [{ id: "msg1", snippet: "Hello" }],
+  });
   const { ctx, stdout } = createGmailContext(alice, mockFetch(gmailBody));
 
   const result = await curl(
-    ["-s", "-H", "Authorization: Bearer ya29.token", "https://gmail.googleapis.com/gmail/v1/users/me/messages"],
+    [
+      "-s",
+      "-H",
+      "Authorization: Bearer ya29.token",
+      "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+    ],
     ctx,
   );
 
   assertEquals(result.exitCode, 0);
 
   // GoogleAuth should be dropped from output label
-  assertEquals(result.label.confidentiality.length, 1, "Should have 1 confidentiality clause");
-  assertEquals(result.label.confidentiality[0][0], user(alice), "Should be User(Alice)");
+  assertEquals(
+    result.label.confidentiality.length,
+    1,
+    "Should have 1 confidentiality clause",
+  );
+  assertEquals(
+    result.label.confidentiality[0][0],
+    user(alice),
+    "Should be User(Alice)",
+  );
 
   // Integrity should have Origin + NetworkProvenance
   assertEquals(result.label.integrity.length, 2);
@@ -131,7 +156,11 @@ Deno.test("curl gmail: no auth header — GoogleAuth preserved", async () => {
 
   assertEquals(result.exitCode, 0);
   // Without AuthorizedRequest boundary integrity, exchange rule doesn't fire
-  assertEquals(result.label.confidentiality.length, 2, "Both clauses preserved");
+  assertEquals(
+    result.label.confidentiality.length,
+    2,
+    "Both clauses preserved",
+  );
 });
 
 Deno.test("curl gmail: output to file preserves label", async () => {
@@ -140,8 +169,14 @@ Deno.test("curl gmail: output to file preserves label", async () => {
   const { ctx } = createGmailContext(alice, mockFetch(gmailBody));
 
   const result = await curl(
-    ["-s", "-H", "Authorization: Bearer tok", "-o", "/tmp/gmail.json",
-     "https://gmail.googleapis.com/gmail/v1/users/me/messages"],
+    [
+      "-s",
+      "-H",
+      "Authorization: Bearer tok",
+      "-o",
+      "/tmp/gmail.json",
+      "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+    ],
     ctx,
   );
 
@@ -156,10 +191,18 @@ Deno.test("curl gmail: output to file preserves label", async () => {
 
 Deno.test("curl gmail: HTTP error with -f returns error code", async () => {
   const alice = "Alice";
-  const { ctx, stderr } = createGmailContext(alice, mockFetch("Unauthorized", 401));
+  const { ctx, stderr } = createGmailContext(
+    alice,
+    mockFetch("Unauthorized", 401),
+  );
 
   const result = await curl(
-    ["-f", "-H", "Authorization: Bearer expired", "https://gmail.googleapis.com/gmail/v1/users/me/messages"],
+    [
+      "-f",
+      "-H",
+      "Authorization: Bearer expired",
+      "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+    ],
     ctx,
   );
 
@@ -182,7 +225,7 @@ Deno.test("curl: mock fetch basic GET", async () => {
     stdout,
     stderr,
     pcLabel: labels.bottom(),
-    requestIntent: async () => true,
+    requestIntent: () => Promise.resolve(true),
     mockFetch: mockFetch("hello world"),
   };
 

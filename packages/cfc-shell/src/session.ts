@@ -12,7 +12,11 @@
 import { Label, labels } from "./labels.ts";
 import { VFS } from "./vfs.ts";
 import { CommandRegistry } from "./commands/registry.ts";
-import { Environment, IntentCallback, createEnvironment } from "./commands/context.ts";
+import {
+  createEnvironment,
+  Environment,
+  IntentCallback,
+} from "./commands/context.ts";
 
 // ============================================================================
 // Audit Entry
@@ -62,13 +66,13 @@ class ShellSessionImpl implements ShellSession {
     vfs: VFS,
     env: Environment,
     registry: CommandRegistry,
-    requestIntent?: IntentCallback
+    requestIntent?: IntentCallback,
   ) {
     this.vfs = vfs;
     this.env = env;
     this.registry = registry;
     this.lastExitLabel = labels.bottom();
-    this.requestIntent = requestIntent || (async () => false);
+    this.requestIntent = requestIntent || (() => Promise.resolve(false));
   }
 
   get pcLabel(): Label {

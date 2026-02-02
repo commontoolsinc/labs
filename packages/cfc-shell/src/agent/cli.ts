@@ -26,24 +26,27 @@
 
 import { AgentSession } from "./agent-session.ts";
 import { AgentPolicy, policies } from "./policy.ts";
-import { labels } from "../labels.ts";
 import { VFS } from "../vfs.ts";
 
 /** Format a label concisely for display */
-function formatLabel(label: { confidentiality: any[]; integrity: any[] }): string {
+function formatLabel(
+  label: { confidentiality: any[]; integrity: any[] },
+): string {
   const conf = label.confidentiality.length > 0
-    ? label.confidentiality.map((c: any[]) => c.map((a: any) => {
+    ? label.confidentiality.map((c: any[]) =>
+      c.map((a: any) => {
         if (a.kind === "Space") return `Space:${a.id}`;
         return a.kind;
-      }).join("|")).join(" ∧ ")
+      }).join("|")
+    ).join(" ∧ ")
     : "public";
   const integ = label.integrity.length > 0
     ? label.integrity.map((a: any) => {
-        if (a.kind === "TransformedBy") return `TransformedBy:${a.command}`;
-        if (a.kind === "Origin") return `Origin`;
-        if (a.kind === "EndorsedBy") return `EndorsedBy:${a.principal}`;
-        return a.kind;
-      }).join(", ")
+      if (a.kind === "TransformedBy") return `TransformedBy:${a.command}`;
+      if (a.kind === "Origin") return `Origin`;
+      if (a.kind === "EndorsedBy") return `EndorsedBy:${a.principal}`;
+      return a.kind;
+    }).join(", ")
     : "none";
   return `{conf: ${conf}, int: ${integ}}`;
 }
@@ -135,8 +138,8 @@ export class AgentCLI {
       this.stack.push(child);
 
       return `Sub-agent ${child.id} started with policy: ${child.policy.name}\n` +
-             `Policy: ${child.policy.description}\n` +
-             `Use "!select <path> <key>" to select from provided ballot.\n`;
+        `Policy: ${child.policy.description}\n` +
+        `Use "!select <path> <key>" to select from provided ballot.\n`;
     } catch (e) {
       return `Error: ${e instanceof Error ? e.message : String(e)}\n`;
     }
@@ -151,8 +154,8 @@ export class AgentCLI {
     const exitLabel = child.end();
 
     return `Sub-agent ${child.id} ended.\n` +
-           `  Exit label: ${formatLabel(exitLabel)}\n` +
-           `  Returning to ${this.current.id} (${this.current.policy.name})\n`;
+      `  Exit label: ${formatLabel(exitLabel)}\n` +
+      `  Returning to ${this.current.id} (${this.current.policy.name})\n`;
   }
 
   private handleLabel(trimmed: string): string {
@@ -200,11 +203,11 @@ export class AgentCLI {
       ? p.requiredIntegrity.map((a) => a.kind).join(", ")
       : "(none -- can see everything)";
     return `Agent: ${this.current.id}\n` +
-           `Policy: ${p.name}\n` +
-           `Description: ${p.description}\n` +
-           `Required integrity (${p.mode}): ${req}\n` +
-           `Can spawn sub-agents: ${p.canSpawnSubAgents}\n` +
-           `Stack depth: ${this.stack.length}\n`;
+      `Policy: ${p.name}\n` +
+      `Description: ${p.description}\n` +
+      `Required integrity (${p.mode}): ${req}\n` +
+      `Can spawn sub-agents: ${p.canSpawnSubAgents}\n` +
+      `Stack depth: ${this.stack.length}\n`;
   }
 
   async run(): Promise<void> {
@@ -274,14 +277,18 @@ Label Atoms:
     const events = this.current.getEvents();
     if (events.length === 0) return "No events.\n";
 
-    return events.map(e => {
+    return events.map((e) => {
       switch (e.type) {
         case "sub-agent-started":
           return `[SUB-AGENT] ${e.agentId} started (policy: ${e.policy})`;
         case "sub-agent-ended":
-          return `[SUB-AGENT] ${e.agentId} ended (label: ${formatLabel(e.exitLabel)})`;
+          return `[SUB-AGENT] ${e.agentId} ended (label: ${
+            formatLabel(e.exitLabel)
+          })`;
         case "ballot-provided":
-          return `[BALLOT] provided to ${e.agentId} at ${e.path}: [${e.options.join(", ")}]`;
+          return `[BALLOT] provided to ${e.agentId} at ${e.path}: [${
+            e.options.join(", ")
+          }]`;
         case "ballot-selected":
           return `[BALLOT] ${e.agentId} selected "${e.key}" at ${e.path}`;
         case "label-info":

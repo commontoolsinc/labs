@@ -12,7 +12,7 @@ export interface IntentOnce {
   createdAt: number;
   expiresAt: number;
   consumed: boolean;
-  scope: string;  // scoped description of what this intent authorizes
+  scope: string; // scoped description of what this intent authorizes
 }
 
 /**
@@ -20,7 +20,7 @@ export interface IntentOnce {
  */
 export class IntentManager {
   private intents = new Map<string, IntentOnce>();
-  private defaultTTL: number;  // ms, default 5 minutes = 300000
+  private defaultTTL: number; // ms, default 5 minutes = 300000
 
   constructor(options?: { ttl?: number }) {
     this.defaultTTL = options?.ttl ?? 300000;
@@ -114,7 +114,7 @@ export class IntentManager {
   active(): IntentOnce[] {
     const now = Date.now();
     return Array.from(this.intents.values()).filter(
-      intent => !intent.consumed && now <= intent.expiresAt
+      (intent) => !intent.consumed && now <= intent.expiresAt,
     );
   }
 }

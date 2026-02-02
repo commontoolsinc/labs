@@ -18,14 +18,14 @@
  * The content literally cannot contain injection because the parent wrote it.
  */
 
-import { Atom, Label, labels } from "../labels.ts";
-import { ShellSession, createSession } from "../session.ts";
+import { type Label, labels } from "../labels.ts";
+import { createSession, ShellSession } from "../session.ts";
 import { execute } from "../interpreter.ts";
 import { VFS } from "../vfs.ts";
 import { createDefaultRegistry } from "../commands/mod.ts";
-import { createEnvironment, Environment, CommandResult } from "../commands/context.ts";
-import { AgentPolicy, checkVisibility, filterOutput, policies } from "./policy.ts";
-import { ToolCall, ToolResult, AgentEvent } from "./protocol.ts";
+import { createEnvironment, type Environment } from "../commands/context.ts";
+import { type AgentPolicy, filterOutput, policies } from "./policy.ts";
+import { AgentEvent, ToolCall, ToolResult } from "./protocol.ts";
 
 /** Unique ID generator */
 let agentCounter = 0;
@@ -75,25 +75,30 @@ export class AgentSession {
 
     // Share VFS with parent if this is a sub-agent, otherwise create new
     const vfs = options.vfs ?? (options.parent?.shell.vfs) ?? new VFS();
-    const env =
-      options.env ??
+    const env = options.env ??
       (options.parent
         ? cloneEnvironment(options.parent.shell.env)
         : createEnvironment({
-            HOME: { value: "/home/agent", label: labels.userInput() },
-            PATH: { value: "/usr/bin:/bin", label: labels.userInput() },
-            USER: { value: "agent", label: labels.userInput() },
-          }));
+          HOME: { value: "/home/agent", label: labels.userInput() },
+          PATH: { value: "/usr/bin:/bin", label: labels.userInput() },
+          USER: { value: "agent", label: labels.userInput() },
+        }));
 
     this.shell = createSession({
       vfs,
       env,
       registry: createDefaultRegistry(),
-      requestIntent: async () => {
+      requestIntent: () => {
         // Sub-agents auto-approve intents; main agents deny by default
-        return this.parent !== null;
+        return Promise.resolve(this.parent !== null);
       },
     });
+
+    // Agent commands originate from user requests — initialize PC with userInput
+    // so that literals and shell-generated output retain InjectionFree integrity.
+    // After each command, the PC is updated with the result's label so taint
+    // from untrusted data accumulates across exec() calls.
+    this.shell.pushPC(labels.userInput());
   }
 
   /**
@@ -155,7 +160,11 @@ export class AgentSession {
     path: string,
   ): { content: string; label: Label; filtered: boolean; reason?: string } {
     const { value, label } = this.shell.vfs.readFileText(path);
-    const { content, filtered, reason } = filterOutput(value, label, this.policy);
+    const { content, filtered, reason } = filterOutput(
+      value,
+      label,
+      this.policy,
+    );
     return { content, label, filtered, reason };
   }
 
@@ -241,7 +250,9 @@ export class AgentSession {
     }
     if (!(key in ballot.options)) {
       throw new Error(
-        `Invalid ballot key: "${key}". Valid keys: ${Object.keys(ballot.options).join(", ")}`,
+        `Invalid ballot key: "${key}". Valid keys: ${
+          Object.keys(ballot.options).join(", ")
+        }`,
       );
     }
 
@@ -263,8 +274,9 @@ export class AgentSession {
    */
   end(): Label {
     const resultLabels = this.history.map((h) => h.result.label);
-    const accumulatedLabel =
-      resultLabels.length > 0 ? labels.joinAll(resultLabels) : labels.bottom();
+    const accumulatedLabel = resultLabels.length > 0
+      ? labels.joinAll(resultLabels)
+      : labels.bottom();
 
     if (this.parent) {
       this.parent.events.push({
@@ -294,10 +306,10 @@ export class AgentSession {
 
   // ---- Private helpers ----
 
-  private async handleSubAgent(
+  private handleSubAgent(
     callId: string,
     command: string,
-  ): Promise<ToolResult> {
+  ): ToolResult {
     if (!this.policy.canSpawnSubAgents) {
       return {
         id: callId,
@@ -311,8 +323,9 @@ export class AgentSession {
 
     const parts = command.trim().split(/\s+/);
     const policyName = parts[1] || "sub";
-    const policy =
-      policyName === "restricted" ? policies.restricted() : policies.sub();
+    const policy = policyName === "restricted"
+      ? policies.restricted()
+      : policies.sub();
 
     const child = this.spawnSubAgent(policy);
     return {
@@ -328,10 +341,10 @@ export class AgentSession {
     };
   }
 
-  private async handleSelect(
+  private handleSelect(
     callId: string,
     command: string,
-  ): Promise<ToolResult> {
+  ): ToolResult {
     // Parse: !select <path> <key>
     const match = command.match(/^!select\s+(\S+)\s+(\S+)/);
     if (!match) {
@@ -370,7 +383,7 @@ export class AgentSession {
     }
   }
 
-  private async handleBallotInfo(callId: string): Promise<ToolResult> {
+  private handleBallotInfo(callId: string): ToolResult {
     if (this.ballots.size === 0) {
       return {
         id: callId,
@@ -397,10 +410,10 @@ export class AgentSession {
     };
   }
 
-  private async handleLabelInspect(
+  private handleLabelInspect(
     callId: string,
     command: string,
-  ): Promise<ToolResult> {
+  ): ToolResult {
     const parts = command.trim().split(/\s+/);
     const path = parts[1];
 
@@ -417,22 +430,21 @@ export class AgentSession {
 
     try {
       const { label } = this.shell.vfs.readFileText(path);
-      const conf =
-        label.confidentiality.length > 0
-          ? label.confidentiality
-              .map((c) => c.map((a) => a.kind).join("|"))
-              .join(" \u2227 ")
-          : "(public)";
-      const integ =
-        label.integrity.length > 0
-          ? label.integrity.map((a) => a.kind).join(", ")
-          : "(none)";
+      const conf = label.confidentiality.length > 0
+        ? label.confidentiality
+          .map((c) => c.map((a) => a.kind).join("|"))
+          .join(" \u2227 ")
+        : "(public)";
+      const integ = label.integrity.length > 0
+        ? label.integrity.map((a) => a.kind).join(", ")
+        : "(none)";
 
       this.events.push({ type: "label-info", path, label });
 
       return {
         id: callId,
-        stdout: `Label for ${path}:\n  Confidentiality: ${conf}\n  Integrity: ${integ}\n`,
+        stdout:
+          `Label for ${path}:\n  Confidentiality: ${conf}\n  Integrity: ${integ}\n`,
         stderr: "",
         exitCode: 0,
         label: labels.bottom(),
@@ -451,15 +463,13 @@ export class AgentSession {
   }
 
   private handlePolicyInfo(callId: string): ToolResult {
-    const req =
-      this.policy.requiredIntegrity.length > 0
-        ? this.policy.requiredIntegrity.map((a) => a.kind).join(", ")
-        : "(none -- can see everything)";
+    const req = this.policy.requiredIntegrity.length > 0
+      ? this.policy.requiredIntegrity.map((a) => a.kind).join(", ")
+      : "(none -- can see everything)";
 
     return {
       id: callId,
-      stdout:
-        `Agent: ${this.id}\n` +
+      stdout: `Agent: ${this.id}\n` +
         `Policy: ${this.policy.name}\n` +
         `Description: ${this.policy.description}\n` +
         `Required integrity (${this.policy.mode}): ${req}\n` +
@@ -487,6 +497,13 @@ export class AgentSession {
         `(${command}) > ${tmpFile} 2>/dev/null`,
         this.shell,
       );
+
+      // Accumulate taint: join the result label into the session PC so that
+      // subsequent commands reflect any taint from data this command touched.
+      // E.g., after `cat untrusted.txt`, the PC loses InjectionFree.
+      const prevPC = this.shell.pcLabel;
+      this.shell.popPC();
+      this.shell.pushPC(labels.join(prevPC, result.label));
 
       let stdout = "";
       let outputLabel = result.label;

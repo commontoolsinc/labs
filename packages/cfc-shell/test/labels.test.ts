@@ -8,7 +8,7 @@
  * - LabeledStream operations
  */
 
-import { assertEquals, assert } from "jsr:@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { Label, labels } from "../src/labels.ts";
 import { LabeledStream } from "../src/labeled-stream.ts";
 
@@ -20,9 +20,9 @@ function labelEqual(a: Label, b: Label): boolean {
   // Check confidentiality clauses (order doesn't matter)
   if (a.confidentiality.length !== b.confidentiality.length) return false;
   for (const clauseA of a.confidentiality) {
-    const found = b.confidentiality.some(clauseB =>
+    const found = b.confidentiality.some((clauseB) =>
       clauseA.length === clauseB.length &&
-      clauseA.every(atomA => clauseB.some(atomB => atomEqual(atomA, atomB)))
+      clauseA.every((atomA) => clauseB.some((atomB) => atomEqual(atomA, atomB)))
     );
     if (!found) return false;
   }
@@ -30,7 +30,7 @@ function labelEqual(a: Label, b: Label): boolean {
   // Check integrity atoms (order doesn't matter)
   if (a.integrity.length !== b.integrity.length) return false;
   for (const atomA of a.integrity) {
-    if (!b.integrity.some(atomB => atomEqual(atomA, atomB))) return false;
+    if (!b.integrity.some((atomB) => atomEqual(atomA, atomB))) return false;
   }
 
   return true;
@@ -95,7 +95,10 @@ Deno.test("join is associative", () => {
   const ab_c = labels.join(labels.join(a, b), c);
   const a_bc = labels.join(a, labels.join(b, c));
 
-  assert(labelEqual(ab_c, a_bc), "join(join(a,b),c) should equal join(a,join(b,c))");
+  assert(
+    labelEqual(ab_c, a_bc),
+    "join(join(a,b),c) should equal join(a,join(b,c))",
+  );
 });
 
 Deno.test("join is idempotent", () => {
@@ -127,7 +130,10 @@ Deno.test("meet is associative", () => {
   const ab_c = labels.meet(labels.meet(a, b), c);
   const a_bc = labels.meet(a, labels.meet(b, c));
 
-  assert(labelEqual(ab_c, a_bc), "meet(meet(a,b),c) should equal meet(a,meet(b,c))");
+  assert(
+    labelEqual(ab_c, a_bc),
+    "meet(meet(a,b),c) should equal meet(a,meet(b,c))",
+  );
 });
 
 Deno.test("meet is idempotent", () => {
@@ -189,25 +195,28 @@ Deno.test("endorse adds integrity without changing confidentiality", () => {
   const original = labels.fromNetwork("https://example.com", true);
   const endorsed = labels.endorse(
     original,
-    { kind: "EndorsedBy", principal: "user@example.com" }
+    { kind: "EndorsedBy", principal: "user@example.com" },
   );
 
   // Confidentiality should be unchanged
   assertEquals(
     endorsed.confidentiality.length,
     original.confidentiality.length,
-    "Confidentiality should not change"
+    "Confidentiality should not change",
   );
 
   // Integrity should be increased
   assert(
     endorsed.integrity.length > original.integrity.length,
-    "Integrity should be increased"
+    "Integrity should be increased",
   );
 
   assert(
-    labels.hasIntegrity(endorsed, { kind: "EndorsedBy", principal: "user@example.com" }),
-    "Should have the new integrity atom"
+    labels.hasIntegrity(endorsed, {
+      kind: "EndorsedBy",
+      principal: "user@example.com",
+    }),
+    "Should have the new integrity atom",
   );
 });
 
@@ -220,7 +229,7 @@ Deno.test("userInput has UserInput integrity", () => {
 
   assert(
     labels.hasIntegrity(label, { kind: "UserInput" }),
-    "Should have UserInput integrity"
+    "Should have UserInput integrity",
   );
 
   assertEquals(label.confidentiality.length, 0, "Should be public");
@@ -232,12 +241,16 @@ Deno.test("fromNetwork has Origin + NetworkProvenance integrity", () => {
 
   assert(
     labels.hasIntegrity(label, { kind: "Origin", url }),
-    "Should have Origin integrity"
+    "Should have Origin integrity",
   );
 
   assert(
-    labels.hasIntegrity(label, { kind: "NetworkProvenance", tls: true, host: "example.com" }),
-    "Should have NetworkProvenance integrity"
+    labels.hasIntegrity(label, {
+      kind: "NetworkProvenance",
+      tls: true,
+      host: "example.com",
+    }),
+    "Should have NetworkProvenance integrity",
   );
 
   assertEquals(label.confidentiality.length, 0, "Should be public");
@@ -248,8 +261,12 @@ Deno.test("fromNetwork handles non-TLS URLs", () => {
   const label = labels.fromNetwork(url, false);
 
   assert(
-    labels.hasIntegrity(label, { kind: "NetworkProvenance", tls: false, host: "insecure.com" }),
-    "Should have non-TLS NetworkProvenance"
+    labels.hasIntegrity(label, {
+      kind: "NetworkProvenance",
+      tls: false,
+      host: "insecure.com",
+    }),
+    "Should have non-TLS NetworkProvenance",
   );
 });
 
@@ -258,7 +275,7 @@ Deno.test("llmGenerated has LLMGenerated integrity", () => {
 
   assert(
     labels.hasIntegrity(label, { kind: "LLMGenerated", model: "gpt-4" }),
-    "Should have LLMGenerated integrity with model"
+    "Should have LLMGenerated integrity with model",
   );
 
   assertEquals(label.confidentiality.length, 0, "Should be public");
@@ -269,17 +286,33 @@ Deno.test("llmGenerated without model", () => {
 
   assert(
     labels.hasIntegrity(label, { kind: "LLMGenerated" }),
-    "Should have LLMGenerated integrity without model"
+    "Should have LLMGenerated integrity without model",
   );
 });
 
 Deno.test("fromFile with spaceId has Space confidentiality", () => {
   const label = labels.fromFile("/path/to/file", "space123");
 
-  assertEquals(label.confidentiality.length, 1, "Should have one confidentiality clause");
-  assertEquals(label.confidentiality[0].length, 1, "Clause should have one atom");
-  assertEquals(label.confidentiality[0][0].kind, "Space", "Should be Space atom");
-  assertEquals((label.confidentiality[0][0] as any).id, "space123", "Should have correct space ID");
+  assertEquals(
+    label.confidentiality.length,
+    1,
+    "Should have one confidentiality clause",
+  );
+  assertEquals(
+    label.confidentiality[0].length,
+    1,
+    "Clause should have one atom",
+  );
+  assertEquals(
+    label.confidentiality[0][0].kind,
+    "Space",
+    "Should be Space atom",
+  );
+  assertEquals(
+    (label.confidentiality[0][0] as any).id,
+    "space123",
+    "Should have correct space ID",
+  );
 });
 
 Deno.test("fromFile without spaceId is public", () => {
@@ -303,7 +336,11 @@ Deno.test("joinAll joins multiple labels correctly", () => {
   const joined = labels.joinAll([a, b, c]);
 
   // Should have no integrity (intersection of all three)
-  assertEquals(joined.integrity.length, 0, "Should have no shared integrity atoms");
+  assertEquals(
+    joined.integrity.length,
+    0,
+    "Should have no shared integrity atoms",
+  );
 
   // Should be public (all three are public)
   assertEquals(joined.confidentiality.length, 0, "Should be public");
@@ -319,7 +356,7 @@ Deno.test("public data flows to private context", () => {
 
   assert(
     labels.flowsTo(public_label, private_label),
-    "Public data should flow to private context"
+    "Public data should flow to private context",
   );
 });
 
@@ -329,7 +366,7 @@ Deno.test("private data does not flow to public context", () => {
 
   assert(
     !labels.flowsTo(private_label, public_label),
-    "Private data should not flow to public context"
+    "Private data should not flow to public context",
   );
 });
 
@@ -339,7 +376,7 @@ Deno.test("data flows to context with same confidentiality", () => {
 
   assert(
     labels.flowsTo(label_a, label_b),
-    "Data should flow to context with same confidentiality"
+    "Data should flow to context with same confidentiality",
   );
 });
 
@@ -355,7 +392,7 @@ Deno.test("hasAnyIntegrity checks for any of given atoms", () => {
       { kind: "Origin", url: "https://example.com" },
       { kind: "UserInput" },
     ]),
-    "Should have at least one of the atoms"
+    "Should have at least one of the atoms",
   );
 
   assert(
@@ -363,7 +400,7 @@ Deno.test("hasAnyIntegrity checks for any of given atoms", () => {
       { kind: "UserInput" },
       { kind: "LLMGenerated" },
     ]),
-    "Should not have any of these atoms"
+    "Should not have any of these atoms",
   );
 });
 
@@ -374,7 +411,11 @@ Deno.test("join reduces integrity (intersection)", () => {
   const joined = labels.join(a, b);
 
   // No shared integrity atoms
-  assertEquals(joined.integrity.length, 0, "Join should have no integrity (intersection is empty)");
+  assertEquals(
+    joined.integrity.length,
+    0,
+    "Join should have no integrity (intersection is empty)",
+  );
 });
 
 Deno.test("meet increases integrity (union)", () => {
@@ -386,11 +427,11 @@ Deno.test("meet increases integrity (union)", () => {
   // Should have both integrity atoms
   assert(
     labels.hasIntegrity(met, { kind: "UserInput" }),
-    "Should have UserInput integrity"
+    "Should have UserInput integrity",
   );
   assert(
     labels.hasIntegrity(met, { kind: "LLMGenerated", model: "gpt-4" }),
-    "Should have LLMGenerated integrity"
+    "Should have LLMGenerated integrity",
   );
 });
 
@@ -416,7 +457,7 @@ Deno.test("LabeledStream: write and readAll joins labels correctly", async () =>
   const expectedLabel = labels.join(label1, label2);
   assert(
     labelEqual(result.label, expectedLabel),
-    "Labels should be joined"
+    "Labels should be joined",
   );
 });
 
@@ -462,7 +503,11 @@ Deno.test("LabeledStream: close signals EOF", async () => {
   stream.close();
 
   const chunk = await stream.read();
-  assertEquals(chunk, null, "Should return null when reading from closed empty stream");
+  assertEquals(
+    chunk,
+    null,
+    "Should return null when reading from closed empty stream",
+  );
 });
 
 Deno.test("LabeledStream: cannot write after close", () => {
@@ -472,7 +517,7 @@ Deno.test("LabeledStream: cannot write after close", () => {
   let errorThrown = false;
   try {
     stream.write("data", labels.bottom());
-  } catch (e) {
+  } catch {
     errorThrown = true;
   }
 
@@ -533,7 +578,7 @@ Deno.test("LabeledStream: readAll on empty stream returns empty", async () => {
 // Complex Scenarios
 // ============================================================================
 
-Deno.test("Complex: data from multiple sources through pipe", async () => {
+Deno.test("Complex: data from multiple sources through pipe", () => {
   // Simulate: cat user_file.txt | grep pattern | process
   const userFile = labels.fromFile("/user_file.txt", "user-space");
   const grepPattern = labels.userInput(); // User provided pattern
@@ -545,21 +590,31 @@ Deno.test("Complex: data from multiple sources through pipe", async () => {
   const grepOutput = labels.join(catOutput, grepPattern);
 
   // process adds transformation
-  const processOutput = labels.endorse(grepOutput, { kind: "TransformedBy", command: "process" });
+  const processOutput = labels.endorse(grepOutput, {
+    kind: "TransformedBy",
+    command: "process",
+  });
 
   // Final output should:
   // - Have user-space confidentiality (from file)
   // - Have TransformedBy integrity
   // - Not have UserInput integrity (lost in join)
 
-  assertEquals(processOutput.confidentiality.length, 1, "Should preserve confidentiality");
+  assertEquals(
+    processOutput.confidentiality.length,
+    1,
+    "Should preserve confidentiality",
+  );
   assert(
-    labels.hasIntegrity(processOutput, { kind: "TransformedBy", command: "process" }),
-    "Should have TransformedBy integrity"
+    labels.hasIntegrity(processOutput, {
+      kind: "TransformedBy",
+      command: "process",
+    }),
+    "Should have TransformedBy integrity",
   );
   assert(
     !labels.hasIntegrity(processOutput, { kind: "UserInput" }),
-    "Should not have UserInput integrity (lost in join)"
+    "Should not have UserInput integrity (lost in join)",
   );
 });
 
@@ -573,7 +628,7 @@ Deno.test("Complex: prevent data exfiltration", () => {
   // Secret should not flow to public network
   assert(
     !labels.flowsTo(secret, networkTarget),
-    "Secret data should not flow to public network"
+    "Secret data should not flow to public network",
   );
 
   // This would be blocked by exchange rules in practice
@@ -586,23 +641,23 @@ Deno.test("Complex: untrusted data should not execute", () => {
   // Check if it has required integrity for execution
   const hasUserEndorsement = labels.hasIntegrity(
     untrusted,
-    { kind: "EndorsedBy", principal: "user" }
+    { kind: "EndorsedBy", principal: "user" },
   );
 
   assert(
     !hasUserEndorsement,
-    "Untrusted network data should not have user endorsement"
+    "Untrusted network data should not have user endorsement",
   );
 
   // Would require explicit endorsement to execute
   const endorsed = labels.endorse(
     untrusted,
-    { kind: "EndorsedBy", principal: "user" }
+    { kind: "EndorsedBy", principal: "user" },
   );
 
   assert(
     labels.hasIntegrity(endorsed, { kind: "EndorsedBy", principal: "user" }),
-    "Explicitly endorsed data can execute"
+    "Explicitly endorsed data can execute",
   );
 });
 
@@ -615,15 +670,15 @@ Deno.test("clean() has both InjectionFree and InfluenceClean", () => {
 
   assert(
     labels.hasIntegrity(label, { kind: "InjectionFree" }),
-    "Should have InjectionFree"
+    "Should have InjectionFree",
   );
   assert(
     labels.hasIntegrity(label, { kind: "InfluenceClean" }),
-    "Should have InfluenceClean"
+    "Should have InfluenceClean",
   );
   assert(
     labels.hasIntegrity(label, { kind: "UserInput" }),
-    "Should have UserInput"
+    "Should have UserInput",
   );
 });
 
@@ -632,15 +687,15 @@ Deno.test("userInput() now has InjectionFree and InfluenceClean", () => {
 
   assert(
     labels.hasIntegrity(label, { kind: "UserInput" }),
-    "Should have UserInput"
+    "Should have UserInput",
   );
   assert(
     labels.hasIntegrity(label, { kind: "InjectionFree" }),
-    "Should have InjectionFree"
+    "Should have InjectionFree",
   );
   assert(
     labels.hasIntegrity(label, { kind: "InfluenceClean" }),
-    "Should have InfluenceClean"
+    "Should have InfluenceClean",
   );
 });
 
@@ -650,15 +705,15 @@ Deno.test("stripInjectionIntegrity removes both InjectionFree and InfluenceClean
 
   assert(
     !labels.hasIntegrity(stripped, { kind: "InjectionFree" }),
-    "Should not have InjectionFree"
+    "Should not have InjectionFree",
   );
   assert(
     !labels.hasIntegrity(stripped, { kind: "InfluenceClean" }),
-    "Should not have InfluenceClean"
+    "Should not have InfluenceClean",
   );
   assert(
     labels.hasIntegrity(stripped, { kind: "UserInput" }),
-    "Should still have UserInput"
+    "Should still have UserInput",
   );
 });
 
@@ -668,15 +723,15 @@ Deno.test("stripInfluenceClean removes only InfluenceClean, keeps InjectionFree"
 
   assert(
     labels.hasIntegrity(stripped, { kind: "InjectionFree" }),
-    "Should still have InjectionFree"
+    "Should still have InjectionFree",
   );
   assert(
     !labels.hasIntegrity(stripped, { kind: "InfluenceClean" }),
-    "Should not have InfluenceClean"
+    "Should not have InfluenceClean",
   );
   assert(
     labels.hasIntegrity(stripped, { kind: "UserInput" }),
-    "Should still have UserInput"
+    "Should still have UserInput",
   );
 });
 
@@ -687,11 +742,11 @@ Deno.test("join(clean, llmGenerated) loses both injection atoms", () => {
 
   assert(
     !labels.hasIntegrity(joined, { kind: "InjectionFree" }),
-    "Should not have InjectionFree after join with LLM"
+    "Should not have InjectionFree after join with LLM",
   );
   assert(
     !labels.hasIntegrity(joined, { kind: "InfluenceClean" }),
-    "Should not have InfluenceClean after join with LLM"
+    "Should not have InfluenceClean after join with LLM",
   );
 });
 
@@ -700,10 +755,10 @@ Deno.test("influenceTainted() has InjectionFree but NOT InfluenceClean", () => {
 
   assert(
     labels.hasIntegrity(label, { kind: "InjectionFree" }),
-    "Should have InjectionFree"
+    "Should have InjectionFree",
   );
   assert(
     !labels.hasIntegrity(label, { kind: "InfluenceClean" }),
-    "Should not have InfluenceClean"
+    "Should not have InfluenceClean",
   );
 });

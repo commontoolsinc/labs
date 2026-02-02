@@ -15,7 +15,7 @@
 
 import type { CommandContext, CommandResult } from "./context.ts";
 import type { Atom, Integrity, Label } from "../labels.ts";
-import { labels } from "../labels.ts";
+import { labels as _labels } from "../labels.ts";
 import { evalExchangeRules } from "../policy.ts";
 
 /**
@@ -24,7 +24,10 @@ import { evalExchangeRules } from "../policy.ts";
  * Supports: GET, POST, custom methods, headers, request body,
  * redirects, fail-on-error, output to file, silent mode.
  */
-export async function curl(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function curl(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
   let silent = false;
   let showError = true;
   let outputFile: string | null = null;
@@ -109,7 +112,10 @@ export async function curl(args: string[], ctx: CommandContext): Promise<Command
   } catch (e: unknown) {
     if (!silent || showError) {
       const msg = e instanceof Error ? e.message : String(e);
-      ctx.stderr.write(`curl: (6) Could not resolve host or connect: ${msg}\n`, ctx.pcLabel);
+      ctx.stderr.write(
+        `curl: (6) Could not resolve host or connect: ${msg}\n`,
+        ctx.pcLabel,
+      );
     }
     return { exitCode: 6, label: ctx.pcLabel };
   }
@@ -129,8 +135,12 @@ export async function curl(args: string[], ctx: CommandContext): Promise<Command
   const hasAuthHeader = headers.has("Authorization");
   const boundaryIntegrity: Integrity = [
     ...networkIntegrity,
-    ...(hasAuthHeader ? [{ kind: "IntegrityToken", name: "AuthorizedRequest" } as Atom] : []),
-    ...(tls ? [{ kind: "IntegrityToken", name: "NetworkProvenance" } as Atom] : []),
+    ...(hasAuthHeader
+      ? [{ kind: "IntegrityToken", name: "AuthorizedRequest" } as Atom]
+      : []),
+    ...(tls
+      ? [{ kind: "IntegrityToken", name: "NetworkProvenance" } as Atom]
+      : []),
   ];
 
   // The response label starts with:

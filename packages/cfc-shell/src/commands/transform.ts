@@ -8,7 +8,10 @@ import { labels } from "../labels.ts";
 /**
  * sed - stream editor (basic s command only)
  */
-export async function sed(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function sed(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
   if (args.length === 0) {
     ctx.stderr.write("sed: missing script\n", ctx.pcLabel);
     return { exitCode: 1, label: ctx.pcLabel };
@@ -39,11 +42,14 @@ export async function sed(args: string[], ctx: CommandContext): Promise<CommandR
 
     const regex = new RegExp(pattern, global ? "g" : "");
     const output = content.split("\n")
-      .map(line => line.replace(regex, replacement))
+      .map((line) => line.replace(regex, replacement))
       .join("\n");
 
     // Output inherits input confidentiality, gets TransformedBy integrity
-    const outputLabel = labels.endorse(inputLabel, { kind: "TransformedBy", command: "sed" });
+    const outputLabel = labels.endorse(inputLabel, {
+      kind: "TransformedBy",
+      command: "sed",
+    });
 
     ctx.stdout.write(output, outputLabel);
 
@@ -58,7 +64,10 @@ export async function sed(args: string[], ctx: CommandContext): Promise<CommandR
 /**
  * sort - sort lines
  */
-export async function sort(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function sort(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
   let reverse = false;
   let numeric = false;
   let keyField: number | null = null;
@@ -89,7 +98,7 @@ export async function sort(args: string[], ctx: CommandContext): Promise<Command
       ({ value: content, label: inputLabel } = await ctx.stdin.readAll());
     }
 
-    let lines = content.split("\n").filter(l => l.length > 0);
+    const lines = content.split("\n").filter((l) => l.length > 0);
 
     lines.sort((a, b) => {
       let aVal = a;
@@ -109,9 +118,15 @@ export async function sort(args: string[], ctx: CommandContext): Promise<Command
       }
     });
 
-    const outputLabel = labels.endorse(inputLabel, { kind: "TransformedBy", command: "sort" });
+    const outputLabel = labels.endorse(inputLabel, {
+      kind: "TransformedBy",
+      command: "sort",
+    });
 
-    ctx.stdout.write(lines.join("\n") + (lines.length > 0 ? "\n" : ""), outputLabel);
+    ctx.stdout.write(
+      lines.join("\n") + (lines.length > 0 ? "\n" : ""),
+      outputLabel,
+    );
 
     return { exitCode: 0, label: outputLabel };
   } catch (err) {
@@ -124,7 +139,10 @@ export async function sort(args: string[], ctx: CommandContext): Promise<Command
 /**
  * uniq - deduplicate adjacent lines
  */
-export async function uniq(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function uniq(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
   let showCount = false;
   let file: string | null = null;
 
@@ -170,7 +188,10 @@ export async function uniq(args: string[], ctx: CommandContext): Promise<Command
       output.push(prefix + lastLine);
     }
 
-    const outputLabel = labels.endorse(inputLabel, { kind: "TransformedBy", command: "uniq" });
+    const outputLabel = labels.endorse(inputLabel, {
+      kind: "TransformedBy",
+      command: "uniq",
+    });
 
     ctx.stdout.write(output.join("\n"), outputLabel);
 
@@ -185,7 +206,10 @@ export async function uniq(args: string[], ctx: CommandContext): Promise<Command
 /**
  * cut - extract fields
  */
-export async function cut(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function cut(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
   let delimiter = "\t";
   let fields: number[] = [];
   let file: string | null = null;
@@ -197,7 +221,7 @@ export async function cut(args: string[], ctx: CommandContext): Promise<CommandR
       delimiter = args[i + 1];
       i++;
     } else if (arg === "-f" && i + 1 < args.length) {
-      fields = args[i + 1].split(",").map(f => parseInt(f, 10) - 1);
+      fields = args[i + 1].split(",").map((f) => parseInt(f, 10) - 1);
       i++;
     } else if (!arg.startsWith("-")) {
       file = arg;
@@ -220,13 +244,16 @@ export async function cut(args: string[], ctx: CommandContext): Promise<CommandR
     }
 
     const output = content.split("\n")
-      .map(line => {
+      .map((line) => {
         const parts = line.split(delimiter);
-        return fields.map(f => parts[f] || "").join(delimiter);
+        return fields.map((f) => parts[f] || "").join(delimiter);
       })
       .join("\n");
 
-    const outputLabel = labels.endorse(inputLabel, { kind: "TransformedBy", command: "cut" });
+    const outputLabel = labels.endorse(inputLabel, {
+      kind: "TransformedBy",
+      command: "cut",
+    });
 
     ctx.stdout.write(output, outputLabel);
 
@@ -241,7 +268,10 @@ export async function cut(args: string[], ctx: CommandContext): Promise<CommandR
 /**
  * tr - character translation
  */
-export async function tr(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function tr(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
   if (args.length < 2) {
     ctx.stderr.write("tr: missing operand\n", ctx.pcLabel);
     return { exitCode: 1, label: ctx.pcLabel };
@@ -253,12 +283,15 @@ export async function tr(args: string[], ctx: CommandContext): Promise<CommandRe
   try {
     const { value: content, label: inputLabel } = await ctx.stdin.readAll();
 
-    const output = content.split("").map(char => {
+    const output = content.split("").map((char) => {
       const idx = set1.indexOf(char);
       return idx >= 0 && idx < set2.length ? set2[idx] : char;
     }).join("");
 
-    const outputLabel = labels.endorse(inputLabel, { kind: "TransformedBy", command: "tr" });
+    const outputLabel = labels.endorse(inputLabel, {
+      kind: "TransformedBy",
+      command: "tr",
+    });
 
     ctx.stdout.write(output, outputLabel);
 
@@ -274,7 +307,10 @@ export async function tr(args: string[], ctx: CommandContext): Promise<CommandRe
  * jq - JSON query
  * Supports: .key, .key.subkey, .[], .[N], .key[], |, and identity .
  */
-export async function jq(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function jq(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
   if (args.length === 0) {
     ctx.stderr.write("jq: missing filter\n", ctx.pcLabel);
     return { exitCode: 1, label: ctx.pcLabel };
@@ -296,7 +332,10 @@ export async function jq(args: string[], ctx: CommandContext): Promise<CommandRe
     const data = JSON.parse(content);
     const result = applyJqFilter(data, filter);
 
-    const outputLabel = labels.endorse(inputLabel, { kind: "TransformedBy", command: "jq" });
+    const outputLabel = labels.endorse(inputLabel, {
+      kind: "TransformedBy",
+      command: "jq",
+    });
 
     ctx.stdout.write(JSON.stringify(result, null, 2) + "\n", outputLabel);
 
@@ -311,7 +350,7 @@ export async function jq(args: string[], ctx: CommandContext): Promise<CommandRe
 function applyJqFilter(data: any, filter: string): any {
   // Handle pipe
   if (filter.includes("|")) {
-    const parts = filter.split("|").map(p => p.trim());
+    const parts = filter.split("|").map((p) => p.trim());
     return parts.reduce((acc, part) => applyJqFilter(acc, part), data);
   }
 
@@ -352,7 +391,10 @@ function applyJqFilter(data: any, filter: string): any {
 /**
  * base64 - encode/decode base64
  */
-export async function base64(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function base64(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
   let decode = false;
   let file: string | null = null;
 
@@ -380,14 +422,20 @@ export async function base64(args: string[], ctx: CommandContext): Promise<Comma
 
     let output: string;
     if (decode) {
-      const binary = Uint8Array.from(atob(content.trim()), c => c.charCodeAt(0));
+      const binary = Uint8Array.from(
+        atob(content.trim()),
+        (c) => c.charCodeAt(0),
+      );
       output = decoder.decode(binary);
     } else {
       const binary = encoder.encode(content);
       output = btoa(String.fromCharCode(...binary));
     }
 
-    const outputLabel = labels.endorse(inputLabel, { kind: "TransformedBy", command: "base64" });
+    const outputLabel = labels.endorse(inputLabel, {
+      kind: "TransformedBy",
+      command: "base64",
+    });
 
     ctx.stdout.write(output + "\n", outputLabel);
 

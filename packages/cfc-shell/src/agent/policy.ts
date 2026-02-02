@@ -6,7 +6,7 @@
  * (but their outputs inherit the taint).
  */
 
-import { Label, Atom, labels } from "../labels.ts";
+import { Atom, Label } from "../labels.ts";
 
 /** Defines what integrity atoms are required for an agent to see data */
 export interface AgentPolicy {
@@ -85,7 +85,9 @@ export function checkVisibility(
     if (policy.requiredIntegrity.some((r) => hasAtom(r))) {
       return null;
     }
-    return `Data lacks any of required integrity: ${policy.requiredIntegrity.map((a) => a.kind).join(", ")}`;
+    return `Data lacks any of required integrity: ${
+      policy.requiredIntegrity.map((a) => a.kind).join(", ")
+    }`;
   }
 }
 

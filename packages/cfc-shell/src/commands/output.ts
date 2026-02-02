@@ -3,12 +3,15 @@
  */
 
 import type { CommandContext, CommandResult } from "./context.ts";
-import { labels } from "../labels.ts";
 
 /**
  * echo - output arguments
  */
-export async function echo(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function echo(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
+  await Promise.resolve();
   let suppressNewline = false;
   const outputArgs: string[] = [];
 
@@ -33,7 +36,11 @@ export async function echo(args: string[], ctx: CommandContext): Promise<Command
 /**
  * printf - formatted output
  */
-export async function printf(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function printf(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
+  await Promise.resolve();
   if (args.length === 0) {
     ctx.stderr.write("printf: missing format\n", ctx.pcLabel);
     return { exitCode: 1, label: ctx.pcLabel };

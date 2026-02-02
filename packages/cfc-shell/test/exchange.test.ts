@@ -4,12 +4,16 @@
  * Tests exchange rule evaluation, intent management, and audit logging.
  */
 
-import { assertEquals, assertExists } from "jsr:@std/assert";
-import { ExchangeRuleEvaluator, atomMatchesMatcher, atomMatchesAny } from "../src/exchange.ts";
+import { assertEquals, assertExists } from "@std/assert";
+import {
+  atomMatchesAny,
+  atomMatchesMatcher,
+  ExchangeRuleEvaluator,
+} from "../src/exchange.ts";
 import { IntentManager } from "../src/intent.ts";
 import { AuditLog } from "../src/audit.ts";
 import { defaultRules } from "../src/rules/default.ts";
-import { labels, Label, Atom } from "../src/labels.ts";
+import { Atom, Label, labels } from "../src/labels.ts";
 
 // ============================================================================
 // Helper Functions
@@ -35,7 +39,10 @@ Deno.test("atomMatchesMatcher - matches by kind only", () => {
 
 Deno.test("atomMatchesMatcher - matches by kind and params", () => {
   const atom: Atom = { kind: "EndorsedBy", principal: "alice" };
-  const matcher = { kind: "EndorsedBy" as const, params: { principal: "alice" } };
+  const matcher = {
+    kind: "EndorsedBy" as const,
+    params: { principal: "alice" },
+  };
 
   assertEquals(atomMatchesMatcher(atom, matcher), true);
 });
@@ -162,7 +169,12 @@ Deno.test("Network egress blocks data with Space confidentiality", () => {
   };
   const pcLabel = labels.userInput();
 
-  const verdict = evaluator.evaluate("curl", "network-egress", dataLabel, pcLabel);
+  const verdict = evaluator.evaluate(
+    "curl",
+    "network-egress",
+    dataLabel,
+    pcLabel,
+  );
 
   assertEquals(verdict.allowed, false);
   assertEquals(verdict.action, "block");
@@ -173,10 +185,15 @@ Deno.test("Network egress allows public data", () => {
   const evaluator = new ExchangeRuleEvaluator();
   evaluator.addRules(defaultRules);
 
-  const dataLabel = makeLabel([]);  // Public, no confidentiality
+  const dataLabel = makeLabel([]); // Public, no confidentiality
   const pcLabel = labels.userInput();
 
-  const verdict = evaluator.evaluate("curl", "network-egress", dataLabel, pcLabel);
+  const verdict = evaluator.evaluate(
+    "curl",
+    "network-egress",
+    dataLabel,
+    pcLabel,
+  );
 
   assertEquals(verdict.allowed, true);
 });
@@ -192,7 +209,12 @@ Deno.test("Destructive write requests intent", () => {
   const dataLabel = labels.userInput();
   const pcLabel = labels.userInput();
 
-  const verdict = evaluator.evaluate("rm", "destructive-write", dataLabel, pcLabel);
+  const verdict = evaluator.evaluate(
+    "rm",
+    "destructive-write",
+    dataLabel,
+    pcLabel,
+  );
 
   assertEquals(verdict.allowed, false);
   assertEquals(verdict.action, "request-intent");
@@ -213,7 +235,12 @@ Deno.test("Environment mutation blocks when PC has no UserInput integrity", () =
     { kind: "Origin", url: "https://evil.com" },
   ]);
 
-  const verdict = evaluator.evaluate("export", "env-mutation", dataLabel, pcLabel);
+  const verdict = evaluator.evaluate(
+    "export",
+    "env-mutation",
+    dataLabel,
+    pcLabel,
+  );
 
   assertEquals(verdict.allowed, false);
   assertEquals(verdict.action, "block");
@@ -226,7 +253,12 @@ Deno.test("Environment mutation allows when PC has UserInput integrity", () => {
   const dataLabel = labels.userInput();
   const pcLabel = labels.userInput();
 
-  const verdict = evaluator.evaluate("export", "env-mutation", dataLabel, pcLabel);
+  const verdict = evaluator.evaluate(
+    "export",
+    "env-mutation",
+    dataLabel,
+    pcLabel,
+  );
 
   assertEquals(verdict.allowed, true);
 });
@@ -253,14 +285,14 @@ Deno.test("Intent creation and single-use consumption", () => {
 });
 
 Deno.test("Intent expiration", async () => {
-  const manager = new IntentManager({ ttl: 100 });  // 100ms TTL
+  const manager = new IntentManager({ ttl: 100 }); // 100ms TTL
 
   const intent = manager.create("rm", "rm file.txt", "delete file.txt");
 
   assertEquals(manager.isValid(intent.id), true);
 
   // Wait for expiration
-  await new Promise(resolve => setTimeout(resolve, 150));
+  await new Promise((resolve) => setTimeout(resolve, 150));
 
   assertEquals(manager.isValid(intent.id), false);
   assertEquals(manager.consume(intent.id), false);
@@ -286,7 +318,7 @@ Deno.test("Intent garbage collection", async () => {
   assertEquals(manager.active().length, 2);
 
   // Wait for expiration
-  await new Promise(resolve => setTimeout(resolve, 100));
+  await new Promise((resolve) => setTimeout(resolve, 100));
 
   // Before GC, expired intents still exist
   assertEquals(manager.get(intent1.id), intent1);
@@ -496,7 +528,12 @@ Deno.test("Multiple rules: first matching rule by priority", () => {
     priority: 10,
   });
 
-  const verdict = evaluator.evaluate("test", undefined, labels.bottom(), labels.bottom());
+  const verdict = evaluator.evaluate(
+    "test",
+    undefined,
+    labels.bottom(),
+    labels.bottom(),
+  );
 
   // High priority rule (lower number) should match first
   assertEquals(verdict.rule?.name, "high-priority");
@@ -517,7 +554,12 @@ Deno.test("Rule with requirements passes when met", () => {
   });
 
   const dataLabel = labels.userInput();
-  const verdict = evaluator.evaluate("test", undefined, dataLabel, labels.bottom());
+  const verdict = evaluator.evaluate(
+    "test",
+    undefined,
+    dataLabel,
+    labels.bottom(),
+  );
 
   assertEquals(verdict.allowed, true);
   assertEquals(verdict.rule?.name, "test-rule");
@@ -538,7 +580,12 @@ Deno.test("Rule with requirements fails when not met", () => {
   });
 
   const dataLabel = makeLabel([{ kind: "Origin", url: "https://evil.com" }]);
-  const verdict = evaluator.evaluate("test", undefined, dataLabel, labels.bottom());
+  const verdict = evaluator.evaluate(
+    "test",
+    undefined,
+    dataLabel,
+    labels.bottom(),
+  );
 
   assertEquals(verdict.allowed, false);
   assertEquals(verdict.action, "block");
@@ -562,7 +609,12 @@ Deno.test("Integration: Prompt injection defense", () => {
   const llmOutput = labels.join(downloadedData, labels.llmGenerated("gpt-4"));
 
   // Simulate: bash -c "$llm_output"
-  const verdict = evaluator.evaluate("bash", "exec", llmOutput, labels.userInput());
+  const verdict = evaluator.evaluate(
+    "bash",
+    "exec",
+    llmOutput,
+    labels.userInput(),
+  );
 
   // Should be blocked!
   assertEquals(verdict.allowed, false);

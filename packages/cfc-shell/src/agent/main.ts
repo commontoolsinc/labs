@@ -15,11 +15,11 @@
 
 import { AgentSession, policies } from "./mod.ts";
 import {
-  runAgentLoop,
+  type ContentPart,
   type LLMClient,
   type LLMRequest,
   type LLMResponse,
-  type ContentPart,
+  runAgentLoop,
 } from "./llm-loop.ts";
 import { VFS } from "../vfs.ts";
 
@@ -39,9 +39,8 @@ class FetchLLMClient implements LLMClient {
     const response = await fetch(this.baseUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
+      body: JSON.stringify({ ...request, cache: false, stream: true }),
     });
-
     if (!response.ok) {
       const text = await response.text();
       throw new Error(`LLM API error ${response.status}: ${text}`);
@@ -89,7 +88,8 @@ class FetchLLMClient implements LLMClient {
           const event = JSON.parse(line);
           if (typeof event === "string") {
             text += event;
-          } else if (event.type === "text-delta") {
+          }
+          if (event.type === "text-delta") {
             text += event.textDelta;
             // Print streaming text as it arrives
             const encoder = new TextEncoder();
@@ -114,7 +114,11 @@ class FetchLLMClient implements LLMClient {
     if (text) content.push({ type: "text", text });
     content.push(...toolCalls);
 
-    return { role: "assistant", content: content.length > 0 ? content : text, id };
+    return {
+      role: "assistant",
+      content: content.length > 0 ? content : text,
+      id,
+    };
   }
 }
 
@@ -122,24 +126,78 @@ class FetchLLMClient implements LLMClient {
 // System prompt
 // ---------------------------------------------------------------------------
 
-const SYSTEM_PROMPT = `You are a helpful assistant with access to a sandboxed shell environment.
+const SYSTEM_PROMPT =
+  `You are a shell assistant. You MUST use the exec tool to run commands — never just describe what you would do.
 
-You have one tool: \`exec\`, which executes a shell command. The shell supports common Unix commands: cat, echo, grep, sed, jq, wc, sort, head, tail, ls, pwd, cd, cp, mv, rm, mkdir, test, true, false, and pipes/redirects.
+You have one tool: exec. It runs a shell command in a sandboxed environment with a virtual filesystem. The shell supports: cat, echo, grep, sed, jq, wc, sort, head, tail, ls, pwd, cd, cp, mv, rm, mkdir, test, curl, true, false, pipes, and redirects.
 
-The shell operates on a virtual filesystem. Files you create persist within the session.
-
-Guidelines:
-- Use exec to run commands when the user asks you to do something
+Rules:
+- ALWAYS call the exec tool when the user asks you to do something. Do not just explain — execute.
 - You can chain commands with pipes: echo "hello" | grep hello
 - You can redirect output: echo "data" > /tmp/file.txt
-- Explain what you're doing and share results
-- If a command's output is filtered, it means the content didn't meet the security policy — this is expected for untrusted data`;
+- If output is filtered, the content didn't meet the security policy — this is expected for untrusted data.
+- After executing, briefly explain what happened.`;
 
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
+function parseArgs(args: string[]): { prompt?: string } {
+  for (let i = 0; i < args.length; i++) {
+    if ((args[i] === "-p" || args[i] === "--prompt") && i + 1 < args.length) {
+      return { prompt: args[i + 1] };
+    }
+  }
+  return {};
+}
+
+async function runOnce(
+  input: string,
+  agent: AgentSession,
+  llm: LLMClient,
+  model: string,
+  write: (s: string) => Promise<unknown>,
+): Promise<void> {
+  let eventCursor = agent.getEvents().length;
+
+  await runAgentLoop(input, {
+    llm,
+    agent,
+    model,
+    system: SYSTEM_PROMPT,
+    onToolCall: async (_toolName, input) => {
+      await write(`\n  $ ${input.command}\n`);
+    },
+    onToolResult: async (_cmd, res) => {
+      const events = agent.getEvents();
+      for (let i = eventCursor; i < events.length; i++) {
+        const ev = events[i];
+        if (ev.type === "sub-agent-started") {
+          await write(`  [sub-agent started: ${ev.policy}]\n`);
+        } else if (ev.type === "sub-agent-ended") {
+          await write(`  [sub-agent ended]\n`);
+        }
+      }
+      eventCursor = events.length;
+
+      if (res.filtered) {
+        await write(`  [filtered: ${res.filterReason}]\n`);
+      } else if (res.stdout) {
+        const lines = res.stdout.split("\n").map((l) => `  ${l}`).join("\n");
+        await write(`${lines}\n`);
+      }
+      if (res.exitCode !== 0) {
+        await write(`  [exit code: ${res.exitCode}]\n`);
+      }
+    },
+  });
+
+  // Text was already streamed to stdout by readStream
+  await write("\n");
+}
+
 async function main(): Promise<void> {
+  const { prompt: oneShot } = parseArgs(Deno.args);
   const model = Deno.env.get("MODEL") ?? "anthropic:claude-sonnet-4-5";
   const llm = new FetchLLMClient();
   const vfs = new VFS();
@@ -148,50 +206,37 @@ async function main(): Promise<void> {
   const encoder = new TextEncoder();
   const write = (s: string) => Deno.stdout.write(encoder.encode(s));
 
+  if (oneShot) {
+    try {
+      await runOnce(oneShot, agent, llm, model, write);
+    } catch (e) {
+      await write(`[error: ${e instanceof Error ? e.message : String(e)}]\n`);
+      Deno.exit(1);
+    }
+    return;
+  }
+
   await write("CFC LLM Agent\n");
   await write(`Model: ${model}\n`);
   await write("Type your message. Ctrl-D or 'exit' to quit.\n\n");
 
   while (true) {
-    await write("you> ");
-    const input = prompt("");
+    const input = prompt("user>");
     if (input === null || input.trim() === "exit") {
       await write("\nGoodbye.\n");
       break;
     }
     if (!input.trim()) continue;
 
-    await write("\nassistant> ");
+    await write("\n---\n");
 
     try {
-      const result = await runAgentLoop(input, {
-        llm,
-        agent,
-        model,
-        system: SYSTEM_PROMPT,
-        onToolResult: async (cmd, res) => {
-          let output = `\n  [exec] ${cmd}\n`;
-          if (res.filtered) {
-            output += `  [filtered: ${res.filterReason}]\n`;
-          } else if (res.stdout) {
-            // Indent command output
-            const lines = res.stdout.split("\n").map((l) => `  ${l}`).join("\n");
-            output += `${lines}\n`;
-          }
-          if (res.exitCode !== 0) {
-            output += `  [exit code: ${res.exitCode}]\n`;
-          }
-          await write(output);
-        },
-      });
-
-      // If the response wasn't already streamed, print it
-      if (result.response && !result.response.startsWith("[")) {
-        await write(result.response);
-      }
-      await write("\n\n");
+      await runOnce(input, agent, llm, model, write);
+      await write("\n");
     } catch (e) {
-      await write(`\n[error: ${e instanceof Error ? e.message : String(e)}]\n\n`);
+      await write(
+        `\n[error: ${e instanceof Error ? e.message : String(e)}]\n\n`,
+      );
     }
   }
 }

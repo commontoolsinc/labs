@@ -2,7 +2,7 @@
  * Tests for VFS mount functionality
  */
 
-import { assertEquals, assertThrows } from "jsr:@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { VFS } from "../src/vfs.ts";
 import { labels } from "../src/labels.ts";
 
@@ -47,7 +47,9 @@ Deno.test("mount: write file to host directory", async () => {
     assertEquals(hostContent, "content");
 
     // Verify label stored in sidecar
-    const sidecar = JSON.parse(Deno.readTextFileSync(dir + "/" + LABEL_SIDECAR));
+    const sidecar = JSON.parse(
+      Deno.readTextFileSync(dir + "/" + LABEL_SIDECAR),
+    );
     assertEquals(sidecar["/new.txt"] !== undefined, true);
   });
 });
@@ -59,7 +61,11 @@ Deno.test("mount: readdir lists host files, hides sidecar", async () => {
     Deno.writeTextFileSync(dir + "/" + LABEL_SIDECAR, "{}");
 
     const vfs = new VFS();
-    vfs.mount({ hostPath: dir, mountPoint: "/data", defaultLabel: labels.bottom() });
+    vfs.mount({
+      hostPath: dir,
+      mountPoint: "/data",
+      defaultLabel: labels.bottom(),
+    });
 
     const result = vfs.readdir("/data");
     const sorted = [...result.value].sort();
@@ -72,7 +78,11 @@ Deno.test("mount: exists works for mounted paths", async () => {
     Deno.writeTextFileSync(dir + "/exists.txt", "yes");
 
     const vfs = new VFS();
-    vfs.mount({ hostPath: dir, mountPoint: "/mnt", defaultLabel: labels.bottom() });
+    vfs.mount({
+      hostPath: dir,
+      mountPoint: "/mnt",
+      defaultLabel: labels.bottom(),
+    });
 
     assertEquals(vfs.exists("/mnt/exists.txt"), true);
     assertEquals(vfs.exists("/mnt/nope.txt"), false);
@@ -84,7 +94,11 @@ Deno.test("mount: stat returns host file metadata", async () => {
     Deno.writeTextFileSync(dir + "/file.txt", "hello");
 
     const vfs = new VFS();
-    vfs.mount({ hostPath: dir, mountPoint: "/mnt", defaultLabel: labels.bottom() });
+    vfs.mount({
+      hostPath: dir,
+      mountPoint: "/mnt",
+      defaultLabel: labels.bottom(),
+    });
 
     const stat = vfs.stat("/mnt/file.txt");
     assertEquals(stat.value.size, 5);
@@ -132,7 +146,11 @@ Deno.test("mount: unmount removes the mount", async () => {
     Deno.writeTextFileSync(dir + "/file.txt", "data");
 
     const vfs = new VFS();
-    vfs.mount({ hostPath: dir, mountPoint: "/mnt", defaultLabel: labels.bottom() });
+    vfs.mount({
+      hostPath: dir,
+      mountPoint: "/mnt",
+      defaultLabel: labels.bottom(),
+    });
     assertEquals(vfs.exists("/mnt/file.txt"), true);
 
     vfs.unmount("/mnt");
@@ -143,9 +161,18 @@ Deno.test("mount: unmount removes the mount", async () => {
 Deno.test("mount: duplicate mount point throws", async () => {
   await withTempDir((dir) => {
     const vfs = new VFS();
-    vfs.mount({ hostPath: dir, mountPoint: "/mnt", defaultLabel: labels.bottom() });
+    vfs.mount({
+      hostPath: dir,
+      mountPoint: "/mnt",
+      defaultLabel: labels.bottom(),
+    });
     assertThrows(
-      () => vfs.mount({ hostPath: dir, mountPoint: "/mnt", defaultLabel: labels.bottom() }),
+      () =>
+        vfs.mount({
+          hostPath: dir,
+          mountPoint: "/mnt",
+          defaultLabel: labels.bottom(),
+        }),
       Error,
       "Already mounted",
     );
@@ -155,7 +182,11 @@ Deno.test("mount: duplicate mount point throws", async () => {
 Deno.test("mount: in-memory VFS still works alongside mounts", async () => {
   await withTempDir((dir) => {
     const vfs = new VFS();
-    vfs.mount({ hostPath: dir, mountPoint: "/mnt", defaultLabel: labels.bottom() });
+    vfs.mount({
+      hostPath: dir,
+      mountPoint: "/mnt",
+      defaultLabel: labels.bottom(),
+    });
 
     // Write to in-memory VFS path (not mounted)
     vfs.writeFile("/inmemory.txt", "hello", labels.userInput());
@@ -166,7 +197,11 @@ Deno.test("mount: in-memory VFS still works alongside mounts", async () => {
 Deno.test("mount: write creates subdirectories on host", async () => {
   await withTempDir((dir) => {
     const vfs = new VFS();
-    vfs.mount({ hostPath: dir, mountPoint: "/mnt", defaultLabel: labels.bottom() });
+    vfs.mount({
+      hostPath: dir,
+      mountPoint: "/mnt",
+      defaultLabel: labels.bottom(),
+    });
 
     vfs.writeFile("/mnt/sub/dir/file.txt", "nested", labels.bottom());
 

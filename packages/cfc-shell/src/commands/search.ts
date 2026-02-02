@@ -9,14 +9,17 @@ import { expandGlob } from "../glob.ts";
 /**
  * grep - search for pattern in files
  */
-export async function grep(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function grep(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
   let caseInsensitive = false;
   let showLineNumbers = false;
   let invertMatch = false;
   let countOnly = false;
   let recursive = false;
   let filesOnly = false;
-  let useExtendedRegex = false;
+  let _useExtendedRegex = false;
   let pattern = "";
   const files: string[] = [];
 
@@ -37,7 +40,7 @@ export async function grep(args: string[], ctx: CommandContext): Promise<Command
     } else if (arg === "-l") {
       filesOnly = true;
     } else if (arg === "-E") {
-      useExtendedRegex = true;
+      _useExtendedRegex = true;
     } else if (arg.startsWith("-")) {
       // Handle combined flags like -inr
       for (let j = 1; j < arg.length; j++) {
@@ -47,7 +50,7 @@ export async function grep(args: string[], ctx: CommandContext): Promise<Command
         else if (arg[j] === "c") countOnly = true;
         else if (arg[j] === "r") recursive = true;
         else if (arg[j] === "l") filesOnly = true;
-        else if (arg[j] === "E") useExtendedRegex = true;
+        else if (arg[j] === "E") _useExtendedRegex = true;
       }
     } else if (!pattern) {
       pattern = arg;
@@ -74,9 +77,13 @@ export async function grep(args: string[], ctx: CommandContext): Promise<Command
   // Pattern label from PC (since it's in the command)
   let outputLabel = ctx.pcLabel;
   let exitCode = 1; // No matches by default
-  let foundMatch = false;
+  let _foundMatch = false;
 
-  const processFile = (path: string, content: string, fileLabel: typeof outputLabel) => {
+  const processFile = (
+    path: string,
+    content: string,
+    fileLabel: typeof outputLabel,
+  ) => {
     const lines = content.split("\n");
     let matchCount = 0;
     let hasMatch = false;
@@ -89,21 +96,27 @@ export async function grep(args: string[], ctx: CommandContext): Promise<Command
       if (shouldOutput) {
         matchCount++;
         hasMatch = true;
-        foundMatch = true;
+        _foundMatch = true;
 
         if (countOnly || filesOnly) {
           // Don't output lines yet
         } else {
           const prefix = showLineNumbers ? `${i + 1}:` : "";
           const filePrefix = files.length > 1 ? `${path}:` : "";
-          ctx.stdout.write(`${filePrefix}${prefix}${line}\n`, labels.join(outputLabel, fileLabel));
+          ctx.stdout.write(
+            `${filePrefix}${prefix}${line}\n`,
+            labels.join(outputLabel, fileLabel),
+          );
         }
       }
     }
 
     if (countOnly) {
       const filePrefix = files.length > 1 ? `${path}:` : "";
-      ctx.stdout.write(`${filePrefix}${matchCount}\n`, labels.join(outputLabel, fileLabel));
+      ctx.stdout.write(
+        `${filePrefix}${matchCount}\n`,
+        labels.join(outputLabel, fileLabel),
+      );
     } else if (filesOnly && hasMatch) {
       ctx.stdout.write(`${path}\n`, labels.join(outputLabel, fileLabel));
     }
@@ -122,9 +135,14 @@ export async function grep(args: string[], ctx: CommandContext): Promise<Command
     // Process files
     for (const filePattern of files) {
       try {
-        if (recursive || filePattern.includes("*") || filePattern.includes("?")) {
+        if (
+          recursive || filePattern.includes("*") || filePattern.includes("?")
+        ) {
           // Expand glob
-          const { value: matches, label: globLabel } = expandGlob(ctx.vfs, filePattern);
+          const { value: matches, label: globLabel } = expandGlob(
+            ctx.vfs,
+            filePattern,
+          );
           outputLabel = labels.join(outputLabel, globLabel);
 
           for (const match of matches) {

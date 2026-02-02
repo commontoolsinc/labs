@@ -32,12 +32,13 @@ export const defaultRules: ExchangeRule[] = [
     requires: {
       integrity: [
         { kind: "UserInput" },
-        { kind: "EndorsedBy" },  // matches any EndorsedBy regardless of principal
-        { kind: "CodeHash" },     // matches any CodeHash regardless of hash value
+        { kind: "EndorsedBy" }, // matches any EndorsedBy regardless of principal
+        { kind: "CodeHash" }, // matches any CodeHash regardless of hash value
       ],
     },
     onViolation: "block",
-    description: "Executable code must have UserInput, EndorsedBy, or CodeHash integrity to prevent prompt injection attacks",
+    description:
+      "Executable code must have UserInput, EndorsedBy, or CodeHash integrity to prevent prompt injection attacks",
     priority: 10,
   },
 
@@ -55,7 +56,8 @@ export const defaultRules: ExchangeRule[] = [
       publicOnly: true,
     },
     onViolation: "block",
-    description: "Confidential data (with Space or PersonalSpace labels) cannot be sent over the network",
+    description:
+      "Confidential data (with Space or PersonalSpace labels) cannot be sent over the network",
     priority: 20,
   },
 
@@ -94,7 +96,8 @@ export const defaultRules: ExchangeRule[] = [
       ],
     },
     onViolation: "block",
-    description: "Environment variables cannot be modified from tainted control flow (PC must have UserInput integrity)",
+    description:
+      "Environment variables cannot be modified from tainted control flow (PC must have UserInput integrity)",
     priority: 40,
   },
 
@@ -118,7 +121,8 @@ export const defaultRules: ExchangeRule[] = [
       ],
     },
     onViolation: "block",
-    description: "Executable content must be injection-free, endorsed, or hash-verified",
+    description:
+      "Executable content must be injection-free, endorsed, or hash-verified",
     priority: 12,
   },
 
@@ -140,7 +144,8 @@ export const defaultRules: ExchangeRule[] = [
       ],
     },
     onViolation: "sandbox",
-    description: "Data sent over network that may contain injection must be sandboxed/framed",
+    description:
+      "Data sent over network that may contain injection must be sandboxed/framed",
     priority: 22,
   },
 
@@ -162,10 +167,10 @@ export const defaultRules: ExchangeRule[] = [
       ],
     },
     onViolation: "request-intent",
-    description: "Writes to sensitive paths from influence-tainted control flow require approval",
+    description:
+      "Writes to sensitive paths from influence-tainted control flow require approval",
     priority: 35,
   },
-
   // ========================================================================
   // Rule 8: LLM Prompt Data Framing (FUTURE)
   // ========================================================================

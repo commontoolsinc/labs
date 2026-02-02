@@ -10,25 +10,25 @@
  */
 
 import {
-  Program,
-  Pipeline,
-  Command,
-  SimpleCommand,
   Assignment,
-  IfClause,
-  ForClause,
-  WhileClause,
-  Subshell,
   BraceGroup,
+  Command,
+  ForClause,
+  IfClause,
+  Pipeline,
+  Program,
   Redirection,
+  SimpleCommand,
+  Subshell,
+  WhileClause,
   Word,
   WordPart,
 } from "./parser/ast.ts";
 import { parse } from "./parser/parser.ts";
 import { ShellSession } from "./session.ts";
-import { CommandResult, CommandContext } from "./commands/context.ts";
+import { CommandContext, CommandResult } from "./commands/context.ts";
 import { LabeledStream } from "./labeled-stream.ts";
-import { Label, Labeled, labels } from "./labels.ts";
+import { Labeled, labels } from "./labels.ts";
 import { expandGlob } from "./glob.ts";
 
 // ============================================================================
@@ -47,9 +47,9 @@ class ContinueSignal {
 // Main Entry Point
 // ============================================================================
 
-export async function execute(
+export function execute(
   input: string,
-  session: ShellSession
+  session: ShellSession,
 ): Promise<CommandResult> {
   const ast = parse(input);
   return executeProgram(ast, session);
@@ -62,7 +62,7 @@ export async function execute(
 async function executeProgram(
   node: Program,
   session: ShellSession,
-  stdio?: { stdout: LabeledStream; stderr: LabeledStream }
+  stdio?: { stdout: LabeledStream; stderr: LabeledStream },
 ): Promise<CommandResult> {
   let lastResult: CommandResult = {
     exitCode: 0,
@@ -107,7 +107,7 @@ async function executeProgram(
 async function executePipeline(
   node: Pipeline,
   session: ShellSession,
-  stdio?: { stdout: LabeledStream; stderr: LabeledStream }
+  stdio?: { stdout: LabeledStream; stderr: LabeledStream },
 ): Promise<CommandResult> {
   if (node.commands.length === 0) {
     return { exitCode: 0, label: labels.bottom() };
@@ -124,7 +124,7 @@ async function executePipeline(
       session,
       stdin,
       stdout,
-      stderr
+      stderr,
     );
 
     // Close streams only if we created them (not provided by caller)
@@ -173,7 +173,13 @@ async function executePipeline(
       : new LabeledStream();
 
     // Execute command
-    const result = await executeCommand(command, session, stdin, stdout, stderr);
+    const result = await executeCommand(
+      command,
+      session,
+      stdin,
+      stdout,
+      stderr,
+    );
     results.push(result);
 
     // Close stderr (unless it was provided by caller on last command)
@@ -211,12 +217,12 @@ async function executePipeline(
 // Command Execution (dispatch to specific command types)
 // ============================================================================
 
-async function executeCommand(
+function executeCommand(
   node: Command,
   session: ShellSession,
   stdin: LabeledStream,
   stdout: LabeledStream,
-  stderr: LabeledStream
+  stderr: LabeledStream,
 ): Promise<CommandResult> {
   switch (node.type) {
     case "SimpleCommand":
@@ -247,7 +253,7 @@ async function executeSimpleCommand(
   session: ShellSession,
   stdin: LabeledStream,
   stdout: LabeledStream,
-  stderr: LabeledStream
+  stderr: LabeledStream,
 ): Promise<CommandResult> {
   // Handle empty command (redirections only)
   if (!node.name) {
@@ -279,8 +285,18 @@ async function executeSimpleCommand(
   }
 
   // Apply redirections
-  const { stdin: effectiveStdin, stdout: effectiveStdout, stderr: effectiveStderr, flushers } =
-    await applyRedirections(node.redirections, session, stdin, stdout, stderr);
+  const {
+    stdin: effectiveStdin,
+    stdout: effectiveStdout,
+    stderr: effectiveStderr,
+    flushers,
+  } = await applyRedirections(
+    node.redirections,
+    session,
+    stdin,
+    stdout,
+    stderr,
+  );
 
   // Look up command in registry
   const commandName = expandedName.value;
@@ -288,7 +304,10 @@ async function executeSimpleCommand(
 
   if (!commandFn) {
     // Command not found
-    effectiveStderr.write(`${commandName}: command not found\n`, session.pcLabel);
+    effectiveStderr.write(
+      `${commandName}: command not found\n`,
+      session.pcLabel,
+    );
     effectiveStderr.close();
     effectiveStdout.close();
 
@@ -358,7 +377,7 @@ async function executeSimpleCommand(
 
 async function expandWord(
   word: Word,
-  session: ShellSession
+  session: ShellSession,
 ): Promise<Labeled<string>> {
   const parts: Labeled<string>[] = [];
 
@@ -380,7 +399,7 @@ async function expandWord(
 
 async function expandWordPart(
   part: WordPart,
-  session: ShellSession
+  session: ShellSession,
 ): Promise<Labeled<string>> {
   switch (part.type) {
     case "Literal":
@@ -473,7 +492,7 @@ async function expandWordPart(
       try {
         const result = evaluateArithmetic(part.expression);
         return { value: String(result), label: session.pcLabel };
-      } catch (e) {
+      } catch {
         // Arithmetic error - return 0
         return { value: "0", label: session.pcLabel };
       }
@@ -525,9 +544,9 @@ function evaluateArithmetic(expr: string): number {
 async function executeAssignment(
   node: Assignment,
   session: ShellSession,
-  stdin: LabeledStream,
-  stdout: LabeledStream,
-  stderr: LabeledStream
+  _stdin: LabeledStream,
+  _stdout: LabeledStream,
+  _stderr: LabeledStream,
 ): Promise<CommandResult> {
   // Expand the value
   const expandedValue = await expandWord(node.value, session);
@@ -545,9 +564,9 @@ async function executeAssignment(
 async function executeIf(
   node: IfClause,
   session: ShellSession,
-  stdin: LabeledStream,
-  stdout: LabeledStream,
-  stderr: LabeledStream
+  _stdin: LabeledStream,
+  _stdout: LabeledStream,
+  _stderr: LabeledStream,
 ): Promise<CommandResult> {
   // Execute condition
   const conditionResult = await executeProgram(node.condition, session);
@@ -560,7 +579,7 @@ async function executeIf(
   if (conditionResult.exitCode === 0) {
     // Execute then branch
     branchResult = await executeProgram(node.then, session);
-  } else{
+  } else {
     // Try elifs
     let elifExecuted = false;
 
@@ -595,9 +614,9 @@ async function executeIf(
 async function executeFor(
   node: ForClause,
   session: ShellSession,
-  stdin: LabeledStream,
-  stdout: LabeledStream,
-  stderr: LabeledStream
+  _stdin: LabeledStream,
+  _stdout: LabeledStream,
+  _stderr: LabeledStream,
 ): Promise<CommandResult> {
   // Expand all words in the word list
   const expandedWords: Labeled<string>[] = [];
@@ -648,9 +667,9 @@ async function executeFor(
 async function executeWhile(
   node: WhileClause,
   session: ShellSession,
-  stdin: LabeledStream,
-  stdout: LabeledStream,
-  stderr: LabeledStream
+  _stdin: LabeledStream,
+  _stdout: LabeledStream,
+  _stderr: LabeledStream,
 ): Promise<CommandResult> {
   let lastResult: CommandResult = { exitCode: 0, label: session.pcLabel };
   let iterations = 0;
@@ -708,11 +727,21 @@ async function executeSubshell(
   session: ShellSession,
   stdin: LabeledStream,
   stdout: LabeledStream,
-  stderr: LabeledStream
+  stderr: LabeledStream,
 ): Promise<CommandResult> {
   // Apply redirections on the subshell itself
-  const { stdin: effectiveStdin, stdout: effectiveStdout, stderr: effectiveStderr, flushers } =
-    await applyRedirections(node.redirections, session, stdin, stdout, stderr);
+  const {
+    stdin: _effectiveStdin,
+    stdout: effectiveStdout,
+    stderr: effectiveStderr,
+    flushers,
+  } = await applyRedirections(
+    node.redirections,
+    session,
+    stdin,
+    stdout,
+    stderr,
+  );
 
   // Push environment scope
   session.env.pushScope();
@@ -743,12 +772,12 @@ async function executeSubshell(
 // Brace Group Execution (no environment scope)
 // ============================================================================
 
-async function executeBraceGroup(
+function executeBraceGroup(
   node: BraceGroup,
   session: ShellSession,
-  stdin: LabeledStream,
-  stdout: LabeledStream,
-  stderr: LabeledStream
+  _stdin: LabeledStream,
+  _stdout: LabeledStream,
+  _stderr: LabeledStream,
 ): Promise<CommandResult> {
   // Execute body in current scope
   return executeProgram(node.body, session);
@@ -772,7 +801,7 @@ async function applyRedirections(
   session: ShellSession,
   stdin: LabeledStream,
   stdout: LabeledStream,
-  stderr: LabeledStream
+  stderr: LabeledStream,
 ): Promise<RedirectionResult> {
   let effectiveStdin = stdin;
   let effectiveStdout = stdout;
@@ -789,7 +818,7 @@ async function applyRedirections(
         try {
           const fileContent = session.vfs.readFileText(targetPath);
           effectiveStdin = LabeledStream.from(fileContent);
-        } catch (e) {
+        } catch {
           // File not found - create empty stream
           effectiveStdin = LabeledStream.empty();
         }
@@ -804,7 +833,10 @@ async function applyRedirections(
         flushers.push(async () => {
           const output = await captureStream.readAll();
           // Taint confidentiality with PC (preserve output's integrity)
-          const writeLabel = labels.taintConfidentiality(output.label, session.pcLabel);
+          const writeLabel = labels.taintConfidentiality(
+            output.label,
+            session.pcLabel,
+          );
           session.vfs.writeFile(targetPath, output.value, writeLabel);
         });
         break;
@@ -833,7 +865,10 @@ async function applyRedirections(
           // Append new content; taint confidentiality with PC (preserve integrity)
           const newContent = existingContent + output.value;
           const combinedLabel = labels.join(existingLabel, output.label);
-          const newLabel = labels.taintConfidentiality(combinedLabel, session.pcLabel);
+          const newLabel = labels.taintConfidentiality(
+            combinedLabel,
+            session.pcLabel,
+          );
 
           session.vfs.writeFile(targetPath, newContent, newLabel);
         });
@@ -847,7 +882,10 @@ async function applyRedirections(
 
         flushers.push(async () => {
           const output = await captureStream.readAll();
-          const writeLabel = labels.taintConfidentiality(output.label, session.pcLabel);
+          const writeLabel = labels.taintConfidentiality(
+            output.label,
+            session.pcLabel,
+          );
           session.vfs.writeFile(targetPath, output.value, writeLabel);
         });
         break;
@@ -876,7 +914,10 @@ async function applyRedirections(
           // Append new content; taint confidentiality with PC (preserve integrity)
           const newContent = existingContent + output.value;
           const combinedLabel = labels.join(existingLabel, output.label);
-          const newLabel = labels.taintConfidentiality(combinedLabel, session.pcLabel);
+          const newLabel = labels.taintConfidentiality(
+            combinedLabel,
+            session.pcLabel,
+          );
 
           session.vfs.writeFile(targetPath, newContent, newLabel);
         });
@@ -891,7 +932,10 @@ async function applyRedirections(
 
         flushers.push(async () => {
           const output = await captureStream.readAll();
-          const writeLabel = labels.taintConfidentiality(output.label, session.pcLabel);
+          const writeLabel = labels.taintConfidentiality(
+            output.label,
+            session.pcLabel,
+          );
           session.vfs.writeFile(targetPath, output.value, writeLabel);
         });
         break;

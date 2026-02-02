@@ -8,7 +8,11 @@ import { labels } from "../labels.ts";
 /**
  * export - mark variables as exported
  */
-export async function exportCmd(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function exportCmd(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
+  await Promise.resolve();
   if (args.length === 0) {
     // Show all exported variables
     const exported = ctx.env.exported();
@@ -41,7 +45,11 @@ export async function exportCmd(args: string[], ctx: CommandContext): Promise<Co
 /**
  * unset - remove variables
  */
-export async function unset(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function unset(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
+  await Promise.resolve();
   if (args.length === 0) {
     ctx.stderr.write("unset: not enough arguments\n", ctx.pcLabel);
     return { exitCode: 1, label: ctx.pcLabel };
@@ -62,11 +70,17 @@ export async function unset(args: string[], ctx: CommandContext): Promise<Comman
 /**
  * env - print all exported variables
  */
-export async function env(_args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function env(
+  _args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
+  await Promise.resolve();
   const exported = ctx.env.exported();
   let outputLabel = ctx.pcLabel;
 
-  const entries = Array.from(exported.entries()).sort(([a], [b]) => a.localeCompare(b));
+  const entries = Array.from(exported.entries()).sort(([a], [b]) =>
+    a.localeCompare(b)
+  );
 
   for (const [name, { value, label }] of entries) {
     ctx.stdout.write(`${name}=${value}\n`, label);
@@ -79,13 +93,19 @@ export async function env(_args: string[], ctx: CommandContext): Promise<Command
 /**
  * printenv - print environment variable(s)
  */
-export async function printenv(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function printenv(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
+  await Promise.resolve();
   if (args.length === 0) {
     // Print all variables
     const exported = ctx.env.exported();
     let outputLabel = ctx.pcLabel;
 
-    const entries = Array.from(exported.entries()).sort(([a], [b]) => a.localeCompare(b));
+    const entries = Array.from(exported.entries()).sort(([a], [b]) =>
+      a.localeCompare(b)
+    );
 
     for (const [name, { value, label }] of entries) {
       ctx.stdout.write(`${name}=${value}\n`, label);

@@ -14,21 +14,21 @@
  * - Timeout configuration propagates
  */
 
-import { assertEquals, assert, assertRejects } from "jsr:@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import {
-  SandboxedExecConfig,
   defaultConfig,
-  mergeConfig,
   getProfile,
+  mergeConfig,
   profiles,
+  SandboxedExecConfig,
 } from "../src/sandbox/config.ts";
 import { SandboxedExecutor } from "../src/sandbox/executor.ts";
 import { exportToReal, importFromReal } from "../src/sandbox/vfs-bridge.ts";
 import { realCommand } from "../src/commands/real.ts";
-import { labels, Label } from "../src/labels.ts";
+import { Label, labels } from "../src/labels.ts";
 import { VFS } from "../src/vfs.ts";
 import { LabeledStream } from "../src/labeled-stream.ts";
-import { createEnvironment, CommandContext } from "../src/commands/context.ts";
+import { CommandContext, createEnvironment } from "../src/commands/context.ts";
 
 // ============================================================================
 // Helper Functions
@@ -38,9 +38,9 @@ function labelEqual(a: Label, b: Label): boolean {
   // Check confidentiality clauses (order doesn't matter)
   if (a.confidentiality.length !== b.confidentiality.length) return false;
   for (const clauseA of a.confidentiality) {
-    const found = b.confidentiality.some(clauseB =>
+    const found = b.confidentiality.some((clauseB) =>
       clauseA.length === clauseB.length &&
-      clauseA.every(atomA => clauseB.some(atomB => atomEqual(atomA, atomB)))
+      clauseA.every((atomA) => clauseB.some((atomB) => atomEqual(atomA, atomB)))
     );
     if (!found) return false;
   }
@@ -48,7 +48,7 @@ function labelEqual(a: Label, b: Label): boolean {
   // Check integrity atoms (order doesn't matter)
   if (a.integrity.length !== b.integrity.length) return false;
   for (const atomA of a.integrity) {
-    if (!b.integrity.some(atomB => atomEqual(atomA, atomB))) return false;
+    if (!b.integrity.some((atomB) => atomEqual(atomA, atomB))) return false;
   }
 
   return true;
@@ -95,7 +95,7 @@ function createMockContext(vfs?: VFS): CommandContext {
     stdout: new LabeledStream(),
     stderr: new LabeledStream(),
     pcLabel: labels.bottom(),
-    requestIntent: async () => true,
+    requestIntent: () => Promise.resolve(true),
   };
 }
 
@@ -190,7 +190,9 @@ Deno.test("SandboxedExecutor in stub mode returns appropriate message", async ()
 
   assertEquals(result.exitCode, 1);
   assert(result.stderr.value.includes("Sandboxed execution not available"));
-  assert(result.stderr.value.includes("cfc-nonexistent-command-for-testing arg1"));
+  assert(
+    result.stderr.value.includes("cfc-nonexistent-command-for-testing arg1"),
+  );
 });
 
 Deno.test("Executor stub mode applies correct labels with no inputs", async () => {
@@ -345,7 +347,9 @@ Deno.test("exportToReal exports directory recursively", async () => {
     const content1 = await Deno.readTextFile(`${tempDir}/data/file1.txt`);
     assertEquals(content1, "File 1");
 
-    const content2 = await Deno.readTextFile(`${tempDir}/data/subdir/file2.txt`);
+    const content2 = await Deno.readTextFile(
+      `${tempDir}/data/subdir/file2.txt`,
+    );
     assertEquals(content2, "File 2");
   } finally {
     await Deno.remove(tempDir, { recursive: true });
@@ -363,7 +367,12 @@ Deno.test("importFromReal imports files with correct label", async () => {
     await Deno.writeTextFile(`${tempDir}/imported.txt`, "Imported content");
 
     // Import to VFS
-    const imported = await importFromReal(vfs, tempDir, "/imported", importLabel);
+    const imported = await importFromReal(
+      vfs,
+      tempDir,
+      "/imported",
+      importLabel,
+    );
 
     // Should have imported one file
     assertEquals(imported.length, 1);
@@ -429,7 +438,10 @@ Deno.test("!real parses basic command", async () => {
   if (result.exitCode === 0) {
     // Real execution succeeded — stdout should have output
     const stdoutOutput = await ctx.stdout.readAll();
-    assert(stdoutOutput.value.includes("hello"), "real echo should output 'hello'");
+    assert(
+      stdoutOutput.value.includes("hello"),
+      "real echo should output 'hello'",
+    );
   } else {
     // Stub mode — stderr should indicate sandbox not available
     const stderrOutput = await ctx.stderr.readAll();
@@ -478,7 +490,10 @@ Deno.test("!real parses --profile flag", async () => {
   const ctx = createMockContext();
   ctx.stdin.close();
 
-  await realCommand(["--profile", "python-data", "--", "python", "script.py"], ctx);
+  await realCommand(
+    ["--profile", "python-data", "--", "python", "script.py"],
+    ctx,
+  );
 
   // Should complete without throwing
   assert(true);
@@ -528,7 +543,7 @@ Deno.test("!real requires intent", async () => {
   ctx.stdin.close();
 
   // Mock intent callback that denies
-  ctx.requestIntent = async () => false;
+  ctx.requestIntent = () => Promise.resolve(false);
 
   const result = await realCommand(["echo", "hello"], ctx);
 
@@ -640,12 +655,15 @@ Deno.test("Integration: conservative label propagation through sandbox", async (
   // 2. Have no other integrity (intersection of UserInput and Origin is empty)
   // Plus SandboxedExec = 1 integrity atom
   const sandboxedExecCount = result.stdout.label.integrity.filter(
-    a => a.kind === "SandboxedExec"
+    (a) => a.kind === "SandboxedExec",
   ).length;
-  assert(sandboxedExecCount >= 1, "Should have at least SandboxedExec integrity");
+  assert(
+    sandboxedExecCount >= 1,
+    "Should have at least SandboxedExec integrity",
+  );
 });
 
-Deno.test("Integration: timeout configuration propagates", async () => {
+Deno.test("Integration: timeout configuration propagates", () => {
   const shortTimeout = 100;
   const config = mergeConfig(defaultConfig, { timeout: shortTimeout });
   const executor = new SandboxedExecutor(config);

@@ -6,7 +6,7 @@
  */
 
 import { VFS } from "../vfs.ts";
-import { Label, Labeled } from "../labels.ts";
+import { Label } from "../labels.ts";
 
 /**
  * Export VFS files to a real directory for sandbox consumption.
@@ -25,7 +25,8 @@ export async function exportToReal(
   const labelMap = new Map<string, Label>();
 
   // Check if we have Deno filesystem APIs
-  const hasDeno = typeof Deno !== "undefined" && typeof Deno.writeFile === "function";
+  const hasDeno = typeof Deno !== "undefined" &&
+    typeof Deno.writeFile === "function";
 
   if (!hasDeno) {
     // In environments without Deno filesystem APIs, we can't export
@@ -89,7 +90,11 @@ export async function exportToReal(
             : `${normalizedVfsPath}/${entry}`;
 
           // Recursively export child
-          const childLabels = await exportToReal(vfs, [childPath], realBasePath);
+          const childLabels = await exportToReal(
+            vfs,
+            [childPath],
+            realBasePath,
+          );
           for (const [path, label] of childLabels) {
             labelMap.set(path, label);
           }
@@ -124,7 +129,8 @@ export async function importFromReal(
   const imported: string[] = [];
 
   // Check if we have Deno filesystem APIs
-  const hasDeno = typeof Deno !== "undefined" && typeof Deno.readDir === "function";
+  const hasDeno = typeof Deno !== "undefined" &&
+    typeof Deno.readDir === "function";
 
   if (!hasDeno) {
     // In environments without Deno filesystem APIs, we can't import
@@ -133,7 +139,14 @@ export async function importFromReal(
 
   try {
     // Walk the real directory
-    await walkRealDir(realBasePath, realBasePath, vfsBasePath, vfs, label, imported);
+    await walkRealDir(
+      realBasePath,
+      realBasePath,
+      vfsBasePath,
+      vfs,
+      label,
+      imported,
+    );
   } catch (error) {
     console.error(`Failed to import from ${realBasePath}: ${error}`);
   }
@@ -181,7 +194,14 @@ async function walkRealDir(
         }
       } else if (entry.isDirectory) {
         // Recursively walk subdirectory
-        await walkRealDir(realPath, baseRealPath, baseVfsPath, vfs, label, imported);
+        await walkRealDir(
+          realPath,
+          baseRealPath,
+          baseVfsPath,
+          vfs,
+          label,
+          imported,
+        );
       }
       // Skip other types (symlinks, etc.)
     }

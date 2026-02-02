@@ -2,7 +2,7 @@
  * Tests for Virtual Filesystem (VFS)
  */
 
-import { assertEquals, assertThrows } from "jsr:@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { VFS } from "../src/vfs.ts";
 import { expandGlob, matchGlob } from "../src/glob.ts";
 import { labels } from "../src/labels.ts";
@@ -44,7 +44,7 @@ Deno.test("VFS: read nonexistent file throws", () => {
   assertThrows(
     () => vfs.readFile("/nonexistent.txt"),
     Error,
-    "No such file"
+    "No such file",
   );
 });
 
@@ -66,7 +66,7 @@ Deno.test("VFS: write binary content", () => {
 
 Deno.test("VFS: readdir lists children with directory label", () => {
   const vfs = new VFS();
-  const dirLabel = labels.userInput();
+  const _dirLabel = labels.userInput();
 
   vfs.mkdir("/mydir");
   vfs.writeFile("/mydir/file1.txt", "content1", labels.bottom());
@@ -75,7 +75,10 @@ Deno.test("VFS: readdir lists children with directory label", () => {
 
   const result = vfs.readdir("/mydir");
 
-  assertEquals(result.value.sort(), ["file1.txt", "file2.txt", "subdir"].sort());
+  assertEquals(
+    result.value.sort(),
+    ["file1.txt", "file2.txt", "subdir"].sort(),
+  );
 });
 
 Deno.test("VFS: mkdir creates directory", () => {
@@ -106,7 +109,7 @@ Deno.test("VFS: mkdir non-recursive throws if parent missing", () => {
   assertThrows(
     () => vfs.mkdir("/a/b/c"),
     Error,
-    "No such file or directory"
+    "No such file or directory",
   );
 });
 
@@ -145,7 +148,7 @@ Deno.test("VFS: rm non-recursive throws on non-empty directory", () => {
   assertThrows(
     () => vfs.rm("/dir"),
     Error,
-    "Directory not empty"
+    "Directory not empty",
   );
 });
 
@@ -262,7 +265,7 @@ Deno.test("VFS: symlink cycle detection", () => {
   assertThrows(
     () => vfs.readFile("/link1"),
     Error,
-    "Too many levels of symbolic links"
+    "Too many levels of symbolic links",
   );
 });
 
@@ -377,7 +380,7 @@ Deno.test("VFS: label monotonicity - writing with missing confidentiality throws
   assertThrows(
     () => vfs.writeFile("/file.txt", "new content", label2),
     Error,
-    "Label monotonicity violation"
+    "Label monotonicity violation",
   );
 });
 
@@ -570,7 +573,7 @@ Deno.test("glob: expandGlob **/*.ts matches recursively", () => {
 
   assertEquals(
     result.value.sort(),
-    ["/a/test.ts", "/a/b/test.ts", "/a/b/c/test.ts"].sort()
+    ["/a/test.ts", "/a/b/test.ts", "/a/b/c/test.ts"].sort(),
   );
 });
 
@@ -598,7 +601,7 @@ Deno.test("glob: expandGlob [abc] pattern works", () => {
 
   assertEquals(
     result.value.sort(),
-    ["/testa.txt", "/testb.txt", "/testc.txt"].sort()
+    ["/testa.txt", "/testb.txt", "/testc.txt"].sort(),
   );
 });
 
@@ -660,6 +663,6 @@ Deno.test("glob: expandGlob with cwd", () => {
 
   assertEquals(
     result.value.sort(),
-    ["/home/user/test1.txt", "/home/user/test2.txt"].sort()
+    ["/home/user/test1.txt", "/home/user/test2.txt"].sort(),
   );
 });

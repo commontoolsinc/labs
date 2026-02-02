@@ -9,7 +9,7 @@ came from). Designed for LLM agent sandboxing and prompt injection defense.
 When LLM agents execute shell commands, we need to track information flow to
 prevent prompt injection attacks and data exfiltration. Traditional sandboxes
 make binary yes/no decisions about operations. CFC (Contextual Flow Control)
-labels track *what information influenced what*, enabling fine-grained policies.
+labels track _what information influenced what_, enabling fine-grained policies.
 
 Consider this attack:
 
@@ -36,20 +36,20 @@ conditionals, loops, and command substitutions. No annotations required.
 Atoms are the primitive building blocks of labels. Each atom represents a single
 fact about data's origin or authority:
 
-| Atom | Meaning | Example |
-|------|---------|---------|
-| `Origin` | Data came from a URL | `Origin { url: "https://evil.com/page" }` |
-| `UserInput` | Typed by the user (high trust) | `UserInput` |
-| `LLMGenerated` | Produced by an LLM (low trust) | `LLMGenerated { model: "claude-3" }` |
-| `EndorsedBy` | Reviewed/approved by a principal | `EndorsedBy { principal: "user" }` |
-| `AuthoredBy` | Written by a principal | `AuthoredBy { principal: "alice" }` |
-| `NetworkProvenance` | Fetched over network | `NetworkProvenance { tls: true, host: "api.com" }` |
-| `TransformedBy` | Processed by a command | `TransformedBy { command: "jq" }` |
-| `Space` | Belongs to a data space | `Space { id: "credentials" }` |
-| `PersonalSpace` | Belongs to a user's space | `PersonalSpace { did: "did:key:abc" }` |
-| `SandboxedExec` | Output of sandboxed execution | `SandboxedExec` |
-| `CodeHash` | Content-addressed trust | `CodeHash { hash: "sha256:..." }` |
-| `Custom` | Extension point | `Custom { tag: "acme", value: "v1" }` |
+| Atom                | Meaning                          | Example                                            |
+| ------------------- | -------------------------------- | -------------------------------------------------- |
+| `Origin`            | Data came from a URL             | `Origin { url: "https://evil.com/page" }`          |
+| `UserInput`         | Typed by the user (high trust)   | `UserInput`                                        |
+| `LLMGenerated`      | Produced by an LLM (low trust)   | `LLMGenerated { model: "claude-3" }`               |
+| `EndorsedBy`        | Reviewed/approved by a principal | `EndorsedBy { principal: "user" }`                 |
+| `AuthoredBy`        | Written by a principal           | `AuthoredBy { principal: "alice" }`                |
+| `NetworkProvenance` | Fetched over network             | `NetworkProvenance { tls: true, host: "api.com" }` |
+| `TransformedBy`     | Processed by a command           | `TransformedBy { command: "jq" }`                  |
+| `Space`             | Belongs to a data space          | `Space { id: "credentials" }`                      |
+| `PersonalSpace`     | Belongs to a user's space        | `PersonalSpace { did: "did:key:abc" }`             |
+| `SandboxedExec`     | Output of sandboxed execution    | `SandboxedExec`                                    |
+| `CodeHash`          | Content-addressed trust          | `CodeHash { hash: "sha256:..." }`                  |
+| `Custom`            | Extension point                  | `Custom { tag: "acme", value: "v1" }`              |
 
 ### Labels
 
@@ -57,8 +57,8 @@ Every value in the shell (file contents, variable values, command outputs)
 carries a **Label** with two components:
 
 **Confidentiality** (CNF -- Conjunctive Normal Form): Specifies who can read the
-data. Represented as an AND of OR clauses. Each clause lists atoms where at least
-one must be satisfied. Empty confidentiality (`[]`) means public -- no
+data. Represented as an AND of OR clauses. Each clause lists atoms where at
+least one must be satisfied. Empty confidentiality (`[]`) means public -- no
 restrictions.
 
 ```
@@ -109,7 +109,7 @@ without violating confidentiality (every clause in `a` appears in `b`).
 ### PC (Program Counter) Taint
 
 Control flow creates implicit information channels. If a conditional branches on
-secret data, the *fact that the branch executed* reveals information about the
+secret data, the _fact that the branch executed_ reveals information about the
 secret:
 
 ```bash
@@ -119,11 +119,11 @@ fi
 ```
 
 The string "found it" is constant, but its presence in `/tmp/result.txt` reveals
-that "ATLAS" appears in the secret report. The interpreter pushes the condition's
-label onto the PC stack, and all writes within the branch inherit that
-confidentiality.
+that "ATLAS" appears in the secret report. The interpreter pushes the
+condition's label onto the PC stack, and all writes within the branch inherit
+that confidentiality.
 
-For loops work similarly -- the *number of iterations* reveals information about
+For loops work similarly -- the _number of iterations_ reveals information about
 the word list:
 
 ```bash
@@ -147,16 +147,20 @@ specifies:
   `request-intent`, `warn`, `sandbox`)
 
 Default rules include:
-- **Exec integrity gate**: `bash`, `eval`, `source` require `EndorsedBy(user)` or
-  `UserInput` integrity. Blocks prompt injection from executing downloaded/LLM code.
+
+- **Exec integrity gate**: `bash`, `eval`, `source` require `EndorsedBy(user)`
+  or `UserInput` integrity. Blocks prompt injection from executing
+  downloaded/LLM code.
 - **Network egress confidentiality gate**: `curl` sending data checks that the
   data's confidentiality allows flow to the target host.
-- **Destructive write intent**: `rm` on important files may require user approval.
+- **Destructive write intent**: `rm` on important files may require user
+  approval.
 
 ### IntentOnce
 
 Single-use authorization tokens for gating side effects at commit points. An
 IntentOnce is:
+
 - Created when an operation is blocked and needs approval
 - Scoped to a specific action (cannot be reused for different operations)
 - Consumed once (replay-proof)
@@ -192,23 +196,22 @@ Input string
 
 Key modules:
 
-| Module | File | Purpose |
-|--------|------|---------|
-| Labels | `src/labels.ts` | Atom types, Label structure, lattice operations |
-| LabeledStream | `src/labeled-stream.ts` | Streams where each chunk carries a label |
-| Parser | `src/parser/` | Lexer, AST types, recursive-descent parser |
-| Interpreter | `src/interpreter.ts` | AST walker with label propagation |
-| VFS | `src/vfs.ts` | In-memory labeled filesystem |
-| Session | `src/session.ts` | Top-level state (env, VFS, PC stack, audit log) |
-| Commands | `src/commands/` | ~35 built-in command implementations |
-| Exchange | `src/exchange.ts` | Policy rules checked at commit points |
-| Intent | `src/intent.ts` | Single-use authorization tokens |
+| Module        | File                    | Purpose                                         |
+| ------------- | ----------------------- | ----------------------------------------------- |
+| Labels        | `src/labels.ts`         | Atom types, Label structure, lattice operations |
+| LabeledStream | `src/labeled-stream.ts` | Streams where each chunk carries a label        |
+| Parser        | `src/parser/`           | Lexer, AST types, recursive-descent parser      |
+| Interpreter   | `src/interpreter.ts`    | AST walker with label propagation               |
+| VFS           | `src/vfs.ts`            | In-memory labeled filesystem                    |
+| Session       | `src/session.ts`        | Top-level state (env, VFS, PC stack, audit log) |
+| Commands      | `src/commands/`         | ~35 built-in command implementations            |
+| Exchange      | `src/exchange.ts`       | Policy rules checked at commit points           |
+| Intent        | `src/intent.ts`         | Single-use authorization tokens                 |
 
 ## Examples
 
-The following examples are drawn from the test suite
-(`test/examples.test.ts`). Each demonstrates a specific aspect of label
-propagation.
+The following examples are drawn from the test suite (`test/examples.test.ts`).
+Each demonstrates a specific aspect of label propagation.
 
 ### 1. Prompt Injection -- Downloaded Script Blocked
 
@@ -221,7 +224,7 @@ const s = session();
 // File with Origin integrity (from the network -- untrusted)
 s.vfs.writeFile(
   "/tmp/page.sh",
-  '#!/bin/bash\nrm -rf /home/agent\n',
+  "#!/bin/bash\nrm -rf /home/agent\n",
   labels.fromNetwork("https://evil.com/page.sh", true),
 );
 
@@ -265,7 +268,10 @@ s.vfs.writeFile(
   },
 );
 
-await execute('cat /data/customers.csv | grep "@corp.com" > /tmp/matches.txt', s);
+await execute(
+  'cat /data/customers.csv | grep "@corp.com" > /tmp/matches.txt',
+  s,
+);
 
 const { label } = s.vfs.readFileText("/tmp/matches.txt");
 // label.confidentiality includes Space("customer-data")
@@ -294,7 +300,7 @@ const { label } = s.vfs.readFileText("/tmp/result.txt");
 // label has Space("executive") confidentiality -- PC taint from the condition
 ```
 
-The string "found it" is constant, but its *existence* in the output file
+The string "found it" is constant, but its _existence_ in the output file
 reveals information about the secret report.
 
 ### 5. Variable Taint Through Command Substitution
@@ -385,7 +391,10 @@ s.vfs.writeFile("/hr/headcount.txt", "Engineers: 50\n", {
   integrity: [{ kind: "UserInput" }],
 });
 
-await execute("cat /finance/revenue.txt /hr/headcount.txt > /tmp/combined.txt", s);
+await execute(
+  "cat /finance/revenue.txt /hr/headcount.txt > /tmp/combined.txt",
+  s,
+);
 
 const { label } = s.vfs.readFileText("/tmp/combined.txt");
 // label.confidentiality includes BOTH Space("finance") AND Space("hr")
@@ -419,7 +428,7 @@ Variable changes inside subshells do not propagate back:
 ```typescript
 await execute('OUTER="before"', s);
 await execute('(OUTER="inside")', s);
-await execute('echo $OUTER > /tmp/outer.txt', s);
+await execute("echo $OUTER > /tmp/outer.txt", s);
 
 const { value } = s.vfs.readFileText("/tmp/outer.txt");
 // value.trim() === "before" -- subshell changes don't leak
@@ -451,7 +460,7 @@ checks integrity the same way `bash` does:
 ```typescript
 s.vfs.writeFile(
   "/tmp/evil_config",
-  'PATH=/tmp/evil:$PATH\n',
+  "PATH=/tmp/evil:$PATH\n",
   labels.fromNetwork("https://evil.com/config", true),
 );
 
@@ -465,36 +474,47 @@ const pathVar = s.env.get("PATH");
 ## Available Commands
 
 ### Navigation
+
 `cd`, `pwd`, `ls`
 
 ### File Reading
+
 `cat`, `head`, `tail`, `wc`, `diff`
 
 ### Search
+
 `grep`
 
 ### Transform
+
 `sed`, `sort`, `uniq`, `cut`, `tr`, `jq`, `base64`
 
 ### File Writing
+
 `cp`, `mv`, `rm`, `mkdir`, `touch`, `tee`, `chmod`
 
 ### Output
+
 `echo`, `printf`
 
 ### Environment
+
 `export`, `unset`, `env`, `printenv`
 
 ### Network
+
 `curl`
 
 ### Execution
+
 `bash`, `eval`, `source`
 
 ### Misc
+
 `date`, `true`, `false`, `test` (also `[`), `sleep`, `read`, `which`, `xargs`
 
 ### Sandbox Escape
+
 `!real` -- run a real command in a sandboxed subprocess with label import/export
 
 ## API Usage
@@ -526,10 +546,17 @@ const session = createSession({
 });
 
 // 2. Populate the VFS
-vfs.writeFile("/data/notes.txt", "Buy milk\nCall dentist\n", labels.userInput());
+vfs.writeFile(
+  "/data/notes.txt",
+  "Buy milk\nCall dentist\n",
+  labels.userInput(),
+);
 
 // 3. Run commands
-const result = await execute("cat /data/notes.txt | grep milk > /tmp/out.txt", session);
+const result = await execute(
+  "cat /data/notes.txt | grep milk > /tmp/out.txt",
+  session,
+);
 console.log("Exit code:", result.exitCode);
 
 // 4. Inspect labels
@@ -540,7 +567,11 @@ console.log("Integrity:", label.integrity);
 
 // 5. Check the audit log
 for (const entry of session.audit) {
-  console.log(entry.command, entry.blocked ? "BLOCKED" : "allowed", entry.reason ?? "");
+  console.log(
+    entry.command,
+    entry.blocked ? "BLOCKED" : "allowed",
+    entry.reason ?? "",
+  );
 }
 ```
 

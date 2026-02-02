@@ -12,13 +12,13 @@
  * - Label propagation through all operations
  */
 
-import { assertEquals, assertExists } from "jsr:@std/assert";
+import { assertEquals, assertExists } from "@std/assert";
 import { execute } from "../src/interpreter.ts";
 import { createSession, ShellSession } from "../src/session.ts";
 import { CommandRegistry } from "../src/commands/registry.ts";
 import { CommandContext, CommandResult } from "../src/commands/context.ts";
 import { VFS } from "../src/vfs.ts";
-import { labels, type Label } from "../src/labels.ts";
+import { type Label, labels } from "../src/labels.ts";
 import { cat } from "../src/commands/read.ts";
 
 // ============================================================================
@@ -30,40 +30,56 @@ function createTestSession(): ShellSession {
   const vfs = new VFS();
 
   // Register echo command
-  registry.register("echo", async (args: string[], ctx: CommandContext): Promise<CommandResult> => {
-    const output = args.join(" ") + "\n";
-    ctx.stdout.write(output, ctx.pcLabel);
-    return { exitCode: 0, label: ctx.pcLabel };
-  });
+  registry.register(
+    "echo",
+    async (args: string[], ctx: CommandContext): Promise<CommandResult> => {
+      await Promise.resolve();
+      const output = args.join(" ") + "\n";
+      ctx.stdout.write(output, ctx.pcLabel);
+      return { exitCode: 0, label: ctx.pcLabel };
+    },
+  );
 
   // Register cat command
   registry.register("cat", cat);
 
   // Register true/false commands for testing
-  registry.register("true", async (args: string[], ctx: CommandContext): Promise<CommandResult> => {
-    return { exitCode: 0, label: ctx.pcLabel };
-  });
+  registry.register(
+    "true",
+    async (_args: string[], ctx: CommandContext): Promise<CommandResult> => {
+      await Promise.resolve();
+      return { exitCode: 0, label: ctx.pcLabel };
+    },
+  );
 
-  registry.register("false", async (args: string[], ctx: CommandContext): Promise<CommandResult> => {
-    return { exitCode: 1, label: ctx.pcLabel };
-  });
+  registry.register(
+    "false",
+    async (_args: string[], ctx: CommandContext): Promise<CommandResult> => {
+      await Promise.resolve();
+      return { exitCode: 1, label: ctx.pcLabel };
+    },
+  );
 
   // Register test command (for conditionals)
-  registry.register("test", async (args: string[], ctx: CommandContext): Promise<CommandResult> => {
-    // Simple test: [ -z STRING ] tests if string is empty
-    if (args[0] === "-z") {
-      const exitCode = args[1] === "" ? 0 : 1;
-      return { exitCode, label: ctx.pcLabel };
-    }
+  registry.register(
+    "test",
+    async (args: string[], ctx: CommandContext): Promise<CommandResult> => {
+      await Promise.resolve();
+      // Simple test: [ -z STRING ] tests if string is empty
+      if (args[0] === "-z") {
+        const exitCode = args[1] === "" ? 0 : 1;
+        return { exitCode, label: ctx.pcLabel };
+      }
 
-    // [ STRING1 = STRING2 ]
-    if (args[1] === "=") {
-      const exitCode = args[0] === args[2] ? 0 : 1;
-      return { exitCode, label: ctx.pcLabel };
-    }
+      // [ STRING1 = STRING2 ]
+      if (args[1] === "=") {
+        const exitCode = args[0] === args[2] ? 0 : 1;
+        return { exitCode, label: ctx.pcLabel };
+      }
 
-    return { exitCode: 1, label: ctx.pcLabel };
-  });
+      return { exitCode: 1, label: ctx.pcLabel };
+    },
+  );
 
   return createSession({ registry, vfs });
 }
@@ -130,7 +146,7 @@ Deno.test("interpreter: special variable $? (last exit code)", async () => {
   assertEquals(session.lastExitCode, 1);
 
   // $? should reflect the last exit code
-  const exitCodeVar = session.env.get("?");
+  const _exitCodeVar = session.env.get("?");
   // Note: $? is handled specially in expandWord, not in env
 });
 
@@ -272,29 +288,36 @@ Deno.test("interpreter: ; connector - both commands always run", async () => {
 Deno.test("interpreter: if-then executes then branch on success", async () => {
   const session = createTestSession();
 
-  await execute(`
+  await execute(
+    `
     if true; then
       echo in_then
     fi
-  `, session);
+  `,
+    session,
+  );
 });
 
 Deno.test("interpreter: if-then-else executes else branch on failure", async () => {
   const session = createTestSession();
 
-  await execute(`
+  await execute(
+    `
     if false; then
       echo in_then
     else
       echo in_else
     fi
-  `, session);
+  `,
+    session,
+  );
 });
 
 Deno.test("interpreter: if-elif-else chain", async () => {
   const session = createTestSession();
 
-  await execute(`
+  await execute(
+    `
     if false; then
       echo first
     elif true; then
@@ -302,18 +325,23 @@ Deno.test("interpreter: if-elif-else chain", async () => {
     else
       echo third
     fi
-  `, session);
+  `,
+    session,
+  );
 });
 
 Deno.test("interpreter: if with PC taint - condition label taints branch output", async () => {
   const session = createTestSession();
 
   // The condition's label should be pushed onto PC stack during branch execution
-  await execute(`
+  await execute(
+    `
     if true; then
       echo tainted
     fi
-  `, session);
+  `,
+    session,
+  );
 });
 
 // ============================================================================
@@ -323,11 +351,14 @@ Deno.test("interpreter: if with PC taint - condition label taints branch output"
 Deno.test("interpreter: for loop iterates over words", async () => {
   const session = createTestSession();
 
-  await execute(`
+  await execute(
+    `
     for i in a b c; do
       echo $i
     done
-  `, session);
+  `,
+    session,
+  );
 
   // Loop variable should be set to last value
   const value = session.env.get("i");
@@ -338,23 +369,29 @@ Deno.test("interpreter: for loop iterates over words", async () => {
 Deno.test("interpreter: for loop with variable expansion", async () => {
   const session = createTestSession();
 
-  await execute(`
+  await execute(
+    `
     ITEMS="one two three"
     for item in $ITEMS; do
       echo $item
     done
-  `, session);
+  `,
+    session,
+  );
 });
 
 Deno.test("interpreter: for loop with PC taint - word list taints iterations", async () => {
   const session = createTestSession();
 
   // The iteration count reveals information about the word list
-  await execute(`
+  await execute(
+    `
     for x in a b; do
       echo iteration
     done
-  `, session);
+  `,
+    session,
+  );
 });
 
 // ============================================================================
@@ -370,11 +407,14 @@ Deno.test("interpreter: while loop runs until condition fails", async () => {
   // Use a simple loop that will terminate
   // Note: This is tricky because we need a way to modify COUNT in the loop
   // For now, just test that while with false doesn't run
-  await execute(`
+  await execute(
+    `
     while false; do
       echo should_not_run
     done
-  `, session);
+  `,
+    session,
+  );
 });
 
 Deno.test("interpreter: while loop with true runs body (limited iterations)", async () => {
@@ -382,12 +422,15 @@ Deno.test("interpreter: while loop with true runs body (limited iterations)", as
 
   // This would be infinite, but we have a safety limit
   // Just test that the loop mechanism works
-  await execute(`
+  await execute(
+    `
     while true; do
       echo iteration
       break
     done
-  `, session);
+  `,
+    session,
+  );
 });
 
 // ============================================================================
@@ -456,7 +499,7 @@ Deno.test("interpreter: label propagates through pipeline", async () => {
     {
       confidentiality: [[{ kind: "Custom", tag: "secret" }]],
       integrity: [],
-    }
+    },
   );
 
   session.vfs.writeFile("/tmp/secret.txt", "secret data", secretLabel);
@@ -482,11 +525,14 @@ Deno.test("interpreter: PC label taints output in conditional", async () => {
   session.vfs.writeFile("/tmp/tainted.txt", "tainted", taintedLabel);
 
   // Use tainted data in condition
-  await execute(`
+  await execute(
+    `
     if cat /tmp/tainted.txt > /dev/null; then
       echo revealed
     fi
-  `, session);
+  `,
+    session,
+  );
 
   // The "revealed" output should be tainted by the condition
   // (PC stack tracking should propagate this)
@@ -499,7 +545,8 @@ Deno.test("interpreter: PC label taints output in conditional", async () => {
 Deno.test("interpreter: complex script with multiple features", async () => {
   const session = createTestSession();
 
-  await execute(`
+  await execute(
+    `
     # Variable assignment
     NAME=world
 
@@ -517,7 +564,9 @@ Deno.test("interpreter: complex script with multiple features", async () => {
     # Pipeline with redirection
     echo output > /tmp/result.txt
     cat /tmp/result.txt
-  `, session);
+  `,
+    session,
+  );
 
   assertEquals(session.lastExitCode, 0);
 });
@@ -525,13 +574,16 @@ Deno.test("interpreter: complex script with multiple features", async () => {
 Deno.test("interpreter: nested control structures", async () => {
   const session = createTestSession();
 
-  await execute(`
+  await execute(
+    `
     for x in a b; do
       if true; then
         echo $x
       fi
     done
-  `, session);
+  `,
+    session,
+  );
 
   assertEquals(session.lastExitCode, 0);
 });
@@ -568,10 +620,13 @@ Deno.test("interpreter: empty input", async () => {
 Deno.test("interpreter: comments are ignored", async () => {
   const session = createTestSession();
 
-  const result = await execute(`
+  const result = await execute(
+    `
     # This is a comment
     echo hello # inline comment
-  `, session);
+  `,
+    session,
+  );
 
   assertEquals(result.exitCode, 0);
 });

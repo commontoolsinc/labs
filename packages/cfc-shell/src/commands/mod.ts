@@ -7,16 +7,25 @@ export * from "./context.ts";
 export { CommandRegistry } from "./registry.ts";
 
 // Command implementations
-import { cd, pwd, ls } from "./navigation.ts";
-import { cat, head, tail, wc, diff } from "./read.ts";
+import { cd, ls, pwd } from "./navigation.ts";
+import { cat, diff, head, tail, wc } from "./read.ts";
 import { grep } from "./search.ts";
-import { sed, sort, uniq, cut, tr, jq, base64 } from "./transform.ts";
-import { cp, mv, rm, mkdir, touch, tee, chmod } from "./write.ts";
+import { base64, cut, jq, sed, sort, tr, uniq } from "./transform.ts";
+import { chmod, cp, mkdir, mv, rm, tee, touch } from "./write.ts";
 import { echo, printf } from "./output.ts";
-import { exportCmd, unset, env, printenv } from "./env.ts";
+import { env, exportCmd, printenv, unset } from "./env.ts";
 import { curl } from "./network.ts";
 import { bash, evalCmd, source } from "./exec.ts";
-import { date, trueCmd, falseCmd, test, sleep, read, which, xargs } from "./misc.ts";
+import {
+  date,
+  falseCmd,
+  read,
+  sleep,
+  test,
+  trueCmd,
+  which,
+  xargs,
+} from "./misc.ts";
 import { realCommand } from "./real.ts";
 import { CommandRegistry } from "./registry.ts";
 

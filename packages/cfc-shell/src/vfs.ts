@@ -116,7 +116,7 @@ export class VFS {
     const absolutePath = this.resolveCwd(path);
 
     // Split into parts and process
-    const parts = absolutePath.split("/").filter(p => p !== "");
+    const parts = absolutePath.split("/").filter((p) => p !== "");
     const normalized: string[] = [];
 
     for (const part of parts) {
@@ -150,12 +150,10 @@ export class VFS {
     }
 
     // Join with cwd
-    const joined = this.cwd === "/"
-      ? "/" + path
-      : this.cwd + "/" + path;
+    const joined = this.cwd === "/" ? "/" + path : this.cwd + "/" + path;
 
     // Normalize the joined path (but don't recurse)
-    const parts = joined.split("/").filter(p => p !== "");
+    const parts = joined.split("/").filter((p) => p !== "");
     const normalized: string[] = [];
 
     for (const part of parts) {
@@ -201,7 +199,7 @@ export class VFS {
   private resolveWithDepth(
     path: string,
     followSymlinks: boolean,
-    depth: number
+    depth: number,
   ): VFSNode | null {
     // Cycle detection via depth limit
     if (depth > 40) {
@@ -214,7 +212,7 @@ export class VFS {
       return this.root;
     }
 
-    const parts = normalized.split("/").filter(p => p !== "");
+    const parts = normalized.split("/").filter((p) => p !== "");
     return this.resolveFrom(this.root, parts, followSymlinks, depth);
   }
 
@@ -222,7 +220,7 @@ export class VFS {
     current: VFSNode,
     parts: string[],
     followSymlinks: boolean,
-    depth: number
+    depth: number,
   ): VFSNode | null {
     // Cycle detection via depth limit
     if (depth > 40) {
@@ -267,7 +265,9 @@ export class VFS {
     }
 
     const lastSlash = normalized.lastIndexOf("/");
-    const parentPath = lastSlash === 0 ? "/" : normalized.substring(0, lastSlash);
+    const parentPath = lastSlash === 0
+      ? "/"
+      : normalized.substring(0, lastSlash);
     const name = normalized.substring(lastSlash + 1);
 
     const parent = this.resolve(parentPath, true);
@@ -343,7 +343,7 @@ export class VFS {
       // (new label must be >= existing label, meaning more restrictive)
       if (!labels.flowsTo(existing.label, label)) {
         throw new Error(
-          `Label monotonicity violation: cannot write less restrictive label to ${path}`
+          `Label monotonicity violation: cannot write less restrictive label to ${path}`,
         );
       }
 
@@ -355,7 +355,9 @@ export class VFS {
     } else {
       // Create new file, auto-creating parent directories
       const lastSlash = normalized.lastIndexOf("/");
-      const parentPath = lastSlash === 0 ? "/" : normalized.substring(0, lastSlash);
+      const parentPath = lastSlash === 0
+        ? "/"
+        : normalized.substring(0, lastSlash);
       const name = normalized.substring(lastSlash + 1);
 
       // Ensure parent exists
@@ -428,7 +430,9 @@ export class VFS {
     }
 
     const lastSlash = normalized.lastIndexOf("/");
-    const parentPath = lastSlash === 0 ? "/" : normalized.substring(0, lastSlash);
+    const parentPath = lastSlash === 0
+      ? "/"
+      : normalized.substring(0, lastSlash);
     const name = normalized.substring(lastSlash + 1);
 
     // Ensure parent exists
@@ -525,12 +529,16 @@ export class VFS {
     }
 
     // Remove from source
-    const { parent: srcParent, name: srcName } = this.resolveParent(srcNormalized);
+    const { parent: srcParent, name: srcName } = this.resolveParent(
+      srcNormalized,
+    );
     srcParent.children.delete(srcName);
 
     // Add to destination
     const lastSlash = dstNormalized.lastIndexOf("/");
-    const dstParentPath = lastSlash === 0 ? "/" : dstNormalized.substring(0, lastSlash);
+    const dstParentPath = lastSlash === 0
+      ? "/"
+      : dstNormalized.substring(0, lastSlash);
     const dstName = dstNormalized.substring(lastSlash + 1);
 
     this.mkdir(dstParentPath, true);
@@ -638,8 +646,13 @@ export class VFS {
       if (mountPoint === m.mountPoint) {
         throw new Error(`Already mounted at ${mountPoint}`);
       }
-      if (mountPoint.startsWith(m.mountPoint + "/") || m.mountPoint.startsWith(mountPoint + "/")) {
-        throw new Error(`Overlapping mount: ${mountPoint} conflicts with ${m.mountPoint}`);
+      if (
+        mountPoint.startsWith(m.mountPoint + "/") ||
+        m.mountPoint.startsWith(mountPoint + "/")
+      ) {
+        throw new Error(
+          `Overlapping mount: ${mountPoint} conflicts with ${m.mountPoint}`,
+        );
       }
     }
 
@@ -661,7 +674,7 @@ export class VFS {
    */
   unmount(mountPoint: string): void {
     const normalized = this.resolvePath(mountPoint);
-    const idx = this.mounts.findIndex(m => m.mountPoint === normalized);
+    const idx = this.mounts.findIndex((m) => m.mountPoint === normalized);
     if (idx === -1) {
       throw new Error(`Not mounted: ${mountPoint}`);
     }
@@ -669,8 +682,10 @@ export class VFS {
   }
 
   /** Get all current mounts */
-  getMounts(): ReadonlyArray<{ mountPoint: string; hostPath: string; readOnly: boolean }> {
-    return this.mounts.map(m => ({
+  getMounts(): ReadonlyArray<
+    { mountPoint: string; hostPath: string; readOnly: boolean }
+  > {
+    return this.mounts.map((m) => ({
       mountPoint: m.mountPoint,
       hostPath: m.hostPath,
       readOnly: m.readOnly,
@@ -681,7 +696,9 @@ export class VFS {
    * Find a mount that covers the given normalized VFS path.
    * Returns the mount entry and the relative path within the mount.
    */
-  private findMount(normalizedPath: string): { mount: MountEntry; relPath: string } | null {
+  private findMount(
+    normalizedPath: string,
+  ): { mount: MountEntry; relPath: string } | null {
     for (const m of this.mounts) {
       if (normalizedPath === m.mountPoint) {
         return { mount: m, relPath: "" };
@@ -752,7 +769,11 @@ export class VFS {
   /**
    * Store a label for a file in a mount.
    */
-  private setMountLabel(mount: MountEntry, relPath: string, label: Label): void {
+  private setMountLabel(
+    mount: MountEntry,
+    relPath: string,
+    label: Label,
+  ): void {
     const store = this.loadLabelStore(mount);
     store.set(relPath, {
       confidentiality: label.confidentiality,
@@ -782,7 +803,11 @@ export class VFS {
   /**
    * Write a file through a mount.
    */
-  writeMountedFile(path: string, content: Uint8Array | string, label: Label): boolean {
+  writeMountedFile(
+    path: string,
+    content: Uint8Array | string,
+    label: Label,
+  ): boolean {
     const normalized = this.resolvePath(path);
     const found = this.findMount(normalized);
     if (!found) return false;

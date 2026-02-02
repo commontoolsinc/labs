@@ -8,7 +8,11 @@ import { labels } from "../labels.ts";
 /**
  * cd - change working directory
  */
-export async function cd(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function cd(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
+  await Promise.resolve();
   const dir = args[0] || ctx.env.get("HOME")?.value || "/";
 
   try {
@@ -23,7 +27,11 @@ export async function cd(args: string[], ctx: CommandContext): Promise<CommandRe
 /**
  * pwd - print working directory
  */
-export async function pwd(_args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function pwd(
+  _args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
+  await Promise.resolve();
   ctx.stdout.write(ctx.vfs.cwd + "\n", ctx.pcLabel);
   return { exitCode: 0, label: ctx.pcLabel };
 }
@@ -31,7 +39,11 @@ export async function pwd(_args: string[], ctx: CommandContext): Promise<Command
 /**
  * ls - list directory contents
  */
-export async function ls(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function ls(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
+  await Promise.resolve();
   let longFormat = false;
   let showAll = false;
   const paths: string[] = [];
@@ -66,7 +78,10 @@ export async function ls(args: string[], ctx: CommandContext): Promise<CommandRe
       const node = ctx.vfs.resolve(path, true);
 
       if (!node) {
-        ctx.stderr.write(`ls: cannot access '${path}': No such file or directory\n`, ctx.pcLabel);
+        ctx.stderr.write(
+          `ls: cannot access '${path}': No such file or directory\n`,
+          ctx.pcLabel,
+        );
         exitCode = 1;
         continue;
       }
@@ -83,7 +98,11 @@ export async function ls(args: string[], ctx: CommandContext): Promise<CommandRe
           if (longFormat) {
             const mode = child.metadata.mode.toString(8).padStart(4, "0");
             const size = child.metadata.size.toString().padStart(8);
-            const kind = child.kind === "directory" ? "d" : child.kind === "symlink" ? "l" : "-";
+            const kind = child.kind === "directory"
+              ? "d"
+              : child.kind === "symlink"
+              ? "l"
+              : "-";
             ctx.stdout.write(`${kind}${mode} ${size} ${name}\n`, outputLabel);
           } else {
             ctx.stdout.write(name + "\n", outputLabel);

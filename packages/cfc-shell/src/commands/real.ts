@@ -22,9 +22,9 @@
  *   !real --profile python-data -- python train.py
  */
 
-import { CommandFn, CommandResult, CommandContext } from "./context.ts";
+import { CommandContext, CommandFn, CommandResult } from "./context.ts";
 import { SandboxedExecutor } from "../sandbox/executor.ts";
-import { defaultConfig, mergeConfig, getProfile } from "../sandbox/config.ts";
+import { defaultConfig, getProfile, mergeConfig } from "../sandbox/config.ts";
 import { labels } from "../labels.ts";
 
 /**
@@ -48,14 +48,14 @@ function parseRealFlags(args: string[]): RealCommandFlags {
   };
 
   let i = 0;
-  let foundSeparator = false;
+  let _foundSeparator = false;
 
   while (i < args.length) {
     const arg = args[i];
 
     if (arg === "--") {
       // Everything after -- is the actual command
-      foundSeparator = true;
+      _foundSeparator = true;
       i++;
       break;
     } else if (arg === "--net") {
@@ -265,7 +265,9 @@ export const realCommand: CommandFn = async (
     };
   } catch (error) {
     await ctx.stderr.write(
-      `!real: Execution failed: ${error instanceof Error ? error.message : String(error)}\n`,
+      `!real: Execution failed: ${
+        error instanceof Error ? error.message : String(error)
+      }\n`,
       labels.bottom(),
     );
     ctx.stderr.close();

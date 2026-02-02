@@ -9,15 +9,13 @@
  * Plus an end-to-end Gmail read case test.
  */
 
-import { assertEquals } from "jsr:@std/assert";
-import type { Atom, Label, Clause } from "../src/labels.ts";
-import { labels } from "../src/labels.ts";
+import { assertEquals } from "@std/assert";
+import type { Atom, Label } from "../src/labels.ts";
 import {
   evalExchangeRules,
-  pat,
   type ExchangeRule,
+  pat,
   type PolicyRecord,
-  type AtomPattern,
 } from "../src/policy.ts";
 
 // ============================================================================
@@ -32,8 +30,14 @@ function user(did: string): Atom {
   return { kind: "PersonalSpace", did };
 }
 
-const authorizedRequest: Atom = { kind: "IntegrityToken", name: "AuthorizedRequest" };
-const networkProvenance: Atom = { kind: "IntegrityToken", name: "NetworkProvenance" };
+const authorizedRequest: Atom = {
+  kind: "IntegrityToken",
+  name: "AuthorizedRequest",
+};
+const networkProvenance: Atom = {
+  kind: "IntegrityToken",
+  name: "NetworkProvenance",
+};
 
 /** Token label: { conf: [[User(Alice)], [GoogleAuth(Alice)]], integ: [] } */
 function tokenLabel(u: string): Label {
@@ -56,13 +60,18 @@ function googleAuthDropRule(u: string): ExchangeRule {
   return {
     name: "AuthorityOnlyDropGoogleAuth",
     preConf: [
-      { kind: "Policy", name: pat.lit("GoogleAuth"), subject: pat.lit(u), hash: pat.lit("h") },
+      {
+        kind: "Policy",
+        name: pat.lit("GoogleAuth"),
+        subject: pat.lit(u),
+        hash: pat.lit("h"),
+      },
     ],
     preInteg: [
       { kind: "IntegrityToken", name: pat.lit("AuthorizedRequest") },
       { kind: "IntegrityToken", name: pat.lit("NetworkProvenance") },
     ],
-    postConf: [],  // drop
+    postConf: [], // drop
     postInteg: [],
   };
 }
@@ -94,7 +103,7 @@ Deno.test("policy: with guards, drops GoogleAuth confidentiality", () => {
 Deno.test("policy: without guards, no-op (safe default)", () => {
   const alice = "Alice";
   const policies = [googleAuthPolicy(alice)];
-  const boundary: Atom[] = [];  // no integrity evidence
+  const boundary: Atom[] = []; // no integrity evidence
 
   const input = tokenLabel(alice);
   const result = evalExchangeRules(policies, boundary, input);
@@ -107,7 +116,7 @@ Deno.test("policy: without guards, no-op (safe default)", () => {
 Deno.test("policy: partial guards (only AuthorizedRequest) — no-op", () => {
   const alice = "Alice";
   const policies = [googleAuthPolicy(alice)];
-  const boundary = [authorizedRequest];  // missing NetworkProvenance
+  const boundary = [authorizedRequest]; // missing NetworkProvenance
 
   const input = tokenLabel(alice);
   const result = evalExchangeRules(policies, boundary, input);
@@ -153,7 +162,12 @@ Deno.test("policy: stale index handling — multiple drops", () => {
 Deno.test("policy: add alternatives (non-drop rule)", () => {
   // Exchange rule that adds User(acting) as alternative to Space clause
   const spaceAtom: Atom = { kind: "Space", id: "workspace-1" };
-  const readerRole: Atom = { kind: "HasRole", principal: "Alice", space: "workspace-1", role: "reader" };
+  const readerRole: Atom = {
+    kind: "HasRole",
+    principal: "Alice",
+    space: "workspace-1",
+    role: "reader",
+  };
 
   const spaceReaderRule: ExchangeRule = {
     name: "SpaceReaderAccess",
@@ -161,7 +175,12 @@ Deno.test("policy: add alternatives (non-drop rule)", () => {
       { kind: "Space", id: pat.var("S") },
     ],
     preInteg: [
-      { kind: "HasRole", principal: pat.var("U"), space: pat.var("S"), role: pat.lit("reader") },
+      {
+        kind: "HasRole",
+        principal: pat.var("U"),
+        space: pat.var("S"),
+        role: pat.lit("reader"),
+      },
     ],
     // Add User(U) as alternative in the Space clause
     postConf: [
@@ -170,10 +189,15 @@ Deno.test("policy: add alternatives (non-drop rule)", () => {
     postInteg: [],
   };
 
-  const policies: PolicyRecord[] = [];  // No policy principal needed for this test
+  const _policies: PolicyRecord[] = []; // No policy principal needed for this test
   // Actually, the rule needs to be triggered by a policy principal in scope.
   // Let's make Space a policy principal via a wrapper.
-  const spacePolicyAtom: Atom = { kind: "Policy", name: "SpacePolicy", subject: "workspace-1", hash: "h" };
+  const spacePolicyAtom: Atom = {
+    kind: "Policy",
+    name: "SpacePolicy",
+    subject: "workspace-1",
+    hash: "h",
+  };
 
   const spacePolicies: PolicyRecord[] = [{
     principal: spacePolicyAtom,
@@ -189,25 +213,36 @@ Deno.test("policy: add alternatives (non-drop rule)", () => {
   const result = evalExchangeRules(spacePolicies, [readerRole], input);
 
   // The Space clause should now also contain PersonalSpace(Alice)
-  const spaceClause = result.confidentiality.find(c =>
-    c.some(a => a.kind === "Space")
+  const spaceClause = result.confidentiality.find((c) =>
+    c.some((a) => a.kind === "Space")
   );
   assertEquals(spaceClause !== undefined, true);
-  assertEquals(spaceClause!.some(a =>
-    a.kind === "PersonalSpace" && a.did === "Alice"
-  ), true);
+  assertEquals(
+    spaceClause!.some((a) => a.kind === "PersonalSpace" && a.did === "Alice"),
+    true,
+  );
 });
 
 Deno.test("policy: variable binding across conf and integ patterns", () => {
   // Rule that uses the same variable in conf and integ patterns
   const alice = "Alice";
-  const P: Atom = { kind: "Policy", name: "TestPolicy", subject: alice, hash: "h" };
+  const P: Atom = {
+    kind: "Policy",
+    name: "TestPolicy",
+    subject: alice,
+    hash: "h",
+  };
 
   // Drop PersonalSpace(X) if EndorsedBy(X) is in integrity
   const endorsedDropRule: ExchangeRule = {
     name: "EndorsedDrop",
     preConf: [
-      { kind: "Policy", name: pat.lit("TestPolicy"), subject: pat.var("U"), hash: pat.lit("h") },
+      {
+        kind: "Policy",
+        name: pat.lit("TestPolicy"),
+        subject: pat.var("U"),
+        hash: pat.lit("h"),
+      },
     ],
     preInteg: [
       { kind: "EndorsedBy", principal: pat.var("U") },
@@ -227,11 +262,17 @@ Deno.test("policy: variable binding across conf and integ patterns", () => {
   };
 
   // Without matching endorsement — no-op
-  const result1 = evalExchangeRules(policies, [{ kind: "EndorsedBy", principal: "Bob" }], input);
+  const result1 = evalExchangeRules(policies, [{
+    kind: "EndorsedBy",
+    principal: "Bob",
+  }], input);
   assertEquals(result1.confidentiality.length, 2);
 
   // With matching endorsement — drops the Policy clause
-  const result2 = evalExchangeRules(policies, [{ kind: "EndorsedBy", principal: alice }], input);
+  const result2 = evalExchangeRules(policies, [{
+    kind: "EndorsedBy",
+    principal: alice,
+  }], input);
   assertEquals(result2.confidentiality.length, 1);
   // Only User(Alice) remains
   assertEquals(result2.confidentiality[0][0], user(alice));
@@ -275,25 +316,51 @@ Deno.test("gmail read case: token confidentiality dropped after authorized fetch
   const rawResponseLabel: Label = {
     confidentiality: tokenLabel(alice).confidentiality,
     integrity: [
-      { kind: "Origin", url: "https://gmail.googleapis.com/gmail/v1/users/me/messages" },
+      {
+        kind: "Origin",
+        url: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+      },
       { kind: "NetworkProvenance", tls: true, host: "gmail.googleapis.com" },
     ],
   };
 
   // Boundary integrity minted by curl (structural proof: secret in Authorization header only)
   const boundaryIntegrity = [
-    { kind: "Origin", url: "https://gmail.googleapis.com/gmail/v1/users/me/messages" } as Atom,
-    { kind: "NetworkProvenance", tls: true, host: "gmail.googleapis.com" } as Atom,
+    {
+      kind: "Origin",
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+    } as Atom,
+    {
+      kind: "NetworkProvenance",
+      tls: true,
+      host: "gmail.googleapis.com",
+    } as Atom,
     { kind: "IntegrityToken", name: "AuthorizedRequest" } as Atom,
     { kind: "IntegrityToken", name: "NetworkProvenance" } as Atom,
   ];
 
-  const result = evalExchangeRules(policies, boundaryIntegrity, rawResponseLabel);
+  const result = evalExchangeRules(
+    policies,
+    boundaryIntegrity,
+    rawResponseLabel,
+  );
 
   // GoogleAuth(Alice) clause should be dropped
-  assertEquals(result.confidentiality.length, 1, "Should have 1 confidentiality clause");
-  assertEquals(result.confidentiality[0].length, 1, "Clause should have 1 atom");
-  assertEquals(result.confidentiality[0][0], user(alice), "Should be User(Alice)");
+  assertEquals(
+    result.confidentiality.length,
+    1,
+    "Should have 1 confidentiality clause",
+  );
+  assertEquals(
+    result.confidentiality[0].length,
+    1,
+    "Clause should have 1 atom",
+  );
+  assertEquals(
+    result.confidentiality[0][0],
+    user(alice),
+    "Should be User(Alice)",
+  );
 
   // Integrity preserved
   assertEquals(result.integrity.length, 2, "Should have 2 integrity atoms");
@@ -312,7 +379,11 @@ Deno.test("gmail read case: query secret taints response (data-bearing)", () => 
   const alice = "Alice";
   const policies = [googleAuthPolicy(alice)];
 
-  const notesSecret: Atom = { kind: "Custom", tag: "NotesSecret", value: alice };
+  const notesSecret: Atom = {
+    kind: "Custom",
+    tag: "NotesSecret",
+    value: alice,
+  };
 
   // The PC label is the join of token + query labels
   // Token: [[User(Alice)], [GoogleAuth(Alice)]]
@@ -325,36 +396,54 @@ Deno.test("gmail read case: query secret taints response (data-bearing)", () => 
       [notesSecret],
     ],
     integrity: [
-      { kind: "Origin", url: "https://gmail.googleapis.com/gmail/v1/users/me/messages" },
+      {
+        kind: "Origin",
+        url: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+      },
       { kind: "NetworkProvenance", tls: true, host: "gmail.googleapis.com" },
     ],
   };
 
   const boundaryIntegrity = [
-    { kind: "Origin", url: "https://gmail.googleapis.com/gmail/v1/users/me/messages" } as Atom,
-    { kind: "NetworkProvenance", tls: true, host: "gmail.googleapis.com" } as Atom,
+    {
+      kind: "Origin",
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+    } as Atom,
+    {
+      kind: "NetworkProvenance",
+      tls: true,
+      host: "gmail.googleapis.com",
+    } as Atom,
     { kind: "IntegrityToken", name: "AuthorizedRequest" } as Atom,
     { kind: "IntegrityToken", name: "NetworkProvenance" } as Atom,
   ];
 
-  const result = evalExchangeRules(policies, boundaryIntegrity, rawResponseLabel);
+  const result = evalExchangeRules(
+    policies,
+    boundaryIntegrity,
+    rawResponseLabel,
+  );
 
   // GoogleAuth dropped, but User(Alice) and NotesSecret(Alice) preserved
-  assertEquals(result.confidentiality.length, 2, "Should have 2 confidentiality clauses");
+  assertEquals(
+    result.confidentiality.length,
+    2,
+    "Should have 2 confidentiality clauses",
+  );
 
-  const hasUser = result.confidentiality.some(c =>
+  const hasUser = result.confidentiality.some((c) =>
     c.length === 1 && c[0].kind === "PersonalSpace" && c[0].did === alice
   );
   assertEquals(hasUser, true, "Should have User(Alice)");
 
-  const hasNotes = result.confidentiality.some(c =>
+  const hasNotes = result.confidentiality.some((c) =>
     c.length === 1 && c[0].kind === "Custom" && c[0].tag === "NotesSecret"
   );
   assertEquals(hasNotes, true, "Should have NotesSecret(Alice)");
 
   // GoogleAuth should be gone
-  const hasGoogleAuth = result.confidentiality.some(c =>
-    c.some(a => a.kind === "Policy" && a.name === "GoogleAuth")
+  const hasGoogleAuth = result.confidentiality.some((c) =>
+    c.some((a) => a.kind === "Policy" && a.name === "GoogleAuth")
   );
   assertEquals(hasGoogleAuth, false, "GoogleAuth should be dropped");
 });

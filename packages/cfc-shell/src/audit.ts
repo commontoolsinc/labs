@@ -43,21 +43,21 @@ export class AuditLog {
    * Get entries for a specific command
    */
   forCommand(command: string): AuditEntry[] {
-    return this.entries.filter(e => e.command === command);
+    return this.entries.filter((e) => e.command === command);
   }
 
   /**
    * Get all blocked entries
    */
   blocked(): AuditEntry[] {
-    return this.entries.filter(e => e.verdict === "blocked");
+    return this.entries.filter((e) => e.verdict === "blocked");
   }
 
   /**
    * Get entries since a timestamp
    */
   since(timestamp: number): AuditEntry[] {
-    return this.entries.filter(e => e.timestamp >= timestamp);
+    return this.entries.filter((e) => e.timestamp >= timestamp);
   }
 
   /**
@@ -80,16 +80,18 @@ export class AuditLog {
 
     // Format labels concisely
     if (entry.inputLabels.length > 0) {
-      const integrities = entry.inputLabels.map(l =>
-        l.integrity.map(a => a.kind).join("|") || "none"
+      const integrities = entry.inputLabels.map((l) =>
+        l.integrity.map((a) => a.kind).join("|") || "none"
       );
       result += `  Input integrity: [${integrities.join(", ")}]\n`;
     }
 
-    const outputIntegrity = entry.outputLabel.integrity.map(a => a.kind).join("|") || "none";
+    const outputIntegrity =
+      entry.outputLabel.integrity.map((a) => a.kind).join("|") || "none";
     result += `  Output integrity: ${outputIntegrity}\n`;
 
-    const pcIntegrity = entry.pcLabel.integrity.map(a => a.kind).join("|") || "none";
+    const pcIntegrity = entry.pcLabel.integrity.map((a) => a.kind).join("|") ||
+      "none";
     result += `  PC integrity: ${pcIntegrity}\n`;
 
     return result;
@@ -99,7 +101,7 @@ export class AuditLog {
    * Format all entries
    */
   formatAll(): string {
-    return this.entries.map(e => this.format(e)).join("\n");
+    return this.entries.map((e) => this.format(e)).join("\n");
   }
 
   /**

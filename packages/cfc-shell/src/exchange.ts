@@ -6,7 +6,7 @@
  * and confidentiality requirements.
  */
 
-import { Label, Atom, labels } from "./labels.ts";
+import { Atom, Label } from "./labels.ts";
 
 /**
  * Matches atoms by kind and optional parameters
@@ -29,7 +29,12 @@ export interface ExchangeRule {
     /** Or: any command that is a commit point */
     commitPoint?: boolean;
     /** Or: any command in this category */
-    category?: "exec" | "network-egress" | "network-fetch" | "destructive-write" | "env-mutation";
+    category?:
+      | "exec"
+      | "network-egress"
+      | "network-fetch"
+      | "destructive-write"
+      | "env-mutation";
   };
   /** Conditions that must be met for the flow to be allowed */
   requires?: {
@@ -84,8 +89,8 @@ export function atomMatchesMatcher(atom: Atom, matcher: AtomMatcher): boolean {
  * Check if a label has at least one atom matching any of the matchers
  */
 export function atomMatchesAny(label: Label, matchers: AtomMatcher[]): boolean {
-  return label.integrity.some(atom =>
-    matchers.some(matcher => atomMatchesMatcher(atom, matcher))
+  return label.integrity.some((atom) =>
+    matchers.some((matcher) => atomMatchesMatcher(atom, matcher))
   );
 }
 
@@ -184,8 +189,8 @@ export class ExchangeRuleEvaluator {
       // This would be checked by the caller marking certain commands as commit points
       // For now, we consider network and exec categories as commit points
       return category === "network-egress" ||
-             category === "exec" ||
-             category === "destructive-write";
+        category === "exec" ||
+        category === "destructive-write";
     }
 
     return false;
@@ -203,14 +208,18 @@ export class ExchangeRuleEvaluator {
     // Check data integrity requirements
     if (rule.requires.integrity) {
       if (!atomMatchesAny(dataLabel, rule.requires.integrity)) {
-        return `Data lacks required integrity atoms: ${rule.requires.integrity.map(m => m.kind).join(", ")}`;
+        return `Data lacks required integrity atoms: ${
+          rule.requires.integrity.map((m) => m.kind).join(", ")
+        }`;
       }
     }
 
     // Check data integrity blacklist
     if (rule.requires.notIntegrity) {
       for (const matcher of rule.requires.notIntegrity) {
-        if (dataLabel.integrity.some(atom => atomMatchesMatcher(atom, matcher))) {
+        if (
+          dataLabel.integrity.some((atom) => atomMatchesMatcher(atom, matcher))
+        ) {
           return `Data has blacklisted integrity atom: ${matcher.kind}`;
         }
       }
@@ -219,7 +228,9 @@ export class ExchangeRuleEvaluator {
     // Check PC integrity requirements
     if (rule.requires.pcIntegrity) {
       if (!atomMatchesAny(pcLabel, rule.requires.pcIntegrity)) {
-        return `PC lacks required integrity atoms: ${rule.requires.pcIntegrity.map(m => m.kind).join(", ")}`;
+        return `PC lacks required integrity atoms: ${
+          rule.requires.pcIntegrity.map((m) => m.kind).join(", ")
+        }`;
       }
     }
 

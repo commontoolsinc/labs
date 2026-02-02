@@ -1,6 +1,6 @@
 // Shell lexer/tokenizer
 
-import type { Word, WordPart, Program } from "./ast.ts";
+import type { Word, WordPart } from "./ast.ts";
 
 export type TokenType =
   | "Word"
@@ -96,7 +96,11 @@ class Lexer {
       if (op) {
         this.tokens.push(op);
         // After these operators, we're at command start
-        if (["Semi", "And", "Or", "Amp", "Pipe", "Newline", "LParen"].includes(op.type)) {
+        if (
+          ["Semi", "And", "Or", "Amp", "Pipe", "Newline", "LParen"].includes(
+            op.type,
+          )
+        ) {
           this.atCommandStart = true;
         }
         continue;
@@ -216,7 +220,8 @@ class Lexer {
         // Single-quoted string
         const sq = this.readSingleQuoted();
         parts.push(sq);
-        rawValue += "'" + (sq as { type: "SingleQuoted"; value: string }).value + "'";
+        rawValue += "'" +
+          (sq as { type: "SingleQuoted"; value: string }).value + "'";
       } else if (ch === '"') {
         // Double-quoted string
         const dq = this.readDoubleQuoted();
@@ -245,7 +250,10 @@ class Lexer {
         let lit = "";
         while (!this.isAtEnd() && !this.isWordBoundary()) {
           const c = this.peek();
-          if (c === "'" || c === '"' || c === "\\" || c === "$" || c === "*" || c === "?" || c === "[") break;
+          if (
+            c === "'" || c === '"' || c === "\\" || c === "$" || c === "*" ||
+            c === "?" || c === "["
+          ) break;
           lit += this.advance();
         }
         if (lit) {
@@ -262,7 +270,7 @@ class Lexer {
     // Check if this is an assignment (NAME=value at command start)
     if (this.atCommandStart && this.isAssignment(parts)) {
       const eqIndex = rawValue.indexOf("=");
-      const name = rawValue.substring(0, eqIndex);
+      const _name = rawValue.substring(0, eqIndex);
       return {
         type: "Assignment",
         value: rawValue,
@@ -396,7 +404,10 @@ class Lexer {
         if (!this.isAtEnd()) {
           const next = this.peek();
           // Only these characters can be escaped in double quotes
-          if (next === "$" || next === '"' || next === "\\" || next === "`" || next === "\n") {
+          if (
+            next === "$" || next === '"' || next === "\\" || next === "`" ||
+            next === "\n"
+          ) {
             this.advance();
             parts.push({ type: "Literal", value: next === "\n" ? "" : next });
           } else {
@@ -415,7 +426,10 @@ class Lexer {
       } else {
         // Literal characters - accumulate consecutive
         let lit = "";
-        while (!this.isAtEnd() && this.peek() !== '"' && this.peek() !== "\\" && this.peek() !== "$" && this.peek() !== "`") {
+        while (
+          !this.isAtEnd() && this.peek() !== '"' && this.peek() !== "\\" &&
+          this.peek() !== "$" && this.peek() !== "`"
+        ) {
           lit += this.advance();
         }
         if (lit) parts.push({ type: "Literal", value: lit });
@@ -465,7 +479,10 @@ class Lexer {
     }
 
     // Special variables: $?, $!, $$, $0-$9, etc.
-    if (ch === "?" || ch === "!" || ch === "$" || ch === "#" || ch === "*" || ch === "@" || ch === "-" || /[0-9]/.test(ch)) {
+    if (
+      ch === "?" || ch === "!" || ch === "$" || ch === "#" || ch === "*" ||
+      ch === "@" || ch === "-" || /[0-9]/.test(ch)
+    ) {
       const name = this.advance();
       return { type: "VariableExpansion", name };
     }
@@ -494,7 +511,9 @@ class Lexer {
       this.advance();
       if (!this.isAtEnd()) {
         const opChar = this.peek();
-        if (opChar === "-" || opChar === "=" || opChar === "+" || opChar === "?") {
+        if (
+          opChar === "-" || opChar === "=" || opChar === "+" || opChar === "?"
+        ) {
           this.advance();
           op = ":" + opChar;
 
@@ -505,7 +524,9 @@ class Lexer {
               argParts.push(this.readExpansion());
             } else {
               let lit = "";
-              while (!this.isAtEnd() && this.peek() !== "}" && this.peek() !== "$") {
+              while (
+                !this.isAtEnd() && this.peek() !== "}" && this.peek() !== "$"
+              ) {
                 lit += this.advance();
               }
               if (lit) argParts.push({ type: "Literal", value: lit });

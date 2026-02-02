@@ -21,8 +21,18 @@ import { ToolResult } from "./protocol.ts";
 /** A content part in a message */
 export type ContentPart =
   | { type: "text"; text: string }
-  | { type: "tool-call"; toolCallId: string; toolName: string; input: Record<string, unknown> }
-  | { type: "tool-result"; toolCallId: string; toolName: string; output: { type: "text"; value: string } };
+  | {
+    type: "tool-call";
+    toolCallId: string;
+    toolName: string;
+    input: Record<string, unknown>;
+  }
+  | {
+    type: "tool-result";
+    toolCallId: string;
+    toolName: string;
+    output: { type: "text"; value: string };
+  };
 
 /** A message in the conversation */
 export interface Message {
@@ -63,8 +73,7 @@ export interface LLMClient {
 
 const EXEC_TOOL: Record<string, ToolDef> = {
   exec: {
-    description:
-      "Execute a shell command in the CFC sandbox. " +
+    description: "Execute a shell command in the CFC sandbox. " +
       "The command string is interpreted by the CFC shell which supports " +
       "pipes, redirects, variables, and common Unix commands (cat, grep, sed, " +
       "jq, echo, etc.). Output is security-filtered based on the agent's " +
@@ -97,6 +106,8 @@ export interface AgentLoopOptions {
   system?: string;
   /** Maximum number of loop iterations (tool-call rounds). Default: 20 */
   maxIterations?: number;
+  /** Called before each tool execution */
+  onToolCall?: (toolName: string, input: Record<string, unknown>) => void;
   /** Called after each exec with the tool result */
   onToolResult?: (command: string, result: ToolResult) => void;
   /** Called with each assistant message */
@@ -125,6 +136,7 @@ export async function runAgentLoop(
     model,
     system,
     maxIterations = 20,
+    onToolCall,
     onToolResult,
     onAssistantMessage,
   } = options;
@@ -172,11 +184,15 @@ export async function runAgentLoop(
           type: "tool-result",
           toolCallId: tc.toolCallId,
           toolName: tc.toolName,
-          output: { type: "text", value: `Error: unknown tool "${tc.toolName}"` },
+          output: {
+            type: "text",
+            value: `Error: unknown tool "${tc.toolName}"`,
+          },
         });
         continue;
       }
 
+      onToolCall?.(tc.toolName, tc.input);
       const command = String(tc.input.command ?? "");
       const result = await agent.exec(command);
 
@@ -225,10 +241,14 @@ export async function runAgentLoop(
 
 function extractToolCalls(
   content: string | ContentPart[],
-): Array<{ toolCallId: string; toolName: string; input: Record<string, unknown> }> {
+): Array<
+  { toolCallId: string; toolName: string; input: Record<string, unknown> }
+> {
   if (typeof content === "string") return [];
   return content
-    .filter((p): p is ContentPart & { type: "tool-call" } => p.type === "tool-call")
+    .filter((p): p is ContentPart & { type: "tool-call" } =>
+      p.type === "tool-call"
+    )
     .map((p) => ({
       toolCallId: p.toolCallId,
       toolName: p.toolName,

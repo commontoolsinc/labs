@@ -17,7 +17,7 @@ export function expandGlob(vfs: VFS, pattern: string): Labeled<string[]> {
   const normalizedPattern = vfs.resolvePath(pattern);
 
   // Split pattern into segments
-  const segments = normalizedPattern.split("/").filter(s => s !== "");
+  const segments = normalizedPattern.split("/").filter((s) => s !== "");
 
   // Start from root
   const matches: string[] = [];
@@ -27,7 +27,7 @@ export function expandGlob(vfs: VFS, pattern: string): Labeled<string[]> {
   function matchSegments(
     currentPath: string,
     remainingSegments: string[],
-    currentDepth: number
+    currentDepth: number,
   ): void {
     // Get current node
     const node = vfs.resolve(currentPath === "" ? "/" : currentPath, true);
@@ -122,7 +122,7 @@ function matchGlobImpl(
   pattern: string,
   name: string,
   pIdx: number,
-  nIdx: number
+  nIdx: number,
 ): boolean {
   // Both exhausted - match
   if (pIdx === pattern.length && nIdx === name.length) {

@@ -111,13 +111,17 @@ function atomEqual(a: Atom, b: Atom): boolean {
     case "InfluenceClean":
       return true;
     case "Policy":
-      return (b as typeof a).name === a.name && (b as typeof a).subject === a.subject && (b as typeof a).hash === a.hash;
+      return (b as typeof a).name === a.name &&
+        (b as typeof a).subject === a.subject &&
+        (b as typeof a).hash === a.hash;
     case "IntegrityToken":
       return (b as typeof a).name === a.name;
     case "HasRole":
-      return (b as typeof a).principal === a.principal && (b as typeof a).space === a.space && (b as typeof a).role === a.role;
+      return (b as typeof a).principal === a.principal &&
+        (b as typeof a).space === a.space && (b as typeof a).role === a.role;
     case "Capability":
-      return (b as typeof a).capKind === a.capKind && (b as typeof a).resource === a.resource;
+      return (b as typeof a).capKind === a.capKind &&
+        (b as typeof a).resource === a.resource;
     case "Custom":
       return (b as typeof a).tag === a.tag && (b as typeof a).value === a.value;
   }
@@ -126,13 +130,13 @@ function atomEqual(a: Atom, b: Atom): boolean {
 function clauseEqual(a: Clause, b: Clause): boolean {
   if (a.length !== b.length) return false;
   // Clauses are sets, so order doesn't matter
-  return a.every(atomA => b.some(atomB => atomEqual(atomA, atomB)));
+  return a.every((atomA) => b.some((atomB) => atomEqual(atomA, atomB)));
 }
 
 function deduplicateAtoms(atoms: Atom[]): Atom[] {
   const result: Atom[] = [];
   for (const atom of atoms) {
-    if (!result.some(a => atomEqual(a, atom))) {
+    if (!result.some((a) => atomEqual(a, atom))) {
       result.push(atom);
     }
   }
@@ -142,7 +146,7 @@ function deduplicateAtoms(atoms: Atom[]): Atom[] {
 function deduplicateClauses(clauses: Clause[]): Clause[] {
   const result: Clause[] = [];
   for (const clause of clauses) {
-    if (!result.some(c => clauseEqual(c, clause))) {
+    if (!result.some((c) => clauseEqual(c, clause))) {
       result.push(clause);
     }
   }
@@ -150,7 +154,7 @@ function deduplicateClauses(clauses: Clause[]): Clause[] {
 }
 
 function atomSetContains(atoms: Atom[], atom: Atom): boolean {
-  return atoms.some(a => atomEqual(a, atom));
+  return atoms.some((a) => atomEqual(a, atom));
 }
 
 // ============================================================================
@@ -183,7 +187,7 @@ function join(a: Label, b: Label): Label {
 
   // Intersection of integrity atoms
   const integrity = deduplicateAtoms(
-    a.integrity.filter(atom => atomSetContains(b.integrity, atom))
+    a.integrity.filter((atom) => atomSetContains(b.integrity, atom)),
   );
 
   return { confidentiality, integrity };
@@ -199,9 +203,9 @@ function join(a: Label, b: Label): Label {
 function meet(a: Label, b: Label): Label {
   // Intersection of confidentiality clauses
   const confidentiality = deduplicateClauses(
-    a.confidentiality.filter(clauseA =>
-      b.confidentiality.some(clauseB => clauseEqual(clauseA, clauseB))
-    )
+    a.confidentiality.filter((clauseA) =>
+      b.confidentiality.some((clauseB) => clauseEqual(clauseA, clauseB))
+    ),
   );
 
   // Union of integrity atoms
@@ -266,7 +270,7 @@ function hasIntegrity(label: Label, atom: Atom): boolean {
  * hasAnyIntegrity - check if label has any of the given integrity atoms
  */
 function hasAnyIntegrity(label: Label, atoms: Atom[]): boolean {
-  return atoms.some(atom => hasIntegrity(label, atom));
+  return atoms.some((atom) => hasIntegrity(label, atom));
 }
 
 /**
@@ -279,8 +283,8 @@ function hasAnyIntegrity(label: Label, atoms: Atom[]): boolean {
  */
 function flowsTo(a: Label, b: Label): boolean {
   // Every clause in a must appear in b
-  return a.confidentiality.every(clauseA =>
-    b.confidentiality.some(clauseB => clauseEqual(clauseA, clauseB))
+  return a.confidentiality.every((clauseA) =>
+    b.confidentiality.some((clauseB) => clauseEqual(clauseA, clauseB))
   );
 }
 
@@ -294,7 +298,9 @@ function flowsTo(a: Label, b: Label): boolean {
 function userInput(): Label {
   return {
     confidentiality: [],
-    integrity: [{ kind: "UserInput" }, { kind: "InjectionFree" }, { kind: "InfluenceClean" }],
+    integrity: [{ kind: "UserInput" }, { kind: "InjectionFree" }, {
+      kind: "InfluenceClean",
+    }],
   };
 }
 
@@ -329,7 +335,7 @@ function llmGenerated(model?: string): Label {
 /**
  * fromFile - data from file (space confidentiality if spaceId given)
  */
-function fromFile(path: string, spaceId?: string): Label {
+function fromFile(_path: string, spaceId?: string): Label {
   const confidentiality: Confidentiality = spaceId
     ? [[{ kind: "Space", id: spaceId }]]
     : [];
@@ -344,7 +350,9 @@ function fromFile(path: string, spaceId?: string): Label {
 function clean(): Label {
   return {
     confidentiality: [],
-    integrity: [{ kind: "InjectionFree" }, { kind: "InfluenceClean" }, { kind: "UserInput" }],
+    integrity: [{ kind: "InjectionFree" }, { kind: "InfluenceClean" }, {
+      kind: "UserInput",
+    }],
   };
 }
 
@@ -361,7 +369,7 @@ function stripInjectionIntegrity(label: Label): Label {
   return {
     confidentiality: label.confidentiality,
     integrity: label.integrity.filter(
-      a => a.kind !== "InjectionFree" && a.kind !== "InfluenceClean"
+      (a) => a.kind !== "InjectionFree" && a.kind !== "InfluenceClean",
     ),
   };
 }
@@ -370,7 +378,7 @@ function stripInjectionIntegrity(label: Label): Label {
 function stripInfluenceClean(label: Label): Label {
   return {
     confidentiality: label.confidentiality,
-    integrity: label.integrity.filter(a => a.kind !== "InfluenceClean"),
+    integrity: label.integrity.filter((a) => a.kind !== "InfluenceClean"),
   };
 }
 

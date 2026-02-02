@@ -8,7 +8,10 @@ import { labels } from "../labels.ts";
 /**
  * cat - concatenate files to stdout
  */
-export async function cat(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function cat(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
   // If no args, copy stdin to stdout
   if (args.length === 0) {
     const { value, label } = await ctx.stdin.readAll();
@@ -37,7 +40,10 @@ export async function cat(args: string[], ctx: CommandContext): Promise<CommandR
 /**
  * head - output first N lines
  */
-export async function head(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function head(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
   let n = 10;
   let file: string | null = null;
 
@@ -46,7 +52,9 @@ export async function head(args: string[], ctx: CommandContext): Promise<Command
     if (args[i] === "-n" && i + 1 < args.length) {
       n = parseInt(args[i + 1], 10);
       i++;
-    } else if (args[i].startsWith("-") && !isNaN(parseInt(args[i].slice(1), 10))) {
+    } else if (
+      args[i].startsWith("-") && !isNaN(parseInt(args[i].slice(1), 10))
+    ) {
       n = parseInt(args[i].slice(1), 10);
     } else {
       file = args[i];
@@ -80,7 +88,10 @@ export async function head(args: string[], ctx: CommandContext): Promise<Command
 /**
  * tail - output last N lines
  */
-export async function tail(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function tail(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
   let n = 10;
   let file: string | null = null;
 
@@ -89,7 +100,9 @@ export async function tail(args: string[], ctx: CommandContext): Promise<Command
     if (args[i] === "-n" && i + 1 < args.length) {
       n = parseInt(args[i + 1], 10);
       i++;
-    } else if (args[i].startsWith("-") && !isNaN(parseInt(args[i].slice(1), 10))) {
+    } else if (
+      args[i].startsWith("-") && !isNaN(parseInt(args[i].slice(1), 10))
+    ) {
       n = parseInt(args[i].slice(1), 10);
     } else {
       file = args[i];
@@ -123,7 +136,10 @@ export async function tail(args: string[], ctx: CommandContext): Promise<Command
 /**
  * wc - count lines, words, characters
  */
-export async function wc(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function wc(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
   let countLines = false;
   let countWords = false;
   let countChars = false;
@@ -152,7 +168,7 @@ export async function wc(args: string[], ctx: CommandContext): Promise<CommandRe
 
   const processContent = (content: string, name: string) => {
     const lines = content.split("\n").length - 1;
-    const words = content.split(/\s+/).filter(w => w.length > 0).length;
+    const words = content.split(/\s+/).filter((w) => w.length > 0).length;
     const chars = content.length;
 
     const parts: string[] = [];
@@ -188,7 +204,11 @@ export async function wc(args: string[], ctx: CommandContext): Promise<CommandRe
 /**
  * diff - simple line-by-line diff
  */
-export async function diff(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function diff(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
+  await Promise.resolve();
   if (args.length < 2) {
     ctx.stderr.write("diff: missing operand\n", ctx.pcLabel);
     return { exitCode: 1, label: ctx.pcLabel };

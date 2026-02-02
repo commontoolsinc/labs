@@ -9,16 +9,14 @@
  * label system permits or blocks — and why.
  */
 
-import { labels, Label } from "./src/labels.ts";
-import { LabeledStream } from "./src/labeled-stream.ts";
+import { labels } from "./src/labels.ts";
 import { VFS } from "./src/vfs.ts";
 import { createSession, ShellSession } from "./src/session.ts";
-import { createEnvironment, createDefaultRegistry } from "./src/commands/mod.ts";
+import {
+  createDefaultRegistry,
+  createEnvironment,
+} from "./src/commands/mod.ts";
 import { execute } from "./src/interpreter.ts";
-import { ExchangeRuleEvaluator } from "./src/exchange.ts";
-import { defaultRules } from "./src/rules/default.ts";
-import { IntentManager } from "./src/intent.ts";
-import { AuditLog } from "./src/audit.ts";
 
 // ---------------------------------------------------------------------------
 // Helper: create a fully-wired session for examples
@@ -38,7 +36,7 @@ function exampleSession(opts?: {
     vfs,
     env,
     registry,
-    requestIntent: opts?.intentApprover ?? (async () => false),
+    requestIntent: opts?.intentApprover ?? (() => Promise.resolve(false)),
   });
 }
 
@@ -286,7 +284,10 @@ async function example08_llmCodeEndorsed() {
 
   const result = await execute("bash /tmp/reviewed_script.py", session);
   // Allowed — has both LLMGenerated and EndorsedBy(user)
-  console.log("Example 8 — Endorsed LLM code allowed:", result.exitCode !== 126);
+  console.log(
+    "Example 8 — Endorsed LLM code allowed:",
+    result.exitCode !== 126,
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -449,7 +450,11 @@ async function example13_loopTaint() {
  */
 async function example14_intentGatedDeletion() {
   const session = exampleSession();
-  session.vfs.writeFile("/important/data.db", "precious data", labels.userInput());
+  session.vfs.writeFile(
+    "/important/data.db",
+    "precious data",
+    labels.userInput(),
+  );
 
   // Without intent approval (default: async () => false), rm is blocked
   const blocked = await execute("rm -rf /important", session);
@@ -457,9 +462,13 @@ async function example14_intentGatedDeletion() {
 
   // With intent approval
   const approved = exampleSession({
-    intentApprover: async () => true,
+    intentApprover: () => Promise.resolve(true),
   });
-  approved.vfs.writeFile("/important/data.db", "precious data", labels.userInput());
+  approved.vfs.writeFile(
+    "/important/data.db",
+    "precious data",
+    labels.userInput(),
+  );
   const allowed = await execute("rm -rf /important", approved);
   console.log("Example 14b — rm with intent:", allowed.exitCode === 0);
 }
@@ -478,7 +487,10 @@ async function example15_networkFetchLabeling() {
 
   // curl output gets Origin + NetworkProvenance labels automatically
   // (in the current stub, curl returns a message instead of real HTTP)
-  const result = await execute("curl -s https://api.example.com/data", session);
+  const _result = await execute(
+    "curl -s https://api.example.com/data",
+    session,
+  );
   // Any file written from this would carry:
   //   integrity: [Origin(https://api.example.com/data), NetworkProvenance(tls=true, host=api.example.com)]
   // This is NOT sufficient for execution (missing UserInput/EndorsedBy)
@@ -521,7 +533,7 @@ async function example16_confusedDeputyPath() {
  * lower-confidentiality data and lose the label. This prevents
  * "label laundering" — writing secret data to a public file.
  */
-async function example17_labelMonotonicity() {
+function example17_labelMonotonicity() {
   const session = exampleSession();
 
   // Create a file with high confidentiality
@@ -562,10 +574,14 @@ async function example17_labelMonotonicity() {
  */
 async function example18_sandboxedExec() {
   const session = exampleSession({
-    intentApprover: async () => true, // approve the sandbox
+    intentApprover: () => Promise.resolve(true), // approve the sandbox
   });
 
-  session.vfs.writeFile("/data/input.csv", "1,2,3\n4,5,6\n", labels.userInput());
+  session.vfs.writeFile(
+    "/data/input.csv",
+    "1,2,3\n4,5,6\n",
+    labels.userInput(),
+  );
 
   // Run real Python in sandbox — output gets SandboxedExec integrity
   await execute(
@@ -665,7 +681,9 @@ fi`,
     session,
   );
   // /tmp/status.txt carries Space(ops) PC taint from the condition
-  console.log("Example 21 — Heredoc inherits PC taint from enclosing conditional");
+  console.log(
+    "Example 21 — Heredoc inherits PC taint from enclosing conditional",
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

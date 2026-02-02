@@ -1,8 +1,8 @@
 // Parser tests
 
-import { assertEquals, assertThrows } from "jsr:@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { parse } from "../src/parser/parser.ts";
-import type { Program, SimpleCommand, Pipeline, Assignment, Word } from "../src/parser/ast.ts";
+import type { Assignment, SimpleCommand } from "../src/parser/ast.ts";
 
 Deno.test("parse simple command", () => {
   const result = parse("echo hello world");
@@ -48,7 +48,10 @@ Deno.test("parse output redirection", () => {
   const cmd = result.body[0].pipeline.commands[0] as SimpleCommand;
   assertEquals(cmd.redirections.length, 1);
   assertEquals(cmd.redirections[0].op, ">");
-  assertEquals(cmd.redirections[0].target.parts[0], { type: "Literal", value: "file.txt" });
+  assertEquals(cmd.redirections[0].target.parts[0], {
+    type: "Literal",
+    value: "file.txt",
+  });
 });
 
 Deno.test("parse input redirection", () => {
@@ -57,7 +60,10 @@ Deno.test("parse input redirection", () => {
   const cmd = result.body[0].pipeline.commands[0] as SimpleCommand;
   assertEquals(cmd.redirections.length, 1);
   assertEquals(cmd.redirections[0].op, "<");
-  assertEquals(cmd.redirections[0].target.parts[0], { type: "Literal", value: "input.txt" });
+  assertEquals(cmd.redirections[0].target.parts[0], {
+    type: "Literal",
+    value: "input.txt",
+  });
 });
 
 Deno.test("parse append redirection", () => {
@@ -283,7 +289,10 @@ Deno.test("parse here-document", () => {
   const cmd = result.body[0].pipeline.commands[0] as SimpleCommand;
   assertEquals(cmd.redirections.length, 1);
   assertEquals(cmd.redirections[0].op, "<<");
-  assertEquals(cmd.redirections[0].target.parts[0], { type: "Literal", value: "EOF" });
+  assertEquals(cmd.redirections[0].target.parts[0], {
+    type: "Literal",
+    value: "EOF",
+  });
 });
 
 Deno.test("parse semicolon separator", () => {

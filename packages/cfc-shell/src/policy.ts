@@ -16,7 +16,7 @@
  * integrity-guarded exchange rules" mechanism.
  */
 
-import { Atom, Clause, Confidentiality, Integrity, Label, labels } from "./labels.ts";
+import { Atom, Clause, Confidentiality, Integrity, Label } from "./labels.ts";
 
 // ============================================================================
 // Atom equality (re-exported from labels for convenience)
@@ -25,48 +25,76 @@ import { Atom, Clause, Confidentiality, Integrity, Label, labels } from "./label
 function atomEqual(a: Atom, b: Atom): boolean {
   if (a.kind !== b.kind) return false;
   switch (a.kind) {
-    case "Origin": return (b as typeof a).url === a.url;
-    case "CodeHash": return (b as typeof a).hash === a.hash;
-    case "EndorsedBy": return (b as typeof a).principal === a.principal;
-    case "AuthoredBy": return (b as typeof a).principal === a.principal;
-    case "LLMGenerated": return (b as typeof a).model === a.model;
-    case "UserInput": return true;
-    case "NetworkProvenance": return (b as typeof a).tls === a.tls && (b as typeof a).host === a.host;
-    case "TransformedBy": return (b as typeof a).command === a.command;
-    case "Space": return (b as typeof a).id === a.id;
-    case "PersonalSpace": return (b as typeof a).did === a.did;
-    case "SandboxedExec": return true;
-    case "InjectionFree": return true;
-    case "InfluenceClean": return true;
-    case "Policy": return (b as typeof a).name === a.name && (b as typeof a).subject === a.subject && (b as typeof a).hash === a.hash;
-    case "IntegrityToken": return (b as typeof a).name === a.name;
-    case "HasRole": return (b as typeof a).principal === a.principal && (b as typeof a).space === a.space && (b as typeof a).role === a.role;
-    case "Capability": return (b as typeof a).capKind === a.capKind && (b as typeof a).resource === a.resource;
-    case "Custom": return (b as typeof a).tag === a.tag && (b as typeof a).value === a.value;
+    case "Origin":
+      return (b as typeof a).url === a.url;
+    case "CodeHash":
+      return (b as typeof a).hash === a.hash;
+    case "EndorsedBy":
+      return (b as typeof a).principal === a.principal;
+    case "AuthoredBy":
+      return (b as typeof a).principal === a.principal;
+    case "LLMGenerated":
+      return (b as typeof a).model === a.model;
+    case "UserInput":
+      return true;
+    case "NetworkProvenance":
+      return (b as typeof a).tls === a.tls && (b as typeof a).host === a.host;
+    case "TransformedBy":
+      return (b as typeof a).command === a.command;
+    case "Space":
+      return (b as typeof a).id === a.id;
+    case "PersonalSpace":
+      return (b as typeof a).did === a.did;
+    case "SandboxedExec":
+      return true;
+    case "InjectionFree":
+      return true;
+    case "InfluenceClean":
+      return true;
+    case "Policy":
+      return (b as typeof a).name === a.name &&
+        (b as typeof a).subject === a.subject &&
+        (b as typeof a).hash === a.hash;
+    case "IntegrityToken":
+      return (b as typeof a).name === a.name;
+    case "HasRole":
+      return (b as typeof a).principal === a.principal &&
+        (b as typeof a).space === a.space && (b as typeof a).role === a.role;
+    case "Capability":
+      return (b as typeof a).capKind === a.capKind &&
+        (b as typeof a).resource === a.resource;
+    case "Custom":
+      return (b as typeof a).tag === a.tag && (b as typeof a).value === a.value;
   }
 }
 
 function atomSetContains(atoms: Atom[], atom: Atom): boolean {
-  return atoms.some(a => atomEqual(a, atom));
+  return atoms.some((a) => atomEqual(a, atom));
 }
 
 function labelEqual(a: Label, b: Label): boolean {
   if (a.confidentiality.length !== b.confidentiality.length) return false;
   if (a.integrity.length !== b.integrity.length) return false;
   // Check every clause in a is in b and vice versa
-  const confMatch = a.confidentiality.every(ca =>
-    b.confidentiality.some(cb =>
-      ca.length === cb.length && ca.every(aa => cb.some(ab => atomEqual(aa, ab)))
-    )
-  ) && b.confidentiality.every(cb =>
-    a.confidentiality.some(ca =>
-      ca.length === cb.length && ca.every(aa => cb.some(ab => atomEqual(aa, ab)))
-    )
-  );
+  const confMatch =
+    a.confidentiality.every((ca) =>
+      b.confidentiality.some((cb) =>
+        ca.length === cb.length &&
+        ca.every((aa) => cb.some((ab) => atomEqual(aa, ab)))
+      )
+    ) && b.confidentiality.every((cb) =>
+      a.confidentiality.some((ca) =>
+        ca.length === cb.length && ca.every((aa) =>
+          cb.some((ab) =>
+            atomEqual(aa, ab)
+          )
+        )
+      )
+    );
   if (!confMatch) return false;
   // Check integrity sets match
-  return a.integrity.every(ai => atomSetContains(b.integrity, ai)) &&
-    b.integrity.every(bi => atomSetContains(a.integrity, bi));
+  return a.integrity.every((ai) => atomSetContains(b.integrity, ai)) &&
+    b.integrity.every((bi) => atomSetContains(a.integrity, bi));
 }
 
 // ============================================================================
@@ -114,7 +142,11 @@ function v<T>(name: string): FieldPat<T> {
   return { kind: "var", name };
 }
 
-function matchField<T>(pat: FieldPat<T>, val: T, bs: Bindings): Bindings | null {
+function matchField<T>(
+  pat: FieldPat<T>,
+  val: T,
+  bs: Bindings,
+): Bindings | null {
   if (pat.kind === "lit") {
     return pat.value === val ? bs : null;
   }
@@ -138,21 +170,43 @@ export type AtomPattern =
   | { kind: "EndorsedBy"; principal: FieldPat<string> }
   | { kind: "AuthoredBy"; principal: FieldPat<string> }
   | { kind: "UserInput" }
-  | { kind: "NetworkProvenance"; tls: FieldPat<boolean>; host: FieldPat<string> }
+  | {
+    kind: "NetworkProvenance";
+    tls: FieldPat<boolean>;
+    host: FieldPat<string>;
+  }
   | { kind: "TransformedBy"; command: FieldPat<string> }
   | { kind: "Space"; id: FieldPat<string> }
   | { kind: "PersonalSpace"; did: FieldPat<string> }
   | { kind: "SandboxedExec" }
   | { kind: "InjectionFree" }
   | { kind: "InfluenceClean" }
-  | { kind: "Policy"; name: FieldPat<string>; subject: FieldPat<string>; hash: FieldPat<string> }
+  | {
+    kind: "Policy";
+    name: FieldPat<string>;
+    subject: FieldPat<string>;
+    hash: FieldPat<string>;
+  }
   | { kind: "IntegrityToken"; name: FieldPat<string> }
-  | { kind: "HasRole"; principal: FieldPat<string>; space: FieldPat<string>; role: FieldPat<string> }
-  | { kind: "Capability"; capKind: FieldPat<string>; resource: FieldPat<string> }
+  | {
+    kind: "HasRole";
+    principal: FieldPat<string>;
+    space: FieldPat<string>;
+    role: FieldPat<string>;
+  }
+  | {
+    kind: "Capability";
+    capKind: FieldPat<string>;
+    resource: FieldPat<string>;
+  }
   | { kind: "Custom"; tag: FieldPat<string>; value: FieldPat<string> }
   | { kind: "eq"; atom: Atom };
 
-function matchAtomPattern(pat: AtomPattern, atom: Atom, bs: Bindings): Bindings | null {
+function matchAtomPattern(
+  pat: AtomPattern,
+  atom: Atom,
+  bs: Bindings,
+): Bindings | null {
   if (pat.kind === "eq") {
     return atomEqual(pat.atom, atom) ? bs : null;
   }
@@ -178,7 +232,11 @@ function matchAtomPattern(pat: AtomPattern, atom: Atom, bs: Bindings): Bindings 
     case "UserInput":
       return bs;
     case "NetworkProvenance": {
-      const a = atom as { kind: "NetworkProvenance"; tls: boolean; host: string };
+      const a = atom as {
+        kind: "NetworkProvenance";
+        tls: boolean;
+        host: string;
+      };
       const bs1 = matchField(pat.tls, a.tls, bs);
       if (!bs1) return null;
       return matchField(pat.host, a.host, bs1);
@@ -202,7 +260,12 @@ function matchAtomPattern(pat: AtomPattern, atom: Atom, bs: Bindings): Bindings 
     case "InfluenceClean":
       return bs;
     case "Policy": {
-      const a = atom as { kind: "Policy"; name: string; subject: string; hash: string };
+      const a = atom as {
+        kind: "Policy";
+        name: string;
+        subject: string;
+        hash: string;
+      };
       const bs1 = matchField(pat.name, a.name, bs);
       if (!bs1) return null;
       const bs2 = matchField(pat.subject, a.subject, bs1);
@@ -214,7 +277,12 @@ function matchAtomPattern(pat: AtomPattern, atom: Atom, bs: Bindings): Bindings 
       return matchField(pat.name, a.name, bs);
     }
     case "HasRole": {
-      const a = atom as { kind: "HasRole"; principal: string; space: string; role: string };
+      const a = atom as {
+        kind: "HasRole";
+        principal: string;
+        space: string;
+        role: string;
+      };
       const bs1 = matchField(pat.principal, a.principal, bs);
       if (!bs1) return null;
       const bs2 = matchField(pat.space, a.space, bs1);
@@ -222,7 +290,11 @@ function matchAtomPattern(pat: AtomPattern, atom: Atom, bs: Bindings): Bindings 
       return matchField(pat.role, a.role, bs2);
     }
     case "Capability": {
-      const a = atom as { kind: "Capability"; capKind: string; resource: string };
+      const a = atom as {
+        kind: "Capability";
+        capKind: string;
+        resource: string;
+      };
       const bs1 = matchField(pat.capKind, a.capKind, bs);
       if (!bs1) return null;
       return matchField(pat.resource, a.resource, bs1);
@@ -261,7 +333,9 @@ function instantiateAtomPattern(pat: AtomPattern, bs: Bindings): Atom | null {
     case "NetworkProvenance": {
       const tls = instantiateField(pat.tls, bs);
       const host = instantiateField(pat.host, bs);
-      return tls !== null && host !== null ? { kind: "NetworkProvenance", tls, host } : null;
+      return tls !== null && host !== null
+        ? { kind: "NetworkProvenance", tls, host }
+        : null;
     }
     case "TransformedBy": {
       const command = instantiateField(pat.command, bs);
@@ -286,7 +360,8 @@ function instantiateAtomPattern(pat: AtomPattern, bs: Bindings): Atom | null {
       const subject = instantiateField(pat.subject, bs);
       const hash = instantiateField(pat.hash, bs);
       return name !== null && subject !== null && hash !== null
-        ? { kind: "Policy", name, subject, hash } : null;
+        ? { kind: "Policy", name, subject, hash }
+        : null;
     }
     case "IntegrityToken": {
       const name = instantiateField(pat.name, bs);
@@ -297,17 +372,22 @@ function instantiateAtomPattern(pat: AtomPattern, bs: Bindings): Atom | null {
       const space = instantiateField(pat.space, bs);
       const role = instantiateField(pat.role, bs);
       return principal !== null && space !== null && role !== null
-        ? { kind: "HasRole", principal, space, role } : null;
+        ? { kind: "HasRole", principal, space, role }
+        : null;
     }
     case "Capability": {
       const capKind = instantiateField(pat.capKind, bs);
       const resource = instantiateField(pat.resource, bs);
-      return capKind !== null && resource !== null ? { kind: "Capability", capKind, resource } : null;
+      return capKind !== null && resource !== null
+        ? { kind: "Capability", capKind, resource }
+        : null;
     }
     case "Custom": {
       const tag = instantiateField(pat.tag, bs);
       const value = instantiateField(pat.value, bs);
-      return tag !== null && value !== null ? { kind: "Custom", tag, value } : null;
+      return tag !== null && value !== null
+        ? { kind: "Custom", tag, value }
+        : null;
     }
   }
 }
@@ -395,7 +475,11 @@ function matchAny(pat: AtomPattern, atoms: Atom[], bs: Bindings): Bindings[] {
 }
 
 /** Match a list of patterns, each against some atom in the list. Returns all valid binding sets. */
-function matchAllSomewhere(pats: AtomPattern[], atoms: Atom[], bs: Bindings): Bindings[] {
+function matchAllSomewhere(
+  pats: AtomPattern[],
+  atoms: Atom[],
+  bs: Bindings,
+): Bindings[] {
   if (pats.length === 0) return [bs];
   const [first, ...rest] = pats;
   const firstMatches = matchAny(first, atoms, bs);
@@ -410,7 +494,11 @@ function matchAllSomewhere(pats: AtomPattern[], atoms: Atom[], bs: Bindings): Bi
  * Match a rule against a label with available integrity.
  * Returns all possible matches with their clause/alt positions and bindings.
  */
-function matchRule(rule: ExchangeRule, label: Label, availIntegrity: Integrity): RuleMatch[] {
+function matchRule(
+  rule: ExchangeRule,
+  label: Label,
+  availIntegrity: Integrity,
+): RuleMatch[] {
   if (rule.preConf.length === 0) return [];
 
   const [targetPat, ...otherPats] = rule.preConf;
@@ -426,9 +514,18 @@ function matchRule(rule: ExchangeRule, label: Label, availIntegrity: Integrity):
 
     // For each conf match, match integrity patterns
     for (const bs1 of confBindings) {
-      const integBindings = matchAllSomewhere(rule.preInteg, availIntegrity, bs1);
+      const integBindings = matchAllSomewhere(
+        rule.preInteg,
+        availIntegrity,
+        bs1,
+      );
       for (const bs2 of integBindings) {
-        results.push({ clauseIndex: i, altIndex: j, targetAtom: atom, bindings: bs2 });
+        results.push({
+          clauseIndex: i,
+          altIndex: j,
+          targetAtom: atom,
+          bindings: bs2,
+        });
       }
     }
   }
@@ -441,7 +538,7 @@ function matchRule(rule: ExchangeRule, label: Label, availIntegrity: Integrity):
 // ============================================================================
 
 function clauseInsert(atom: Atom, clause: Clause): Clause {
-  if (clause.some(a => atomEqual(a, atom))) return clause;
+  if (clause.some((a) => atomEqual(a, atom))) return clause;
   return [atom, ...clause];
 }
 
@@ -450,14 +547,20 @@ function addUniqueAtom(atoms: Atom[], atom: Atom): Atom[] {
   return [...atoms, atom];
 }
 
-function applyRule(label: Label, match: RuleMatch, rule: ExchangeRule): Label | null {
+function applyRule(
+  label: Label,
+  match: RuleMatch,
+  rule: ExchangeRule,
+): Label | null {
   const postConfAtoms = instantiateAll(rule.postConf, match.bindings);
   if (postConfAtoms === null) return null;
 
   const postIntegAtoms = instantiateAll(rule.postInteg, match.bindings);
   if (postIntegAtoms === null) return null;
 
-  const addedInteg = postIntegAtoms.filter(a => !atomSetContains(label.integrity, a));
+  const addedInteg = postIntegAtoms.filter((a) =>
+    !atomSetContains(label.integrity, a)
+  );
   const clause = label.confidentiality[match.clauseIndex];
   if (!clause) return label;
 
@@ -466,13 +569,21 @@ function applyRule(label: Label, match: RuleMatch, rule: ExchangeRule): Label | 
     const atomAt = clause[match.altIndex];
     if (!atomAt || !atomEqual(atomAt, match.targetAtom)) return label;
 
-    const newClause = [...clause.slice(0, match.altIndex), ...clause.slice(match.altIndex + 1)];
+    const newClause = [
+      ...clause.slice(0, match.altIndex),
+      ...clause.slice(match.altIndex + 1),
+    ];
     let newConf: Confidentiality;
     if (newClause.length === 0) {
       // Empty clause — drop it entirely
-      newConf = [...label.confidentiality.slice(0, match.clauseIndex), ...label.confidentiality.slice(match.clauseIndex + 1)];
+      newConf = [
+        ...label.confidentiality.slice(0, match.clauseIndex),
+        ...label.confidentiality.slice(match.clauseIndex + 1),
+      ];
     } else {
-      newConf = label.confidentiality.map((c, i) => i === match.clauseIndex ? newClause : c);
+      newConf = label.confidentiality.map((c, i) =>
+        i === match.clauseIndex ? newClause : c
+      );
     }
     let newInteg = label.integrity;
     for (const a of addedInteg) newInteg = addUniqueAtom(newInteg, a);
@@ -481,7 +592,9 @@ function applyRule(label: Label, match: RuleMatch, rule: ExchangeRule): Label | 
     // Add postcondition atoms as alternatives in the target clause
     let newClause = clause;
     for (const a of postConfAtoms) newClause = clauseInsert(a, newClause);
-    const newConf = label.confidentiality.map((c, i) => i === match.clauseIndex ? newClause : c);
+    const newConf = label.confidentiality.map((c, i) =>
+      i === match.clauseIndex ? newClause : c
+    );
     let newInteg = label.integrity;
     for (const a of addedInteg) newInteg = addUniqueAtom(newInteg, a);
     return { confidentiality: newConf, integrity: newInteg };
@@ -508,11 +621,14 @@ function collectPolicyPrincipals(conf: Confidentiality): Atom[] {
   return seen;
 }
 
-function policiesInScope(policies: PolicyRecord[], conf: Confidentiality): PolicyRecord[] {
+function policiesInScope(
+  policies: PolicyRecord[],
+  conf: Confidentiality,
+): PolicyRecord[] {
   const principals = collectPolicyPrincipals(conf);
   const result: PolicyRecord[] = [];
   for (const p of principals) {
-    const record = policies.find(pol => atomEqual(pol.principal, p));
+    const record = policies.find((pol) => atomEqual(pol.principal, p));
     if (record) result.push(record);
   }
   return result;
@@ -533,7 +649,11 @@ function sortMatchesForDrop(matches: RuleMatch[]): RuleMatch[] {
  * One pass: evaluate all in-scope policy rules against the label.
  * Mirrors formal/Cfc/Policy.lean evalOnce.
  */
-function evalOnce(policies: PolicyRecord[], boundaryIntegrity: Integrity, label: Label): Label {
+function evalOnce(
+  policies: PolicyRecord[],
+  boundaryIntegrity: Integrity,
+  label: Label,
+): Label {
   const inScope = policiesInScope(policies, label.confidentiality);
   let current = label;
 

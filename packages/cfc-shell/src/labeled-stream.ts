@@ -58,15 +58,15 @@ export class LabeledStream {
    * Read the next chunk from the stream
    * Returns null when the stream is closed and buffer is empty
    */
-  async read(): Promise<LabeledChunk | null> {
+  read(): Promise<LabeledChunk | null> {
     // If there's data in the buffer, return it immediately
     if (this.buffer.length > 0) {
-      return this.buffer.shift()!;
+      return Promise.resolve(this.buffer.shift()!);
     }
 
     // If stream is closed and buffer is empty, return null (EOF)
     if (this._closed) {
-      return null;
+      return Promise.resolve(null);
     }
 
     // Wait for data to be written or stream to close
@@ -97,8 +97,8 @@ export class LabeledStream {
       };
     }
 
-    const value = chunks.map(c => c.data).join("");
-    const label = labels.joinAll(chunks.map(c => c.label));
+    const value = chunks.map((c) => c.data).join("");
+    const label = labels.joinAll(chunks.map((c) => c.label));
 
     return { value, label };
   }

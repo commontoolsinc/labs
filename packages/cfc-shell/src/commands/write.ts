@@ -8,7 +8,11 @@ import { labels } from "../labels.ts";
 /**
  * cp - copy files
  */
-export async function cp(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function cp(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
+  await Promise.resolve();
   let recursive = false;
   const paths: string[] = [];
 
@@ -33,12 +37,18 @@ export async function cp(args: string[], ctx: CommandContext): Promise<CommandRe
     const srcNode = ctx.vfs.resolve(src, true);
 
     if (!srcNode) {
-      ctx.stderr.write(`cp: cannot stat '${src}': No such file or directory\n`, ctx.pcLabel);
+      ctx.stderr.write(
+        `cp: cannot stat '${src}': No such file or directory\n`,
+        ctx.pcLabel,
+      );
       return { exitCode: 1, label: ctx.pcLabel };
     }
 
     if (srcNode.kind === "directory" && !recursive) {
-      ctx.stderr.write(`cp: -r not specified; omitting directory '${src}'\n`, ctx.pcLabel);
+      ctx.stderr.write(
+        `cp: -r not specified; omitting directory '${src}'\n`,
+        ctx.pcLabel,
+      );
       return { exitCode: 1, label: ctx.pcLabel };
     }
 
@@ -78,7 +88,11 @@ function copyDirectory(ctx: CommandContext, src: string, dst: string): void {
 /**
  * mv - move/rename files
  */
-export async function mv(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function mv(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
+  await Promise.resolve();
   if (args.length < 2) {
     ctx.stderr.write("mv: missing destination\n", ctx.pcLabel);
     return { exitCode: 1, label: ctx.pcLabel };
@@ -100,7 +114,11 @@ export async function mv(args: string[], ctx: CommandContext): Promise<CommandRe
 /**
  * rm - remove files/directories
  */
-export async function rm(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function rm(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
+  await Promise.resolve();
   let recursive = false;
   let force = false;
   const paths: string[] = [];
@@ -144,7 +162,11 @@ export async function rm(args: string[], ctx: CommandContext): Promise<CommandRe
 /**
  * mkdir - create directories
  */
-export async function mkdir(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function mkdir(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
+  await Promise.resolve();
   let parents = false;
   const paths: string[] = [];
 
@@ -180,7 +202,11 @@ export async function mkdir(args: string[], ctx: CommandContext): Promise<Comman
 /**
  * touch - create empty files or update mtime
  */
-export async function touch(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function touch(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
+  await Promise.resolve();
   if (args.length === 0) {
     ctx.stderr.write("touch: missing file operand\n", ctx.pcLabel);
     return { exitCode: 1, label: ctx.pcLabel };
@@ -211,7 +237,10 @@ export async function touch(args: string[], ctx: CommandContext): Promise<Comman
 /**
  * tee - read from stdin, write to file and stdout
  */
-export async function tee(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function tee(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
   let append = false;
   const files: string[] = [];
 
@@ -234,7 +263,8 @@ export async function tee(args: string[], ctx: CommandContext): Promise<CommandR
     for (const file of files) {
       try {
         if (append && ctx.vfs.exists(file)) {
-          const { value: existing, label: existingLabel } = ctx.vfs.readFileText(file);
+          const { value: existing, label: existingLabel } = ctx.vfs
+            .readFileText(file);
           const newContent = existing + value;
           const newLabel = labels.join(existingLabel, label);
           ctx.vfs.writeFile(file, newContent, newLabel);
@@ -258,7 +288,11 @@ export async function tee(args: string[], ctx: CommandContext): Promise<CommandR
 /**
  * chmod - change file mode
  */
-export async function chmod(args: string[], ctx: CommandContext): Promise<CommandResult> {
+export async function chmod(
+  args: string[],
+  ctx: CommandContext,
+): Promise<CommandResult> {
+  await Promise.resolve();
   if (args.length < 2) {
     ctx.stderr.write("chmod: missing operand\n", ctx.pcLabel);
     return { exitCode: 1, label: ctx.pcLabel };

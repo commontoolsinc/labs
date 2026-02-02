@@ -38,7 +38,7 @@ export interface Environment {
  * Create an environment with optional initial variables
  */
 export function createEnvironment(
-  initial?: Record<string, { value: string; label: Label }>
+  initial?: Record<string, { value: string; label: Label }>,
 ): Environment {
   // Scope chain: array of maps, with innermost scope at the end
   const scopes: Map<string, EnvVar>[] = [new Map()];
@@ -163,7 +163,10 @@ export function createEnvironment(
 /**
  * Callback for requesting user intent at commit points
  */
-export type IntentCallback = (action: string, detail: string) => Promise<boolean>;
+export type IntentCallback = (
+  action: string,
+  detail: string,
+) => Promise<boolean>;
 
 /**
  * Context passed to command handlers
@@ -174,7 +177,7 @@ export interface CommandContext {
   stdin: LabeledStream;
   stdout: LabeledStream;
   stderr: LabeledStream;
-  pcLabel: Label;             // current PC taint
+  pcLabel: Label; // current PC taint
   requestIntent: IntentCallback;
   /** Policy records for exchange rule evaluation (e.g., at network boundaries) */
   policies?: PolicyRecord[];
@@ -187,7 +190,7 @@ export interface CommandContext {
  */
 export interface CommandResult {
   exitCode: number;
-  label: Label;  // label of the output produced
+  label: Label; // label of the output produced
   /** If true, the command's output format is structurally fixed (e.g. numbers,
    *  fixed strings) and cannot contain injection regardless of input content.
    *  The interpreter will attest InjectionFree on the output label.
@@ -198,4 +201,7 @@ export interface CommandResult {
 /**
  * Command function signature
  */
-export type CommandFn = (args: string[], ctx: CommandContext) => Promise<CommandResult>;
+export type CommandFn = (
+  args: string[],
+  ctx: CommandContext,
+) => Promise<CommandResult>;

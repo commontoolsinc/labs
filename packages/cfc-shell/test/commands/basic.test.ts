@@ -2,11 +2,14 @@
  * Basic command tests
  */
 
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals } from "@std/assert";
 import { VFS } from "../../src/vfs.ts";
 import { labels } from "../../src/labels.ts";
 import { LabeledStream } from "../../src/labeled-stream.ts";
-import { createEnvironment, type CommandContext } from "../../src/commands/context.ts";
+import {
+  type CommandContext,
+  createEnvironment,
+} from "../../src/commands/context.ts";
 import { createDefaultRegistry } from "../../src/commands/mod.ts";
 
 /**
@@ -35,7 +38,7 @@ function createTestContext(): {
     stdout,
     stderr,
     pcLabel: labels.userInput(),
-    requestIntent: async () => false,
+    requestIntent: () => Promise.resolve(false),
   };
 
   return { vfs, ctx, stdout, stderr };
@@ -54,8 +57,14 @@ Deno.test("echo writes to stdout with correct label", async () => {
   const output = await stdout.readAll();
   assertEquals(output.value, "hello world\n");
   // userInput() label has UserInput + InjectionFree + InfluenceClean
-  const hasUserInput = output.label.integrity.some(a => a.kind === "UserInput");
-  assertEquals(hasUserInput, true, "echo output should have UserInput integrity");
+  const hasUserInput = output.label.integrity.some((a) =>
+    a.kind === "UserInput"
+  );
+  assertEquals(
+    hasUserInput,
+    true,
+    "echo output should have UserInput integrity",
+  );
 });
 
 Deno.test("cat reads file with file's label", async () => {
@@ -76,8 +85,10 @@ Deno.test("cat reads file with file's label", async () => {
   assertEquals(output.value, "secret data");
 
   // Should have Origin and NetworkProvenance in integrity
-  const hasOrigin = output.label.integrity.some(a => a.kind === "Origin");
-  const hasNetworkProv = output.label.integrity.some(a => a.kind === "NetworkProvenance");
+  const hasOrigin = output.label.integrity.some((a) => a.kind === "Origin");
+  const hasNetworkProv = output.label.integrity.some((a) =>
+    a.kind === "NetworkProvenance"
+  );
   assertEquals(hasOrigin, true);
   assertEquals(hasNetworkProv, true);
 });
@@ -88,7 +99,11 @@ Deno.test("grep filters and joins labels correctly", async () => {
 
   // Create a file
   const fileLabel = labels.fromFile("/data.txt");
-  vfs.writeFile("/data.txt", "line1\nline2 match\nline3\nline4 match", fileLabel);
+  vfs.writeFile(
+    "/data.txt",
+    "line1\nline2 match\nline3\nline4 match",
+    fileLabel,
+  );
 
   const grep = registry.get("grep")!;
   const result = await grep(["match", "/data.txt"], ctx);
@@ -141,12 +156,12 @@ Deno.test("cp preserves labels", async () => {
   // Check destination has the same label
   const { label: dstLabel } = vfs.readFile("/dst.txt");
 
-  const srcHasOrigin = srcLabel.integrity.some(a => a.kind === "Origin");
-  const dstHasOrigin = dstLabel.integrity.some(a => a.kind === "Origin");
+  const srcHasOrigin = srcLabel.integrity.some((a) => a.kind === "Origin");
+  const dstHasOrigin = dstLabel.integrity.some((a) => a.kind === "Origin");
   assertEquals(srcHasOrigin, dstHasOrigin);
 });
 
-Deno.test("environment variables preserve labels", async () => {
+Deno.test("environment variables preserve labels", () => {
   const { ctx } = createTestContext();
 
   const secretLabel = labels.fromFile("/etc/secret");
@@ -267,7 +282,7 @@ Deno.test("sed transforms with correct label", async () => {
   assertEquals(output.value, "goodbye world\ngoodbye there");
 
   // Should have TransformedBy integrity
-  const hasTransformed = output.label.integrity.some(a =>
+  const hasTransformed = output.label.integrity.some((a) =>
     a.kind === "TransformedBy" && a.command === "sed"
   );
   assertEquals(hasTransformed, true);
@@ -292,7 +307,7 @@ Deno.test("jq filters JSON with correct label", async () => {
   assertEquals(parsed, "Alice");
 
   // Should have TransformedBy integrity
-  const hasTransformed = output.label.integrity.some(a =>
+  const hasTransformed = output.label.integrity.some((a) =>
     a.kind === "TransformedBy" && a.command === "jq"
   );
   assertEquals(hasTransformed, true);
@@ -317,7 +332,7 @@ Deno.test("sort preserves data with correct label", async () => {
   assertEquals(output.value, "apple\nbanana\nzebra\n");
 
   // Should have TransformedBy integrity
-  const hasTransformed = output.label.integrity.some(a =>
+  const hasTransformed = output.label.integrity.some((a) =>
     a.kind === "TransformedBy" && a.command === "sort"
   );
   assertEquals(hasTransformed, true);

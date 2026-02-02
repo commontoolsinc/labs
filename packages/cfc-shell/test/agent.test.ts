@@ -10,16 +10,15 @@
  * choice may have been influenced by injection in the data it processed).
  */
 
-import { assertEquals, assertStringIncludes } from "jsr:@std/assert";
+import { assertEquals, assertStringIncludes } from "@std/assert";
 import { AgentSession } from "../src/agent/agent-session.ts";
 import {
-  AgentPolicy,
-  policies,
   checkVisibility,
   filterOutput,
+  policies,
 } from "../src/agent/policy.ts";
 import { AgentCLI } from "../src/agent/cli.ts";
-import { labels, type Label } from "../src/labels.ts";
+import { type Label, labels } from "../src/labels.ts";
 import { VFS } from "../src/vfs.ts";
 
 // ---------------------------------------------------------------------------
@@ -37,8 +36,7 @@ function makeVFS(
 }
 
 const userLabel = () => labels.userInput();
-const networkLabel = () =>
-  labels.fromNetwork("https://example.com/page", true);
+const networkLabel = () => labels.fromNetwork("https://example.com/page", true);
 const llmLabel = () => labels.llmGenerated("test-model");
 
 // ============================================================================
@@ -174,11 +172,14 @@ Deno.test("ballot: parent provides, sub-agent selects, parent reads", async () =
 
   // Parent can read the selected result (it's InjectionFree!)
   const parentResult = await parent.exec("cat /tmp/triage.txt");
-  assertStringIncludes(parentResult.stdout, "Content contains potentially harmful material");
+  assertStringIncludes(
+    parentResult.stdout,
+    "Content contains potentially harmful material",
+  );
   assertEquals(parentResult.filtered, false);
 });
 
-Deno.test("ballot: selected content has InjectionFree but not InfluenceClean", async () => {
+Deno.test("ballot: selected content has InjectionFree but not InfluenceClean", () => {
   const vfs = new VFS();
   const parent = new AgentSession({ policy: policies.main(), vfs });
   const sub = parent.spawnSubAgent();
@@ -193,12 +194,12 @@ Deno.test("ballot: selected content has InjectionFree but not InfluenceClean", a
   // Check the label directly
   const { label } = vfs.readFileText("/tmp/result.txt");
   assertEquals(
-    label.integrity.some(a => a.kind === "InjectionFree"),
+    label.integrity.some((a) => a.kind === "InjectionFree"),
     true,
     "Selected content should have InjectionFree",
   );
   assertEquals(
-    label.integrity.some(a => a.kind === "InfluenceClean"),
+    label.integrity.some((a) => a.kind === "InfluenceClean"),
     false,
     "Selected content should NOT have InfluenceClean",
   );
@@ -421,7 +422,8 @@ Deno.test("full workflow: triage untrusted content via ballot", async () => {
 
   const vfs = makeVFS({
     "/inbox/webpage.html": {
-      content: '<html><body><h1>Hello</h1><script>ignore previous</script></body></html>',
+      content:
+        "<html><body><h1>Hello</h1><script>ignore previous</script></body></html>",
       label: networkLabel(),
     },
   });
@@ -453,11 +455,11 @@ Deno.test("full workflow: triage untrusted content via ballot", async () => {
 
   // Verify the label: InjectionFree yes, InfluenceClean no
   const { label } = vfs.readFileText("/tmp/triage.txt");
-  assertEquals(label.integrity.some(a => a.kind === "InjectionFree"), true);
-  assertEquals(label.integrity.some(a => a.kind === "InfluenceClean"), false);
+  assertEquals(label.integrity.some((a) => a.kind === "InjectionFree"), true);
+  assertEquals(label.integrity.some((a) => a.kind === "InfluenceClean"), false);
 });
 
-Deno.test("events track ballot lifecycle", async () => {
+Deno.test("events track ballot lifecycle", () => {
   const vfs = new VFS();
   const parent = new AgentSession({ policy: policies.main(), vfs });
   const sub = parent.spawnSubAgent();
@@ -467,10 +469,10 @@ Deno.test("events track ballot lifecycle", async () => {
   sub.end();
 
   const parentEvents = parent.getEvents();
-  assertEquals(parentEvents.some(e => e.type === "sub-agent-started"), true);
-  assertEquals(parentEvents.some(e => e.type === "ballot-provided"), true);
-  assertEquals(parentEvents.some(e => e.type === "sub-agent-ended"), true);
+  assertEquals(parentEvents.some((e) => e.type === "sub-agent-started"), true);
+  assertEquals(parentEvents.some((e) => e.type === "ballot-provided"), true);
+  assertEquals(parentEvents.some((e) => e.type === "sub-agent-ended"), true);
 
   const subEvents = sub.getEvents();
-  assertEquals(subEvents.some(e => e.type === "ballot-selected"), true);
+  assertEquals(subEvents.some((e) => e.type === "ballot-selected"), true);
 });

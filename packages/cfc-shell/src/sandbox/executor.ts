@@ -11,13 +11,14 @@
 
 import { Label, Labeled, labels } from "../labels.ts";
 import { VFS } from "../vfs.ts";
-import { SandboxedExecConfig, defaultConfig, mergeConfig } from "./config.ts";
+import { defaultConfig, mergeConfig, SandboxedExecConfig } from "./config.ts";
 import { exportToReal, importFromReal } from "./vfs-bridge.ts";
 
 /** Check for permission/capability errors across Deno versions */
 function isPermissionError(e: unknown): boolean {
   return e instanceof Deno.errors.PermissionDenied ||
-    ((Deno.errors as any).NotCapable != null && e instanceof (Deno.errors as any).NotCapable);
+    ((Deno.errors as any).NotCapable != null &&
+      e instanceof (Deno.errors as any).NotCapable);
 }
 
 export interface SandboxResult {
@@ -53,7 +54,8 @@ export class SandboxedExecutor {
     exportPaths: string[],
   ): Promise<SandboxResult> {
     // Check if Deno.Command is available
-    const hasDenoCommand = typeof Deno !== "undefined" && typeof Deno.Command === "function";
+    const hasDenoCommand = typeof Deno !== "undefined" &&
+      typeof Deno.Command === "function";
 
     if (!hasDenoCommand) {
       // Stub mode: return a result indicating sandbox is not available
@@ -147,7 +149,12 @@ export class SandboxedExecutor {
         const modifiedFiles = new Map<string, Labeled<Uint8Array>>();
         for (const writablePath of this.config.allowedWritePaths) {
           try {
-            const imported = await importFromReal(vfs, tempDir, writablePath, outputLabel);
+            const imported = await importFromReal(
+              vfs,
+              tempDir,
+              writablePath,
+              outputLabel,
+            );
             // Read imported files back with their labels
             for (const vfsPath of imported) {
               const { value, label } = vfs.readFile(vfsPath);
@@ -175,7 +182,8 @@ export class SandboxedExecutor {
               label: outputLabel,
             },
             stderr: {
-              value: `[CFC-SHELL] Command timed out after ${this.config.timeout}ms`,
+              value:
+                `[CFC-SHELL] Command timed out after ${this.config.timeout}ms`,
               label: outputLabel,
             },
             exitCode: 124, // Standard timeout exit code
@@ -215,7 +223,8 @@ export class SandboxedExecutor {
     const outputLabel = this.computeOutputLabel(allInputLabels);
 
     const argsStr = args.join(" ");
-    const message = `[CFC-SHELL] Sandboxed execution not available in this environment. Command: ${command} ${argsStr}`;
+    const message =
+      `[CFC-SHELL] Sandboxed execution not available in this environment. Command: ${command} ${argsStr}`;
 
     return {
       stdout: {

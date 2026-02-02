@@ -1,23 +1,21 @@
 // Recursive descent parser for shell syntax
 
 import type {
-  Program,
-  ConnectedPipeline,
-  Pipeline,
-  Command,
-  SimpleCommand,
   Assignment,
-  IfClause,
-  ForClause,
-  WhileClause,
-  Subshell,
   BraceGroup,
-  CompoundCommand,
+  Command,
+  ConnectedPipeline,
+  ForClause,
+  IfClause,
+  Pipeline,
+  Program,
   Redirection,
+  Subshell,
+  WhileClause,
   Word,
   WordPart,
 } from "./ast.ts";
-import { tokenize, type Token, type TokenType } from "./lexer.ts";
+import { type Token, tokenize, type TokenType } from "./lexer.ts";
 
 export class Parser {
   private pos = 0;
@@ -49,7 +47,7 @@ export class Parser {
     if (node.type === "CommandSubstitution" && node.command && !node.body) {
       try {
         node.body = parse(node.command);
-      } catch (e) {
+      } catch {
         // If parsing fails, leave body undefined
         // The interpreter will handle this error
       }
@@ -70,7 +68,11 @@ export class Parser {
     // Skip leading newlines
     this.skipNewlines();
 
-    while (!this.atEnd() && !this.check("Fi") && !this.check("Done") && !this.check("Elif") && !this.check("Else") && !this.check("Then") && !this.check("Do") && !this.check("RParen") && !this.check("RBrace")) {
+    while (
+      !this.atEnd() && !this.check("Fi") && !this.check("Done") &&
+      !this.check("Elif") && !this.check("Else") && !this.check("Then") &&
+      !this.check("Do") && !this.check("RParen") && !this.check("RBrace")
+    ) {
       const pipeline = this.parsePipeline();
 
       let connector: "&&" | "||" | ";" | "&" | undefined;
