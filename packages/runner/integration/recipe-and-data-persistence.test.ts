@@ -361,6 +361,13 @@ async function phase4CrossSessionReactivity(
 
   const tx = ctx.runtime.edit();
   dataCell.withTx(tx).set(newData);
+
+  // Before commit: should still see old value
+  await resultCell.pull();
+  const midUpdate = resultCell.getAsQueryResult();
+  console.log("Mid-update (before commit): sum =", midUpdate.sum);
+  assertEquals(midUpdate.sum, 60, "Before commit, should still see old value");
+
   await tx.commit();
 
   // Wait for reactivity to propagate
