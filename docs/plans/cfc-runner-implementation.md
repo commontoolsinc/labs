@@ -533,6 +533,320 @@ Phase 7 is last.
 
 ---
 
+## Phase 8: Path-Level Taint Tracking
+
+The current taint model joins all read labels into a single flat
+`accumulatedTaint`. This means reading an object with a secret `token` field
+taints the entire action — even if the token only flows into one specific output
+field. Path-level tracking preserves *which paths carry which labels* through the
+reactive graph, enabling field-level declassification.
+
+**Motivating example (Gmail OAuth):** A recipe reads an auth object with
+`{token: "ya29...", email: "alice@..."}`. The token field carries
+`Service(google-auth)` taint. The recipe builds a fetch request putting the token
+into `headers.Authorization`. With path-level tracking, only that header field
+carries the Service taint — the URL and body don't. The auth policy can then say:
+"Service(google-auth) may be declassified when consumed at
+`headers.Authorization` by fetchData" — without needing a separate
+`endorse_request` component to inspect the assembled request.
+
+### 8.1 Path-Labeled Value Representation
+
+- [ ] Define `PathLabel` type: `{ path: string[], label: Label }`
+- [ ] Define `TaintMap`: a structure mapping paths to their labels, with
+  efficient join and lookup operations
+  ```
+  TaintMap = {
+    entries: PathLabel[],
+    join(path: string[], label: Label): void,
+    labelAt(path: string[]): Label,       // label for a specific path
+    flatLabel(): Label,                    // join of all entries (fallback)
+  }
+  ```
+- [ ] `TaintMap.labelAt(path)` returns the label for that specific path, or
+  the join of all ancestor paths (taint flows down: if the whole object is
+  secret, every field is secret)
+- [ ] Ensure empty TaintMap behaves identically to current `emptyLabel()` —
+  backwards compatible
+
+**File:** new `packages/runner/src/cfc/taint-map.ts`
+
+### 8.2 Per-Property Schema Labels
+
+The schema `ifc` annotation already exists per-property (e.g.,
+`token: { type: "string", ifc: { classification: ["secret"] } }`). Currently
+`traverse.ts` collapses these into one label per document read. Change this to
+produce path-level entries.
+
+- [ ] In `SchemaObjectTraverser`, when encountering a property with `ifc`,
+  emit a `PathLabel` with the property path instead of joining into flat taint
+- [ ] `recordTaintedRead` gains an optional `path` parameter:
+  `recordTaintedRead(tx, label, path?)`
+- [ ] When a path is provided, the taint context stores it in the TaintMap
+  rather than flat-joining
+- [ ] When no path is provided (backwards compat), flat-join as before
+
+**File:** modifications to `packages/runner/src/traverse.ts`,
+`packages/runner/src/cfc/taint-tracking.ts`
+
+### 8.3 Taint Propagation Through Reactive Graph (Link-Based)
+
+The key insight: `diffAndUpdate` already writes **links** (cell references)
+instead of copying values when the output contains Cell objects. A lift that
+receives an auth cell and returns `{ headers: { Authorization: tokenCell } }`
+never reads the token string — it writes a link. The taint the lift accumulates
+is only from what it actually `.get()`s, not from linked cells it passes through.
+
+This means field-to-field taint tracking largely comes for free:
+
+**How it works:**
+
+1. A lift receives input cells. It can access them as `OpaqueCell` (no `.get()`)
+   or as regular cells.
+2. If the lift reads `input.email` (no ifc) but only passes `input.token` as
+   a cell reference in the output, the lift's taint = just the email read
+   (no token taint). The token reference is written as a link via
+   `diffAndUpdate` → `isCell(newValue)` branch (data-updating.ts:258).
+3. The link itself carries minimal taint — it's a pointer, not the secret data.
+   The label on the link document reflects the writing action's taint (the
+   email read), not the linked-to token's label.
+4. When `fetchData` later dereferences `headers.Authorization` (resolving the
+   link to get the actual token string), *that* read accumulates the token's
+   `Service(google-auth)` taint — but only in fetchData's context, at a known
+   path.
+
+**What this enables:**
+
+- A lift that passes an `OpaqueCell` through never taints itself with that
+  cell's content. OpaqueCell removes `.get()` from the interface, making this
+  explicit.
+- Path-level labels on the output document reflect which paths are links
+  (untainted pointers) vs which paths are materialized values (tainted by reads).
+- Builtins that dereference links accumulate taint per-path, enabling
+  sink-aware declassification (Phase 9).
+
+**Implementation:**
+
+- [ ] Verify that `diffAndUpdate`'s cell-to-link conversion preserves the
+  output document's path-level label structure — links should not inherit
+  the linked-to cell's label until dereferenced
+- [ ] In `recordTaintedRead`, distinguish between "read a link pointer" (low
+  taint) and "dereferenced a link and read the value" (inherits linked cell's
+  label)
+- [ ] Ensure `OpaqueCell` usage in a lift context does not trigger
+  `recordTaintedRead` — no `.get()` means no taint
+- [ ] Document the pattern: lift authors should use `OpaqueCell` for
+  pass-through fields to minimize taint. This is the idiomatic way to build
+  request objects where secrets go into specific fields.
+
+**Stage B (future) — Primitive value tracking:**
+
+- [ ] Links only work for cell-valued fields. Primitive values (strings,
+  numbers) are copied inline by `diffAndUpdate`, so reading `input.email`
+  and writing it to `output.from` copies the string and taints the output.
+- [ ] For primitives, future work can add proxy-based tracking or static
+  analysis to map input reads to output paths. Deferred — the link-based
+  model handles the Gmail case since the token is a cell reference.
+
+**File:** modifications to `packages/runner/src/data-updating.ts` (label on
+link writes), `packages/runner/src/cfc/taint-tracking.ts`
+
+### 8.4 ActionTaintContext with TaintMap
+
+- [ ] Replace `accumulatedTaint: Label` with `taintMap: TaintMap` on
+  `ActionTaintContext`
+- [ ] Keep `flatTaint(): Label` as a derived accessor (join of all entries)
+  for backwards compat with `checkWrite` and `checkClearance`
+- [ ] `accumulateTaint(ctx, label, path?)` stores path-level entry when path
+  is given, flat-joins otherwise
+- [ ] `checkWrite` continues to use flat taint — it's the final gate and needs
+  the full picture
+- [ ] Add `taintAtPath(ctx, path): Label` — returns the taint for a specific
+  output path (used by builtins)
+
+**File:** modifications to `packages/runner/src/cfc/action-context.ts`
+
+### 8.5 Tests for Path-Level Tracking
+
+- [ ] Unit: TaintMap join, lookup, ancestor propagation, flatLabel
+- [ ] Unit: recordTaintedRead with path produces path-level entry
+- [ ] Integration: read object with secret field + non-secret field, only
+  secret field path carries taint
+- [ ] Integration: lift that reads only the non-secret field → output untainted
+- [ ] Integration: lift that reads the secret field → output tainted
+- [ ] Backwards compat: all existing CFC tests pass unchanged
+
+**File:** `packages/runner/test/cfc-path-taint.test.ts`
+
+---
+
+## Phase 9: Sink-Aware Declassification
+
+With path-level taint, builtins can inspect per-field taint on their inputs and
+apply field-level declassification rules. This replaces the spec's
+`endorse_request` pipeline (§5.2) with a simpler model: the auth policy
+declares which confidentiality atoms may be consumed at which sink paths, and
+the builtin enforces it at the point of consumption.
+
+### 9.1 Sink Declassification Rules
+
+- [ ] Define `SinkDeclassificationRule` type:
+  ```
+  {
+    /** Atom pattern to match on taint */
+    taintPattern: AtomPattern,
+    /** Builtin that may consume this taint */
+    allowedSink: string,          // e.g. "fetchData"
+    /** Path within the sink's input where consumption is allowed */
+    allowedPaths: string[][],     // e.g. [["options","headers","Authorization"]]
+    /** Variables for pattern matching */
+    variables: string[],
+  }
+  ```
+- [ ] Add `sinkRules: SinkDeclassificationRule[]` to `PolicyRecord`
+- [ ] Default policy: empty (no sink declassification — backwards compat)
+
+**File:** new `packages/runner/src/cfc/sink-rules.ts`, modifications to
+`packages/runner/src/cfc/policy.ts`
+
+### 9.2 Builtin Taint Gate
+
+When a builtin like `fetchData` is about to consume its inputs:
+
+- [ ] Inspect the taint on each input path (via `taintAtPath`)
+- [ ] For each path that carries confidentiality atoms:
+  - Look up sink declassification rules for this builtin
+  - If the path matches an allowed sink path and the taint matches the atom
+    pattern → strip the matched atom (authority-only consumption)
+  - If no rule matches → the taint remains, and if it exceeds the output
+    label the write is blocked
+- [ ] Emit `AuthorizedRequest` integrity atom when a sink rule fires — this
+  provides the integrity evidence that the spec requires for exchange rules
+  downstream
+- [ ] For `fetchData` specifically: check taint on `options.headers.*`,
+  `options.body`, `url` separately. Only `headers.Authorization` gets
+  declassification for `Service(google-auth)`.
+
+**File:** modifications to `packages/runner/src/builtins/fetch-data.ts`,
+new helper in `packages/runner/src/cfc/sink-gate.ts`
+
+### 9.3 Auth Policy for Gmail Example
+
+- [ ] Define a Google auth policy record with:
+  ```
+  sinkRules: [{
+    taintPattern: { kind: "Service", params: { id: "google-auth" } },
+    allowedSink: "fetchData",
+    allowedPaths: [["options", "headers", "Authorization"]],
+    variables: [],
+  }]
+  ```
+- [ ] The token's `Service(google-auth)` is declassified when it flows into
+  `headers.Authorization` of a fetchData call
+- [ ] If the token is put in the body, query string, or any other field — the
+  taint remains and blocks the request
+- [ ] The response inherits only the non-authority taint (e.g., `User(Alice)`)
+
+**File:** test fixtures in `packages/runner/test/cfc-gmail-read.test.ts`
+
+### 9.4 Relationship to endorse_request (Spec §5.2)
+
+The spec defines `endorse_request` as a trusted component that inspects the
+assembled request and emits `AuthorizedRequest` integrity. In our model:
+
+- `endorse_request` is **not a separate component** — it's the policy predicate
+  evaluated by the builtin's taint gate (§9.2)
+- The sink declassification rule **is** the endorsement logic: it verifies the
+  secret is in the right place
+- The `AuthorizedRequest` integrity atom is emitted by the taint gate when the
+  rule fires, providing the same integrity evidence for downstream exchange rules
+- This is simpler (no separate pipeline stage) and more precise (per-field
+  rather than whole-request inspection)
+
+**Spec update needed:** §5.2.1 should note that `endorse_request` can be
+implemented as a builtin-local policy check rather than a separate component,
+when path-level labels are available.
+
+### 9.5 Tests for Sink Declassification
+
+- [ ] Unit: SinkDeclassificationRule matching against path + atom
+- [ ] Integration: Gmail read path — token in Authorization header, request
+  succeeds, response untainted by Service atom
+- [ ] Integration: token in request body → request blocked (no sink rule for
+  body path)
+- [ ] Integration: token in wrong header (e.g., X-Token) → blocked
+- [ ] Integration: non-secret field (email) in body → allowed
+- [ ] Integration: AuthorizedRequest integrity atom emitted on success
+- [ ] Backwards compat: fetchData without any ifc works unchanged
+
+**File:** `packages/runner/test/cfc-sink-rules.test.ts`,
+`packages/runner/test/cfc-gmail-read.test.ts`
+
+---
+
+## Phase 10: End-to-End Gmail Flow
+
+With path-level tracking and sink declassification in place, wire up the full
+Gmail example from the spec.
+
+### 10.1 Gmail Read Path (end-to-end)
+
+- [ ] OAuth token cell with `Service(google-auth)` on token field
+- [ ] Recipe reads token, builds fetch request with token in Authorization
+  header
+- [ ] fetchData taint gate: declassifies Service atom at header path, emits
+  AuthorizedRequest integrity
+- [ ] Mock fetch returns Gmail messages
+- [ ] Response cell carries `User(Alice)` taint only (not Service)
+- [ ] Downstream recipe reads response — not blocked by Service taint
+
+### 10.2 Gmail Write Path
+
+- [ ] Recipe reads email draft (user data) + token
+- [ ] Builds POST request: token in header (authority-only), draft in body
+  (data-bearing)
+- [ ] Response inherits draft's taint but not token's
+- [ ] Test: draft with secret search query → response inherits secret taint
+
+### 10.3 Error Path
+
+- [ ] Failed request → error response inherits full input taint (safe default)
+- [ ] Error exchange rule declassifies error code/message for display
+- [ ] Auth error (401) → user sees error, token not leaked
+
+**File:** `packages/runner/test/cfc-gmail-e2e.test.ts`
+
+---
+
+## Ordering (Phases 8-10)
+
+```
+Phases 1-7 (complete)
+  │
+  └──→ Phase 8 (Path-Level Taint)
+          │
+          ├──→ 8.1-8.2: TaintMap + per-property schema reads
+          │       │
+          │       └──→ 8.3-8.4: Propagation + ActionTaintContext update
+          │               │
+          │               └──→ 8.5: Tests
+          │
+          └──→ Phase 9 (Sink Declassification)
+                  │
+                  ├──→ 9.1-9.2: Rules + builtin taint gate
+                  │       │
+                  │       └──→ 9.3: Gmail auth policy
+                  │
+                  └──→ Phase 10 (Gmail E2E)
+```
+
+The link-based propagation model (Phase 8.3) is sufficient for the Gmail example:
+lifts pass token cells as links (no read, no taint), and fetchData dereferences
+at a known path where sink rules can fire. Stage B (primitive value tracking) is
+deferred — links already handle cell-valued fields like OAuth tokens.
+
+---
+
 ## Out of Scope (Future Work)
 
 These are described in the spec but deferred from this implementation round:
@@ -541,7 +855,9 @@ These are described in the spec but deferred from this implementation round:
 - [ ] VDOM snapshot digests and gesture provenance (spec section 6)
 - [ ] Static analysis / TypeScript transformer integration (spec section 11)
 - [ ] Multi-party consent validation (spec section 3.9)
-- [ ] Network provenance and `endorse_request` pipeline (spec section 5)
+- [ ] Path-level taint Stage B: primitive value field-to-field tracking
+  through lifts via Proxy-based runtime tracing or static analysis (links
+  already handle cell-valued fields)
 - [ ] User-configurable trust lattices (structural support built, UI deferred)
 - [ ] Robust declassification validation (spec invariant 7)
 - [ ] Transparent endorsement checks (spec invariant 8)
