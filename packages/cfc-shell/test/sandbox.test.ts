@@ -87,6 +87,19 @@ function atomEqual(a: any, b: any): boolean {
   }
 }
 
+/** Check if we have write permission (for tests that need real filesystem) */
+let _hasWritePermission: boolean | null = null;
+async function hasWritePermission(): Promise<boolean> {
+  if (_hasWritePermission !== null) return _hasWritePermission;
+  try {
+    const p = await Deno.permissions.query({ name: "write" as any });
+    _hasWritePermission = p.state === "granted";
+  } catch {
+    _hasWritePermission = false;
+  }
+  return _hasWritePermission;
+}
+
 function createMockContext(vfs?: VFS): CommandContext {
   return {
     vfs: vfs || new VFS(),
@@ -279,7 +292,7 @@ Deno.test("Executor with network adds network taint", async () => {
 // VFS Bridge Tests
 // ============================================================================
 
-Deno.test("exportToReal handles non-existent paths gracefully", async () => {
+Deno.test({ name: "exportToReal handles non-existent paths gracefully", ignore: !(await hasWritePermission()), fn: async () => {
   const vfs = new VFS();
 
   // Create a temp directory for testing
@@ -293,9 +306,9 @@ Deno.test("exportToReal handles non-existent paths gracefully", async () => {
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
-});
+}});
 
-Deno.test("exportToReal exports file with correct label", async () => {
+Deno.test({ name: "exportToReal exports file with correct label", ignore: !(await hasWritePermission()), fn: async () => {
   const vfs = new VFS();
   const fileLabel = labels.fromFile("/test.txt", "test-space");
 
@@ -320,9 +333,9 @@ Deno.test("exportToReal exports file with correct label", async () => {
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
-});
+}});
 
-Deno.test("exportToReal exports directory recursively", async () => {
+Deno.test({ name: "exportToReal exports directory recursively", ignore: !(await hasWritePermission()), fn: async () => {
   const vfs = new VFS();
 
   // Create directory structure
@@ -350,9 +363,9 @@ Deno.test("exportToReal exports directory recursively", async () => {
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
-});
+}});
 
-Deno.test("importFromReal imports files with correct label", async () => {
+Deno.test({ name: "importFromReal imports files with correct label", ignore: !(await hasWritePermission()), fn: async () => {
   const vfs = new VFS();
   const importLabel = labels.fromNetwork("https://example.com", true);
 
@@ -376,9 +389,9 @@ Deno.test("importFromReal imports files with correct label", async () => {
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
-});
+}});
 
-Deno.test("importFromReal imports nested directories", async () => {
+Deno.test({ name: "importFromReal imports nested directories", ignore: !(await hasWritePermission()), fn: async () => {
   const vfs = new VFS();
   const importLabel = labels.bottom();
 
@@ -407,7 +420,7 @@ Deno.test("importFromReal imports nested directories", async () => {
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
-});
+}});
 
 // ============================================================================
 // !real Command Tests

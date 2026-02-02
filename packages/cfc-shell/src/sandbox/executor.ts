@@ -14,6 +14,12 @@ import { VFS } from "../vfs.ts";
 import { SandboxedExecConfig, defaultConfig, mergeConfig } from "./config.ts";
 import { exportToReal, importFromReal } from "./vfs-bridge.ts";
 
+/** Check for permission/capability errors across Deno versions */
+function isPermissionError(e: unknown): boolean {
+  return e instanceof Deno.errors.PermissionDenied ||
+    ((Deno.errors as any).NotCapable != null && e instanceof (Deno.errors as any).NotCapable);
+}
+
 export interface SandboxResult {
   stdout: Labeled<string>;
   stderr: Labeled<string>;
@@ -55,7 +61,15 @@ export class SandboxedExecutor {
     }
 
     // Create temp directory for sandbox workspace
-    const tempDir = await Deno.makeTempDir({ prefix: "cfc-sandbox-" });
+    let tempDir: string;
+    try {
+      tempDir = await Deno.makeTempDir({ prefix: "cfc-sandbox-" });
+    } catch (e: unknown) {
+      if (isPermissionError(e)) {
+        return this.executeStub(command, args, stdin, inputLabels);
+      }
+      throw e;
+    }
 
     try {
       // Export VFS files to temp directory
@@ -105,7 +119,7 @@ export class SandboxedExecutor {
         } catch (e: unknown) {
           clearTimeout(timeoutId);
           // Fall back to stub mode if we lack permission to spawn processes
-          if (e instanceof Deno.errors.PermissionDenied) {
+          if (isPermissionError(e)) {
             return this.executeStub(command, args, stdin, inputLabels);
           }
           throw e;
