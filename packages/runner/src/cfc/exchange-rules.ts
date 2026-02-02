@@ -35,6 +35,12 @@ export type ExchangeRule = {
   addAlternatives: AtomPattern[];
   /** Variables used in this rule (for documentation). */
   variables: string[];
+  /**
+   * If true, remove matched clauses entirely instead of adding alternatives.
+   * Used for authority-only atoms (e.g., OAuth tokens that authorize but
+   * should not taint the response).
+   */
+  removeMatchedClauses?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -197,33 +203,37 @@ export function applyRule(
   );
 
   // Find clauses that contain an atom matching any confidentiality precondition.
-  const newConfidentiality: ConfidentialityLabel = label.confidentiality.map(
-    (clause) => {
-      let matches = false;
-      for (const pattern of rule.confidentialityPre) {
-        for (const atom of clause) {
-          if (matchAtomPattern(pattern, atom, bindings) !== null) {
-            matches = true;
-            break;
-          }
+  const newConfidentiality: ConfidentialityLabel = [];
+  for (const clause of label.confidentiality) {
+    let matches = false;
+    for (const pattern of rule.confidentialityPre) {
+      for (const atom of clause) {
+        if (matchAtomPattern(pattern, atom, bindings) !== null) {
+          matches = true;
+          break;
         }
-        if (matches) break;
       }
-      if (matches) {
-        // Add alternatives, deduplicating by canonical form.
-        const existing = new Set(clause.map(canonicalizeAtom));
-        const extended = [...clause];
-        for (const alt of newAlternatives) {
-          if (!existing.has(canonicalizeAtom(alt))) {
-            existing.add(canonicalizeAtom(alt));
-            extended.push(alt);
-          }
+      if (matches) break;
+    }
+    if (matches && rule.removeMatchedClauses) {
+      // Authority-only: drop the entire clause
+      continue;
+    }
+    if (matches) {
+      // Add alternatives, deduplicating by canonical form.
+      const existing = new Set(clause.map(canonicalizeAtom));
+      const extended = [...clause];
+      for (const alt of newAlternatives) {
+        if (!existing.has(canonicalizeAtom(alt))) {
+          existing.add(canonicalizeAtom(alt));
+          extended.push(alt);
         }
-        return extended;
       }
-      return clause;
-    },
-  );
+      newConfidentiality.push(extended);
+    } else {
+      newConfidentiality.push(clause);
+    }
+  }
 
   return {
     confidentiality: normalizeConfidentiality(newConfidentiality),
