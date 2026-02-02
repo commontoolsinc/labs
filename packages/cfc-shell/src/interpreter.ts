@@ -196,8 +196,12 @@ async function executePipeline(
   // The pipeline's exit code is the exit code of the last command
   const lastResult = results[results.length - 1];
 
-  // The pipeline's label is the join of all command output labels
-  const pipelineLabel = labels.joinAll(results.map((r) => r.label));
+  // The pipeline's label is the last command's label. Earlier commands'
+  // labels flow through the pipe into subsequent commands (which join them
+  // into their own labels), but only the last command's output is visible
+  // to the caller. This preserves fixedOutputFormat endorsements (e.g.,
+  // wc -l at the end of a pipeline keeps InjectionFree).
+  const pipelineLabel = lastResult.label;
 
   // Apply negation if needed
   if (node.negated) {
