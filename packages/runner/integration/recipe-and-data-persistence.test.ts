@@ -178,28 +178,19 @@ async function phase2LoadAndVerify(
   console.log("\n--- Phase 2: Load recipe and data from storage ---");
 
   const ctx = createTestContext(identity);
-  const tx = ctx.runtime.edit();
 
   // Load recipe from storage (fresh cache)
-  const recipe = await ctx.runtime.recipeManager.loadRecipe(
-    recipeId,
-    space,
-    tx,
-  );
+  const recipe = await ctx.runtime.recipeManager.loadRecipe(recipeId, space);
   console.log("Recipe loaded from storage");
 
   // Load data cell from storage
-  const dataCell = getInputCell(ctx.runtime, space, INPUT_CELL_ID_PHASE_2, tx);
+  const dataCell = getInputCell(ctx.runtime, space, INPUT_CELL_ID_PHASE_2);
   await dataCell.sync();
   console.log(`Data loaded: ${JSON.stringify(dataCell.get())}`);
 
   // Create result cell and run recipe
-  const resultCell = getResultCell(
-    ctx.runtime,
-    space,
-    RESULT_CELL_ID_PHASE_2,
-    tx,
-  );
+  const resultCell = getResultCell(ctx.runtime, space, RESULT_CELL_ID_PHASE_2);
+  const tx = ctx.runtime.edit();
   const runResult = ctx.runtime.run(tx, recipe, { data: dataCell }, resultCell);
   await tx.commit();
   await runResult.pull();
@@ -235,29 +226,21 @@ async function phase3ReactivityAndIsolation(
   console.log("\n--- Phase 3: Reactivity and instance isolation ---");
 
   const ctx = createTestContext(identity);
-  let tx = ctx.runtime.edit();
 
   // Load recipe from storage (fresh cache)
-  const recipe = await ctx.runtime.recipeManager.loadRecipe(
-    recipeId,
-    space,
-    tx,
-  );
+  const recipe = await ctx.runtime.recipeManager.loadRecipe(recipeId, space);
   console.log("Recipe loaded from storage (third runtime)");
 
   // Create a NEW input cell for Phase 3's instance (same initial values)
-  const dataCell3 = getInputCell(ctx.runtime, space, INPUT_CELL_ID_PHASE_3, tx);
+  const dataCell3 = getInputCell(ctx.runtime, space, INPUT_CELL_ID_PHASE_3);
+  const resultCell3 = getResultCell(ctx.runtime, space, RESULT_CELL_ID_PHASE_3);
+
+  // Set up Phase 3's recipe instance (writes need transaction)
+  let tx = ctx.runtime.edit();
   const initialData: InputData = { values: [1, 2, 3, 4, 5], label: "Numbers" };
-  dataCell3.set(initialData);
+  dataCell3.withTx(tx).set(initialData);
   console.log("Created new input cell for Phase 3:", initialData);
 
-  // Create Phase 3's result cell and run recipe
-  const resultCell3 = getResultCell(
-    ctx.runtime,
-    space,
-    RESULT_CELL_ID_PHASE_3,
-    tx,
-  );
   const runResult3 = ctx.runtime.run(
     tx,
     recipe,
@@ -347,25 +330,17 @@ async function phase4CrossSessionReactivity(
   console.log("\n--- Phase 4: Cross-session reactivity ---");
 
   const ctx = createTestContext(identity);
-  let tx = ctx.runtime.edit();
 
   // Load the result cell from Phase 3 (by the same cause/ID)
-  const resultCell = getResultCell(
-    ctx.runtime,
-    space,
-    RESULT_CELL_ID_PHASE_3,
-    tx,
-  );
-  await resultCell.sync();
+  const resultCell = getResultCell(ctx.runtime, space, RESULT_CELL_ID_PHASE_3);
 
   // Start the existing recipe instance - this rehydrates the reactive graph
   await ctx.runtime.start(resultCell);
   console.log("Started existing recipe instance");
 
   // Load Phase 3's input cell
-  const dataCell = getInputCell(ctx.runtime, space, INPUT_CELL_ID_PHASE_3, tx);
+  const dataCell = getInputCell(ctx.runtime, space, INPUT_CELL_ID_PHASE_3);
   await dataCell.sync();
-  await tx.commit();
 
   // Verify current state (should be from Phase 3's update: sum=60)
   await resultCell.pull();
@@ -383,7 +358,7 @@ async function phase4CrossSessionReactivity(
   const newData: InputData = { values: [100, 200], label: "Hundreds" };
   console.log("Updating data to:", newData);
 
-  tx = ctx.runtime.edit();
+  const tx = ctx.runtime.edit();
   dataCell.withTx(tx).set(newData);
   await tx.commit();
 
