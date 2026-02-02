@@ -6,7 +6,7 @@
  * never less restrictive.
  */
 
-import { Label, Labeled, labels } from "./labels.ts";
+import { Atom, Label, Labeled, labels } from "./labels.ts";
 
 // ============================================================================
 // Types
@@ -48,6 +48,38 @@ export interface SymlinkNode {
 }
 
 // ============================================================================
+// Mount Types
+// ============================================================================
+
+export interface MountOptions {
+  /** Real filesystem path to mount */
+  hostPath: string;
+  /** VFS path to mount at */
+  mountPoint: string;
+  /** Default label for files without a stored label */
+  defaultLabel: Label;
+  /** If true, mount is read-only (writes throw) */
+  readOnly?: boolean;
+}
+
+interface MountEntry {
+  hostPath: string;
+  mountPoint: string;
+  defaultLabel: Label;
+  readOnly: boolean;
+  /** Cached label store — loaded lazily from .cfc-labels.json */
+  labelStore: Map<string, SerializedLabel> | null;
+}
+
+/** JSON-serializable label for the sidecar file */
+interface SerializedLabel {
+  confidentiality: Atom[][];
+  integrity: Atom[];
+}
+
+const LABEL_SIDECAR = ".cfc-labels.json";
+
+// ============================================================================
 // VFS Class
 // ============================================================================
 
@@ -56,6 +88,7 @@ export class VFS {
   public cwd: string;
   private textEncoder = new TextEncoder();
   private textDecoder = new TextDecoder();
+  private mounts: MountEntry[] = [];
 
   constructor(rootLabel?: Label) {
     const now = Date.now();
@@ -254,6 +287,10 @@ export class VFS {
    * Read file contents with label
    */
   readFile(path: string): Labeled<Uint8Array> {
+    // Check mounts first
+    const mounted = this.readMountedFile(path);
+    if (mounted) return mounted;
+
     const node = this.resolve(path, true);
 
     if (!node) {
@@ -285,6 +322,9 @@ export class VFS {
    * Write file content with label (enforces monotonicity)
    */
   writeFile(path: string, content: Uint8Array | string, label: Label): void {
+    // Check mounts first
+    if (this.writeMountedFile(path, content, label)) return;
+
     const normalized = this.resolvePath(path);
     const existing = this.resolve(normalized, true);
 
@@ -349,6 +389,10 @@ export class VFS {
    * Read directory listing with label
    */
   readdir(path: string): Labeled<string[]> {
+    // Check mounts first
+    const mounted = this.readMountedDir(path);
+    if (mounted) return mounted;
+
     const node = this.resolve(path, true);
 
     if (!node) {
@@ -507,6 +551,10 @@ export class VFS {
    * Get file metadata with label
    */
   stat(path: string): Labeled<Metadata> {
+    // Check mounts first
+    const mounted = this.statMounted(path);
+    if (mounted) return mounted;
+
     const node = this.resolve(path, true);
 
     if (!node) {
@@ -568,6 +616,253 @@ export class VFS {
    * Check if path exists
    */
   exists(path: string): boolean {
+    const mounted = this.existsMounted(path);
+    if (mounted !== null) return mounted;
     return this.resolve(path, true) !== null;
+  }
+
+  // ==========================================================================
+  // Mount Support
+  // ==========================================================================
+
+  /**
+   * Mount a real filesystem directory at a VFS path.
+   * Files are read/written through to the host filesystem.
+   * Labels are stored in a `.cfc-labels.json` sidecar at the host path root.
+   */
+  mount(options: MountOptions): void {
+    const mountPoint = this.resolvePath(options.mountPoint);
+
+    // Check for overlapping mounts
+    for (const m of this.mounts) {
+      if (mountPoint === m.mountPoint) {
+        throw new Error(`Already mounted at ${mountPoint}`);
+      }
+      if (mountPoint.startsWith(m.mountPoint + "/") || m.mountPoint.startsWith(mountPoint + "/")) {
+        throw new Error(`Overlapping mount: ${mountPoint} conflicts with ${m.mountPoint}`);
+      }
+    }
+
+    this.mounts.push({
+      hostPath: options.hostPath,
+      mountPoint,
+      defaultLabel: options.defaultLabel,
+      readOnly: options.readOnly ?? false,
+      labelStore: null,
+    });
+
+    // Sort longest-first so inner mounts are checked first
+    this.mounts.sort((a, b) => b.mountPoint.length - a.mountPoint.length);
+  }
+
+  /**
+   * Unmount a previously mounted path.
+   * Flushes any pending label changes before unmounting.
+   */
+  unmount(mountPoint: string): void {
+    const normalized = this.resolvePath(mountPoint);
+    const idx = this.mounts.findIndex(m => m.mountPoint === normalized);
+    if (idx === -1) {
+      throw new Error(`Not mounted: ${mountPoint}`);
+    }
+    this.mounts.splice(idx, 1);
+  }
+
+  /** Get all current mounts */
+  getMounts(): ReadonlyArray<{ mountPoint: string; hostPath: string; readOnly: boolean }> {
+    return this.mounts.map(m => ({
+      mountPoint: m.mountPoint,
+      hostPath: m.hostPath,
+      readOnly: m.readOnly,
+    }));
+  }
+
+  /**
+   * Find a mount that covers the given normalized VFS path.
+   * Returns the mount entry and the relative path within the mount.
+   */
+  private findMount(normalizedPath: string): { mount: MountEntry; relPath: string } | null {
+    for (const m of this.mounts) {
+      if (normalizedPath === m.mountPoint) {
+        return { mount: m, relPath: "" };
+      }
+      if (normalizedPath.startsWith(m.mountPoint + "/")) {
+        return { mount: m, relPath: normalizedPath.slice(m.mountPoint.length) };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Resolve the real host path for a mounted VFS path.
+   */
+  private hostPathFor(mount: MountEntry, relPath: string): string {
+    if (relPath === "" || relPath === "/") return mount.hostPath;
+    return mount.hostPath + relPath;
+  }
+
+  /**
+   * Load the label store for a mount (lazy, cached).
+   */
+  private loadLabelStore(mount: MountEntry): Map<string, SerializedLabel> {
+    if (mount.labelStore !== null) return mount.labelStore;
+
+    mount.labelStore = new Map();
+    const sidecarPath = mount.hostPath + "/" + LABEL_SIDECAR;
+    try {
+      const data = Deno.readTextFileSync(sidecarPath);
+      const parsed = JSON.parse(data) as Record<string, SerializedLabel>;
+      for (const [key, val] of Object.entries(parsed)) {
+        mount.labelStore.set(key, val);
+      }
+    } catch {
+      // No sidecar yet — that's fine
+    }
+    return mount.labelStore;
+  }
+
+  /**
+   * Persist the label store to the sidecar file.
+   */
+  private saveLabelStore(mount: MountEntry): void {
+    const store = this.loadLabelStore(mount);
+    const obj: Record<string, SerializedLabel> = {};
+    for (const [key, val] of store) {
+      obj[key] = val;
+    }
+    const sidecarPath = mount.hostPath + "/" + LABEL_SIDECAR;
+    Deno.writeTextFileSync(sidecarPath, JSON.stringify(obj, null, 2) + "\n");
+  }
+
+  /**
+   * Get the label for a file in a mount, falling back to the default label.
+   */
+  private getMountLabel(mount: MountEntry, relPath: string): Label {
+    const store = this.loadLabelStore(mount);
+    const stored = store.get(relPath);
+    if (stored) {
+      return {
+        confidentiality: stored.confidentiality,
+        integrity: stored.integrity,
+      };
+    }
+    return mount.defaultLabel;
+  }
+
+  /**
+   * Store a label for a file in a mount.
+   */
+  private setMountLabel(mount: MountEntry, relPath: string, label: Label): void {
+    const store = this.loadLabelStore(mount);
+    store.set(relPath, {
+      confidentiality: label.confidentiality,
+      integrity: label.integrity,
+    });
+    this.saveLabelStore(mount);
+  }
+
+  // ==========================================================================
+  // Mount-aware overrides for public methods
+  // ==========================================================================
+
+  /**
+   * Read a file, checking mounts first.
+   */
+  readMountedFile(path: string): Labeled<Uint8Array> | null {
+    const normalized = this.resolvePath(path);
+    const found = this.findMount(normalized);
+    if (!found) return null;
+
+    const hostPath = this.hostPathFor(found.mount, found.relPath);
+    const content = Deno.readFileSync(hostPath);
+    const label = this.getMountLabel(found.mount, found.relPath);
+    return { value: content, label };
+  }
+
+  /**
+   * Write a file through a mount.
+   */
+  writeMountedFile(path: string, content: Uint8Array | string, label: Label): boolean {
+    const normalized = this.resolvePath(path);
+    const found = this.findMount(normalized);
+    if (!found) return false;
+
+    if (found.mount.readOnly) {
+      throw new Error(`Read-only mount: ${found.mount.mountPoint}`);
+    }
+
+    const hostPath = this.hostPathFor(found.mount, found.relPath);
+    const bytes = typeof content === "string"
+      ? this.textEncoder.encode(content)
+      : content;
+
+    // Ensure parent directory exists on host
+    const lastSlash = hostPath.lastIndexOf("/");
+    if (lastSlash > 0) {
+      Deno.mkdirSync(hostPath.substring(0, lastSlash), { recursive: true });
+    }
+
+    Deno.writeFileSync(hostPath, bytes);
+    this.setMountLabel(found.mount, found.relPath, label);
+    return true;
+  }
+
+  /**
+   * List directory entries from a mount.
+   */
+  readMountedDir(path: string): Labeled<string[]> | null {
+    const normalized = this.resolvePath(path);
+    const found = this.findMount(normalized);
+    if (!found) return null;
+
+    const hostPath = this.hostPathFor(found.mount, found.relPath);
+    const entries: string[] = [];
+    for (const entry of Deno.readDirSync(hostPath)) {
+      if (entry.name === LABEL_SIDECAR) continue; // hide sidecar
+      entries.push(entry.name);
+    }
+    return { value: entries, label: found.mount.defaultLabel };
+  }
+
+  /**
+   * Stat a mounted path.
+   */
+  statMounted(path: string): Labeled<Metadata> | null {
+    const normalized = this.resolvePath(path);
+    const found = this.findMount(normalized);
+    if (!found) return null;
+
+    const hostPath = this.hostPathFor(found.mount, found.relPath);
+    const info = Deno.statSync(hostPath);
+    const label = this.getMountLabel(found.mount, found.relPath);
+
+    return {
+      value: {
+        mode: info.mode ?? 0o644,
+        uid: "user",
+        gid: "user",
+        mtime: info.mtime?.getTime() ?? Date.now(),
+        ctime: info.birthtime?.getTime() ?? Date.now(),
+        size: info.size,
+      },
+      label,
+    };
+  }
+
+  /**
+   * Check if a mounted path exists.
+   */
+  existsMounted(path: string): boolean | null {
+    const normalized = this.resolvePath(path);
+    const found = this.findMount(normalized);
+    if (!found) return null;
+
+    const hostPath = this.hostPathFor(found.mount, found.relPath);
+    try {
+      Deno.statSync(hostPath);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
