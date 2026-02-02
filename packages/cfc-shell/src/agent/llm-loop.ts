@@ -95,7 +95,10 @@ const AGENT_TOOLS: Record<string, ToolDef> = {
   task: {
     description: "Delegate a task to a sub-agent with a relaxed visibility " +
       "policy. The sub-agent can see data that this agent cannot (e.g., " +
-      "untrusted network content). The sub-agent's final text response is " +
+      "untrusted network content). IMPORTANT: Only use this tool if your " +
+      "own exec output is being filtered — if you can already see the data, " +
+      "just use exec directly. Do NOT delegate from a sub-agent; sub-agents " +
+      "can already see everything. The sub-agent's final text response is " +
       "declassified by checking it against ballots (safe return strings you " +
       "provide) and captured command outputs. If the response matches a " +
       "ballot, it is endorsed as InjectionFree. If it matches a command " +
@@ -209,22 +212,13 @@ export async function runAgentLoop(
   let iterations = 0;
   let conversationLabel = labels.userInput();
 
-  // Only offer the task tool if the agent's policy restricts visibility
-  // (i.e., it has requiredIntegrity). Sub-agents can see everything and
-  // don't need to delegate, so omitting the tool avoids confused recursion.
-  const needsTaskTool = agent.policy.requiredIntegrity.length > 0 &&
-    agent.policy.canSpawnSubAgents;
-  const tools: Record<string, ToolDef> = needsTaskTool
-    ? AGENT_TOOLS
-    : { exec: AGENT_TOOLS.exec };
-
   while (iterations < maxIterations) {
     // Call LLM
     const response = await llm.sendRequest({
       messages,
       model,
       system,
-      tools,
+      tools: AGENT_TOOLS,
     });
 
     onAssistantMessage?.(response);
