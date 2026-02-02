@@ -19,7 +19,8 @@ export async function grep(
   let countOnly = false;
   let recursive = false;
   let filesOnly = false;
-  let _useExtendedRegex = false;
+  // deno-lint-ignore no-unused-vars
+  let useExtendedRegex = false;
   let pattern = "";
   const files: string[] = [];
 
@@ -40,7 +41,7 @@ export async function grep(
     } else if (arg === "-l") {
       filesOnly = true;
     } else if (arg === "-E") {
-      _useExtendedRegex = true;
+      useExtendedRegex = true;
     } else if (arg.startsWith("-")) {
       // Handle combined flags like -inr
       for (let j = 1; j < arg.length; j++) {
@@ -50,7 +51,7 @@ export async function grep(
         else if (arg[j] === "c") countOnly = true;
         else if (arg[j] === "r") recursive = true;
         else if (arg[j] === "l") filesOnly = true;
-        else if (arg[j] === "E") _useExtendedRegex = true;
+        else if (arg[j] === "E") useExtendedRegex = true;
       }
     } else if (!pattern) {
       pattern = arg;
