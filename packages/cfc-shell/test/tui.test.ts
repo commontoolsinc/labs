@@ -117,3 +117,13 @@ Deno.test("createStreamFormatter reset restarts ⏺ marker", () => {
   assertEquals(out.includes("⏺"), true);
   assertEquals(out.includes("Second"), true);
 });
+
+Deno.test("wordWrap hard-wraps words longer than width", () => {
+  const long = "a".repeat(50);
+  const result = wordWrap(long, 20);
+  for (const line of result.split("\n")) {
+    assertEquals(line.length <= 20, true, `line too long: "${line}"`);
+  }
+  // All characters preserved
+  assertEquals(result.replace(/\n/g, ""), long);
+});

@@ -67,6 +67,22 @@ function wrapLine(line: string, width: number): string {
   let current = "";
 
   for (const word of words) {
+    // Hard-wrap words longer than width
+    if (word.length > width) {
+      if (current) {
+        lines.push(current.trimEnd());
+        current = "";
+      }
+      for (let i = 0; i < word.length; i += width) {
+        const chunk = word.slice(i, i + width);
+        if (i + width < word.length) {
+          lines.push(chunk);
+        } else {
+          current = chunk;
+        }
+      }
+      continue;
+    }
     if (current.length + word.length > width && current.length > 0) {
       lines.push(current.trimEnd());
       current = word.trimStart();
@@ -188,8 +204,17 @@ export function createStreamFormatter(
           col = 0;
         }
 
-        // Soft-wrap at word boundary when approaching terminal width
-        if (ch === " " && col >= wrapCol) {
+        // Hard-wrap: force break if a single "word" exceeds the line
+        if (col >= wrapCol && ch !== "\n" && ch !== " ") {
+          out += `\n${gutter(depth)}  `;
+          col = 0;
+        }
+
+        // Soft-wrap: break at space before the line overflows.
+        // We wrap when the *next* word would likely push past wrapCol.
+        // Since we can't look ahead in streaming, we break at spaces
+        // once we're within a small margin of the limit.
+        if (ch === " " && col >= wrapCol - 1) {
           out += `\n${gutter(depth)}  `;
           col = 0;
           continue;
