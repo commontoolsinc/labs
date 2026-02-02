@@ -1931,8 +1931,9 @@ export class SchemaObjectTraverser<V extends JSONValue>
       ) {
         // For inline objects (not links), we need to create a DataCellURI-style
         // address with path: ["value"] so that getNextCellLink can generate a
-        // proper normalized link.
-        if (!isPrimitiveCellLink(item) && isRecord(item)) {
+        // proper normalized link. We check curDoc.value (not item) because item
+        // may have been a link that was resolved to an inline object.
+        if (!isPrimitiveCellLink(curDoc.value) && isRecord(curDoc.value)) {
           const elementLink: NormalizedFullLink = {
             space: curDoc.address.space,
             id: curDoc.address.id,
