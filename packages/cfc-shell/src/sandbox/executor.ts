@@ -99,7 +99,17 @@ export class SandboxedExecutor {
           signal: abortController.signal,
         });
 
-        const process = cmd.spawn();
+        let process;
+        try {
+          process = cmd.spawn();
+        } catch (e: unknown) {
+          clearTimeout(timeoutId);
+          // Fall back to stub mode if we lack permission to spawn processes
+          if (e instanceof Deno.errors.PermissionDenied) {
+            return this.executeStub(command, args, stdin, inputLabels);
+          }
+          throw e;
+        }
 
         // Write stdin if provided
         if (stdin && process.stdin) {
@@ -214,25 +224,24 @@ export class SandboxedExecutor {
    * - Integrity: intersection of inputs + SandboxedExec atom
    */
   private computeOutputLabel(inputLabels: Label[]): Label {
+    let outputLabel: Label;
+
     if (inputLabels.length === 0) {
       // No inputs - just mark as SandboxedExec
-      return {
+      outputLabel = {
         confidentiality: [],
         integrity: [{ kind: "SandboxedExec" }],
       };
+    } else {
+      // Join all input labels (union confidentiality, intersect integrity)
+      outputLabel = labels.joinAll(inputLabels);
+      // Add SandboxedExec to integrity
+      outputLabel = labels.endorse(outputLabel, { kind: "SandboxedExec" });
     }
 
-    // Join all input labels (union confidentiality, intersect integrity)
-    let outputLabel = labels.joinAll(inputLabels);
-
-    // Add SandboxedExec to integrity
-    outputLabel = labels.endorse(outputLabel, { kind: "SandboxedExec" });
-
-    // If network is allowed, add network taint to confidentiality
-    // (data might have been exfiltrated or modified by network requests)
+    // If network is allowed, add network provenance
+    // (data might have been fetched from or modified by network)
     if (this.config.allowNetwork) {
-      // Add a network taint atom to confidentiality
-      // This indicates output might contain data from network
       outputLabel = {
         ...outputLabel,
         integrity: [

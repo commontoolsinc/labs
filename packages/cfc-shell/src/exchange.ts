@@ -138,6 +138,22 @@ export class ExchangeRuleEvaluator {
         };
       }
 
+      // Intent-gate rules with no substantive requirements always trigger
+      if (rule.onViolation === "request-intent") {
+        const r = rule.requires;
+        const hasSubstantiveReqs = r && (
+          r.integrity || r.notIntegrity || r.pcIntegrity || r.publicOnly
+        );
+        if (!hasSubstantiveReqs) {
+          return {
+            allowed: false,
+            rule,
+            reason: `${rule.name}: requires intent`,
+            action: "request-intent",
+          };
+        }
+      }
+
       // Rule matches and requirements met - allow
       return {
         allowed: true,
