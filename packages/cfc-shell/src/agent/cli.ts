@@ -21,6 +21,15 @@ import { AgentSession } from "./agent-session.ts";
 import { AgentPolicy, policies } from "./policy.ts";
 import { VFS } from "../vfs.ts";
 
+/** Prefix each line with >> markers to indicate sub-agent nesting depth. */
+function prefixLines(text: string, depth: number): string {
+  if (depth <= 0) return text;
+  const prefix = ">> ".repeat(depth);
+  return text.split("\n").map((line) => line ? `${prefix}${line}` : line).join(
+    "\n",
+  );
+}
+
 /** Format a label concisely for display */
 function formatLabel(
   label: { confidentiality: any[]; integrity: any[] },
@@ -108,6 +117,13 @@ export class AgentCLI {
     }
 
     output += `  label: ${formatLabel(result.label)}\n`;
+
+    // Prefix output with >> markers for sub-agent depth
+    const subDepth = this.stack.length - 1;
+    if (subDepth > 0) {
+      output = prefixLines(output, subDepth);
+    }
+
     return output;
   }
 

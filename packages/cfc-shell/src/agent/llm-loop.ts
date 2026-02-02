@@ -141,6 +141,8 @@ export interface AgentLoopOptions {
   maxIterations?: number;
   /** Prior conversation history to prepend (for multi-turn sessions) */
   history?: Message[];
+  /** Nesting depth (0 = root agent). Used for output prefixing. */
+  depth?: number;
   /** Called before each tool execution */
   onToolCall?: (toolName: string, input: Record<string, unknown>) => void;
   /** Called after each exec with the tool result */
@@ -171,6 +173,7 @@ export async function runAgentLoop(
     model,
     system,
     maxIterations = 20,
+    depth = 0,
     onToolCall,
     onToolResult,
     onAssistantMessage,
@@ -226,7 +229,7 @@ export async function runAgentLoop(
           type: "tool-result",
           toolCallId: tc.toolCallId,
           toolName: "exec",
-          output: { type: "text", value: formatExecResult(result) },
+          output: { type: "text", value: formatExecResult(result, depth) },
         });
       } else if (tc.toolName === "task") {
         onToolCall?.(tc.toolName, tc.input);
@@ -241,6 +244,7 @@ export async function runAgentLoop(
           taskText,
           policyName,
           ballots,
+          depth,
           {
             llm,
             model,
@@ -298,6 +302,7 @@ async function executeTask(
   task: string,
   policyName: string,
   ballots: string[],
+  parentDepth: number,
   loopOptions: {
     llm: LLMClient;
     model: string;
@@ -315,9 +320,11 @@ async function executeTask(
   const child = parentAgent.spawnSubAgent(policy);
 
   try {
+    const childDepth = parentDepth + 1;
     const result = await runAgentLoop(task, {
       ...loopOptions,
       agent: child,
+      depth: childDepth,
     });
 
     // Declassify the sub-agent's response
@@ -332,7 +339,8 @@ async function executeTask(
       ? declassified.label.integrity.map((a) => a.kind).join(", ")
       : "none";
 
-    return `${declassified.content}\n[integrity: ${labelDesc}]`;
+    const raw = `${declassified.content}\n[integrity: ${labelDesc}]`;
+    return prefixLines(raw, childDepth);
   } catch (e) {
     child.end();
     return `Error in sub-agent: ${e instanceof Error ? e.message : String(e)}`;
@@ -343,7 +351,7 @@ async function executeTask(
 // Helpers
 // ---------------------------------------------------------------------------
 
-function formatExecResult(result: ToolResult): string {
+function formatExecResult(result: ToolResult, depth: number): string {
   let outputText = result.stdout;
   if (result.stderr) {
     outputText += (outputText ? "\n" : "") + `[stderr] ${result.stderr}`;
@@ -353,7 +361,16 @@ function formatExecResult(result: ToolResult): string {
       `[filtered: ${result.filterReason ?? "policy"}]`;
   }
   outputText += `\n[exit code: ${result.exitCode}]`;
-  return outputText;
+  return depth > 0 ? prefixLines(outputText, depth) : outputText;
+}
+
+/** Prefix each line with >> markers to indicate sub-agent nesting depth. */
+function prefixLines(text: string, depth: number): string {
+  if (depth <= 0) return text;
+  const prefix = ">> ".repeat(depth);
+  return text.split("\n").map((line) => line ? `${prefix}${line}` : line).join(
+    "\n",
+  );
 }
 
 function extractToolCalls(

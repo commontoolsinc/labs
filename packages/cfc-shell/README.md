@@ -589,6 +589,7 @@ The LLM has two tools:
 visibility policy (e.g., a main agent only sees InjectionFree data).
 
 **`task`** — Delegate work to a sub-agent with a relaxed policy. Parameters:
+
 - `task` (required): Instructions for the sub-agent
 - `policy`: `"sub"` (default, sees everything) or `"restricted"` (sees
   everything, can't spawn further sub-agents)
@@ -608,14 +609,15 @@ determined by the command, not the data.
 ### Sub-agents and Declassification
 
 When the `task` tool runs, the system:
+
 1. Spawns a sub-agent with the specified policy
 2. Runs a nested agent loop with the sub-agent
 3. Takes the sub-agent's final text response
 4. Runs `declassifyReturn` to check the response:
    - **Ballot match**: If the text exactly matches a ballot string, it is
      endorsed as `InjectionFree` (the parent authored it)
-   - **Output match**: If the text exactly matches any captured stdout from
-     the sub-agent's exec history, it adopts that output's label
+   - **Output match**: If the text exactly matches any captured stdout from the
+     sub-agent's exec history, it adopts that output's label
    - **No match**: The text carries the sub-agent's accumulated label (tainted)
 5. Returns the declassified result to the parent
 
