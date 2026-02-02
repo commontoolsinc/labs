@@ -106,12 +106,8 @@ export class LinksFromController implements ReactiveController {
       return;
     }
 
-    // Get the space from the cell ref for context
-    const cellRef = this.cell.ref();
-    const contextSpace = cellRef.space;
-
-    // Discover links from the value
-    this.links = discoverLinksFromValue(value, contextSpace);
+    // Discover links from the value (CellHandle instances are embedded in the value)
+    this.links = discoverLinksFromValue(value);
     this.host.requestUpdate();
   }
 

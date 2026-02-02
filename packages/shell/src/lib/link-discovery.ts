@@ -1,14 +1,12 @@
 /**
  * Link discovery utilities for finding cell links in values.
  *
- * This module is browser-safe and works with serialized values from CellHandle.get().
+ * This module is browser-safe and works with values from CellHandle.get(),
+ * which contain CellHandle instances where there are cell references.
  */
 
-import { isSigilLink, LINK_V1_TAG } from "@commontools/runtime-client";
-import type {
-  NormalizedFullLink,
-  SigilLink,
-} from "@commontools/runtime-client";
+import { type CellHandle, isCellHandle } from "@commontools/runtime-client";
+import type { NormalizedFullLink } from "@commontools/runtime-client";
 import type { DID } from "@commontools/identity";
 
 /**
@@ -24,95 +22,6 @@ export type DiscoveredLink = {
  */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * Extract a NormalizedFullLink from a sigil link value.
- * Returns undefined if the link cannot be fully resolved (missing id or space).
- */
-function sigilLinkToNormalizedLink(
-  sigilLink: SigilLink,
-  contextSpace?: DID,
-): NormalizedFullLink | undefined {
-  const linkData = sigilLink["/"][LINK_V1_TAG];
-  const id = linkData.id;
-  const space = linkData.space ?? contextSpace;
-
-  // Need both id and space to create a full link
-  if (!id || !space) return undefined;
-
-  return {
-    id,
-    space,
-    type: "application/json",
-    path: linkData.path ?? [],
-    ...(linkData.schema !== undefined && { schema: linkData.schema }),
-    ...(linkData.rootSchema !== undefined &&
-      { rootSchema: linkData.rootSchema }),
-  };
-}
-
-/**
- * Recursively traverse a value and invoke a visitor callback for each sigil link found.
- *
- * This is a browser-safe traversal utility that:
- * - Detects links using isSigilLink()
- * - Handles cycles using a Set of already-seen values
- * - Stops at link boundaries (doesn't traverse INTO linked cells)
- * - Skips data: URI links (they're not useful as external links)
- */
-export function traverseCellLinks(
-  value: unknown,
-  visitor: (link: NormalizedFullLink, path: string[]) => void,
-  contextSpace?: DID,
-  seen: Set<unknown> = new Set(),
-  path: string[] = [],
-): void {
-  if (!isRecord(value)) return;
-
-  // Check if this value is a sigil link
-  if (isSigilLink(value)) {
-    const normalizedLink = sigilLinkToNormalizedLink(
-      value as SigilLink,
-      contextSpace,
-    );
-    if (normalizedLink && !normalizedLink.id.startsWith("data:")) {
-      // Found a link - invoke visitor and stop traversing (don't go into linked cells)
-      visitor(normalizedLink, path);
-    }
-    return;
-  }
-
-  // Cycle detection
-  if (seen.has(value)) {
-    return;
-  }
-  seen.add(value);
-
-  if (Array.isArray(value)) {
-    value.forEach((v, index) => {
-      traverseCellLinks(
-        v,
-        visitor,
-        contextSpace,
-        seen,
-        [...path, index.toString()],
-      );
-    });
-  } else {
-    Object.entries(value as Record<string, unknown>)
-      // Skip $-prefixed properties ($UI, $TYPE, etc.) - these are internal/VDOM
-      .filter(([key]) => !key.startsWith("$"))
-      .forEach(([key, childValue]) => {
-        traverseCellLinks(
-          childValue,
-          visitor,
-          contextSpace,
-          seen,
-          [...path, key],
-        );
-      });
-  }
 }
 
 /**
@@ -140,41 +49,98 @@ export function createLLMFriendlyLink(
 }
 
 /**
- * Discover all sigil links in a value.
+ * Convert a CellHandle to a NormalizedFullLink.
+ */
+function cellHandleToLink(cell: CellHandle<unknown>): NormalizedFullLink {
+  const ref = cell.ref();
+  return {
+    id: ref.id,
+    space: ref.space,
+    type: ref.type ?? "application/json",
+    path: ref.path,
+    ...(ref.schema !== undefined && { schema: ref.schema }),
+    ...(ref.rootSchema !== undefined && { rootSchema: ref.rootSchema }),
+  };
+}
+
+/**
+ * Recursively traverse a value and invoke a visitor callback for each CellHandle found.
+ *
+ * This traversal utility:
+ * - Detects CellHandle instances using isCellHandle()
+ * - Handles cycles using a Set of already-seen values
+ * - Stops at link boundaries (doesn't traverse INTO linked cells)
+ * - Skips data: URI links (they're not useful as external links)
+ */
+export function traverseCellLinks(
+  value: unknown,
+  visitor: (link: NormalizedFullLink, path: string[]) => void,
+  seen: Set<unknown> = new Set(),
+  path: string[] = [],
+): void {
+  // Check if this value is a CellHandle (a cell reference)
+  if (isCellHandle(value)) {
+    const link = cellHandleToLink(value);
+    if (!link.id.startsWith("data:")) {
+      // Found a cell reference - invoke visitor and stop traversing
+      visitor(link, path);
+    }
+    return;
+  }
+
+  // Skip primitives
+  if (!isRecord(value) && !Array.isArray(value)) {
+    return;
+  }
+
+  // Cycle detection
+  if (seen.has(value)) {
+    return;
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    value.forEach((v, index) => {
+      traverseCellLinks(v, visitor, seen, [...path, index.toString()]);
+    });
+  } else if (isRecord(value)) {
+    Object.entries(value)
+      // Skip $-prefixed properties ($UI, $TYPE, etc.) - these are internal/VDOM
+      .filter(([key]) => !key.startsWith("$"))
+      .forEach(([key, childValue]) => {
+        traverseCellLinks(childValue, visitor, seen, [...path, key]);
+      });
+  }
+}
+
+/**
+ * Discover all cell links in a value.
  *
  * This function:
- * - Traverses the value recursively to find all sigil link references
+ * - Traverses the value recursively to find all CellHandle references
  * - Deduplicates links by (space, id) identity
  * - Returns links with the path where they were found
  *
- * @param value - The value to discover links from (e.g., from CellHandle.get())
- * @param contextSpace - The current execution space (for cross-space link detection)
+ * @param value - The value to discover links from (from CellHandle.get())
  * @returns Array of discovered links with their paths
  */
-export function discoverLinksFromValue(
-  value: unknown,
-  contextSpace?: DID,
-): DiscoveredLink[] {
+export function discoverLinksFromValue(value: unknown): DiscoveredLink[] {
   const discovered: DiscoveredLink[] = [];
 
   // Use a Map to deduplicate by (space, id) combination
   const linkKey = (link: NormalizedFullLink) => `${link.space}:${link.id}`;
   const seen = new Map<string, DiscoveredLink>();
 
-  traverseCellLinks(
-    value,
-    (link, path) => {
-      const key = linkKey(link);
+  traverseCellLinks(value, (link, path) => {
+    const key = linkKey(link);
 
-      // Only keep the first occurrence of each unique link
-      if (!seen.has(key)) {
-        const discoveredLink: DiscoveredLink = { link, path };
-        seen.set(key, discoveredLink);
-        discovered.push(discoveredLink);
-      }
-    },
-    contextSpace,
-  );
+    // Only keep the first occurrence of each unique link
+    if (!seen.has(key)) {
+      const discoveredLink: DiscoveredLink = { link, path };
+      seen.set(key, discoveredLink);
+      discovered.push(discoveredLink);
+    }
+  });
 
   return discovered;
 }
