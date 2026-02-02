@@ -128,21 +128,26 @@ export class AgentSession {
     // Execute the command and capture output
     const captured = await this.captureExec(command);
 
-    // Filter the output based on policy
+    // Filter stdout and stderr based on policy
     const {
       content: filteredStdout,
-      filtered,
-      reason,
+      filtered: stdoutFiltered,
+      reason: stdoutReason,
     } = filterOutput(captured.stdout, captured.label, this.policy);
+    const { content: filteredStderr } = filterOutput(
+      captured.stderr,
+      captured.stderrLabel,
+      this.policy,
+    );
 
     const toolResult: ToolResult = {
       id: callId,
       stdout: filteredStdout,
-      stderr: captured.stderr,
+      stderr: filteredStderr,
       exitCode: captured.exitCode,
       label: captured.label,
-      filtered,
-      filterReason: reason,
+      filtered: stdoutFiltered,
+      filterReason: stdoutReason,
     };
 
     this.history.push({
@@ -489,6 +494,7 @@ export class AgentSession {
     stderr: string;
     exitCode: number;
     label: Label;
+    stderrLabel: Label;
   }> {
     const ts = Date.now();
     const outFile = `/tmp/.agent-out-${this.id}-${ts}`;
@@ -531,8 +537,11 @@ export class AgentSession {
       } catch {
         // Command may not have produced output
       }
+      let stderrLabel = result.label;
       try {
-        stderr = this.shell.vfs.readFileText(errFile).value;
+        const errCaptured = this.shell.vfs.readFileText(errFile);
+        stderr = errCaptured.value;
+        stderrLabel = errCaptured.label;
       } catch {
         // No stderr
       }
@@ -549,6 +558,7 @@ export class AgentSession {
         stderr,
         exitCode: result.exitCode,
         label: outputLabel,
+        stderrLabel,
       };
     } catch (e) {
       try {
@@ -565,6 +575,7 @@ export class AgentSession {
         stderr: e instanceof Error ? e.message : String(e),
         exitCode: 1,
         label: labels.bottom(),
+        stderrLabel: labels.bottom(),
       };
     }
   }
