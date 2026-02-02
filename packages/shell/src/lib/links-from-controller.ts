@@ -3,7 +3,7 @@ import type { CellHandle } from "@commontools/runtime-client";
 import {
   type DiscoveredLink,
   discoverLinksFromValue,
-} from "@commontools/runner";
+} from "./link-discovery.ts";
 
 /**
  * Reactive controller for discovering links from a cell.
@@ -124,3 +124,6 @@ export class LinksFromController implements ReactiveController {
     this.unbind();
   }
 }
+
+// Re-export the type for convenience
+export type { DiscoveredLink };

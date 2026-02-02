@@ -1,7 +1,9 @@
 import { css, html, LitElement } from "lit";
 import { property } from "lit/decorators.js";
-import type { DiscoveredLink } from "@commontools/runner";
-import { createLLMFriendlyLink } from "@commontools/runner";
+import {
+  createLLMFriendlyLink,
+  type DiscoveredLink,
+} from "../lib/link-discovery.ts";
 import "@commontools/ui";
 
 /**
