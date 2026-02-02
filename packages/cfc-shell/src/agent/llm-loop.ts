@@ -15,6 +15,7 @@
 import { AgentSession } from "./agent-session.ts";
 import { policies } from "./policy.ts";
 import { ToolResult } from "./protocol.ts";
+import { type Label, labels } from "../labels.ts";
 
 // ---------------------------------------------------------------------------
 // Minimal LLM types (mirrors @commontools/api + @commontools/llm)
@@ -158,6 +159,8 @@ export interface AgentLoopResult {
   messages: Message[];
   /** Number of tool-call iterations */
   iterations: number;
+  /** Label representing what the LLM has seen (taint of conversation context) */
+  label: Label;
 }
 
 /**
@@ -185,6 +188,7 @@ export async function runAgentLoop(
   ];
 
   let iterations = 0;
+  let conversationLabel = labels.userInput();
 
   while (iterations < maxIterations) {
     // Call LLM
@@ -209,7 +213,12 @@ export async function runAgentLoop(
     if (toolCalls.length === 0) {
       // No tool calls — LLM is done, extract final text
       const responseText = extractText(response.content);
-      return { response: responseText, messages, iterations };
+      return {
+        response: responseText,
+        messages,
+        iterations,
+        label: conversationLabel,
+      };
     }
 
     iterations++;
@@ -224,6 +233,7 @@ export async function runAgentLoop(
         const result = await agent.exec(command);
 
         onToolResult?.(command, result);
+        conversationLabel = labels.join(conversationLabel, result.label);
 
         resultParts.push({
           type: "tool-result",
@@ -255,12 +265,13 @@ export async function runAgentLoop(
             onAssistantMessage,
           },
         );
+        conversationLabel = labels.join(conversationLabel, taskResult.label);
 
         resultParts.push({
           type: "tool-result",
           toolCallId: tc.toolCallId,
           toolName: "task",
-          output: { type: "text", value: taskResult },
+          output: { type: "text", value: taskResult.text },
         });
       } else {
         resultParts.push({
@@ -290,7 +301,12 @@ export async function runAgentLoop(
     ? extractText(lastAssistant.content)
     : "[Agent loop reached maximum iterations]";
 
-  return { response: responseText, messages, iterations };
+  return {
+    response: responseText,
+    messages,
+    iterations,
+    label: conversationLabel,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -312,7 +328,7 @@ async function executeTask(
     onToolResult?: (command: string, result: ToolResult) => void;
     onAssistantMessage?: (message: LLMResponse) => void;
   },
-): Promise<string> {
+): Promise<{ text: string; label: Label }> {
   const policy = policyName === "restricted"
     ? policies.restricted()
     : policies.sub();
@@ -340,10 +356,13 @@ async function executeTask(
       : "none";
 
     const raw = `${declassified.content}\n[integrity: ${labelDesc}]`;
-    return prefixLines(raw, childDepth);
+    return { text: prefixLines(raw, childDepth), label: declassified.label };
   } catch (e) {
     child.end();
-    return `Error in sub-agent: ${e instanceof Error ? e.message : String(e)}`;
+    return {
+      text: `Error in sub-agent: ${e instanceof Error ? e.message : String(e)}`,
+      label: labels.userInput(),
+    };
   }
 }
 

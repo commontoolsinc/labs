@@ -876,6 +876,11 @@ original Phase 1-7 plan:
 - **`task` tool + output-matching declassification** (Phase 8): Proper LLM tool
   for sub-agent delegation, replacing string-prefix commands.
 
+- **Conversation label tracking** (Phase 8): The agent loop tracks a
+  `conversationLabel` that accumulates taint from all tool results the LLM has
+  seen. Returned in `AgentLoopResult.label`. Task tool results join the
+  declassified label into the parent's conversation label.
+
 ## Non-goals (for now)
 
 - Full POSIX compliance
