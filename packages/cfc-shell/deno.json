@@ -1,7 +1,8 @@
 {
   "name": "@commontools/cfc-shell",
   "tasks": {
-    "test": "deno test --allow-env --allow-read --allow-write --allow-run test/"
+    "test": "deno test --allow-env --allow-read --allow-write --allow-run test/",
+    "agent": "deno run --allow-env --allow-read --allow-write --allow-run --allow-net src/agent/main.ts"
   },
   "exports": {
     ".": "./mod.ts"
