@@ -1,6 +1,26 @@
 /**
  * TUI formatting helpers for agent output — box-drawing borders,
  * ANSI colors, and word wrapping for sub-agent nesting.
+ *
+ * Visual language (Claude Code-inspired):
+ *
+ *   ⏺ Agent response text        ← depth 0 response
+ *     continuation line
+ *     $ command                   ← depth 0 tool call
+ *     output                     ← depth 0 tool result
+ *
+ *   ┌ sub-agent (sub policy)     ← task start (depth 1)
+ *   │ ⏺ Sub-agent response       ← depth 1 response
+ *   │   continuation
+ *   │   $ command                ← depth 1 tool call
+ *   │   output                  ← depth 1 tool result
+ *   │ ┌ nested sub-agent         ← task start (depth 2)
+ *   │ │ ⏺ ...
+ *   │ │   $ command
+ *   │ └ → "result"              ← task end (depth 2)
+ *   └ → "result"                ← task end (depth 1)
+ *
+ *   ⏺ More root agent text
  */
 
 // ---------------------------------------------------------------------------
@@ -11,6 +31,7 @@ const ESC = "\x1b[";
 export const reset = `${ESC}0m`;
 export const dim = (text: string): string => `${ESC}2m${text}${reset}`;
 export const cyan = (text: string): string => `${ESC}36m${text}${reset}`;
+export const bold = (text: string): string => `${ESC}1m${text}${reset}`;
 
 // ---------------------------------------------------------------------------
 // Terminal width
@@ -57,34 +78,111 @@ function wrapLine(line: string, width: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// Box drawing
+// Depth-based gutter
 // ---------------------------------------------------------------------------
 
 const BOX_V = "│";
 const BOX_TL = "┌";
 const BOX_BL = "└";
+const GUTTER_UNIT = `${BOX_V} `;
 
-/** Opening line: `┌ {label}` in dim color */
-export function boxStart(label: string): string {
-  return dim(`${BOX_TL} ${label}`);
+/** Raw gutter string for a given depth (no ANSI). Used for width calculations. */
+export function gutterRaw(depth: number): string {
+  if (depth <= 0) return "";
+  return GUTTER_UNIT.repeat(depth);
+}
+
+/** Dim-colored gutter prefix for content at a given nesting depth. */
+export function gutter(depth: number): string {
+  if (depth <= 0) return "";
+  return dim(gutterRaw(depth));
+}
+
+/** Width in columns consumed by the gutter at a given depth. */
+export function gutterWidth(depth: number): number {
+  return depth * GUTTER_UNIT.length;
+}
+
+// ---------------------------------------------------------------------------
+// Box drawing (depth-aware)
+// ---------------------------------------------------------------------------
+
+/** Opening line for a sub-agent box at `depth`. Drawn at parent's gutter. */
+export function boxStart(label: string, depth: number): string {
+  const parentGutter = depth > 1 ? gutter(depth - 1) : "";
+  return parentGutter + dim(`${BOX_TL} ${label}`);
+}
+
+/** Closing line for a sub-agent box at `depth`. Drawn at parent's gutter. */
+export function boxEnd(summary: string, depth: number): string {
+  const parentGutter = depth > 1 ? gutter(depth - 1) : "";
+  return parentGutter + dim(`${BOX_BL} → ${summary}`);
+}
+
+// ---------------------------------------------------------------------------
+// Line formatting helpers
+// ---------------------------------------------------------------------------
+
+/** Format a shell command line: `gutter + "  $ cmd"` */
+export function fmtCommand(cmd: string, depth: number): string {
+  return `${gutter(depth)}  $ ${cmd}`;
 }
 
 /**
- * Content line: `│ ` prefix + word-wrapped text.
- * `termWidth` is used to calculate available content width.
+ * Format output text: each line gets `gutter + "  "` indentation.
+ * Empty lines get the gutter only.
  */
-export function boxLine(text: string, termWidth?: number): string {
-  const prefix = `${BOX_V} `;
-  const tw = termWidth ?? getTermWidth();
-  const contentWidth = Math.max(20, tw - prefix.length - 2);
-  const wrapped = wordWrap(text, contentWidth);
-  return wrapped
-    .split("\n")
-    .map((line) => dim(prefix) + line)
-    .join("\n");
+export function fmtOutput(text: string, depth: number): string {
+  const g = gutter(depth);
+  return text.split("\n").map((l) => l ? `${g}  ${l}` : g).join("\n");
 }
 
-/** Closing line: `└ → {summary}` in dim color */
-export function boxEnd(summary: string): string {
-  return dim(`${BOX_BL} → ${summary}`);
+/** Format a status message (e.g. [filtered: ...], [exit code: N]) */
+export function fmtStatus(msg: string, depth: number): string {
+  return `${gutter(depth)}  ${msg}`;
+}
+
+// ---------------------------------------------------------------------------
+// Streaming text formatter
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a stateful formatter for streaming assistant text deltas.
+ * Tracks line position to apply `⏺` on first line and indentation on
+ * continuation lines, all with the correct gutter prefix.
+ *
+ * Call `format(delta)` for each text chunk. Call `reset()` before each
+ * new assistant response to restart the ⏺ marker.
+ */
+export function createStreamFormatter(
+  getDepth: () => number,
+): { format: (delta: string) => string; reset: () => void } {
+  let responseStart = true;
+  let lineStart = false;
+
+  return {
+    reset() {
+      responseStart = true;
+      lineStart = false;
+    },
+    format(delta: string): string {
+      const depth = getDepth();
+      let out = "";
+      for (const ch of delta) {
+        if (responseStart) {
+          out += `\n${gutter(depth)}⏺ `;
+          responseStart = false;
+          lineStart = false;
+        } else if (lineStart) {
+          out += `${gutter(depth)}  `;
+          lineStart = false;
+        }
+        out += ch;
+        if (ch === "\n") {
+          lineStart = true;
+        }
+      }
+      return out;
+    },
+  };
 }

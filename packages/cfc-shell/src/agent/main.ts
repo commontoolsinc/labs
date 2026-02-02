@@ -23,7 +23,14 @@ import {
   runAgentLoop,
 } from "./llm-loop.ts";
 import { VFS } from "../vfs.ts";
-import { boxEnd, boxLine, boxStart, getTermWidth } from "./tui.ts";
+import {
+  boxEnd,
+  boxStart,
+  createStreamFormatter,
+  fmtCommand,
+  fmtOutput,
+  fmtStatus,
+} from "./tui.ts";
 
 // ---------------------------------------------------------------------------
 // Minimal fetch-based LLM client (no dependency on @commontools/llm)
@@ -31,6 +38,8 @@ import { boxEnd, boxLine, boxStart, getTermWidth } from "./tui.ts";
 
 class FetchLLMClient implements LLMClient {
   private baseUrl: string;
+  /** Called for each streaming text delta. Set externally to route through TUI. */
+  onDelta?: (text: string) => void;
 
   constructor(apiUrl?: string) {
     const base = apiUrl ?? Deno.env.get("API_URL") ?? "http://localhost:8000";
@@ -93,9 +102,7 @@ class FetchLLMClient implements LLMClient {
           }
           if (event.type === "text-delta") {
             text += event.textDelta;
-            // Print streaming text as it arrives
-            const encoder = new TextEncoder();
-            await Deno.stdout.write(encoder.encode(event.textDelta));
+            this.onDelta?.(event.textDelta);
           } else if (event.type === "tool-call") {
             toolCalls.push({
               type: "tool-call",
@@ -163,7 +170,18 @@ async function runOnce(
   write: (s: string) => Promise<unknown>,
   history?: Message[],
 ): Promise<Message[]> {
-  const tw = getTermWidth();
+  // Track current depth for streaming text formatting
+  let currentDepth = 0;
+  const streamFmt = createStreamFormatter(() => currentDepth);
+
+  // Route streaming deltas through the TUI formatter
+  llm.onDelta = (text: string) => {
+    const formatted = streamFmt.format(text);
+    if (formatted) {
+      const encoder = new TextEncoder();
+      Deno.stdout.writeSync(encoder.encode(formatted));
+    }
+  };
 
   const result = await runAgentLoop(input, {
     llm,
@@ -173,43 +191,24 @@ async function runOnce(
     history,
     onToolCall: async (_toolName, input, depth) => {
       const cmd = String(input.command ?? input.task ?? "");
-      const line = `  $ ${cmd}`;
-      if (depth > 0) {
-        await write(`${boxLine(line, tw)}\n`);
-      } else {
-        await write(`\n${line}\n`);
-      }
+      await write(`\n${fmtCommand(cmd, depth)}\n`);
     },
     onToolResult: async (_cmd, res, depth) => {
       if (res.filtered) {
-        const msg = `  [filtered: ${res.filterReason}]`;
-        if (depth > 0) {
-          await write(`${boxLine(msg, tw)}\n`);
-        } else {
-          await write(`${msg}\n`);
-        }
+        await write(`${fmtStatus(`[filtered: ${res.filterReason}]`, depth)}\n`);
       } else if (res.stdout) {
-        const lines = res.stdout.split("\n").map((l) => l ? `  ${l}` : l)
-          .join("\n");
-        if (depth > 0) {
-          await write(`${boxLine(lines, tw)}\n`);
-        } else {
-          await write(`${lines}\n`);
-        }
+        await write(`${fmtOutput(res.stdout, depth)}\n`);
       }
       if (res.exitCode !== 0) {
-        const msg = `  [exit code: ${res.exitCode}]`;
-        if (depth > 0) {
-          await write(`${boxLine(msg, tw)}\n`);
-        } else {
-          await write(`${msg}\n`);
-        }
+        await write(`${fmtStatus(`[exit code: ${res.exitCode}]`, depth)}\n`);
       }
     },
-    onTaskStart: async (_task, policy, _depth) => {
-      await write(`\n${boxStart(`sub-agent (${policy} policy)`)}\n`);
+    onTaskStart: async (_task, policy, depth) => {
+      currentDepth = depth;
+      streamFmt.reset();
+      await write(`\n${boxStart(`sub-agent (${policy} policy)`, depth)}\n`);
     },
-    onTaskEnd: async (response, label, filtered, _depth) => {
+    onTaskEnd: async (response, label, filtered, depth) => {
       const labelDesc = label.integrity.length > 0
         ? label.integrity.map((a) => a.kind).join(", ")
         : "none";
@@ -217,7 +216,12 @@ async function runOnce(
       const summary = `${prefix}"${response.slice(0, 60)}${
         response.length > 60 ? "…" : ""
       }" [integrity: ${labelDesc}]`;
-      await write(`${boxEnd(summary)}\n\n`);
+      await write(`${boxEnd(summary, depth)}\n`);
+      currentDepth = depth - 1;
+      streamFmt.reset();
+    },
+    onAssistantMessage: () => {
+      streamFmt.reset();
     },
   });
 

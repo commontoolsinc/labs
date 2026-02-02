@@ -1,9 +1,14 @@
 import { assertEquals } from "@std/assert";
 import {
   boxEnd,
-  boxLine,
   boxStart,
+  createStreamFormatter,
+  fmtCommand,
+  fmtOutput,
+  fmtStatus,
   getTermWidth,
+  gutter,
+  gutterWidth,
   wordWrap,
 } from "../src/agent/tui.ts";
 
@@ -13,7 +18,6 @@ Deno.test("wordWrap breaks long lines at word boundaries", () => {
   for (const line of result.split("\n")) {
     assertEquals(line.length <= 20, true, `line too long: "${line}"`);
   }
-  // All words preserved
   assertEquals(result.replace(/\n/g, " "), input);
 });
 
@@ -24,34 +28,92 @@ Deno.test("wordWrap preserves short lines", () => {
 
 Deno.test("wordWrap preserves existing newlines", () => {
   const input = "line one\nline two";
-  const result = wordWrap(input, 80);
-  assertEquals(result, "line one\nline two");
-});
-
-Deno.test("boxLine wraps content accounting for prefix width", () => {
-  const long = "a ".repeat(40).trim();
-  const result = boxLine(long, 40);
-  // Each rendered line should have the │ prefix
-  for (const line of result.split("\n")) {
-    assertEquals(line.includes("│"), true);
-  }
-});
-
-Deno.test("boxStart produces opening border", () => {
-  const result = boxStart("sub-agent (sub policy)");
-  assertEquals(result.includes("┌"), true);
-  assertEquals(result.includes("sub-agent"), true);
-});
-
-Deno.test("boxEnd produces closing border with summary", () => {
-  const result = boxEnd('"hello" [integrity: InjectionFree]');
-  assertEquals(result.includes("└"), true);
-  assertEquals(result.includes("→"), true);
-  assertEquals(result.includes("hello"), true);
+  assertEquals(wordWrap(input, 80), "line one\nline two");
 });
 
 Deno.test("getTermWidth returns a number", () => {
   const width = getTermWidth();
   assertEquals(typeof width, "number");
   assertEquals(width > 0, true);
+});
+
+Deno.test("gutter returns empty string for depth 0", () => {
+  assertEquals(gutter(0), "");
+});
+
+Deno.test("gutterWidth returns correct column count", () => {
+  assertEquals(gutterWidth(0), 0);
+  assertEquals(gutterWidth(1), 2); // "│ "
+  assertEquals(gutterWidth(2), 4); // "│ │ "
+});
+
+Deno.test("boxStart includes ┌ and label", () => {
+  const result = boxStart("sub-agent (sub policy)", 1);
+  assertEquals(result.includes("┌"), true);
+  assertEquals(result.includes("sub-agent"), true);
+});
+
+Deno.test("boxStart at depth 2 includes parent gutter", () => {
+  const result = boxStart("nested", 2);
+  assertEquals(result.includes("│"), true);
+  assertEquals(result.includes("┌"), true);
+});
+
+Deno.test("boxEnd includes └ and summary", () => {
+  const result = boxEnd('"hello" [integrity: InjectionFree]', 1);
+  assertEquals(result.includes("└"), true);
+  assertEquals(result.includes("→"), true);
+  assertEquals(result.includes("hello"), true);
+});
+
+Deno.test("fmtCommand formats with gutter and $ prefix", () => {
+  const d0 = fmtCommand("ls", 0);
+  assertEquals(d0, "  $ ls");
+
+  const d1 = fmtCommand("cat /file", 1);
+  assertEquals(d1.includes("│"), true);
+  assertEquals(d1.includes("$ cat /file"), true);
+});
+
+Deno.test("fmtOutput indents each line", () => {
+  const result = fmtOutput("line1\nline2", 0);
+  assertEquals(result, "  line1\n  line2");
+});
+
+Deno.test("fmtStatus formats status messages", () => {
+  const result = fmtStatus("[exit code: 1]", 0);
+  assertEquals(result, "  [exit code: 1]");
+});
+
+Deno.test("createStreamFormatter adds ⏺ on first delta", () => {
+  const fmt = createStreamFormatter(() => 0);
+  const out = fmt.format("Hello");
+  assertEquals(out.includes("⏺"), true);
+  assertEquals(out.includes("Hello"), true);
+});
+
+Deno.test("createStreamFormatter indents continuation lines", () => {
+  const fmt = createStreamFormatter(() => 0);
+  const out = fmt.format("line1\nline2");
+  // Output is: "\n⏺ line1\n  line2"
+  const lines = out.split("\n");
+  // lines[0] = "" (before leading \n), lines[1] has ⏺, lines[2] has indent
+  assertEquals(lines[1].includes("⏺"), true);
+  assertEquals(lines[2].startsWith("  "), true);
+});
+
+Deno.test("createStreamFormatter uses gutter at depth > 0", () => {
+  const fmt = createStreamFormatter(() => 1);
+  const out = fmt.format("Hello");
+  assertEquals(out.includes("│"), true);
+  assertEquals(out.includes("⏺"), true);
+});
+
+Deno.test("createStreamFormatter reset restarts ⏺ marker", () => {
+  const fmt = createStreamFormatter(() => 0);
+  fmt.format("First");
+  fmt.reset();
+  const out = fmt.format("Second");
+  assertEquals(out.includes("⏺"), true);
+  assertEquals(out.includes("Second"), true);
 });
