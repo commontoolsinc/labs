@@ -7,6 +7,8 @@
  * 1. Recipe source code stored in `datum` table (content-addressed)
  * 2. Precious data stored in `datum` table
  * 3. Recipe loaded from storage reacts to data loaded from storage
+ * 4. Cross-session reactivity: updating input in a new runtime updates
+ *    a result cell from a previous session
  *
  * The test uses multiple runtime instances to prove that both recipe
  * and data are truly persisted and can be loaded fresh from storage.
@@ -16,16 +18,21 @@ import { assertEquals } from "@std/assert";
 import { Runtime, type RuntimeProgram } from "@commontools/runner";
 import { Identity, type IdentityCreateConfig } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import type { JSONSchema } from "@commontools/runner";
+import type { Cell, JSONSchema, MemorySpace } from "@commontools/runner";
 import { env } from "@commontools/integration";
 
 const { API_URL } = env;
+
+const TIMEOUT_MS = 180000; // 3 minutes timeout
 
 const keyConfig: IdentityCreateConfig = {
   implementation: "noble",
 };
 
-const TIMEOUT_MS = 180000; // 3 minutes timeout
+// Cell IDs used across phases
+const INPUT_CELL_ID = "test-input-data";
+const RESULT_CELL_ID_PHASE_2 = "test-recipe-result";
+const RESULT_CELL_ID_PHASE_3 = "test-recipe-result-3";
 
 /**
  * A simple recipe that:
@@ -72,151 +79,163 @@ const inputDataSchema: JSONSchema = {
   required: ["values", "label"],
 };
 
-async function testRecipeAndDataPersistence() {
-  console.log("\n=== TEST: Recipe and Data Persistence ===");
-  const testId = Date.now().toString();
-  const identity = await Identity.fromPassphrase(
-    `recipe-data-persistence-${testId}`,
-    keyConfig,
-  );
-  const space = identity.did();
+type InputData = { values: number[]; label: string };
+type ResultData = { sum: number; result: string };
 
-  // ============================================================
-  // PHASE 1: First runtime - save recipe and data to storage
-  // ============================================================
+// ============================================================
+// Helper types and functions
+// ============================================================
+
+interface TestContext {
+  runtime: Runtime;
+  storageManager: ReturnType<typeof StorageManager.open>;
+}
+
+function createTestContext(identity: Identity, apiUrl: URL): TestContext {
+  const storageManager = StorageManager.open({
+    as: identity,
+    address: new URL("/api/storage/memory", apiUrl),
+  });
+  const runtime = new Runtime({
+    apiUrl,
+    storageManager,
+  });
+  return { runtime, storageManager };
+}
+
+async function disposeTestContext(ctx: TestContext): Promise<void> {
+  await ctx.runtime.dispose();
+  await ctx.storageManager.close();
+}
+
+function getInputCell(
+  runtime: Runtime,
+  space: MemorySpace,
+  tx?: ReturnType<Runtime["edit"]>,
+): Cell<InputData> {
+  return runtime.getCell(space, INPUT_CELL_ID, inputDataSchema, tx);
+}
+
+function getResultCell(
+  runtime: Runtime,
+  space: MemorySpace,
+  cellId: string,
+  tx?: ReturnType<Runtime["edit"]>,
+): Cell<ResultData> {
+  return runtime.getCell<ResultData>(space, cellId, undefined, tx);
+}
+
+// ============================================================
+// Phase functions
+// ============================================================
+
+/**
+ * Phase 1: Save recipe and initial data to storage.
+ * Returns the recipe ID for use in subsequent phases.
+ */
+async function phase1SaveRecipeAndData(
+  identity: Identity,
+  space: MemorySpace,
+  apiUrl: URL,
+): Promise<string> {
   console.log("\n--- Phase 1: Save recipe and data ---");
 
-  const storageManager1 = StorageManager.open({
-    as: identity,
-    address: new URL("/api/storage/memory", API_URL),
-  });
-
-  const runtime1 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: storageManager1,
-  });
+  const ctx = createTestContext(identity, apiUrl);
 
   // Compile and save the recipe
-  const compiled = await runtime1.recipeManager.compileRecipe(recipeProgram);
-  const recipeId = runtime1.recipeManager.registerRecipe(
+  const compiled = await ctx.runtime.recipeManager.compileRecipe(recipeProgram);
+  const recipeId = ctx.runtime.recipeManager.registerRecipe(
     compiled,
     recipeProgram,
   );
-  await runtime1.recipeManager.saveAndSyncRecipe({ recipeId, space });
-
+  await ctx.runtime.recipeManager.saveAndSyncRecipe({ recipeId, space });
   console.log(`Recipe saved with ID: ${recipeId}`);
 
-  // Save some precious data
-  const initialData = { values: [1, 2, 3, 4, 5], label: "Numbers" };
-
-  let tx = runtime1.edit();
-  const dataCell1 = runtime1.getCell(
-    space,
-    "test-input-data",
-    inputDataSchema,
-    tx,
-  );
-  dataCell1.set(initialData);
+  // Save initial data
+  const initialData: InputData = { values: [1, 2, 3, 4, 5], label: "Numbers" };
+  const tx = ctx.runtime.edit();
+  const dataCell = getInputCell(ctx.runtime, space, tx);
+  dataCell.set(initialData);
   await tx.commit();
-
-  await runtime1.storageManager.synced();
+  await ctx.runtime.storageManager.synced();
   console.log("Data saved:", initialData);
 
-  // Dispose runtime1 - this clears the in-memory cache
-  await runtime1.dispose();
-  await storageManager1.close();
+  await disposeTestContext(ctx);
   console.log("Runtime 1 disposed (cache cleared)");
 
-  // ============================================================
-  // PHASE 2: Second runtime - load recipe and data from storage
-  // ============================================================
+  return recipeId;
+}
+
+/**
+ * Phase 2: Load recipe and data from storage, run recipe, verify output.
+ */
+async function phase2LoadAndVerify(
+  identity: Identity,
+  space: MemorySpace,
+  apiUrl: URL,
+  recipeId: string,
+): Promise<void> {
   console.log("\n--- Phase 2: Load recipe and data from storage ---");
 
-  const storageManager2 = StorageManager.open({
-    as: identity,
-    address: new URL("/api/storage/memory", API_URL),
-  });
+  const ctx = createTestContext(identity, apiUrl);
+  const tx = ctx.runtime.edit();
 
-  const runtime2 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: storageManager2,
-  });
-
-  tx = runtime2.edit();
-
-  // Load the recipe from storage (not from cache - it's a fresh runtime)
-  const loadedRecipe = await runtime2.recipeManager.loadRecipe(
+  // Load recipe from storage (fresh cache)
+  const recipe = await ctx.runtime.recipeManager.loadRecipe(
     recipeId,
     space,
     tx,
   );
   console.log("Recipe loaded from storage");
 
-  // Load the data cell from storage
-  const dataCell2 = runtime2.getCell(
-    space,
-    "test-input-data",
-    inputDataSchema,
-    tx,
-  );
-  await dataCell2.sync();
-  console.log(`Data loaded: ${JSON.stringify(dataCell2.get())}`);
+  // Load data cell from storage
+  const dataCell = getInputCell(ctx.runtime, space, tx);
+  await dataCell.sync();
+  console.log(`Data loaded: ${JSON.stringify(dataCell.get())}`);
 
-  // Create a result cell for the recipe output
-  const resultCell = runtime2.getCell<{ sum: number; result: string }>(
+  // Create result cell and run recipe
+  const resultCell = getResultCell(
+    ctx.runtime,
     space,
-    "test-recipe-result",
-    undefined,
+    RESULT_CELL_ID_PHASE_2,
     tx,
   );
-
-  // Run the loaded recipe with the loaded data cell
-  const runResult = runtime2.run(
-    tx,
-    loadedRecipe,
-    { data: dataCell2 },
-    resultCell,
-  );
+  const runResult = ctx.runtime.run(tx, recipe, { data: dataCell }, resultCell);
   await tx.commit();
-
-  // Wait for the recipe to compute
   await runResult.pull();
 
-  const output1 = runResult.getAsQueryResult();
-  console.log(`Computed result: ${JSON.stringify(output1)}`);
+  const output = runResult.getAsQueryResult();
+  console.log(`Computed result: ${JSON.stringify(output)}`);
 
-  // Verify the derived values
-  assertEquals(output1.sum, 15, "Sum should be 1+2+3+4+5=15");
+  // Verify
+  assertEquals(output.sum, 15, "Sum should be 1+2+3+4+5=15");
   assertEquals(
-    output1.result,
+    output.result,
     "Numbers: 15",
     "Result should be formatted correctly",
   );
 
-  // Dispose runtime2 before phase 3
-  await runtime2.dispose();
-  await storageManager2.close();
+  await disposeTestContext(ctx);
   console.log("Runtime 2 disposed (cache cleared)");
+}
 
-  // ============================================================
-  // PHASE 3: Third runtime - reload, observe, update, verify reactivity
-  // ============================================================
+/**
+ * Phase 3: Reload recipe/data, run recipe, update input, verify reactivity
+ * within the same session.
+ */
+async function phase3ReactivityWithinSession(
+  identity: Identity,
+  space: MemorySpace,
+  apiUrl: URL,
+  recipeId: string,
+): Promise<void> {
   console.log("\n--- Phase 3: Reload, observe, update, verify reactivity ---");
 
-  const storageManager3 = StorageManager.open({
-    as: identity,
-    address: new URL("/api/storage/memory", API_URL),
-  });
-
-  const runtime3 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: storageManager3,
-  });
-
-  tx = runtime3.edit();
+  const ctx = createTestContext(identity, apiUrl);
+  let tx = ctx.runtime.edit();
 
   // Load recipe from storage (fresh cache)
-  const loadedRecipe3 = await runtime3.recipeManager.loadRecipe(
+  const recipe = await ctx.runtime.recipeManager.loadRecipe(
     recipeId,
     space,
     tx,
@@ -224,40 +243,29 @@ async function testRecipeAndDataPersistence() {
   console.log("Recipe loaded from storage (third runtime)");
 
   // Load data cell from storage
-  const dataCell3 = runtime3.getCell(
-    space,
-    "test-input-data",
-    inputDataSchema,
-    tx,
-  );
-  await dataCell3.sync();
-  console.log("Data loaded:", dataCell3.get());
+  const dataCell = getInputCell(ctx.runtime, space, tx);
+  await dataCell.sync();
+  console.log("Data loaded:", dataCell.get());
 
   // Create result cell and run recipe
-  const resultCell3 = runtime3.getCell<{ sum: number; result: string }>(
+  const resultCell = getResultCell(
+    ctx.runtime,
     space,
-    "test-recipe-result-3",
-    undefined,
+    RESULT_CELL_ID_PHASE_3,
     tx,
   );
-  const runResult3 = runtime3.run(
-    tx,
-    loadedRecipe3,
-    { data: dataCell3 },
-    resultCell3,
-  );
+  const runResult = ctx.runtime.run(tx, recipe, { data: dataCell }, resultCell);
   await tx.commit();
-  await runResult3.pull();
+  await runResult.pull();
 
-  // Observe computed value before update (should match phase 2)
-  const beforeUpdate = runResult3.getAsQueryResult();
+  // Verify initial state
+  const beforeUpdate = runResult.getAsQueryResult();
   console.log(
     "Computed result before update: sum =",
     beforeUpdate.sum,
     ", result =",
     beforeUpdate.result,
   );
-
   assertEquals(beforeUpdate.sum, 15, "Sum should still be 15 after reload");
   assertEquals(
     beforeUpdate.result,
@@ -265,18 +273,18 @@ async function testRecipeAndDataPersistence() {
     "Result should still be 'Numbers: 15' after reload",
   );
 
-  // Now update the data
-  const updatedData = { values: [10, 20, 30], label: "Big numbers" };
+  // Update the input data
+  const updatedData: InputData = { values: [10, 20, 30], label: "Big numbers" };
   console.log("Updating data to:", updatedData);
 
-  tx = runtime3.edit();
-  dataCell3.withTx(tx).set(updatedData);
+  tx = ctx.runtime.edit();
+  dataCell.withTx(tx).set(updatedData);
   await tx.commit();
 
   // Wait for reactivity to propagate
-  await runResult3.pull();
+  await runResult.pull();
 
-  const afterUpdate = runResult3.getAsQueryResult();
+  const afterUpdate = runResult.getAsQueryResult();
   console.log(
     "Computed result after update: sum =",
     afterUpdate.sum,
@@ -292,9 +300,117 @@ async function testRecipeAndDataPersistence() {
     "Result should reflect updated data",
   );
 
-  // Cleanup
-  await runtime3.dispose();
-  await storageManager3.close();
+  // Sync to storage before disposing so Phase 4 can see the changes
+  await ctx.runtime.storageManager.synced();
+
+  await disposeTestContext(ctx);
+  console.log("Runtime 3 disposed (cache cleared)");
+}
+
+/**
+ * Phase 4: Cross-session reactivity - create a NEW runtime, load the result
+ * cell from Phase 3, start the existing recipe instance, update the input,
+ * and verify the result updates reactively.
+ *
+ * This demonstrates that:
+ * - A recipe instance can be resumed from storage in a fresh runtime
+ * - Updating the input cell causes the result to update reactively
+ */
+async function phase4CrossSessionReactivity(
+  identity: Identity,
+  space: MemorySpace,
+  apiUrl: URL,
+  recipeId: string,
+): Promise<void> {
+  console.log("\n--- Phase 4: Cross-session reactivity ---");
+
+  const ctx = createTestContext(identity, apiUrl);
+  let tx = ctx.runtime.edit();
+
+  // Load recipe from storage (needed so runtime knows about it)
+  await ctx.runtime.recipeManager.loadRecipe(recipeId, space, tx);
+  console.log("Recipe loaded from storage (fourth runtime)");
+
+  // Load the result cell from Phase 3 (by the same cause/ID)
+  const resultCell = getResultCell(
+    ctx.runtime,
+    space,
+    RESULT_CELL_ID_PHASE_3,
+    tx,
+  );
+  await resultCell.sync();
+
+  // Start the existing recipe instance - this rehydrates the reactive graph
+  await ctx.runtime.start(resultCell);
+  console.log("Started existing recipe instance");
+
+  // Load the input cell
+  const dataCell = getInputCell(ctx.runtime, space, tx);
+  await dataCell.sync();
+  await tx.commit();
+
+  // Verify current state (should be from Phase 3's update: sum=60)
+  await resultCell.pull();
+  const before = resultCell.getAsQueryResult();
+  console.log(
+    "Result before update: sum =",
+    before.sum,
+    ", result =",
+    before.result,
+  );
+  assertEquals(before.sum, 60, "Sum should be 60 from Phase 3");
+  assertEquals(before.result, "Big numbers: 60");
+
+  // Now update the input in this new runtime
+  const newData: InputData = { values: [100, 200], label: "Hundreds" };
+  console.log("Updating data to:", newData);
+
+  tx = ctx.runtime.edit();
+  dataCell.withTx(tx).set(newData);
+  await tx.commit();
+
+  // Wait for reactivity to propagate
+  await resultCell.pull();
+
+  const after = resultCell.getAsQueryResult();
+  console.log(
+    "Result after update: sum =",
+    after.sum,
+    ", result =",
+    after.result,
+  );
+
+  // Verify the recipe reacted to the data change across sessions
+  assertEquals(after.sum, 300, "Sum should be 100+200=300");
+  assertEquals(
+    after.result,
+    "Hundreds: 300",
+    "Result should reflect updated data",
+  );
+
+  await disposeTestContext(ctx);
+  console.log("Runtime 4 disposed");
+}
+
+// ============================================================
+// Main test
+// ============================================================
+
+async function testRecipeAndDataPersistence() {
+  console.log("\n=== TEST: Recipe and Data Persistence ===");
+
+  const testId = Date.now().toString();
+  const identity = await Identity.fromPassphrase(
+    `recipe-data-persistence-${testId}`,
+    keyConfig,
+  );
+  const space = identity.did();
+  const apiUrl = new URL(API_URL);
+
+  const recipeId = await phase1SaveRecipeAndData(identity, space, apiUrl);
+  await phase2LoadAndVerify(identity, space, apiUrl, recipeId);
+  await phase3ReactivityWithinSession(identity, space, apiUrl, recipeId);
+  await phase4CrossSessionReactivity(identity, space, apiUrl, recipeId);
 
   console.log("\n=== TEST PASSED ===");
 }
