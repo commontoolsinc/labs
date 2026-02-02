@@ -130,13 +130,15 @@ class FetchLLMClient implements LLMClient {
 const SYSTEM_PROMPT =
   `You are a shell assistant. You MUST use the exec tool to run commands — never just describe what you would do.
 
-You have one tool: exec. It runs a shell command in a sandboxed environment with a virtual filesystem. The shell supports: cat, echo, grep, sed, jq, wc, sort, head, tail, ls, pwd, cd, cp, mv, rm, mkdir, test, curl, true, false, pipes, and redirects.
+You have two tools:
+- exec: Run a shell command in a sandboxed environment with a virtual filesystem. The shell supports: cat, echo, grep, sed, jq, wc, sort, head, tail, ls, pwd, cd, cp, mv, rm, mkdir, test, curl, true, false, pipes, and redirects.
+- task: Delegate work to a sub-agent that can see data you cannot. Your visibility policy filters out untrusted content (e.g., network-fetched HTML), but a sub-agent has a relaxed policy and can read it. The sub-agent's response is declassified before you see it: if it matches one of your ballots (safe return strings you provide), it's trusted. If it matches a captured command output (like wc -l), it inherits that output's label. Use task when you need to inspect or process untrusted data and report back a safe summary.
 
 Rules:
 - ALWAYS call the exec tool when the user asks you to do something. Do not just explain — execute.
 - You can chain commands with pipes: echo "hello" | grep hello
 - You can redirect output: echo "data" > /tmp/file.txt
-- If output is filtered, the content didn't meet the security policy — this is expected for untrusted data.
+- If output is filtered, the content didn't meet the security policy — use the task tool to delegate to a sub-agent that can see it.
 - After executing, briefly explain what happened.`;
 
 // ---------------------------------------------------------------------------
@@ -168,10 +170,11 @@ async function runOnce(
     model,
     system: SYSTEM_PROMPT,
     history,
-    onToolCall: async (_toolName, input) => {
-      await write(`\n  $ ${input.command}\n`);
+    onToolCall: async (_toolName, input, depth) => {
+      const prefix = depth > 0 ? ">> ".repeat(depth) : "";
+      await write(`\n  ${prefix}$ ${input.command ?? input.task ?? ""}\n`);
     },
-    onToolResult: async (_cmd, res) => {
+    onToolResult: async (_cmd, res, depth) => {
       const events = agent.getEvents();
       for (let i = eventCursor; i < events.length; i++) {
         const ev = events[i];
@@ -183,14 +186,17 @@ async function runOnce(
       }
       eventCursor = events.length;
 
+      const prefix = depth > 0 ? ">> ".repeat(depth) : "";
       if (res.filtered) {
-        await write(`  [filtered: ${res.filterReason}]\n`);
+        await write(`  ${prefix}[filtered: ${res.filterReason}]\n`);
       } else if (res.stdout) {
-        const lines = res.stdout.split("\n").map((l) => `  ${l}`).join("\n");
+        const lines = res.stdout.split("\n").map((l) =>
+          l ? `  ${prefix}${l}` : l
+        ).join("\n");
         await write(`${lines}\n`);
       }
       if (res.exitCode !== 0) {
-        await write(`  [exit code: ${res.exitCode}]\n`);
+        await write(`  ${prefix}[exit code: ${res.exitCode}]\n`);
       }
     },
   });

@@ -144,10 +144,14 @@ export interface AgentLoopOptions {
   history?: Message[];
   /** Nesting depth (0 = root agent). Used for output prefixing. */
   depth?: number;
-  /** Called before each tool execution */
-  onToolCall?: (toolName: string, input: Record<string, unknown>) => void;
-  /** Called after each exec with the tool result */
-  onToolResult?: (command: string, result: ToolResult) => void;
+  /** Called before each tool execution (depth: 0 = root agent) */
+  onToolCall?: (
+    toolName: string,
+    input: Record<string, unknown>,
+    depth: number,
+  ) => void;
+  /** Called after each exec with the tool result (depth: 0 = root agent) */
+  onToolResult?: (command: string, result: ToolResult, depth: number) => void;
   /** Called with each assistant message */
   onAssistantMessage?: (message: LLMResponse) => void;
 }
@@ -228,11 +232,11 @@ export async function runAgentLoop(
 
     for (const tc of toolCalls) {
       if (tc.toolName === "exec") {
-        onToolCall?.(tc.toolName, tc.input);
+        onToolCall?.(tc.toolName, tc.input, depth);
         const command = String(tc.input.command ?? "");
         const result = await agent.exec(command);
 
-        onToolResult?.(command, result);
+        onToolResult?.(command, result, depth);
         conversationLabel = labels.join(conversationLabel, result.label);
 
         resultParts.push({
@@ -242,7 +246,7 @@ export async function runAgentLoop(
           output: { type: "text", value: formatExecResult(result, depth) },
         });
       } else if (tc.toolName === "task") {
-        onToolCall?.(tc.toolName, tc.input);
+        onToolCall?.(tc.toolName, tc.input, depth);
         const taskText = String(tc.input.task ?? "");
         const policyName = String(tc.input.policy ?? "sub");
         const ballots = Array.isArray(tc.input.ballots)
@@ -324,8 +328,12 @@ async function executeTask(
     model: string;
     system?: string;
     maxIterations?: number;
-    onToolCall?: (toolName: string, input: Record<string, unknown>) => void;
-    onToolResult?: (command: string, result: ToolResult) => void;
+    onToolCall?: (
+      toolName: string,
+      input: Record<string, unknown>,
+      depth: number,
+    ) => void;
+    onToolResult?: (command: string, result: ToolResult, depth: number) => void;
     onAssistantMessage?: (message: LLMResponse) => void;
   },
 ): Promise<{ text: string; label: Label }> {
