@@ -249,7 +249,8 @@ async function phase3ReactivityAndIsolation(
   );
 
   // Also load and start Phase 2's instance to verify isolation
-  // We need to load Phase 2's input cell as well for the recipe to work
+  // NOTE: This sync is required - without it, Phase 2's recipe sees undefined inputs
+  // because the input cell data isn't auto-loaded from storage.
   const dataCell2 = getInputCell(ctx.runtime, space, INPUT_CELL_ID_PHASE_2);
   await dataCell2.sync();
 
