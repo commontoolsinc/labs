@@ -59,7 +59,7 @@ export async function cp(
       copyDirectory(ctx, src, dst);
     }
 
-    return { exitCode: 0, label: ctx.pcLabel };
+    return { exitCode: 0, label: ctx.pcLabel, fixedOutputFormat: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     ctx.stderr.write(`cp: ${message}\n`, ctx.pcLabel);
@@ -103,7 +103,7 @@ export async function mv(
 
   try {
     ctx.vfs.mv(src, dst);
-    return { exitCode: 0, label: ctx.pcLabel };
+    return { exitCode: 0, label: ctx.pcLabel, fixedOutputFormat: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     ctx.stderr.write(`mv: ${message}\n`, ctx.pcLabel);
@@ -156,7 +156,7 @@ export async function rm(
     }
   }
 
-  return { exitCode, label: ctx.pcLabel };
+  return { exitCode, label: ctx.pcLabel, fixedOutputFormat: true };
 }
 
 /**
@@ -196,7 +196,7 @@ export async function mkdir(
     }
   }
 
-  return { exitCode, label: ctx.pcLabel };
+  return { exitCode, label: ctx.pcLabel, fixedOutputFormat: true };
 }
 
 /**
@@ -231,7 +231,7 @@ export async function touch(
     }
   }
 
-  return { exitCode, label: ctx.pcLabel };
+  return { exitCode, label: ctx.pcLabel, fixedOutputFormat: true };
 }
 
 /**
@@ -309,7 +309,7 @@ export async function chmod(
     }
 
     ctx.vfs.chmod(path, mode);
-    return { exitCode: 0, label: ctx.pcLabel };
+    return { exitCode: 0, label: ctx.pcLabel, fixedOutputFormat: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     ctx.stderr.write(`chmod: ${message}\n`, ctx.pcLabel);

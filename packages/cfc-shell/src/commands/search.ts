@@ -176,5 +176,9 @@ export async function grep(
     }
   }
 
-  return { exitCode, label: outputLabel, fixedOutputFormat: countOnly };
+  return {
+    exitCode,
+    label: outputLabel,
+    fixedOutputFormat: countOnly || filesOnly,
+  };
 }

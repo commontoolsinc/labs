@@ -227,5 +227,6 @@ export async function curl(
     ctx.stdout.write(bodyText, outputLabel);
   }
 
-  return { exitCode: 0, label: outputLabel };
+  // When output goes to file (-o), stdout is empty — structurally fixed format.
+  return { exitCode: 0, label: outputLabel, fixedOutputFormat: !!outputFile };
 }

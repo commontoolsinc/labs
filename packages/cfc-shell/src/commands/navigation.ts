@@ -17,10 +17,10 @@ export async function cd(
 
   try {
     ctx.vfs.cd(dir);
-    return { exitCode: 0, label: ctx.pcLabel };
+    return { exitCode: 0, label: ctx.pcLabel, fixedOutputFormat: true };
   } catch {
     ctx.stderr.write(`cd: ${dir}: No such file or directory\n`, ctx.pcLabel);
-    return { exitCode: 1, label: ctx.pcLabel };
+    return { exitCode: 1, label: ctx.pcLabel, fixedOutputFormat: true };
   }
 }
 
@@ -33,7 +33,7 @@ export async function pwd(
 ): Promise<CommandResult> {
   await Promise.resolve();
   ctx.stdout.write(ctx.vfs.cwd + "\n", ctx.pcLabel);
-  return { exitCode: 0, label: ctx.pcLabel };
+  return { exitCode: 0, label: ctx.pcLabel, fixedOutputFormat: true };
 }
 
 /**
@@ -126,5 +126,5 @@ export async function ls(
     }
   }
 
-  return { exitCode, label: outputLabel };
+  return { exitCode, label: outputLabel, fixedOutputFormat: true };
 }

@@ -15,7 +15,7 @@ export async function date(
   await Promise.resolve();
   const now = new Date().toString();
   ctx.stdout.write(now + "\n", ctx.pcLabel);
-  return { exitCode: 0, label: ctx.pcLabel };
+  return { exitCode: 0, label: ctx.pcLabel, fixedOutputFormat: true };
 }
 
 /**
@@ -172,7 +172,7 @@ export async function sleep(
 
   await new Promise((resolve) => setTimeout(resolve, cappedSeconds * 1000));
 
-  return { exitCode: 0, label: ctx.pcLabel };
+  return { exitCode: 0, label: ctx.pcLabel, fixedOutputFormat: true };
 }
 
 /**
@@ -274,9 +274,9 @@ export async function which(
 
   if (found) {
     ctx.stdout.write(`/usr/bin/${command}\n`, ctx.pcLabel);
-    return { exitCode: 0, label: ctx.pcLabel };
+    return { exitCode: 0, label: ctx.pcLabel, fixedOutputFormat: true };
   } else {
-    return { exitCode: 1, label: ctx.pcLabel };
+    return { exitCode: 1, label: ctx.pcLabel, fixedOutputFormat: true };
   }
 }
 
