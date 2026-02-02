@@ -147,7 +147,6 @@ declare module "@commontools/api" {
     ): Cell<Schema<S>>;
     asSchema<T>(
       schema?: JSONSchema,
-      rootSchema?: JSONSchema,
     ): Cell<T>;
     asSchemaFromLinks<T = unknown>(): Cell<T>;
     withTx(tx?: IExtendedStorageTransaction): Cell<T>;
@@ -208,7 +207,6 @@ declare module "@commontools/api" {
       cell: OpaqueCell<any>;
       path: readonly PropertyKey[];
       schema?: JSONSchema;
-      rootSchema?: JSONSchema;
       nodes: Set<NodeRef>;
       frame: Frame;
       value?: Opaque<T> | T;
@@ -222,7 +220,6 @@ declare module "@commontools/api" {
     runtime: Runtime;
     tx: IExtendedStorageTransaction | undefined;
     schema?: JSONSchema;
-    rootSchema?: JSONSchema;
     value: T;
     cellLink: SigilLink;
     space: MemorySpace;
@@ -530,24 +527,6 @@ export class CellImpl<T extends StorableValue>
     return undefined;
   }
 
-  get rootSchema(): JSONSchema | undefined {
-    if (this._link.rootSchema !== undefined) return this._link.rootSchema;
-
-    // If no root schema is defined, resolve link and get root schema from there
-    // (which is what .get() would do).
-    if (this.hasFullLink()) {
-      const resolvedLink = resolveLink(
-        this.runtime,
-        this.runtime.readTx(this.tx),
-        this.link,
-        "writeRedirect",
-      );
-      return resolvedLink.rootSchema;
-    }
-
-    return undefined;
-  }
-
   /**
    * Check if this cell contains a stream value
    */
@@ -778,7 +757,7 @@ export class CellImpl<T extends StorableValue>
     // If there's no current value, initialize based on schema, even if there is
     // no default value.
     if (currentValue === undefined) {
-      const resolvedSchema = resolveSchema(this.schema, this.rootSchema);
+      const resolvedSchema = resolveSchema(this.schema);
 
       // TODO(seefeld,ubik2): This should all be moved to schema helpers. This
       // just wants to know whether the value could be an object.
@@ -849,7 +828,7 @@ export class CellImpl<T extends StorableValue>
         [],
         cause,
       );
-      const resolvedSchema = resolveSchema(this.schema, this.rootSchema);
+      const resolvedSchema = resolveSchema(this.schema);
       array = isObject(resolvedSchema) && Array.isArray(resolvedSchema?.default)
         ? processDefaultValue(
           this.runtime,
@@ -957,23 +936,16 @@ export class CellImpl<T extends StorableValue>
     for (const key of keys) {
       // Get child schema if we have one
       childSchema = currentLink.schema
-        ? this.runtime.cfc.getSchemaAtPath(
-          currentLink.schema,
-          [key.toString()],
-          currentLink.rootSchema,
-        )
+        ? this.runtime.cfc.getSchemaAtPath(currentLink.schema, [key.toString()])
         : undefined;
 
       // Create a child link with extended path
-      // When we have a childSchema, we need to preserve the rootSchema that contains $defs
-      // for resolving $ref references. If rootSchema wasn't set, fall back to the parent schema.
+      // When we have a childSchema, we need to preserve the schema that contains $defs
+      // for resolving $ref references. If schema wasn't set, fall back to the parent schema.
       currentLink = {
         ...currentLink,
         path: [...currentLink.path, key.toString()] as string[],
         schema: childSchema,
-        rootSchema: childSchema
-          ? (currentLink.rootSchema ?? currentLink.schema)
-          : undefined,
       };
     }
 
@@ -1002,15 +974,13 @@ export class CellImpl<T extends StorableValue>
   ): Cell<Schema<S>>;
   asSchema<T>(
     schema?: JSONSchema,
-    rootSchema?: JSONSchema,
   ): Cell<T>;
-  asSchema(schema?: JSONSchema, rootSchema?: JSONSchema): Cell<any> {
+  asSchema(schema?: JSONSchema): Cell<any> {
     // asSchema creates a sibling with same identity but different schema
     // Create a new link with modified schema
     const siblingLink: NormalizedLink = {
       ...this._link,
       schema: schema,
-      rootSchema: rootSchema ?? schema,
     };
 
     return new CellImpl(
@@ -1039,7 +1009,7 @@ export class CellImpl<T extends StorableValue>
   asSchemaFromLinks<T = unknown>(): Cell<T> {
     if (!this.synced) this.sync(); // Auto-sync like .get() - matches framework pattern
 
-    let { schema, rootSchema } = resolveLink(
+    let { schema } = resolveLink(
       this.runtime,
       this.runtime.readTx(this.tx),
       this.link,
@@ -1055,9 +1025,7 @@ export class CellImpl<T extends StorableValue>
         schema = this.runtime.cfc.schemaAtPath(
           sourceCellSchema,
           this._link.path,
-          sourceCellSchema,
         );
-        rootSchema = sourceCellSchema;
       }
     }
 
@@ -1067,7 +1035,6 @@ export class CellImpl<T extends StorableValue>
       {
         ...this._link,
         ...(schema !== undefined && { schema }),
-        ...(rootSchema !== undefined && { rootSchema }),
       },
       false, // Reset synced flag, since schema is changing
       this._causeContainer, // Share the causeContainer with siblings
@@ -1304,7 +1271,7 @@ export class CellImpl<T extends StorableValue>
       );
     }
     // Since we don't have a cause yet, we can modify the link's schema
-    this._link = { ...this._link, schema: newSchema, rootSchema: newSchema };
+    this._link = { ...this._link, schema: newSchema };
   }
 
   /**
@@ -1337,7 +1304,6 @@ export class CellImpl<T extends StorableValue>
     cell: OpaqueCell<unknown>;
     path: readonly PropertyKey[];
     schema?: JSONSchema;
-    rootSchema?: JSONSchema;
     nodes: Set<NodeRef>;
     frame: Frame;
     value?: Opaque<T> | T;
@@ -1351,7 +1317,6 @@ export class CellImpl<T extends StorableValue>
       cell: this._causeContainer.cell,
       path: this.path,
       schema: this.schema,
-      rootSchema: this.rootSchema ?? this.schema,
       nodes: cellNodes.get(this._causeContainer.cell) ?? new Set(),
       frame: this._frame,
       // Cast needed: stream sentinel marker isn't actually of type T
@@ -1930,7 +1895,7 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
         frame.runtime,
         {
           path: [],
-          ...(schema !== undefined && { schema, rootSchema: schema }),
+          ...(schema !== undefined && { schema }),
           ...(frame.space && { space: frame.space }),
         },
         frame.tx,

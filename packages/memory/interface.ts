@@ -1,14 +1,9 @@
 import type { Reference } from "merkle-reference";
 import type { JSONSchema, JSONValue } from "@commontools/api";
 
-export type SchemaContext = {
-  schema: JSONSchema;
-  rootSchema: JSONSchema;
-};
-
 export type SchemaPathSelector = {
   path: readonly string[];
-  schemaContext?: Readonly<SchemaContext>;
+  schema?: JSONSchema;
 };
 
 export type { JSONValue, Reference };
@@ -868,9 +863,14 @@ export type SchemaQuery<Space extends MemorySpace = MemorySpace> = Invocation<
 //   }
 // }
 
+export type SchemaContextPathSelector = {
+  path: readonly string[];
+  schemaContext: { schema: JSONSchema };
+};
+
 export type SchemaSelector = Select<
   URI,
-  Select<MIME, Select<CauseString, SchemaPathSelector>>
+  Select<MIME, Select<CauseString, SchemaContextPathSelector>>
 >;
 
 export type Operation =

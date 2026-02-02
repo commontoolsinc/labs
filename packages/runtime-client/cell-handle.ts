@@ -247,7 +247,7 @@ export class CellHandle<T = unknown> {
    * Create a new CellHandle with a different schema.
    */
   asSchema<U = unknown>(schema: JSONSchema): CellHandle<U> {
-    const { schema: _schema, rootSchema: _rootSchema, ...rest } = this.#ref;
+    const { schema: _schema, ...rest } = this.#ref;
     const newCell = new CellHandle(this.#rt, {
       ...rest,
       schema,
@@ -478,8 +478,6 @@ function parseAsCellRef(
       path: (linkData.path ?? []).map((p) => p.toString()),
       type: "application/json",
       ...(linkData.schema !== undefined && { schema: linkData.schema }),
-      ...(linkData.rootSchema !== undefined &&
-        { rootSchema: linkData.rootSchema }),
     };
   } else if (isLegacyAlias(value)) {
     const alias = value.$alias;
@@ -499,7 +497,6 @@ function parseAsCellRef(
       path: aliasPath,
       type: "application/json",
       ...(alias.schema !== undefined && { schema: alias.schema }),
-      ...(alias.rootSchema !== undefined && { rootSchema: alias.rootSchema }),
     };
   }
 }

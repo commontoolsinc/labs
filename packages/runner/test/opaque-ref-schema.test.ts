@@ -5,6 +5,7 @@ import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
+import { isObject } from "@commontools/utils/types";
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -48,12 +49,11 @@ describe("OpaqueRef Schema Support", () => {
       const exported = ref.export();
       expect(exported.schema).toBeDefined();
       expect(exported.schema).toEqual(schema);
-      expect(exported.rootSchema).toEqual(schema);
     });
 
-    it("should handle separate root schema", () => {
+    it("should handle narrowed schema with keys", () => {
       // Set a schema with root schema
-      const rootSchema = {
+      const fullSchema = {
         type: "object",
         properties: {
           name: { type: "string" },
@@ -69,15 +69,13 @@ describe("OpaqueRef Schema Support", () => {
       // Create an opaque ref
       const ref = cell<{ name: string; details: { age: number } }>(
         undefined,
-        rootSchema,
+        fullSchema,
       ).key("details");
 
       // Export the ref and check both schemas are included
       const exported = ref.export();
       expect(exported.schema).toBeDefined();
-      expect(exported.schema).toEqual(rootSchema.properties.details);
-      expect(exported.rootSchema).toBeDefined();
-      expect(exported.rootSchema).toEqual(rootSchema);
+      expect(exported.schema).toEqual(fullSchema.properties.details);
     });
   });
 
@@ -102,7 +100,6 @@ describe("OpaqueRef Schema Support", () => {
       const exported = nameRef.export();
       expect(exported.schema).toBeDefined();
       expect(exported.schema).toEqual({ type: "string" });
-      expect(exported.rootSchema).toEqual(schema);
     });
 
     it("should propagate schema to array elements", () => {
@@ -186,7 +183,6 @@ describe("OpaqueRef Schema Support", () => {
       const exported = themeRef.export();
       expect(exported.schema).toBeDefined();
       expect(exported.schema).toEqual({ type: "string" });
-      expect(exported.rootSchema).toEqual(schema);
     });
 
     it("should handle full object schemas correctly", () => {
@@ -225,7 +221,6 @@ describe("OpaqueRef Schema Support", () => {
           age: { type: "number" },
         },
       });
-      expect(exported.rootSchema).toEqual(schema);
     });
 
     it("should return undefined schema for properties that aren't allowed by the schema", () => {
@@ -259,7 +254,6 @@ describe("OpaqueRef Schema Support", () => {
       // Check schema is undefined for this field that isn't in the schema
       const exported = nicknameRef.export();
       expect(exported.schema).toBeUndefined();
-      expect(exported.rootSchema).toBeUndefined();
     });
   });
 
@@ -328,8 +322,6 @@ describe("OpaqueRef Schema Support", () => {
       // Check the age property schema
       expect(alias.schema).toBeDefined();
       expect(alias.schema).toEqual({ type: "number" });
-      expect(alias.rootSchema).toBeDefined();
-      expect(alias.rootSchema.type).toBe("object");
     });
   });
 
@@ -375,29 +367,31 @@ describe("OpaqueRef Schema Support", () => {
       const userExport = userRef.export();
 
       // The rootSchema should be preserved (contains $defs)
-      expect(userExport.rootSchema).toBeDefined();
-      expect((userExport.rootSchema as any).$defs).toBeDefined();
-      expect((userExport.rootSchema as any).$defs.Address).toBeDefined();
+      expect(userExport.schema).toBeDefined();
+      expect((userExport.schema as any).$defs).toBeDefined();
+      expect((userExport.schema as any).$defs.Address).toBeDefined();
 
       // Navigate further to home (which references Address via $ref)
       const homeRef = userRef.key("home");
       const homeExport = homeRef.export();
 
       // The rootSchema should still be preserved at this level
-      expect(homeExport.rootSchema).toBeDefined();
-      expect((homeExport.rootSchema as any).$defs).toBeDefined();
-      expect((homeExport.rootSchema as any).$defs.Address).toBeDefined();
+      expect(homeExport.schema).toBeDefined();
+      expect((homeExport.schema as any).$defs).toBeDefined();
+      expect((homeExport.schema as any).$defs.Address).toBeDefined();
 
       // Navigate to street (final property)
       const streetRef = homeRef.key("street");
       const streetExport = streetRef.export();
 
-      // Even at the leaf level, rootSchema should be preserved
-      expect(streetExport.rootSchema).toBeDefined();
-      expect((streetExport.rootSchema as any).$defs).toBeDefined();
-
       // The schema at this level should be the string type
-      expect(streetExport.schema).toEqual({ type: "string" });
+      expect(isObject(streetExport.schema)).toBe(true);
+      if (isObject(streetExport.schema)) {
+        const { $defs: defs, ...rest } = streetExport.schema;
+        // Even at the leaf level, defs should be preserved
+        expect(defs).toBeDefined();
+        expect(rest).toEqual({ type: "string" });
+      }
     });
 
     it("should handle deeply nested $ref chains with key() navigation", () => {
@@ -443,15 +437,18 @@ describe("OpaqueRef Schema Support", () => {
       const valueRef = ref.key("outer").key("middle").key("inner").key("value");
       const exported = valueRef.export();
 
-      // The rootSchema should be preserved all the way down
-      expect(exported.rootSchema).toBeDefined();
-      expect((exported.rootSchema as any).$defs).toBeDefined();
-      expect((exported.rootSchema as any).$defs.Inner).toBeDefined();
-      expect((exported.rootSchema as any).$defs.Middle).toBeDefined();
-      expect((exported.rootSchema as any).$defs.Outer).toBeDefined();
+      // The schema defs should be preserved all the way down
+      expect(isObject(exported.schema)).toBe(true);
+      if (isObject(exported.schema)) {
+        const { $defs: defs, ...rest } = exported.schema;
+        expect(defs).toBeDefined();
+        expect(defs?.Inner).toBeDefined();
+        expect(defs?.Middle).toBeDefined();
+        expect(defs?.Outer).toBeDefined();
 
-      // The schema at this level should be the number type
-      expect(exported.schema).toEqual({ type: "number" });
+        // The schema at this level should be the number type
+        expect(rest).toEqual({ type: "number" });
+      }
     });
   });
 });

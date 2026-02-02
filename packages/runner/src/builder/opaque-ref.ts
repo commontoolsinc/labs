@@ -46,7 +46,7 @@ function opaqueRefWithCell<T>(
     frame.runtime,
     {
       path: [],
-      ...(schema !== undefined && { schema, rootSchema: schema }),
+      ...(schema !== undefined && { schema }),
       ...(frame.space && { space: frame.space }),
     },
     frame.tx,

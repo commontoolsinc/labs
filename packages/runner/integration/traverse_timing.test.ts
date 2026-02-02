@@ -1,11 +1,11 @@
-import { JSONObject, JSONValue } from "@commontools/api";
-import { MemorySpace, MIME } from "@commontools/memory/interface";
-import { SchemaPathSelector, URI } from "../src/storage/interface.ts";
+import type { JSONObject, JSONValue } from "@commontools/api";
+import type { MemorySpace, MIME } from "@commontools/memory/interface";
+import type { SchemaPathSelector, URI } from "../src/storage/interface.ts";
 import {
-  BaseMemoryAddress,
-  IAttestation,
+  type BaseMemoryAddress,
+  type IAttestation,
   ManagedStorageTransaction,
-  ObjectStorageManager,
+  type ObjectStorageManager,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
 
@@ -19,43 +19,23 @@ const docAddress: BaseMemoryAddress = {
 
 const selector: SchemaPathSelector = {
   "path": ["value"],
-  "schemaContext": {
-    "schema": {
-      "type": "object",
-      "properties": {
-        "selectedPiece": {
-          "type": "object",
-          "properties": {
-            "piece": true,
-          },
-          "required": [
-            "piece",
-          ],
-          "default": {},
+  "schema": {
+    "type": "object",
+    "properties": {
+      "selectedPiece": {
+        "type": "object",
+        "properties": {
+          "piece": true,
         },
+        "required": [
+          "piece",
+        ],
+        "default": {},
       },
-      "required": [
-        "selectedPiece",
-      ],
     },
-    "rootSchema": {
-      "type": "object",
-      "properties": {
-        "selectedPiece": {
-          "type": "object",
-          "properties": {
-            "piece": true,
-          },
-          "required": [
-            "piece",
-          ],
-          "default": {},
-        },
-      },
-      "required": [
-        "selectedPiece",
-      ],
-    },
+    "required": [
+      "selectedPiece",
+    ],
   },
 };
 

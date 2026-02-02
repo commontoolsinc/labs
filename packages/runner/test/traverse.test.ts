@@ -5,7 +5,6 @@ import type {
   Entity,
   JSONValue,
   Revision,
-  SchemaContext,
   SchemaPathSelector,
   State,
   URI,
@@ -100,13 +99,7 @@ describe("SchemaObjectTraverser.traverseDAG", () => {
       doc2Revision,
     );
 
-    const manager = new StoreObjectManager(store);
-    const managedTx = new ManagedStorageTransaction(manager);
-    const tx = new ExtendedStorageTransaction(managedTx);
-    const traverser = new SchemaObjectTraverser(tx, {
-      path: ["value"],
-      schemaContext: { schema: true, rootSchema: true },
-    });
+    const traverser = getTraverser(store, { path: ["value"], schema: true });
 
     const result = traverser.traverse({
       address: { space: "did:null:null", id: doc2Uri, type, path: ["value"] },
@@ -165,10 +158,7 @@ describe("SchemaObjectTraverser missing value handling", () => {
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
     // Note: missingUri is NOT in the store
 
-    const traverser = getTraverser(store, {
-      path: ["value"],
-      schemaContext: { schema: true, rootSchema: true },
-    });
+    const traverser = getTraverser(store, { path: ["value"], schema: true });
 
     const result = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
@@ -203,10 +193,7 @@ describe("SchemaObjectTraverser missing value handling", () => {
     store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
     // Note: missingUri is NOT in the store
 
-    const traverser = getTraverser(store, {
-      path: ["value"],
-      schemaContext: { schema: true, rootSchema: true },
-    });
+    const traverser = getTraverser(store, { path: ["value"], schema: true });
 
     const result = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
@@ -254,10 +241,7 @@ describe("SchemaObjectTraverser missing value handling", () => {
         ],
       },
     } as JSONSchema;
-    const traverser = getTraverser(store, {
-      path: ["value"],
-      schemaContext: { schema, rootSchema: schema },
-    });
+    const traverser = getTraverser(store, { path: ["value"], schema });
 
     const result = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
@@ -296,10 +280,7 @@ describe("SchemaObjectTraverser missing value handling", () => {
       type: "array",
       items: { type: "string" },
     } as JSONSchema;
-    const traverser = getTraverser(store, {
-      path: ["value"],
-      schemaContext: { schema, rootSchema: schema },
-    });
+    const traverser = getTraverser(store, { path: ["value"], schema });
 
     const result = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
@@ -344,10 +325,7 @@ describe("SchemaObjectTraverser array traversal", () => {
       items: { type: "number" },
     } as const satisfies JSONSchema;
 
-    const traverser = getTraverser(store, {
-      path: ["value"],
-      schemaContext: { schema, rootSchema: schema },
-    });
+    const traverser = getTraverser(store, { path: ["value"], schema });
 
     const result = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
@@ -383,10 +361,7 @@ describe("SchemaObjectTraverser array traversal", () => {
       items: false,
     } as const satisfies JSONSchema;
 
-    const traverser = getTraverser(store, {
-      path: ["value"],
-      schemaContext: { schema, rootSchema: schema },
-    });
+    const traverser = getTraverser(store, { path: ["value"], schema });
 
     const result = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
@@ -465,7 +440,7 @@ describe("SchemaObjectTraverser array traversal", () => {
       const tx = new ExtendedStorageTransaction(managedTx);
       const tracker = new CompoundCycleTracker<
         Immutable<JSONValue>,
-        SchemaContext | undefined
+        JSONSchema | undefined
       >();
       const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
@@ -530,7 +505,7 @@ describe("SchemaObjectTraverser array traversal", () => {
       const tx = new ExtendedStorageTransaction(managedTx);
       const tracker = new CompoundCycleTracker<
         Immutable<JSONValue>,
-        SchemaContext | undefined
+        JSONSchema | undefined
       >();
       const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
@@ -543,10 +518,7 @@ describe("SchemaObjectTraverser array traversal", () => {
         } as IMemorySpaceAddress,
         value: (revA.is as any).value.current as JSONValue,
       };
-      const docASelector = {
-        path: ["value", "current"],
-        schemaContext: { schema: true, rootSchema: true },
-      };
+      const docASelector = { path: ["value", "current"], schema: true };
       const [curDoc, _selector1] = getAtPath(
         tx,
         docACurrent,
@@ -599,7 +571,7 @@ describe("SchemaObjectTraverser array traversal", () => {
       const tx = new ExtendedStorageTransaction(managedTx);
       const tracker = new CompoundCycleTracker<
         Immutable<JSONValue>,
-        SchemaContext | undefined
+        JSONSchema | undefined
       >();
       const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
@@ -680,7 +652,7 @@ describe("getAtPath array index validation", () => {
     const tx = new ExtendedStorageTransaction(managedTx);
     const tracker: PointerCycleTracker = new CompoundCycleTracker<
       Immutable<JSONValue>,
-      SchemaContext | undefined
+      JSONSchema | undefined
     >();
     const cfc = new ContextualFlowControl();
     const schemaTracker = new MapSet<string, SchemaPathSelector>(deepEqual);
@@ -742,10 +714,7 @@ describe("SchemaObjectTraverser boolean type handling", () => {
       items: { type: "boolean" },
     } as const satisfies JSONSchema;
 
-    const traverser = getTraverser(store, {
-      path: ["value"],
-      schemaContext: { schema, rootSchema: schema },
-    });
+    const traverser = getTraverser(store, { path: ["value"], schema });
 
     const result = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
@@ -777,10 +746,7 @@ describe("SchemaObjectTraverser boolean type handling", () => {
       type: "string",
     } as const satisfies JSONSchema;
 
-    const traverser = getTraverser(store, {
-      path: ["value"],
-      schemaContext: { schema, rootSchema: schema },
-    });
+    const traverser = getTraverser(store, { path: ["value"], schema });
 
     const result = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
@@ -818,10 +784,7 @@ describe("SchemaObjectTraverser anyOf/oneOf handling", () => {
       ],
     } as JSONSchema;
 
-    const traverser = getTraverser(store, {
-      path: ["value"],
-      schemaContext: { schema, rootSchema: schema },
-    });
+    const traverser = getTraverser(store, { path: ["value"], schema });
 
     const result = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
@@ -866,10 +829,7 @@ describe("SchemaObjectTraverser anyOf/oneOf handling", () => {
       },
     } as JSONSchema;
 
-    const traverser = getTraverser(store, {
-      path: ["value"],
-      schemaContext: { schema, rootSchema: schema },
-    });
+    const traverser = getTraverser(store, { path: ["value"], schema });
 
     const result = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },
@@ -914,10 +874,7 @@ describe("SchemaObjectTraverser anyOf/oneOf handling", () => {
       },
     } as JSONSchema;
 
-    const traverser = getTraverser(store, {
-      path: ["value"],
-      schemaContext: { schema, rootSchema: schema },
-    });
+    const traverser = getTraverser(store, { path: ["value"], schema });
 
     const result = traverser.traverse({
       address: { space: "did:null:null", id: docUri, type, path: ["value"] },

@@ -106,13 +106,7 @@ async function main() {
   }).open(spaceDID);
   // Before writing data, we need to read it to check if it's changed.
   // Since we need to read in either case, just do that here
-  const syncResult = await provider.sync(uri, {
-    path: [],
-    schemaContext: {
-      schema: schema,
-      rootSchema: schema,
-    },
-  });
+  const syncResult = await provider.sync(uri, { path: [], schema });
   if (syncResult.error) {
     console.log("Failed to sync object", syncResult.error);
   }

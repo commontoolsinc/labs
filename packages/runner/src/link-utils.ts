@@ -247,7 +247,6 @@ export function createSigilLinkFromParsedLink(
   // Include schema if requested
   if (options.includeSchema && link.schema !== undefined) {
     reference.schema = sanitizeSchemaForLinks(link.schema, options);
-    reference.rootSchema = sanitizeSchemaForLinks(link.rootSchema, options);
   }
 
   // Option overrides link value
@@ -290,7 +289,7 @@ export function findAndInlineDataURILinks(value: any): any {
           let schema = newLink.schema;
           if (schema !== undefined && path.length > 0) {
             const cfc = new ContextualFlowControl();
-            schema = cfc.getSchemaAtPath(schema, path, newLink.rootSchema);
+            schema = cfc.getSchemaAtPath(schema, path);
           }
           // Create new link by merging dataLink with remaining path
           const newSigilLink = createSigilLinkFromParsedLink({

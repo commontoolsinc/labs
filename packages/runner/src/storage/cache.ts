@@ -34,8 +34,7 @@ import * as Codec from "@commontools/memory/codec";
 import type { Cancel } from "@commontools/runner";
 import { getLogger } from "@commontools/utils/logger";
 import { isBrowser } from "@commontools/utils/env";
-import { SchemaNone } from "@commontools/memory/schema";
-import { Immutable, isObject, isRecord } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commontools/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "@commontools/utils/deep-equal";
@@ -359,7 +358,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     selector: SchemaPathSelector,
     promise: Promise<T>,
   ) {
-    if (selector === undefined || selector.schemaContext === undefined) {
+    if (selector === undefined || selector.schema === undefined) {
       return;
     }
     const selectorRef = refer(JSON.stringify(selector)).toString();
@@ -367,14 +366,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     this.selectors.set(selectorRef, selector);
     this.standardizedSelector.set(selectorRef, {
       path: selector.path,
-      schemaContext: {
-        schema: SelectorTracker.getStandardSchema(
-          selector.schemaContext.schema,
-        ),
-        rootSchema: SelectorTracker.getStandardSchema(
-          selector.schemaContext.rootSchema,
-        ),
-      },
+      schema: SelectorTracker.getStandardSchema(selector.schema),
     });
     const promiseKey = `${toKey(address)}?${selectorRef}`;
     this.selectorPromises.set(promiseKey, promise);
@@ -416,44 +408,29 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       ];
     }
     const newAddress = { ...address, path: selector.path };
-    const newRootSchemaString = JSON.stringify(
-      selector.schemaContext?.rootSchema
-        ? SelectorTracker.getStandardSchema(selector.schemaContext.rootSchema)
-        : undefined,
-    );
-    const newSchema = selector.schemaContext?.schema
-      ? SelectorTracker.getStandardSchema(selector.schemaContext.schema)
+    const newSchema = selector.schema
+      ? SelectorTracker.getStandardSchema(selector.schema)
       : false;
     const newSchemaString = JSON.stringify(newSchema);
-    const hasRefs = SelectorTracker.hasRefs(newSchema);
     for (const selectorRef of selectorRefs) {
       const existingSelector = this.standardizedSelector.get(selectorRef)!;
       const existingAddress = { ...address, path: existingSelector.path };
       if (Address.includes(existingAddress, newAddress)) {
-        const existingSchema = existingSelector.schemaContext?.schema;
-        const existingRootSchema = existingSelector.schemaContext?.rootSchema;
+        const existingSchema = existingSelector.schema;
         if (existingSchema === undefined) {
           continue;
         }
-        if (hasRefs) {
-          // If we have refs, we may need to resolve them in the rootSchema,
-          // so check that those match
-          const existingRootSchemaString = JSON.stringify(existingRootSchema);
-          // If the root schema doesn't match, the selectors aren't similar enough
-          if (existingRootSchemaString !== newRootSchemaString) {
-            continue;
-          }
-        }
         const subPath = newAddress.path.slice(existingAddress.path.length);
-        // We need to set the additionalPropertiesDefault, so we don't think
+        // We need to override the default schemas, so we don't think
         // `true` is a subset of `{type: "object", properties: {}}`
         const subSchema = cfc.schemaAtPath(
           existingSchema,
           subPath,
-          existingRootSchema,
           undefined,
           false,
+          false,
         );
+        const sortedSubSchema = SelectorTracker.getStandardSchema(subSchema);
         // Basic matching -- we may not recognize some supersets
         // If the subSchema has ifc flags, but the new schema does not, the
         // existing selector can still be a superset.
@@ -463,15 +440,30 @@ export class SelectorTracker<T = Result<Unit, Error>> {
         // is not a subset of the original query, but we treat it as such.
         if (
           ContextualFlowControl.isTrueSchema(subSchema) ||
-          JSON.stringify(subSchema) === newSchemaString ||
-          SelectorTracker.checkAnyOf(
-            subSchema,
-            existingRootSchema,
-            newSchemaString,
-          ) || newSchema === false
+          JSON.stringify(sortedSubSchema) === newSchemaString ||
+          SelectorTracker.checkAnyOf(subSchema, newSchemaString) ||
+          newSchema === false
         ) {
           const promiseKey = `${toKey(address)}?${selectorRef}`;
           return [existingSelector, this.selectorPromises.get(promiseKey)!];
+        } else {
+          const newSchemaRefs = new Set<string>();
+          ContextualFlowControl.findRefs(newSchema, newSchemaRefs);
+          // If we don't use any $refs, we can compare these without $defs
+          if (
+            isObject(newSchema) && isObject(sortedSubSchema) &&
+            newSchemaRefs.size == 0
+          ) {
+            const { $defs: _defs1, ...newSchemaNoDefs } = newSchema;
+            const { $defs: _defs2, ...subSchemaNoDefs } = sortedSubSchema;
+            if (
+              JSON.stringify(subSchemaNoDefs) ===
+                JSON.stringify(newSchemaNoDefs)
+            ) {
+              const promiseKey = `${toKey(address)}?${selectorRef}`;
+              return [existingSelector, this.selectorPromises.get(promiseKey)!];
+            }
+          }
         }
       }
     }
@@ -526,17 +518,28 @@ export class SelectorTracker<T = Result<Unit, Error>> {
   // If the anyOf items are `$ref` items, resolve them, then check.
   static checkAnyOf(
     schema: JSONSchema,
-    rootSchema: JSONSchema | undefined,
     schemaString: string,
   ): boolean {
     return isRecord(schema) && Array.isArray(schema.anyOf) &&
       (schema.anyOf.some((item) => {
+        // this is a bit loose, since we could also have properties that are
+        // in the parent of the anyOf, but this is just an optimization.
+        item = SelectorTracker.getStandardSchema(item);
         // We might match before resolving the `$ref`
         if (JSON.stringify(item) === schemaString) {
           return true;
         }
-        if (item.$ref !== undefined && isObject(rootSchema)) {
-          item = ContextualFlowControl.resolveSchemaRefs(rootSchema, item);
+        // Include $defs and compare again
+        if (schema.$defs !== undefined) {
+          item = { ...item, $defs: schema.$defs };
+          item = SelectorTracker.getStandardSchema(item);
+          if (JSON.stringify(item) === schemaString) {
+            return true;
+          }
+        }
+        if (item.$ref !== undefined) {
+          item = ContextualFlowControl.resolveSchemaRefs(item, schema);
+          item = SelectorTracker.getStandardSchema(item);
           // We might match after resolving the `$ref`
           return JSON.stringify(item) === schemaString;
         }
@@ -544,7 +547,15 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       }));
   }
 
-  // Despite the name, we will still include any "ifc" properties
+  /**
+   * Removes any asCell/asStream properties in the schema, and returns an
+   * object with sorted keys (lexicographic order).
+   *
+   * Despite the name, $ifc properties are preserved.
+   *
+   * @param schema
+   * @returns
+   */
   static getStandardSchema(schema: JSONSchema): JSONSchema {
     if (typeof schema === "boolean") {
       return schema;
@@ -559,6 +570,8 @@ export class SelectorTracker<T = Result<Unit, Error>> {
           return Object.fromEntries(
             Object.entries(value).filter(([key, _val]) =>
               key !== "asCell" && key !== "asStream"
+            ).sort(([keyA, _valA], [keyB, _valB]) =>
+              keyA < keyB ? -1 : keyA > keyB ? 1 : 0
             ).map(([key, val]: [PropertyKey, any]) => [
               key.toString(),
               traverse(val),
@@ -568,28 +581,6 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       } else return value;
     };
     return traverse(schema) as JSONSchema;
-  }
-
-  static hasRefs(schema: JSONSchema): boolean {
-    const traverse = (value: Immutable<any>): boolean => {
-      if (isRecord(value)) {
-        if (Array.isArray(value)) {
-          for (const item of value) {
-            if (traverse(item)) {
-              return true;
-            }
-          }
-        } else {
-          for (const [_k, v] of Object.entries(value)) {
-            if (traverse(v)) {
-              return true;
-            }
-          }
-        }
-      }
-      return false;
-    };
-    return traverse(schema);
   }
 }
 
@@ -699,7 +690,6 @@ export class Replica {
       //         path: [],
       //         schemaContext: {
       //           schema: SchemaNone,
-      //           rootSchema: SchemaNone,
       //         },
       //       },
       //     },
@@ -749,7 +739,7 @@ export class Replica {
     // If we don't actually have those, the server will reject our request.
     const classifications = new Set<string>();
     // Patch to have a valid selector for each entry
-    const defaultSelector = { path: [], schemaContext: SchemaNone };
+    const defaultSelector = { path: [], schema: false };
     const schemaEntries: [BaseMemoryAddress, SchemaPathSelector][] = entries
       .map((
         [address, schemaPathSelector],
@@ -782,15 +772,14 @@ export class Replica {
       logger.debug("pull-doc", () => [`Pulling doc: ${address.id}`]);
 
       // If we don't have a schema, use SchemaNone, which will only fetch the specified object
-      setSelector(schemaSelector, address.id, address.type, "_", selector);
+      setSelector(schemaSelector, address.id, address.type, "_", {
+        path: selector.path,
+        schemaContext: { schema: selector.schema },
+      });
       // Since we're accessing the entire document, we should base our
-      // classification on the rootSchema
-      const rootSchema = selector.schemaContext?.rootSchema ?? false;
-      ContextualFlowControl.joinSchema(
-        classifications,
-        rootSchema,
-        rootSchema,
-      );
+      // classification on the fullSchema
+      const fullSchema = selector.schema ?? false;
+      ContextualFlowControl.joinSchema(classifications, fullSchema);
     }
 
     // We provided schema for the top level fact that we selected, but we
@@ -2205,17 +2194,13 @@ export class StorageManager implements IStorageManager {
   async syncCell<T>(
     cell: Cell<T>,
   ): Promise<Cell<T>> {
-    const { space, id, schema, rootSchema } = cell.getAsNormalizedFullLink();
+    const { space, id, schema } = cell.getAsNormalizedFullLink();
     if (!space) throw new Error("No space set");
     const storageProvider = this.open(space);
 
-    const schemaContext = schema === undefined
-      ? { schema: false, rootSchema: false }
-      : { schema, rootSchema: rootSchema ?? schema };
-
-    const selector = schemaContext === undefined ? undefined : {
+    const selector = {
       path: cell.path.map((p) => p.toString()),
-      schemaContext,
+      schema: schema ?? false,
     };
 
     await storageProvider.sync(id, selector);

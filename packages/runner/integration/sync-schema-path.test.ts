@@ -101,18 +101,11 @@ async function test() {
     }),
   });
 
-  // When we build a cell from a cell link, we don't do the right thing with
-  // rootSchema
   const addressesArrayCell2 = runtime2.getCellFromLink(
     addressesArrayCellLink1,
     addressesArraySchema,
     tx,
   );
-  // This is a hack to set the root schema correctly -- really, the object
-  // returned from getAsNormalizedFullLink should be a copy or readonly,
-  // but since it's neither, we can fix things here.
-  addressesArrayCell2.getAsNormalizedFullLink().rootSchema =
-    employeAddressesSchema;
   const newCell = await addressesArrayCell2.sync();
   await runtime2.storageManager.synced();
 

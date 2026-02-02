@@ -20,4 +20,11 @@ describe("ContextualFlowControl.schemaAtPath array index validation", () => {
     expect(result01).toBe(false);
     expect(result1).toEqual({ type: "string" });
   });
+
+  it("considers a schema with only $defs true'", () => {
+    const schema: JSONSchema = {
+      $defs: { Test: { type: "array", items: { type: "string" } } },
+    };
+    expect(ContextualFlowControl.isTrueSchema(schema)).toBe(true);
+  });
 });

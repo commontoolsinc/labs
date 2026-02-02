@@ -5,10 +5,10 @@ import {
   SelectorTracker,
   StorageManager,
 } from "@commontools/runner/storage/cache.deno";
-import { JSONSchema } from "@commontools/runner";
-import { BaseMemoryAddress } from "@commontools/runner/traverse";
+import { ContextualFlowControl, type JSONSchema } from "@commontools/runner";
+import type { BaseMemoryAddress } from "@commontools/runner/traverse";
 import { Runtime } from "../src/runtime.ts";
-import { Result, Unit } from "../src/storage/interface.ts";
+import type { Result, Unit } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -36,53 +36,58 @@ describe("SelectorTracker", () => {
   });
 
   const vnodeSchema = {
-    "type": "object",
-    "properties": {
-      "type": {
-        "type": "string",
-      },
-      "name": {
-        "type": "string",
-      },
-      "props": {
+    "$ref": "#/$defs/VNode",
+    "$defs": {
+      "VNode": {
         "type": "object",
-        "additionalProperties": {
-          "asCell": true,
+        "properties": {
+          "type": {
+            "type": "string",
+          },
+          "name": {
+            "type": "string",
+          },
+          "props": {
+            "type": "object",
+            "additionalProperties": {
+              "asCell": true,
+            },
+          },
+          "children": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/VNode",
+                  "asCell": true,
+                },
+                {
+                  "type": "string",
+                  "asCell": true,
+                },
+                {
+                  "type": "number",
+                  "asCell": true,
+                },
+                {
+                  "type": "boolean",
+                  "asCell": true,
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/VNode",
+                    "asCell": true,
+                  },
+                },
+              ],
+            },
+            "asCell": true,
+          },
+          "$UI": {
+            "$ref": "#/$defs/VNode",
+          },
         },
-      },
-      "children": {
-        "type": "array",
-        "items": {
-          "anyOf": [
-            {
-              "$ref": "#",
-              "asCell": true,
-            },
-            {
-              "type": "string",
-              "asCell": true,
-            },
-            {
-              "type": "number",
-              "asCell": true,
-            },
-            {
-              "type": "boolean",
-              "asCell": true,
-            },
-            {
-              "type": "array",
-              "items": {
-                "$ref": "#",
-                "asCell": true,
-              },
-            },
-          ],
-        },
-        "asCell": true,
-      },
-      "$UI": {
-        "$ref": "#",
       },
     },
   } as const satisfies JSONSchema;
@@ -98,40 +103,28 @@ describe("SelectorTracker", () => {
       >();
       const initialSelector = {
         path: ["$UI"],
-        schemaContext: { schema: vnodeSchema, rootSchema: vnodeSchema },
+        schema: vnodeSchema,
       };
       selectorTracker.add(address, initialSelector, promise);
       // For comparison, I want these to be in the standard form that doesn't
       // include the asCell/asStream flags.
       const standardInitialSelector = {
         ...initialSelector,
-        schemaContext: {
-          schema: SelectorTracker.getStandardSchema(
-            initialSelector.schemaContext.schema,
-          ),
-          rootSchema: SelectorTracker.getStandardSchema(
-            initialSelector.schemaContext.rootSchema,
-          ),
-        },
+        schema: SelectorTracker.getStandardSchema(initialSelector.schema),
       };
-      const vnodeChildrenSchema = vnodeSchema.properties.children;
+      const cfc = new ContextualFlowControl();
+      const vnodeChildrenSchema = cfc.schemaAtPath(vnodeSchema, ["children"]);
       const [existingSelector1, _existingPromise1] = selectorTracker
         .getSupersetSelector(address, {
           path: ["$UI", "children"],
-          schemaContext: {
-            schema: vnodeChildrenSchema,
-            rootSchema: vnodeSchema,
-          },
+          schema: vnodeChildrenSchema,
         }, runtime.cfc);
       expect(existingSelector1).toEqual(standardInitialSelector);
 
       const [existingSelector2, _existingPromise2] = selectorTracker
         .getSupersetSelector(address, {
           path: ["$UI", "children", "0"],
-          schemaContext: {
-            schema: vnodeSchema,
-            rootSchema: vnodeSchema,
-          },
+          schema: vnodeSchema,
         }, runtime.cfc);
       expect(existingSelector2).toEqual(standardInitialSelector);
     });
@@ -146,30 +139,22 @@ describe("SelectorTracker", () => {
       >();
       const initialSelector = {
         path: ["$UI"],
-        schemaContext: { schema: vnodeSchema, rootSchema: vnodeSchema },
+        schema: vnodeSchema,
       };
       selectorTracker.add(address, initialSelector, promise);
       // For comparison, I want these to be in the standard form that doesn't
       // include the asCell/asStream flags.
       const standardInitialSelector = {
         ...initialSelector,
-        schemaContext: {
-          schema: SelectorTracker.getStandardSchema(
-            initialSelector.schemaContext.schema,
-          ),
-          rootSchema: SelectorTracker.getStandardSchema(
-            initialSelector.schemaContext.rootSchema,
-          ),
-        },
+        schema: SelectorTracker.getStandardSchema(
+          initialSelector.schema,
+        ),
       };
       const nameSchema = { "type": "string" } as const satisfies JSONSchema;
       const [existingSelector1, _existingPromise1] = selectorTracker
         .getSupersetSelector(address, {
           path: ["$UI", "name"],
-          schemaContext: {
-            schema: nameSchema,
-            rootSchema: {},
-          },
+          schema: nameSchema,
         }, runtime.cfc);
       expect(existingSelector1).toEqual(standardInitialSelector);
     });

@@ -41,7 +41,7 @@ export function toJSONWithLegacyAliases(
   if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
 
   if (isCell(value)) {
-    const { external, frame, schema, rootSchema } = value.export();
+    const { external, frame, schema } = value.export();
 
     // If this is an external reference, just copy the reference as is.
     if (external) return external as JSONValue;
@@ -63,8 +63,6 @@ export function toJSONWithLegacyAliases(
           path: pathToCell as (string | number)[],
           ...(schema !== undefined &&
             { schema: sanitizeSchemaForLinks(schema) }),
-          ...(rootSchema &&
-            { rootSchema: sanitizeSchemaForLinks(rootSchema) }),
         },
       } satisfies LegacyAlias;
     } else throw new Error(`Cell not found in paths`);

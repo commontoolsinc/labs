@@ -8,7 +8,7 @@ import { SigilLink } from "../src/sigil-types.ts";
 import { ID, type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { toURI } from "../src/uri-utils.ts";
-import { parseLink, sanitizeSchemaForLinks } from "../src/link-utils.ts";
+import { parseLink } from "../src/link-utils.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
 import { sortAndCompactPaths } from "../src/reactive-dependencies.ts";
 import { toCell } from "../src/back-to-cell.ts";
@@ -354,7 +354,6 @@ describe("Schema Support", () => {
         path: ["current", "label"],
         space,
         schema: current.schema,
-        rootSchema: sanitizeSchemaForLinks(current.rootSchema),
         type: "application/json",
       });
 
@@ -385,7 +384,6 @@ describe("Schema Support", () => {
         space,
         type: "application/json",
         schema: omitSchema,
-        rootSchema: sanitizeSchemaForLinks(schema),
       });
       const log = txToReactivityLog(tx);
       const reads = sortAndCompactPaths(log.reads);
@@ -724,13 +722,18 @@ describe("Schema Support", () => {
       });
 
       const schema = {
-        type: "object",
-        properties: {
-          id: { type: "number" },
-          nested: { $ref: "#", asCell: true },
-        },
         asCell: true,
-        required: ["id"],
+        $ref: "#/$defs/Node",
+        $defs: {
+          "Node": {
+            type: "object",
+            properties: {
+              id: { type: "number" },
+              nested: { $ref: "#/$defs/Node", asCell: true },
+            },
+            required: ["id"],
+          },
+        },
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
@@ -744,7 +747,7 @@ describe("Schema Support", () => {
   });
 
   describe("Schema References", () => {
-    it("should handle self-references with $ref: '#'", () => {
+    it("should handle self-references with $ref: '#/$defs/Node'", () => {
       const c = runtime.getCell<{
         name: string;
         children: Array<{ name: string; children: any[] }>;
@@ -763,15 +766,20 @@ describe("Schema Support", () => {
       });
 
       const schema = {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-          children: {
-            type: "array",
-            items: { $ref: "#" },
+        $ref: "#/$defs/Node",
+        $defs: {
+          Node: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              children: {
+                type: "array",
+                items: { $ref: "#/$defs/Node" },
+              },
+            },
+            required: ["name", "children"],
           },
         },
-        required: ["name", "children"],
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
@@ -812,16 +820,21 @@ describe("Schema Support", () => {
       );
 
       const schema = {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-          parent: { $ref: "#" },
-          children: {
-            type: "array",
-            items: { $ref: "#" },
+        $ref: "#/$defs/Root",
+        $defs: {
+          Root: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              parent: { $ref: "#/$defs/Root" },
+              children: {
+                type: "array",
+                items: { $ref: "#/$defs/Root" },
+              },
+            },
+            required: ["name", "parent", "children"],
           },
         },
-        required: ["name", "parent", "children"],
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
@@ -873,20 +886,25 @@ describe("Schema Support", () => {
       );
 
       const schema = {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-          nested: {
+        $ref: "#/$defs/Root",
+        $defs: {
+          "Root": {
             type: "object",
             properties: {
               name: { type: "string" },
-              items: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    name: { type: "string" },
-                    value: { $ref: "#" },
+              nested: {
+                type: "object",
+                properties: {
+                  name: { type: "string" },
+                  items: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        name: { type: "string" },
+                        value: { $ref: "#/$defs/Root" },
+                      },
+                    },
                   },
                 },
               },
@@ -947,29 +965,34 @@ describe("Schema Support", () => {
       // "required" property since I'm not yet merging properties when we
       // match multiples.
       const schema = {
-        type: "object",
-        properties: {
-          type: { type: "string" },
-          name: { type: "string" },
-          children: {
-            type: "array",
-            items: {
-              anyOf: [
-                { $ref: "#" },
-                {
-                  type: "object",
-                  properties: {
-                    type: { type: "string" },
-                    name: { type: "string" },
-                    value: { $ref: "#" },
-                  },
-                  required: ["value"],
+        $ref: "#/$defs/Root",
+        $defs: {
+          "Root": {
+            type: "object",
+            properties: {
+              type: { type: "string" },
+              name: { type: "string" },
+              children: {
+                type: "array",
+                items: {
+                  anyOf: [
+                    { $ref: "#/$defs/Root" },
+                    {
+                      type: "object",
+                      properties: {
+                        type: { type: "string" },
+                        name: { type: "string" },
+                        value: { $ref: "#/$defs/Root" },
+                      },
+                      required: ["value"],
+                    },
+                  ],
                 },
-              ],
+              },
             },
+            required: ["children"],
           },
         },
-        required: ["children"],
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
@@ -1013,8 +1036,6 @@ describe("Schema Support", () => {
         schema,
         tx,
       );
-      // TODO(@ubik2): this is a bit messy, but we need to have this to
-      // have the rootSchema set
       const cell = c.asSchema(schema);
       cell.set({ value: 1, next: { value: 2, next: { value: 3 } } });
 
@@ -1593,30 +1614,38 @@ describe("Schema Support", () => {
         });
 
         const vdomSchema = {
-          type: "object",
-          properties: {
-            type: { type: "string" },
-            name: { type: "string" },
-            value: { type: "string" },
-            props: {
+          $ref: "#/$defs/VDom",
+          $defs: {
+            VDom: {
               type: "object",
-              additionalProperties: { asCell: true },
-            },
-            children: {
-              type: "array",
-              items: {
-                anyOf: [
-                  { $ref: "#", asCell: true },
-                  { type: "string", asCell: true },
-                  { type: "number", asCell: true },
-                  { type: "boolean", asCell: true },
-                  { type: "array", items: { $ref: "#", asCell: true } },
-                ],
+              properties: {
+                type: { type: "string" },
+                name: { type: "string" },
+                value: { type: "string" },
+                props: {
+                  type: "object",
+                  additionalProperties: { asCell: true },
+                },
+                children: {
+                  type: "array",
+                  items: {
+                    anyOf: [
+                      { $ref: "#/$defs/VDom", asCell: true },
+                      { type: "string", asCell: true },
+                      { type: "number", asCell: true },
+                      { type: "boolean", asCell: true },
+                      {
+                        type: "array",
+                        items: { $ref: "#/$defs/VDom", asCell: true },
+                      },
+                    ],
+                  },
+                  asCell: true,
+                },
               },
-              asCell: true,
+              required: ["type"],
             },
           },
-          required: ["type"],
         } as const satisfies JSONSchema;
 
         for (const doc of [plain, withLinks]) {

@@ -50,11 +50,11 @@ import {
   getRevision,
   iterate,
   iterateSelector,
+  SelectAllString,
   set,
   setEmptyObj,
   setRevision,
 } from "./selection.ts";
-import { SelectAllString } from "./schema.ts";
 import * as Error from "./error.ts";
 import { selectSchema, type SelectSchemaResult } from "./space-schema.ts";
 export type { SelectSchemaResult } from "./space-schema.ts";

@@ -51,11 +51,9 @@ export function createCellRef(cell: Cell<unknown>, schema?: unknown): CellRef {
     type: link.type as `${string}/${string}`,
   };
   if (link.schema != null) cellRef.schema = link.schema;
-  if (link.rootSchema != null) cellRef.rootSchema = link.rootSchema;
   if (link.overwrite != null) cellRef.overwrite = link.overwrite;
   if (schema !== undefined) {
     cellRef.schema = schema as JSONSchema;
-    delete cellRef.rootSchema;
   }
   return cellRef;
 }
@@ -68,7 +66,7 @@ export function createPageRef(cell: Cell<unknown>): PageRef {
 
 export function getCell(runtime: Runtime, ref: CellRef): Cell<unknown> {
   // We explicitly do not pass in `schema`, as this function applies
-  // the schema to both `schema` and `rootSchema`, and cell refs already
-  // contain all this information. Maybe the upstream function should change.
+  // the schema to `schema`, and cell refs already contain all this
+  // information. Maybe the upstream function should change.
   return runtime.getCellFromLink(ref);
 }

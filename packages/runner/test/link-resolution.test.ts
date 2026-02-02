@@ -265,8 +265,8 @@ describe("link-resolution", () => {
       expect(resolved.schema).toBeUndefined();
     });
 
-    it("should preserve rootSchema when available", () => {
-      // Use a simple schema without $ref since it's not supported yet
+    it("should preserve schema when available", () => {
+      // Use a simple schema without $ref
       const rootSchema = {
         type: "object",
         properties: {
@@ -292,9 +292,9 @@ describe("link-resolution", () => {
         tx,
       );
       const linkData = targetCell.getAsLink();
-      // Manually add rootSchema to the link
+      // Manually set schema on the link
       if (linkData["/"] && linkData["/"]["link@1"]) {
-        linkData["/"]["link@1"].rootSchema = rootSchema;
+        linkData["/"]["link@1"].schema = schema;
       }
       sourceCell.setRaw({ link: linkData });
       tx.commit();
@@ -302,7 +302,7 @@ describe("link-resolution", () => {
 
       const link = parseLink(sourceCell.get().link, sourceCell)!;
       const resolved = resolveLink(runtime, tx, link);
-      expect(resolved.rootSchema).toEqual(rootSchema);
+      expect(resolved.schema).toEqual(rootSchema);
     });
 
     it("should handle schema through multiple link hops", () => {
@@ -844,13 +844,22 @@ describe("link-resolution", () => {
       // - Two cells reference each other in a cycle
       // - We can still access properties through the cycle without errors
       // Create cellA with a reference to cellB and a non-cyclic property
+      const schema = {
+        $ref: "#/$defs/Root",
+        $defs: {
+          Root: {
+            type: "object",
+            properties: {
+              foo: { $ref: "#/$defs/Root" },
+              bar: { type: "string" },
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
       const cellA = runtime.getCell(
         space,
         "cycle-detection-bug-cellA",
-        {
-          type: "object",
-          properties: { foo: { $ref: "#" }, bar: { type: "string" } },
-        } as const as any,
+        schema,
         tx,
       );
 
@@ -873,12 +882,13 @@ describe("link-resolution", () => {
       expect(result.bar).toBe("baz");
       // When we get(), cells are automatically dereferenced, so result.foo
       // is the actual value (not a cell)
-      expect(result.foo.bar).toBe("baz");
-      expect(result.foo.foo.foo).toEqual(result.foo.foo);
+      expect(result.foo?.bar).toBe("baz");
+      expect(result.foo?.foo).toBeDefined();
+      expect(result.foo?.foo?.foo).toEqual(result.foo?.foo);
 
       // Test 2: A.key("foo").get() should work and return the value of cellB (which is cellA)
       const fooResult = cellA.key("foo").get();
-      expect(fooResult.bar).toBe("baz");
+      expect(fooResult?.bar).toBe("baz");
 
       // Test 3: A.key("foo").key("bar").get() should work and return "baz"
       // This is where the overtrigger might happen - accessing bar through the cycle

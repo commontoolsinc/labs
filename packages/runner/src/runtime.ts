@@ -401,7 +401,7 @@ export class Runtime {
       ? cellLink
       : undefined;
     if (!link) throw new Error("Invalid cell link");
-    if (schema !== undefined) link = { ...link, schema, rootSchema: schema };
+    if (schema !== undefined) link = { ...link, schema };
     return createCell(this, link as NormalizedFullLink, tx);
   }
 

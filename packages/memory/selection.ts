@@ -10,7 +10,7 @@ import type {
   StorableDatum,
   URI,
 } from "./interface.ts";
-import { SelectAllString } from "./schema.ts";
+export const SelectAllString = "_";
 
 export const from = (
   source: Iterable<[fact: Fact, since: number]>,

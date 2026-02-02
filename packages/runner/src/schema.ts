@@ -53,7 +53,6 @@ const logger = getLogger("validateAndTransform", {
 
 export function resolveSchema(
   schema: JSONSchema | undefined,
-  rootSchema: JSONSchema | undefined = schema,
   filterAsCell = false,
 ): JSONSchema | undefined {
   // Treat undefined/null/{} or any other non-object as no schema
@@ -67,11 +66,8 @@ export function resolveSchema(
   }
 
   let resolvedSchema = schema;
-  if (typeof schema.$ref === "string" && rootSchema !== undefined) {
-    const resolved = ContextualFlowControl.resolveSchemaRefs(
-      rootSchema,
-      schema,
-    );
+  if (typeof schema.$ref === "string") {
+    const resolved = ContextualFlowControl.resolveSchemaRefs(schema);
     if (!isObject(resolved)) {
       // For boolean schema or the default `{}` schema, we don't have any
       // meaningful information in the schema, so just return undefined.
@@ -129,10 +125,9 @@ export function processDefaultValue(
   defaultValue: any,
 ): any {
   const schema = link.schema;
-  const rootSchema = link.rootSchema ?? schema;
   if (!schema) return defaultValue;
 
-  const resolvedSchema = resolveSchema(schema, rootSchema, true);
+  const resolvedSchema = resolveSchema(schema, true);
 
   // If schema indicates this should be a cell
   if (isObject(schema) && schema.asCell) {
@@ -156,7 +151,6 @@ export function processDefaultValue(
         {
           ...link,
           schema: mergeDefaults(resolvedSchema, defaultValue),
-          rootSchema,
         },
         getTransactionForChildCells(tx),
       );
@@ -362,10 +356,9 @@ export function validateAndTransform(
   // reflect that reality.
   if (tx?.status().status !== "ready") tx = undefined;
 
-  // Reconstruct doc, path, schema, rootSchema from link and runtime
+  // Reconstruct doc, path, schema from link and runtime
   const schema = link.schema;
-  let rootSchema = link.rootSchema ?? schema;
-  let resolvedSchema = resolveSchema(schema, rootSchema);
+  let resolvedSchema = resolveSchema(schema);
   let filteredSchema = filterAsCell(resolvedSchema);
 
   // Follow aliases, etc. to last element on path + just aliases on that last one
@@ -376,22 +369,17 @@ export function validateAndTransform(
 
   // Use schema from alias if provided and no explicit schema was set
   if (filteredSchema === undefined && resolvedLink.schema) {
-    resolvedSchema = resolveSchema(
-      resolvedLink.schema,
-      resolvedLink.rootSchema,
-    );
+    resolvedSchema = resolveSchema(resolvedLink.schema);
     // Call resolveSchema to strip asCell/asStream here as well. It's still the
     // initial `schema` that says whether this should be a cell, not the
     // resolved schema.
     filteredSchema = filterAsCell(resolvedSchema);
-    rootSchema = resolvedLink.rootSchema || resolvedLink.schema;
   }
 
   // Unlike the original, we have kept the asCell markers in the schema
   link = {
     ...resolvedLink,
     schema: resolvedSchema,
-    rootSchema,
   };
 
   // If we don't have a schema, and we aren't asCell/asStream, use a proxy
@@ -431,10 +419,7 @@ export function validateAndTransform(
       const mergedSchema = (next.schema !== undefined)
         ? combineSchema(schema!, next.schema)
         : schema!;
-      const mergedRootSchema = (next.rootSchema !== undefined)
-        ? combineSchema(rootSchema ?? true, next.rootSchema)
-        : rootSchema ?? true;
-      link = { ...next, schema: mergedSchema, rootSchema: mergedRootSchema };
+      link = { ...next, schema: mergedSchema };
     }
     // If our ref has a schema, merge our schema flags into that schema
     // This will overwrite any schema that we got from the first non-redirect
@@ -453,10 +438,7 @@ export function validateAndTransform(
   // If we have a ref with a schema, use that; otherwise, use the link's schema
   const selector = {
     path: doc.address.path,
-    schemaContext: {
-      schema: ref.schema ?? link.schema!,
-      rootSchema: ref.rootSchema ?? link.rootSchema!,
-    },
+    schema: ref.schema ?? link.schema!,
   };
   // TODO(@ubik2): these constructor parameters are complex enough that we should
   // use an options struct
@@ -483,7 +465,6 @@ class TransformObjectCreator
   mergeMatches<T>(
     matches: T[],
     schema?: JSONSchema,
-    rootSchema?: JSONSchema,
   ): T | Record<string, T> | undefined {
     // These value objects should be merged. While this isn't JSONSchema
     // spec, when we have an anyOf with branches where name is set in one
@@ -497,9 +478,9 @@ class TransformObjectCreator
       if (cellMatch !== undefined) {
         if (typeof schema === "object") {
           const { asCell: _, ...restSchema } = schema;
-          return cellMatch.asSchema(restSchema, rootSchema) as any;
+          return cellMatch.asSchema(restSchema) as any;
         } else {
-          return cellMatch.asSchema(schema, rootSchema) as any;
+          return cellMatch.asSchema(schema) as any;
         }
       }
     }

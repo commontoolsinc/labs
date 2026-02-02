@@ -2,13 +2,12 @@ import {
   ContextualFlowControl,
   deepEqual,
   type JSONObject,
-  type SchemaContext,
+  type JSONSchema,
 } from "@commontools/runner";
 import type { StorableDatum } from "./interface.ts";
 import {
   type BaseMemoryAddress,
   CompoundCycleTracker,
-  DefaultSchemaSelector,
   getAtPath,
   type IAttestation,
   loadSource,
@@ -31,12 +30,12 @@ import type {
   MIME,
   SchemaQuery,
 } from "./interface.ts";
-import { SchemaNone, SelectAllString } from "./schema.ts";
 import {
   getChange,
   getRevision,
   iterate,
   iterateSelector,
+  SelectAllString,
   setEmptyObj,
   setRevision,
 } from "./selection.ts";
@@ -164,7 +163,7 @@ export const selectSchema = <Space extends MemorySpace>(
   // while loading dependent docs, we want to avoid cycles
   const tracker = new CompoundCycleTracker<
     Immutable<StorableDatum>,
-    SchemaContext | undefined
+    JSONSchema | undefined
   >();
   const cfc = new ContextualFlowControl();
   // Use existing tracker if provided, otherwise create new one
@@ -175,7 +174,10 @@ export const selectSchema = <Space extends MemorySpace>(
   // First, collect all the potentially relevant facts (without dereferencing pointers)
   // The value in these selectorEntry objects doesn't have the "value" in path yet.
   for (
-    const selectorEntry of iterateSelector(selectSchema, DefaultSchemaSelector)
+    const selectorEntry of iterateSelector(
+      selectSchema,
+      { path: [], schemaContext: { schema: true } },
+    )
   ) {
     const factSelector = {
       of: selectorEntry.of,
@@ -190,8 +192,8 @@ export const selectSchema = <Space extends MemorySpace>(
       // These selectorEntry objects in SchemaQuery have their path relative
       // to the value, but our traversal wants them to be relative to the
       // fact.is, so adjust the paths.
-      const selector = {
-        ...selectorEntry.value,
+      const selector: SchemaPathSelector = {
+        schema: selectorEntry.value.schemaContext?.schema,
         path: ["value", ...selectorEntry.value.path],
       };
       // Then filter the facts by the associated schemas, which will dereference
@@ -243,7 +245,10 @@ export const selectSchema = <Space extends MemorySpace>(
   // Our returned stub objects will not have a cause.
   // TODO(@ubik2) See if I can remove this
   for (
-    const factSelector of iterateSelector(selectSchema, DefaultSchemaSelector)
+    const factSelector of iterateSelector(
+      selectSchema,
+      { path: [], schemaContext: { schema: true } },
+    )
   ) {
     if (
       factSelector.of !== SelectAllString &&
@@ -297,7 +302,7 @@ export function evaluateDocumentLinks<Space extends MemorySpace>(
   const manager = new ServerObjectManager(session, providedClassifications);
   const tracker = new CompoundCycleTracker<
     Immutable<StorableDatum>,
-    SchemaContext | undefined
+    JSONSchema | undefined
   >();
   const cfc = new ContextualFlowControl();
 
@@ -346,8 +351,8 @@ function loadFactsForDoc(
 ) {
   // A query without a schema context is the same as a query with the minimal schema
   // This will match the specified document, but no linked documents
-  if (selector.schemaContext === undefined) {
-    selector = { ...selector, schemaContext: SchemaNone };
+  if (selector.schema === undefined) {
+    selector = { ...selector, schema: false };
   }
 
   // If this doc+schema pair is already tracked, we've already traversed its links
@@ -363,7 +368,7 @@ function loadFactsForDoc(
   if (isObject(fact.value)) {
     const managedTx = new ManagedStorageTransaction(manager);
     const tx = new ExtendedStorageTransaction(managedTx);
-    if (!deepEqual(selector.schemaContext, SchemaNone)) {
+    if (selector.schema !== false) {
       const factValue: IMemorySpaceAttestation = {
         address: { ...fact.address, space: space },
         value: (fact.value as Immutable<JSONObject>),
@@ -384,13 +389,14 @@ function loadFactsForDoc(
         return;
       }
       // We've provided a schema context for this, so traverse it
-      // Pass newLinks to collect any newly discovered docs during traversal
       const traverser = new SchemaObjectTraverser(
         tx,
         newSelector!,
         tracker,
         schemaTracker,
+        cfc,
         undefined,
+        // FIXME(@ubik2): I think this should be true, but not part of this PR
         undefined,
       );
       // We don't actually use the return value here, but we've built up

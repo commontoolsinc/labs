@@ -303,7 +303,6 @@ describe("recipe", () => {
       x: {
         $alias: {
           path: ["argument", "x"],
-          rootSchema: ArgumentSchema,
           schema: ArgumentSchema.properties?.x,
         },
       },

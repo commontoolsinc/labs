@@ -219,7 +219,6 @@ describe("link-utils", () => {
         space: space,
         type: "application/json",
         schema: undefined,
-        rootSchema: undefined,
       });
     });
 
@@ -235,7 +234,6 @@ describe("link-utils", () => {
         space: space,
         type: "application/json",
         schema: undefined,
-        rootSchema: undefined,
       });
     });
 
@@ -249,7 +247,6 @@ describe("link-utils", () => {
         space: space,
         type: "application/json",
         schema: undefined,
-        rootSchema: undefined,
       });
     });
 
@@ -261,7 +258,6 @@ describe("link-utils", () => {
             path: ["nested", "value"],
             space: space,
             schema: { type: "number" },
-            rootSchema: { type: "object" },
           },
         },
       };
@@ -273,7 +269,6 @@ describe("link-utils", () => {
         space: space,
         type: "application/json",
         schema: { type: "number" },
-        rootSchema: { type: "object" },
       });
     });
 
@@ -285,7 +280,6 @@ describe("link-utils", () => {
             path: ["nested", "value"],
             space: space,
             schema: { type: "number" },
-            rootSchema: { type: "object" },
             overwrite: "this",
           },
         },
@@ -298,7 +292,6 @@ describe("link-utils", () => {
         space: space,
         type: "application/json",
         schema: { type: "number" },
-        rootSchema: { type: "object" },
       });
     });
 
@@ -311,7 +304,6 @@ describe("link-utils", () => {
             space: space,
             type: "application/json",
             schema: { type: "number" },
-            rootSchema: { type: "object" },
             overwrite: "redirect",
           },
         },
@@ -324,7 +316,6 @@ describe("link-utils", () => {
         space: space,
         type: "application/json",
         schema: { type: "number" },
-        rootSchema: { type: "object" },
         overwrite: "redirect",
       });
     });
@@ -347,7 +338,6 @@ describe("link-utils", () => {
         space: space,
         type: "application/json",
         schema: undefined,
-        rootSchema: undefined,
       });
     });
 
@@ -370,7 +360,6 @@ describe("link-utils", () => {
       expect("id" in result!).toBe(false);
       expect("space" in result!).toBe(false);
       expect("schema" in result!).toBe(false);
-      expect("rootSchema" in result!).toBe(false);
     });
 
     it("should parse cell links to normalized links", () => {
@@ -384,7 +373,6 @@ describe("link-utils", () => {
         space: space,
         type: "application/json",
         schema: undefined,
-        rootSchema: undefined,
       });
     });
 
@@ -411,7 +399,6 @@ describe("link-utils", () => {
           cell: cell.entityId,
           path: ["nested", "value"],
           schema: { type: "number" },
-          rootSchema: { type: "object" },
         },
       };
       const result = parseLink(legacyAlias, cell);
@@ -422,7 +409,6 @@ describe("link-utils", () => {
         space: space,
         type: "application/json",
         schema: { type: "number" },
-        rootSchema: { type: "object" },
         overwrite: "redirect",
       });
     });
@@ -442,7 +428,6 @@ describe("link-utils", () => {
         type: "application/json",
         space: space,
         schema: undefined,
-        rootSchema: undefined,
         overwrite: "redirect",
       });
     });
@@ -519,7 +504,6 @@ describe("link-utils", () => {
         path: ["nested", "value"],
         space: space,
         schema: { type: "number" },
-        rootSchema: { type: "object" },
       };
 
       const result = createSigilLinkFromParsedLink(normalizedLink, {
@@ -533,7 +517,6 @@ describe("link-utils", () => {
             path: ["nested", "value"],
             space: space,
             schema: { type: "number" },
-            rootSchema: { type: "object" },
           },
         },
       });

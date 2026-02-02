@@ -23,7 +23,6 @@ export type LinkV1Inner = {
   path?: readonly string[];
   space?: MemorySpace;
   schema?: JSONSchema;
-  rootSchema?: JSONSchema;
   overwrite?: "redirect" | "this"; // default is "this"
 };
 
@@ -61,7 +60,6 @@ export type LegacyAlias = {
     cell?: number | { "/": string };
     path: readonly PropertyKey[];
     schema?: JSONSchema;
-    rootSchema?: JSONSchema;
   };
 };
 

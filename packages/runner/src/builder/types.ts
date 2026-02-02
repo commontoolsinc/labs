@@ -1,5 +1,4 @@
 import { isObject, type Mutable } from "@commontools/utils/types";
-import type { SchemaContext } from "@commontools/memory/interface";
 
 import type {
   ActionFunction,
@@ -145,8 +144,6 @@ export type NodeRef = {
   outputs: OpaqueRef<any>;
   frame: Frame | undefined;
 };
-
-export type { SchemaContext };
 
 export type StreamValue = {
   $stream: true;

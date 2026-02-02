@@ -6,7 +6,6 @@ import {
   JSONObject,
   type JSONSchema,
   type JSONValue,
-  type SchemaContext,
 } from "../src/index.ts";
 import {
   CompoundCycleTracker,
@@ -40,7 +39,7 @@ describe("Query", () => {
     Revision<State>
   >();
   let emulatedStorageTx: IExtendedStorageTransaction;
-  let tracker: CompoundCycleTracker<JSONValue, SchemaContext | undefined>;
+  let tracker: CompoundCycleTracker<JSONValue, JSONSchema | undefined>;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -54,7 +53,7 @@ describe("Query", () => {
     const manager = new StoreObjectManager(store);
     const managerTx = new ManagedStorageTransaction(manager);
     emulatedStorageTx = new ExtendedStorageTransaction(managerTx);
-    tracker = new CompoundCycleTracker<JSONValue, SchemaContext | undefined>();
+    tracker = new CompoundCycleTracker<JSONValue, JSONSchema | undefined>();
   });
 
   afterEach(async () => {
@@ -110,24 +109,21 @@ describe("Query", () => {
 
     store.set(`${assert1.of}/${assert1.the}`, assert1);
     store.set(`${assert2.of}/${assert2.the}`, assert2);
-    const schemaContext = {
-      schema: {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "object",
-            "properties": { "first": { "type": "string" } },
-            "additionalProperties": false,
-          },
+    const schema = {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "object",
+          "properties": { "first": { "type": "string" } },
+          "additionalProperties": false,
         },
-        "additionalProperties": false,
-      } as const satisfies JSONSchema,
-      rootSchema: true,
-    };
+      },
+      "additionalProperties": false,
+    } as const satisfies JSONSchema;
     const schemaTracker = new MapSet<string, SchemaPathSelector>();
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
-      { path: ["value"], schemaContext: schemaContext },
+      { path: ["value"], schema },
       tracker,
       schemaTracker,
     );
@@ -151,16 +147,10 @@ describe("Query", () => {
     expect(selectorSet2?.size).toBe(1);
     const [selector1] = selectorSet1!.values();
     const [selector2] = selectorSet2!.values();
-    expect(selector2).toEqual({
-      path: ["value"],
-      schemaContext: schemaContext,
-    });
+    expect(selector2).toEqual({ path: ["value"], schema });
     expect(selector1).toEqual({
       path: ["value", "employees", "0", "fullName"],
-      schemaContext: {
-        schema: schemaContext.schema.properties.name,
-        rootSchema: true,
-      },
+      schema: schema.properties.name,
     });
   });
 
@@ -208,17 +198,14 @@ describe("Query", () => {
 
     store.set(`${assert1.of}/${assert1.the}`, assert1);
     store.set(`${assert2.of}/${assert2.the}`, assert2);
-    const schemaContext = {
-      schema: {
-        "type": "object",
-        "additionalProperties": true,
-      } as const satisfies JSONSchema,
-      rootSchema: true,
-    };
+    const schema = {
+      "type": "object",
+      "additionalProperties": true,
+    } as const satisfies JSONSchema;
     const schemaTracker = new MapSet<string, SchemaPathSelector>();
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
-      { path: ["value"], schemaContext: schemaContext },
+      { path: ["value"], schema },
       tracker,
       schemaTracker,
     );
@@ -242,26 +229,25 @@ describe("Query", () => {
     expect(selectorSet2?.size).toBe(1);
     const [selector1] = selectorSet1!.values();
     const [selector2] = selectorSet2!.values();
-    expect(selector2).toEqual({
-      path: ["value"],
-      schemaContext: schemaContext,
-    });
+    expect(selector2).toEqual({ path: ["value"], schema });
     expect(selector1).toEqual({
       path: ["value", "employees", "0", "name"],
-      schemaContext: {
-        schema: true,
-        rootSchema: true,
-      },
+      schema: true,
     });
   });
 
   it("should handle pointer loops", () => {
     // schema that enables loops
     const schema = {
-      "type": "object",
-      "properties": {
-        "name": { "$ref": "#" },
-        "firstName": { "type": "string" },
+      "$ref": "#/$defs/Root",
+      "$defs": {
+        "Root": {
+          "type": "object",
+          "properties": {
+            "name": { "$ref": "#/$defs/Root" },
+            "firstName": { "type": "string" },
+          },
+        },
       },
     } as const satisfies JSONSchema;
     // Now we make the doc with the cycle
@@ -295,14 +281,10 @@ describe("Query", () => {
       since: 1,
     };
     store.set(`${assert1.of}/${assert1.the}`, assert1);
-    const schemaContext = {
-      schema: schema,
-      rootSchema: schema,
-    };
     const schemaTracker = new MapSet<string, SchemaPathSelector>();
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
-      { path: ["value"], schemaContext: schemaContext },
+      { path: ["value"], schema },
       tracker,
       schemaTracker,
     );
@@ -320,14 +302,8 @@ describe("Query", () => {
       `did:null:null/of:${entityId1["/"]}/application/json`,
     );
     expect(selectorSet1?.size).toBe(2);
-    expect(selectorSet1).toContainEqual({
-      path: ["value"],
-      schemaContext: schemaContext,
-    });
-    expect(selectorSet1).toContainEqual({
-      path: ["value", "name"],
-      schemaContext: schemaContext,
-    });
+    expect(selectorSet1).toContainEqual({ path: ["value"], schema });
+    expect(selectorSet1).toContainEqual({ path: ["value", "name"], schema });
   });
 
   it("detects pointer cycles when schema initially differ", () => {
@@ -393,27 +369,28 @@ describe("Query", () => {
     // After walking down the self property of the top level cell, our other
     // link does match, since it's a property of that schema.
     const schema = {
-      "type": "object",
-      "required": ["self"],
-      "properties": {
-        "self": {
+      "$ref": "#/$defs/Node",
+      "$defs": {
+        "Node": {
           "type": "object",
+          "required": ["self"],
           "properties": {
-            "self": { "$ref": "#" },
-            "other": { "$ref": "#" },
+            "self": {
+              "type": "object",
+              "properties": {
+                "self": { "$ref": "#/$defs/Node" },
+                "other": { "$ref": "#/$defs/Node" },
+              },
+            },
           },
         },
       },
     } as const satisfies JSONSchema;
 
-    const schemaContext = {
-      schema,
-      rootSchema: schema,
-    };
     const schemaTracker = new MapSet<string, SchemaPathSelector>(deepEqual);
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
-      { path: ["value"], schemaContext },
+      { path: ["value"], schema },
       tracker,
       schemaTracker,
     );
@@ -437,20 +414,14 @@ describe("Query", () => {
     );
     expect(selectors1).not.toBeUndefined();
     expect(selectors1?.size).toBe(2);
-    expect(selectors1).toContainEqual({
-      path: ["value"],
-      schemaContext,
-    });
+    expect(selectors1).toContainEqual({ path: ["value"], schema });
 
     const selectors2 = schemaTracker.get(
       `did:null:null/${testCell2.sourceURI}/application/json`,
     );
     expect(selectors2).not.toBeUndefined();
     expect(selectors2?.size).toBe(2);
-    expect(selectors2).toContainEqual({
-      path: ["value"],
-      schemaContext,
-    });
+    expect(selectors2).toContainEqual({ path: ["value"], schema });
   });
 
   it("should handle paths in schema and cell links", () => {
@@ -492,10 +463,7 @@ describe("Query", () => {
     const schema = { "type": "string" } as const satisfies JSONSchema;
     const selector = {
       path: ["value", "employees", "0", "address", "street"],
-      schemaContext: {
-        schema: schema,
-        rootSchema: schema,
-      },
+      schema,
     };
 
     const entityId2 = testCell2.entityId!;
@@ -539,14 +507,11 @@ describe("Query", () => {
     const [selector2] = selectorSet2!.values();
     expect(selector1).toEqual({
       path: ["value", "home", "street"],
-      schemaContext: {
-        schema: schema, // {"type": "string"}
-        rootSchema: schema,
-      },
+      schema: schema, // {"type": "string"}
     });
     expect(selector2).toEqual({
       path: selector.path, // ["employees", "0", "address", "street"]
-      schemaContext: selector.schemaContext,
+      schema: selector.schema,
     });
   });
 });

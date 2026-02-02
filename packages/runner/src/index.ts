@@ -104,7 +104,6 @@ export {
   type RenderNode,
   type Schema,
   schema,
-  type SchemaContext,
   type SchemaWithoutCell,
   type StreamValue,
   type toJSON,

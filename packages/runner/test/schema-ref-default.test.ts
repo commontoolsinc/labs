@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { JSONSchemaObj } from "commontools";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { resolveSchema } from "../src/schema.ts";
 
@@ -14,7 +15,7 @@ describe("$ref with default support", () => {
         default: "ref-site-default",
       };
 
-      const resolved = resolveSchema(schema, schema, false);
+      const resolved = resolveSchema(schema, false);
       expect(resolved).toEqual({
         $defs: schema.$defs,
         type: "string",
@@ -31,7 +32,7 @@ describe("$ref with default support", () => {
         default: "ref-site-default",
       };
 
-      const resolved = resolveSchema(schema, schema, false);
+      const resolved = resolveSchema(schema, false);
       expect(resolved).toEqual({
         $defs: schema.$defs,
         type: "string",
@@ -47,7 +48,7 @@ describe("$ref with default support", () => {
         $ref: "#/$defs/String",
       };
 
-      const resolved = resolveSchema(schema, schema, false);
+      const resolved = resolveSchema(schema, false);
       expect(resolved).toEqual({
         $defs: schema.$defs,
         type: "string",
@@ -66,7 +67,7 @@ describe("$ref with default support", () => {
         default: "outermost",
       };
 
-      const resolved = resolveSchema(schema, schema, false);
+      const resolved = resolveSchema(schema, false);
       expect(resolved).toHaveProperty("default", "outermost");
     });
 
@@ -80,7 +81,7 @@ describe("$ref with default support", () => {
         $ref: "#/$defs/Level1",
       };
 
-      const resolved = resolveSchema(schema, schema, false);
+      const resolved = resolveSchema(schema, false);
       expect(resolved).toHaveProperty("default", "level1");
     });
 
@@ -94,7 +95,7 @@ describe("$ref with default support", () => {
         asCell: true,
       };
 
-      const resolved = resolveSchema(schema, schema, true);
+      const resolved = resolveSchema(schema, true);
       // asCell should be filtered, but default should remain
       expect(resolved).toEqual({
         $defs: schema.$defs,
@@ -112,7 +113,7 @@ describe("$ref with default support", () => {
         default: "foo",
       };
 
-      const resolved = resolveSchema(schema, schema, false);
+      const resolved = resolveSchema(schema, false);
       // Should convert boolean true to object to hold default
       expect(resolved).toEqual({
         $defs: schema.$defs,
@@ -129,7 +130,7 @@ describe("$ref with default support", () => {
         default: "foo",
       };
 
-      const resolved = resolveSchema(schema, schema, false);
+      const resolved = resolveSchema(schema, false);
       // false schema means nothing validates, but we can still have properties
       expect(resolved).toEqual({
         $defs: schema.$defs,
@@ -150,14 +151,31 @@ describe("$ref with default support", () => {
           { $ref: "#/$defs/String", default: "string-default" },
           { $ref: "#/$defs/Number", default: 42 },
         ],
+      } as const satisfies JSONSchema;
+
+      const s1 = {
+        ...(rootSchema.anyOf![0] as JSONSchemaObj),
+        $defs: rootSchema.$defs,
       };
-
+      const s2 = {
+        ...(rootSchema.anyOf![1] as JSONSchemaObj),
+        $defs: rootSchema.$defs,
+      };
       // This would be used in validateAndTransform's anyOf handling
-      const option1 = resolveSchema(rootSchema.anyOf![0], rootSchema, false);
-      const option2 = resolveSchema(rootSchema.anyOf![1], rootSchema, false);
+      const option1 = resolveSchema(s1, false);
+      const option2 = resolveSchema(s2, false);
 
-      expect(option1).toEqual({ type: "string", default: "string-default" });
-      expect(option2).toEqual({ type: "number", default: 42 });
+      // resolveSchema doesn't remove $defs
+      expect(option1).toEqual({
+        type: "string",
+        default: "string-default",
+        $defs: rootSchema.$defs,
+      });
+      expect(option2).toEqual({
+        type: "number",
+        default: 42,
+        $defs: rootSchema.$defs,
+      });
     });
 
     it("should apply ref site default to anyOf union as a whole", () => {
@@ -174,7 +192,7 @@ describe("$ref with default support", () => {
         default: "override",
       };
 
-      const resolved = resolveSchema(rootSchema, rootSchema, false);
+      const resolved = resolveSchema(rootSchema, false);
 
       expect(resolved).toEqual({
         $defs: rootSchema.$defs,
@@ -197,9 +215,14 @@ describe("$ref with default support", () => {
         ],
       };
 
-      const option1 = resolveSchema(rootSchema.anyOf![0], rootSchema, false);
+      const option1 = resolveSchema({
+        ...(rootSchema.anyOf![0] as JSONSchemaObj),
+        $defs: rootSchema.$defs,
+      }, false);
 
+      // Resolve schema doesn't remove $defs
       expect(option1).toEqual({
+        $defs: rootSchema.$defs,
         type: "string",
         default: "cell-default",
         asCell: true,
@@ -217,7 +240,7 @@ describe("$ref with default support", () => {
         default: 42,
       };
 
-      const resolved = resolveSchema(rootSchema, rootSchema, false);
+      const resolved = resolveSchema(rootSchema, false);
       expect(resolved).toEqual({
         $defs: rootSchema.$defs,
         type: "number",
@@ -234,7 +257,7 @@ describe("$ref with default support", () => {
         default: null,
       };
 
-      const resolved = resolveSchema(rootSchema, rootSchema, false);
+      const resolved = resolveSchema(rootSchema, false);
       expect(resolved).toEqual({
         $defs: rootSchema.$defs,
         type: ["string", "null"],
@@ -251,7 +274,7 @@ describe("$ref with default support", () => {
         default: ["item1", "item2"],
       };
 
-      const resolved = resolveSchema(rootSchema, rootSchema, false);
+      const resolved = resolveSchema(rootSchema, false);
       expect(resolved).toEqual({
         $defs: rootSchema.$defs,
         type: "array",
@@ -275,7 +298,7 @@ describe("$ref with default support", () => {
         default: { name: "John", age: 30 },
       };
 
-      const resolved = resolveSchema(rootSchema, rootSchema, false);
+      const resolved = resolveSchema(rootSchema, false);
       expect(resolved).toEqual({
         $defs: rootSchema.$defs,
         type: "object",
@@ -301,7 +324,7 @@ describe("$ref with default support", () => {
         asCell: true,
       };
 
-      const resolved = resolveSchema(rootSchema, rootSchema, true);
+      const resolved = resolveSchema(rootSchema, true);
 
       // asCell should be filtered out, but default should remain
       expect(resolved).not.toHaveProperty("asCell");
@@ -319,7 +342,7 @@ describe("$ref with default support", () => {
         asStream: true,
       };
 
-      const resolved = resolveSchema(rootSchema, rootSchema, false);
+      const resolved = resolveSchema(rootSchema, false);
 
       expect(resolved).toEqual({
         $defs: rootSchema.$defs,
