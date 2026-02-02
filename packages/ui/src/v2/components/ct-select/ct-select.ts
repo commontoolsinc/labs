@@ -9,6 +9,7 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
+import { type FormContext, formContext } from "../form-context.ts";
 import { type CellHandle } from "@commontools/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
 
@@ -145,6 +146,14 @@ export class CTSelect extends BaseElement {
       },
     });
 
+    /* ---------- Form context integration ---------- */
+    @consume({ context: formContext, subscribe: false })
+    private _formContext?: FormContext;
+
+    private _buffer: unknown | unknown[] | undefined;
+    private _initialValue: unknown | unknown[] | undefined;
+    private _formUnregister?: () => void;
+
     /* ---------- Reactive properties ---------- */
     static override properties = {
       disabled: { type: Boolean, reflect: true },
@@ -195,6 +204,47 @@ export class CTSelect extends BaseElement {
       this.applyValueToDom();
       // Apply theme on first render
       applyThemeToElement(this, this.theme ?? defaultTheme);
+
+      // Register with form after binding is complete
+      this._registerWithForm();
+    }
+
+    private _registerWithForm() {
+      // Only register if we have both a form context and a cell value binding
+      if (this._formContext && this.value) {
+        // Read initial value from cell
+        this._initialValue = this._cellController.getValue();
+        // Initialize buffer with initial value
+        this._buffer = this._initialValue;
+
+        // Register with form
+        this._formUnregister = this._formContext.registerField({
+          element: this,
+          getValue: () => this._buffer,
+          setValue: (v) => {
+            this._buffer = v as unknown | unknown[];
+            this.requestUpdate();
+          },
+          flush: () => {
+            this._cellController.setValue(this._buffer!);
+          },
+          reset: () => {
+            this._buffer = this._initialValue;
+            this.requestUpdate();
+          },
+          validate: () => ({
+            valid: this.checkValidity(),
+            message: this._select?.validationMessage,
+          }),
+        });
+      }
+    }
+
+    override disconnectedCallback() {
+      super.disconnectedCallback();
+      // Unregister from form if registered
+      this._formUnregister?.();
+      this._formUnregister = undefined;
     }
 
     override willUpdate(changedProperties: Map<string, any>) {
@@ -331,8 +381,14 @@ export class CTSelect extends BaseElement {
         newValue = this._keyMap.get(optKey)?.value;
       }
 
-      // Always update through cell controller
-      this._cellController.setValue(newValue);
+      // If in form context, update buffer instead of cell
+      if (this._formContext) {
+        this._buffer = newValue;
+        this.requestUpdate();
+      } else {
+        // Update through cell controller
+        this._cellController.setValue(newValue);
+      }
     }
 
     /* ---------- Public API ---------- */
@@ -370,6 +426,10 @@ export class CTSelect extends BaseElement {
      * Get the current value from the cell controller
      */
     private getCurrentValue(): unknown | unknown[] {
+      // If in form context, use buffer instead of cell value
+      if (this._formContext && this._buffer !== undefined) {
+        return this._buffer;
+      }
       return this._cellController.getValue();
     }
 

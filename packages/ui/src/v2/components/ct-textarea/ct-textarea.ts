@@ -9,6 +9,7 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
+import { type FormContext, formContext } from "../form-context.ts";
 import { type CellHandle } from "@commontools/runtime-client";
 import { stringSchema } from "@commontools/runner/schemas";
 import { createStringCellController } from "../../core/cell-controller.ts";
@@ -288,6 +289,14 @@ export class CTTextarea extends BaseElement {
         },
       });
 
+      // Form context integration
+      @consume({ context: formContext, subscribe: false })
+      private _formContext?: FormContext;
+
+      private _buffer: string | undefined;
+      private _initialValue: string | undefined;
+      private _formUnregister?: () => void;
+
       constructor() {
         super();
         this.placeholder = "";
@@ -312,11 +321,21 @@ export class CTTextarea extends BaseElement {
       }
 
       private getValue(): string {
+        // If in form context, use buffer instead of cell value
+        if (this._formContext && this._buffer !== undefined) {
+          return this._buffer;
+        }
         return this._cellController.getValue();
       }
 
       private setValue(newValue: string): void {
-        this._cellController.setValue(newValue);
+        // If in form context, update buffer instead of cell
+        if (this._formContext) {
+          this._buffer = newValue;
+          this.requestUpdate();
+        } else {
+          this._cellController.setValue(newValue);
+        }
       }
 
       get textarea(): HTMLTextAreaElement | null {
@@ -348,6 +367,9 @@ export class CTTextarea extends BaseElement {
         // Apply theme on mount
         applyThemeToElement(this, this.theme ?? defaultTheme);
 
+        // Register with form after binding is complete
+        this._registerWithForm();
+
         if (this.autofocus) {
           this.textarea?.focus();
         }
@@ -357,6 +379,44 @@ export class CTTextarea extends BaseElement {
           this._minHeight = this.textarea.scrollHeight;
           this.adjustHeight();
         }
+      }
+
+      private _registerWithForm() {
+        // Only register if we have both a form context and a cell value binding
+        if (this._formContext && this.value) {
+          // Read initial value from cell
+          this._initialValue = this._cellController.getValue();
+          // Initialize buffer with initial value
+          this._buffer = this._initialValue;
+
+          // Register with form
+          this._formUnregister = this._formContext.registerField({
+            element: this,
+            getValue: () => this._buffer,
+            setValue: (v) => {
+              this._buffer = v as string;
+              this.requestUpdate();
+            },
+            flush: () => {
+              this._cellController.setValue(this._buffer ?? "");
+            },
+            reset: () => {
+              this._buffer = this._initialValue;
+              this.requestUpdate();
+            },
+            validate: () => ({
+              valid: this.checkValidity(),
+              message: this.validationMessage,
+            }),
+          });
+        }
+      }
+
+      override disconnectedCallback() {
+        super.disconnectedCallback();
+        // Unregister from form if registered
+        this._formUnregister?.();
+        this._formUnregister = undefined;
       }
 
       override updated(
