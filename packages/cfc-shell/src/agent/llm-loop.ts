@@ -74,59 +74,74 @@ export interface LLMClient {
 // Tool definitions for `exec` and `task`
 // ---------------------------------------------------------------------------
 
-const AGENT_TOOLS: Record<string, ToolDef> = {
-  exec: {
-    description: "Execute a shell command in the CFC sandbox. " +
-      "The command string is interpreted by the CFC shell which supports " +
-      "pipes, redirects, variables, and common Unix commands (cat, grep, sed, " +
-      "jq, echo, etc.). Output is security-filtered based on the agent's " +
-      "visibility policy.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        command: {
-          type: "string",
-          description: "The shell command to execute",
-        },
+const EXEC_TOOL: ToolDef = {
+  description: "Execute a shell command in the CFC sandbox. " +
+    "The command string is interpreted by the CFC shell which supports " +
+    "pipes, redirects, variables, and common Unix commands (cat, grep, sed, " +
+    "jq, echo, etc.). Output is security-filtered based on the agent's " +
+    "visibility policy.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      command: {
+        type: "string",
+        description: "The shell command to execute",
       },
-      required: ["command"],
     },
-  },
-  task: {
-    description: "Delegate a task to a sub-agent with a relaxed visibility " +
-      "policy. The sub-agent can see data that this agent cannot (e.g., " +
-      "untrusted network content). IMPORTANT: Only use this tool if your " +
-      "own exec output is being filtered — if you can already see the data, " +
-      "just use exec directly. Do NOT delegate from a sub-agent; sub-agents " +
-      "can already see everything. The sub-agent's final text response is " +
-      "declassified by checking it against ballots (safe return strings you " +
-      "provide) and captured command outputs. If the response matches a " +
-      "ballot, it is endorsed as InjectionFree. If it matches a command " +
-      "output (e.g., the result of `wc -l`), it inherits that output's label.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        task: {
-          type: "string",
-          description: "Instructions for the sub-agent",
-        },
-        policy: {
-          type: "string",
-          enum: ["sub", "restricted"],
-          description:
-            'Sub-agent policy. "sub" (default) can see everything. "restricted" can see everything but cannot spawn further sub-agents.',
-        },
-        ballots: {
-          type: "array",
-          items: { type: "string" },
-          description:
-            "Safe return strings. If the sub-agent responds with one of these exactly, it is endorsed as InjectionFree (you authored it).",
-        },
-      },
-      required: ["task"],
-    },
+    required: ["command"],
   },
 };
+
+const TASK_SCHEMA = {
+  type: "object",
+  properties: {
+    task: {
+      type: "string",
+      description: "Instructions for the sub-agent",
+    },
+    policy: {
+      type: "string",
+      enum: ["sub", "restricted"],
+      description:
+        'Sub-agent policy. "sub" (default) can see everything. "restricted" can see everything but cannot spawn further sub-agents.',
+    },
+    ballots: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "Safe return strings. If the sub-agent responds with one of these exactly, it is endorsed as InjectionFree (you authored it).",
+    },
+  },
+  required: ["task"],
+};
+
+const TASK_DESC_MAIN =
+  "Delegate a task to a sub-agent with a relaxed visibility " +
+  "policy. The sub-agent can see data that this agent cannot (e.g., " +
+  "untrusted network content). Use this when your exec output is " +
+  "filtered due to security policy. The sub-agent's final text response is " +
+  "declassified by checking it against ballots (safe return strings you " +
+  "provide) and captured command outputs. If the response matches a " +
+  "ballot, it is endorsed as InjectionFree. If it matches a command " +
+  "output (e.g., the result of `wc -l`), it inherits that output's label.";
+
+const TASK_DESC_SUB =
+  "Delegate a subtask to another agent. Useful for breaking up work " +
+  "that would consume too much context, or for parallel exploration. " +
+  "The sub-agent shares the same filesystem and can see all data.";
+
+/** Build tool definitions based on agent context. */
+function agentTools(
+  hasVisibilityRestrictions: boolean,
+): Record<string, ToolDef> {
+  return {
+    exec: EXEC_TOOL,
+    task: {
+      description: hasVisibilityRestrictions ? TASK_DESC_MAIN : TASK_DESC_SUB,
+      inputSchema: TASK_SCHEMA,
+    },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Agent Loop
@@ -212,13 +227,15 @@ export async function runAgentLoop(
   let iterations = 0;
   let conversationLabel = labels.userInput();
 
+  const tools = agentTools(agent.policy.requiredIntegrity.length > 0);
+
   while (iterations < maxIterations) {
     // Call LLM
     const response = await llm.sendRequest({
       messages,
       model,
       system,
-      tools: AGENT_TOOLS,
+      tools,
     });
 
     onAssistantMessage?.(response);
