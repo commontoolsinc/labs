@@ -1151,3 +1151,70 @@ describe("data: URI behaviors", () => {
     expect(result.error?.name).toBe("ReadOnlyAddressError");
   });
 });
+
+describe("Cell-level transaction isolation", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      storageManager,
+      apiUrl: new URL("http://localhost:8000"),
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("uncommitted writes should not be visible to get() outside transaction", async () => {
+    const cell = runtime.getCell<{ value: number }>(space, "isolation-test");
+
+    // Set initial value
+    const setupTx = runtime.edit();
+    cell.withTx(setupTx).set({ value: 42 });
+    await setupTx.commit();
+
+    // Start a new transaction and write a new value
+    const tx = runtime.edit();
+    cell.withTx(tx).set({ value: 999 });
+
+    // Before commit: get() should still see the old value
+    const beforeCommit = cell.get();
+    expect(beforeCommit?.value).toBe(42);
+
+    // After commit: get() should see the new value
+    await tx.commit();
+    const afterCommit = cell.get();
+    expect(afterCommit?.value).toBe(999);
+  });
+
+  it("uncommitted writes should not be visible to pull() outside transaction", async () => {
+    const cell = runtime.getCell<{ value: number }>(
+      space,
+      "isolation-pull-test",
+    );
+
+    // Set initial value
+    const setupTx = runtime.edit();
+    cell.withTx(setupTx).set({ value: 100 });
+    await setupTx.commit();
+
+    // Start a new transaction and write a new value
+    const tx = runtime.edit();
+    cell.withTx(tx).set({ value: 500 });
+
+    // Before commit: pull() should still see the old value
+    await cell.pull();
+    const beforeCommit = cell.get();
+    expect(beforeCommit?.value).toBe(100);
+
+    // After commit: pull() should see the new value
+    await tx.commit();
+    await cell.pull();
+    const afterCommit = cell.get();
+    expect(afterCommit?.value).toBe(500);
+  });
+});
