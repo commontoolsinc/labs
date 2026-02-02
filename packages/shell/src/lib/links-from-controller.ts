@@ -62,16 +62,25 @@ export class LinksFromController implements ReactiveController {
       this.unbind();
     }
 
-    this.cell = cell;
+    // The PageHandle's cell may have a restrictive schema (like nameSchema)
+    // that only includes $NAME. To get all properties including links,
+    // we need to use a broader schema. Using `true` means "any value".
+    const fullCell = cell.asSchema<Record<string, unknown>>(true as any);
 
-    // Subscribe to cell updates
-    this.cancelSubscription = cell.subscribe((_value) => {
+    this.cell = fullCell;
+
+    // Subscribe to cell updates - the subscription handles syncing
+    this.cancelSubscription = fullCell.subscribe(() => {
       // Re-discover links whenever the cell value changes
       this.discoverLinks();
     });
 
-    // Perform initial discovery
-    this.discoverLinks();
+    // Perform initial sync and discovery
+    // The subscribe() above will trigger discovery after sync completes,
+    // but we also sync explicitly to ensure we have data
+    fullCell.sync().then(() => {
+      this.discoverLinks();
+    });
   }
 
   /**
