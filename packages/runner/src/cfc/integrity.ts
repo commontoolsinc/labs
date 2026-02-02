@@ -6,7 +6,7 @@
  * higher integrity (more endorsements).
  *
  * Lattice structure:
- * - Top (weakest): empty set — no endorsements claimed
+ * - Bottom (weakest): empty set — no endorsements claimed
  * - Join (⊔): intersection — combining sources keeps only shared endorsements
  * - Meet (⊓): union — adding endorsements strengthens integrity
  * - Order: a ≤ b iff a.atoms ⊆ b.atoms (fewer endorsements = lower integrity)

@@ -24,7 +24,7 @@ import {
 } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { recordTaintedRead } from "./cfc/taint-tracking.ts";
+import { getTaintContext, recordTaintedRead } from "./cfc/taint-tracking.ts";
 import {
   joinLabel,
   labelFromSchemaIfc,
@@ -1687,14 +1687,17 @@ export class SchemaObjectTraverser<V extends JSONValue>
     }
     const schemaObj = resolved;
 
-    // CFC: accumulate taint from merged schema + stored labels
+    // CFC: accumulate taint from merged schema + stored labels.
+    // When CFC is active (taint context on tx), always check stored labels
+    // even without schema ifc — a cell may have been tainted at runtime.
     if (this.tx) {
+      const cfcActive = !!getTaintContext(this.tx);
       const schemaLabel = schemaObj.ifc
         ? labelFromSchemaIfc(schemaObj.ifc as { classification?: string[] })
         : undefined;
-      // Only read stored labels when schema has ifc — avoids registering
-      // phantom reactive dependencies on the label/ path for every read.
-      const storedLabels = schemaLabel
+      // Read stored labels when schema has ifc OR when CFC is active.
+      // Skip for non-CFC paths to avoid phantom reactive dependencies.
+      const storedLabels = (schemaLabel || cfcActive)
         ? this.tx.readLabelOrUndefined({
           space: doc.address.space,
           id: doc.address.id,

@@ -37,11 +37,13 @@ export type Label = {
 // ---------------------------------------------------------------------------
 
 /** Bottom confidentiality (no restrictions), empty integrity (no endorsements). */
+const EMPTY_LABEL: Label = Object.freeze({
+  confidentiality: emptyConfidentiality(),
+  integrity: emptyIntegrity(),
+});
+
 export function emptyLabel(): Label {
-  return {
-    confidentiality: emptyConfidentiality(),
-    integrity: emptyIntegrity(),
-  };
+  return EMPTY_LABEL;
 }
 
 // ---------------------------------------------------------------------------
@@ -91,12 +93,6 @@ export function labelFromClassification(level: string): Label {
   };
 }
 
-/**
- * Convert existing schema `ifc` annotations to a Label.
- *
- * If `ifc.classification` has multiple strings, each becomes a separate
- * clause (they are AND'd — you need ALL those clearances).
- */
 /**
  * Convert stored `Labels` (from the `label/` document path) into a composite
  * `Label`.  Prefers the rich `confidentiality`/`integrity` fields when present

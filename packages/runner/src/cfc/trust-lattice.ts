@@ -98,7 +98,7 @@ export class TarjanSCC {
         w = this.stack.pop()!;
         this.vertexOnStack[w] = false;
         scc.push(w);
-      } while (w != v);
+      } while (w !== v);
       this.sorted.push(scc);
     }
   }

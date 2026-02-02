@@ -25,6 +25,7 @@ import type {
 } from "@commontools/memory/interface";
 import { BaseMemoryAddress } from "@commontools/runner/traverse";
 import { Cell } from "../cell.ts";
+import type { Atom } from "../cfc/atoms.ts";
 
 export type {
   Assertion,
@@ -72,9 +73,9 @@ export interface IReadOptions {
 export type Labels = {
   classification?: string[];
   /** CNF confidentiality: outer=AND (clauses), inner=OR (alternatives) */
-  confidentiality?: import("../cfc/atoms.ts").Atom[][];
+  confidentiality?: Atom[][];
   /** Integrity: conjunction of endorsement atoms */
-  integrity?: import("../cfc/atoms.ts").Atom[];
+  integrity?: Atom[];
 };
 
 /** Immutable storage value container. */
