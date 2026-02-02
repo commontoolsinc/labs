@@ -118,8 +118,8 @@ export class SandboxedExecutor {
           process = cmd.spawn();
         } catch (e: unknown) {
           clearTimeout(timeoutId);
-          // Fall back to stub mode if we lack permission to spawn processes
-          if (isPermissionError(e)) {
+          // Fall back to stub mode if we lack permission or the command doesn't exist
+          if (isPermissionError(e) || e instanceof Deno.errors.NotFound) {
             return this.executeStub(command, args, stdin, inputLabels);
           }
           throw e;

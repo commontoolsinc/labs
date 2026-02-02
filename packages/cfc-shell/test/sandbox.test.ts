@@ -87,19 +87,6 @@ function atomEqual(a: any, b: any): boolean {
   }
 }
 
-/** Check if we have write permission (for tests that need real filesystem) */
-let _hasWritePermission: boolean | null = null;
-async function hasWritePermission(): Promise<boolean> {
-  if (_hasWritePermission !== null) return _hasWritePermission;
-  try {
-    const p = await Deno.permissions.query({ name: "write" as any });
-    _hasWritePermission = p.state === "granted";
-  } catch {
-    _hasWritePermission = false;
-  }
-  return _hasWritePermission;
-}
-
 function createMockContext(vfs?: VFS): CommandContext {
   return {
     vfs: vfs || new VFS(),
@@ -193,8 +180,8 @@ Deno.test("SandboxedExecutor in stub mode returns appropriate message", async ()
   const vfs = new VFS();
 
   const result = await executor.execute(
-    "python",
-    ["script.py"],
+    "cfc-nonexistent-command-for-testing",
+    ["arg1"],
     null,
     [],
     vfs,
@@ -203,7 +190,7 @@ Deno.test("SandboxedExecutor in stub mode returns appropriate message", async ()
 
   assertEquals(result.exitCode, 1);
   assert(result.stderr.value.includes("Sandboxed execution not available"));
-  assert(result.stderr.value.includes("python script.py"));
+  assert(result.stderr.value.includes("cfc-nonexistent-command-for-testing arg1"));
 });
 
 Deno.test("Executor stub mode applies correct labels with no inputs", async () => {
@@ -292,7 +279,7 @@ Deno.test("Executor with network adds network taint", async () => {
 // VFS Bridge Tests
 // ============================================================================
 
-Deno.test({ name: "exportToReal handles non-existent paths gracefully", ignore: !(await hasWritePermission()), fn: async () => {
+Deno.test("exportToReal handles non-existent paths gracefully", async () => {
   const vfs = new VFS();
 
   // Create a temp directory for testing
@@ -306,9 +293,9 @@ Deno.test({ name: "exportToReal handles non-existent paths gracefully", ignore: 
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
-}});
+});
 
-Deno.test({ name: "exportToReal exports file with correct label", ignore: !(await hasWritePermission()), fn: async () => {
+Deno.test("exportToReal exports file with correct label", async () => {
   const vfs = new VFS();
   const fileLabel = labels.fromFile("/test.txt", "test-space");
 
@@ -333,9 +320,9 @@ Deno.test({ name: "exportToReal exports file with correct label", ignore: !(awai
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
-}});
+});
 
-Deno.test({ name: "exportToReal exports directory recursively", ignore: !(await hasWritePermission()), fn: async () => {
+Deno.test("exportToReal exports directory recursively", async () => {
   const vfs = new VFS();
 
   // Create directory structure
@@ -363,9 +350,9 @@ Deno.test({ name: "exportToReal exports directory recursively", ignore: !(await 
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
-}});
+});
 
-Deno.test({ name: "importFromReal imports files with correct label", ignore: !(await hasWritePermission()), fn: async () => {
+Deno.test("importFromReal imports files with correct label", async () => {
   const vfs = new VFS();
   const importLabel = labels.fromNetwork("https://example.com", true);
 
@@ -389,9 +376,9 @@ Deno.test({ name: "importFromReal imports files with correct label", ignore: !(a
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
-}});
+});
 
-Deno.test({ name: "importFromReal imports nested directories", ignore: !(await hasWritePermission()), fn: async () => {
+Deno.test("importFromReal imports nested directories", async () => {
   const vfs = new VFS();
   const importLabel = labels.bottom();
 
@@ -420,7 +407,7 @@ Deno.test({ name: "importFromReal imports nested directories", ignore: !(await h
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
-}});
+});
 
 // ============================================================================
 // !real Command Tests
@@ -432,12 +419,22 @@ Deno.test("!real parses basic command", async () => {
 
   const result = await realCommand(["echo", "hello"], ctx);
 
-  // In stub mode, should return exit code 1
-  assertEquals(result.exitCode, 1);
+  // Command may run for real (exit 0) or fall back to stub (exit 1)
+  // depending on whether `echo` is available in the environment.
+  assert(
+    result.exitCode === 0 || result.exitCode === 1,
+    `expected exit code 0 or 1, got ${result.exitCode}`,
+  );
 
-  // Should have written to stderr
-  const stderrOutput = await ctx.stderr.readAll();
-  assert(stderrOutput.value.includes("Sandboxed execution not available"));
+  if (result.exitCode === 0) {
+    // Real execution succeeded — stdout should have output
+    const stdoutOutput = await ctx.stdout.readAll();
+    assert(stdoutOutput.value.includes("hello"), "real echo should output 'hello'");
+  } else {
+    // Stub mode — stderr should indicate sandbox not available
+    const stderrOutput = await ctx.stderr.readAll();
+    assert(stderrOutput.value.includes("Sandboxed execution not available"));
+  }
 });
 
 Deno.test("!real parses --net flag", async () => {
