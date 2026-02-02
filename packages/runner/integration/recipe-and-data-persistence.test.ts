@@ -30,7 +30,8 @@ const keyConfig: IdentityCreateConfig = {
 };
 
 // Cell IDs used across phases
-const INPUT_CELL_ID = "test-input-data";
+const INPUT_CELL_ID_PHASE_2 = "test-input-data";
+const INPUT_CELL_ID_PHASE_3 = "test-input-data-phase-3";
 const RESULT_CELL_ID_PHASE_2 = "test-recipe-result";
 const RESULT_CELL_ID_PHASE_3 = "test-recipe-result-3";
 
@@ -111,9 +112,10 @@ async function disposeTestContext(ctx: TestContext): Promise<void> {
 function getInputCell(
   runtime: Runtime,
   space: MemorySpace,
+  cellId: string,
   tx?: ReturnType<Runtime["edit"]>,
 ): Cell<InputData> {
-  return runtime.getCell(space, INPUT_CELL_ID, inputDataSchema, tx);
+  return runtime.getCell(space, cellId, inputDataSchema, tx);
 }
 
 function getResultCell(
@@ -150,10 +152,10 @@ async function phase1SaveRecipeAndData(
   await ctx.runtime.recipeManager.saveAndSyncRecipe({ recipeId, space });
   console.log(`Recipe saved with ID: ${recipeId}`);
 
-  // Save initial data
+  // Save initial data for Phase 2's instance
   const initialData: InputData = { values: [1, 2, 3, 4, 5], label: "Numbers" };
   const tx = ctx.runtime.edit();
-  const dataCell = getInputCell(ctx.runtime, space, tx);
+  const dataCell = getInputCell(ctx.runtime, space, INPUT_CELL_ID_PHASE_2, tx);
   dataCell.set(initialData);
   await tx.commit();
   await ctx.runtime.storageManager.synced();
@@ -187,7 +189,7 @@ async function phase2LoadAndVerify(
   console.log("Recipe loaded from storage");
 
   // Load data cell from storage
-  const dataCell = getInputCell(ctx.runtime, space, tx);
+  const dataCell = getInputCell(ctx.runtime, space, INPUT_CELL_ID_PHASE_2, tx);
   await dataCell.sync();
   console.log(`Data loaded: ${JSON.stringify(dataCell.get())}`);
 
@@ -213,20 +215,24 @@ async function phase2LoadAndVerify(
     "Result should be formatted correctly",
   );
 
+  // Sync to storage so Phase 3 can load this instance
+  await ctx.runtime.storageManager.synced();
+
   await disposeTestContext(ctx);
   console.log("Runtime 2 disposed (cache cleared)");
 }
 
 /**
- * Phase 3: Reload recipe/data, run recipe, update input, verify reactivity
- * within the same session.
+ * Phase 3: Create a second recipe instance with its own input cell, verify
+ * reactivity within the same session, AND verify that updating this instance's
+ * input does NOT affect Phase 2's instance.
  */
-async function phase3ReactivityWithinSession(
+async function phase3ReactivityAndIsolation(
   identity: Identity,
   space: MemorySpace,
   recipeId: string,
 ): Promise<void> {
-  console.log("\n--- Phase 3: Reload, observe, update, verify reactivity ---");
+  console.log("\n--- Phase 3: Reactivity and instance isolation ---");
 
   const ctx = createTestContext(identity);
   let tx = ctx.runtime.edit();
@@ -239,62 +245,89 @@ async function phase3ReactivityWithinSession(
   );
   console.log("Recipe loaded from storage (third runtime)");
 
-  // Load data cell from storage
-  const dataCell = getInputCell(ctx.runtime, space, tx);
-  await dataCell.sync();
-  console.log("Data loaded:", dataCell.get());
+  // Create a NEW input cell for Phase 3's instance (same initial values)
+  const dataCell3 = getInputCell(ctx.runtime, space, INPUT_CELL_ID_PHASE_3, tx);
+  const initialData: InputData = { values: [1, 2, 3, 4, 5], label: "Numbers" };
+  dataCell3.set(initialData);
+  console.log("Created new input cell for Phase 3:", initialData);
 
-  // Create result cell and run recipe
-  const resultCell = getResultCell(
+  // Create Phase 3's result cell and run recipe
+  const resultCell3 = getResultCell(
     ctx.runtime,
     space,
     RESULT_CELL_ID_PHASE_3,
     tx,
   );
-  const runResult = ctx.runtime.run(tx, recipe, { data: dataCell }, resultCell);
+  const runResult3 = ctx.runtime.run(
+    tx,
+    recipe,
+    { data: dataCell3 },
+    resultCell3,
+  );
+
+  // Also load and start Phase 2's instance to verify isolation
+  // We need to load Phase 2's input cell as well for the recipe to work
+  const dataCell2 = getInputCell(ctx.runtime, space, INPUT_CELL_ID_PHASE_2, tx);
+  await dataCell2.sync();
+
+  const resultCell2 = getResultCell(
+    ctx.runtime,
+    space,
+    RESULT_CELL_ID_PHASE_2,
+    tx,
+  );
+  await resultCell2.sync();
+  await ctx.runtime.start(resultCell2);
+  console.log("Started Phase 2's instance for isolation check");
+
   await tx.commit();
-  await runResult.pull();
+  await runResult3.pull();
+  await resultCell2.pull();
 
-  // Verify initial state
-  const beforeUpdate = runResult.getAsQueryResult();
-  console.log(
-    "Computed result before update: sum =",
-    beforeUpdate.sum,
-    ", result =",
-    beforeUpdate.result,
-  );
-  assertEquals(beforeUpdate.sum, 15, "Sum should still be 15 after reload");
-  assertEquals(
-    beforeUpdate.result,
-    "Numbers: 15",
-    "Result should still be 'Numbers: 15' after reload",
-  );
+  // Verify both instances have initial state
+  const phase3Before = runResult3.getAsQueryResult();
+  const phase2Before = resultCell2.getAsQueryResult();
+  console.log("Phase 3 result before update: sum =", phase3Before.sum);
+  console.log("Phase 2 result before update: sum =", phase2Before.sum);
 
-  // Update the input data
+  assertEquals(phase3Before.sum, 15, "Phase 3 sum should be 15");
+  assertEquals(phase2Before.sum, 15, "Phase 2 sum should be 15");
+
+  // Update Phase 3's input data (NOT Phase 2's)
   const updatedData: InputData = { values: [10, 20, 30], label: "Big numbers" };
-  console.log("Updating data to:", updatedData);
+  console.log("Updating Phase 3's input to:", updatedData);
 
   tx = ctx.runtime.edit();
-  dataCell.withTx(tx).set(updatedData);
+  dataCell3.withTx(tx).set(updatedData);
   await tx.commit();
 
   // Wait for reactivity to propagate
-  await runResult.pull();
+  await runResult3.pull();
+  await resultCell2.pull();
 
-  const afterUpdate = runResult.getAsQueryResult();
-  console.log(
-    "Computed result after update: sum =",
-    afterUpdate.sum,
-    ", result =",
-    afterUpdate.result,
+  const phase3After = runResult3.getAsQueryResult();
+  const phase2After = resultCell2.getAsQueryResult();
+  console.log("Phase 3 result after update: sum =", phase3After.sum);
+  console.log("Phase 2 result after update: sum =", phase2After.sum);
+
+  // Verify Phase 3's instance reacted to its input change
+  assertEquals(phase3After.sum, 60, "Phase 3 sum should be 10+20+30=60");
+  assertEquals(
+    phase3After.result,
+    "Big numbers: 60",
+    "Phase 3 result should reflect updated data",
   );
 
-  // Verify the recipe reacted to the data change
-  assertEquals(afterUpdate.sum, 60, "Sum should be 10+20+30=60");
+  // Verify Phase 2's instance did NOT change (isolation)
   assertEquals(
-    afterUpdate.result,
-    "Big numbers: 60",
-    "Result should reflect updated data",
+    phase2After.sum,
+    15,
+    "Phase 2 sum should still be 15 (isolation)",
+  );
+  assertEquals(
+    phase2After.result,
+    "Numbers: 15",
+    "Phase 2 result should be unchanged (isolation)",
   );
 
   // Sync to storage before disposing so Phase 4 can see the changes
@@ -335,8 +368,8 @@ async function phase4CrossSessionReactivity(
   await ctx.runtime.start(resultCell);
   console.log("Started existing recipe instance");
 
-  // Load the input cell
-  const dataCell = getInputCell(ctx.runtime, space, tx);
+  // Load Phase 3's input cell
+  const dataCell = getInputCell(ctx.runtime, space, INPUT_CELL_ID_PHASE_3, tx);
   await dataCell.sync();
   await tx.commit();
 
@@ -399,7 +432,7 @@ async function testRecipeAndDataPersistence() {
 
   const recipeId = await phase1SaveRecipeAndData(identity, space);
   await phase2LoadAndVerify(identity, space, recipeId);
-  await phase3ReactivityWithinSession(identity, space, recipeId);
+  await phase3ReactivityAndIsolation(identity, space, recipeId);
   await phase4CrossSessionReactivity(identity, space);
 
   console.log("\n=== TEST PASSED ===");
