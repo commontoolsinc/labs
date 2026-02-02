@@ -8,14 +8,14 @@
  * Key invariant: an agent NEVER sees raw content that violates its policy.
  * The system mediates all data flow between the shell and the agent.
  *
- * Ballot mechanism: the parent provides a set of predetermined response strings
- * ("ballot") to a sub-agent. The sub-agent selects one. Because the CONTENT
- * was authored by the trusted parent, it keeps InjectionFree. Only
- * InfluenceClean is stripped — the sub-agent's choice of which option may
- * have been influenced by injection in the data it processed.
+ * Declassification mechanism: when a sub-agent returns its final text response,
+ * the parent runs a declassifier that checks whether the text matches:
+ *   1. A ballot string (parent-authored) → InjectionFree
+ *   2. A captured exec stdout → adopt that output's label
+ *   3. Neither → return with the sub-agent's accumulated label
  *
  * This is structurally sound: no trust in the sub-agent's claims is needed.
- * The content literally cannot contain injection because the parent wrote it.
+ * The declassifier verifies that content matches known-safe values.
  */
 
 import { type Label, labels } from "../labels.ts";
@@ -39,16 +39,6 @@ function nextToolCallId(): string {
   return `tc-${++toolCallCounter}`;
 }
 
-/** A ballot: a set of predetermined responses the sub-agent can select from. */
-export interface Ballot {
-  /** The path where the selected result will be written */
-  path: string;
-  /** Map of option keys to their content strings */
-  options: Record<string, string>;
-  /** Label to apply to the selected option (InjectionFree, no InfluenceClean) */
-  label: Label;
-}
-
 export interface AgentSessionOptions {
   policy?: AgentPolicy;
   vfs?: VFS;
@@ -65,8 +55,6 @@ export class AgentSession {
   private children: AgentSession[] = [];
   private events: AgentEvent[] = [];
   private history: { call: ToolCall; result: ToolResult }[] = [];
-  /** Ballots provided by the parent, keyed by output path */
-  private ballots: Map<string, Ballot> = new Map();
 
   constructor(options: AgentSessionOptions = {}) {
     this.id = nextAgentId();
@@ -108,16 +96,7 @@ export class AgentSession {
   async exec(command: string): Promise<ToolResult> {
     const callId = nextToolCallId();
 
-    // Special commands
-    if (command.startsWith("!sub")) {
-      return this.handleSubAgent(callId, command);
-    }
-    if (command.startsWith("!select ")) {
-      return this.handleSelect(callId, command);
-    }
-    if (command.startsWith("!ballot")) {
-      return this.handleBallotInfo(callId);
-    }
+    // Diagnostic commands
     if (command.startsWith("!label ")) {
       return this.handleLabelInspect(callId, command);
     }
@@ -200,78 +179,62 @@ export class AgentSession {
   }
 
   /**
-   * Provide a ballot to a sub-agent: a set of predetermined response strings.
+   * Declassify a sub-agent's return text by checking it against known-safe values.
    *
-   * The parent (caller) provides the options. Because the content of each
-   * option was authored by the trusted parent, the selected option will
-   * carry InjectionFree integrity. InfluenceClean is stripped because the
-   * sub-agent's choice may have been influenced by injection in the data
-   * it processed.
-   *
-   * @param child The sub-agent to provide the ballot to
-   * @param path  Where the selected result will be written
-   * @param options Map of key → content (e.g. { "safe": "Content is safe", "unsafe": "Content is unsafe" })
+   * 1. Exact ballot match → InjectionFree (parent authored it)
+   * 2. Exact match against any captured stdout → adopt that output's label
+   * 3. No match → return with child's accumulated label
    */
-  provideBallot(
+  declassifyReturn(
     child: AgentSession,
-    path: string,
-    options: Record<string, string>,
-  ): void {
+    text: string,
+    ballots: string[],
+  ): { content: string; label: Label } {
     if (!this.children.includes(child)) {
-      throw new Error("Can only provide ballots to own sub-agents");
+      throw new Error("Can only declassify returns from own sub-agents");
     }
 
-    // The ballot label: InjectionFree (content is predetermined by parent),
-    // but NOT InfluenceClean (the selection is influenced by sub-agent's context).
-    // Also carries accumulated confidentiality if the parent has any.
-    const ballotLabel: Label = {
-      confidentiality: [],
-      integrity: [{ kind: "InjectionFree" }],
-    };
+    const trimmed = text.trim();
 
-    const ballot: Ballot = { path, options, label: ballotLabel };
-    child.ballots.set(path, ballot);
+    // 1. Exact ballot match → InjectionFree
+    if (ballots.some((b) => b.trim() === trimmed)) {
+      this.events.push({
+        type: "sub-agent-return",
+        agentId: child.id,
+        ballotMatch: true,
+        outputMatch: false,
+      });
+      return {
+        content: trimmed,
+        label: {
+          confidentiality: [],
+          integrity: [{ kind: "InjectionFree" }],
+        },
+      };
+    }
 
+    // 2. Exact match against any captured stdout → adopt that output's label
+    for (const { result } of child.getHistory()) {
+      if (!result.filtered && result.stdout.trim() === trimmed) {
+        this.events.push({
+          type: "sub-agent-return",
+          agentId: child.id,
+          ballotMatch: false,
+          outputMatch: true,
+        });
+        return { content: trimmed, label: result.label };
+      }
+    }
+
+    // 3. No match → return with child's accumulated label
+    const exitLabel = child.end();
     this.events.push({
-      type: "ballot-provided",
+      type: "sub-agent-return",
       agentId: child.id,
-      path,
-      options: Object.keys(options),
+      ballotMatch: false,
+      outputMatch: false,
     });
-  }
-
-  /**
-   * Select a ballot option. Only sub-agents with a ballot can call this.
-   *
-   * The system writes the predetermined content (from the parent) to the
-   * ballot path with InjectionFree integrity. The sub-agent's choice only
-   * determines WHICH predetermined string is written — the content itself
-   * is structurally safe.
-   */
-  select(path: string, key: string): void {
-    const ballot = this.ballots.get(path);
-    if (!ballot) {
-      throw new Error(`No ballot for path: ${path}`);
-    }
-    if (!(key in ballot.options)) {
-      throw new Error(
-        `Invalid ballot key: "${key}". Valid keys: ${
-          Object.keys(ballot.options).join(", ")
-        }`,
-      );
-    }
-
-    const content = ballot.options[key];
-
-    // Write with the ballot's label (InjectionFree, no InfluenceClean)
-    this.shell.vfs.writeFile(path, content, ballot.label);
-
-    this.events.push({
-      type: "ballot-selected",
-      agentId: this.id,
-      path,
-      key,
-    });
+    return { content: text, label: exitLabel };
   }
 
   /**
@@ -304,116 +267,7 @@ export class AgentSession {
     return this.history;
   }
 
-  /** Get ballot keys available for a path */
-  getBallot(path: string): Ballot | undefined {
-    return this.ballots.get(path);
-  }
-
   // ---- Private helpers ----
-
-  private handleSubAgent(
-    callId: string,
-    command: string,
-  ): ToolResult {
-    if (!this.policy.canSpawnSubAgents) {
-      return {
-        id: callId,
-        stdout: "Error: policy does not allow spawning sub-agents\n",
-        stderr: "",
-        exitCode: 1,
-        label: labels.bottom(),
-        filtered: false,
-      };
-    }
-
-    const parts = command.trim().split(/\s+/);
-    const policyName = parts[1] || "sub";
-    const policy = policyName === "restricted"
-      ? policies.restricted()
-      : policies.sub();
-
-    const child = this.spawnSubAgent(policy);
-    return {
-      id: callId,
-      stdout:
-        `Sub-agent ${child.id} started with policy: ${child.policy.name}\n` +
-        `Policy: ${child.policy.description}\n` +
-        `Use "!select <path> <key>" to select from provided ballot.\n`,
-      stderr: "",
-      exitCode: 0,
-      label: labels.bottom(),
-      filtered: false,
-    };
-  }
-
-  private handleSelect(
-    callId: string,
-    command: string,
-  ): ToolResult {
-    // Parse: !select <path> <key>
-    const match = command.match(/^!select\s+(\S+)\s+(\S+)/);
-    if (!match) {
-      return {
-        id: callId,
-        stdout: "Usage: !select <path> <key>\n",
-        stderr: "",
-        exitCode: 1,
-        label: labels.bottom(),
-        filtered: false,
-      };
-    }
-
-    const path = match[1];
-    const key = match[2];
-
-    try {
-      this.select(path, key);
-      return {
-        id: callId,
-        stdout: `Selected "${key}" for ${path}\n`,
-        stderr: "",
-        exitCode: 0,
-        label: labels.bottom(),
-        filtered: false,
-      };
-    } catch (e) {
-      return {
-        id: callId,
-        stdout: `Error: ${e instanceof Error ? e.message : String(e)}\n`,
-        stderr: "",
-        exitCode: 1,
-        label: labels.bottom(),
-        filtered: false,
-      };
-    }
-  }
-
-  private handleBallotInfo(callId: string): ToolResult {
-    if (this.ballots.size === 0) {
-      return {
-        id: callId,
-        stdout: "No ballots available.\n",
-        stderr: "",
-        exitCode: 0,
-        label: labels.bottom(),
-        filtered: false,
-      };
-    }
-
-    let output = "Available ballots:\n";
-    for (const [path, ballot] of this.ballots) {
-      output += `  ${path}: [${Object.keys(ballot.options).join(", ")}]\n`;
-    }
-
-    return {
-      id: callId,
-      stdout: output,
-      stderr: "",
-      exitCode: 0,
-      label: labels.bottom(),
-      filtered: false,
-    };
-  }
 
   private handleLabelInspect(
     callId: string,

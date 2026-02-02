@@ -37,10 +37,9 @@ export type AgentEvent =
   | { type: "sub-agent-ended"; agentId: string; exitLabel: Label }
   | { type: "policy-violation"; command: string; reason: string; label: Label }
   | {
-    type: "ballot-provided";
+    type: "sub-agent-return";
     agentId: string;
-    path: string;
-    options: string[];
+    ballotMatch: boolean;
+    outputMatch: boolean;
   }
-  | { type: "ballot-selected"; agentId: string; path: string; key: string }
   | { type: "label-info"; path: string; label: Label };

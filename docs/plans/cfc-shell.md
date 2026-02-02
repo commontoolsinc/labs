@@ -762,6 +762,120 @@ Phase 3 (VFS) ──────────────────────
    **Current decision**: join all traversed file labels. This is conservative
    but correct per CFC spec §8 (collection transitions).
 
+## Phase 8: Agent Protocol — `task` Tool + Output-Matching Declassification
+
+**Goal**: Replace string-prefix commands (`!sub`, `!select`, `!ballot`) with a
+proper `task` LLM tool and output-matching declassification.
+
+**Dependencies**: Phase 7 (agent system with visibility policies).
+
+### Design
+
+The sub-agent's return value is its final text response. Before the parent sees
+it, a declassifier runs:
+
+1. **Ballot match**: If the text exactly matches a ballot string → endorse
+   InjectionFree (parent authored it)
+2. **Captured output match**: Compare against ALL stdout values from the
+   sub-agent's exec history. If the text exactly matches any captured stdout,
+   adopt that stdout's label integrity.
+3. **Otherwise**: Return with the sub-agent's accumulated label (filtered by
+   parent's policy)
+
+### Tasks
+
+- [x] **8.1** Add `task` tool definition to `AGENT_TOOLS` in `llm-loop.ts`
+  - Parameters: `task` (string), `policy` ("sub"|"restricted"), `ballots` (string[])
+  - Dispatches to nested `runAgentLoop` with child agent
+- [x] **8.2** Add `declassifyReturn(child, text, ballots)` to `AgentSession`
+  - Ballot match → InjectionFree
+  - Stdout match → adopt output's label
+  - No match → child's accumulated label
+- [x] **8.3** Remove old ballot mechanism from `AgentSession`
+  - Removed `Ballot` interface, `ballots` Map
+  - Removed `provideBallot()`, `select()`, `getBallot()`
+  - Removed `handleSubAgent()`, `handleSelect()`, `handleBallotInfo()`
+  - Removed `!sub`, `!select`, `!ballot` dispatch in `exec()`
+  - Kept `!label` and `!policy` diagnostic commands
+- [x] **8.4** Update `protocol.ts`
+  - Removed `ballot-provided` and `ballot-selected` events
+  - Added `sub-agent-return` event with `ballotMatch`/`outputMatch` flags
+- [x] **8.5** Update CLI (`cli.ts`)
+  - Removed `!select` and `!ballot` commands
+  - Updated help text to describe the `task` tool flow
+- [x] **8.6** Rewrite `test/agent.test.ts`
+  - Removed ballot mechanism tests
+  - Added: `declassifyReturn` ballot match → InjectionFree
+  - Added: `declassifyReturn` stdout match → adopts output's label (wc)
+  - Added: `declassifyReturn` no match → tainted label
+  - Added: trimmed comparison (whitespace tolerance)
+  - Added: can only declassify own sub-agents
+  - Added: events track return info
+- [x] **8.7** Add integration tests in `test/llm-loop.test.ts`
+  - `task` tool with ballot match (MockLLM nested loop)
+  - `task` tool with stdout match (wc output)
+- [x] **8.8** Update example tests in `test/examples.test.ts`
+  - Converted examples 31, 34, 36, 38, 40 from old ballot API to `declassifyReturn`
+- [x] **8.9** Add Agent System section to `README.md`
+  - Documents `exec` and `task` tools
+  - Visibility filtering and fixedOutputFormat
+  - Sub-agents and output-matching declassification
+
+### Files Modified
+
+| File | Action |
+|------|--------|
+| `src/agent/llm-loop.ts` | Added `task` tool def + nested loop dispatch |
+| `src/agent/agent-session.ts` | Added `declassifyReturn`, removed ballot/!sub/!select |
+| `src/agent/protocol.ts` | Updated event types |
+| `src/agent/cli.ts` | Removed ballot commands, updated help |
+| `README.md` | Added Agent System section |
+| `test/agent.test.ts` | Rewrote tests for new API |
+| `test/llm-loop.test.ts` | Added task tool integration tests |
+| `test/examples.test.ts` | Converted ballot examples to declassifyReturn |
+| `docs/plans/cfc-shell.md` | Added Phase 8 |
+
+---
+
+## Implementation Status
+
+### Features implemented beyond original plan
+
+The following features were added during implementation but were not in the
+original Phase 1-7 plan:
+
+- **fixedOutputFormat annotations**: Commands like `wc`, `grep -c`, `sort`,
+  `uniq -c` annotate their output as having a fixed format. This enables the
+  agent to see structured output (line counts, match counts) even from untrusted
+  data, because the output format is determined by the command rather than the
+  data.
+
+- **Outbound confidentiality check**: Network egress (curl) checks that the
+  data's confidentiality allows flow to the target host.
+
+- **Stderr filtering**: Agent stderr is filtered through the same policy as
+  stdout, preventing tainted data from leaking via stderr.
+
+- **Pipeline label propagation**: The last command's label in a pipeline is used
+  for the result, with proper InjectionFree preservation across pipe stages.
+
+- **Conversation history**: The LLM loop supports multi-turn sessions via the
+  `history` parameter.
+
+- **mockFetch**: Test infrastructure for mocking curl/network requests.
+
+- **Exchange rules**: Policy rules checked at commit points (exec, network,
+  destructive writes) with IntentOnce authorization tokens.
+
+- **VFS mounts**: Real filesystem paths can be mounted into the VFS with
+  appropriate labels.
+
+- **Agent CLI**: Interactive REPL for the agent system with stack-based sub-agent
+  management.
+
+- **`task` tool + output-matching declassification** (Phase 8): Proper LLM tool
+  for sub-agent delegation, replacing string-prefix commands.
+
 ## Non-goals (for now)
 
 - Full POSIX compliance

@@ -5,17 +5,10 @@
  * restricted visibility policy; sub-agents spawned with !sub have
  * relaxed policies but taint their outputs.
  *
- * Ballot mechanism: the parent provides predetermined response strings
- * to the sub-agent. The sub-agent selects one with !select. The content
- * keeps InjectionFree (it was authored by the parent), but loses
- * InfluenceClean (the sub-agent's choice may have been influenced).
- *
  * Commands:
  *   <any shell command>  — Execute via cfc-shell, output filtered by policy
  *   !sub [policy]        — Spawn sub-agent (policy: "sub" or "restricted")
  *   !end                 — End current sub-agent, return to parent
- *   !select <path> <key> — Select a ballot option (sub-agent only)
- *   !ballot              — Show available ballot options
  *   !label <path>        — Inspect a file's label
  *   !policy              — Show current agent's policy
  *   !history             — Show execution history
@@ -101,14 +94,6 @@ export class AgentCLI {
       return this.handleLabel(trimmed);
     }
 
-    if (trimmed.startsWith("!select ")) {
-      return this.handleSelect(trimmed);
-    }
-
-    if (trimmed === "!ballot") {
-      return this.handleBallotInfo();
-    }
-
     // Execute through agent session
     const result = await this.current.exec(trimmed);
 
@@ -138,8 +123,7 @@ export class AgentCLI {
       this.stack.push(child);
 
       return `Sub-agent ${child.id} started with policy: ${child.policy.name}\n` +
-        `Policy: ${child.policy.description}\n` +
-        `Use "!select <path> <key>" to select from provided ballot.\n`;
+        `Policy: ${child.policy.description}\n`;
     } catch (e) {
       return `Error: ${e instanceof Error ? e.message : String(e)}\n`;
     }
@@ -168,33 +152,6 @@ export class AgentCLI {
     } catch (e) {
       return `Error: ${e instanceof Error ? e.message : String(e)}\n`;
     }
-  }
-
-  private handleSelect(trimmed: string): string {
-    const match = trimmed.match(/^!select\s+(\S+)\s+(\S+)/);
-    if (!match) return "Usage: !select <path> <key>\n";
-
-    const path = match[1];
-    const key = match[2];
-
-    try {
-      this.current.select(path, key);
-      return `Selected "${key}" for ${path}\n`;
-    } catch (e) {
-      return `Error: ${e instanceof Error ? e.message : String(e)}\n`;
-    }
-  }
-
-  private handleBallotInfo(): string {
-    let output = "Available ballots:\n";
-    // Check all ballots on the current session
-    // (We expose this through the CLI for visibility)
-    const result = this.current.getBallot("/tmp/result.txt");
-    if (!result) {
-      return "No ballots available. Parent must provide a ballot first.\n";
-    }
-    output += `  ${result.path}: [${Object.keys(result.options).join(", ")}]\n`;
-    return output;
   }
 
   private formatPolicy(): string {
@@ -232,8 +189,6 @@ export class AgentCLI {
   <command>              Execute shell command (output filtered by policy)
   !sub [policy]          Spawn sub-agent ("sub" or "restricted")
   !end                   End current sub-agent, return to parent
-  !select <path> <key>   Select from ballot (sub-agent only)
-  !ballot                Show available ballot options
   !label <path>          Inspect a file's label
   !policy                Show current agent's policy
   !history               Show execution history
@@ -243,15 +198,12 @@ export class AgentCLI {
 
 Policies:
   main-agent:     Can only see injection-free data
-  sub-agent:      Can see everything, selects from ballot
+  sub-agent:      Can see everything (for processing untrusted data)
   restricted:     Can see everything, cannot spawn sub-agents
 
-Ballot Mechanism:
-  The parent provides predetermined response strings via provideBallot().
-  The sub-agent selects one with "!select <path> <key>".
-  The selected content keeps InjectionFree (parent authored it).
-  InfluenceClean is stripped (sub-agent's choice may be influenced).
-  The parent can then read the result — no trust in sub-agent needed.
+In the LLM loop, use the "task" tool to delegate work to sub-agents.
+The sub-agent's response is declassified by matching against ballots
+(parent-authored safe strings) and captured command outputs.
 
 Label Atoms:
   InjectionFree    Content doesn't contain prompt injection
@@ -285,12 +237,8 @@ Label Atoms:
           return `[SUB-AGENT] ${e.agentId} ended (label: ${
             formatLabel(e.exitLabel)
           })`;
-        case "ballot-provided":
-          return `[BALLOT] provided to ${e.agentId} at ${e.path}: [${
-            e.options.join(", ")
-          }]`;
-        case "ballot-selected":
-          return `[BALLOT] ${e.agentId} selected "${e.key}" at ${e.path}`;
+        case "sub-agent-return":
+          return `[SUB-AGENT] ${e.agentId} return (ballot: ${e.ballotMatch}, output: ${e.outputMatch})`;
         case "label-info":
           return `[LABEL] ${e.path}: ${formatLabel(e.label)}`;
         case "policy-violation":
