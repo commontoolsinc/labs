@@ -209,13 +209,22 @@ export async function runAgentLoop(
   let iterations = 0;
   let conversationLabel = labels.userInput();
 
+  // Only offer the task tool if the agent's policy restricts visibility
+  // (i.e., it has requiredIntegrity). Sub-agents can see everything and
+  // don't need to delegate, so omitting the tool avoids confused recursion.
+  const needsTaskTool = agent.policy.requiredIntegrity.length > 0 &&
+    agent.policy.canSpawnSubAgents;
+  const tools: Record<string, ToolDef> = needsTaskTool
+    ? AGENT_TOOLS
+    : { exec: AGENT_TOOLS.exec };
+
   while (iterations < maxIterations) {
     // Call LLM
     const response = await llm.sendRequest({
       messages,
       model,
       system,
-      tools: AGENT_TOOLS,
+      tools,
     });
 
     onAssistantMessage?.(response);
