@@ -99,7 +99,8 @@ export async function curl(args: string[], ctx: CommandContext): Promise<Command
   // Perform fetch
   let response: Response;
   try {
-    response = await fetch(url, {
+    const fetchFn = ctx.mockFetch ?? fetch;
+    response = await fetchFn(url, {
       method,
       headers,
       body: data ?? undefined,
@@ -129,6 +130,7 @@ export async function curl(args: string[], ctx: CommandContext): Promise<Command
   const boundaryIntegrity: Integrity = [
     ...networkIntegrity,
     ...(hasAuthHeader ? [{ kind: "IntegrityToken", name: "AuthorizedRequest" } as Atom] : []),
+    ...(tls ? [{ kind: "IntegrityToken", name: "NetworkProvenance" } as Atom] : []),
   ];
 
   // The response label starts with:

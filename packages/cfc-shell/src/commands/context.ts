@@ -178,6 +178,8 @@ export interface CommandContext {
   requestIntent: IntentCallback;
   /** Policy records for exchange rule evaluation (e.g., at network boundaries) */
   policies?: PolicyRecord[];
+  /** Mock fetch for testing — if set, curl uses this instead of global fetch */
+  mockFetch?: (url: string, init?: RequestInit) => Promise<Response>;
 }
 
 /**
