@@ -16,6 +16,7 @@ import type {
   ITransactionWriter,
   MemorySpace,
   ReaderError,
+  ReadError,
   Result,
   StorageTransactionFailed,
   StorageTransactionStatus,
@@ -218,17 +219,57 @@ export const writer = (
   }
 };
 
+import { isWriteRedirectLink, parseLink } from "../link-utils.ts";
+
 export const read = (
   transaction: StorageTransaction,
   address: IMemorySpaceAddress,
   options?: IReadOptions,
-) => {
+): Result<IAttestation, ReadError> => {
   const { ok: space, error } = reader(transaction, address.space);
   if (error) {
     return { error };
   } else {
     const { space: _, ...memoryAddress } = address;
     const result = space.read(memoryAddress, options);
+
+    // If we hit a TypeMismatchError, check if we hit a write redirect
+    // Use loose check for TypeMismatchError to avoid importing the class/type directly if not needed
+    if (result.error && result.error.name === "TypeMismatchError") {
+      const errorAddress = (result.error as any).address;
+      if (errorAddress && errorAddress.path) {
+        // Read the exact value at the error path to see if it is a redirect
+        const valueResult = space.read(errorAddress);
+
+        if (
+          valueResult.ok && typeof valueResult.ok.value === "string" &&
+          isWriteRedirectLink(valueResult.ok.value)
+        ) {
+          // Parse the redirect link
+          // We convert errorAddress to full address for context (assuming same space)
+          const contextAddress = { ...errorAddress, space: address.space };
+          const link = parseLink(valueResult.ok.value, contextAddress);
+
+          // Calculate the remaining path that we couldn't traverse
+          const remainingPath = address.path.slice(errorAddress.path.length);
+
+          // Construct the new target address
+          const newAddress = {
+            space: link.space,
+            id: link.id,
+            type: link.type,
+            path: [...link.path, ...remainingPath],
+          };
+
+          // Recurse to read from the new address
+          logger.debug("storage-redirect", () => [
+            `Following write redirect from ${address.space}/${address.id} path [${address.path}]`,
+            `to ${newAddress.space}/${newAddress.id} path [${newAddress.path}]`,
+          ]);
+          return read(transaction, newAddress, options);
+        }
+      }
+    }
 
     // Special handling for source path, API is to always return object
     // We should return objects, but we get JSON strings from transaction, so we convert
