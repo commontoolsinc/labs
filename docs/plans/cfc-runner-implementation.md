@@ -791,28 +791,28 @@ Gmail example from the spec.
 
 ### 10.1 Gmail Read Path (end-to-end)
 
-- [ ] OAuth token cell with `Service(google-auth)` on token field
-- [ ] Recipe reads token, builds fetch request with token in Authorization
+- [x] OAuth token cell with `Service(google-auth)` on token field
+- [x] Recipe reads token, builds fetch request with token in Authorization
   header
-- [ ] fetchData taint gate: declassifies Service atom at header path, emits
+- [x] fetchData taint gate: declassifies Service atom at header path, emits
   AuthorizedRequest integrity
-- [ ] Mock fetch returns Gmail messages
-- [ ] Response cell carries `User(Alice)` taint only (not Service)
-- [ ] Downstream recipe reads response — not blocked by Service taint
+- [x] Mock fetch returns Gmail messages
+- [x] Response cell carries `User(Alice)` taint only (not Service)
+- [x] Downstream recipe reads response — not blocked by Service taint
 
 ### 10.2 Gmail Write Path
 
-- [ ] Recipe reads email draft (user data) + token
-- [ ] Builds POST request: token in header (authority-only), draft in body
+- [x] Recipe reads email draft (user data) + token
+- [x] Builds POST request: token in header (authority-only), draft in body
   (data-bearing)
-- [ ] Response inherits draft's taint but not token's
-- [ ] Test: draft with secret search query → response inherits secret taint
+- [x] Response inherits draft's taint but not token's
+- [x] Test: draft with secret search query → response inherits secret taint
 
 ### 10.3 Error Path
 
-- [ ] Failed request → error response inherits full input taint (safe default)
-- [ ] Error exchange rule declassifies error code/message for display
-- [ ] Auth error (401) → user sees error, token not leaked
+- [x] Failed request → error response inherits full input taint (safe default)
+- [x] Error exchange rule declassifies error code/message for display
+- [x] Auth error (401) → user sees error, token not leaked
 
 **File:** `packages/runner/test/cfc-gmail-e2e.test.ts`
 
