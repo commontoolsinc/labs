@@ -552,8 +552,8 @@ carries the Service taint — the URL and body don't. The auth policy can then s
 
 ### 8.1 Path-Labeled Value Representation
 
-- [ ] Define `PathLabel` type: `{ path: string[], label: Label }`
-- [ ] Define `TaintMap`: a structure mapping paths to their labels, with
+- [x] Define `PathLabel` type: `{ path: string[], label: Label }`
+- [x] Define `TaintMap`: a structure mapping paths to their labels, with
   efficient join and lookup operations
   ```
   TaintMap = {
@@ -563,10 +563,10 @@ carries the Service taint — the URL and body don't. The auth policy can then s
     flatLabel(): Label,                    // join of all entries (fallback)
   }
   ```
-- [ ] `TaintMap.labelAt(path)` returns the label for that specific path, or
+- [x] `TaintMap.labelAt(path)` returns the label for that specific path, or
   the join of all ancestor paths (taint flows down: if the whole object is
   secret, every field is secret)
-- [ ] Ensure empty TaintMap behaves identically to current `emptyLabel()` —
+- [x] Ensure empty TaintMap behaves identically to current `emptyLabel()` —
   backwards compatible
 
 **File:** new `packages/runner/src/cfc/taint-map.ts`
@@ -578,13 +578,13 @@ The schema `ifc` annotation already exists per-property (e.g.,
 `traverse.ts` collapses these into one label per document read. Change this to
 produce path-level entries.
 
-- [ ] In `SchemaObjectTraverser`, when encountering a property with `ifc`,
+- [x] In `SchemaObjectTraverser`, when encountering a property with `ifc`,
   emit a `PathLabel` with the property path instead of joining into flat taint
-- [ ] `recordTaintedRead` gains an optional `path` parameter:
+- [x] `recordTaintedRead` gains an optional `path` parameter:
   `recordTaintedRead(tx, label, path?)`
-- [ ] When a path is provided, the taint context stores it in the TaintMap
+- [x] When a path is provided, the taint context stores it in the TaintMap
   rather than flat-joining
-- [ ] When no path is provided (backwards compat), flat-join as before
+- [x] When no path is provided (backwards compat), flat-join as before
 
 **File:** modifications to `packages/runner/src/traverse.ts`,
 `packages/runner/src/cfc/taint-tracking.ts`
@@ -653,28 +653,28 @@ link writes), `packages/runner/src/cfc/taint-tracking.ts`
 
 ### 8.4 ActionTaintContext with TaintMap
 
-- [ ] Replace `accumulatedTaint: Label` with `taintMap: TaintMap` on
+- [x] Replace `accumulatedTaint: Label` with `taintMap: TaintMap` on
   `ActionTaintContext`
-- [ ] Keep `flatTaint(): Label` as a derived accessor (join of all entries)
+- [x] Keep `flatTaint(): Label` as a derived accessor (join of all entries)
   for backwards compat with `checkWrite` and `checkClearance`
-- [ ] `accumulateTaint(ctx, label, path?)` stores path-level entry when path
+- [x] `accumulateTaint(ctx, label, path?)` stores path-level entry when path
   is given, flat-joins otherwise
-- [ ] `checkWrite` continues to use flat taint — it's the final gate and needs
+- [x] `checkWrite` continues to use flat taint — it's the final gate and needs
   the full picture
-- [ ] Add `taintAtPath(ctx, path): Label` — returns the taint for a specific
+- [x] Add `taintAtPath(ctx, path): Label` — returns the taint for a specific
   output path (used by builtins)
 
 **File:** modifications to `packages/runner/src/cfc/action-context.ts`
 
 ### 8.5 Tests for Path-Level Tracking
 
-- [ ] Unit: TaintMap join, lookup, ancestor propagation, flatLabel
-- [ ] Unit: recordTaintedRead with path produces path-level entry
-- [ ] Integration: read object with secret field + non-secret field, only
+- [x] Unit: TaintMap join, lookup, ancestor propagation, flatLabel
+- [x] Unit: recordTaintedRead with path produces path-level entry
+- [x] Integration: read object with secret field + non-secret field, only
   secret field path carries taint
 - [ ] Integration: lift that reads only the non-secret field → output untainted
 - [ ] Integration: lift that reads the secret field → output tainted
-- [ ] Backwards compat: all existing CFC tests pass unchanged
+- [x] Backwards compat: all existing CFC tests pass unchanged
 
 **File:** `packages/runner/test/cfc-path-taint.test.ts`
 
