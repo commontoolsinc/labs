@@ -32,23 +32,22 @@ import type { JSONSchema } from "../src/builder/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { setRecipeEnvironment } from "../src/env.ts";
 import {
-  createActionContext,
   CFCViolationError,
+  createActionContext,
 } from "../src/cfc/action-context.ts";
 import {
   attachTaintContext,
-  recordTaintedRead,
   checkTaintedWrite,
   detachTaintContext,
+  recordTaintedRead,
 } from "../src/cfc/taint-tracking.ts";
 import {
-  labelFromSchemaIfc,
-  labelFromClassification,
   emptyLabel,
   type Label,
+  labelFromClassification,
 } from "../src/cfc/labels.ts";
 import { emptyIntegrity } from "../src/cfc/integrity.ts";
-import { userAtom, serviceAtom } from "../src/cfc/atoms.ts";
+import { serviceAtom, userAtom } from "../src/cfc/atoms.ts";
 import type { ExchangeRule } from "../src/cfc/exchange-rules.ts";
 
 const signer = await Identity.fromPassphrase("cfc gmail test");
@@ -72,7 +71,7 @@ const oauthTokenSchema = {
 } as const satisfies JSONSchema;
 
 /** Email metadata schema — user-scoped, not secret */
-const emailMetadataSchema = {
+const _emailMetadataSchema = {
   type: "object",
   properties: {
     messages: {
@@ -330,7 +329,10 @@ describe("CFC Gmail Read Path: exchange rule flow", () => {
     //   Token's GoogleAuth taint is stripped by exchange rule
 
     const tx = mockTx();
-    const ctx = createActionContext({ userDid: "did:alice", space: "space:work" });
+    const ctx = createActionContext({
+      userDid: "did:alice",
+      space: "space:work",
+    });
     attachTaintContext(tx, ctx);
 
     // Reading the token accumulates: User(Alice) ∧ Service(google-auth)
@@ -349,7 +351,9 @@ describe("CFC Gmail Read Path: exchange rule flow", () => {
       confidentiality: [[userAtom("did:alice")]],
       integrity: emptyIntegrity(),
     };
-    expect(() => checkTaintedWrite(tx, userOnlyTarget)).toThrow(CFCViolationError);
+    expect(() => checkTaintedWrite(tx, userOnlyTarget)).toThrow(
+      CFCViolationError,
+    );
 
     // Exchange rule: Service(google-auth) is authority-only — strip it
     // "If taint includes Service(X), the Service clause can be removed"
@@ -363,7 +367,8 @@ describe("CFC Gmail Read Path: exchange rule flow", () => {
 
     // With the exchange rule, write to User(Alice) target should succeed
     // because Service(google-auth) is stripped
-    expect(() => checkTaintedWrite(tx, userOnlyTarget, [authorityOnlyRule])).not.toThrow();
+    expect(() => checkTaintedWrite(tx, userOnlyTarget, [authorityOnlyRule])).not
+      .toThrow();
 
     detachTaintContext(tx);
   });
@@ -374,7 +379,10 @@ describe("CFC Gmail Read Path: exchange rule flow", () => {
     //   Response = { User(Alice), EmailMetadataSecret(Alice), NotesSecret(Alice) }
 
     const tx = mockTx();
-    const ctx = createActionContext({ userDid: "did:alice", space: "space:work" });
+    const ctx = createActionContext({
+      userDid: "did:alice",
+      space: "space:work",
+    });
     attachTaintContext(tx, ctx);
 
     // Read email metadata (User-scoped)
@@ -409,7 +417,10 @@ describe("CFC Gmail Read Path: exchange rule flow", () => {
 
   it("no ifc annotations: recipe without CFC labels works normally", () => {
     const tx = mockTx();
-    const ctx = createActionContext({ userDid: "did:alice", space: "space:work" });
+    const ctx = createActionContext({
+      userDid: "did:alice",
+      space: "space:work",
+    });
     attachTaintContext(tx, ctx);
 
     // Read data with no ifc — empty label

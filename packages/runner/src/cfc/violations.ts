@@ -1,5 +1,4 @@
 import type { Label } from "./labels.ts";
-import { canonicalizeAtom } from "./atoms.ts";
 import type { Atom } from "./atoms.ts";
 
 /** Structured CFC violation for observability and debugging. */
@@ -57,5 +56,7 @@ function formatAtom(atom: Atom): string {
 
 /** Create a human-readable violation summary. */
 export function describeViolation(v: CFCViolation): string {
-  return `CFC ${v.kind}: taint ${formatLabel(v.accumulatedTaint)} cannot flow to ${formatLabel(v.writeTargetLabel)}`;
+  return `CFC ${v.kind}: taint ${
+    formatLabel(v.accumulatedTaint)
+  } cannot flow to ${formatLabel(v.writeTargetLabel)}`;
 }

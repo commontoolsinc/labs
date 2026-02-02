@@ -4,13 +4,12 @@ import { getLogger } from "@commontools/utils/logger";
 import type { JSONSchema } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
 import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
-import { TrustLattice, KahnTopologicalSort } from "./cfc/trust-lattice.ts";
+import { KahnTopologicalSort, TrustLattice } from "./cfc/trust-lattice.ts";
 import { SpacePolicyManager } from "./cfc/space-policy.ts";
 import type { ActionTaintContext } from "./cfc/action-context.ts";
 import { createActionContext } from "./cfc/action-context.ts";
-import type { Atom } from "./cfc/atoms.ts";
 import type { Label } from "./cfc/labels.ts";
-import { labelFromSchemaIfc, joinLabel, emptyLabel } from "./cfc/labels.ts";
+import { emptyLabel, joinLabel, labelFromSchemaIfc } from "./cfc/labels.ts";
 
 const logger = getLogger("cfc");
 
@@ -188,7 +187,10 @@ export class ContextualFlowControl {
 
     // Add flat classification as atoms
     if (lubClassification) {
-      label = joinLabel(label, labelFromSchemaIfc({ classification: [lubClassification] }));
+      label = joinLabel(
+        label,
+        labelFromSchemaIfc({ classification: [lubClassification] }),
+      );
     }
 
     // Collect parameterized atoms from ifc fields
@@ -220,16 +222,46 @@ export class ContextualFlowControl {
 
     if (schema.properties && typeof schema.properties === "object") {
       for (const value of Object.values(schema.properties)) {
-        label = joinLabel(label, this.collectParameterizedLabels(value as JSONSchema, rootSchema, seen));
+        label = joinLabel(
+          label,
+          this.collectParameterizedLabels(
+            value as JSONSchema,
+            rootSchema,
+            seen,
+          ),
+        );
       }
     }
-    if (schema.additionalProperties && typeof schema.additionalProperties === "object") {
-      label = joinLabel(label, this.collectParameterizedLabels(schema.additionalProperties as JSONSchema, rootSchema, seen));
+    if (
+      schema.additionalProperties &&
+      typeof schema.additionalProperties === "object"
+    ) {
+      label = joinLabel(
+        label,
+        this.collectParameterizedLabels(
+          schema.additionalProperties as JSONSchema,
+          rootSchema,
+          seen,
+        ),
+      );
     } else if (schema.items && typeof schema.items === "object") {
-      label = joinLabel(label, this.collectParameterizedLabels(schema.items as JSONSchema, rootSchema, seen));
+      label = joinLabel(
+        label,
+        this.collectParameterizedLabels(
+          schema.items as JSONSchema,
+          rootSchema,
+          seen,
+        ),
+      );
     } else if (schema.$ref) {
-      const resolved = ContextualFlowControl.resolveSchemaRefsOrThrow(rootSchema, schema);
-      label = joinLabel(label, this.collectParameterizedLabels(resolved, rootSchema, seen));
+      const resolved = ContextualFlowControl.resolveSchemaRefsOrThrow(
+        rootSchema,
+        schema,
+      );
+      label = joinLabel(
+        label,
+        this.collectParameterizedLabels(resolved, rootSchema, seen),
+      );
     }
 
     return label;
@@ -741,9 +773,14 @@ export class ContextualFlowControl {
   }
 
   /** Create an action taint context for the given principal and space. */
-  createActionContext(options: { userDid: string; space: string; codeHash?: string }): ActionTaintContext {
+  createActionContext(
+    options: { userDid: string; space: string; codeHash?: string },
+  ): ActionTaintContext {
     const policy = this.spacePolicies.getPolicy(options.space);
-    const clearance = this.spacePolicies.getClearance(options.userDid, options.space);
+    const clearance = this.spacePolicies.getClearance(
+      options.userDid,
+      options.space,
+    );
     return createActionContext({ ...options, policy, clearance });
   }
 }

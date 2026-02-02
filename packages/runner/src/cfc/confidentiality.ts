@@ -7,7 +7,7 @@
  * (the bottom element of the lattice).
  */
 
-import { type Atom, canonicalizeAtom, atomEquals } from "./atoms.ts";
+import { type Atom, canonicalizeAtom } from "./atoms.ts";
 
 // ---------------------------------------------------------------------------
 // Type
@@ -50,7 +50,7 @@ function deduplicateClause(clause: Atom[]): Atom[] {
 /** Sort atoms within a clause by canonical form. */
 function sortClause(clause: Atom[]): Atom[] {
   return [...clause].sort((a, b) =>
-    canonicalizeAtom(a).localeCompare(canonicalizeAtom(b)),
+    canonicalizeAtom(a).localeCompare(canonicalizeAtom(b))
   );
 }
 
@@ -78,7 +78,7 @@ export function normalizeConfidentiality(
   const seen = new Set<string>();
   const unique: Atom[][] = [];
   clauses.sort((a, b) =>
-    canonicalizeClause(a).localeCompare(canonicalizeClause(b)),
+    canonicalizeClause(a).localeCompare(canonicalizeClause(b))
   );
   for (const clause of clauses) {
     const key = canonicalizeClause(clause);
@@ -96,7 +96,10 @@ export function normalizeConfidentiality(
     let subsumed = false;
     for (let j = 0; j < clauses.length; j++) {
       if (i === j) continue;
-      if (clauseIsSubset(clauses[j], clauses[i]) && !clauseIsSubset(clauses[i], clauses[j])) {
+      if (
+        clauseIsSubset(clauses[j], clauses[i]) &&
+        !clauseIsSubset(clauses[i], clauses[j])
+      ) {
         // clauses[j] is a strict subset of clauses[i], so clauses[i] is subsumed
         subsumed = true;
         break;
@@ -164,6 +167,6 @@ export function confidentialityLeq(
   const nb = normalizeConfidentiality(b);
 
   return na.every((clauseA) =>
-    nb.some((clauseB) => clauseIsSubset(clauseB, clauseA)),
+    nb.some((clauseB) => clauseIsSubset(clauseB, clauseA))
   );
 }

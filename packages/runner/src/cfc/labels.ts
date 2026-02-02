@@ -9,17 +9,17 @@
 import { type Atom, classificationAtom } from "./atoms.ts";
 import {
   type ConfidentialityLabel,
+  confidentialityLeq,
   emptyConfidentiality,
   joinConfidentiality,
   meetConfidentiality,
-  confidentialityLeq,
 } from "./confidentiality.ts";
 import {
-  type IntegrityLabel,
   emptyIntegrity,
+  type IntegrityLabel,
+  integrityLeq,
   joinIntegrity,
   meetIntegrity,
-  integrityLeq,
 } from "./integrity.ts";
 import type { Labels } from "../storage/interface.ts";
 
@@ -103,8 +103,7 @@ export function labelFromClassification(level: string): Label {
  * and falls back to the legacy `classification` strings.
  */
 export function labelFromStoredLabels(labels: Labels): Label {
-  const confidentiality: ConfidentialityLabel =
-    labels.confidentiality ??
+  const confidentiality: ConfidentialityLabel = labels.confidentiality ??
     (labels.classification
       ? labels.classification.map((level) => [classificationAtom(level)])
       : emptyConfidentiality());
@@ -136,20 +135,18 @@ export function labelFromSchemaIfc(ifc: {
   confidentiality?: Atom[][];
   integrity?: Atom[] | string[];
 }): Label {
-  const confidentiality: ConfidentialityLabel =
-    ifc.confidentiality ??
+  const confidentiality: ConfidentialityLabel = ifc.confidentiality ??
     (ifc.classification && ifc.classification.length > 0
       ? ifc.classification.map((level) => [classificationAtom(level)])
       : emptyConfidentiality());
 
   // integrity may be Atom[] (new parameterized) or string[] (legacy schema type).
   // Only treat as atoms if the first element is an object.
-  const integrity: IntegrityLabel =
-    ifc.integrity &&
+  const integrity: IntegrityLabel = ifc.integrity &&
       ifc.integrity.length > 0 &&
       typeof ifc.integrity[0] === "object"
-      ? { atoms: ifc.integrity as Atom[] }
-      : emptyIntegrity();
+    ? { atoms: ifc.integrity as Atom[] }
+    : emptyIntegrity();
 
   return { confidentiality, integrity };
 }

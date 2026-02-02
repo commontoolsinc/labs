@@ -44,7 +44,10 @@ import type {
   SchedulerGraphSnapshot,
 } from "./telemetry.ts";
 import { ensureNotRenderThread } from "@commontools/utils/env";
-import { attachTaintContext, detachTaintContext } from "./cfc/taint-tracking.ts";
+import {
+  attachTaintContext,
+  detachTaintContext,
+} from "./cfc/taint-tracking.ts";
 ensureNotRenderThread();
 
 const logger = getLogger("scheduler", {
@@ -692,7 +695,7 @@ export class Scheduler {
     if (this.runtime.cfcEnabled) {
       const ctx = this.runtime.cfc.createActionContext({
         userDid: this.runtime.userIdentityDID ?? "anonymous",
-        space: "default", // TODO: derive from action's target cell
+        space: "default", // TODO(jakedahn): derive from action's target cell
       });
       attachTaintContext(tx, ctx, {
         debug: this.runtime.cfcDebug,
@@ -2130,7 +2133,7 @@ export class Scheduler {
         if (this.runtime.cfcEnabled) {
           const ctx = this.runtime.cfc.createActionContext({
             userDid: this.runtime.userIdentityDID ?? "anonymous",
-            space: "default", // TODO: derive from action's target cell
+            space: "default", // TODO(jakedahn): derive from action's target cell
           });
           attachTaintContext(tx, ctx, {
             debug: this.runtime.cfcDebug,

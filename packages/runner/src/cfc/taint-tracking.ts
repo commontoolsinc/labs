@@ -1,7 +1,11 @@
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { ActionTaintContext } from "./action-context.ts";
 import type { Label } from "./labels.ts";
-import { accumulateTaint, checkWrite, CFCViolationError } from "./action-context.ts";
+import {
+  accumulateTaint,
+  CFCViolationError,
+  checkWrite,
+} from "./action-context.ts";
 import type { ExchangeRule } from "./exchange-rules.ts";
 import { formatLabel } from "./violations.ts";
 import { getLogger } from "@commontools/utils/logger";
@@ -55,7 +59,8 @@ export function recordTaintedRead(
   if (entry) {
     if (entry.debug) {
       logger.info("cfc-read", () => [
-        `Taint accumulated:`, formatLabel(label),
+        `Taint accumulated:`,
+        formatLabel(label),
       ]);
     }
     accumulateTaint(entry.ctx, label);
@@ -75,7 +80,11 @@ export function checkTaintedWrite(
   const entry = taintEntries.get(tx);
   if (entry) {
     try {
-      checkWrite(entry.ctx, writeTargetLabel, exchangeRules ?? entry.ctx.policy.exchangeRules);
+      checkWrite(
+        entry.ctx,
+        writeTargetLabel,
+        exchangeRules ?? entry.ctx.policy.exchangeRules,
+      );
     } catch (e) {
       if (e instanceof CFCViolationError) {
         const violation = {

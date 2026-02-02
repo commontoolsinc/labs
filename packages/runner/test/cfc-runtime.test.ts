@@ -7,14 +7,13 @@ import { createBuilder } from "../src/builder/factory.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
-  createActionContext,
   CFCViolationError,
+  createActionContext,
 } from "../src/cfc/action-context.ts";
-import { RuntimeTelemetry } from "../src/telemetry.ts";
 import {
   attachTaintContext,
-  recordTaintedRead,
   checkTaintedWrite,
+  recordTaintedRead,
 } from "../src/cfc/taint-tracking.ts";
 import { labelFromSchemaIfc } from "../src/cfc/labels.ts";
 
@@ -282,12 +281,12 @@ describe("CFC Runtime: label persistence across restart", () => {
     const storageManager = StorageManager.emulate({ as: signer });
 
     // --- First runtime lifecycle: write a cell with secret data ---
-    let runtime1 = new Runtime({
+    const runtime1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnabled: true,
     });
-    let tx1 = runtime1.edit();
+    const tx1 = runtime1.edit();
 
     const cellId = "cfc-persist-test-1";
     const cell1 = runtime1.getCell(space, cellId, secretSchema, tx1);
@@ -297,12 +296,12 @@ describe("CFC Runtime: label persistence across restart", () => {
     await runtime1.dispose();
 
     // --- Second runtime lifecycle: read the cell, verify data persists ---
-    let runtime2 = new Runtime({
+    const runtime2 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnabled: true,
     });
-    let tx2 = runtime2.edit();
+    const tx2 = runtime2.edit();
 
     const cell2 = runtime2.getCell(space, cellId, secretSchema, tx2);
     const value = await cell2.pull();
@@ -313,7 +312,9 @@ describe("CFC Runtime: label persistence across restart", () => {
     const ctx = createActionContext({ userDid: "did:test", space });
     attachTaintContext(tx2, ctx);
     recordTaintedRead(tx2, labelFromSchemaIfc(secretSchema.ifc));
-    expect(() => checkTaintedWrite(tx2, labelFromSchemaIfc({ classification: [] }))).toThrow(CFCViolationError);
+    expect(() =>
+      checkTaintedWrite(tx2, labelFromSchemaIfc({ classification: [] }))
+    ).toThrow(CFCViolationError);
 
     tx2.commit();
     await runtime2.dispose();

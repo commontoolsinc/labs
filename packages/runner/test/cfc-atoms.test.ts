@@ -1,38 +1,37 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  atomEquals,
+  authoredByAtom,
   // Atoms
   canonicalizeAtom,
-  atomEquals,
-  isConfidentialityAtom,
-  isIntegrityAtom,
-  userAtom,
-  spaceAtom,
   classificationAtom,
   codeHashAtom,
-  authoredByAtom,
-  endorsedByAtom,
-  serviceAtom,
-  resourceAtom,
+  confidentialityLeq,
   // Confidentiality
   emptyConfidentiality,
-  joinConfidentiality,
-  meetConfidentiality,
-  confidentialityLeq,
-  normalizeConfidentiality,
   // Integrity
   emptyIntegrity,
-  integrityFromAtoms,
-  joinIntegrity,
-  meetIntegrity,
-  integrityLeq,
-  integrityContains,
   // Composite labels
   emptyLabel,
+  endorsedByAtom,
+  integrityContains,
+  integrityFromAtoms,
+  integrityLeq,
+  isConfidentialityAtom,
+  isIntegrityAtom,
+  joinConfidentiality,
+  joinIntegrity,
   joinLabel,
-  labelLeq,
   labelFromClassification,
   labelFromSchemaIfc,
+  labelLeq,
+  meetConfidentiality,
+  meetIntegrity,
+  normalizeConfidentiality,
+  serviceAtom,
+  spaceAtom,
+  userAtom,
 } from "../src/cfc/index.ts";
 
 // =========================================================================
@@ -192,7 +191,7 @@ describe("Confidentiality", () => {
 
 describe("Integrity", () => {
   const hashA = codeHashAtom("abc123");
-  const hashB = codeHashAtom("def456");
+  const _hashB = codeHashAtom("def456");
   const alice = authoredByAtom("did:alice");
   const bob = endorsedByAtom("did:bob");
 

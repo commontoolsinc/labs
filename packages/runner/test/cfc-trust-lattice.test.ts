@@ -1,33 +1,29 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
-  userAtom,
-  spaceAtom,
-  classificationAtom,
-  hasRoleAtom,
-  codeHashAtom,
+  accumulateTaint,
+  applyRule,
   atomEquals,
-  TrustLattice,
-  emptyLabel,
-  labelFromClassification,
-  joinLabel,
-  type Label,
-  emptyConfidentiality,
+  type AtomPattern,
+  CFCViolationError,
+  checkWrite,
+  classificationAtom,
+  createActionContext,
+  createPolicy,
+  DEFAULT_POLICY,
   emptyIntegrity,
+  emptyLabel,
+  evaluateRules,
+  type ExchangeRule,
+  hashPolicy,
+  hasRoleAtom,
   integrityFromAtoms,
+  type Label,
   matchAtomPattern,
   matchPrecondition,
-  applyRule,
-  evaluateRules,
-  type AtomPattern,
-  type ExchangeRule,
-  createPolicy,
-  hashPolicy,
-  DEFAULT_POLICY,
-  createActionContext,
-  accumulateTaint,
-  checkWrite,
-  CFCViolationError,
+  spaceAtom,
+  TrustLattice,
+  userAtom,
 } from "../src/cfc/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -38,7 +34,9 @@ describe("TrustLattice", () => {
   const lattice = new TrustLattice();
 
   it("classification ordering: unclassified < confidential < secret < topsecret", () => {
-    expect(lattice.classificationLeq("unclassified", "confidential")).toBe(true);
+    expect(lattice.classificationLeq("unclassified", "confidential")).toBe(
+      true,
+    );
     expect(lattice.classificationLeq("confidential", "secret")).toBe(true);
     expect(lattice.classificationLeq("secret", "topsecret")).toBe(true);
     expect(lattice.classificationLeq("unclassified", "topsecret")).toBe(true);
@@ -47,7 +45,9 @@ describe("TrustLattice", () => {
   });
 
   it("classificationLeq is transitive", () => {
-    expect(lattice.classificationLeq("unclassified", "confidential")).toBe(true);
+    expect(lattice.classificationLeq("unclassified", "confidential")).toBe(
+      true,
+    );
     expect(lattice.classificationLeq("confidential", "secret")).toBe(true);
     expect(lattice.classificationLeq("unclassified", "secret")).toBe(true);
   });
@@ -76,7 +76,9 @@ describe("TrustLattice", () => {
       integrity: emptyIntegrity(),
     };
     const high: Label = {
-      confidentiality: [[classificationAtom("unclassified")], [classificationAtom("secret")]],
+      confidentiality: [[classificationAtom("unclassified")], [
+        classificationAtom("secret"),
+      ]],
       integrity: emptyIntegrity(),
     };
     expect(lattice.compareLabels(low, high)).toBe("below");
@@ -91,7 +93,10 @@ describe("TrustLattice", () => {
 
 describe("Exchange Rules", () => {
   it("matchAtomPattern: literal match", () => {
-    const pattern: AtomPattern = { kind: "Space", params: { space: "my-space" } };
+    const pattern: AtomPattern = {
+      kind: "Space",
+      params: { space: "my-space" },
+    };
     const atom = spaceAtom("my-space");
     const result = matchAtomPattern(pattern, atom, new Map());
     expect(result).not.toBeNull();
@@ -178,7 +183,9 @@ describe("Exchange Rules", () => {
     const clause = result.confidentiality[0];
     expect(clause.length).toBe(2);
     expect(clause.some((a) => atomEquals(a, spaceAtom("my-space")))).toBe(true);
-    expect(clause.some((a) => atomEquals(a, userAtom("did:example:bob")))).toBe(true);
+    expect(clause.some((a) => atomEquals(a, userAtom("did:example:bob")))).toBe(
+      true,
+    );
   });
 
   it("evaluateRules: fixpoint converges", () => {
@@ -209,7 +216,10 @@ describe("Exchange Rules", () => {
     const rule: ExchangeRule = {
       confidentialityPre: [{ kind: "Space", params: { space: "$X" } }],
       integrityPre: [
-        { kind: "HasRole", params: { principal: "$Y", space: "$X", role: "reader" } },
+        {
+          kind: "HasRole",
+          params: { principal: "$Y", space: "$X", role: "reader" },
+        },
       ],
       addAlternatives: [{ kind: "User", params: { did: "$Y" } }],
       variables: ["$X", "$Y"],
@@ -217,12 +227,15 @@ describe("Exchange Rules", () => {
 
     const label: Label = {
       confidentiality: [[spaceAtom("space-1")]],
-      integrity: integrityFromAtoms([hasRoleAtom("did:example:alice", "space-1", "reader")]),
+      integrity: integrityFromAtoms([
+        hasRoleAtom("did:example:alice", "space-1", "reader"),
+      ]),
     };
 
     const result = evaluateRules(label, [rule]);
     const clause = result.confidentiality[0];
-    expect(clause.some((a) => atomEquals(a, userAtom("did:example:alice")))).toBe(true);
+    expect(clause.some((a) => atomEquals(a, userAtom("did:example:alice"))))
+      .toBe(true);
     expect(clause.some((a) => atomEquals(a, spaceAtom("space-1")))).toBe(true);
   });
 });

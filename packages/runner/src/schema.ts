@@ -17,7 +17,11 @@ import {
 } from "./query-result-proxy.ts";
 import { toCell } from "./back-to-cell.ts";
 import { recordTaintedRead } from "./cfc/taint-tracking.ts";
-import { labelFromSchemaIfc, labelFromStoredLabels, joinLabel } from "./cfc/labels.ts";
+import {
+  joinLabel,
+  labelFromSchemaIfc,
+  labelFromStoredLabels,
+} from "./cfc/labels.ts";
 import {
   combineSchema,
   IObjectCreator,
@@ -441,9 +445,10 @@ export function validateAndTransform(
   // CFC: record read taint from merged schema + stored labels
   if (tx) {
     const readSchema = ref.schema ?? link.schema;
-    const schemaLabel = (readSchema && typeof readSchema === "object" && readSchema.ifc)
-      ? labelFromSchemaIfc(readSchema.ifc)
-      : undefined;
+    const schemaLabel =
+      (readSchema && typeof readSchema === "object" && readSchema.ifc)
+        ? labelFromSchemaIfc(readSchema.ifc)
+        : undefined;
     // Only read stored labels when schema has ifc — avoids registering
     // phantom reactive dependencies on the label/ path for every read.
     const storedLabels = schemaLabel ? tx.readLabelOrUndefined(ref) : undefined;

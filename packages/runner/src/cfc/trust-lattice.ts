@@ -3,7 +3,7 @@
  * including the classification hierarchy and composite label comparison.
  */
 
-import { type Atom, atomEquals, canonicalizeAtom } from "./atoms.ts";
+import { type Atom, atomEquals } from "./atoms.ts";
 import { type Label } from "./labels.ts";
 import { confidentialityLeq } from "./confidentiality.ts";
 import { integrityLeq } from "./integrity.ts";
@@ -215,11 +215,9 @@ export class TrustLattice {
 
   /** Compare composite labels. */
   compareLabels(a: Label, b: Label): LatticeRelation {
-    const aLeqB =
-      confidentialityLeq(a.confidentiality, b.confidentiality) &&
+    const aLeqB = confidentialityLeq(a.confidentiality, b.confidentiality) &&
       integrityLeq(a.integrity, b.integrity);
-    const bLeqA =
-      confidentialityLeq(b.confidentiality, a.confidentiality) &&
+    const bLeqA = confidentialityLeq(b.confidentiality, a.confidentiality) &&
       integrityLeq(b.integrity, a.integrity);
 
     if (aLeqB && bLeqA) return "equal";

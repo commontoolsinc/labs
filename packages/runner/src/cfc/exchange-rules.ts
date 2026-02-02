@@ -8,10 +8,7 @@
  * integrity requirements.
  */
 
-import {
-  type Atom,
-  canonicalizeAtom,
-} from "./atoms.ts";
+import { type Atom, canonicalizeAtom } from "./atoms.ts";
 import type { ConfidentialityLabel } from "./confidentiality.ts";
 import { normalizeConfidentiality } from "./confidentiality.ts";
 import type { Label } from "./labels.ts";
@@ -199,7 +196,7 @@ export function applyRule(
   bindings: Map<string, string>,
 ): Label {
   const newAlternatives: Atom[] = rule.addAlternatives.map((p) =>
-    instantiatePattern(p, bindings),
+    instantiatePattern(p, bindings)
   );
 
   // Find clauses that contain an atom matching any confidentiality precondition.
@@ -251,7 +248,7 @@ function serializeLabel(label: Label): string {
       clause
         .map(canonicalizeAtom)
         .sort()
-        .join("|"),
+        .join("|")
     )
     .sort()
     .join("&");

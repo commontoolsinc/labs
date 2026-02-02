@@ -25,7 +25,11 @@ import {
 import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { recordTaintedRead } from "./cfc/taint-tracking.ts";
-import { labelFromSchemaIfc, labelFromStoredLabels, joinLabel } from "./cfc/labels.ts";
+import {
+  joinLabel,
+  labelFromSchemaIfc,
+  labelFromStoredLabels,
+} from "./cfc/labels.ts";
 import type { JSONObject, JSONSchema } from "./builder/types.ts";
 import {
   createDataCellURI,
@@ -1692,11 +1696,11 @@ export class SchemaObjectTraverser<V extends JSONValue>
       // phantom reactive dependencies on the label/ path for every read.
       const storedLabels = schemaLabel
         ? this.tx.readLabelOrUndefined({
-            space: doc.address.space,
-            id: doc.address.id,
-            type: doc.address.type,
-            path: [],
-          })
+          space: doc.address.space,
+          id: doc.address.id,
+          type: doc.address.type,
+          path: [],
+        })
         : undefined;
       const storedLabel = storedLabels
         ? labelFromStoredLabels(storedLabels)

@@ -32,8 +32,12 @@ import type {
 import { type Runtime } from "./runtime.ts";
 import { toURI } from "./uri-utils.ts";
 import { markReadAsPotentialWrite } from "./scheduler.ts";
-import { recordTaintedRead, checkTaintedWrite, getTaintContext } from "./cfc/taint-tracking.ts";
-import { labelFromSchemaIfc, joinLabel, toLabelStorage } from "./cfc/labels.ts";
+import {
+  checkTaintedWrite,
+  getTaintContext,
+  recordTaintedRead,
+} from "./cfc/taint-tracking.ts";
+import { joinLabel, labelFromSchemaIfc, toLabelStorage } from "./cfc/labels.ts";
 
 const diffLogger = getLogger("normalizeAndDiff", {
   enabled: false,
@@ -92,7 +96,10 @@ export function diffAndUpdate(
   applyChangeSet(tx, changes);
 
   // CFC: persist effective label on written entities
-  if (changes.length > 0 && link.schema && typeof link.schema === "object" && link.schema.ifc) {
+  if (
+    changes.length > 0 && link.schema && typeof link.schema === "object" &&
+    link.schema.ifc
+  ) {
     const schemaLabel = labelFromSchemaIfc(link.schema.ifc);
     const taintCtx = getTaintContext(tx);
     const effectiveLabel = taintCtx

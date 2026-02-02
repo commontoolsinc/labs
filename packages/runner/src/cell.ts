@@ -88,8 +88,18 @@ import {
 } from "./storage/extended-storage-transaction.ts";
 import { fromURI } from "./uri-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { checkTaintedWrite, getTaintContext, recordTaintedRead } from "./cfc/taint-tracking.ts";
-import { type Label, joinLabel, labelFromSchemaIfc, emptyLabel, toLabelStorage } from "./cfc/labels.ts";
+import {
+  checkTaintedWrite,
+  getTaintContext,
+  recordTaintedRead,
+} from "./cfc/taint-tracking.ts";
+import {
+  emptyLabel,
+  joinLabel,
+  type Label,
+  labelFromSchemaIfc,
+  toLabelStorage,
+} from "./cfc/labels.ts";
 import { getLogger } from "@commontools/utils/logger";
 import { ensureNotRenderThread } from "@commontools/utils/env";
 ensureNotRenderThread();
@@ -564,7 +574,10 @@ export class CellImpl<T extends StorableValue>
       options,
     );
     // CFC: accumulate taint from schema on get()
-    if (this.tx && this.schema && typeof this.schema === "object" && this.schema.ifc) {
+    if (
+      this.tx && this.schema && typeof this.schema === "object" &&
+      this.schema.ifc
+    ) {
       recordTaintedRead(this.tx, labelFromSchemaIfc(this.schema.ifc));
     }
     const elapsed = logger.timeEnd("cell", "get")!;
@@ -744,9 +757,19 @@ export class CellImpl<T extends StorableValue>
           : schemaLabel;
         const storage = toLabelStorage(effectiveLabel);
         if (Object.keys(storage).length > 0) {
-          const writeLink = resolveLink(this.runtime, this.tx, this.link, "writeRedirect");
+          const writeLink = resolveLink(
+            this.runtime,
+            this.tx,
+            this.link,
+            "writeRedirect",
+          );
           this.tx.writeLabelOrThrow(
-            { space: writeLink.space, id: writeLink.id, type: writeLink.type, path: [] },
+            {
+              space: writeLink.space,
+              id: writeLink.id,
+              type: writeLink.type,
+              path: [],
+            },
             storage,
           );
         }
@@ -909,7 +932,12 @@ export class CellImpl<T extends StorableValue>
       const storage = toLabelStorage(effectiveLabel);
       if (Object.keys(storage).length > 0) {
         this.tx.writeLabelOrThrow(
-          { space: resolvedLink.space, id: resolvedLink.id, type: resolvedLink.type, path: [] },
+          {
+            space: resolvedLink.space,
+            id: resolvedLink.id,
+            type: resolvedLink.type,
+            path: [],
+          },
           storage,
         );
       }

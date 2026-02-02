@@ -1,23 +1,23 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
-  userAtom,
-  spaceAtom,
-  classificationAtom,
-  resourceAtom,
-  serviceAtom,
-  codeHashAtom,
   authoredByAtom,
-  endorsedByAtom,
-  hasRoleAtom,
-  expiresAtom,
-  policyPrincipalAtom,
-  emptyLabel,
-  labelFromStoredLabels,
-  toLabelStorage,
+  classificationAtom,
+  codeHashAtom,
   emptyConfidentiality,
   emptyIntegrity,
+  emptyLabel,
+  endorsedByAtom,
+  expiresAtom,
+  hasRoleAtom,
   integrityFromAtoms,
+  labelFromStoredLabels,
+  policyPrincipalAtom,
+  resourceAtom,
+  serviceAtom,
+  spaceAtom,
+  toLabelStorage,
+  userAtom,
 } from "../src/cfc/index.ts";
 import type { Atom } from "../src/cfc/atoms.ts";
 import type { Labels } from "../src/storage/interface.ts";

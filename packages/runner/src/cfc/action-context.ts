@@ -3,12 +3,12 @@
  * action (read/compute/write sequence) and enforces CFC write checks.
  */
 
-import { userAtom, spaceAtom, authoredByAtom, codeHashAtom } from "./atoms.ts";
+import { authoredByAtom, codeHashAtom, spaceAtom, userAtom } from "./atoms.ts";
 import { emptyIntegrity, integrityFromAtoms } from "./integrity.ts";
-import { type Label, emptyLabel, joinLabel, labelLeq } from "./labels.ts";
+import { emptyLabel, joinLabel, type Label, labelLeq } from "./labels.ts";
 import type { IntegrityLabel } from "./integrity.ts";
-import { type ExchangeRule, evaluateRules } from "./exchange-rules.ts";
-import { type PolicyRecord, DEFAULT_POLICY } from "./policy.ts";
+import { evaluateRules, type ExchangeRule } from "./exchange-rules.ts";
+import { DEFAULT_POLICY, type PolicyRecord } from "./policy.ts";
 import { formatLabel } from "./violations.ts";
 
 // ---------------------------------------------------------------------------
@@ -21,7 +21,11 @@ export class CFCViolationError extends Error {
     public readonly accumulatedTaint: Label,
     public readonly writeTargetLabel: Label,
   ) {
-    super(`CFC violation: ${kind} — taint ${formatLabel(accumulatedTaint)} cannot flow to ${formatLabel(writeTargetLabel)}`);
+    super(
+      `CFC violation: ${kind} — taint ${
+        formatLabel(accumulatedTaint)
+      } cannot flow to ${formatLabel(writeTargetLabel)}`,
+    );
     this.name = "CFCViolationError";
   }
 }
