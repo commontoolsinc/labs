@@ -141,3 +141,7 @@ The "event-ness" emerges from the data shape:
 - What is the validation behavior on schema mismatch?
 - How do schemas interact with the type system in pattern code?
 - Should schemas be versioned?
+
+---
+
+**Previous:** [Reactivity](./5-reactivity.md)

@@ -139,3 +139,7 @@ all serialization paths produce `link@1` format.
 - What is the canonical hashing specification?
 - How do cross-space references interact with permissions?
 - Should `toJSON()` on cells be removed once JSON is no longer the primary format?
+
+---
+
+**Previous:** [Storage Format](./1-storage-format.md) | **Next:** [Cells](./3-cells.md)

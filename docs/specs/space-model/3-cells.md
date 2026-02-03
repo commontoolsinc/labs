@@ -153,3 +153,7 @@ The "event-ness" emerges from the data shape. Event producers include timestamps
 - Should timestamps be required for events, or can the system add them?
 - What are the exact semantics of "last event" queries on unified cells?
 - How does the unified model affect the handler registration mechanism?
+
+---
+
+**Previous:** [Identity and References](./2-identity-and-references.md) | **Next:** [Transactions](./4-transactions.md)

@@ -106,3 +106,7 @@ streaming) builds on top.
 - What is the relationship between transactions and the scheduler?
 - How are transactions serialized for storage?
 - What consistency guarantees exist across spaces?
+
+---
+
+**Previous:** [Cells](./3-cells.md) | **Next:** [Reactivity](./5-reactivity.md)

@@ -90,3 +90,7 @@ potential unification.
 - How is binary data handled (blobs, files)?
 - What are the exact persistence semantics for the `cause` chain?
 - How does compaction/garbage collection work?
+
+---
+
+**Next:** [Identity and References](./2-identity-and-references.md)

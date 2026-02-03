@@ -148,3 +148,7 @@ This would eliminate the special-casing for streams.
 - What are the consistency guarantees during propagation?
 - How does batching work for multiple simultaneous changes?
 - What is the relationship between reactivity and transactions?
+
+---
+
+**Previous:** [Transactions](./4-transactions.md) | **Next:** [Schemas](./6-schemas.md)
