@@ -219,6 +219,7 @@ export async function runAgentLoop(
     onAssistantMessage,
     onTaskStart,
     onTaskEnd,
+    onTaskRetry,
   } = options;
 
   const messages: Message[] = [
