@@ -13,7 +13,6 @@ import {
   action,
   computed,
   Default,
-  equals,
   handler,
   ifElse,
   NAME,
@@ -40,6 +39,44 @@ interface FormDemoOutput {
   [UI]: VNode;
   people: Person[];
 }
+
+// ===== Module-scope handlers =====
+
+const startEdit = handler<
+  unknown,
+  {
+    index: number;
+    people: Writable<Person[]>;
+    formData: Writable<Person>;
+    editingIndex: Writable<number | null>;
+    showModal: Writable<boolean>;
+  }
+>((_event, { index, people, formData, editingIndex, showModal }) => {
+  const list = people.get();
+  const person = list[index];
+  if (person) {
+    formData.set({
+      name: person.name,
+      email: person.email,
+      role: person.role,
+    });
+    editingIndex.set(index);
+    showModal.set(true);
+  }
+});
+
+const deletePerson = handler<
+  unknown,
+  {
+    index: number;
+    people: Writable<Person[]>;
+  }
+>((_event, { index, people }) => {
+  const current = people.get();
+  if (index >= 0 && index < current.length) {
+    people.set(current.toSpliced(index, 1));
+  }
+});
 
 // ===== Pattern =====
 
@@ -102,36 +139,6 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
     showModal.set(true);
   });
 
-  // Open modal in edit mode
-  const startEdit = handler<
-    unknown,
-    { index: number }
-  >((_event, { index }) => {
-    const person = people.get()[index];
-    if (person) {
-      // Populate form with existing person data
-      formData.set({
-        name: person.name,
-        email: person.email,
-        role: person.role,
-      });
-      editingIndex.set(index);
-      showModal.set(true);
-    }
-  });
-
-  // Delete a person
-  const deletePerson = handler<
-    unknown,
-    { person: Person }
-  >((_event, { person }) => {
-    const current = people.get();
-    const idx = current.findIndex((p) => equals(person, p));
-    if (idx >= 0) {
-      people.set(current.toSpliced(idx, 1));
-    }
-  });
-
   return {
     [NAME]: computed(() => `People Directory (${people.get().length})`),
     [UI]: (
@@ -153,7 +160,13 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
             {people.map((person, index) => (
               <ct-card
                 style="cursor: pointer;"
-                onClick={startEdit({ index })}
+                onClick={startEdit({
+                  index,
+                  people,
+                  formData,
+                  editingIndex,
+                  showModal,
+                })}
               >
                 <ct-hstack gap="2" align="center">
                   <ct-vstack gap="1" style="flex: 1;">
@@ -186,7 +199,7 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
                   </ct-vstack>
                   <ct-button
                     variant="ghost"
-                    onClick={deletePerson({ person })}
+                    onClick={deletePerson({ index, people })}
                   >
                     ×
                   </ct-button>
