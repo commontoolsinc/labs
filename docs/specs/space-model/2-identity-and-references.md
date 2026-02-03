@@ -30,9 +30,9 @@ The preferred format uses a versioned tag:
 type SigilLink = {
   "/": {
     "link@1": {
-      id?: URI,           // entity identifier (defaults to containing entity)
-      path?: string[],    // path within the entity's value
-      space?: SpaceDID,   // target space (defaults to current)
+      id?: URI,                    // entity identifier (defaults to containing entity)
+      path?: readonly string[],    // path within the entity's value
+      space?: MemorySpace,         // target space (defaults to current)
       schema?: JSONSchema,
       overwrite?: "this" | "redirect"
     }
@@ -97,8 +97,10 @@ Internally, links are normalized to `NormalizedFullLink`:
 type NormalizedFullLink = {
   id: URI,
   space: MemorySpace,
-  path: readonly PropertyKey[],
-  schema?: JSONSchema
+  path: readonly string[],
+  type: MediaType,            // e.g., "application/json"
+  schema?: JSONSchema,
+  overwrite?: "redirect"
 }
 ```
 

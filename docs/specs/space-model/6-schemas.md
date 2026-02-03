@@ -73,8 +73,9 @@ Provides default values:
 ### Schema-Driven Behavior
 
 Schemas influence runtime behavior:
-- **Validation**: Values are checked against schema on read/write
-- **Transformation**: Schema-aware traversal resolves references
+- **Transformation**: Schema-aware traversal resolves references and shapes data.
+  Non-conforming values may return as `undefined` rather than being strictly
+  rejected — this is transformation, not validation in the strict sense.
 - **Cell creation**: `asCell` properties become cell references
 - **Stream detection**: `asStream` properties get event semantics
 

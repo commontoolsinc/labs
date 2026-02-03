@@ -35,9 +35,11 @@ A special category of fact stores execution metadata:
 
 ```
 {
-  TYPE: string,           // recipe/function content ID
-  resultRef: SigilLink,   // link to the result cell
-  argument: any           // input data
+  $TYPE: string,           // recipe/function content ID (serialized key is "$TYPE")
+  resultRef: SigilLink,    // link to the result cell
+  argument?: any,          // input data (optional)
+  spell?: SigilLink,       // link to spell cell (optional)
+  internal?: any           // working state storage (optional)
 }
 ```
 
