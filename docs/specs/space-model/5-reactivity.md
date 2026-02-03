@@ -13,8 +13,61 @@ current implementation.
 
 ### Overview
 
-The reactivity system connects data changes to computation. When cell values
-change, dependent handlers and computed values re-execute.
+The reactivity system connects data changes to computation through two patterns:
+**dataflow** (value changes propagate to dependent computations) and **events**
+(occurrences trigger handlers). These patterns compose: events often write to
+value cells, which then propagate through dataflow.
+
+### Two Data Flow Patterns
+
+The system supports two fundamental patterns of data flow:
+
+#### Dataflow: Value Cells → Recipe → Result Cell
+
+```
+┌─────────────┐     ┌─────────────┐
+│ input cell  │────>│             │     ┌─────────────┐
+└─────────────┘     │   recipe    │────>│ result cell │
+┌─────────────┐     │             │     └─────────────┘
+│ input cell  │────>│             │
+└─────────────┘     └─────────────┘
+```
+
+This is **pull-based / demand-driven** reactivity:
+- Recipe declares dependencies on input cells
+- When any input changes, the recipe re-executes
+- Result cell receives the new computed value
+- Like a spreadsheet: change a cell, dependent formulas update
+
+The scheduler tracks dependencies and ensures consistent propagation.
+
+#### Events: External Occurrence → Stream Cell → Handler
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  external   │────>│ stream cell │────>│   handler   │
+│   event     │     │             │     │             │
+└─────────────┘     └─────────────┘     └─────────────┘
+```
+
+This is **push-based / occurrence-driven** reactivity:
+- External event (user click, API response, timer) arrives
+- Event is sent to a stream cell
+- Registered handlers are invoked with the event payload
+- Like DOM events: something happens, listeners react
+
+Handlers may write to value cells, bridging events into dataflow.
+
+#### Bridging the Two Patterns
+
+Events often produce state changes:
+
+```
+click event ──> stream ──> handler ──> writes to value cell ──> dataflow propagates
+```
+
+This is how user interactions flow through the system: an event triggers a
+handler, which updates state, which causes dependent computations to re-run.
 
 ### Key Insight: The Graph Is Not Persisted
 
