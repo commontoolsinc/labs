@@ -78,6 +78,41 @@ const deletePerson = handler<
   }
 });
 
+// Form submit handler - must be at module scope, receives event with flush function
+const handleFormSubmit = handler<
+  { detail: { flush: () => void } },
+  {
+    formData: Writable<Person>;
+    people: Writable<Person[]>;
+    editingIndex: Writable<number | null>;
+    showModal: Writable<boolean>;
+  }
+>((event, { formData, people, editingIndex, showModal }) => {
+  console.log("handleFormSubmit called, flushing...");
+  // Flush buffered values to cells within this action context
+  event.detail.flush();
+
+  // Now we can read the updated values
+  const data = formData.get();
+  console.log("form data after flush:", data);
+  const idx = editingIndex.get();
+
+  if (idx !== null) {
+    // Edit mode - update existing person
+    const list = people.get();
+    const updated = [...list];
+    updated[idx] = data;
+    people.set(updated);
+  } else {
+    // Create mode - add new person
+    people.push(data);
+  }
+
+  // Close modal
+  showModal.set(false);
+  editingIndex.set(null);
+});
+
 // ===== Pattern =====
 
 export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
@@ -98,29 +133,6 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
   const peopleCount = computed(() => people.get().length);
   const isEditMode = computed(() => editingIndex.get() !== null);
   const modalTitle = ifElse(isEditMode, "Edit Person", "Add Person");
-
-  // Submit handler - called after form validation passes and fields are flushed
-  const handleSubmit = action(() => {
-    console.log("handleSubmit called");
-    const data = formData.get();
-    console.log("form data:", data);
-    const idx = editingIndex.get();
-
-    if (idx !== null) {
-      // Edit mode - update existing person
-      const list = people.get();
-      const updated = [...list];
-      updated[idx] = data;
-      people.set(updated);
-    } else {
-      // Create mode - add new person
-      people.push(data);
-    }
-
-    // Close modal
-    showModal.set(false);
-    editingIndex.set(null);
-  });
 
   // Cancel handler - close modal without saving
   const handleCancel = action(() => {
@@ -236,7 +248,14 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
         <ct-modal $open={showModal} dismissable size="md">
           <span slot="header">{modalTitle}</span>
 
-          <ct-form onct-submit={handleSubmit}>
+          <ct-form
+            onct-submit={handleFormSubmit({
+              formData,
+              people,
+              editingIndex,
+              showModal,
+            })}
+          >
             <ct-vstack gap="3">
               {/* Name field */}
               <ct-vstack gap="1">
