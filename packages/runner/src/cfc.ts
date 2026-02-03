@@ -4,6 +4,7 @@ import { getLogger } from "@commontools/utils/logger";
 import type { JSONSchema } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
 import { isArrayIndexPropertyName } from "@commontools/memory/storable-value";
+import { rendererVDOMSchema } from "@commontools/runner/schemas";
 
 const logger = getLogger("cfc");
 
@@ -419,6 +420,10 @@ export class ContextualFlowControl {
     fullSchema: JSONSchema,
     schemaRef: string,
   ): JSONSchema | undefined {
+    // Allow for some absolute schema refs
+    if (schemaRef == "https://commontools.dev/schemas/vdom.json") {
+      return rendererVDOMSchema;
+    }
     // We only support schemaRefs that are URI fragments
     if (!schemaRef.startsWith("#")) {
       logger.warn("cfc", () => ["Unsupported $ref in schema: ", schemaRef]);

@@ -7,6 +7,7 @@
 import { JSONSchema, NAME, type Schema, TYPE, UI } from "./shared.ts";
 
 export const rendererVDOMSchema = {
+  $id: "https://commontools.dev/schemas/vdom.json",
   $defs: {
     vdomNode: {
       type: "object",

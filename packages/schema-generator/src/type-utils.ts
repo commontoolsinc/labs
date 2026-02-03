@@ -225,6 +225,7 @@ export interface TypeWithInternals extends ts.Type {
 }
 
 const NATIVE_TYPE_SCHEMAS: Record<string, SchemaDefinition | boolean> = {
+  VNode: { $ref: "https://commontools.dev/schemas/vdom.json" },
   Date: { type: "string", format: "date-time" },
   URL: { type: "string", format: "uri" },
   ArrayBuffer: true,
