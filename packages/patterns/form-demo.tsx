@@ -79,54 +79,41 @@ const deletePerson = handler<
 });
 
 // Form submit handler - must be at module scope
-// Note: Common Tools handlers receive a transformed event, not raw DOM event
-// We log it to see the actual structure
+// Event detail contains { values: { fieldName: value, ... } }
 const handleFormSubmit = handler<
-  unknown,
+  { detail: { values: Record<string, unknown> } },
   {
-    formData: Writable<Person>;
     people: Writable<Person[]>;
     editingIndex: Writable<number | null>;
     showModal: Writable<boolean>;
   }
->((event, { formData, people, editingIndex, showModal }) => {
-  console.log("handleFormSubmit called, event:", event);
-  console.log("event type:", typeof event);
-  if (event && typeof event === "object") {
-    console.log("event keys:", Object.keys(event));
-    const detail = (event as any).detail;
-    console.log("event.detail:", detail);
-    console.log("event.detail type:", typeof detail);
-    if (detail && typeof detail === "object") {
-      console.log("detail keys:", Object.keys(detail));
-      console.log("detail.flush:", detail.flush);
-      console.log("detail.bufferedValues:", detail.bufferedValues);
-    }
-  }
+>((event, { people, editingIndex, showModal }) => {
+  console.log("handleFormSubmit called");
+  console.log("event.detail:", event?.detail);
 
-  // Try to get flush from event if available
-  const detail = (event as any)?.detail;
-  if (detail?.flush) {
-    console.log("Found flush, calling it...");
-    detail.flush();
-  } else {
-    console.log("No flush function found in event.detail");
-  }
+  // Get values from event (passed by ct-form, survives serialization)
+  const values = event?.detail?.values || {};
+  console.log("values from form:", values);
 
-  // Read values from cells (may or may not have been flushed)
-  const data = formData.get();
-  console.log("form data:", data);
+  // Build person from form values
+  const person: Person = {
+    name: (values.name as string) || "",
+    email: (values.email as string) || "",
+    role: (values.role as "user" | "admin") || "user",
+  };
+  console.log("person to save:", person);
+
   const idx = editingIndex.get();
 
   if (idx !== null) {
     // Edit mode - update existing person
     const list = people.get();
     const updated = [...list];
-    updated[idx] = data;
+    updated[idx] = person;
     people.set(updated);
   } else {
     // Create mode - add new person
-    people.push(data);
+    people.push(person);
   }
 
   // Close modal
@@ -271,7 +258,6 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
 
           <ct-form
             onct-submit={handleFormSubmit({
-              formData,
               people,
               editingIndex,
               showModal,
@@ -284,6 +270,7 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
                   Name *
                 </label>
                 <ct-input
+                  name="name"
                   $value={formData.key("name")}
                   placeholder="Enter full name"
                   required
@@ -296,6 +283,7 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
                   Email *
                 </label>
                 <ct-input
+                  name="email"
                   $value={formData.key("email")}
                   type="email"
                   placeholder="email@example.com"
@@ -309,6 +297,7 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
                   Role
                 </label>
                 <ct-select
+                  name="role"
                   $value={formData.key("role")}
                   items={[
                     { label: "User", value: "user" },

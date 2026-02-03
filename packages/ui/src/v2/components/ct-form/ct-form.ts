@@ -221,33 +221,24 @@ export class CTForm extends BaseElement {
     }
 
     // Collect buffered values from all registered ct-* fields
-    // These are the actual edited values that may not have been written to cells yet
-    const bufferedValues: Array<{ element: HTMLElement; value: unknown }> = [];
-    for (const [element, field] of this._fields) {
-      bufferedValues.push({ element, value: field.getValue() });
+    // Build a values object keyed by field name (if available)
+    // Only include JSON-serializable values (Common Tools serializes events across workers)
+    const values: Record<string, unknown> = {};
+    let fieldIndex = 0;
+    for (const field of this._fields.values()) {
+      // Use field name if available, otherwise use index
+      const key = field.name || `field_${fieldIndex}`;
+      values[key] = field.getValue();
+      fieldIndex++;
     }
 
-    // Provide a flush function that the handler can call within action context
-    // This is needed because cell writes require transaction context
-    const flushFields = () => {
-      for (const field of this._fields.values()) {
-        field.flush();
-      }
-    };
+    console.log("ct-form: about to emit ct-submit, values:", values);
 
-    console.log(
-      "ct-form: about to emit ct-submit, buffered values:",
-      bufferedValues,
-    );
-    // Emit custom event with both native form data and buffered values
+    // IMPORTANT: Common Tools serializes event details across worker boundaries
+    // Only pass JSON-serializable data (no DOM elements, functions, or FormData)
     const submitted = this.emit("ct-submit", {
-      data: nativeData,
-      formData,
-      bufferedValues,
-      method: this.method,
-      action: this.action,
-      form: this._form,
-      flush: flushFields,
+      values, // Object with field values keyed by name
+      data: nativeData, // Plain object from native FormData
     });
 
     // If event wasn't prevented, submit the form natively
