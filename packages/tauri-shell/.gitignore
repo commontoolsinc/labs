@@ -1,0 +1,27 @@
+# Rust build artifacts
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# Mobile build outputs
+src-tauri/gen/android/.gradle/
+src-tauri/gen/android/build/
+src-tauri/gen/android/app/build/
+src-tauri/gen/android/*.apk
+src-tauri/gen/android/*.aab
+
+src-tauri/gen/apple/build/
+src-tauri/gen/apple/*.xcarchive
+src-tauri/gen/apple/DerivedData/
+
+# IDE
+.idea/
+*.xcworkspace/
+*.xcuserdata/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node/Deno
+node_modules/
+.deno/

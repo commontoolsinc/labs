@@ -1,0 +1,74 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Common Tools",
+  "identifier": "tools.common.shell",
+  "version": "0.1.0",
+  "build": {
+    "beforeDevCommand": "cd ../.. && cd shell && deno task build",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "cd ../.. && cd shell && PRODUCTION=1 deno task build",
+    "frontendDist": "../../shell/dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "csp": null,
+      "dangerousDisableAssetCspModification": true
+    },
+    "windows": [
+      {
+        "title": "Common Tools",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 320,
+        "minHeight": 480,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "iOS": {
+      "developmentTeam": "",
+      "minimumSystemVersion": "16.0"
+    },
+    "android": {
+      "minSdkVersion": 28
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": true
+    },
+    "http": {
+      "enabled": true,
+      "scope": ["https://*", "http://localhost:*", "http://127.0.0.1:*"]
+    },
+    "deep-link": {
+      "mobile": [
+        {
+          "host": "common.tools",
+          "pathPrefix": ["/"]
+        },
+        {
+          "host": "*.common.tools",
+          "pathPrefix": ["/"]
+        }
+      ],
+      "desktop": {
+        "schemes": ["commontools"]
+      }
+    }
+  }
+}

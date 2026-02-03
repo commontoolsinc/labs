@@ -1,0 +1,17 @@
+# Icon Placeholders
+
+Generate icons using Tauri's icon generator:
+
+```bash
+cargo tauri icon path/to/source-icon.png
+```
+
+Required icons:
+- 32x32.png
+- 128x128.png
+- 128x128@2x.png
+- icon.icns (macOS)
+- icon.ico (Windows)
+- icon.png (512x512 for Android/iOS)
+
+Source icon should be at least 1024x1024 PNG with transparency.

@@ -1,0 +1,19 @@
+{
+  "name": "@commontools/tauri-shell",
+  "version": "0.1.0",
+  "tasks": {
+    "tauri": "cargo tauri",
+    "dev": "cargo tauri dev",
+    "build": "cargo tauri build",
+    "android:init": "cargo tauri android init",
+    "android:dev": "cargo tauri android dev",
+    "android:build": "cargo tauri android build",
+    "ios:init": "cargo tauri ios init",
+    "ios:dev": "cargo tauri ios dev",
+    "ios:build": "cargo tauri ios build"
+  },
+  "exports": {
+    ".": "./src/mod.ts",
+    "./passkey-bridge": "./src/passkey-bridge.ts"
+  }
+}

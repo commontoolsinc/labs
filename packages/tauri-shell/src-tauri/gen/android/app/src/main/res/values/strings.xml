@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Common Tools</string>
+
+    <!-- Asset statements for passkey and app link association with common.tools -->
+    <!-- This tells Android which domain(s) this app is associated with for passkeys -->
+    <string name="asset_statements" translatable="false">
+        [{
+            "include": "https://common.tools/.well-known/assetlinks.json"
+        }]
+    </string>
+</resources>
