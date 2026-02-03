@@ -84,14 +84,9 @@ export default pattern<Record<string, never>>((_) => {
     query: "#journal",
   });
 
-  // Debug: log raw result
+  // Debug: stringify raw result for the debug panel
   const debugRaw = computed(() => {
     const raw = journalResult.result;
-    console.log("[journal.tsx] raw journalResult.result:", raw);
-    console.log("[journal.tsx] type:", typeof raw);
-    if (Array.isArray(raw)) {
-      console.log("[journal.tsx] first entry:", raw[0]);
-    }
     return JSON.stringify(raw, null, 2);
   });
 
