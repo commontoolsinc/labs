@@ -399,46 +399,71 @@ async function executeTask(
       ? buildSubAgentSystemPrompt(loopOptions.system, ballots)
       : loopOptions.system;
 
-    const result = await runAgentLoop(task, {
-      ...loopOptions,
-      system: childSystem,
-      agent: child,
-      depth: childDepth,
-    });
+    const MAX_RETRIES = 3;
+    let history: Message[] | undefined;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const result = await runAgentLoop(
+        attempt === 0 ? task : buildRetryMessage(ballots),
+        {
+          ...loopOptions,
+          system: childSystem,
+          agent: child,
+          depth: childDepth,
+          history,
+        },
+      );
+      lastResult = result;
 
-    // Declassify the sub-agent's response
-    const declassified = parentAgent.declassifyReturn(
-      child,
-      result.response,
-      ballots,
-    );
+      // Declassify the sub-agent's response
+      const declassified = parentAgent.declassifyReturn(
+        child,
+        result.response,
+        ballots,
+      );
 
-    // Filter declassified result through parent's visibility policy
-    const filtered = filterOutput(
-      declassified.content,
-      declassified.label,
-      parentAgent.policy,
-    );
+      // Filter declassified result through parent's visibility policy
+      const filtered = filterOutput(
+        declassified.content,
+        declassified.label,
+        parentAgent.policy,
+      );
 
-    const labelDesc = declassified.label.integrity.length > 0
-      ? declassified.label.integrity.map((a) => a.kind).join(", ")
-      : "none";
+      const isFiltered = filtered.filtered ?? false;
 
-    const isFiltered = filtered.filtered ?? false;
-    const content = isFiltered
-      ? `[FILTERED: ${filtered.reason ?? "policy"}]`
-      : filtered.content;
+      if (!isFiltered || attempt === MAX_RETRIES) {
+        // Success, or gave up after max retries
+        const labelDesc = declassified.label.integrity.length > 0
+          ? declassified.label.integrity.map((a) => a.kind).join(", ")
+          : "none";
 
-    loopOptions.onTaskEnd?.(
-      content,
-      declassified.label,
-      isFiltered,
-      childDepth,
-    );
+        const content = isFiltered
+          ? `[FILTERED: ${filtered.reason ?? "policy"}]`
+          : filtered.content;
 
-    // LLM sees >> prefixed text; TUI display is handled by callbacks
-    const raw = `${content}\n[integrity: ${labelDesc}]`;
-    return { text: prefixLines(raw, childDepth), label: declassified.label };
+        loopOptions.onTaskEnd?.(
+          content,
+          declassified.label,
+          isFiltered,
+          childDepth,
+        );
+
+        const raw = `${content}\n[integrity: ${labelDesc}]`;
+        return {
+          text: prefixLines(raw, childDepth),
+          label: declassified.label,
+        };
+      }
+
+      // Response would be filtered — retry with correction
+      history = result.messages;
+    }
+
+    // Unreachable, but satisfy TypeScript
+    const exitLabel = child.end();
+    return {
+      text: prefixLines("[FILTERED: max retries exceeded]", childDepth + 1),
+      label: exitLabel,
+    };
   } catch (e) {
     child.end();
     return {
@@ -451,6 +476,35 @@ async function executeTask(
 // ---------------------------------------------------------------------------
 // Sub-agent system prompt
 // ---------------------------------------------------------------------------
+
+/**
+ * Build a correction message when the sub-agent's response would be
+ * filtered by the parent's policy. Tells the agent to try again with
+ * a safe response, and re-includes ballots if available.
+ */
+function buildRetryMessage(ballots: string[]): string {
+  const lines = [
+    "Your previous response contained tainted content and was blocked by " +
+    "the parent agent's security policy. You must respond with ONLY safe, " +
+    "untainted content. Do not include raw HTML, scripts, or other " +
+    "untrusted data in your response.",
+    "",
+    "Follow the original task instructions precisely. Summarize or " +
+    "extract specific facts instead of echoing raw content.",
+  ];
+
+  if (ballots.length > 0) {
+    lines.push("");
+    lines.push(
+      "If one of these pre-approved responses fits, respond with it exactly:",
+    );
+    for (const b of ballots) {
+      lines.push(`  - "${b}"`);
+    }
+  }
+
+  return lines.join("\n");
+}
 
 /**
  * Build a system prompt for a sub-agent whose parent has visibility
