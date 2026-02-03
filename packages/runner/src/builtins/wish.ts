@@ -320,22 +320,8 @@ function resolveBase(
                 if (t.toLowerCase() === searchTermWithoutHash) return true;
               }
 
-              // Fall back to tag field (schema-based hashtag search)
-              let tag = entry.tag;
-
-              // Fallback: compute tag lazily if not stored
-              if (!tag) {
-                try {
-                  const { schema } = entry.cell.asSchemaFromLinks()
-                    .getAsNormalizedFullLink();
-                  if (schema !== undefined) {
-                    tag = JSON.stringify(schema);
-                  }
-                } catch {
-                  // Schema not available yet
-                }
-              }
-
+              // Search schema tag for hashtags
+              const tag = entry.tag;
               const hashtags = tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ??
                 [];
               return [...hashtags].some((m) => m[1] === searchTermWithoutHash);

@@ -745,6 +745,7 @@ describe("wish built-in", () => {
 
   describe("scope-based wish search", () => {
     let userIdentity: Identity;
+    let patternSpace: Identity;
     let storageManager: ReturnType<typeof StorageManager.emulate>;
     let runtime: Runtime;
     let tx: ReturnType<Runtime["edit"]>;
@@ -753,6 +754,7 @@ describe("wish built-in", () => {
 
     beforeEach(async () => {
       userIdentity = await Identity.fromPassphrase("scope-test-user");
+      patternSpace = await Identity.fromPassphrase("scope-pattern-space");
       storageManager = StorageManager.emulate({ as: userIdentity });
       runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
@@ -770,9 +772,8 @@ describe("wish built-in", () => {
       await storageManager.close();
     });
 
-    // Skip this test for now - needs more investigation into how mentionable Cells work
-    it.ignore('searches only mentionables with scope: ["."]', async () => {
-      // Setup: Add favorites to home space
+    it('searches only mentionables with scope: ["."]', async () => {
+      // Setup: Add favorites to home space (should NOT be found)
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
       const homeDefaultPatternCell = runtime.getCell(
         userIdentity.did(),
@@ -791,17 +792,29 @@ describe("wish built-in", () => {
       favoritesCell.set([{ cell: favoriteItem, tag: "#test-tag" }]);
       (homeSpaceCell as any).key("defaultPattern").set(homeDefaultPatternCell);
 
-      // Setup: Add mentionables to pattern space
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Setup: Add mentionables to pattern space (should be found)
       const spaceCell = runtime.getCell(
-        userIdentity.did(),
-        userIdentity.did(),
+        patternSpace.did(),
+        patternSpace.did(),
       ).withTx(tx);
       const defaultPatternCell = runtime.getCell(
-        userIdentity.did(),
+        patternSpace.did(),
         "space-default-pattern",
-      ).withTx(tx);
+        undefined,
+        tx,
+      );
+      const backlinksIndexCell = runtime.getCell(
+        patternSpace.did(),
+        "backlinks-index",
+        undefined,
+        tx,
+      );
       const mentionableItem = runtime.getCell(
-        userIdentity.did(),
+        patternSpace.did(),
         "mentionable-item",
         undefined,
         tx,
@@ -809,10 +822,13 @@ describe("wish built-in", () => {
       const mentionableData: any = { type: "mentionable" };
       mentionableData[NAME] = "test-tag";
       mentionableItem.set(mentionableData);
+      // Set up backlinksIndex as a separate cell with mentionable array
+      backlinksIndexCell.set({
+        mentionable: [mentionableItem],
+      });
+      // defaultPattern references backlinksIndex as a cell
       defaultPatternCell.set({
-        backlinksIndex: {
-          mentionable: [mentionableItem],
-        },
+        backlinksIndex: backlinksIndexCell,
       });
       (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
@@ -828,7 +844,7 @@ describe("wish built-in", () => {
       const resultCell = runtime.getCell<{
         result?: { result?: unknown };
       }>(
-        userIdentity.did(),
+        patternSpace.did(),
         "scope-mentionable-result",
         undefined,
         tx,
@@ -850,8 +866,8 @@ describe("wish built-in", () => {
       expect(data.type).toBe("mentionable");
     });
 
-    it.ignore('searches only favorites with scope: ["~"]', async () => {
-      // Setup: Add favorites to home space
+    it('searches only favorites with scope: ["~"]', async () => {
+      // Setup: Add favorites to home space (should be found)
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
       const homeDefaultPatternCell = runtime.getCell(
         userIdentity.did(),
@@ -870,17 +886,29 @@ describe("wish built-in", () => {
       favoritesCell.set([{ cell: favoriteItem, tag: "#test-tag" }]);
       (homeSpaceCell as any).key("defaultPattern").set(homeDefaultPatternCell);
 
-      // Setup: Add mentionables to pattern space
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Setup: Add mentionables to pattern space (with same tag - should NOT be found)
       const spaceCell = runtime.getCell(
-        userIdentity.did(),
-        userIdentity.did(),
+        patternSpace.did(),
+        patternSpace.did(),
       ).withTx(tx);
       const defaultPatternCell = runtime.getCell(
-        userIdentity.did(),
+        patternSpace.did(),
         "space-default-pattern",
-      ).withTx(tx);
+        undefined,
+        tx,
+      );
+      const backlinksIndexCell = runtime.getCell(
+        patternSpace.did(),
+        "backlinks-index-fav",
+        undefined,
+        tx,
+      );
       const mentionableItem = runtime.getCell(
-        userIdentity.did(),
+        patternSpace.did(),
         "mentionable-item",
         undefined,
         tx,
@@ -888,10 +916,11 @@ describe("wish built-in", () => {
       const mentionableData: any = { type: "mentionable" };
       mentionableData[NAME] = "test-tag";
       mentionableItem.set(mentionableData);
+      backlinksIndexCell.set({
+        mentionable: [mentionableItem],
+      });
       defaultPatternCell.set({
-        backlinksIndex: {
-          mentionable: [mentionableItem],
-        },
+        backlinksIndex: backlinksIndexCell,
       });
       (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
@@ -907,7 +936,7 @@ describe("wish built-in", () => {
       const resultCell = runtime.getCell<{
         result?: { result?: unknown };
       }>(
-        userIdentity.did(),
+        patternSpace.did(),
         "scope-favorites-result",
         undefined,
         tx,
@@ -919,13 +948,17 @@ describe("wish built-in", () => {
       await result.pull();
 
       // Verify: Should find favorite, not mentionable
-      const foundItem = result.key("result").get()?.result;
+      const wishResult = result.key("result").get();
+      if (wishResult?.error) {
+        console.log("Error in scope favorites test:", wishResult.error);
+      }
+      const foundItem = wishResult?.result;
       expect(foundItem).toBeDefined();
       const data = (foundItem as any).get?.() ?? foundItem;
       expect(data.type).toBe("favorite");
     });
 
-    it.ignore('searches both favorites and mentionables with scope: ["~", "."]', async () => {
+    it('searches both favorites and mentionables with scope: ["~", "."]', async () => {
       // Setup: Add favorites to home space
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
       const homeDefaultPatternCell = runtime.getCell(
@@ -945,17 +978,29 @@ describe("wish built-in", () => {
       favoritesCell.set([{ cell: favoriteItem, tag: "#fav-tag" }]);
       (homeSpaceCell as any).key("defaultPattern").set(homeDefaultPatternCell);
 
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
       // Setup: Add mentionables to pattern space
       const spaceCell = runtime.getCell(
-        userIdentity.did(),
-        userIdentity.did(),
+        patternSpace.did(),
+        patternSpace.did(),
       ).withTx(tx);
       const defaultPatternCell = runtime.getCell(
-        userIdentity.did(),
+        patternSpace.did(),
         "space-default-pattern",
-      ).withTx(tx);
+        undefined,
+        tx,
+      );
+      const backlinksIndexCell = runtime.getCell(
+        patternSpace.did(),
+        "backlinks-index-both",
+        undefined,
+        tx,
+      );
       const mentionableItem = runtime.getCell(
-        userIdentity.did(),
+        patternSpace.did(),
         "mentionable-item",
         undefined,
         tx,
@@ -963,10 +1008,11 @@ describe("wish built-in", () => {
       const mentionableData: any = { type: "mentionable" };
       mentionableData[NAME] = "ment-tag";
       mentionableItem.set(mentionableData);
+      backlinksIndexCell.set({
+        mentionable: [mentionableItem],
+      });
       defaultPatternCell.set({
-        backlinksIndex: {
-          mentionable: [mentionableItem],
-        },
+        backlinksIndex: backlinksIndexCell,
       });
       (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
@@ -982,7 +1028,7 @@ describe("wish built-in", () => {
       const resultCell1 = runtime.getCell<{
         result?: { result?: unknown };
       }>(
-        userIdentity.did(),
+        patternSpace.did(),
         "scope-both-fav-result",
         undefined,
         tx,
@@ -1007,7 +1053,7 @@ describe("wish built-in", () => {
       const resultCell2 = runtime.getCell<{
         result?: { result?: unknown };
       }>(
-        userIdentity.did(),
+        patternSpace.did(),
         "scope-both-ment-result",
         undefined,
         tx,
@@ -1026,8 +1072,8 @@ describe("wish built-in", () => {
       expect(mentData.type).toBe("mentionable");
     });
 
-    it.ignore("searches favorites only by default (no scope parameter)", async () => {
-      // Setup: Add favorites to home space
+    it("searches favorites only by default (no scope parameter)", async () => {
+      // Setup: Add favorites to home space (should be found)
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
       const homeDefaultPatternCell = runtime.getCell(
         userIdentity.did(),
@@ -1046,26 +1092,41 @@ describe("wish built-in", () => {
       favoritesCell.set([{ cell: favoriteItem, tag: "#test-tag" }]);
       (homeSpaceCell as any).key("defaultPattern").set(homeDefaultPatternCell);
 
-      // Setup: Add mentionables to pattern space (with same tag)
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Setup: Add mentionables to pattern space (with same tag - should NOT be found)
       const spaceCell = runtime.getCell(
-        userIdentity.did(),
-        userIdentity.did(),
+        patternSpace.did(),
+        patternSpace.did(),
       ).withTx(tx);
       const defaultPatternCell = runtime.getCell(
-        userIdentity.did(),
+        patternSpace.did(),
         "space-default-pattern",
-      ).withTx(tx);
+        undefined,
+        tx,
+      );
+      const backlinksIndexCell = runtime.getCell(
+        patternSpace.did(),
+        "backlinks-index-default",
+        undefined,
+        tx,
+      );
       const mentionableItem = runtime.getCell(
-        userIdentity.did(),
+        patternSpace.did(),
         "mentionable-item",
         undefined,
         tx,
       );
-      mentionableItem.set({ type: "mentionable", [NAME]: "test-tag" });
+      const mentionableData: any = { type: "mentionable" };
+      mentionableData[NAME] = "test-tag";
+      mentionableItem.set(mentionableData);
+      backlinksIndexCell.set({
+        mentionable: [mentionableItem],
+      });
       defaultPatternCell.set({
-        backlinksIndex: {
-          mentionable: [mentionableItem],
-        },
+        backlinksIndex: backlinksIndexCell,
       });
       (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
@@ -1081,7 +1142,7 @@ describe("wish built-in", () => {
       const resultCell = runtime.getCell<{
         result?: { result?: unknown };
       }>(
-        userIdentity.did(),
+        patternSpace.did(),
         "default-scope-result",
         undefined,
         tx,
@@ -1100,7 +1161,7 @@ describe("wish built-in", () => {
     });
 
     it("scope parameter changes error message for mentionable-only search", async () => {
-      // Setup: No mentionables or favorites with "nonexistent" tag
+      // Setup: No favorites with "nonexistent" tag
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
       const homeDefaultPatternCell = runtime.getCell(
         userIdentity.did(),
@@ -1112,12 +1173,17 @@ describe("wish built-in", () => {
       favoritesCell.set([]);
       (homeSpaceCell as any).key("defaultPattern").set(homeDefaultPatternCell);
 
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Setup: No mentionables with "nonexistent" tag
       const spaceCell = runtime.getCell(
-        userIdentity.did(),
-        userIdentity.did(),
+        patternSpace.did(),
+        patternSpace.did(),
       ).withTx(tx);
       const defaultPatternCell = runtime.getCell(
-        userIdentity.did(),
+        patternSpace.did(),
         "space-default-pattern",
       ).withTx(tx);
       defaultPatternCell.set({
@@ -1139,7 +1205,7 @@ describe("wish built-in", () => {
       const resultCell = runtime.getCell<{
         result?: { error?: string };
       }>(
-        userIdentity.did(),
+        patternSpace.did(),
         "scope-error-result",
         undefined,
         tx,
@@ -1177,13 +1243,17 @@ describe("wish built-in", () => {
       favoritesCell.set([{ cell: favoriteItem, tag: "#test-tag" }]);
       (homeSpaceCell as any).key("defaultPattern").set(homeDefaultPatternCell);
 
-      // Setup empty mentionables
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Setup empty mentionables in pattern space
       const spaceCell = runtime.getCell(
-        userIdentity.did(),
-        userIdentity.did(),
+        patternSpace.did(),
+        patternSpace.did(),
       ).withTx(tx);
       const defaultPatternCell = runtime.getCell(
-        userIdentity.did(),
+        patternSpace.did(),
         "space-default-pattern",
       ).withTx(tx);
       defaultPatternCell.set({
@@ -1197,7 +1267,7 @@ describe("wish built-in", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      // Execute: Search with mentionable scope only should fail
+      // Execute: Search with mentionable scope only should fail (even though favorites has it)
       const wishRecipe = recipe("no mentionable match", () => {
         return { result: wish({ query: "#test-tag", scope: ["."] }) };
       });
@@ -1205,7 +1275,7 @@ describe("wish built-in", () => {
       const resultCell = runtime.getCell<{
         result?: { error?: string };
       }>(
-        userIdentity.did(),
+        patternSpace.did(),
         "no-match-result",
         undefined,
         tx,
