@@ -197,7 +197,15 @@ async function runOnce(
       const sep = depth > 0 ? (atLn ? "" : "\n") : "\n\n";
       if (toolName === "task") {
         const task = String(input.task ?? "");
-        await write(`${sep}${fmtPrefixed("#", task, depth)}\n`);
+        const ballots = Array.isArray(input.ballots)
+          ? (input.ballots as string[]).map(String)
+          : [];
+        const ballotsStr = ballots.length > 0
+          ? ` [ballots: ${ballots.map((b) => `"${b}"`).join(", ")}]`
+          : "";
+        await write(
+          `${sep}${fmtPrefixed("#", task + ballotsStr, depth)}\n`,
+        );
       } else {
         const cmd = String(input.command ?? "");
         await write(`${sep}${fmtCommand(cmd, depth)}\n`);
