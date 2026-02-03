@@ -226,6 +226,25 @@ The "event-ness" emerges from the data shape. Event producers include timestamps
 - Possibly: schema-level indication of "where does the timestamp come from"
 - Migration path for existing stream usages
 
+#### Current State: No Timestamps
+
+The current system does **not** add timestamps or unique IDs to events:
+- `stream.send(event)` passes the payload directly to the scheduler
+- DOM events have a `timeStamp` property, but `sanitizeEvent()` does not
+  include it in the allowlist of properties passed through
+- No deduplication or idempotency mechanism exists
+
+For unification, timestamps would need to be injected somewhere — either at
+the `send()` layer, in `sanitizeEvent()`, or by event producers explicitly.
+
+#### Event Replay Consideration
+
+Event replay (for debugging, testing, or recovery) is a related concern. For
+replay to be possible, events would likely need unique markings anyway —
+timestamps, sequence numbers, or IDs. This aligns with the unification
+proposal: if events must be uniquely identifiable for replay, that same
+identity makes them content-distinct for change detection.
+
 ---
 
 ## Open Questions
