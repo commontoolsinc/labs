@@ -94,7 +94,14 @@ const handleFormSubmit = handler<
   console.log("event type:", typeof event);
   if (event && typeof event === "object") {
     console.log("event keys:", Object.keys(event));
-    console.log("event.detail:", (event as any).detail);
+    const detail = (event as any).detail;
+    console.log("event.detail:", detail);
+    console.log("event.detail type:", typeof detail);
+    if (detail && typeof detail === "object") {
+      console.log("detail keys:", Object.keys(detail));
+      console.log("detail.flush:", detail.flush);
+      console.log("detail.bufferedValues:", detail.bufferedValues);
+    }
   }
 
   // Try to get flush from event if available
@@ -102,6 +109,8 @@ const handleFormSubmit = handler<
   if (detail?.flush) {
     console.log("Found flush, calling it...");
     detail.flush();
+  } else {
+    console.log("No flush function found in event.detail");
   }
 
   // Read values from cells (may or may not have been flushed)
