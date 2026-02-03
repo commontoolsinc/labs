@@ -30,6 +30,7 @@ import {
   fmtCommand,
   fmtOutput,
   fmtStatus,
+  gutter,
 } from "./tui.ts";
 
 // ---------------------------------------------------------------------------
@@ -189,9 +190,14 @@ async function runOnce(
     model,
     system: SYSTEM_PROMPT,
     history,
-    onToolCall: async (_toolName, input, depth) => {
-      const cmd = String(input.command ?? input.task ?? "");
-      await write(`\n${fmtCommand(cmd, depth)}\n`);
+    onToolCall: async (toolName, input, depth) => {
+      if (toolName === "task") {
+        const task = String(input.task ?? "");
+        await write(`\n${gutter(depth)}# ${task}\n`);
+      } else {
+        const cmd = String(input.command ?? "");
+        await write(`\n${fmtCommand(cmd, depth)}\n`);
+      }
     },
     onToolResult: async (_cmd, res, depth) => {
       if (res.filtered) {

@@ -146,12 +146,21 @@ export function fmtCommand(cmd: string, depth: number): string {
 }
 
 /**
- * Format output text: each line gets `gutter + "  "` indentation.
+ * Format output text: each line gets `gutter + "  "` indentation,
+ * word-wrapped to fit the terminal width.
  * Empty lines get the gutter only.
  */
-export function fmtOutput(text: string, depth: number): string {
+export function fmtOutput(
+  text: string,
+  depth: number,
+  termWidth?: number,
+): string {
   const g = gutter(depth);
-  return text.split("\n").map((l) => l ? `${g}  ${l}` : g).join("\n");
+  const tw = termWidth ?? getTermWidth();
+  const indent = 2; // "  " prefix
+  const contentWidth = Math.max(20, tw - gutterWidth(depth) - indent);
+  const wrapped = wordWrap(text, contentWidth);
+  return wrapped.split("\n").map((l) => l ? `${g}  ${l}` : g).join("\n");
 }
 
 /** Format a status message (e.g. [filtered: ...], [exit code: N]) */
