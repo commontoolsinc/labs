@@ -1331,4 +1331,178 @@ describe("Cell-level transaction isolation", () => {
     // Last writer wins
     expect(cell.get()?.value).toBe(3);
   });
+
+  /*
+   * =========================================================================
+   * Conflicting writes: two transactions with pending writes to the same cell
+   * =========================================================================
+   *
+   * These tests document what happens when two transactions both have
+   * uncommitted writes to the same cell, then both attempt to commit.
+   *
+   * Key finding: The system DOES have conflict detection. When the underlying
+   * data changes between when a transaction starts and when it commits, the
+   * commit fails with StorageTransactionInconsistent error.
+   *
+   * This differs from the "no conflict detection" test above because that test
+   * has T2 commit before T1 writes - so T1's write happens after T1 has already
+   * observed the new state. Here, both transactions have pending writes based
+   * on the ORIGINAL state, so the second commit detects the inconsistency.
+   * =========================================================================
+   */
+
+  it("conflicting writes with sequential commits: second commit fails", async () => {
+    const cell = runtime.getCell<{ value: number }>(
+      space,
+      "conflict-sequential",
+    );
+
+    // Setup: cell has initial value
+    const setupTx = runtime.edit();
+    cell.withTx(setupTx).set({ value: 0 });
+    await setupTx.commit();
+
+    // T1 and T2 both open (both see value = 0)
+    const t1 = runtime.edit();
+    const t2 = runtime.edit();
+
+    // Both write different values (neither has committed yet)
+    cell.withTx(t1).set({ value: 100 });
+    cell.withTx(t2).set({ value: 200 });
+
+    // T1 commits first - succeeds
+    const t1Result = await t1.commit();
+    expect(t1Result.error).toBeUndefined();
+
+    // Cell now has T1's value
+    expect(cell.get()?.value).toBe(100);
+
+    // T2 commits second - FAILS because T2 was based on value=0, but it's now 100
+    const t2Result = await t2.commit();
+    expect(t2Result.error).toBeDefined();
+    expect(t2Result.error?.name).toBe("StorageTransactionInconsistent");
+
+    // Cell still has T1's value (T2's commit was rejected)
+    expect(cell.get()?.value).toBe(100);
+  });
+
+  it("conflicting writes with parallel commits: one succeeds, one fails", async () => {
+    const cell = runtime.getCell<{ value: number }>(
+      space,
+      "conflict-parallel",
+    );
+
+    // Setup: cell has initial value
+    const setupTx = runtime.edit();
+    cell.withTx(setupTx).set({ value: 0 });
+    await setupTx.commit();
+
+    // T1 and T2 both open (both see value = 0)
+    const t1 = runtime.edit();
+    const t2 = runtime.edit();
+
+    // Both write different values (neither has committed yet)
+    cell.withTx(t1).set({ value: 100 });
+    cell.withTx(t2).set({ value: 200 });
+
+    // Both commit in parallel
+    const [t1Result, t2Result] = await Promise.all([
+      t1.commit(),
+      t2.commit(),
+    ]);
+
+    // One succeeds, one fails (whichever commits first wins)
+    const successes = [t1Result, t2Result].filter((r) => !r.error);
+    const failures = [t1Result, t2Result].filter((r) => r.error);
+
+    expect(successes.length).toBe(1);
+    expect(failures.length).toBe(1);
+    expect(failures[0].error?.name).toBe("StorageTransactionInconsistent");
+
+    // Cell has the winning transaction's value
+    const finalValue = cell.get()?.value;
+    expect([100, 200]).toContain(finalValue);
+  });
+
+  /*
+   * =========================================================================
+   * Transaction read-your-writes: withTx().get() sees pending writes
+   * =========================================================================
+   *
+   * Unlike the earlier "live reference" tests where cell.get() (without tx)
+   * returns the committed state, cell.withTx(tx).get() returns the
+   * transaction's pending writes - providing read-your-writes semantics
+   * within a transaction.
+   * =========================================================================
+   */
+
+  it("withTx().get() returns pending writes within the transaction", async () => {
+    const cell = runtime.getCell<{ value: number }>(
+      space,
+      "withtx-get-behavior",
+    );
+
+    // Setup: cell has initial value
+    const setupTx = runtime.edit();
+    cell.withTx(setupTx).set({ value: 0 });
+    await setupTx.commit();
+
+    // T1 opens and writes
+    const t1 = runtime.edit();
+    cell.withTx(t1).set({ value: 100 });
+
+    // withTx().get() returns the PENDING write (100), providing read-your-writes
+    expect(cell.withTx(t1).get()?.value).toBe(100);
+
+    // But cell.get() (without tx) returns the COMMITTED value (0)
+    expect(cell.get()?.value).toBe(0);
+
+    // After T1 commits, both see the committed value
+    await t1.commit();
+    expect(cell.withTx(t1).get()?.value).toBe(100);
+    expect(cell.get()?.value).toBe(100);
+  });
+
+  it("each transaction sees its own pending writes, isolated from each other", async () => {
+    const cell = runtime.getCell<{ value: number }>(
+      space,
+      "tx-isolation-pending",
+    );
+
+    // Setup: cell has initial value
+    const setupTx = runtime.edit();
+    cell.withTx(setupTx).set({ value: 0 });
+    await setupTx.commit();
+
+    // T1 and T2 both open
+    const t1 = runtime.edit();
+    const t2 = runtime.edit();
+
+    // Both write different values
+    cell.withTx(t1).set({ value: 100 });
+    cell.withTx(t2).set({ value: 200 });
+
+    // Each transaction sees its own pending write
+    expect(cell.withTx(t1).get()?.value).toBe(100);
+    expect(cell.withTx(t2).get()?.value).toBe(200);
+
+    // The committed value is still 0 (neither has committed)
+    expect(cell.get()?.value).toBe(0);
+
+    // After T1 commits, the committed value changes
+    const t1Result = await t1.commit();
+    expect(t1Result.error).toBeUndefined();
+    expect(cell.get()?.value).toBe(100);
+
+    // T2 still sees its own pending write (200)
+    expect(cell.withTx(t2).get()?.value).toBe(200);
+
+    // But T2's commit fails due to conflict
+    const t2Result = await t2.commit();
+    expect(t2Result.error).toBeDefined();
+    expect(t2Result.error?.name).toBe("StorageTransactionInconsistent");
+
+    // Cell still has T1's value
+    expect(cell.get()?.value).toBe(100);
+  });
 });
