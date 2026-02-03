@@ -109,11 +109,12 @@ const TASK_SCHEMA = {
       type: "array",
       items: { type: "string" },
       description:
-        "Fixed literal strings the sub-agent may return. Each ballot must be " +
-        "a complete, exact response — not a template or pattern. If the " +
-        "sub-agent responds with one of these exactly (and nothing else), " +
-        'it is endorsed as InjectionFree. Example: ["YES", "NO"] not ' +
-        '["YES: [description]"].',
+        "Short fixed literal strings the sub-agent may return verbatim. " +
+        "Each ballot must be a single short word or phrase with NO " +
+        'placeholders, brackets, or variable parts. Good: ["YES", "NO", ' +
+        '"SAFE", "UNSAFE"]. Bad: ["YES - [description]", "NO - standard ' +
+        'Google logo"]. Put all instructions and detail in the task field ' +
+        "instead — ballots are just the allowed return values.",
     },
   },
   required: ["task"],
@@ -123,11 +124,10 @@ const TASK_DESC_MAIN =
   "Delegate a task to a sub-agent with a relaxed visibility " +
   "policy. The sub-agent can see data that this agent cannot (e.g., " +
   "untrusted network content). Use this when your exec output is " +
-  "filtered due to security policy. The sub-agent's final text response is " +
-  "declassified by checking it against ballots (safe return strings you " +
-  "provide) and captured command outputs. If the response matches a " +
-  "ballot, it is endorsed as InjectionFree. If it matches a command " +
-  "output (e.g., the result of `wc -l`), it inherits that output's label.";
+  "filtered due to security policy. Always provide short ballots " +
+  '(e.g., ["YES", "NO"]) — put all detail in the task description, ' +
+  "not in the ballot strings. The sub-agent's response is declassified " +
+  "by checking it against ballots and captured command outputs.";
 
 const TASK_DESC_SUB =
   "Delegate a subtask to another agent. Useful for breaking up work " +
