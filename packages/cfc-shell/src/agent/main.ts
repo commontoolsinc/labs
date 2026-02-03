@@ -200,6 +200,7 @@ async function runOnce(
         const cmd = String(input.command ?? "");
         await write(`${sep}${fmtCommand(cmd, depth)}\n`);
       }
+      streamFmt.setAtLineStart();
     },
     onToolResult: async (_cmd, res, depth) => {
       if (res.filtered) {
@@ -210,11 +211,13 @@ async function runOnce(
       if (res.exitCode !== 0) {
         await write(`${fmtStatus(`[exit code: ${res.exitCode}]`, depth)}\n`);
       }
+      streamFmt.setAtLineStart();
     },
     onTaskStart: async (_task, policy, depth) => {
       currentDepth = depth;
       streamFmt.reset();
       await write(`\n${boxStart(`sub-agent (${policy} policy)`, depth)}\n`);
+      streamFmt.setAtLineStart();
     },
     onTaskEnd: async (response, label, filtered, depth) => {
       const labelDesc = label.integrity.length > 0
@@ -227,12 +230,14 @@ async function runOnce(
       await write(`${boxEnd(summary, depth)}\n`);
       currentDepth = depth - 1;
       streamFmt.reset();
+      streamFmt.setAtLineStart();
     },
     onTaskRetry: async (attempt, depth) => {
       await write(
         `${fmtStatus(`[response blocked — retry ${attempt}/3]`, depth)}\n`,
       );
       streamFmt.reset();
+      streamFmt.setAtLineStart();
     },
     onAssistantMessage: () => {
       streamFmt.reset();

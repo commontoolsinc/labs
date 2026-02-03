@@ -203,10 +203,16 @@ export function fmtStatus(msg: string, depth: number): string {
  */
 export function createStreamFormatter(
   getDepth: () => number,
-): { format: (delta: string) => string; reset: () => void } {
+): {
+  format: (delta: string) => string;
+  reset: () => void;
+  /** Signal that the cursor is at the start of a new line (after a \n). */
+  setAtLineStart: () => void;
+} {
   let responseStart = true;
   let lineStart = false;
-  let col = 0; // current column position (for word wrapping)
+  let atLineStart = false; // cursor is at col 0 from a prior write
+  let col = 0;
 
   return {
     reset() {
@@ -214,20 +220,28 @@ export function createStreamFormatter(
       lineStart = false;
       col = 0;
     },
+    setAtLineStart() {
+      atLineStart = true;
+    },
     format(delta: string): string {
       const depth = getDepth();
       const tw = getTermWidth();
-      // "⏺ " is 2 visible chars; continuation indent is 2 spaces
       const prefixWidth = gutterWidth(depth) + 2;
       const wrapCol = Math.max(20, tw - prefixWidth);
       let out = "";
 
       for (const ch of delta) {
         if (responseStart) {
-          // At depth 0, blank line separator; inside a box, guttered newline
-          out += depth > 0 ? `\n${gutter(depth)}⏺ ` : `\n\n⏺ `;
+          if (depth > 0) {
+            // Inside a box: no extra blank line, just start on current/next line
+            out += atLineStart ? `${gutter(depth)}⏺ ` : `\n${gutter(depth)}⏺ `;
+          } else {
+            // Root agent: blank line separator
+            out += atLineStart ? `\n⏺ ` : `\n\n⏺ `;
+          }
           responseStart = false;
           lineStart = false;
+          atLineStart = false;
           col = 0;
         } else if (lineStart) {
           out += `${gutter(depth)}  `;

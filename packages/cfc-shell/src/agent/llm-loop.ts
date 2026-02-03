@@ -109,7 +109,11 @@ const TASK_SCHEMA = {
       type: "array",
       items: { type: "string" },
       description:
-        "Safe return strings. If the sub-agent responds with one of these exactly, it is endorsed as InjectionFree (you authored it).",
+        "Fixed literal strings the sub-agent may return. Each ballot must be " +
+        "a complete, exact response — not a template or pattern. If the " +
+        "sub-agent responds with one of these exactly (and nothing else), " +
+        'it is endorsed as InjectionFree. Example: ["YES", "NO"] not ' +
+        '["YES: [description]"].',
     },
   },
   required: ["task"],
@@ -524,27 +528,22 @@ function previewDeclassify(
  * a safe response, and re-includes ballots if available.
  */
 function buildRetryMessage(ballots: string[]): string {
-  const lines = [
-    "Your previous response contained tainted content and was blocked by " +
-    "the parent agent's security policy. You must respond with ONLY safe, " +
-    "untainted content. Do not include raw HTML, scripts, or other " +
-    "untrusted data in your response.",
-    "",
-    "Follow the original task instructions precisely. Summarize or " +
-    "extract specific facts instead of echoing raw content.",
-  ];
-
   if (ballots.length > 0) {
-    lines.push("");
-    lines.push(
-      "If one of these pre-approved responses fits, respond with it exactly:",
+    const ballotList = ballots.map((b) => `  "${b}"`).join("\n");
+    return (
+      "BLOCKED: Your previous response was rejected by the security policy. " +
+      "You MUST respond with ONLY one of these exact strings and nothing else — " +
+      "no explanation, no quotes, no extra text:\n\n" +
+      ballotList
     );
-    for (const b of ballots) {
-      lines.push(`  - "${b}"`);
-    }
   }
 
-  return lines.join("\n");
+  return (
+    "BLOCKED: Your previous response was rejected by the security policy " +
+    "because it contained tainted content. Respond with ONLY a brief, " +
+    "factual summary — no raw HTML, scripts, or untrusted data. " +
+    "Keep your response as short as possible."
+  );
 }
 
 /**
