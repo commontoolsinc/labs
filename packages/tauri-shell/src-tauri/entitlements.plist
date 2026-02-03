@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Required for app to run -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+
+    <!-- Network access for API calls -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- Associated Domains for passkeys and universal links -->
+    <key>com.apple.developer.associated-domains</key>
+    <array>
+        <string>webcredentials:common.tools</string>
+        <string>webcredentials:*.common.tools</string>
+        <string>applinks:common.tools</string>
+        <string>applinks:*.common.tools</string>
+    </array>
+
+    <!-- Enable passkey/WebAuthn support -->
+    <key>com.apple.developer.web-browser.public-key-credential</key>
+    <true/>
+
+    <!-- Keychain access for credential storage -->
+    <key>com.apple.security.keychain-access-groups</key>
+    <array>
+        <string>$(AppIdentifierPrefix)tools.common.shell</string>
+    </array>
+
+    <!-- Allow reading user-selected files (for import functionality) -->
+    <key>com.apple.security.files.user-selected.read-only</key>
+    <true/>
+
+    <!-- Allow writing user-selected files (for export functionality) -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+</dict>
+</plist>

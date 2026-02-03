@@ -1,11 +1,12 @@
 # @commontools/tauri-shell
 
-Tauri mobile application for Common Tools Shell with native passkey integration.
+Tauri application for Common Tools Shell with native passkey integration.
 
 ## Overview
 
-This package provides Android and iOS mobile apps that serve the Common Tools Shell web application, with deep integration for passkeys (WebAuthn) using native platform APIs:
+This package provides desktop and mobile apps that serve the Common Tools Shell web application, with deep integration for passkeys (WebAuthn) using native platform APIs:
 
+- **macOS**: Uses ASAuthorizationController with iCloud Keychain (macOS 12+)
 - **Android**: Uses Credential Manager API (Android 14+)
 - **iOS**: Uses ASAuthorizationController (iOS 16+)
 
@@ -21,6 +22,7 @@ This package provides Android and iOS mobile apps that serve the Common Tools Sh
 
 For detailed installation instructions, see:
 
+- **[macOS Setup Guide](docs/MACOS_SETUP.md)** - Xcode CLI, code signing, notarization
 - **[Android Setup Guide](docs/ANDROID_SETUP.md)** - Android Studio, SDK, NDK, emulator setup
 - **[iOS Setup Guide](docs/IOS_SETUP.md)** - Xcode, simulators, signing, device deployment
 
@@ -37,6 +39,9 @@ deno task ios:init
 ### Development
 
 ```bash
+# Run macOS development build
+deno task macos:dev
+
 # Run Android development build
 deno task android:dev
 
@@ -47,6 +52,9 @@ deno task ios:dev
 ### Production Build
 
 ```bash
+# Build macOS app (universal binary for Intel + Apple Silicon)
+deno task macos:build
+
 # Build Android APK/AAB
 deno task android:build
 
@@ -64,6 +72,8 @@ packages/tauri-shell/
 ├── src-tauri/                    # Rust backend
 │   ├── Cargo.toml               # Rust dependencies
 │   ├── tauri.conf.json          # Tauri configuration
+│   ├── entitlements.plist       # macOS entitlements (production)
+│   ├── entitlements.debug.plist # macOS entitlements (development)
 │   ├── src/
 │   │   ├── lib.rs               # Library entry point
 │   │   ├── main.rs              # Application entry point
@@ -76,6 +86,10 @@ packages/tauri-shell/
 │       └── apple/               # iOS-specific code
 │           └── Sources/
 │               └── PasskeyBridge.swift
+├── docs/                         # Setup documentation
+│   ├── MACOS_SETUP.md
+│   ├── ANDROID_SETUP.md
+│   └── IOS_SETUP.md
 └── deno.json                    # Package configuration
 ```
 
@@ -128,6 +142,13 @@ const assertion = await getPasskey({
 
 ## Platform Requirements
 
+### macOS
+
+- Minimum macOS: 12.0 (Monterey)
+- Passkeys use iCloud Keychain (requires Apple ID)
+- For PRF extension support: macOS 14+ (Sonoma) recommended
+- Associated Domains must be configured for passkey association
+
 ### Android
 
 - Minimum SDK: 28 (Android 9)
@@ -145,24 +166,7 @@ const assertion = await getPasskey({
 
 For passkeys to work correctly, you must configure domain association:
 
-### Android (assetlinks.json)
-
-Host at `https://common.tools/.well-known/assetlinks.json`:
-
-```json
-[
-  {
-    "relation": ["delegate_permission/common.handle_all_urls", "delegate_permission/common.get_login_creds"],
-    "target": {
-      "namespace": "android_app",
-      "package_name": "tools.common.shell",
-      "sha256_cert_fingerprints": ["YOUR_SIGNING_CERTIFICATE_SHA256"]
-    }
-  }
-]
-```
-
-### iOS (apple-app-site-association)
+### Apple Platforms (macOS & iOS)
 
 Host at `https://common.tools/.well-known/apple-app-site-association`:
 
@@ -181,6 +185,25 @@ Host at `https://common.tools/.well-known/apple-app-site-association`:
     ]
   }
 }
+```
+
+Replace `TEAM_ID` with your Apple Developer Team ID.
+
+### Android (assetlinks.json)
+
+Host at `https://common.tools/.well-known/assetlinks.json`:
+
+```json
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls", "delegate_permission/common.get_login_creds"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "tools.common.shell",
+      "sha256_cert_fingerprints": ["YOUR_SIGNING_CERTIFICATE_SHA256"]
+    }
+  }
+]
 ```
 
 ## License

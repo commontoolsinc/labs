@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Development entitlements (sandbox disabled for easier debugging) -->
+
+    <!-- Network access for API calls -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- Associated Domains for passkeys and universal links -->
+    <key>com.apple.developer.associated-domains</key>
+    <array>
+        <string>webcredentials:common.tools</string>
+        <string>webcredentials:*.common.tools</string>
+        <string>applinks:common.tools</string>
+        <string>applinks:*.common.tools</string>
+    </array>
+
+    <!-- Enable passkey/WebAuthn support -->
+    <key>com.apple.developer.web-browser.public-key-credential</key>
+    <true/>
+</dict>
+</plist>
