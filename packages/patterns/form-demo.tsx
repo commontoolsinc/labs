@@ -78,9 +78,11 @@ const deletePerson = handler<
   }
 });
 
-// Form submit handler - must be at module scope, receives event with flush function
+// Form submit handler - must be at module scope
+// Note: Common Tools handlers receive a transformed event, not raw DOM event
+// We log it to see the actual structure
 const handleFormSubmit = handler<
-  { detail: { flush: () => void } },
+  unknown,
   {
     formData: Writable<Person>;
     people: Writable<Person[]>;
@@ -88,13 +90,23 @@ const handleFormSubmit = handler<
     showModal: Writable<boolean>;
   }
 >((event, { formData, people, editingIndex, showModal }) => {
-  console.log("handleFormSubmit called, flushing...");
-  // Flush buffered values to cells within this action context
-  event.detail.flush();
+  console.log("handleFormSubmit called, event:", event);
+  console.log("event type:", typeof event);
+  if (event && typeof event === "object") {
+    console.log("event keys:", Object.keys(event));
+    console.log("event.detail:", (event as any).detail);
+  }
 
-  // Now we can read the updated values
+  // Try to get flush from event if available
+  const detail = (event as any)?.detail;
+  if (detail?.flush) {
+    console.log("Found flush, calling it...");
+    detail.flush();
+  }
+
+  // Read values from cells (may or may not have been flushed)
   const data = formData.get();
-  console.log("form data after flush:", data);
+  console.log("form data:", data);
   const idx = editingIndex.get();
 
   if (idx !== null) {
