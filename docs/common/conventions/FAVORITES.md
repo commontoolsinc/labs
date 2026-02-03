@@ -15,7 +15,7 @@ The `tag` field contains the serialized `resultSchema` of the piece pointed to b
 
 # Wishing for A Specific Piece
 
-See `system/wish.tsx` for a full example. 
+See `system/wish.tsx` for a full example.
 
 In `note.tsx` I decorate my schema with a jsdoc comment containing "#note":
 ```tsx
@@ -36,6 +36,44 @@ Later, I wish for "#note" and discover the first matching item in the list.
 ```tsx
 const wishResult = wish<{ content: string }>({ query: "#note" });
 ```
+
+# Scope Parameter
+
+The `scope` parameter controls where wish searches for matching pieces:
+
+- `"~"` - Search favorites in the [[HOME_SPACE]] (global, cross-space)
+- `"."` - Search [[mentionable]] items in the current space
+
+By default (no scope), wish searches **favorites only** for backward compatibility.
+
+## Examples
+
+```tsx
+// Search only favorites (default behavior)
+wish({ query: "#note" })
+wish({ query: "#note", scope: ["~"] })
+
+// Search only mentionables in current space
+wish({ query: "#note", scope: ["."] })
+
+// Search both favorites AND mentionables (favorites first)
+wish({ query: "#note", scope: ["~", "."] })
+```
+
+## Favorites vs Mentionables
+
+| Feature | Favorites (`~`) | Mentionables (`.`) |
+|---------|-----------------|-------------------|
+| Storage | Home space (global) | Current space |
+| Scope | Cross-space | Per-space |
+| Source | User's favorites list | Pattern's `mentionable` export |
+| Tag source | Snapshotted when favorited | Computed from schema |
+
+## When to Use Each Scope
+
+- **Favorites only (default)**: Use when you want globally available pieces the user has explicitly saved
+- **Mentionables only**: Use when building space-specific features that discover pieces created within that space
+- **Both**: Use when you want to find any relevant piece regardless of where it lives
 
 # Call wish() at Pattern Level
 
@@ -61,11 +99,3 @@ This ensures the wish is established once. Conditional logic belongs in how you 
 # Intended Usage
 
 Keep a handle to important information in a piece, e.g. google auth, user preferences/biography, cross-cutting data (calendar).
-
-# Future Plans
-
-This is the minimum viable design. We will later:
-
-- find tags on specific sub-schemas and properly discover the paths to the subtrees
-- result a 'result picker' UI from in the `wishResult` to choose between many options and/or override
-- support filtering `wish` to certain scopes
