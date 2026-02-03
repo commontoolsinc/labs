@@ -203,36 +203,51 @@ export class CTForm extends BaseElement {
       return;
     }
 
-    // Flush all registered fields (write buffered values to cells)
-    for (const field of this._fields.values()) {
-      field.flush();
-    }
-
-    // Collect form data
+    // Collect form data from native form
     const formData = new FormData(this._form);
-    const data: Record<string, any> = {};
+    const nativeData: Record<string, any> = {};
 
     // Convert FormData to plain object
     for (const [key, value] of formData.entries()) {
-      if (data[key] !== undefined) {
+      if (nativeData[key] !== undefined) {
         // Handle multiple values with same name (like checkboxes)
-        if (!Array.isArray(data[key])) {
-          data[key] = [data[key]];
+        if (!Array.isArray(nativeData[key])) {
+          nativeData[key] = [nativeData[key]];
         }
-        data[key].push(value);
+        nativeData[key].push(value);
       } else {
-        data[key] = value;
+        nativeData[key] = value;
       }
     }
 
-    console.log("ct-form: about to emit ct-submit");
-    // Emit custom event with form data
+    // Collect buffered values from all registered ct-* fields
+    // These are the actual edited values that may not have been written to cells yet
+    const bufferedValues: Array<{ element: HTMLElement; value: unknown }> = [];
+    for (const [element, field] of this._fields) {
+      bufferedValues.push({ element, value: field.getValue() });
+    }
+
+    // Provide a flush function that the handler can call within action context
+    // This is needed because cell writes require transaction context
+    const flushFields = () => {
+      for (const field of this._fields.values()) {
+        field.flush();
+      }
+    };
+
+    console.log(
+      "ct-form: about to emit ct-submit, buffered values:",
+      bufferedValues,
+    );
+    // Emit custom event with both native form data and buffered values
     const submitted = this.emit("ct-submit", {
-      data,
+      data: nativeData,
       formData,
+      bufferedValues,
       method: this.method,
       action: this.action,
       form: this._form,
+      flush: flushFields,
     });
 
     // If event wasn't prevented, submit the form natively
