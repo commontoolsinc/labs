@@ -506,9 +506,16 @@ async function expandWordPart(
         value = value.slice(0, -1);
       }
 
+      // Compute label: join output label with result label.
+      // If output is empty (no writes to stdout), output.label is bottom()
+      // which would make the join empty. In that case, use result.label alone.
+      const outputLabel = output.value.length > 0
+        ? labels.join(output.label, result.label)
+        : result.label;
+
       return {
         value,
-        label: labels.join(output.label, result.label),
+        label: outputLabel,
       };
     }
 
