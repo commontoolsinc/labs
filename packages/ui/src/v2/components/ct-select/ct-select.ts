@@ -223,6 +223,7 @@ export class CTSelect extends BaseElement {
         // Register with form
         this._formUnregister = this._formContext.registerField({
           element: this,
+          name: this.name || undefined,
           getValue: () => this._buffer,
           setValue: (v) => {
             this._buffer = v as unknown | unknown[];

@@ -23,6 +23,8 @@ export interface ValidationResult {
 export interface FieldRegistration {
   /** Reference to the field element */
   element: HTMLElement;
+  /** Field name for identifying in form submission */
+  name?: string;
   /** Get the current buffered value */
   getValue: () => unknown;
   /** Set the buffered value programmatically */
