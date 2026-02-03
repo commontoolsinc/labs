@@ -20,7 +20,9 @@ Cells can be categorized along two dimensions:
 
 2. **Semantic role**: What purpose the cell serves
    - Process cells (execution metadata)
-   - Precious data cells (user input, irreplaceable)
+   - Precious data cells (irreplaceable):
+     - User input (created/edited by user)
+     - External input (fetched from outside, world has moved on)
    - Computed result cells (derived, reconstructible)
    - Stream cells (event endpoints)
 
@@ -109,13 +111,26 @@ tracking which recipe governs a piece and linking to its result. See
 
 #### Precious Data Cells
 
-User-created or imported data that **cannot be reconstructed**:
-- Direct user input
-- Imported files or external data
+Data that **cannot be reconstructed** from inputs. Two subtypes:
+
+**User input**: Data created or edited directly by the user:
+- Text they typed
+- Selections they made
+- Files they uploaded
 - Manually curated content
 
-These must be preserved — loss means loss. The system should never
-garbage-collect precious data.
+Loss means losing the user's creative act, which cannot be replayed.
+
+**External input**: Data fetched from outside the system:
+- API responses (stock prices, weather, search results)
+- Scraped web content
+- Sensor readings at a point in time
+
+Loss means the data is gone — the external world has moved on and won't
+produce the same result again. Even "re-fetching" yields different data.
+
+Both subtypes must be preserved. The system should never garbage-collect
+precious data.
 
 #### Computed Result Cells
 
