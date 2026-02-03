@@ -240,31 +240,36 @@ export class CTCheckbox extends BaseElement {
     }
 
     private _registerWithForm() {
+      // Only register once
+      if (this._formUnregister) return;
+
       // Only register if we have both a form context and a cell checked binding
       if (this._formContext && this.checked) {
-        // Read initial value from cell
-        this._initialValue = this._checkedCellController.getValue();
-        // Initialize buffer with initial value
-        this._buffer = this._initialValue;
-        // Track the last known cell value to detect external changes
-        this._lastCellValue = this._initialValue;
+        // Don't eagerly initialize buffer - let it stay undefined
+        // getChecked() will fall back to cell value when buffer is undefined
 
         // Register with form
         this._formUnregister = this._formContext.registerField({
           element: this,
           name: this.name || undefined,
-          getValue: () => this._buffer,
+          // Return buffer if user has clicked, otherwise return current cell value
+          getValue: () =>
+            this._buffer ?? this._checkedCellController.getValue(),
           setValue: (v) => {
             this._buffer = v as boolean;
             this.requestUpdate();
           },
           flush: () => {
-            this._checkedCellController.setValue(this._buffer ?? false);
-            // Update last known value so we don't think this was an external change
-            this._lastCellValue = this._buffer;
+            const valueToFlush = this._buffer ??
+              this._checkedCellController.getValue();
+            this._checkedCellController.setValue(valueToFlush);
+            this._lastCellValue = valueToFlush;
           },
           reset: () => {
-            this._buffer = this._initialValue;
+            // Reset buffer to undefined - will fall back to cell value
+            this._buffer = undefined;
+            this._initialValue = undefined;
+            this._lastCellValue = undefined;
             this.requestUpdate();
           },
           validate: () => ({
@@ -275,19 +280,8 @@ export class CTCheckbox extends BaseElement {
       }
     }
 
-    /**
-     * Sync buffer with cell value when it changes externally.
-     */
-    private _syncBufferWithCell() {
-      if (!this._formContext) return;
-
-      const currentCellValue = this._checkedCellController.getValue();
-      if (currentCellValue !== this._lastCellValue) {
-        this._buffer = currentCellValue;
-        this._initialValue = currentCellValue;
-        this._lastCellValue = currentCellValue;
-      }
-    }
+    // Note: _syncBufferWithCell removed - with deferred init, getChecked() always
+    // falls back to cell value when buffer is undefined, so no sync needed
 
     override disconnectedCallback() {
       super.disconnectedCallback();
@@ -316,9 +310,6 @@ export class CTCheckbox extends BaseElement {
       changedProperties: Map<string | number | symbol, unknown>,
     ) {
       super.updated(changedProperties);
-
-      // Sync buffer with cell when cell value changes externally (e.g., edit mode)
-      this._syncBufferWithCell();
 
       if (changedProperties.has("disabled")) {
         this.tabIndex = this.disabled ? -1 : 0;
