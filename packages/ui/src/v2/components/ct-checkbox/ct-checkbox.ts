@@ -1,11 +1,10 @@
 import { css, html } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
-import { consume } from "@lit/context";
-import { type FormContext, formContext } from "../form-context.ts";
 import { type CellHandle } from "@commontools/runtime-client";
 import { booleanSchema } from "@commontools/runner/schemas";
 import { createBooleanCellController } from "../../core/cell-controller.ts";
+import { createFormFieldController } from "../../core/form-field-controller.ts";
 
 /**
  * CTCheckbox - Binary selection input with support for indeterminate state
@@ -187,14 +186,12 @@ export class CTCheckbox extends BaseElement {
       },
     });
 
-    // Form context integration
-    @consume({ context: formContext, subscribe: false })
-    private _formContext?: FormContext;
-
-    private _buffer: boolean | undefined;
-    private _initialValue: boolean | undefined;
-    private _lastCellValue: boolean | undefined;
-    private _formUnregister?: () => void;
+    // Form field controller handles buffering when in ct-form context
+    private _formField = createFormFieldController<boolean>(this, {
+      cellController: this._checkedCellController,
+      // Checkboxes don't have built-in validation
+      validate: () => ({ valid: true }),
+    });
 
     constructor() {
       super();
@@ -206,21 +203,11 @@ export class CTCheckbox extends BaseElement {
     }
 
     private getChecked(): boolean {
-      // If in form context, use buffer instead of cell value
-      if (this._formContext && this._buffer !== undefined) {
-        return this._buffer;
-      }
-      return this._checkedCellController.getValue();
+      return this._formField.getValue();
     }
 
     private setChecked(newValue: boolean): void {
-      // If in form context, update buffer instead of cell
-      if (this._formContext) {
-        this._buffer = newValue;
-        this.requestUpdate();
-      } else {
-        this._checkedCellController.setValue(newValue);
-      }
+      this._formField.setValue(newValue);
     }
 
     override connectedCallback() {
@@ -236,62 +223,15 @@ export class CTCheckbox extends BaseElement {
       this.addEventListener("keydown", this._handleKeydown);
 
       // Register with form after binding is complete
-      this._registerWithForm();
+      this._formField.register(this.name);
     }
-
-    private _registerWithForm() {
-      // Only register once
-      if (this._formUnregister) return;
-
-      // Only register if we have both a form context and a cell checked binding
-      if (this._formContext && this.checked) {
-        // Don't eagerly initialize buffer - let it stay undefined
-        // getChecked() will fall back to cell value when buffer is undefined
-
-        // Register with form
-        this._formUnregister = this._formContext.registerField({
-          element: this,
-          name: this.name || undefined,
-          // Return buffer if user has clicked, otherwise return current cell value
-          getValue: () =>
-            this._buffer ?? this._checkedCellController.getValue(),
-          setValue: (v) => {
-            this._buffer = v as boolean;
-            this.requestUpdate();
-          },
-          flush: () => {
-            const valueToFlush = this._buffer ??
-              this._checkedCellController.getValue();
-            this._checkedCellController.setValue(valueToFlush);
-            this._lastCellValue = valueToFlush;
-          },
-          reset: () => {
-            // Reset buffer to undefined - will fall back to cell value
-            this._buffer = undefined;
-            this._initialValue = undefined;
-            this._lastCellValue = undefined;
-            this.requestUpdate();
-          },
-          validate: () => ({
-            valid: true, // Checkboxes don't have built-in validation
-            message: undefined,
-          }),
-        });
-      }
-    }
-
-    // Note: _syncBufferWithCell removed - with deferred init, getChecked() always
-    // falls back to cell value when buffer is undefined, so no sync needed
 
     override disconnectedCallback() {
       super.disconnectedCallback();
       // Clean up event listeners
       this.removeEventListener("click", this._handleClick);
       this.removeEventListener("keydown", this._handleKeydown);
-
-      // Unregister from form if registered
-      this._formUnregister?.();
-      this._formUnregister = undefined;
+      // Controllers handle form cleanup automatically via ReactiveController
     }
 
     override willUpdate(

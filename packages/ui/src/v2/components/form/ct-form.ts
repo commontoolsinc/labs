@@ -6,7 +6,7 @@ import {
   type FieldRegistration,
   type FormContext,
   formContext,
-} from "../form-context.ts";
+} from "./form-context.ts";
 
 /**
  * CTForm Component
@@ -176,17 +176,13 @@ export class CTForm extends BaseElement {
   }
 
   private handleSubmit(event: Event): void {
-    console.log("ct-form handleSubmit called", event);
     // Prevent default form submission
     event.preventDefault();
     event.stopPropagation();
 
     if (!this._form) {
-      console.log("ct-form: _form is null");
       return;
     }
-    console.log("ct-form: _form is", this._form);
-    console.log("ct-form: registered fields count:", this._fields.size);
 
     // Validate all registered fields
     const errors: Array<{ element: HTMLElement; message?: string }> = [];
@@ -231,8 +227,6 @@ export class CTForm extends BaseElement {
       values[key] = field.getValue();
       fieldIndex++;
     }
-
-    console.log("ct-form: about to emit ct-submit, values:", values);
 
     // IMPORTANT: Common Tools serializes event details across worker boundaries
     // Only pass JSON-serializable data (no DOM elements, functions, or FormData)

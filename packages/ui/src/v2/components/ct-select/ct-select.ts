@@ -9,9 +9,9 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
-import { type FormContext, formContext } from "../form-context.ts";
 import { type CellHandle } from "@commontools/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";
+import { createFormFieldController } from "../../core/form-field-controller.ts";
 
 /**
  * CTSelect – Dropdown/select component that accepts an array of generic JS objects
@@ -146,14 +146,14 @@ export class CTSelect extends BaseElement {
       },
     });
 
-    /* ---------- Form context integration ---------- */
-    @consume({ context: formContext, subscribe: false })
-    private _formContext?: FormContext;
-
-    private _buffer: unknown | unknown[] | undefined;
-    private _initialValue: unknown | unknown[] | undefined;
-    private _lastCellValue: unknown | unknown[] | undefined;
-    private _formUnregister?: () => void;
+    /* ---------- Form field controller for buffering ---------- */
+    private _formField = createFormFieldController<unknown | unknown[]>(this, {
+      cellController: this._cellController,
+      validate: () => ({
+        valid: this.checkValidity(),
+        message: this._select?.validationMessage,
+      }),
+    });
 
     /* ---------- Reactive properties ---------- */
     static override properties = {
@@ -207,62 +207,12 @@ export class CTSelect extends BaseElement {
       applyThemeToElement(this, this.theme ?? defaultTheme);
 
       // Register with form after binding is complete
-      this._registerWithForm();
+      this._formField.register(this.name);
     }
-
-    private _registerWithForm() {
-      // Only register once
-      if (this._formUnregister) return;
-
-      // Only register if we have both a form context and a cell value binding
-      if (this._formContext && this.value) {
-        // Don't eagerly initialize buffer - let it stay undefined
-        // getValue() will fall back to cell value when buffer is undefined
-
-        console.log(
-          `ct-select[${this.name}] _registerWithForm (deferred init)`,
-        );
-
-        // Register with form
-        this._formUnregister = this._formContext.registerField({
-          element: this,
-          name: this.name || undefined,
-          // Return buffer if user has selected, otherwise return current cell value
-          getValue: () => this._buffer ?? this._cellController.getValue(),
-          setValue: (v) => {
-            this._buffer = v as unknown | unknown[];
-            this.requestUpdate();
-          },
-          flush: () => {
-            const valueToFlush = this._buffer ??
-              this._cellController.getValue();
-            console.log("ct-select flush:", valueToFlush);
-            this._cellController.setValue(valueToFlush);
-            this._lastCellValue = valueToFlush;
-          },
-          reset: () => {
-            // Reset buffer to undefined - will fall back to cell value
-            this._buffer = undefined;
-            this._initialValue = undefined;
-            this._lastCellValue = undefined;
-            this.requestUpdate();
-          },
-          validate: () => ({
-            valid: this.checkValidity(),
-            message: this._select?.validationMessage,
-          }),
-        });
-      }
-    }
-
-    // Note: _syncBufferWithCell removed - with deferred init, getValue() always
-    // falls back to cell value when buffer is undefined, so no sync needed
 
     override disconnectedCallback() {
       super.disconnectedCallback();
-      // Unregister from form if registered
-      this._formUnregister?.();
-      this._formUnregister = undefined;
+      // Controllers handle cleanup automatically via ReactiveController
     }
 
     override willUpdate(changedProperties: Map<string, any>) {
@@ -399,14 +349,8 @@ export class CTSelect extends BaseElement {
         newValue = this._keyMap.get(optKey)?.value;
       }
 
-      // If in form context, update buffer instead of cell
-      if (this._formContext) {
-        this._buffer = newValue;
-        this.requestUpdate();
-      } else {
-        // Update through cell controller
-        this._cellController.setValue(newValue);
-      }
+      // Use form field controller (handles buffering vs direct write)
+      this._formField.setValue(newValue);
     }
 
     /* ---------- Public API ---------- */
@@ -441,14 +385,10 @@ export class CTSelect extends BaseElement {
     }
 
     /**
-     * Get the current value from the cell controller
+     * Get the current value from the form field controller
      */
     private getCurrentValue(): unknown | unknown[] {
-      // If in form context, use buffer instead of cell value
-      if (this._formContext && this._buffer !== undefined) {
-        return this._buffer;
-      }
-      return this._cellController.getValue();
+      return this._formField.getValue();
     }
 
     /**
