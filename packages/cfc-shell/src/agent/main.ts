@@ -191,8 +191,10 @@ async function runOnce(
     system: SYSTEM_PROMPT,
     history,
     onToolCall: async (toolName, input, depth) => {
-      // At depth 0, blank line before command; inside a box, just a newline
-      const sep = depth > 0 ? "\n" : "\n\n";
+      // Blank line separator at depth 0; inside a box, newline only if
+      // we're not already at line start (avoids gaps in the frame).
+      const atLn = streamFmt.isAtLineStart();
+      const sep = depth > 0 ? (atLn ? "" : "\n") : "\n\n";
       if (toolName === "task") {
         const task = String(input.task ?? "");
         await write(`${sep}${fmtPrefixed("#", task, depth)}\n`);
@@ -227,7 +229,8 @@ async function runOnce(
       const summary = `${prefix}"${response.slice(0, 60)}${
         response.length > 60 ? "…" : ""
       }" [integrity: ${labelDesc}]`;
-      await write(`${boxEnd(summary, depth)}\n`);
+      const endSep = streamFmt.isAtLineStart() ? "" : "\n";
+      await write(`${endSep}${boxEnd(summary, depth)}\n`);
       currentDepth = depth - 1;
       streamFmt.reset();
       streamFmt.setAtLineStart();

@@ -208,6 +208,8 @@ export function createStreamFormatter(
   reset: () => void;
   /** Signal that the cursor is at the start of a new line (after a \n). */
   setAtLineStart: () => void;
+  /** Whether the cursor is currently at the start of a line. */
+  isAtLineStart: () => boolean;
 } {
   let responseStart = true;
   let lineStart = false;
@@ -222,6 +224,9 @@ export function createStreamFormatter(
     },
     setAtLineStart() {
       atLineStart = true;
+    },
+    isAtLineStart() {
+      return atLineStart;
     },
     format(delta: string): string {
       const depth = getDepth();
