@@ -45,6 +45,8 @@ export interface AgentSessionOptions {
   env?: Environment;
   /** Parent agent (for sub-agent hierarchy) */
   parent?: AgentSession;
+  /** Label inherited from the parent's tool-call prompt. */
+  initialLabel?: Label;
 }
 
 export class AgentSession {
@@ -52,6 +54,8 @@ export class AgentSession {
   readonly policy: AgentPolicy;
   readonly shell: ShellSession;
   readonly parent: AgentSession | null;
+  /** Label inherited from the parent's tool-call prompt. */
+  readonly initialLabel: Label;
   private children: AgentSession[] = [];
   private events: AgentEvent[] = [];
   private history: { call: ToolCall; result: ToolResult }[] = [];
@@ -60,6 +64,7 @@ export class AgentSession {
     this.id = nextAgentId();
     this.policy = options.policy ?? policies.main();
     this.parent = options.parent ?? null;
+    this.initialLabel = options.initialLabel ?? labels.userInput();
 
     // Share VFS with parent if this is a sub-agent, otherwise create new
     const vfs = options.vfs ?? (options.parent?.shell.vfs) ?? new VFS();
@@ -156,7 +161,7 @@ export class AgentSession {
    * Spawn a sub-agent with a relaxed policy.
    * The sub-agent shares the VFS (can read/write same files).
    */
-  spawnSubAgent(policy?: AgentPolicy): AgentSession {
+  spawnSubAgent(policy?: AgentPolicy, initialLabel?: Label): AgentSession {
     if (!this.policy.canSpawnSubAgents) {
       throw new Error(
         "This agent's policy does not allow spawning sub-agents",
@@ -166,6 +171,7 @@ export class AgentSession {
     const child = new AgentSession({
       policy: policy ?? policies.sub(),
       parent: this,
+      initialLabel: initialLabel ?? labels.userInput(),
     });
 
     this.children.push(child);
@@ -244,7 +250,7 @@ export class AgentSession {
     const resultLabels = this.history.map((h) => h.result.label);
     const accumulatedLabel = resultLabels.length > 0
       ? labels.joinAll(resultLabels)
-      : labels.bottom();
+      : this.initialLabel;
 
     if (this.parent) {
       this.parent.events.push({

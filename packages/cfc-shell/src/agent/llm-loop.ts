@@ -394,7 +394,9 @@ async function executeTask(
     ? policies.restricted()
     : policies.sub();
 
-  const child = parentAgent.spawnSubAgent(policy);
+  // The task text was composed by the parent LLM, so the child inherits
+  // the parent agent's initial label (carries InjectionFree integrity).
+  const child = parentAgent.spawnSubAgent(policy, parentAgent.initialLabel);
 
   try {
     const childDepth = parentDepth + 1;
@@ -515,10 +517,12 @@ function previewDeclassify(
     }
   }
 
-  // 3. No match → tainted label → check if parent would filter
-  const accLabel = labels.joinAll(
-    child.getHistory().map((h) => h.result.label),
-  );
+  // 3. No match → accumulated label (falls back to child's initialLabel
+  //    when history is empty, i.e. the sub-agent never ran any tools)
+  const history = child.getHistory();
+  const accLabel = history.length > 0
+    ? labels.joinAll(history.map((h) => h.result.label))
+    : child.initialLabel;
   return !filterOutput(text, accLabel, parentPolicy).filtered;
 }
 

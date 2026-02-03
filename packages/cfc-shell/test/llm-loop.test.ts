@@ -554,6 +554,10 @@ Deno.test("task tool — no-match response is filtered for main agent", async ()
   llm.addToolCallResponse("cat /data/evil.html");
   // Child responds with arbitrary text (no ballot/output match)
   llm.addTextResponse("hello from the attacker");
+  // Retry responses (sub-agent retries up to 3 times)
+  llm.addTextResponse("still tainted response 1");
+  llm.addTextResponse("still tainted response 2");
+  llm.addTextResponse("still tainted response 3");
 
   // Parent final
   llm.addTextResponse("Done.");
