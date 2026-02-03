@@ -20,6 +20,16 @@ This file models the part of the spec where *policies are evaluated at a trusted
 
 This is the spec's core "declassification happens via integrity-guarded exchange rules" story.
 
+Sink-scoped rules (spec 5.2.1):
+
+The spec also introduces **sink-scoped exchange rules**: rules that apply only when data flows
+to a particular sink (e.g. `fetchData`) and only when the relevant taint appears at permitted
+paths. These rules are used for *structural authorization* (token placement checks).
+
+In this repo:
+- `Cfc.Policy` models **general** (non-sink-scoped) fixpoint evaluation.
+- `Cfc.SinkGate` models sink-scoped evaluation using an explicit `PathTaints` input.
+
 Important note about scope:
 
 The full spec supports a rich pattern language with variables and constraints.
@@ -225,6 +235,26 @@ structure ExchangeRule where
   preInteg : List AtomPattern
   postConf : List AtomPattern
   postInteg : List AtomPattern
+  /--
+  Optional sink name for **sink-scoped** exchange rules (spec 5.2.1 / 5.3.2).
+
+  If `allowedSink = some s`, this rule is NOT applied during general boundary policy evaluation
+  (`evalFixpoint`). Instead it is meant to be applied by the sink gate for the named sink `s`.
+
+  Intuition: these rules exist to perform *structural authorization* such as "the token appears
+  only at permitted paths" before stripping authority-only confidentiality taint.
+  -/
+  allowedSink : Option String := none
+
+  /--
+  For sink-scoped rules: the set of allowed paths where the relevant taint may appear.
+
+  We represent a path as a list of strings (segments). This matches how paths are modeled
+  elsewhere in this repo (e.g. projection paths in Chapter 8).
+
+  For general rules (`allowedSink = none`), this is ignored and defaults to `[]`.
+  -/
+  allowedPaths : List (List String) := []
   deriving Repr
 
 structure PolicyRecord where
@@ -461,16 +491,25 @@ def evalOnce (policies : List PolicyRecord) (boundaryIntegrity : IntegLabel) (â„
   -- Apply all rules, and within a rule apply all matches, sequentially.
   pols.foldl (fun acc pol =>
     pol.exchangeRules.foldl (fun acc2 rule =>
-      let avail := Exchange.availIntegrity acc2 boundaryIntegrity;
-      let ms0 := matchRule rule acc2 avail;
-      -- For drop-rules, apply matches from the "back" so indices don't go stale as we delete.
-      let ms := match rule.postConf with
-        | [] => sortMatchesForDrop ms0
-        | _ :: _ => ms0
-      ms.foldl (fun acc3 m =>
-        match applyRule acc3 m rule with
-        | some next => next
-        | none => acc3) acc2
+      -- Sink-scoped rules are evaluated by the sink gate (spec 5.2.1), not during general
+      -- fixpoint evaluation at a boundary (spec 4.4.5).
+      --
+      -- This separation matters because sink-scoped rules rely on *path-scoped* taint
+      -- information (where in a structured request a secret appeared), which this minimal
+      -- `Label` model does not track directly.
+      match rule.allowedSink with
+      | some _ => acc2
+      | none =>
+          let avail := Exchange.availIntegrity acc2 boundaryIntegrity;
+          let ms0 := matchRule rule acc2 avail;
+          -- For drop-rules, apply matches from the "back" so indices don't go stale as we delete.
+          let ms := match rule.postConf with
+            | [] => sortMatchesForDrop ms0
+            | _ :: _ => ms0
+          ms.foldl (fun acc3 m =>
+            match applyRule acc3 m rule with
+            | some next => next
+            | none => acc3) acc2
     ) acc
   ) â„“
 

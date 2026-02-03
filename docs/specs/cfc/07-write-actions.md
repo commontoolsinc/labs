@@ -427,7 +427,7 @@ A refinement step mints:
 
 **Step E — Late-bound audience verification at commit**
 
-At the commit point, `endorse_request` performs **fresh verification**:
+At the commit point, `endorse_request` performs **fresh semantic verification** (structural checks — token placement — are handled by the sink gate's sink-scoped exchange rules):
 
 1. Determine candidate audience URL (from UI selection or discovery)
 2. **Verify at this moment** that the URL represents the target principal:

@@ -544,7 +544,7 @@ Endorsement (upgrading data from low to high integrity) must not depend on confi
 
 Safe endorsement patterns in CFC:
 
-1. **Structural endorsement** (`endorse_request`): Checks request structure (host, method, header placement) without examining secret content.
+1. **Structural endorsement** (sink-scoped exchange rules): The sink gate checks request structure (header placement, path constraints) without examining secret content. For write actions, `endorse_request` additionally verifies intent bindings.
 
 2. **User-mediated endorsement** (links, intent minting): The user already has access to displayed data before choosing to act. The endorsement reflects user intent, not a secret-dependent branch.
 
