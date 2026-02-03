@@ -3,7 +3,7 @@ import type { CellHandle } from "@commontools/runtime-client";
 import {
   type DiscoveredLink,
   discoverLinksFromValue,
-  isNavigablePiece,
+  resolveAndCheckNavigable,
 } from "./link-discovery.ts";
 
 /**
@@ -101,7 +101,8 @@ export class LinksFromController implements ReactiveController {
 
   /**
    * Discover links from the current cell and update the links array.
-   * Only includes navigable pieces (cells with $NAME and $UI).
+   * Searches the result cell, plus the pattern's argument and internal cells.
+   * Only includes navigable pieces (cells with $NAME).
    * Triggers a host update when links change.
    */
   private async discoverLinks(): Promise<void> {
@@ -110,27 +111,123 @@ export class LinksFromController implements ReactiveController {
       return;
     }
 
-    // Get the current value from the CellHandle
+    // Get the current value from the result cell
     const value = this.cell.get();
+    console.log("[discoverLinks] Result cell value:", value);
+    console.log(
+      "[discoverLinks] Result cell keys:",
+      value && typeof value === "object" ? Object.keys(value) : "not object",
+    );
     if (value === undefined) {
       this.links = [];
       return;
     }
 
-    // Discover all links from the value
+    // Discover links from the result cell
     const allLinks = discoverLinksFromValue(value);
+    console.log("[discoverLinks] Links from result cell:", allLinks.length);
 
-    // Filter to only navigable pieces (those with $NAME and $UI)
-    const navigableChecks = await Promise.all(
-      allLinks.map(async (link) => ({
-        link,
-        isNavigable: await isNavigablePiece(link.cellHandle),
-      })),
+    // Also traverse the pattern's argument and internal cells via the source cell
+    try {
+      const sourceCell = await this.cell.getSourceCell();
+      if (sourceCell) {
+        console.log("[discoverLinks] Got source cell:", sourceCell.ref());
+
+        // Get the source cell value with broad schema
+        const sourceCellWithSchema = sourceCell.asSchema<{
+          argument?: unknown;
+          internal?: unknown;
+        }>(true as any);
+        await sourceCellWithSchema.sync();
+        const sourceValue = sourceCellWithSchema.get();
+
+        console.log(
+          "[discoverLinks] Source cell value keys:",
+          sourceValue && typeof sourceValue === "object"
+            ? Object.keys(sourceValue)
+            : "not object",
+        );
+
+        if (sourceValue && typeof sourceValue === "object") {
+          // Traverse argument if present
+          if ("argument" in sourceValue && sourceValue.argument !== undefined) {
+            console.log("[discoverLinks] Traversing argument");
+            const argumentLinks = discoverLinksFromValue(sourceValue.argument);
+            console.log(
+              "[discoverLinks] Links from argument:",
+              argumentLinks.length,
+            );
+            allLinks.push(...argumentLinks);
+          }
+
+          // Traverse internal if present
+          if ("internal" in sourceValue && sourceValue.internal !== undefined) {
+            console.log("[discoverLinks] Traversing internal");
+            const internalLinks = discoverLinksFromValue(sourceValue.internal);
+            console.log(
+              "[discoverLinks] Links from internal:",
+              internalLinks.length,
+            );
+            allLinks.push(...internalLinks);
+          }
+        }
+      } else {
+        console.log("[discoverLinks] No source cell (not a pattern result)");
+      }
+    } catch (e) {
+      console.log("[discoverLinks] Error getting source cell:", e);
+    }
+
+    // Deduplicate links by (space, id)
+    const linkKey = (link: DiscoveredLink) =>
+      `${link.link.space}:${link.link.id}`;
+    const seen = new Set<string>();
+    const uniqueLinks = allLinks.filter((link) => {
+      const key = linkKey(link);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    // Resolve each link and filter to only navigable pieces (those with $NAME)
+    const resolvedLinks = await Promise.all(
+      uniqueLinks.map(async (link) => {
+        const result = await resolveAndCheckNavigable(link.cellHandle);
+        console.log(
+          `[discoverLinks] Link ${link.link.id.slice(0, 30)}... resolved to ${
+            result.resolvedLink.id.slice(0, 30)
+          }... isNavigable: ${result.isNavigable}`,
+        );
+        // Return a new DiscoveredLink with the RESOLVED cell info
+        return {
+          original: link,
+          resolved: {
+            link: result.resolvedLink,
+            path: link.path,
+            cellHandle: result.resolvedCell,
+          } as DiscoveredLink,
+          isNavigable: result.isNavigable,
+        };
+      }),
     );
 
-    this.links = navigableChecks
+    console.log(
+      `[discoverLinks] After navigable filter: ${
+        resolvedLinks.filter((c) => c.isNavigable).length
+      } of ${resolvedLinks.length}`,
+    );
+
+    // Deduplicate again by resolved ID (different paths may resolve to same cell)
+    const resolvedSeen = new Set<string>();
+    this.links = resolvedLinks
       .filter((check) => check.isNavigable)
-      .map((check) => check.link);
+      .filter((check) => {
+        const key = `${check.resolved.link.space}:${check.resolved.link.id}`;
+        if (resolvedSeen.has(key)) return false;
+        resolvedSeen.add(key);
+        return true;
+      })
+      .map((check) => check.resolved);
 
     this.host.requestUpdate();
   }

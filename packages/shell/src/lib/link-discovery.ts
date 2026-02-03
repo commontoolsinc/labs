@@ -9,7 +9,6 @@ import {
   type CellHandle,
   isCellHandle,
   NAME,
-  UI,
 } from "@commontools/runtime-client";
 import type { NormalizedFullLink } from "@commontools/runtime-client";
 import type { DID } from "@commontools/identity";
@@ -92,6 +91,13 @@ export function traverseCellLinks(
   // Check if this value is a CellHandle (a cell reference)
   if (isCellHandle(value)) {
     const link = cellHandleToLink(value);
+    console.log(
+      `[traverseCellLinks] Found CellHandle at path "${
+        path.join(".")
+      }" -> ref.id: ${link.id.slice(0, 40)}..., ref.path: [${
+        link.path.join(",")
+      }]`,
+    );
     if (!link.id.startsWith("data:")) {
       // Found a cell reference - invoke visitor and stop traversing
       visitor(link, path, value);
@@ -102,6 +108,26 @@ export function traverseCellLinks(
   // Skip primitives
   if (!isRecord(value) && !Array.isArray(value)) {
     return;
+  }
+
+  // Debug: Log when traversing arrays to see what types we find
+  if (Array.isArray(value) && value.length > 0 && path.length <= 2) {
+    console.log(
+      `[traverseCellLinks] Array at path "${
+        path.join(".")
+      }" has ${value.length} items:`,
+    );
+    value.slice(0, 3).forEach((item, i) => {
+      console.log(
+        `  [${i}] isCellHandle: ${
+          isCellHandle(item)
+        }, type: ${typeof item}, constructor: ${item?.constructor?.name}, keys: ${
+          item && typeof item === "object"
+            ? Object.keys(item).slice(0, 5).join(",")
+            : "N/A"
+        }`,
+      );
+    });
   }
 
   // Cycle detection
@@ -157,28 +183,85 @@ export function discoverLinksFromValue(value: unknown): DiscoveredLink[] {
 }
 
 /**
- * Check if a cell is a navigable piece (has $NAME and $UI properties).
- * This determines whether the cell can be displayed as a clickable link.
+ * Result of resolving and checking a cell link.
+ */
+export type ResolvedLink = {
+  /** Whether the resolved cell is navigable (has $NAME) */
+  isNavigable: boolean;
+  /** The resolved CellHandle pointing to the actual cell (not a path reference) */
+  resolvedCell: CellHandle<unknown>;
+  /** The NormalizedFullLink for the resolved cell */
+  resolvedLink: NormalizedFullLink;
+};
+
+/**
+ * Resolve a CellHandle and check if it points to a navigable piece.
  *
- * @param cellHandle - The cell handle to check
- * @returns Promise that resolves to true if the cell is a navigable piece
+ * This function:
+ * - Resolves path-based references to get the actual cell
+ * - Checks if the resolved cell has $NAME (making it navigable)
+ * - Returns the resolved cell info for use in the UI
+ *
+ * @param cellHandle - The cell handle to resolve and check
+ * @returns Promise with resolved cell info and navigability status
+ */
+export async function resolveAndCheckNavigable(
+  cellHandle: CellHandle<unknown>,
+): Promise<ResolvedLink> {
+  const ref = cellHandle.ref();
+  console.log(
+    `[resolveAndCheckNavigable] Checking ${ref.id.slice(0, 30)}... path: [${
+      ref.path.join(",")
+    }]`,
+  );
+
+  // Resolve to get the actual cell (follows links if this is a path reference)
+  let resolvedCell = cellHandle;
+  try {
+    resolvedCell = await cellHandle.resolveAsCell();
+    const resolvedRef = resolvedCell.ref();
+    console.log(
+      `[resolveAndCheckNavigable]   Resolved to: ${
+        resolvedRef.id.slice(0, 30)
+      }... path: [${resolvedRef.path.join(",")}]`,
+    );
+  } catch (e) {
+    console.log(`[resolveAndCheckNavigable]   Failed to resolve: ${e}`);
+    // Keep original cell
+  }
+
+  const resolvedLink = cellHandleToLink(resolvedCell);
+
+  // Use a broad schema to get all properties
+  const fullCell = resolvedCell.asSchema<Record<string, unknown>>(true as any);
+  await fullCell.sync();
+  const value = fullCell.get();
+
+  console.log(
+    `[resolveAndCheckNavigable]   value type: ${typeof value}, keys: ${
+      value && typeof value === "object"
+        ? Object.keys(value).slice(0, 10).join(",")
+        : "N/A"
+    }`,
+  );
+
+  if (!value || typeof value !== "object") {
+    console.log(`[resolveAndCheckNavigable]   FAIL: not an object`);
+    return { isNavigable: false, resolvedCell, resolvedLink };
+  }
+
+  // Check for $NAME - if it has a name, it's a navigable piece
+  const hasName = NAME in value;
+  console.log(`[resolveAndCheckNavigable]   has $NAME: ${hasName}`);
+  return { isNavigable: hasName, resolvedCell, resolvedLink };
+}
+
+/**
+ * @deprecated Use resolveAndCheckNavigable instead
  */
 export async function isNavigablePiece(
   cellHandle: CellHandle<unknown>,
 ): Promise<boolean> {
-  try {
-    // Use a broad schema to get all properties
-    const fullCell = cellHandle.asSchema<Record<string, unknown>>(true as any);
-    await fullCell.sync();
-    const value = fullCell.get();
-
-    if (!value || typeof value !== "object") {
-      return false;
-    }
-
-    // Check for $NAME and $UI properties (using the symbols)
-    return NAME in value && UI in value;
-  } catch {
-    return false;
-  }
+  const result = await resolveAndCheckNavigable(cellHandle);
+  return result.isNavigable;
 }
