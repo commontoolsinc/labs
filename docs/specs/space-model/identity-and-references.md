@@ -7,7 +7,11 @@ data are represented.
 
 Draft — based on codebase investigation and discussion.
 
-## The "/" Sigil Convention
+---
+
+## Current State
+
+### The "/" Sigil Convention
 
 The system uses `"/"` as a special key to denote "this is a reference, not
 data." This convention comes from [DAG-JSON](https://ipld.io/specs/codecs/dag-json/spec/),
@@ -16,9 +20,9 @@ part of the IPLD ecosystem.
 Any object with a `"/"` key is interpreted as a reference rather than a literal
 object value.
 
-## Link Formats
+### Link Formats
 
-### Current: Sigil Links (`link@1`)
+#### Sigil Links (`link@1`)
 
 The preferred format uses a versioned tag:
 
@@ -48,7 +52,7 @@ Example:
 }
 ```
 
-### Legacy Formats (Still in Use)
+#### Legacy Formats (Still in Use)
 
 **`$alias` format** — still actively produced by recipe serialization:
 ```json
@@ -63,12 +67,10 @@ Example:
 These are marked `@deprecated` but remain in active use. The `toJSONWithLegacyAliases()`
 function still produces `$alias` structures during recipe serialization.
 
-## Entity Identifiers
+### Entity Identifiers
 
 Entities are identified by content-derived hashes. The current implementation
 uses `merkle-reference` to compute deterministic identifiers from content.
-
-### Current Usage
 
 The `refer()` function is used for:
 - Recipe ID generation: `refer({ causal: { recipeId, type: "recipe" } })`
@@ -76,7 +78,7 @@ The `refer()` function is used for:
 - Cache keys: `refer(JSON.stringify(selector)).toString()`
 - Causal chain references
 
-### Concerns with Current Approach
+#### Concerns with Current Approach
 
 The `merkle-reference` library:
 - Translates content into binary trees before hashing
@@ -84,25 +86,10 @@ The `merkle-reference` library:
 - Adds translation overhead
 - Provides IPLD/CID formatting that isn't used for interop
 
-**No actual IPFS interoperability exists** — the system doesn't retrieve content
-by CID, pin to IPFS, or verify against external sources.
+**Note**: No actual IPFS interoperability exists — the system doesn't retrieve
+content by CID, pin to IPFS, or verify against external sources.
 
-### Proposed Direction
-
-A simpler canonical hashing approach:
-- Traverse the natural data structure directly (no intermediate tree)
-- Sort object keys, preserve array order
-- Hash type tags + content in a single pass
-- No intermediate allocations
-
-The hash should reflect the logical content, not any particular encoding or
-intermediate representation.
-
-**Open Question**: What is the exact specification for canonical hashing? Need
-to define handling of all types (null, bool, int, float, string, bytes, array,
-object, references).
-
-## Internal Representation
+### Internal Representation
 
 Internally, links are normalized to `NormalizedFullLink`:
 
@@ -119,6 +106,32 @@ This is the form used for:
 - Event routing (matching streams to handlers)
 - Equality comparison (`areNormalizedLinksSame`)
 - Cell identity
+
+---
+
+## Proposed Directions
+
+### Simplified Canonical Hashing
+
+Replace `merkle-reference` with a simpler canonical hashing approach:
+- Traverse the natural data structure directly (no intermediate tree)
+- Sort object keys, preserve array order
+- Hash type tags + content in a single pass
+- No intermediate allocations
+
+The hash should reflect the logical content, not any particular encoding or
+intermediate representation.
+
+**Open Question**: What is the exact specification for canonical hashing? Need
+to define handling of all types (null, bool, int, float, string, bytes, array,
+object, references).
+
+### Legacy Format Deprecation
+
+The `$alias` and `LegacyJSONCellLink` formats should eventually be removed once
+all serialization paths produce `link@1` format.
+
+---
 
 ## Open Questions
 

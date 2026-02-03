@@ -4,14 +4,19 @@ This document specifies how reads and writes are grouped into atomic units.
 
 ## Status
 
-Draft — based on codebase investigation.
+Draft — based on codebase investigation. This document describes the current
+implementation; no major changes are currently proposed.
 
-## Overview
+---
+
+## Current State
+
+### Overview
 
 Transactions provide atomicity and consistency for cell operations. All writes
 to cells require a transaction context.
 
-## Transaction Lifecycle
+### Transaction Lifecycle
 
 1. **Open**: `runtime.edit()` creates a new transaction
 2. **Read**: `cell.withTx(tx).get()` reads within transaction context
@@ -19,7 +24,7 @@ to cells require a transaction context.
 4. **Commit**: `tx.commit()` attempts to persist changes
 5. **Abort**: `tx.abort()` discards changes (or automatic on error)
 
-## Read-Your-Writes
+### Read-Your-Writes
 
 Within a transaction, reads reflect pending writes:
 
@@ -32,12 +37,12 @@ cell.withTx(tx).get();  // returns 5, even before commit
 This allows handlers to read back values they've written within the same
 transaction.
 
-## Conflict Detection
+### Conflict Detection
 
 The system detects conflicts when the base state changes between transaction
 open and commit.
 
-### Behavior
+#### Behavior
 
 - When committing, if the underlying data has changed since the transaction
   started, the commit fails with `StorageTransactionInconsistent`
@@ -45,7 +50,7 @@ open and commit.
   changing, not on whether final values differ
 - This is optimistic concurrency control
 
-### Example
+#### Example
 
 ```
 Transaction A: open, read cell (value=1)
@@ -56,7 +61,7 @@ Transaction A: set(2), commit  // FAILS — base state changed
 Transaction A fails even though it wrote the same value, because the base state
 it read from is no longer current.
 
-## Relationship to Handlers
+### Relationship to Handlers
 
 Handlers execute within transaction context:
 - The transaction is provided to the handler function
@@ -72,7 +77,7 @@ const handler = (tx: IExtendedStorageTransaction, event: any) => {
 };
 ```
 
-## Cell Methods and Transactions
+### Cell Methods and Transactions
 
 The transaction layer uses a narrow subset of Cell methods:
 
@@ -91,6 +96,8 @@ The transaction layer uses a narrow subset of Cell methods:
 
 These ~10 methods form the core data access API. Everything else (reactivity,
 streaming) builds on top.
+
+---
 
 ## Open Questions
 

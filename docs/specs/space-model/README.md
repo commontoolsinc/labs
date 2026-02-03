@@ -4,6 +4,22 @@ This document specifies the data and execution model for Common Tools spaces,
 covering the full stack from persistent storage at the lowest layer up through
 transactions and the dataflow/reactivity system at the top.
 
+## Purpose
+
+This specification serves two purposes:
+
+1. **Document the existing design**: Capture the current de facto architecture
+   as implemented in the codebase, including behaviors that may not be
+   explicitly documented elsewhere.
+
+2. **Propose future directions**: Where the current design has known issues or
+   opportunities for simplification, describe potential improvements.
+
+Each topic document clearly separates these concerns:
+- **Current State** sections describe how the system works today
+- **Proposed** sections describe potential future directions
+- **Open Questions** highlight areas needing further investigation or decision
+
 ## Scope
 
 The specification addresses:

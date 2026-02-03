@@ -4,14 +4,19 @@ This document specifies how changes propagate through the system.
 
 ## Status
 
-Draft — based on codebase investigation.
+Draft — based on codebase investigation. This document primarily describes the
+current implementation.
 
-## Overview
+---
+
+## Current State
+
+### Overview
 
 The reactivity system connects data changes to computation. When cell values
 change, dependent handlers and computed values re-execute.
 
-## Key Insight: The Graph Is Not Persisted
+### Key Insight: The Graph Is Not Persisted
 
 The reactive dependency graph is **reconstructed at runtime**, not stored
 directly. What is persisted:
@@ -23,9 +28,9 @@ directly. What is persisted:
 From this persistent data, the system can reconstruct the dataflow graph by
 loading recipes and registering handlers.
 
-## Subscription Mechanisms
+### Subscription Mechanisms
 
-### `sink()` — Subscribe to Changes
+#### `sink()` — Subscribe to Changes
 
 For value cells:
 ```typescript
@@ -47,7 +52,7 @@ const cancel = stream.sink((event) => {
 The callback fires for each event. Implementation differs: stream sinks add to
 a local listener set rather than using scheduler-managed actions.
 
-### `pull()` — Read with Dependency Tracking
+#### `pull()` — Read with Dependency Tracking
 
 ```typescript
 const value = await cell.pull();
@@ -56,7 +61,7 @@ const value = await cell.pull();
 Creates a temporary effect action, registers dependencies, waits for idle, then
 resolves. Used for one-shot reads that should trigger if dependencies change.
 
-## Event Dispatch
+### Event Dispatch
 
 When `stream.send(event)` is called:
 
@@ -74,7 +79,7 @@ for (const [link, handler] of this.eventHandlers) {
 }
 ```
 
-## Lazy Piece Loading
+### Lazy Piece Loading
 
 When an event arrives but no handler is registered:
 
@@ -87,7 +92,7 @@ When an event arrives but no handler is registered:
 
 This enables pieces to start on-demand when events arrive.
 
-## The Source Cell Chain
+### The Source Cell Chain
 
 Cells are linked in an ownership hierarchy:
 
@@ -103,7 +108,7 @@ This chain enables:
 - Lazy piece loading (traverse to find owner)
 - Schema resolution (inherit from source)
 
-## Handler Registration
+### Handler Registration
 
 Handlers are registered when recipes run:
 
@@ -114,7 +119,7 @@ scheduler.addEventHandler(handler, streamLink, populateDependencies);
 Returns a cancel function. The handler is stored in an in-memory array, not
 persisted. On piece restart, handlers re-register.
 
-## Change Detection
+### Change Detection
 
 For value cells, change detection compares content:
 - Same value written twice → no reaction
@@ -124,9 +129,17 @@ For streams, every send triggers:
 - Handler invoked for each event
 - No content comparison
 
-**Note**: If cells are unified via timestamps (see [Cells](./cells.md)), change
-detection would naturally handle both cases via content comparison on
-timestamped data.
+---
+
+## Proposed Directions
+
+### Unified Change Detection
+
+If cells are unified via timestamps (see [Cells](./cells.md)), change detection
+would naturally handle both cases via content comparison on timestamped data.
+This would eliminate the special-casing for streams.
+
+---
 
 ## Open Questions
 

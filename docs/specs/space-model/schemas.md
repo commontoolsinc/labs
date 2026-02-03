@@ -6,12 +6,16 @@ This document specifies how data types are described and used.
 
 Draft — based on codebase investigation and design discussion.
 
-## Overview
+---
+
+## Current State
+
+### Overview
 
 Schemas describe the shape and type of data in cells. The system uses JSON
 Schema as the description language, with extensions for cell-specific behavior.
 
-## JSON Schema as Type Language
+### JSON Schema as Type Language
 
 Standard JSON Schema properties are used:
 - `type`: "string", "number", "boolean", "object", "array", "null"
@@ -20,9 +24,9 @@ Standard JSON Schema properties are used:
 - `default`: default value
 - `required`: required properties
 
-## Special Schema Properties
+### Special Schema Properties
 
-### `asCell`
+#### `asCell`
 
 Marks a property as a cell reference rather than inline data:
 
@@ -35,7 +39,7 @@ Marks a property as a cell reference rather than inline data:
 }
 ```
 
-### `asStream` (Current)
+#### `asStream`
 
 Marks a property as a stream endpoint:
 
@@ -53,10 +57,7 @@ This causes:
 - Different runtime behavior (send vs set)
 - Different change detection (every send triggers)
 
-**Note**: This flag may be unnecessary if cells are unified via timestamps.
-See discussion below.
-
-### `default`
+#### `default`
 
 Provides default values:
 
@@ -69,7 +70,7 @@ Provides default values:
 }
 ```
 
-## Schema-Driven Behavior
+### Schema-Driven Behavior
 
 Schemas influence runtime behavior:
 - **Validation**: Values are checked against schema on read/write
@@ -77,7 +78,20 @@ Schemas influence runtime behavior:
 - **Cell creation**: `asCell` properties become cell references
 - **Stream detection**: `asStream` properties get event semantics
 
-## The Case Against `asStream`
+### Schema Resolution
+
+Schemas can be:
+- Explicitly provided when creating cells
+- Inherited from source cells via `sourceCell.key("resultRef").get()?.schema`
+- Inferred from values (limited)
+
+The `asSchemaFromLinks()` method resolves schemas by following links.
+
+---
+
+## Proposed Directions
+
+### Removing `asStream`
 
 The `asStream` flag encodes type information in a schema property rather than
 in the data itself. This creates:
@@ -85,7 +99,7 @@ in the data itself. This creates:
 - Method duplication (get/set vs send)
 - Runtime brand checking (isStream)
 
-### Alternative: Timestamps in Schema
+#### Alternative: Timestamps in Schema
 
 Instead of `asStream`, events could be data that includes timestamps:
 
@@ -105,27 +119,20 @@ The "event-ness" emerges from the data shape:
 - Change detection works normally
 - No special flags or bifurcated runtime behavior
 
-### What This Eliminates
+#### What This Eliminates
 
 - `asStream` flag
 - `isStream()` / `isCell()` checks
 - Separate Stream type
 - Duplicated methods (send vs set)
 
-### What This Requires
+#### What This Requires
 
 - Convention for timestamp fields
 - Event producers include timestamps
 - Or: system adds timestamps if schema indicates it
 
-## Schema Resolution
-
-Schemas can be:
-- Explicitly provided when creating cells
-- Inherited from source cells via `sourceCell.key("resultRef").get()?.schema`
-- Inferred from values (limited)
-
-The `asSchemaFromLinks()` method resolves schemas by following links.
+---
 
 ## Open Questions
 
