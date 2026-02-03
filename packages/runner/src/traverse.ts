@@ -1497,9 +1497,9 @@ export class SchemaObjectTraverser<V extends JSONValue>
   // Traverse the specified doc with the selector.
   // The selector should have been re-rooted if needed to be relative to the
   // specified doc. This generally means that its path starts with value.
-  // The selector must have a valid (defined) schemaContext
+  // The selector must have a valid (defined) schema
   // Once we've gotten the path of our doc to match the path of our selector,
-  // we can call traverseWithSchemaContext instead.
+  // we can call traverseWithSchema instead.
   traverseWithSelector(
     doc: IMemorySpaceAttestation,
     selector: SchemaPathSelector,
