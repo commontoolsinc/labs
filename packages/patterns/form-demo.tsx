@@ -54,16 +54,12 @@ const startEdit = handler<
 >((_event, { index, people, formData, editingIndex, showModal }) => {
   const list = people.get();
   const person = list[index];
-  console.log("startEdit called:", { index, person });
   if (person) {
-    const newFormData = {
+    formData.set({
       name: person.name,
       email: person.email,
       role: person.role,
-    };
-    console.log("setting formData to:", newFormData);
-    formData.set(newFormData);
-    console.log("formData after set:", formData.get());
+    });
     editingIndex.set(index);
     showModal.set(true);
   }
@@ -92,12 +88,8 @@ const handleFormSubmit = handler<
     showModal: Writable<boolean>;
   }
 >((event, { people, editingIndex, showModal }) => {
-  console.log("handleFormSubmit called");
-  console.log("event.detail:", event?.detail);
-
   // Get values from event (passed by ct-form, survives serialization)
   const values = event?.detail?.values || {};
-  console.log("values from form:", values);
 
   // Build person from form values
   const person: Person = {
@@ -105,7 +97,6 @@ const handleFormSubmit = handler<
     email: (values.email as string) || "",
     role: (values.role as "user" | "admin") || "user",
   };
-  console.log("person to save:", person);
 
   const idx = editingIndex.get();
 
@@ -155,7 +146,6 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
 
   // Open modal in create mode
   const startCreate = action(() => {
-    console.log("startCreate called");
     // Reset form data to defaults
     formData.set({
       name: "",
@@ -164,7 +154,6 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
     });
     editingIndex.set(null);
     showModal.set(true);
-    console.log("showModal set to true");
   });
 
   return {

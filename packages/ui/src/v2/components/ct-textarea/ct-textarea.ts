@@ -9,10 +9,10 @@ import {
   defaultTheme,
   themeContext,
 } from "../theme-context.ts";
-import { type FormContext, formContext } from "../form-context.ts";
 import { type CellHandle } from "@commontools/runtime-client";
 import { stringSchema } from "@commontools/runner/schemas";
 import { createStringCellController } from "../../core/cell-controller.ts";
+import { createFormFieldController } from "../../core/form-field-controller.ts";
 
 export type TimingStrategy = "immediate" | "debounce" | "throttle" | "blur";
 
@@ -289,14 +289,14 @@ export class CTTextarea extends BaseElement {
         },
       });
 
-      // Form context integration
-      @consume({ context: formContext, subscribe: false })
-      private _formContext?: FormContext;
-
-      private _buffer: string | undefined;
-      private _initialValue: string | undefined;
-      private _lastCellValue: string | undefined;
-      private _formUnregister?: () => void;
+      // Form field controller handles buffering when in ct-form context
+      private _formField = createFormFieldController<string>(this, {
+        cellController: this._cellController,
+        validate: () => ({
+          valid: this.checkValidity(),
+          message: this.validationMessage,
+        }),
+      });
 
       constructor() {
         super();
@@ -322,21 +322,11 @@ export class CTTextarea extends BaseElement {
       }
 
       private getValue(): string {
-        // If in form context, use buffer instead of cell value
-        if (this._formContext && this._buffer !== undefined) {
-          return this._buffer;
-        }
-        return this._cellController.getValue();
+        return this._formField.getValue();
       }
 
       private setValue(newValue: string): void {
-        // If in form context, update buffer instead of cell
-        if (this._formContext) {
-          this._buffer = newValue;
-          this.requestUpdate();
-        } else {
-          this._cellController.setValue(newValue);
-        }
+        this._formField.setValue(newValue);
       }
 
       get textarea(): HTMLTextAreaElement | null {
@@ -369,7 +359,7 @@ export class CTTextarea extends BaseElement {
         applyThemeToElement(this, this.theme ?? defaultTheme);
 
         // Register with form after binding is complete
-        this._registerWithForm();
+        this._formField.register(this.name);
 
         if (this.autofocus) {
           this.textarea?.focus();
@@ -382,54 +372,9 @@ export class CTTextarea extends BaseElement {
         }
       }
 
-      private _registerWithForm() {
-        // Only register once
-        if (this._formUnregister) return;
-
-        // Only register if we have both a form context and a cell value binding
-        if (this._formContext && this.value) {
-          // Don't eagerly initialize buffer - let it stay undefined
-          // getValue() will fall back to cell value when buffer is undefined
-
-          // Register with form
-          this._formUnregister = this._formContext.registerField({
-            element: this,
-            name: this.name || undefined,
-            // Return buffer if user has typed, otherwise return current cell value
-            getValue: () => this._buffer ?? this._cellController.getValue(),
-            setValue: (v) => {
-              this._buffer = v as string;
-              this.requestUpdate();
-            },
-            flush: () => {
-              const valueToFlush = this._buffer ??
-                this._cellController.getValue();
-              this._cellController.setValue(valueToFlush);
-              this._lastCellValue = valueToFlush;
-            },
-            reset: () => {
-              // Reset buffer to undefined - will fall back to cell value
-              this._buffer = undefined;
-              this._initialValue = undefined;
-              this._lastCellValue = undefined;
-              this.requestUpdate();
-            },
-            validate: () => ({
-              valid: this.checkValidity(),
-              message: this.validationMessage,
-            }),
-          });
-        }
-      }
-
-      // Note: _syncBufferWithCell removed - with deferred init, getValue() always
-      // falls back to cell value when buffer is undefined, so no sync needed
-
       override disconnectedCallback() {
         super.disconnectedCallback();
-        // Unregister from form if registered
-        this._formUnregister?.();
-        this._formUnregister = undefined;
+        // Controllers handle cleanup automatically via ReactiveController
       }
 
       override updated(
