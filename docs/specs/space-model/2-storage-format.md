@@ -83,7 +83,7 @@ format migration without breaking identities.
 ### Stream Marker Elimination
 
 The `$stream` marker may be unnecessary if streams are unified with value cells
-via timestamp-inclusive schemas. See [Cells](./3-cells.md) for discussion of
+via timestamp-inclusive schemas. See [Cells](./4-cells.md) for discussion of
 potential unification.
 
 ## Open Questions
@@ -95,4 +95,4 @@ potential unification.
 
 ---
 
-**Previous:** [Data Model](./0-data-model.md) | **Next:** [Identity and References](./2-identity-and-references.md)
+**Previous:** [Data Model](./1-data-model.md) | **Next:** [Identity and References](./3-identity-and-references.md)

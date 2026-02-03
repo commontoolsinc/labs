@@ -149,4 +149,4 @@ streaming) builds on top.
 
 ---
 
-**Previous:** [Cells](./3-cells.md) | **Next:** [Reactivity](./5-reactivity.md)
+**Previous:** [Cells](./4-cells.md) | **Next:** [Reactivity](./6-reactivity.md)

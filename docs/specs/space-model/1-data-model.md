@@ -88,14 +88,14 @@ comes from [DAG-JSON](https://ipld.io/specs/codecs/dag-json/spec/).
 }
 ```
 
-See [Identity and References](./2-identity-and-references.md) for details.
+See [Identity and References](./3-identity-and-references.md) for details.
 
 #### Stream Marker: `{ $stream: true }`
 
 Objects with exactly `{ $stream: true }` mark stream cell locations. The marker
 persists to preserve stream identity; event payloads are ephemeral.
 
-See [Cells](./3-cells.md) for stream semantics.
+See [Cells](./4-cells.md) for stream semantics.
 
 #### Error Wrapper: `{ "@Error": {...} }`
 
@@ -250,4 +250,4 @@ intermediate representation.
 
 ---
 
-**Next:** [Storage Format](./1-storage-format.md)
+**Next:** [Storage Format](./2-storage-format.md)

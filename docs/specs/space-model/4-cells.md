@@ -107,7 +107,7 @@ Control plane metadata for piece execution:
 
 Process cells are implemented as value cells but serve a distinct purpose:
 tracking which recipe governs a piece and linking to its result. See
-[Storage Format](./1-storage-format.md) for details.
+[Storage Format](./2-storage-format.md) for details.
 
 #### Precious Data Cells
 
@@ -264,4 +264,4 @@ identity makes them content-distinct for change detection.
 
 ---
 
-**Previous:** [Identity and References](./2-identity-and-references.md) | **Next:** [Transactions](./4-transactions.md)
+**Previous:** [Identity and References](./3-identity-and-references.md) | **Next:** [Transactions](./5-transactions.md)

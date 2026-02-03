@@ -70,7 +70,7 @@ function still produces `$alias` structures during recipe serialization.
 ### Entity Identifiers
 
 Entities are identified by content-derived hashes computed via the `refer()`
-function. See [Data Model](./0-data-model.md#hashing-and-content-addressing) for
+function. See [Data Model](./1-data-model.md#hashing-and-content-addressing) for
 details on the hashing mechanism.
 
 The `refer()` function is used for:
@@ -105,7 +105,7 @@ This is the form used for:
 
 ### Simplified Canonical Hashing
 
-See [Data Model](./0-data-model.md#simplified-canonical-hashing) for the
+See [Data Model](./1-data-model.md#simplified-canonical-hashing) for the
 proposal to simplify content addressing.
 
 ### Legacy Format Deprecation
@@ -123,4 +123,4 @@ all serialization paths produce `link@1` format.
 
 ---
 
-**Previous:** [Storage Format](./1-storage-format.md) | **Next:** [Cells](./3-cells.md)
+**Previous:** [Storage Format](./2-storage-format.md) | **Next:** [Cells](./4-cells.md)

@@ -191,7 +191,7 @@ For streams, every send triggers:
 
 ### Unified Change Detection
 
-If cells are unified via timestamps (see [Cells](./3-cells.md)), change detection
+If cells are unified via timestamps (see [Cells](./4-cells.md)), change detection
 would naturally handle both cases via content comparison on timestamped data.
 This would eliminate the special-casing for streams.
 
@@ -207,4 +207,4 @@ This would eliminate the special-casing for streams.
 
 ---
 
-**Previous:** [Transactions](./4-transactions.md) | **Next:** [Schemas](./6-schemas.md)
+**Previous:** [Transactions](./5-transactions.md) | **Next:** [Schemas](./7-schemas.md)

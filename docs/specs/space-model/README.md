@@ -48,10 +48,10 @@ The specification addresses:
 
 ## Topics
 
-- [Data Model](./0-data-model.md)
-- [Storage Format](./1-storage-format.md)
-- [Identity and References](./2-identity-and-references.md)
-- [Cells](./3-cells.md)
-- [Transactions](./4-transactions.md)
-- [Reactivity](./5-reactivity.md)
-- [Schemas](./6-schemas.md)
+- [Data Model](./1-data-model.md)
+- [Storage Format](./2-storage-format.md)
+- [Identity and References](./3-identity-and-references.md)
+- [Cells](./4-cells.md)
+- [Transactions](./5-transactions.md)
+- [Reactivity](./6-reactivity.md)
+- [Schemas](./7-schemas.md)
