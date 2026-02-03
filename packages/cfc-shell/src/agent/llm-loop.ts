@@ -75,11 +75,16 @@ export interface LLMClient {
 // ---------------------------------------------------------------------------
 
 const EXEC_TOOL: ToolDef = {
-  description: "Execute a shell command in the CFC sandbox. " +
-    "The command string is interpreted by the CFC shell which supports " +
-    "pipes, redirects, variables, and common Unix commands (cat, grep, sed, " +
-    "jq, echo, etc.). Output is security-filtered based on the agent's " +
-    "visibility policy.",
+  description: "Execute a command in the CFC sandbox shell. " +
+    "This is NOT bash — only built-in commands are available: " +
+    "cat, head, tail, wc, diff, grep, sed, sort, uniq, cut, tr, jq, " +
+    "base64, echo, printf, ls, pwd, cd, cp, mv, rm, mkdir, touch, tee, " +
+    "chmod, curl, date, test, true, false, sleep, read, which, xargs. " +
+    "Pipes (|) and redirects (>, >>) work. Shell variables ($VAR) work. " +
+    "Do NOT use bash-specific syntax (if/then/fi, for/do/done, while, " +
+    "functions, $(...), [[ ]], arithmetic). Keep commands simple — one " +
+    "pipeline per call. If a command fails, simplify rather than adding " +
+    "bash scripting.",
   inputSchema: {
     type: "object",
     properties: {
