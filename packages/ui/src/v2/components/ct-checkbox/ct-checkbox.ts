@@ -193,6 +193,7 @@ export class CTCheckbox extends BaseElement {
 
     private _buffer: boolean | undefined;
     private _initialValue: boolean | undefined;
+    private _lastCellValue: boolean | undefined;
     private _formUnregister?: () => void;
 
     constructor() {
@@ -245,6 +246,8 @@ export class CTCheckbox extends BaseElement {
         this._initialValue = this._checkedCellController.getValue();
         // Initialize buffer with initial value
         this._buffer = this._initialValue;
+        // Track the last known cell value to detect external changes
+        this._lastCellValue = this._initialValue;
 
         // Register with form
         this._formUnregister = this._formContext.registerField({
@@ -256,6 +259,8 @@ export class CTCheckbox extends BaseElement {
           },
           flush: () => {
             this._checkedCellController.setValue(this._buffer ?? false);
+            // Update last known value so we don't think this was an external change
+            this._lastCellValue = this._buffer;
           },
           reset: () => {
             this._buffer = this._initialValue;
@@ -266,6 +271,20 @@ export class CTCheckbox extends BaseElement {
             message: undefined,
           }),
         });
+      }
+    }
+
+    /**
+     * Sync buffer with cell value when it changes externally.
+     */
+    private _syncBufferWithCell() {
+      if (!this._formContext) return;
+
+      const currentCellValue = this._checkedCellController.getValue();
+      if (currentCellValue !== this._lastCellValue) {
+        this._buffer = currentCellValue;
+        this._initialValue = currentCellValue;
+        this._lastCellValue = currentCellValue;
       }
     }
 
@@ -296,6 +315,9 @@ export class CTCheckbox extends BaseElement {
       changedProperties: Map<string | number | symbol, unknown>,
     ) {
       super.updated(changedProperties);
+
+      // Sync buffer with cell when cell value changes externally (e.g., edit mode)
+      this._syncBufferWithCell();
 
       if (changedProperties.has("disabled")) {
         this.tabIndex = this.disabled ? -1 : 0;
