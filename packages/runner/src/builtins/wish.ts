@@ -9,13 +9,9 @@ import { favoriteListSchema } from "@commontools/home-schemas";
 import { HttpProgramResolver } from "@commontools/js-compiler";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
-import type { Runtime } from "../runtime.ts";
-import type {
-  IExtendedStorageTransaction,
-  MemorySpace,
-} from "../storage/interface.ts";
-import type { EntityId } from "../create-ref.ts";
-import { type JSONSchema, type Recipe, UI } from "../builder/types.ts";
+import { type Runtime, spaceCellSchema } from "../runtime.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { type JSONSchema, NAME, type Recipe, UI } from "../builder/types.ts";
 import { getRecipeEnvironment } from "../env.ts";
 
 const WISH_TSX_PATH = getRecipeEnvironment().apiUrl +
@@ -23,37 +19,18 @@ const WISH_TSX_PATH = getRecipeEnvironment().apiUrl +
 const SUGGESTION_TSX_PATH = getRecipeEnvironment().apiUrl +
   "api/patterns/system/suggestion.tsx";
 
+// Schema for mentionable array - items are cell references (asCell: true)
+// Don't restrict properties so .get() returns full cell data
+const mentionableListSchema = {
+  type: "array",
+  items: { asCell: true },
+} as const satisfies JSONSchema;
+
 class WishError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "WishError";
   }
-}
-
-type WishResolution = {
-  entityId: EntityId;
-  path?: readonly string[];
-};
-
-const WISH_TARGETS: Partial<Record<WishTag, WishResolution>> = {};
-
-function resolveWishTarget(
-  resolution: WishResolution,
-  runtime: Runtime,
-  space: MemorySpace,
-  tx: IExtendedStorageTransaction,
-): Cell<any> {
-  const cell = runtime.getCellFromEntityId(
-    space,
-    resolution.entityId,
-    resolution.path,
-    undefined,
-    tx,
-  );
-  if (!cell) {
-    throw new WishError("Failed to resolve wish target");
-  }
-  return cell;
 }
 
 export type ParsedWishTarget = {
@@ -86,11 +63,24 @@ export function parseWishTarget(target: string): ParsedWishTarget {
   throw new WishError(`Wish path target "${target}" is not recognized.`);
 }
 
+/**
+ * Check if a tag string contains a hashtag matching the search term.
+ * Extracts all #hashtags from the tag and checks for exact match.
+ */
+function tagMatchesHashtag(
+  tag: string | undefined,
+  searchTermWithoutHash: string,
+): boolean {
+  const hashtags = tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ?? [];
+  return [...hashtags].some((m) => m[1] === searchTermWithoutHash);
+}
+
 type WishContext = {
   runtime: Runtime;
   tx: IExtendedStorageTransaction;
   parentCell: Cell<any>;
   spaceCell?: Cell<unknown>;
+  scope?: ("~" | "." | string)[];
 };
 
 type BaseResolution = {
@@ -103,7 +93,7 @@ function getSpaceCell(ctx: WishContext): Cell<unknown> {
     ctx.spaceCell = ctx.runtime.getCell(
       ctx.parentCell.space,
       ctx.parentCell.space,
-      undefined,
+      spaceCellSchema,
       ctx.tx,
     );
   }
@@ -126,10 +116,235 @@ function formatTarget(parsed: ParsedWishTarget): string {
     (parsed.path.length > 0 ? "/" + parsed.path.join("/") : "");
 }
 
-function resolveBase(
+/**
+ * Search favorites in home space for pieces matching a hashtag.
+ */
+function searchFavoritesForHashtag(
+  ctx: WishContext,
+  searchTermWithoutHash: string,
+  pathPrefix: string[],
+): BaseResolution[] {
+  const userDID = ctx.runtime.userIdentityDID;
+  if (!userDID) return [];
+
+  const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
+  const favoritesCell = homeSpaceCell
+    .key("defaultPattern")
+    .key("favorites")
+    .asSchema(favoriteListSchema);
+  const favorites = favoritesCell.get() || [];
+
+  const matches = favorites.filter((entry) => {
+    // Check userTags first (stored without # prefix)
+    const userTags = entry.userTags ?? [];
+    for (const t of userTags) {
+      if (t.toLowerCase() === searchTermWithoutHash) return true;
+    }
+    // Search schema tag for hashtags
+    return tagMatchesHashtag(entry.tag, searchTermWithoutHash);
+  });
+
+  return matches.map((match) => ({ cell: match.cell, pathPrefix }));
+}
+
+/**
+ * Search mentionables in current space for pieces matching a hashtag.
+ */
+function searchMentionablesForHashtag(
+  ctx: WishContext,
+  searchTermWithoutHash: string,
+  pathPrefix: string[],
+): BaseResolution[] {
+  const mentionableCell = getSpaceCell(ctx)
+    .key("defaultPattern")
+    .key("backlinksIndex")
+    .key("mentionable")
+    .resolveAsCell()
+    .asSchema(mentionableListSchema);
+  // Sync to ensure data is loaded
+  mentionableCell.sync();
+  const mentionables = (mentionableCell.get() || []) as Cell<any>[];
+
+  const matches = mentionables.filter((pieceCell: Cell<any>) => {
+    if (!pieceCell) return false;
+
+    const piece = pieceCell.get();
+    if (!piece) return false;
+
+    // Check [NAME] field for exact match
+    const name = piece[NAME]?.toLowerCase() ?? "";
+    if (name === searchTermWithoutHash) return true;
+
+    // Compute schema tag lazily from the cell
+    let tag: string | undefined;
+    try {
+      const schema = (pieceCell as any)?.resolveAsCell()?.asSchema(undefined)
+        .asSchemaFromLinks?.()?.schema;
+      if (typeof schema === "object") {
+        tag = JSON.stringify(schema);
+      }
+    } catch {
+      // Schema not available yet
+    }
+
+    return tagMatchesHashtag(tag, searchTermWithoutHash);
+  });
+
+  return matches.map((match) => ({ cell: match, pathPrefix }));
+}
+
+/**
+ * Search for pieces by hashtag across favorites and/or mentionables based on scope.
+ */
+function searchByHashtag(
   parsed: ParsedWishTarget,
   ctx: WishContext,
 ): BaseResolution[] {
+  const searchTerm = parsed.key.toLowerCase();
+  const searchTermWithoutHash = searchTerm.slice(1);
+
+  // Determine what to search based on scope
+  // Default (no scope) = favorites only for backward compatibility
+  const searchFavorites = !ctx.scope || ctx.scope.includes("~");
+  const searchMentionables = ctx.scope?.includes(".");
+
+  const allMatches: BaseResolution[] = [];
+
+  if (searchFavorites) {
+    allMatches.push(
+      ...searchFavoritesForHashtag(ctx, searchTermWithoutHash, parsed.path),
+    );
+  }
+
+  if (searchMentionables) {
+    allMatches.push(
+      ...searchMentionablesForHashtag(ctx, searchTermWithoutHash, parsed.path),
+    );
+  }
+
+  if (allMatches.length === 0) {
+    const scopeDesc = searchFavorites && searchMentionables
+      ? "favorites or mentionables"
+      : searchMentionables
+      ? "mentionables"
+      : "favorites";
+    throw new WishError(`No ${scopeDesc} found matching "${searchTerm}"`);
+  }
+
+  return allMatches;
+}
+
+/**
+ * Resolve well-known targets that map to home space paths.
+ */
+function resolveHomeSpaceTarget(
+  parsed: ParsedWishTarget,
+  ctx: WishContext,
+): BaseResolution[] | null {
+  switch (parsed.key) {
+    case "#favorites": {
+      const userDID = ctx.runtime.userIdentityDID;
+      if (!userDID) {
+        throw new WishError("User identity DID not available for #favorites");
+      }
+      const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
+
+      // No path = return favorites list
+      if (parsed.path.length === 0) {
+        return [{
+          cell: homeSpaceCell,
+          pathPrefix: ["defaultPattern", "favorites"],
+        }];
+      }
+
+      // Path provided = search by tag (legacy behavior)
+      const searchTerm = parsed.path[0].toLowerCase();
+      const favoritesCell = homeSpaceCell
+        .key("defaultPattern")
+        .key("favorites")
+        .asSchema(favoriteListSchema);
+      const favorites = favoritesCell.get() || [];
+
+      const match = favorites.find((entry) => {
+        const userTags = entry.userTags ?? [];
+        for (const t of userTags) {
+          if (t.toLowerCase().includes(searchTerm)) return true;
+        }
+
+        let tag = entry.tag;
+        if (!tag) {
+          try {
+            const { schema } = entry.cell.asSchemaFromLinks()
+              .getAsNormalizedFullLink();
+            if (schema !== undefined) {
+              tag = JSON.stringify(schema);
+            }
+          } catch {
+            // Schema not available yet
+          }
+        }
+        return tag?.toLowerCase().includes(searchTerm);
+      });
+
+      if (!match) {
+        throw new WishError(`No favorite found matching "${searchTerm}"`);
+      }
+
+      return [{
+        cell: match.cell,
+        pathPrefix: parsed.path.slice(1),
+      }];
+    }
+
+    case "#journal": {
+      const userDID = ctx.runtime.userIdentityDID;
+      if (!userDID) {
+        throw new WishError("User identity DID not available for #journal");
+      }
+      return [{
+        cell: ctx.runtime.getHomeSpaceCell(ctx.tx),
+        pathPrefix: ["defaultPattern", "journal"],
+      }];
+    }
+
+    case "#learned": {
+      const userDID = ctx.runtime.userIdentityDID;
+      if (!userDID) {
+        throw new WishError("User identity DID not available for #learned");
+      }
+      return [{
+        cell: ctx.runtime.getHomeSpaceCell(ctx.tx),
+        pathPrefix: ["defaultPattern", "learned"],
+      }];
+    }
+
+    case "#profile": {
+      const userDID = ctx.runtime.userIdentityDID;
+      if (!userDID) {
+        throw new WishError("User identity DID not available for #profile");
+      }
+      const learnedCell = ctx.runtime.getHomeSpaceCell(ctx.tx)
+        .key("defaultPattern")
+        .key("learned")
+        .resolveAsCell();
+      return [{
+        cell: learnedCell,
+        pathPrefix: ["summary"],
+      }];
+    }
+
+    default:
+      return null;
+  }
+}
+
+/**
+ * Resolve well-known targets that map to current space paths.
+ */
+function resolveSpaceTarget(
+  parsed: ParsedWishTarget,
+  ctx: WishContext,
+): BaseResolution[] | null {
   switch (parsed.key) {
     case "/":
       return [{ cell: getSpaceCell(ctx) }];
@@ -150,67 +365,6 @@ function resolveBase(
         cell: getSpaceCell(ctx),
         pathPrefix: ["defaultPattern", "recentPieces"],
       }];
-    case "#favorites": {
-      // Favorites always come from the HOME space (user identity DID)
-      const userDID = ctx.runtime.userIdentityDID;
-      if (!userDID) {
-        throw new WishError("User identity DID not available for #favorites");
-      }
-      const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
-
-      // No path = return favorites list through defaultPattern
-      if (parsed.path.length === 0) {
-        return [{
-          cell: homeSpaceCell,
-          pathPrefix: ["defaultPattern", "favorites"],
-        }];
-      }
-
-      // Path provided = search by tag
-      const searchTerm = parsed.path[0].toLowerCase();
-      const favoritesCell = homeSpaceCell.key("defaultPattern").key("favorites")
-        .asSchema(
-          favoriteListSchema,
-        );
-      const favorites = favoritesCell.get() || [];
-
-      // Case-insensitive search in userTags or tag field.
-      // If tag is empty, try to compute it lazily from the cell's schema.
-      const match = favorites.find((entry) => {
-        // Check userTags first
-        const userTags = entry.userTags ?? [];
-        for (const t of userTags) {
-          if (t.toLowerCase().includes(searchTerm)) return true;
-        }
-
-        // Fall back to tag field
-        let tag = entry.tag;
-
-        // Fallback: compute tag lazily if not stored
-        if (!tag) {
-          try {
-            const { schema } = entry.cell.asSchemaFromLinks()
-              .getAsNormalizedFullLink();
-            if (schema !== undefined) {
-              tag = JSON.stringify(schema);
-            }
-          } catch {
-            // Schema not available yet
-          }
-        }
-
-        return tag?.toLowerCase().includes(searchTerm);
-      });
-
-      if (!match) {
-        throw new WishError(`No favorite found matching "${searchTerm}"`);
-      }
-
-      return [{
-        cell: match.cell,
-        pathPrefix: parsed.path.slice(1), // remaining path after search term
-      }];
-    }
     case "#now": {
       if (parsed.path.length > 0) {
         throw new WishError(
@@ -225,126 +379,37 @@ function resolveBase(
       );
       return [{ cell: nowCell }];
     }
-    case "#journal": {
-      // Journal always comes from the HOME space (user identity DID)
-      const userDID = ctx.runtime.userIdentityDID;
-      if (!userDID) {
-        throw new WishError("User identity DID not available for #journal");
-      }
-
-      return [{
-        cell: ctx.runtime.getHomeSpaceCell(ctx.tx),
-        pathPrefix: ["defaultPattern", "journal"],
-      }];
-    }
-    case "#learned": {
-      // Learned profile data comes from the HOME space (user identity DID)
-      const userDID = ctx.runtime.userIdentityDID;
-      if (!userDID) {
-        throw new WishError("User identity DID not available for #learned");
-      }
-
-      return [{
-        cell: ctx.runtime.getHomeSpaceCell(ctx.tx),
-        pathPrefix: ["defaultPattern", "learned"],
-      }];
-    }
-    case "#profile": {
-      // Profile returns just the summary text (the textual profile)
-      const userDID = ctx.runtime.userIdentityDID;
-      if (!userDID) {
-        throw new WishError("User identity DID not available for #profile");
-      }
-
-      // First resolve to the learned cell, then access summary
-      // This ensures the intermediate cell is resolved before accessing nested property
-      const learnedCell = ctx.runtime.getHomeSpaceCell(ctx.tx)
-        .key("defaultPattern")
-        .key("learned")
-        .resolveAsCell();
-
-      return [{
-        cell: learnedCell,
-        pathPrefix: ["summary"],
-      }];
-    }
-    default: {
-      // Check if it's a well-known target
-      const resolution = WISH_TARGETS[parsed.key];
-      if (resolution) {
-        const baseCell = resolveWishTarget(
-          resolution,
-          ctx.runtime,
-          ctx.parentCell.space,
-          ctx.tx,
-        );
-        return [{ cell: baseCell }];
-      }
-
-      // Hash tag: Look for exact matches in favorites.
-      if (parsed.key.startsWith("#")) {
-        // Unknown tag = search favorites by tag
-        const userDID = ctx.runtime.userIdentityDID;
-        if (!userDID) {
-          throw new WishError(
-            "User identity DID not available for favorites search",
-          );
-        }
-
-        const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
-        const favoritesCell = homeSpaceCell.key("defaultPattern").key(
-          "favorites",
-        )
-          .asSchema(
-            favoriteListSchema,
-          );
-        const favorites = favoritesCell.get() || [];
-
-        // Match hash tags in userTags or tag field (the schema), all lowercase.
-        // If tag is empty, try to compute it lazily from the cell's schema.
-        // This handles existing favorites that were saved before schema was synced.
-        const searchTerm = parsed.key.toLowerCase(); // e.g., "#my-tag"
-        const searchTermWithoutHash = searchTerm.slice(1); // e.g., "my-tag"
-        const matches = favorites.filter((entry) => {
-          // Check userTags first (stored without # prefix)
-          const userTags = entry.userTags ?? [];
-          for (const t of userTags) {
-            if (t.toLowerCase() === searchTermWithoutHash) return true;
-          }
-
-          // Fall back to tag field (schema-based hashtag search)
-          let tag = entry.tag;
-
-          // Fallback: compute tag lazily if not stored
-          if (!tag) {
-            try {
-              const { schema } = entry.cell.asSchemaFromLinks()
-                .getAsNormalizedFullLink();
-              if (schema !== undefined) {
-                tag = JSON.stringify(schema);
-              }
-            } catch {
-              // Schema not available yet
-            }
-          }
-
-          const hashtags = tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ?? [];
-          return [...hashtags].some((m) => m[1] === searchTermWithoutHash);
-        });
-
-        if (matches.length === 0) {
-          throw new WishError(`No favorite found matching "${searchTerm}"`);
-        }
-
-        return matches.map((match) => ({
-          cell: match.cell,
-          pathPrefix: parsed.path,
-        }));
-      }
-
-      throw new WishError(`Wish target "${parsed.key}" is not recognized.`);
-    }
+    default:
+      return null;
   }
+}
+
+/**
+ * Main resolution function - dispatches to appropriate resolver based on target type.
+ *
+ * Resolution paths:
+ * 1. Well-known space targets (/, #default, #mentionable, #allPieces, #recent, #now)
+ * 2. Well-known home space targets (#favorites, #journal, #learned, #profile)
+ * 3. Hashtag search (arbitrary #tags in favorites/mentionables)
+ */
+function resolveBase(
+  parsed: ParsedWishTarget,
+  ctx: WishContext,
+): BaseResolution[] {
+  // Try space targets first (most common)
+  const spaceResult = resolveSpaceTarget(parsed, ctx);
+  if (spaceResult) return spaceResult;
+
+  // Try home space targets
+  const homeResult = resolveHomeSpaceTarget(parsed, ctx);
+  if (homeResult) return homeResult;
+
+  // Hashtag search
+  if (parsed.key.startsWith("#")) {
+    return searchByHashtag(parsed, ctx);
+  }
+
+  throw new WishError(`Wish target "${parsed.key}" is not recognized.`);
 }
 
 // fetchWishPattern runs at runtime scope, shared across all wish invocations
@@ -595,8 +660,7 @@ export function wish(
       }
       return;
     } else if (typeof targetValue === "object") {
-      const { query, path, schema, context, scope: _scope } =
-        targetValue as WishParams;
+      const { query, path, schema, context, scope } = targetValue as WishParams;
 
       if (query === undefined || query === null || query === "") {
         const errorMsg = `Wish target "${
@@ -616,7 +680,7 @@ export function wish(
             key: query as WishTag,
             path: path ?? [],
           };
-          const ctx: WishContext = { runtime, tx, parentCell };
+          const ctx: WishContext = { runtime, tx, parentCell, scope };
           const baseResolutions = resolveBase(parsed, ctx);
           const resultCells = baseResolutions.map((baseResolution) => {
             const combinedPath = baseResolution.pathPrefix
