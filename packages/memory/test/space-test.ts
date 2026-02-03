@@ -1193,7 +1193,7 @@ test("list single fact with schema query", DB, async (session) => {
   const sampleSchemaSelector: SchemaSelector = {
     [doc]: {
       [the]: {
-        _: { path: ["v"], schemaContext: { schema: { "type": "number" } } },
+        _: { path: ["v"], schema: { "type": "number" } },
       },
     },
   };
@@ -1307,14 +1307,12 @@ test(
         [the]: {
           _: {
             path: ["address"],
-            schemaContext: {
-              schema: {
-                "type": "object",
-                "properties": {
-                  "name": { "type": "string" },
-                  "street": { "type": "string" },
-                  "city": { "type": "string" },
-                },
+            schema: {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "street": { "type": "string" },
+                "city": { "type": "string" },
               },
             },
           },
@@ -1436,15 +1434,13 @@ test(
         [the]: {
           _: {
             path: ["address"],
-            schemaContext: {
-              schema: {
-                "type": "object",
-                "properties": {
-                  "street": { "type": "string" },
-                  "city": { "type": "string" },
-                },
-                "additionalProperties": false,
+            schema: {
+              "type": "object",
+              "properties": {
+                "street": { "type": "string" },
+                "city": { "type": "string" },
               },
+              "additionalProperties": false,
             },
           },
         },
@@ -1575,7 +1571,7 @@ test(
         [the]: {
           _: {
             path: ["emergency_contacts", "0", "first"],
-            schemaContext: { schema: { "type": "string" } },
+            schema: { "type": "string" },
           },
         },
       },
@@ -1662,7 +1658,7 @@ test(
     const schemaSelector: SchemaSelector = {
       [doc2]: {
         [the]: {
-          _: { path: ["left"], schemaContext: { schema } },
+          _: { path: ["left"], schema },
         },
       },
     };
@@ -1747,7 +1743,7 @@ test(
     const schemaSelector: SchemaSelector = {
       [doc2]: {
         [the]: {
-          _: { path: ["left"], schemaContext: { schema } },
+          _: { path: ["left"], schema },
         },
       },
     };
@@ -1843,16 +1839,14 @@ test(
         [the]: {
           _: {
             path: ["offices", "main"],
-            schemaContext: {
-              schema: {
-                "type": "object",
-                "properties": {
-                  "name": { "type": "string" },
-                  "street": { "type": "string" },
-                  "city": { "type": "string" },
-                },
-                "required": ["name", "street", "city"],
+            schema: {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "street": { "type": "string" },
+                "city": { "type": "string" },
               },
+              "required": ["name", "street", "city"],
             },
           },
         },
@@ -1887,7 +1881,7 @@ test(
         selectSchema: {
           [doc]: {
             [the]: {
-              _: { path: [], schemaContext: { schema: {} } },
+              _: { path: [], schema: {} },
             },
           },
         },
@@ -2002,7 +1996,7 @@ test(
         [the]: {
           _: {
             path: [],
-            schemaContext: { schema: { "type": "object", "properties": {} } },
+            schema: { "type": "object", "properties": {} },
           },
         },
       },
@@ -2037,7 +2031,7 @@ test(
         selectSchema: {
           [doc1]: {
             [the]: {
-              _: { path: [], schemaContext: { schema: {} } },
+              _: { path: [], schema: {} },
             },
           },
         },
@@ -2066,9 +2060,7 @@ test(
             [the]: {
               _: {
                 path: [],
-                schemaContext: {
-                  schema: { type: "object", additionalProperties: true },
-                },
+                schema: { type: "object", additionalProperties: true },
               },
             },
           },
@@ -2154,7 +2146,7 @@ test(
     const schemaSelector: SchemaSelector = {
       [doc3]: {
         [the]: {
-          _: { path: [], schemaContext: { schema: pieceListSchema } },
+          _: { path: [], schema: pieceListSchema },
         },
       },
     };

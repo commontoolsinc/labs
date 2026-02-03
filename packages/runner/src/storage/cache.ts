@@ -688,9 +688,7 @@ export class Replica {
       //     [the]: {
       //       SelectAllString: {
       //         path: [],
-      //         schemaContext: {
-      //           schema: SchemaNone,
-      //         },
+      //         schema: SchemaNone,
       //       },
       //     },
       //   },
@@ -772,10 +770,7 @@ export class Replica {
       logger.debug("pull-doc", () => [`Pulling doc: ${address.id}`]);
 
       // If we don't have a schema, use SchemaNone, which will only fetch the specified object
-      setSelector(schemaSelector, address.id, address.type, "_", {
-        path: selector.path,
-        schemaContext: { schema: selector.schema },
-      });
+      setSelector(schemaSelector, address.id, address.type, "_", selector);
       // Since we're accessing the entire document, we should base our
       // classification on the fullSchema
       const fullSchema = selector.schema ?? false;
@@ -2232,7 +2227,7 @@ export const getChanges = (
   return changes;
 };
 
-// Given an Assert statement with labels, return a SchemaContext with the ifc tags
+// Given an Assert statement with labels, return a Schema with the ifc tags
 const _generateSchemaFromLabels = (
   change: Assert | Retract | Claim,
 ): JSONSchema | undefined => {

@@ -854,23 +854,17 @@ export type SchemaQuery<Space extends MemorySpace = MemorySpace> = Invocation<
 //     "application/json": {
 //       _: {
 //         path: [],
-//         schemaContext: {
-//           schema: { "type": "object" },
-//           rootSchema: { "type": "object" }
-//         }
+//         schema: { "type": "object" },
 //       }
 //     }
 //   }
 // }
 
-export type SchemaContextPathSelector = {
-  path: readonly string[];
-  schemaContext: { schema: JSONSchema };
-};
-
+// The SchemaPathSelector objects contained by the SchemaSelector have their
+// path relative to fact.is.value, unlike standard SchemaPathSelectors.
 export type SchemaSelector = Select<
   URI,
-  Select<MIME, Select<CauseString, SchemaContextPathSelector>>
+  Select<MIME, Select<CauseString, SchemaPathSelector>>
 >;
 
 export type Operation =

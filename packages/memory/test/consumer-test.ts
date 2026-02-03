@@ -346,7 +346,7 @@ test("list multiple facts using schema query", store, async (session) => {
     selectSchema: {
       _: {
         [the]: {
-          _: { path: [], schemaContext: { schema: true } },
+          _: { path: [], schema: true },
         },
       },
     },
@@ -775,7 +775,7 @@ test(
       selectSchema: {
         [doc]: {
           "application/json": {
-            _: { path: [], schemaContext: { schema: VersionSchema } },
+            _: { path: [], schema: VersionSchema },
           },
         },
       },
@@ -815,7 +815,7 @@ test(
       selectSchema: {
         [doc]: {
           "application/json": {
-            _: { path: [], schemaContext: { schema: VersionSchema } },
+            _: { path: [], schema: VersionSchema },
           },
         },
       },
@@ -924,7 +924,7 @@ test(
         [the]: {
           _: {
             path: ["offices", "main"],
-            schemaContext: { schema: AddressSchema },
+            schema: AddressSchema,
           },
         },
       },
@@ -1036,7 +1036,7 @@ test(
         [the]: {
           _: {
             path: ["offices", "main"],
-            schemaContext: { schema: AddressSchema },
+            schema: AddressSchema,
           },
         },
       },
@@ -1165,7 +1165,7 @@ test(
 
     const selector = {
       path: [],
-      schemaContext: { schema: VersionSchema },
+      schema: VersionSchema,
     };
 
     const v1 = Fact.assert({
@@ -1277,7 +1277,7 @@ test(
 
     const selector = {
       path: [],
-      schemaContext: { schema: VersionSchema },
+      schema: VersionSchema,
     };
 
     const v1 = Fact.assert({
@@ -1347,7 +1347,7 @@ test(
       selectSchema: {
         _: {
           [the]: {
-            _: { path: [], schemaContext: { schema: true } },
+            _: { path: [], schema: true },
           },
         },
       },
@@ -1366,7 +1366,7 @@ test(
       selectSchema: {
         _: {
           [the]: {
-            _: { path: [], schemaContext: { schema: true } },
+            _: { path: [], schema: true },
           },
         },
       },
@@ -1385,7 +1385,7 @@ test(
       selectSchema: {
         _: {
           [the]: {
-            _: { path: [], schemaContext: { schema: true } },
+            _: { path: [], schema: true },
           },
         },
       },

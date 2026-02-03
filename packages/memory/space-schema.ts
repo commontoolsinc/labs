@@ -176,7 +176,7 @@ export const selectSchema = <Space extends MemorySpace>(
   for (
     const selectorEntry of iterateSelector(
       selectSchema,
-      { path: [], schemaContext: { schema: true } },
+      { path: [], schema: true },
     )
   ) {
     const factSelector = {
@@ -193,7 +193,7 @@ export const selectSchema = <Space extends MemorySpace>(
       // to the value, but our traversal wants them to be relative to the
       // fact.is, so adjust the paths.
       const selector: SchemaPathSelector = {
-        schema: selectorEntry.value.schemaContext?.schema,
+        schema: selectorEntry.value.schema,
         path: ["value", ...selectorEntry.value.path],
       };
       // Then filter the facts by the associated schemas, which will dereference
@@ -247,7 +247,7 @@ export const selectSchema = <Space extends MemorySpace>(
   for (
     const factSelector of iterateSelector(
       selectSchema,
-      { path: [], schemaContext: { schema: true } },
+      { path: [], schema: true },
     )
   ) {
     if (

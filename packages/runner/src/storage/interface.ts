@@ -172,7 +172,7 @@ export interface IStorageProvider {
    * Sync a value from storage. Use `get()` to retrieve the value.
    *
    * @param uri - uri of the entity to sync.
-   * @param selector - The SchemaPathSelector with the path and schemaContext that determines what to sync.
+   * @param selector - The SchemaPathSelector with the path and schema that determines what to sync.
    * @returns Promise that resolves when the value is synced.
    */
   sync(

@@ -32,7 +32,6 @@ import type {
   Reference,
   Result,
   Revision,
-  SchemaContextPathSelector,
   SchemaPathSelector,
   SchemaQuery,
   SchemaQueryArgs,
@@ -385,12 +384,12 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
   private static asSelectSchema(queryArg: QueryArgs): SchemaQueryArgs {
     const selectSchema: Select<
       URI,
-      Select<MIME, Select<CauseString, SchemaContextPathSelector>>
+      Select<MIME, Select<CauseString, SchemaPathSelector>>
     > = {};
     for (const [of, attributes] of Object.entries(queryArg.select)) {
       const entityEntry: Select<
         MIME,
-        Select<CauseString, SchemaContextPathSelector>
+        Select<CauseString, SchemaPathSelector>
       > = {};
       selectSchema[of as URI | SelectAll] = entityEntry;
       let attrEntries = Object.entries(attributes);
@@ -399,19 +398,17 @@ class MemorySpaceConsumerSession<Space extends MemorySpace>
         attrEntries = [["_", {}]];
       }
       for (const [the, causes] of attrEntries) {
-        const attributeEntry: Select<CauseString, SchemaContextPathSelector> =
-          {};
+        const attributeEntry: Select<CauseString, SchemaPathSelector> = {};
         entityEntry[the as MIME | SelectAll] = attributeEntry;
         // A Selector may not have a cause, but SchemaSelector needs all three levels
         let causeEntries = Object.entries(causes);
         if (causeEntries.length === 0) {
           causeEntries = [["_", {}]];
         }
-        for (const [cause, selector] of causeEntries) {
-          const causeEntry: SchemaContextPathSelector = {
+        for (const [cause, _selector] of causeEntries) {
+          const causeEntry: SchemaPathSelector = {
             path: [],
-            schemaContext: { schema: false },
-            ...selector.is ? { is: selector.is } : {},
+            schema: false,
           };
           attributeEntry[cause as CauseString | SelectAll] = causeEntry;
         }
@@ -612,13 +609,13 @@ class QueryView<
     return subscription;
   }
 
-  // Get the schema context used to fetch the specified fact.
-  // If the fact was included from another fact, it will not have a schemaContext.
+  // Get the SchemaPathSelector used to fetch the specified fact.
+  // If the fact was included from another fact, it will not have a schema.
   getSchemaPathSelector(fact: Revision<Fact>): SchemaPathSelector | undefined {
     const factSelector = this.selector as SchemaSelector;
     const value = getSelectorRevision(factSelector, fact.of, fact.the);
     return value !== undefined
-      ? { path: value?.path, schema: value?.schemaContext.schema }
+      ? { path: value?.path, schema: value?.schema }
       : undefined;
   }
 }
