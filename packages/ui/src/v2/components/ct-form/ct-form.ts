@@ -176,11 +176,17 @@ export class CTForm extends BaseElement {
   }
 
   private handleSubmit(event: Event): void {
+    console.log("ct-form handleSubmit called", event);
     // Prevent default form submission
     event.preventDefault();
     event.stopPropagation();
 
-    if (!this._form) return;
+    if (!this._form) {
+      console.log("ct-form: _form is null");
+      return;
+    }
+    console.log("ct-form: _form is", this._form);
+    console.log("ct-form: registered fields count:", this._fields.size);
 
     // Validate all registered fields
     const errors: Array<{ element: HTMLElement; message?: string }> = [];
@@ -219,6 +225,7 @@ export class CTForm extends BaseElement {
       }
     }
 
+    console.log("ct-form: about to emit ct-submit");
     // Emit custom event with form data
     const submitted = this.emit("ct-submit", {
       data,

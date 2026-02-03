@@ -98,9 +98,11 @@ export type InputMode =
   | "url";
 
 // Common validation patterns for different input types
+// Note: Patterns must be compatible with both legacy and Unicode Sets (/v flag) regex modes
+// In /v mode, hyphens in character classes must be at start/end or escaped
 export const INPUT_PATTERNS = {
-  // Email pattern (basic validation)
-  email: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}",
+  // Email pattern (basic validation) - hyphen at end of character class for /v compatibility
+  email: "[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}",
   // URL pattern (http/https)
   url: "https?://.+",
   // US Phone pattern (various formats)

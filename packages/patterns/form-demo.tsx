@@ -101,7 +101,9 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
 
   // Submit handler - called after form validation passes and fields are flushed
   const handleSubmit = action(() => {
+    console.log("handleSubmit called");
     const data = formData.get();
+    console.log("form data:", data);
     const idx = editingIndex.get();
 
     if (idx !== null) {
@@ -129,6 +131,7 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
 
   // Open modal in create mode
   const startCreate = action(() => {
+    console.log("startCreate called");
     // Reset form data to defaults
     formData.set({
       name: "",
@@ -137,6 +140,7 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
     });
     editingIndex.set(null);
     showModal.set(true);
+    console.log("showModal set to true");
   });
 
   return {
