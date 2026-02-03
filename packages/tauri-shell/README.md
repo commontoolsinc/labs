@@ -9,20 +9,20 @@ This package provides Android and iOS mobile apps that serve the Common Tools Sh
 - **Android**: Uses Credential Manager API (Android 14+)
 - **iOS**: Uses ASAuthorizationController (iOS 16+)
 
-## Prerequisites
+## Quick Start
+
+### Prerequisites
 
 - [Rust](https://rustup.rs/) (1.77.2+)
+- [Deno](https://deno.land/) (2.0+)
 - [Tauri CLI](https://tauri.app/v2/guides/getting-started/prerequisites) (`cargo install tauri-cli --version "^2"`)
-- For Android:
-  - Android Studio
-  - Android SDK (API 28+)
-  - NDK
-- For iOS:
-  - Xcode 15+
-  - iOS SDK 16+
-  - Apple Developer account (for device testing)
 
-## Setup
+### Platform-Specific Setup
+
+For detailed installation instructions, see:
+
+- **[Android Setup Guide](docs/ANDROID_SETUP.md)** - Android Studio, SDK, NDK, emulator setup
+- **[iOS Setup Guide](docs/IOS_SETUP.md)** - Xcode, simulators, signing, device deployment
 
 ### Initialize Mobile Targets
 
