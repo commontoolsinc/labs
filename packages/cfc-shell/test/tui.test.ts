@@ -5,6 +5,7 @@ import {
   createStreamFormatter,
   fmtCommand,
   fmtOutput,
+  fmtPrefixed,
   fmtStatus,
   getTermWidth,
   gutter,
@@ -73,6 +74,18 @@ Deno.test("fmtCommand formats with gutter and $ prefix", () => {
   const d1 = fmtCommand("cat /file", 1);
   assertEquals(d1.includes("│"), true);
   assertEquals(d1.includes("$ cat /file"), true);
+});
+
+Deno.test("fmtPrefixed wraps long text with indented continuation", () => {
+  const long = "a ".repeat(40).trim(); // 79 chars
+  const result = fmtPrefixed("#", long, 0, 40);
+  const lines = result.split("\n");
+  assertEquals(lines[0].startsWith("# "), true);
+  // Continuation lines should start with 2-space indent, not "# "
+  for (let i = 1; i < lines.length; i++) {
+    assertEquals(lines[i].startsWith("  "), true);
+    assertEquals(lines[i].startsWith("# "), false);
+  }
 });
 
 Deno.test("fmtOutput indents each line", () => {

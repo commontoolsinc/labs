@@ -29,8 +29,8 @@ import {
   createStreamFormatter,
   fmtCommand,
   fmtOutput,
+  fmtPrefixed,
   fmtStatus,
-  gutter,
 } from "./tui.ts";
 
 // ---------------------------------------------------------------------------
@@ -195,7 +195,7 @@ async function runOnce(
       const sep = depth > 0 ? "\n" : "\n\n";
       if (toolName === "task") {
         const task = String(input.task ?? "");
-        await write(`${sep}${gutter(depth)}# ${task}\n`);
+        await write(`${sep}${fmtPrefixed("#", task, depth)}\n`);
       } else {
         const cmd = String(input.command ?? "");
         await write(`${sep}${fmtCommand(cmd, depth)}\n`);

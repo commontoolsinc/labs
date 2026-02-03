@@ -140,9 +140,30 @@ export function boxEnd(summary: string, depth: number): string {
 // Line formatting helpers
 // ---------------------------------------------------------------------------
 
-/** Format a shell command line: `gutter + "$ cmd"` ($ aligns with ⏺) */
+/**
+ * Format a line with a marker prefix (e.g. "$ cmd", "# task"), word-wrapped
+ * with continuation lines indented by 2 spaces (aligning under the marker text).
+ */
+export function fmtPrefixed(
+  marker: string,
+  text: string,
+  depth: number,
+  termWidth?: number,
+): string {
+  const g = gutter(depth);
+  const tw = termWidth ?? getTermWidth();
+  const prefix = `${marker} `;
+  const contentWidth = Math.max(20, tw - gutterWidth(depth) - prefix.length);
+  const wrapped = wordWrap(text, contentWidth);
+  const lines = wrapped.split("\n");
+  return lines
+    .map((l, i) => (i === 0 ? `${g}${prefix}${l}` : `${g}  ${l}`))
+    .join("\n");
+}
+
+/** Format a shell command: `gutter + "$ cmd"` with word wrap */
 export function fmtCommand(cmd: string, depth: number): string {
-  return `${gutter(depth)}$ ${cmd}`;
+  return fmtPrefixed("$", cmd, depth);
 }
 
 /**
