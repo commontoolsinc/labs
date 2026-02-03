@@ -64,6 +64,25 @@ Transaction A: set(2), commit  // FAILS — base state changed
 Transaction A fails even though it wrote the same value, because the base state
 it read from is no longer current.
 
+### Non-Traditional Transaction Semantics
+
+This system does not implement SQL-style transaction isolation. Key differences:
+
+- **Live references, not snapshots**: `cell.get()` returns a live proxy to
+  committed state. If another transaction commits while yours is open, your
+  previously-read reference reflects their changes — no isolation.
+
+- **Conflict detection is conditional**: Conflicts only occur when both
+  transactions have pending writes based on the same original state. If T2
+  commits *before* T1 writes, T1 observes the new state via live reference
+  and commits successfully — no conflict.
+
+- **Two read modes**: `cell.get()` returns committed state (live proxy);
+  `cell.withTx(tx).get()` returns pending writes (read-your-writes).
+
+- **Point-in-time requires explicit copy**: If you need snapshot semantics,
+  deep-copy at read time: `JSON.parse(JSON.stringify(cell.get()))`.
+
 ### Retry Semantics
 
 The `editWithRetry()` helper provides automatic retry on commit failure:
