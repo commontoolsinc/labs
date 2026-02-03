@@ -83,10 +83,8 @@ Schemas influence runtime behavior:
 
 Schemas can be:
 - Explicitly provided when creating cells
-- Inherited from source cells via `sourceCell.key("resultRef").get()?.schema`
+- Inherited from source cells
 - Inferred from values (limited)
-
-The `asSchemaFromLinks()` method resolves schemas by following links.
 
 ---
 

@@ -122,19 +122,6 @@ Properties captured:
 This allows errors to round-trip through storage while preserving diagnostic
 information.
 
-### Conversion Functions
-
-The system provides conversion utilities:
-
-| Function | Purpose |
-|----------|---------|
-| `isStorableValue()` | Check if value is already storable |
-| `toStorableValue()` | Convert a single value (shallow) |
-| `toDeepStorableValue()` | Convert recursively, handling cycles |
-
-`toJSON()` methods are invoked automatically for objects and functions that
-have them, allowing custom serialization.
-
 ### Circular References
 
 Circular references are detected and throw an error. The system does not support
@@ -147,55 +134,19 @@ multiple times) are preserved correctly.
 
 ### Current State
 
-The system uses content-derived hashes for entity identification. The
-`merkle-reference` library computes deterministic identifiers from content.
-
-#### How It Works
+The system uses content-derived hashes for entity identification:
 
 1. Content is translated into a binary tree representation
 2. Tree nodes are hashed using SHA-256
 3. Result is formatted as a CID (Content Identifier)
 
-#### Hash Implementations
-
-The system selects SHA-256 implementation by environment:
-
-| Environment | Implementation | Notes |
-|-------------|----------------|-------|
-| Server (Deno) | `node:crypto` | Hardware-accelerated via OpenSSL |
-| Browser | `hash-wasm` | WebAssembly, ~3x faster than pure JS |
-| Fallback | `@noble/hashes` | Pure JavaScript |
-
-#### Usage
-
-The `refer()` function computes references:
-
-```typescript
-const id = refer({ the: "application/json", of: "some-entity" });
-// Returns a Reference (CID-formatted string)
-```
-
-Common uses:
+Content hashes are used for:
+- Entity identification
 - Recipe ID generation
 - Request deduplication
-- Cache keys
 - Causal chain references
 
-#### Caching
-
-Two caches optimize reference computation:
-- **Primitive cache**: LRU cache for primitives (97%+ hit rate)
-- **Unclaimed cache**: LRU cache for `{the, of}` patterns (frequent in facts)
-
-### Concerns with Current Approach
-
-The `merkle-reference` library:
-- Translates content into binary trees before hashing
-- Encodes a specific representation (tree structure) into the hash
-- Adds translation overhead
-- Provides IPLD/CID formatting that isn't used for actual interop
-
-#### IPFS Clothing Without IPFS Functionality
+### Concerns: IPFS Clothing Without IPFS Functionality
 
 The system wears the "clothing" of IPFS — using CID formatting, the `"/"` sigil
 convention from DAG-JSON, and merkle tree hashing — but gains none of the

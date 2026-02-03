@@ -92,8 +92,7 @@ const cancel = cell.sink((value) => {
 });
 ```
 
-The callback fires when the cell's value changes. Internally, this creates an
-action that the scheduler manages.
+The callback fires when the cell's value changes.
 
 For stream cells:
 ```typescript
@@ -102,8 +101,7 @@ const cancel = stream.sink((event) => {
 });
 ```
 
-The callback fires for each event. Implementation differs: stream sinks add to
-a local listener set rather than using scheduler-managed actions.
+The callback fires for each event.
 
 #### `pull()` — Read with Dependency Tracking
 
@@ -111,37 +109,22 @@ a local listener set rather than using scheduler-managed actions.
 const value = await cell.pull();
 ```
 
-Creates a temporary effect action, registers dependencies, waits for idle, then
-resolves. Used for one-shot reads that should trigger if dependencies change.
+Used for one-shot reads with dependency tracking.
 
 ### Event Dispatch
 
 When `stream.send(event)` is called:
 
-1. Event converted to links via `convertCellsToLinks()`
-2. `scheduler.queueEvent(streamLink, event)` called
-3. Scheduler iterates `eventHandlers` array
-4. Handlers matching the stream link are invoked
-
-```typescript
-// In scheduler
-for (const [link, handler] of this.eventHandlers) {
-  if (areNormalizedLinksSame(link, eventLink)) {
-    this.eventQueue.push({ action: (tx) => handler(tx, event), ... });
-  }
-}
-```
+1. Event is queued with the stream's link
+2. Handlers registered for that stream are invoked
 
 ### Lazy Piece Loading
 
 When an event arrives but no handler is registered:
 
-1. `ensurePieceRunning(runtime, eventLink)` is called
-2. Traverse `sourceCell` chain to find the process cell
-3. Read `TYPE` (recipe ID) and `resultRef` from process cell
-4. Load the recipe via `recipeManager.loadRecipe()`
-5. Start the piece via `runtime.runSynced()`
-6. Re-queue the event
+1. Traverse `sourceCell` chain to find the process cell
+2. Load the recipe and start the piece
+3. Re-queue the event
 
 This enables pieces to start on-demand when events arrive.
 
@@ -166,14 +149,8 @@ This chain enables:
 
 ### Handler Registration
 
-Handlers are registered when recipes run:
-
-```typescript
-scheduler.addEventHandler(handler, streamLink, populateDependencies);
-```
-
-Returns a cancel function. The handler is stored in an in-memory array, not
-persisted. On piece restart, handlers re-register.
+Handlers are registered when recipes run. They are stored in memory (not
+persisted) and re-register on piece restart.
 
 ### Change Detection
 

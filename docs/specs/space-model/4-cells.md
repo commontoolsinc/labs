@@ -32,12 +32,11 @@ Cells can be categorized along two dimensions:
 
 ### Cell API
 
-The Cell class exposes approximately 50 public methods. Investigation shows
-that usage is stratified by layer:
+Cell methods are stratified by layer:
 
-#### Transaction Layer (~10 methods)
+#### Transaction Layer
 
-The narrow core used for data access:
+The core methods for data access:
 - `get()`, `getRaw()` — read value (reactive)
 - `sample()` — read value (non-reactive, no dependency tracking)
 - `set()`, `setRaw()` — write value
@@ -46,7 +45,7 @@ The narrow core used for data access:
 - `withTx()` — bind to transaction
 - `asSchema()` — type cast
 
-#### Reactivity Layer (adds ~3 methods)
+#### Reactivity Layer
 
 Subscription and synchronization:
 - `sink()` — subscribe to changes
@@ -59,7 +58,6 @@ Subscription and synchronization:
 
 #### Rarely Used Outside Foundation
 
-Candidates for internal-only:
 - `freeze()`, `isFrozen()`
 - `setInitialValue()`, `setSelfRef()`
 - `connect()`, `export()`
@@ -177,6 +175,12 @@ serialization patterns, not cell-specific code.
 ---
 
 ## Proposed Directions
+
+### API Surface Reduction
+
+The "Rarely Used Outside Foundation" methods could be made internal-only,
+reducing the public API surface and clarifying which methods are intended for
+general use.
 
 ### Unification via Timestamps
 

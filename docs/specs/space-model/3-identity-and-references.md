@@ -64,8 +64,7 @@ Example:
 { "cell": { "/": "abc123" }, "path": ["items", 0] }
 ```
 
-These are marked `@deprecated` but remain in active use. The `toJSONWithLegacyAliases()`
-function still produces `$alias` structures during recipe serialization.
+These are marked deprecated but remain in active use during recipe serialization.
 
 ### Entity Identifiers
 
@@ -96,7 +95,7 @@ type NormalizedFullLink = {
 
 This is the form used for:
 - Event routing (matching streams to handlers)
-- Equality comparison (`areNormalizedLinksSame`)
+- Equality comparison
 - Cell identity
 
 ---

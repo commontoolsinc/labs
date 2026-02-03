@@ -45,7 +45,7 @@ open and commit.
 #### Behavior
 
 - When committing, if the underlying data has changed since the transaction
-  started, the commit fails with `StorageTransactionInconsistent`
+  started, the commit fails
 - Even **identical writes** trigger conflict — detection is based on base state
   changing, not on whether final values differ
 - This is optimistic concurrency control
@@ -95,13 +95,10 @@ const result = await runtime.editWithRetry(async (tx) => {
 });
 ```
 
-- Default maximum retries: 5
 - On commit error, re-runs the entire function with a fresh transaction
-- Returns `{ ok: result }` on success
-- Returns `{ error: CommitError }` after exhausting retries
+- Returns success or error after exhausting retries
 
-The scheduler also provides automatic retry for handlers, up to
-`MAX_RETRIES_FOR_REACTIVE` attempts on transaction conflict.
+The scheduler also provides automatic retry for handlers on transaction conflict.
 
 ### Relationship to Handlers
 
@@ -112,7 +109,7 @@ Handlers execute within transaction context:
 - On handler error, the transaction aborts
 
 ```typescript
-const handler = (tx: IExtendedStorageTransaction, event: any) => {
+const handler = (tx, event) => {
   const current = someCell.withTx(tx).get();
   someCell.withTx(tx).set(current + 1);
   // tx commits automatically after handler returns
