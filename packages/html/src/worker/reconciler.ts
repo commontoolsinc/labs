@@ -271,7 +271,7 @@ export class WorkerReconciler {
    */
   private createWrapperState(_ctx: ReconcileContext, nodeId: number): {
     nodeId: number;
-    currentChild: NodeState | ChildNodeState | null;
+    currentChild: NodeState | null;
     cancel: Cancel;
   } {
     return {
@@ -313,7 +313,7 @@ export class WorkerReconciler {
     ctx: ReconcileContext,
     wrapper: {
       nodeId: number;
-      currentChild: NodeState | ChildNodeState | null;
+      currentChild: NodeState | null;
       cancel: Cancel;
     },
     node: WorkerRenderNode,
@@ -327,25 +327,18 @@ export class WorkerReconciler {
       : null;
     const newTagName = newVNode?.name ?? null;
 
-    // Case 1: Same element type AND we have a full NodeState - update in place
-    if (
-      oldState &&
-      oldTagName &&
-      newTagName &&
-      oldTagName === newTagName &&
-      "children" in oldState // Has full NodeState (not just ChildNodeState)
-    ) {
-      const elementState = oldState as NodeState;
+    // Case 1: Same element type - update in place
+    if (oldState && oldTagName && newTagName && oldTagName === newTagName) {
       const sanitized = this.sanitizeNode(newVNode!);
       if (sanitized) {
         // Update props in place with proper diffing
-        this.updatePropsInPlace(ctx, elementState, sanitized.props);
+        this.updatePropsInPlace(ctx, oldState, sanitized.props);
 
         // Update children in place with proper diffing
         if (sanitized.children !== undefined) {
           this.updateChildrenInPlace(
             ctx,
-            elementState,
+            oldState,
             sanitized.children,
             new Set(),
           );
