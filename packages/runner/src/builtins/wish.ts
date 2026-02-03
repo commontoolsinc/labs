@@ -9,7 +9,7 @@ import { favoriteListSchema } from "@commontools/home-schemas";
 import { HttpProgramResolver } from "@commontools/js-compiler";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
-import type { Runtime } from "../runtime.ts";
+import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import type {
   IExtendedStorageTransaction,
   MemorySpace,
@@ -22,6 +22,13 @@ const WISH_TSX_PATH = getRecipeEnvironment().apiUrl +
   "api/patterns/system/wish.tsx";
 const SUGGESTION_TSX_PATH = getRecipeEnvironment().apiUrl +
   "api/patterns/system/suggestion.tsx";
+
+// Schema for mentionable array - items are cell references (asCell: true)
+// Don't restrict properties so .get() returns full cell data
+const mentionableListSchema = {
+  type: "array",
+  items: { asCell: true },
+} as const satisfies JSONSchema;
 
 class WishError extends Error {
   constructor(message: string) {
@@ -104,7 +111,7 @@ function getSpaceCell(ctx: WishContext): Cell<unknown> {
     ctx.spaceCell = ctx.runtime.getCell(
       ctx.parentCell.space,
       ctx.parentCell.space,
-      undefined,
+      spaceCellSchema,
       ctx.tx,
     );
   }
@@ -342,25 +349,38 @@ function resolveBase(
 
         // Search mentionables if in scope
         if (searchMentionables) {
+          // Use the same pattern as resolvePath and the #mentionable case:
+          // chain all .key() calls first, then resolveAsCell() once at the end
           const mentionableCell = getSpaceCell(ctx)
             .key("defaultPattern")
             .key("backlinksIndex")
-            .key("mentionable");
-          const mentionables = mentionableCell.get() || [];
+            .key("mentionable")
+            .resolveAsCell()
+            .asSchema(mentionableListSchema);
+          // Sync to ensure data is loaded - note: resolveBase is sync so we can't await,
+          // but calling sync() sets the synced flag which may help with subsequent get()
+          mentionableCell.sync();
+          const mentionables = (mentionableCell.get() || []) as Cell<any>[];
 
-          const matches = mentionables.filter((piece: any) => {
+          const matches = mentionables.filter((pieceCell: Cell<any>) => {
+            if (!pieceCell) return false;
+
+            // Get the actual value from the cell
+            const piece = pieceCell.get();
             if (!piece) return false;
 
             // Check [NAME] field for exact match
             const name = piece[NAME]?.toLowerCase() ?? "";
             if (name === searchTermWithoutHash) return true;
 
-            // Compute schema tag lazily
+            // Compute schema tag lazily from the cell using the same trick as home.tsx
             let tag: string | undefined;
             try {
-              const { schema } = piece.asSchemaFromLinks?.()
-                ?.getAsNormalizedFullLink() ?? {};
-              if (schema !== undefined) {
+              const schema = (pieceCell as any)?.resolveAsCell()?.asSchema(
+                undefined,
+              )
+                .asSchemaFromLinks?.()?.schema;
+              if (typeof schema === "object") {
                 tag = JSON.stringify(schema);
               }
             } catch {
@@ -373,6 +393,7 @@ function resolveBase(
           });
 
           for (const match of matches) {
+            // match is already a Cell, use it directly
             allMatches.push({ cell: match, pathPrefix: parsed.path });
           }
         }

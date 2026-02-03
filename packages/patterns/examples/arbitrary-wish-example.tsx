@@ -6,6 +6,7 @@ export default pattern<Record<string, never>>((_) => {
 
   const wishResult = wish<{ [UI]: VNode }>({
     query: wishText,
+    scope: ["."],
   });
 
   return {
