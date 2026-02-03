@@ -182,14 +182,20 @@ async function executePipeline(
     );
     results.push(result);
 
-    // Close stderr (unless it was provided by caller on last command)
-    if (i !== node.commands.length - 1 || !stdio?.stderr) {
-      stderr.close();
-    }
-
-    // Close stdout if this is the last command (unless it was provided by caller)
-    if (i === node.commands.length - 1 && !stdio?.stdout) {
+    // Close pipe streams for intermediate commands so downstream gets EOF.
+    // For the last command, only close if we created the stream (not provided by caller).
+    if (i !== node.commands.length - 1) {
+      // Intermediate command: close the pipe stdout so next command gets EOF
       stdout.close();
+      stderr.close();
+    } else {
+      // Last command: only close if not provided by caller
+      if (!stdio?.stdout) {
+        stdout.close();
+      }
+      if (!stdio?.stderr) {
+        stderr.close();
+      }
     }
   }
 
@@ -312,8 +318,16 @@ async function executeSimpleCommand(
       `${commandName}: command not found\n`,
       session.pcLabel,
     );
-    effectiveStderr.close();
-    effectiveStdout.close();
+
+    // Close streams: always close the ones we're using (effectiveStdout/Stderr),
+    // but only if they were created by redirections (different from passed-in).
+    // If they're the same as passed-in, the caller owns them.
+    if (effectiveStdout !== stdout) {
+      effectiveStdout.close();
+    }
+    if (effectiveStderr !== stderr) {
+      effectiveStderr.close();
+    }
 
     // Flush redirections
     for (const flush of flushers) {
@@ -361,9 +375,15 @@ async function executeSimpleCommand(
     commandLabel = labels.endorse(commandLabel, { kind: "InjectionFree" });
   }
 
-  // Close streams if we created them
-  effectiveStdout.close();
-  effectiveStderr.close();
+  // Close streams: always close the ones we're using (effectiveStdout/Stderr),
+  // but only if they were created by redirections (different from passed-in).
+  // If they're the same as passed-in, the caller owns them.
+  if (effectiveStdout !== stdout) {
+    effectiveStdout.close();
+  }
+  if (effectiveStderr !== stderr) {
+    effectiveStderr.close();
+  }
 
   // Flush redirections
   for (const flush of flushers) {
