@@ -95,4 +95,4 @@ potential unification.
 
 ---
 
-**Next:** [Identity and References](./2-identity-and-references.md)
+**Previous:** [Data Model](./0-data-model.md) | **Next:** [Identity and References](./2-identity-and-references.md)

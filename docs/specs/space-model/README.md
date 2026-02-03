@@ -24,6 +24,9 @@ Each topic document clearly separates these concerns:
 
 The specification addresses:
 
+- **Data Model**: The immutable data representation — what values can be stored,
+  special object shapes, and content addressing.
+
 - **Storage**: How data is represented on disk and in databases, including the
   fact structure, persistence semantics, and encoding formats.
 
@@ -45,6 +48,7 @@ The specification addresses:
 
 ## Topics
 
+- [Data Model](./0-data-model.md)
 - [Storage Format](./1-storage-format.md)
 - [Identity and References](./2-identity-and-references.md)
 - [Cells](./3-cells.md)

@@ -69,25 +69,15 @@ function still produces `$alias` structures during recipe serialization.
 
 ### Entity Identifiers
 
-Entities are identified by content-derived hashes. The current implementation
-uses `merkle-reference` to compute deterministic identifiers from content.
+Entities are identified by content-derived hashes computed via the `refer()`
+function. See [Data Model](./0-data-model.md#hashing-and-content-addressing) for
+details on the hashing mechanism.
 
 The `refer()` function is used for:
 - Recipe ID generation: `refer({ causal: { recipeId, type: "recipe" } })`
 - Request deduplication: `refer(llmParams).toString()`
 - Cache keys: `refer(JSON.stringify(selector)).toString()`
 - Causal chain references
-
-#### Concerns with Current Approach
-
-The `merkle-reference` library:
-- Translates content into binary trees before hashing
-- Encodes a specific representation (tree structure) into the hash
-- Adds translation overhead
-- Provides IPLD/CID formatting that isn't used for interop
-
-**Note**: No actual IPFS interoperability exists — the system doesn't retrieve
-content by CID, pin to IPFS, or verify against external sources.
 
 ### Internal Representation
 
@@ -115,18 +105,8 @@ This is the form used for:
 
 ### Simplified Canonical Hashing
 
-Replace `merkle-reference` with a simpler canonical hashing approach:
-- Traverse the natural data structure directly (no intermediate tree)
-- Sort object keys, preserve array order
-- Hash type tags + content in a single pass
-- No intermediate allocations
-
-The hash should reflect the logical content, not any particular encoding or
-intermediate representation.
-
-**Open Question**: What is the exact specification for canonical hashing? Need
-to define handling of all types (null, bool, int, float, string, bytes, array,
-object, references).
+See [Data Model](./0-data-model.md#simplified-canonical-hashing) for the
+proposal to simplify content addressing.
 
 ### Legacy Format Deprecation
 
@@ -138,7 +118,6 @@ all serialization paths produce `link@1` format.
 ## Open Questions
 
 - When can legacy formats be removed?
-- What is the canonical hashing specification?
 - How do cross-space references interact with permissions?
 - Should `toJSON()` on cells be removed once JSON is no longer the primary format?
 
