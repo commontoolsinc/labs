@@ -12,9 +12,17 @@ Draft — based on extensive codebase investigation and design discussion.
 A **cell** is a named location that holds a typed value. Cells are identified
 by a link (entity ID + path) and participate in the reactive dataflow graph.
 
-Currently, the system distinguishes two kinds of cells:
-- **Value cells**: Store data, support get/set, trigger on value change
-- **Stream cells**: Event endpoints, support send, trigger on every event
+Cells can be categorized along two dimensions:
+
+1. **Implementation mechanism**: How change detection works
+   - Value cells (content-compared)
+   - Stream cells (occurrence-based)
+
+2. **Semantic role**: What purpose the cell serves
+   - Process cells (execution metadata)
+   - Precious data cells (user input, irreplaceable)
+   - Computed result cells (derived, reconstructible)
+   - Stream cells (event endpoints)
 
 ---
 
@@ -55,7 +63,9 @@ Candidates for internal-only:
 - `connect()`, `export()`
 - `setSchema()` (deprecated)
 
-### Value Cells vs Stream Cells
+### Implementation Mechanism: Value vs Stream
+
+The implementation distinguishes cells by their change detection behavior:
 
 | Aspect | Value Cell | Stream Cell |
 |--------|------------|-------------|
@@ -65,9 +75,7 @@ Candidates for internal-only:
 | Change detection | Content comparison | Every send is distinct |
 | Persistence | Value persisted | Only marker persisted; events ephemeral |
 
-### The Essential Difference
-
-The truly essential semantic difference is **duplicate handling**:
+The essential difference is **duplicate handling**:
 
 - `cell.set(5); cell.set(5);` → one state, no second reaction (idempotent)
 - `stream.send(5); stream.send(5);` → two events, two handler invocations
@@ -76,11 +84,69 @@ This is **state vs occurrence**:
 - Value cells answer: "What is the current state?"
 - Streams answer: "What just happened?"
 
-### Everything Else Is Implementation Choice
+### Semantic Categories
 
-- **Persistence**: Computed cells cache for efficiency, not semantics
-- **At-rest value**: Streams could cache last event without changing meaning
-- **Identity mechanism**: Both use the same `NormalizedFullLink` infrastructure
+While the implementation sees only "value" and "stream," there are richer
+semantic distinctions that matter for garbage collection, recovery, and UI:
+
+#### Process Cells
+
+Control plane metadata for piece execution:
+
+```
+{
+  $TYPE: string,        // recipe ID
+  resultRef: SigilLink, // link to result cell
+  argument?: any,       // input data
+  spell?: SigilLink,    // link to spell
+  internal?: any        // working state
+}
+```
+
+Process cells are implemented as value cells but serve a distinct purpose:
+tracking which recipe governs a piece and linking to its result. See
+[Storage Format](./1-storage-format.md) for details.
+
+#### Precious Data Cells
+
+User-created or imported data that **cannot be reconstructed**:
+- Direct user input
+- Imported files or external data
+- Manually curated content
+
+These must be preserved — loss means loss. The system should never
+garbage-collect precious data.
+
+#### Computed Result Cells
+
+Derived data produced by recipes from inputs:
+- Pattern outputs
+- Aggregations and transformations
+- Cached computations
+
+These **can be reconstructed** by re-running the recipe with the same inputs.
+Persisting them is an optimization (avoid recomputation), not a requirement.
+The system could potentially discard and recompute these during compaction.
+
+#### Stream Cells
+
+Event endpoints for occurrences:
+- User interactions (clicks, input)
+- External events
+- Signals between pieces
+
+Events are ephemeral — only the most recent matters for triggering handlers.
+The `{ $stream: true }` marker persists to preserve the stream's identity,
+but event payloads do not persist.
+
+### Cross-Cutting Observations
+
+- **Implementation vs semantics**: "Value cell" spans three semantic roles
+  (process, precious, computed). The implementation doesn't distinguish them.
+- **Reconstructibility**: The key semantic question is "can this be rebuilt?"
+  Process and computed cells: yes. Precious and stream identity: no.
+- **Identity mechanism**: All categories use the same `NormalizedFullLink`
+  infrastructure for addressing and reactivity.
 
 ### Shared Identity Base
 
@@ -149,11 +215,18 @@ The "event-ness" emerges from the data shape. Event producers include timestamps
 
 ## Open Questions
 
+### Implementation Unification
 - What is the migration path from current stream/cell split to unified model?
 - How do existing `asStream: true` schemas translate?
 - Should timestamps be required for events, or can the system add them?
 - What are the exact semantics of "last event" queries on unified cells?
 - How does the unified model affect the handler registration mechanism?
+
+### Semantic Categories
+- How should precious vs computed be distinguished in the data model?
+- Should there be explicit markers, or is it inferred from the dataflow graph?
+- What are the garbage collection / compaction rules for each category?
+- How do semantic categories affect sync and backup strategies?
 
 ---
 
