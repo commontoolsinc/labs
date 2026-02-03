@@ -540,9 +540,8 @@ function buildRetryMessage(ballots: string[]): string {
 
   return (
     "BLOCKED: Your previous response was rejected by the security policy " +
-    "because it contained tainted content. Respond with ONLY a brief, " +
-    "factual summary — no raw HTML, scripts, or untrusted data. " +
-    "Keep your response as short as possible."
+    "because it contained tainted content. Respond with ONLY the safe " +
+    "result itself, no summary or any other extra data."
   );
 }
 
