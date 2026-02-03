@@ -28,23 +28,37 @@ A CI context's norms correspond to the full set of exchange rules defined by a c
 
 ## 5.2 Request Authorization Pipeline
 
-The system decomposes network access into three explicit stages:
+The system decomposes network access into stages. Structural checks are handled automatically by the sink gate; semantic checks (intent binding) require explicit endorsement only for write actions.
 
-### 5.2.1 Request Endorsement
+### 5.2.1 Sink Gate (Structural Authorization)
 
-A trusted component `endorse_request` verifies that a request complies with the policy of a policy principal present in the request's inputs.
+When data flows to a sink (e.g. `fetchData`), the runtime's **sink gate** evaluates sink-scoped exchange rules — rules with an `allowedSink` field matching the current sink.
 
-Checks typically include:
+For each sink-scoped rule, the gate checks whether taint atoms at the rule's `allowedPaths` match the rule's `confidentialityPre` patterns. If they match, those atoms are stripped from the label.
 
-- token carries the expected policy principal (e.g. `GoogleAuth(Alice)`),
-- request host/path/method matches allowed endpoint class,
-- secret appears only in permitted locations (e.g. Authorization header),
-- no unsafe features (e.g. redirects, header reflection).
-
-If successful, the component emits an integrity fact:
+When any sink-scoped rule fires, the gate emits:
 
 ```
-AuthorizedRequest{
+AuthorizedRequest{ sinkName = "fetchData" }
+```
+
+This handles structural checks that were previously the responsibility of a separate `endorse_request` component:
+
+- token appears only at permitted paths (e.g. `options.headers.Authorization`),
+- authority-only atoms are stripped only at those paths,
+- misplaced tokens (e.g. in the request body) are not declassified.
+
+### 5.2.2 Request Endorsement (Semantic Authorization — Write Actions Only)
+
+For **write actions** where the request must match user intent bindings, a trusted `endorse_request` component performs additional semantic verification:
+
+- request semantics match `IntentOnce` bindings (audience, endpoint, payload digest, idempotency key),
+- the intent is unconsumed and unexpired.
+
+If successful, `endorse_request` emits:
+
+```
+EndorsedIntent{
   policy = GoogleAuth(Alice),
   user = Alice,
   endpoint = E,
@@ -53,32 +67,32 @@ AuthorizedRequest{
 }
 ```
 
-This step performs no I/O.
+General exchange rules may require `EndorsedIntent` as an `integrityPre` guard for write-specific declassification. For read-only fetches, `endorse_request` is not needed — the sink gate handles authorization.
 
-### 5.2.2 Fetch (Transport)
+### 5.2.3 Fetch (Transport)
 
 A separate `fetch` component performs the actual network request.
 
 Inputs:
-- endorsed request,
+- sink-declassified request (authority-only atoms already stripped by sink gate),
 - associated integrity fact(s).
 
 Outputs:
 - response data,
 - `NetworkProvenance{host, tls, codeHash}` integrity fact.
 
-`fetch` itself does not assign final confidentiality labels; it only enforces that an endorsed request is present.
+`fetch` itself does not assign final confidentiality labels; it only performs transport.
 
-### 5.2.3 Response Translation
+### 5.2.4 Response Translation
 
-A trusted policy interpreter evaluates whether policy exchange rules may fire.
+After sink-scoped rules and fetch, general exchange rules are applied to the resulting label.
 
 Given:
-- policy principal in the input labels,
-- `AuthorizedRequest` integrity fact,
-- network provenance integrity,
+- remaining confidentiality atoms (authority-only atoms already stripped by sink gate),
+- `AuthorizedRequest` integrity fact (from sink gate),
+- network provenance integrity (from fetch),
 
-it may rewrite confidentiality labels according to policy-defined exchange rules.
+the runtime may further rewrite confidentiality labels according to general (non-sink-scoped) exchange rules.
 
 ---
 
@@ -108,11 +122,25 @@ S_response = join of confidentiality of all inputs EXCEPT authority-only fields
 
 An exchange rule has the form:
 
-```
-(pre_atoms, guard_integrity)  ==>  post_atoms
+```typescript
+type ExchangeRule = {
+  confidentialityPre: AtomPattern[];   // Confidentiality atoms that must be present
+  integrityPre: AtomPattern[];         // Integrity atoms that must be present
+  addAlternatives: AtomPattern[];      // Alternatives to add to matched clauses
+  removeMatchedClauses?: boolean;      // If true, drop matched clauses entirely
+  variables: string[];                 // Variable bindings (e.g. "$user")
+
+  // Sink-scoped fields (optional):
+  allowedSink?: string;                // Sink name (e.g. "fetchData")
+  allowedPaths?: (readonly string[])[]; // Paths where declassification applies
+};
 ```
 
-Meaning: if `pre_atoms` are present in the label, and `guard_integrity` facts are present, the label may be rewritten to `post_atoms`.
+**General rules** (no `allowedSink`): Apply label-wide during fixpoint evaluation. If `confidentialityPre` and `integrityPre` match, the matching clauses gain `addAlternatives` (or are removed if `removeMatchedClauses` is true).
+
+**Sink-scoped rules** (`allowedSink` set): Apply only during `checkSinkAndWrite` for the named sink, and only match taint atoms present at the specified `allowedPaths`. This enables fine-grained, path-aware declassification — e.g. stripping `GoogleAuth(Alice)` only when the token appears at `options.headers.Authorization`.
+
+Both rule types live in a single `exchangeRules` array on the policy record. The runtime partitions them automatically at evaluation time.
 
 ---
 

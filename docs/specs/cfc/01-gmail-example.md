@@ -23,18 +23,18 @@ Authorization: Bearer <token>
 ```
 
 Steps:
-1. `endorse_request` emits `AuthorizedRequest{policy=GoogleAuth(Alice), endpoint=messages.list}`.
-2. `fetch` performs request and emits `NetworkProvenance`.
-3. Policy exchange rule fires:
+1. The `fetchData` sink gate evaluates sink-scoped exchange rules. A rule matching `GoogleAuth(Alice)` at path `options.headers.Authorization` fires, stripping the authority-only `GoogleAuth(Alice)` clause and emitting `AuthorizedRequest{sinkName=fetchData}`.
+2. `fetch` performs the request and emits `NetworkProvenance`.
+3. General exchange rules apply to the sink-declassified label:
 
 ```
-{ User(Alice), GoogleAuth(Alice) }
+{ User(Alice) }
   + AuthorizedRequest + NetworkProvenance
 ==>
 { User(Alice), EmailMetadataSecret(Alice) }
 ```
 
-The response does **not** inherit `GoogleAuth(Alice)` secrecy.
+The response does **not** inherit `GoogleAuth(Alice)` secrecy — the sink gate stripped it because the token appeared only at the allowed Authorization header path.
 
 Integrity: responses from Gmail may also carry **provenance integrity** (see [§5.6](./05-policy-architecture.md#56-provenance-integrity-fetched-data)) indicating that message fields originate from Gmail under trusted transport and parsing.
 
@@ -49,7 +49,7 @@ If a secret query `q` is included:
 S_q = { NotesSecret(Alice) }
 ```
 
-Request is endorsed only if the query is bound to Alice's authorization.
+The sink gate strips `GoogleAuth(Alice)` at the Authorization header path as before, but `NotesSecret(Alice)` — which taints the query parameter path — is not covered by any sink-scoped rule and flows through.
 
 Response label becomes:
 
@@ -212,23 +212,28 @@ A request constructor builds a specific API call consistent with the intent. A c
 - `Authorization: Bearer <token>`
 - request body containing a raw RFC 2822 message (base64url), constructed according to `ForwardPlan`.
 
-The trusted `endorse_request` step must:
+Two layers of verification apply:
 
-1. Verify token label contains `GoogleAuth(Alice)`.
-2. Verify endpoint and method match `gmail.messages.send`.
-3. Verify the token appears only in the Authorization header.
-4. Compute `requestDigest = H(c14n(RequestSemantics))`.
-5. Verify the request semantics match the `IntentOnce` bindings:
-   - `RequestSemantics.audience == IntentOnce.audience`
-   - `RequestSemantics.endpointClass == IntentOnce.endpoint`
-   - `RequestSemantics.emailId == IntentOnce.emailId` (if represented explicitly)
-   - `RequestSemantics.recipientSet == IntentOnce.recipientSet`
-   - `RequestSemantics.bodyDigest == IntentOnce.payloadDigest` (or a policy-defined equivalence)
-   - `RequestSemantics.idempotencyKey == IntentOnce.idempotencyKey`
+**Structural checks (handled by sink-scoped exchange rules):**
 
-If successful, endorsement emits:
+The sink gate automatically verifies that the token appears only in the Authorization header path. When the `fetchData` sink fires, it strips `GoogleAuth(Alice)` at allowed paths and emits `AuthorizedRequest{sinkName=fetchData}`. No separate `endorse_request` step is needed for structural placement checks.
 
-- `AuthorizedRequest{ policy=GoogleAuth(Alice), user=Alice, endpoint=gmail.messages.send, requestDigest, codeHash=h_endorse }`
+**Semantic checks (intent binding verification):**
+
+For write actions, a trusted `endorse_request` component additionally verifies that the request semantics match the `IntentOnce` bindings:
+
+1. `RequestSemantics.audience == IntentOnce.audience`
+2. `RequestSemantics.endpointClass == IntentOnce.endpoint`
+3. `RequestSemantics.emailId == IntentOnce.emailId` (if represented explicitly)
+4. `RequestSemantics.recipientSet == IntentOnce.recipientSet`
+5. `RequestSemantics.bodyDigest == IntentOnce.payloadDigest` (or a policy-defined equivalence)
+6. `RequestSemantics.idempotencyKey == IntentOnce.idempotencyKey`
+
+If successful, `endorse_request` emits an additional integrity fact:
+
+- `EndorsedIntent{ policy=GoogleAuth(Alice), user=Alice, endpoint=gmail.messages.send, requestDigest, codeHash=h_endorse }`
+
+General exchange rules may use this integrity fact as a guard (via `integrityPre`) for further declassification beyond what the sink gate provides.
 
 ### 1.4.6 Fetch as commit point with retries
 
@@ -256,10 +261,12 @@ If additional secrets (e.g., confidential recipient selection derived from priva
 
 ## 1.5 Incorrect Usage: Token in Query
 
-If the token appears outside the Authorization header:
+If the token appears outside the Authorization header (e.g. in the request body or a query parameter):
 
-- `endorse_request` fails or emits no integrity fact.
-- No exchange rule may fire.
+- The sink-scoped exchange rule does not match — `allowedPaths` specifies only `options.headers.Authorization`.
+- `GoogleAuth(Alice)` is **not** stripped by the sink gate.
+- No `AuthorizedRequest` integrity atom is emitted.
+- General exchange rules requiring `AuthorizedRequest` as an integrity precondition cannot fire.
 - Response confidentiality conservatively includes `GoogleAuth(Alice)`.
 
 ---
