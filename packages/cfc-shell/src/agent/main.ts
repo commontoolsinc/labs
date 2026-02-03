@@ -191,12 +191,14 @@ async function runOnce(
     system: SYSTEM_PROMPT,
     history,
     onToolCall: async (toolName, input, depth) => {
+      // At depth 0, blank line before command; inside a box, just a newline
+      const sep = depth > 0 ? "\n" : "\n\n";
       if (toolName === "task") {
         const task = String(input.task ?? "");
-        await write(`\n${gutter(depth)}# ${task}\n`);
+        await write(`${sep}${gutter(depth)}# ${task}\n`);
       } else {
         const cmd = String(input.command ?? "");
-        await write(`\n\n${fmtCommand(cmd, depth)}\n`);
+        await write(`${sep}${fmtCommand(cmd, depth)}\n`);
       }
     },
     onToolResult: async (_cmd, res, depth) => {

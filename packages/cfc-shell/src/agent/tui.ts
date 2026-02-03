@@ -203,7 +203,8 @@ export function createStreamFormatter(
 
       for (const ch of delta) {
         if (responseStart) {
-          out += `\n${gutter(depth)}⏺ `;
+          // At depth 0, blank line separator; inside a box, guttered newline
+          out += depth > 0 ? `\n${gutter(depth)}⏺ ` : `\n\n⏺ `;
           responseStart = false;
           lineStart = false;
           col = 0;

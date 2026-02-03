@@ -95,11 +95,9 @@ Deno.test("createStreamFormatter adds ⏺ on first delta", () => {
 Deno.test("createStreamFormatter indents continuation lines", () => {
   const fmt = createStreamFormatter(() => 0);
   const out = fmt.format("line1\nline2");
-  // Output is: "\n⏺ line1\n  line2"
-  const lines = out.split("\n");
-  // lines[0] = "" (before leading \n), lines[1] has ⏺, lines[2] has indent
-  assertEquals(lines[1].includes("⏺"), true);
-  assertEquals(lines[2].startsWith("  "), true);
+  // Output is: "\n\n⏺ line1\n  line2" (depth 0 gets blank line separator)
+  assertEquals(out.includes("⏺ line1"), true);
+  assertEquals(out.includes("\n  line2"), true);
 });
 
 Deno.test("createStreamFormatter uses gutter at depth > 0", () => {
