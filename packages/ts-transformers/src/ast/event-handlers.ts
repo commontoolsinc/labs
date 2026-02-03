@@ -12,18 +12,22 @@ export function isSafeEventHandlerCall(node: ts.CallExpression): boolean {
 }
 
 /**
- * Check if a type is a function type (has call signatures).
+ * Check if a type is a function type that looks like an event handler.
  *
  * In Common Tools JSX, any function passed to an element is treated as an action/handler.
- * We don't need complex heuristics about return types or parameter counts because
- * you can't pass arbitrary data-transformer functions to elements - if you could,
- * they'd be patterns.
+ * We check that handlers have 0 or 1 parameters to distinguish them from data-transformer
+ * functions (which typically take multiple parameters).
  */
 export function isEventHandlerType(
   type: ts.Type,
   _checker: ts.TypeChecker,
 ): boolean {
-  return type.getCallSignatures().length > 0;
+  const signatures = type.getCallSignatures();
+  if (signatures.length === 0) {
+    return false;
+  }
+  // Check that all signatures have 0 or 1 parameters
+  return signatures.every((sig) => sig.parameters.length <= 1);
 }
 
 /**

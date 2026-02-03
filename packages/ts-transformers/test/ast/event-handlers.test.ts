@@ -118,24 +118,22 @@ function findJsxAttribute(
 // Tests for isEventHandlerType
 // =============================================================================
 
-Deno.test("isEventHandlerType - any function type is a handler", () => {
+Deno.test("isEventHandlerType - function with 0-1 params is a handler", () => {
   const { checker, sourceFile } = createJsxTestProgram(
     `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} eventHandler={(e) => {}} label="test" count={1} mapper={(n) => String(n)} renderItem={(n) => n} twoParamHandler={(e, ctx) => {}} reducer={(acc, item, idx) => acc + item} />`,
   );
 
-  // All function props should be detected as handlers
-  const functionProps = [
-    "callback",
-    "asyncCallback",
-    "toggle",
-    "eventHandler",
-    "mapper",
-    "renderItem",
-    "twoParamHandler",
-    "reducer",
+  // Functions with 0 or 1 parameters should be detected as handlers
+  const handlerProps = [
+    "callback", // 0 params
+    "asyncCallback", // 0 params
+    "toggle", // 0 params
+    "eventHandler", // 1 param
+    "mapper", // 1 param
+    "renderItem", // 1 param
   ];
 
-  for (const propName of functionProps) {
+  for (const propName of handlerProps) {
     const attr = findJsxAttribute(sourceFile, propName);
     if (!attr?.initializer || !ts.isJsxExpression(attr.initializer)) {
       throw new Error(`${propName} attribute not found`);
@@ -151,7 +149,33 @@ Deno.test("isEventHandlerType - any function type is a handler", () => {
     assertEquals(
       isEventHandlerType(contextualType, checker),
       true,
-      `${propName} (function type) should be detected as handler`,
+      `${propName} (function type with 0-1 params) should be detected as handler`,
+    );
+  }
+
+  // Functions with 2+ parameters should NOT be detected as handlers
+  const nonHandlerFunctionProps = [
+    "twoParamHandler", // 2 params
+    "reducer", // 3 params
+  ];
+
+  for (const propName of nonHandlerFunctionProps) {
+    const attr = findJsxAttribute(sourceFile, propName);
+    if (!attr?.initializer || !ts.isJsxExpression(attr.initializer)) {
+      throw new Error(`${propName} attribute not found`);
+    }
+
+    const expr = attr.initializer.expression!;
+    const contextualType = checker.getContextualType(expr);
+
+    if (!contextualType) {
+      throw new Error(`No contextual type for ${propName}`);
+    }
+
+    assertEquals(
+      isEventHandlerType(contextualType, checker),
+      false,
+      `${propName} (function type with 2+ params) should NOT be detected as handler`,
     );
   }
 });
@@ -254,19 +278,17 @@ Deno.test("isEventHandlerJsxAttribute - function prop detected by type (with che
     `<CustomButton callback={() => {}} asyncCallback={async () => {}} toggle={() => true} eventHandler={(e) => {}} label="test" count={1} mapper={(n) => String(n)} renderItem={(n) => n} twoParamHandler={(e, ctx) => {}} reducer={(acc, item, idx) => acc + item} />`,
   );
 
-  // All function props should be detected as handlers with checker
-  const functionProps = [
-    "callback",
-    "asyncCallback",
-    "toggle",
-    "eventHandler",
-    "mapper",
-    "renderItem",
-    "twoParamHandler",
-    "reducer",
+  // Functions with 0 or 1 parameters should be detected as handlers with checker
+  const handlerProps = [
+    "callback", // 0 params
+    "asyncCallback", // 0 params
+    "toggle", // 0 params
+    "eventHandler", // 1 param
+    "mapper", // 1 param
+    "renderItem", // 1 param
   ];
 
-  for (const propName of functionProps) {
+  for (const propName of handlerProps) {
     const attr = findJsxAttribute(sourceFile, propName);
     if (!attr) {
       throw new Error(`${propName} attribute not found`);
@@ -275,7 +297,26 @@ Deno.test("isEventHandlerJsxAttribute - function prop detected by type (with che
     assertEquals(
       isEventHandlerJsxAttribute(attr, checker),
       true,
-      `${propName} (function prop) should be detected as handler with checker`,
+      `${propName} (function prop with 0-1 params) should be detected as handler with checker`,
+    );
+  }
+
+  // Functions with 2+ parameters should NOT be detected as handlers
+  const nonHandlerFunctionProps = [
+    "twoParamHandler", // 2 params
+    "reducer", // 3 params
+  ];
+
+  for (const propName of nonHandlerFunctionProps) {
+    const attr = findJsxAttribute(sourceFile, propName);
+    if (!attr) {
+      throw new Error(`${propName} attribute not found`);
+    }
+
+    assertEquals(
+      isEventHandlerJsxAttribute(attr, checker),
+      false,
+      `${propName} (function prop with 2+ params) should NOT be detected as handler with checker`,
     );
   }
 });
