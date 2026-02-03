@@ -1,6 +1,7 @@
 import Std
 
 import Cfc.Policy
+import Cfc.SinkGate
 import Cfc.Proofs.GmailExample
 
 namespace Cfc
@@ -14,10 +15,12 @@ to concrete examples already present in the repo (notably the Gmail OAuth exampl
 The key goals:
 
 1. Show that policy evaluation can reproduce the "authority-only token drop" behavior from
-   `formal/Cfc/Proofs/GmailExample.lean`, but now via a policy record instead of calling a
-   specific exchange helper directly.
+   `formal/Cfc/Proofs/GmailExample.lean`, but now via a **sink-scoped exchange rule**
+   evaluated by the sink gate (spec 5.2.1), rather than by a separate `endorse_request`
+   component.
 
-2. Show that if the integrity guard is missing, no rewrite occurs (safe default).
+2. Show that if the token taint appears at a disallowed path, the sink gate does not strip it
+   (safe default).
 
 We keep these as small executable regressions (computed by `simp`) rather than deep proofs.
 -/
@@ -32,31 +35,38 @@ open Cfc.Proofs.GmailExample
 ## A GoogleAuth policy record (minimal)
 
 In the spec, `GoogleAuth(Alice)` is a policy principal whose policy record contains exchange rules.
-For this Lean model, we only need *one* exchange rule:
+For this Lean model, we only need *one* sink-scoped exchange rule:
 
-  If integrity contains `AuthorizedRequest` and `NetworkProvenance`,
-  then drop the singleton confidentiality clause `[GoogleAuth(u)]`.
+  If the request flows to the `fetchData` sink and the `GoogleAuth(u)` taint appears only at the
+  allowed Authorization header path, then drop the singleton confidentiality clause
+  `[GoogleAuth(u)]` and emit `AuthorizedRequest(fetchData)` as integrity.
 
-This models the "authority-only" token behavior from spec 1.2.
+This models the "authority-only" token behavior from spec 1.2, but with the updated
+architecture from spec 5.2.1 (sink gate).
 -/
 
-def googleAuthPolicyDropRule (u : String) : ExchangeRule :=
-  { name := "AuthorityOnlyDropGoogleAuth"
+def fetchDataSink : String := "fetchData"
+
+def authHeaderPath : SinkGate.Path :=
+  ["options", "headers", "Authorization"]
+
+def googleAuthPolicySinkDropRule (u : String) : ExchangeRule :=
+  { name := "SinkDropGoogleAuthAtAuthorizationHeader"
     preConf :=
       [ AtomPattern.policy
           (Pat.lit "GoogleAuth")
           (Pat.lit u)
           (Pat.lit "h") ]
-    preInteg :=
-      [ AtomPattern.integrityTok (Pat.lit "AuthorizedRequest")
-        , AtomPattern.integrityTok (Pat.lit "NetworkProvenance") ]
-    -- Empty postConf means: drop the matched alternative, and if that empties the clause, drop the clause.
+    preInteg := []
+    -- Empty postConf means: drop the matched alternative (and the clause, since it is a singleton).
     postConf := []
-    postInteg := [] }
+    postInteg := []
+    allowedSink := some fetchDataSink
+    allowedPaths := [authHeaderPath] }
 
 def googleAuthPolicyRecord (u : String) : PolicyRecord :=
   { principal := googleAuth u
-    exchangeRules := [googleAuthPolicyDropRule u] }
+    exchangeRules := [googleAuthPolicySinkDropRule u] }
 
 /-!
 Note on these regressions:
@@ -69,27 +79,26 @@ which is closer to how the spec intends policy evaluation to run at runtime.
 def alice : String := "Alice"
 
 /-!
-## Regression 1: with guards, policy evaluation drops the token secrecy clause
+## Regression 1: with correct token placement, the sink gate strips authority-only secrecy
 -/
 
 example :
     let pols := [googleAuthPolicyRecord alice]
-    let boundary : IntegLabel := [authorizedRequest, networkProvenance]
-    Policy.evalFixpoint 1 pols boundary (tokenLabel alice) = { conf := [[Atom.user alice]], integ := [] } := by
-  -- `native_decide` runs the (trusted) computation and discharges definitional equalities.
-  --
-  -- This is a good fit for policy-evaluation regressions: we want to ensure the executable
-  -- evaluator performs the same rewrite the spec describes.
+    let taints : SinkGate.PathTaints := [(authHeaderPath, [googleAuth alice])]
+    SinkGate.evalSinkGate pols fetchDataSink taints [] (tokenLabel alice) =
+      { conf := [[Atom.user alice]], integ := [SinkGate.authorizedRequest fetchDataSink] } := by
+  -- `native_decide` runs the computation and discharges definitional equalities.
   native_decide
 
 /-!
-## Regression 2: without guards, policy evaluation is a no-op (safe default)
+## Regression 2: token at a disallowed path is NOT stripped (safe default)
 -/
 
 example :
     let pols := [googleAuthPolicyRecord alice]
-    let boundary : IntegLabel := []  -- missing integrity evidence
-    Policy.evalFixpoint 1 pols boundary (tokenLabel alice) = tokenLabel alice := by
+    let badPath : SinkGate.Path := ["query", "token"]
+    let taints : SinkGate.PathTaints := [(badPath, [googleAuth alice])]
+    SinkGate.evalSinkGate pols fetchDataSink taints [] (tokenLabel alice) = tokenLabel alice := by
   native_decide
 
 /-!

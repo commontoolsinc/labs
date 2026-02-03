@@ -17,6 +17,7 @@ import Cfc.Store
 import Cfc.Opaque
 import Cfc.WriteAuthority
 import Cfc.Policy
+import Cfc.SinkGate
 import Cfc.Egress
 import Cfc.LabelTransitions
 import Cfc.Access

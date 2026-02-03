@@ -3,6 +3,7 @@ import Std
 import Cfc.Access
 import Cfc.CommitPoint
 import Cfc.Exchange
+import Cfc.SinkGate
 import Cfc.Language.Declassify
 import Cfc.Proofs.CommitPoint
 
@@ -46,7 +47,10 @@ def notesSecret (u : String) : Atom :=
   Atom.other ("NotesSecret(" ++ u ++ ")")
 
 def authorizedRequest : Atom :=
-  Atom.integrityTok "AuthorizedRequest"
+  -- Spec 5.2.1: the sink gate emits `AuthorizedRequest{ sinkName = ... }`.
+  --
+  -- We model this as an `integrityTok` that includes the sink name in its payload string.
+  SinkGate.authorizedRequest "fetchData"
 
 def networkProvenance : Atom :=
   Atom.integrityTok "NetworkProvenance"
@@ -68,8 +72,15 @@ def gmailReadResponseLabel (u : String) : Label :=
 /-!
 Spec 1.2 (read): token secrecy is authority-only and should not taint responses.
 
-We model the "fix" as dropping the singleton `GoogleAuth(u)` clause when the appropriate
-integrity guards are present.
+With the updated spec architecture (spec 5.2.1), the "fix" is implemented by the **sink gate**:
+
+  - A sink-scoped exchange rule checks that the authority-only token taint appears only at the
+    allowed Authorization-header path.
+  - If so, it strips the singleton `GoogleAuth(u)` clause and emits `AuthorizedRequest(fetchData)`
+    as integrity evidence.
+
+General (non-sink-scoped) exchange rules can then use `AuthorizedRequest` and provenance facts to
+label the response without inheriting token secrecy.
 -/
 /-
 Modeling choices for 1.2:
@@ -85,8 +96,8 @@ Modeling choices for 1.2:
 - If we naïvely join them, the result contains the `[GoogleAuth u]` clause, which would
   incorrectly taint the response with token secrecy.
 
-The spec's fix is an authority-only exchange: at a trusted boundary, if we have integrity evidence
-that the request was authorized, we drop the `[GoogleAuth u]` clause from the token label.
+The spec's fix (in the updated architecture) is a sink-scoped exchange rule evaluated by the sink
+gate, which checks token placement (allowed paths) and then drops the `[GoogleAuth u]` clause.
 -/
 theorem read_requires_googleAuth_without_guards (u : String) :
     ¬ canAccess (pAlice u) (tokenLabel u + gmailReadResponseLabel u) := by
@@ -103,27 +114,85 @@ theorem read_requires_googleAuth_without_guards (u : String) :
   -- `pAlice` does not satisfy `GoogleAuth(u)`.
   simp [pAlice, Principal.satisfies, emailMetadataSecret, googleAuth] at hs
 
-theorem read_allows_after_authority_only_drop (u : String) :
+def fetchDataSink : String := "fetchData"
+
+def authHeaderPath : SinkGate.Path :=
+  ["options", "headers", "Authorization"]
+
+def googleAuthSinkDropRule (u : String) : Policy.ExchangeRule :=
+  { name := "SinkDropGoogleAuthAtAuthorizationHeader"
+    preConf := [Policy.AtomPattern.eq (googleAuth u)]
+    preInteg := []
+    postConf := []     -- drop `[GoogleAuth(u)]` when structurally authorized
+    postInteg := []
+    allowedSink := some fetchDataSink
+    allowedPaths := [authHeaderPath] }
+
+def googleAuthPolicyRecord (u : String) : Policy.PolicyRecord :=
+  { principal := googleAuth u
+    exchangeRules := [googleAuthSinkDropRule u] }
+
+theorem read_allows_after_sink_gate_drop (u : String) :
     canAccess (pAlice u)
-      ((Exchange.exchangeDropSingletonIf
-          [authorizedRequest, networkProvenance]
-          (googleAuth u)
-          [authorizedRequest, networkProvenance]
+      ((SinkGate.evalSinkGate
+          [googleAuthPolicyRecord u]
+          fetchDataSink
+          [(authHeaderPath, [googleAuth u])]
+          []
           (tokenLabel u)) +
         gmailReadResponseLabel u) := by
   classical
-  -- Compute the exchange result, then discharge `canAccess` by simple witnesses.
+  -- Compute the sink gate result, then discharge `canAccess` by simple witnesses.
+  have hPols :
+      Policy.policiesInScope [googleAuthPolicyRecord u] (tokenLabel u).conf =
+        [googleAuthPolicyRecord u] := by
+    -- In this example, the label contains exactly one policy principal: `GoogleAuth(u)`.
+    -- Looking that principal up in the singleton policy list succeeds.
+    simp [Policy.policiesInScope, Policy.collectPolicyPrincipals, Policy.lookupPolicy,
+      Policy.flatten, Policy.isPolicyPrincipal, Policy.dedup, Policy.dedup.go,
+      tokenLabel, googleAuthPolicyRecord, googleAuthSinkDropRule, googleAuth]
   have hTok :
-      Exchange.exchangeDropSingletonIf
-          [authorizedRequest, networkProvenance]
-          (googleAuth u)
-          [authorizedRequest, networkProvenance]
+      SinkGate.evalSinkGate
+          [googleAuthPolicyRecord u]
+          fetchDataSink
+          [(authHeaderPath, [googleAuth u])]
+          []
           (tokenLabel u) =
-        { conf := [[Atom.user u]], integ := [] } := by
-    simp [Exchange.exchangeDropSingletonIf, Exchange.hasAllB, Exchange.availIntegrity,
-      Exchange.confDropSingleton, tokenLabel, authorizedRequest, networkProvenance, googleAuth]
+        { conf := [[Atom.user u]], integ := [SinkGate.authorizedRequest fetchDataSink] } := by
+    -- We *cannot* use `native_decide` here because the statement is quantified over `u : String`.
+    -- Instead we:
+    --   1) unfold the sink-gate driver code but keep policy discovery abstract, and
+    --   2) use `hPols` to reduce policy discovery to a singleton list, then
+    --   3) let `simp` compute the single-rule application.
+    simp [SinkGate.evalSinkGate, SinkGate.evalSinkGateOnce, hPols]
+    simp [SinkGate.applySinkScopedRule, SinkGate.atomsAtPaths, SinkGate.atomsOutsidePaths,
+      SinkGate.anyMatchesAtomPattern, SinkGate.matchesAtomPattern, SinkGate.dropSingletonClauses,
+      SinkGate.authorizedRequest, Policy.addUnique, tokenLabel, googleAuthPolicyRecord,
+      googleAuthSinkDropRule, fetchDataSink, authHeaderPath, googleAuth, Exchange.confDropSingleton]
+    -- The remaining goal is an `if` that checks whether dropping `[GoogleAuth(u)]` changed the
+    -- label's confidentiality. We compute the dropped-confidentiality list explicitly.
+    have hConfDropped :
+        List.foldl (fun acc a => List.filter (fun c => !decide (c = [a])) acc)
+            [[Atom.user u], [Atom.policy "GoogleAuth" u "h"]]
+            (List.filterMap
+              (fun bs => Policy.instantiateAtomPattern (Policy.AtomPattern.eq (Atom.policy "GoogleAuth" u "h")) bs)
+              (List.flatMap
+                (fun bs =>
+                  Policy.matchAllSomewhere []
+                    (Exchange.availIntegrity { conf := [[Atom.user u], [Atom.policy "GoogleAuth" u "h"]], integ := [] } []) bs)
+                (Policy.matchAllSomewhere [Policy.AtomPattern.eq (Atom.policy "GoogleAuth" u "h")]
+                  [Atom.policy "GoogleAuth" u "h"] []))) =
+          [[Atom.user u]] := by
+      -- This is a small, fully symbolic computation:
+      -- - the `matchAllSomewhere` calls produce one empty binding,
+      -- - instantiation yields the single target atom,
+      -- - and the fold drops the singleton clause `[GoogleAuth(u)]`.
+      simp [Policy.matchAllSomewhere, Policy.matchAny, Policy.matchAtomPattern, Policy.instantiateAtomPattern]
+    -- With the computed confidentiality, the `if` condition becomes a false list equality
+    -- (different list lengths), so the goal reduces to the expected result.
+    simp [hConfDropped]
   -- Now show `pAlice` can access both parts and use conjunctive access for joins.
-  have hLeft : canAccess (pAlice u) { conf := [[Atom.user u]], integ := [] } := by
+  have hLeft : canAccess (pAlice u) { conf := [[Atom.user u]], integ := [SinkGate.authorizedRequest fetchDataSink] } := by
     unfold canAccess canAccessConf clauseSat
     intro c hc
     have : c = [Atom.user u] := by
@@ -145,8 +214,14 @@ theorem read_allows_after_authority_only_drop (u : String) :
       subst hcm
       refine ⟨emailMetadataSecret u, by simp, ?_⟩
       simp [pAlice, Principal.satisfies, emailMetadataSecret]
-  have hJoin : canAccess (pAlice u) ({ conf := [[Atom.user u]], integ := [] } + gmailReadResponseLabel u) :=
+  have hJoin :
+      canAccess (pAlice u)
+        ({ conf := [[Atom.user u]], integ := [SinkGate.authorizedRequest fetchDataSink] } + gmailReadResponseLabel u) :=
     (canAccess_join_iff (pAlice u) _ _).2 ⟨hLeft, hResp⟩
+  -- We can ignore integrity in `canAccess`, so we rewrite only the confidentiality shape.
+  --
+  -- (The sink gate minted `AuthorizedRequest(fetchData)` integrity evidence, but `canAccess` is
+  -- purely about confidentiality.)
   simpa [hTok] using hJoin
 
 /-!
