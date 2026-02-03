@@ -1929,14 +1929,15 @@ export class SchemaObjectTraverser<V extends JSONValue>
         !this.traverseCells &&
         SchemaObjectTraverser.asCellOrStream(curSelector.schema)
       ) {
-        // For non-link values, we need to create a DataCellURI-style address
-        // with path: ["value"] so that getNextCellLink can generate a proper
-        // normalized link. We check item (not curDoc.value) because if item
-        // was a link, we've already followed it and curDoc.address has the
-        // correct target address - we don't want to overwrite it with a
-        // DataCellURI. This handles inline objects, primitives, arrays, null,
-        // and undefined.
-        if (!isPrimitiveCellLink(item)) {
+        // For values where curDoc.address.path doesn't start with "value",
+        // we need to create a DataCellURI-style address so that getNextCellLink
+        // can generate a proper normalized link via getNormalizedLink.
+        // This handles:
+        // 1. Inline objects/primitives (item was never a link)
+        // 2. Links that resolved to a doc whose path doesn't start with "value"
+        // We skip this when the path already starts with "value" to preserve
+        // the original link's identity.
+        if (curDoc.address.path[0] !== "value") {
           const elementLink: NormalizedFullLink = {
             space: curDoc.address.space,
             id: curDoc.address.id,
