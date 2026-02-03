@@ -50,7 +50,6 @@ import {
 import { emptyIntegrity } from "../src/cfc/integrity.ts";
 import { serviceAtom, userAtom } from "../src/cfc/atoms.ts";
 import type { ExchangeRule } from "../src/cfc/exchange-rules.ts";
-import type { SinkDeclassificationRule } from "../src/cfc/sink-rules.ts";
 import { createPolicy } from "../src/cfc/policy.ts";
 
 const signer = await Identity.fromPassphrase("cfc gmail test");
@@ -421,13 +420,16 @@ describe("CFC Gmail Read Path: exchange rule flow", () => {
   it("sink declassification: token at header path stripped by sink rule", () => {
     // Google auth policy with sink rule: Service(google-auth) at
     // Authorization header is allowed for fetchData sink.
-    const sinkRule: SinkDeclassificationRule = {
-      taintPattern: { kind: "Service", params: { id: "google-auth" } },
+    const sinkRule: ExchangeRule = {
+      confidentialityPre: [{ kind: "Service", params: { id: "google-auth" } }],
+      integrityPre: [],
+      addAlternatives: [],
+      removeMatchedClauses: true,
+      variables: [],
       allowedSink: "fetchData",
       allowedPaths: [["options", "headers", "Authorization"]],
-      variables: [],
     };
-    const policy = createPolicy([], 1, [sinkRule]);
+    const policy = createPolicy([sinkRule], 1);
 
     const tx = mockTx();
     const ctx = createActionContext({
@@ -464,13 +466,16 @@ describe("CFC Gmail Read Path: exchange rule flow", () => {
   });
 
   it("sink declassification: token at body path blocked by sink rule", () => {
-    const sinkRule: SinkDeclassificationRule = {
-      taintPattern: { kind: "Service", params: { id: "google-auth" } },
+    const sinkRule: ExchangeRule = {
+      confidentialityPre: [{ kind: "Service", params: { id: "google-auth" } }],
+      integrityPre: [],
+      addAlternatives: [],
+      removeMatchedClauses: true,
+      variables: [],
       allowedSink: "fetchData",
       allowedPaths: [["options", "headers", "Authorization"]],
-      variables: [],
     };
-    const policy = createPolicy([], 1, [sinkRule]);
+    const policy = createPolicy([sinkRule], 1);
 
     const tx = mockTx();
     const ctx = createActionContext({

@@ -31,7 +31,6 @@ import {
   userAtom,
 } from "../src/cfc/atoms.ts";
 import type { ExchangeRule } from "../src/cfc/exchange-rules.ts";
-import type { SinkDeclassificationRule } from "../src/cfc/sink-rules.ts";
 import { createPolicy } from "../src/cfc/policy.ts";
 
 // ---------------------------------------------------------------------------
@@ -43,11 +42,14 @@ function mockTx(): IExtendedStorageTransaction {
 }
 
 /** Standard Google auth sink rule: Service(google-auth) at Authorization header path. */
-const googleAuthSinkRule: SinkDeclassificationRule = {
-  taintPattern: { kind: "Service", params: { id: "google-auth" } },
+const googleAuthSinkRule: ExchangeRule = {
+  confidentialityPre: [{ kind: "Service", params: { id: "google-auth" } }],
+  integrityPre: [],
+  addAlternatives: [],
+  removeMatchedClauses: true,
+  variables: [],
   allowedSink: "fetchData",
   allowedPaths: [["options", "headers", "Authorization"]],
-  variables: [],
 };
 
 /** Exchange rule that strips any Service atom (authority-only semantics). */
@@ -80,7 +82,7 @@ const userOnlyLabel: Label = {
 
 describe("CFC Gmail E2E: Read Path (10.1)", () => {
   it("full read flow: token taint declassified at header, response carries User only", () => {
-    const policy = createPolicy([authorityOnlyRule], 1, [googleAuthSinkRule]);
+    const policy = createPolicy([authorityOnlyRule, googleAuthSinkRule], 1);
     const tx = mockTx();
     const ctx = createActionContext({
       userDid: "did:alice",
@@ -135,7 +137,7 @@ describe("CFC Gmail E2E: Read Path (10.1)", () => {
   });
 
   it("token at header path: Service stripped, User preserved", () => {
-    const policy = createPolicy([], 1, [googleAuthSinkRule]);
+    const policy = createPolicy([googleAuthSinkRule], 1);
     const tx = mockTx();
     const ctx = createActionContext({
       userDid: "did:alice",
@@ -186,7 +188,7 @@ describe("CFC Gmail E2E: Read Path (10.1)", () => {
   });
 
   it("read with secret search query: response inherits query taint", () => {
-    const policy = createPolicy([authorityOnlyRule], 1, [googleAuthSinkRule]);
+    const policy = createPolicy([authorityOnlyRule, googleAuthSinkRule], 1);
     const tx = mockTx();
     const ctx = createActionContext({
       userDid: "did:alice",
@@ -236,7 +238,7 @@ describe("CFC Gmail E2E: Read Path (10.1)", () => {
 
 describe("CFC Gmail E2E: Write Path (10.2)", () => {
   it("POST: token in header (declassified), draft in body (taint preserved)", () => {
-    const policy = createPolicy([authorityOnlyRule], 1, [googleAuthSinkRule]);
+    const policy = createPolicy([authorityOnlyRule, googleAuthSinkRule], 1);
     const tx = mockTx();
     const ctx = createActionContext({
       userDid: "did:alice",
@@ -273,7 +275,7 @@ describe("CFC Gmail E2E: Write Path (10.2)", () => {
   });
 
   it("POST response inherits draft taint but not token Service taint", () => {
-    const policy = createPolicy([authorityOnlyRule], 1, [googleAuthSinkRule]);
+    const policy = createPolicy([authorityOnlyRule, googleAuthSinkRule], 1);
     const tx = mockTx();
     const ctx = createActionContext({
       userDid: "did:alice",
@@ -326,7 +328,7 @@ describe("CFC Gmail E2E: Write Path (10.2)", () => {
   });
 
   it("draft with secret search query: response inherits secret taint", () => {
-    const policy = createPolicy([authorityOnlyRule], 1, [googleAuthSinkRule]);
+    const policy = createPolicy([authorityOnlyRule, googleAuthSinkRule], 1);
     const tx = mockTx();
     const ctx = createActionContext({
       userDid: "did:alice",
@@ -372,7 +374,7 @@ describe("CFC Gmail E2E: Write Path (10.2)", () => {
   });
 
   it("token in body path is NOT declassified (only header is allowed)", () => {
-    const policy = createPolicy([], 1, [googleAuthSinkRule]);
+    const policy = createPolicy([googleAuthSinkRule], 1);
     const tx = mockTx();
     const ctx = createActionContext({
       userDid: "did:alice",
@@ -402,7 +404,7 @@ describe("CFC Gmail E2E: Write Path (10.2)", () => {
 
 describe("CFC Gmail E2E: Error Path (10.3)", () => {
   it("failed request: error response inherits full input taint (safe default)", () => {
-    const policy = createPolicy([authorityOnlyRule], 1, [googleAuthSinkRule]);
+    const policy = createPolicy([authorityOnlyRule, googleAuthSinkRule], 1);
     const tx = mockTx();
     const ctx = createActionContext({
       userDid: "did:alice",

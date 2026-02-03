@@ -254,7 +254,7 @@ describe("Policy", () => {
   it("hashPolicy is deterministic", () => {
     const body = {
       exchangeRules: [] as ExchangeRule[],
-      sinkRules: [],
+
       version: 1,
     };
     const h1 = hashPolicy(body);

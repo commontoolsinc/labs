@@ -239,13 +239,17 @@ export function checkSinkAndWrite(
   if (!entry) return;
 
   const { ctx } = entry;
-  const rules = exchangeRules ?? ctx.policy.exchangeRules;
+  const allRules = exchangeRules ?? ctx.policy.exchangeRules;
 
-  // Step 1: Apply sink declassification to get a label with allowed atoms stripped.
+  // Partition rules into sink-scoped and general.
+  const sinkScoped = allRules.filter((r) => r.allowedSink !== undefined);
+  const general = allRules.filter((r) => r.allowedSink === undefined);
+
+  // Step 1: Apply sink-scoped rules to get a label with allowed atoms stripped.
   const sinkResult = applySinkDeclassificationWithResult(
     ctx.taintMap,
     sinkName,
-    ctx.policy.sinkRules,
+    sinkScoped,
   );
 
   // Step 1b: If sink rules fired, record AuthorizedRequest integrity atom.
@@ -253,8 +257,8 @@ export function checkSinkAndWrite(
     ctx.acquiredIntegrity.push(authorizedRequestAtom(sinkName));
   }
 
-  // Step 2: Apply standard exchange rules on the sink-declassified label.
-  const fullyDeclassified = evaluateRules(sinkResult.label, rules);
+  // Step 2: Apply general exchange rules on the sink-declassified label.
+  const fullyDeclassified = evaluateRules(sinkResult.label, general);
 
   // Step 3: Check flow.
   if (!labelLeq(fullyDeclassified, writeTargetLabel)) {

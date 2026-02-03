@@ -8,7 +8,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { applySinkDeclassification } from "../src/cfc/sink-gate.ts";
-import type { SinkDeclassificationRule } from "../src/cfc/sink-rules.ts";
+import type { ExchangeRule } from "../src/cfc/exchange-rules.ts";
 import { TaintMap } from "../src/cfc/taint-map.ts";
 import type { Label } from "../src/cfc/labels.ts";
 import { emptyIntegrity } from "../src/cfc/integrity.ts";
@@ -35,19 +35,25 @@ function mockTx(): IExtendedStorageTransaction {
 }
 
 /** Service(google-auth) at Authorization header is OK for fetchData. */
-const googleAuthSinkRule: SinkDeclassificationRule = {
-  taintPattern: { kind: "Service", params: { id: "google-auth" } },
+const googleAuthSinkRule: ExchangeRule = {
+  confidentialityPre: [{ kind: "Service", params: { id: "google-auth" } }],
+  integrityPre: [],
+  addAlternatives: [],
+  removeMatchedClauses: true,
+  variables: [],
   allowedSink: "fetchData",
   allowedPaths: [["options", "headers", "Authorization"]],
-  variables: [],
 };
 
 /** Wildcard: any Service($X) at Authorization header for fetchData. */
-const wildcardServiceSinkRule: SinkDeclassificationRule = {
-  taintPattern: { kind: "Service", params: { id: "$X" } },
+const wildcardServiceSinkRule: ExchangeRule = {
+  confidentialityPre: [{ kind: "Service", params: { id: "$X" } }],
+  integrityPre: [],
+  addAlternatives: [],
+  removeMatchedClauses: true,
+  variables: ["$X"],
   allowedSink: "fetchData",
   allowedPaths: [["options", "headers", "Authorization"]],
-  variables: ["$X"],
 };
 
 const tokenLabel: Label = {
@@ -64,10 +70,10 @@ const userOnlyTarget: Label = {
 };
 
 // ---------------------------------------------------------------------------
-// SinkDeclassificationRule matching
+// Sink-scoped ExchangeRule matching
 // ---------------------------------------------------------------------------
 
-describe("SinkDeclassificationRule matching", () => {
+describe("Sink-scoped ExchangeRule matching", () => {
   it("matches Service(google-auth) at allowed path for correct sink", () => {
     const taintMap = new TaintMap();
     taintMap.add(["options", "headers", "Authorization"], tokenLabel);
@@ -195,14 +201,17 @@ describe("applySinkDeclassification", () => {
   });
 
   it("multiple rules, multiple paths — correct composition", () => {
-    const multiPathRule: SinkDeclassificationRule = {
-      taintPattern: { kind: "Service", params: { id: "google-auth" } },
+    const multiPathRule: ExchangeRule = {
+      confidentialityPre: [{ kind: "Service", params: { id: "google-auth" } }],
+      integrityPre: [],
+      addAlternatives: [],
+      removeMatchedClauses: true,
+      variables: [],
       allowedSink: "fetchData",
       allowedPaths: [
         ["options", "headers", "Authorization"],
         ["options", "headers", "X-Custom-Auth"],
       ],
-      variables: [],
     };
 
     const taintMap = new TaintMap();
@@ -241,7 +250,7 @@ describe("applySinkDeclassification", () => {
 
 describe("checkSinkAndWrite", () => {
   it("Gmail scenario: token in header → write to User-only target succeeds", () => {
-    const policy = createPolicy([], 1, [googleAuthSinkRule]);
+    const policy = createPolicy([googleAuthSinkRule], 1);
     const tx = mockTx();
     const ctx = createActionContext({
       userDid: "did:alice",
@@ -265,7 +274,7 @@ describe("checkSinkAndWrite", () => {
   });
 
   it("Gmail scenario: token in body → write blocked", () => {
-    const policy = createPolicy([], 1, [googleAuthSinkRule]);
+    const policy = createPolicy([googleAuthSinkRule], 1);
     const tx = mockTx();
     const ctx = createActionContext({
       userDid: "did:alice",
@@ -286,7 +295,7 @@ describe("checkSinkAndWrite", () => {
   });
 
   it("no sink rules → falls through to standard exchange rules", () => {
-    const policy = createPolicy([], 1, []); // No sink rules
+    const policy = createPolicy([], 1); // No sink rules
     const tx = mockTx();
     const ctx = createActionContext({
       userDid: "did:alice",

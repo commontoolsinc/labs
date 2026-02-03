@@ -1,14 +1,14 @@
 /**
- * Sink gate — applies sink declassification rules to a taint map.
+ * Sink gate — applies sink-scoped exchange rules to a taint map.
  *
- * For each path in the taint map, checks if any sink rule allows
+ * For each path in the taint map, checks if any sink-scoped rule allows
  * declassification of specific atoms at that path for the given sink.
  * Returns a new label with matched atoms stripped.
  */
 
 import type { Label } from "./labels.ts";
 import type { TaintMap } from "./taint-map.ts";
-import type { SinkDeclassificationRule } from "./sink-rules.ts";
+import type { ExchangeRule } from "./exchange-rules.ts";
 import { matchAtomPattern } from "./exchange-rules.ts";
 import { canonicalizeAtom } from "./atoms.ts";
 import { normalizeConfidentiality } from "./confidentiality.ts";
@@ -19,22 +19,19 @@ export type SinkDeclassificationResult = {
 };
 
 /**
- * Apply sink declassification rules to a taint map.
+ * Apply sink-scoped exchange rules to a taint map.
  *
  * For each rule where `rule.allowedSink === sinkName`, check each allowed
- * path. If the taint at that path contains atoms matching the rule's pattern,
- * strip those atoms' clauses from the flat label.
+ * path. If the taint at that path contains atoms matching the rule's
+ * confidentialityPre patterns, strip those atoms' clauses from the flat label.
  *
  * Returns the declassified label. Also available as `.fired` to indicate
  * whether any atoms were actually stripped.
- *
- * The function is also callable with the old signature (returns Label directly)
- * via the overloaded wrapper below.
  */
 function applySinkDeclassificationImpl(
   taintMap: TaintMap,
   sinkName: string,
-  rules: SinkDeclassificationRule[],
+  rules: ExchangeRule[],
 ): SinkDeclassificationResult {
   const flat = taintMap.flatLabel();
   if (rules.length === 0) return { label: flat, fired: false };
@@ -45,21 +42,21 @@ function applySinkDeclassificationImpl(
   for (const rule of rules) {
     if (rule.allowedSink !== sinkName) continue;
 
-    for (const allowedPath of rule.allowedPaths) {
+    for (const allowedPath of rule.allowedPaths ?? []) {
       const pathLabel = taintMap.labelAt(allowedPath);
 
-      // Try to match the rule's taint pattern against atoms in this path's label.
+      // Try to match the rule's confidentialityPre patterns against atoms in this path's label.
       for (const clause of pathLabel.confidentiality) {
         for (const atom of clause) {
-          const bindings = matchAtomPattern(
-            rule.taintPattern,
-            atom,
-            new Map(),
-          );
-          if (bindings !== null) {
-            // Mark every atom in clauses that contain a matched atom for stripping.
-            // We strip entire clauses that contain the matched atom.
-            strippedAtoms.add(canonicalizeAtom(atom));
+          for (const pattern of rule.confidentialityPre) {
+            const bindings = matchAtomPattern(
+              pattern,
+              atom,
+              new Map(),
+            );
+            if (bindings !== null) {
+              strippedAtoms.add(canonicalizeAtom(atom));
+            }
           }
         }
       }
@@ -89,7 +86,7 @@ function applySinkDeclassificationImpl(
 export function applySinkDeclassification(
   taintMap: TaintMap,
   sinkName: string,
-  rules: SinkDeclassificationRule[],
+  rules: ExchangeRule[],
 ): Label {
   return applySinkDeclassificationImpl(taintMap, sinkName, rules).label;
 }
@@ -100,7 +97,7 @@ export function applySinkDeclassification(
 export function applySinkDeclassificationWithResult(
   taintMap: TaintMap,
   sinkName: string,
-  rules: SinkDeclassificationRule[],
+  rules: ExchangeRule[],
 ): SinkDeclassificationResult {
   return applySinkDeclassificationImpl(taintMap, sinkName, rules);
 }

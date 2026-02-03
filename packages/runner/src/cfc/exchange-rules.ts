@@ -38,6 +38,16 @@ export type ExchangeRule = {
    * should not taint the response).
    */
   removeMatchedClauses?: boolean;
+  /**
+   * When set, this rule is sink-scoped: it only fires during
+   * `checkSinkAndWrite` for the named sink (e.g. "fetchData").
+   */
+  allowedSink?: string;
+  /**
+   * Paths within the sink's input where declassification is allowed.
+   * Only meaningful when `allowedSink` is set.
+   */
+  allowedPaths?: readonly (readonly string[])[];
 };
 
 // ---------------------------------------------------------------------------
