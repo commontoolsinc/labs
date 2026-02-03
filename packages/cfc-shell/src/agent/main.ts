@@ -228,6 +228,12 @@ async function runOnce(
       currentDepth = depth - 1;
       streamFmt.reset();
     },
+    onTaskRetry: async (attempt, depth) => {
+      await write(
+        `${fmtStatus(`[response blocked — retry ${attempt}/3]`, depth)}\n`,
+      );
+      streamFmt.reset();
+    },
     onAssistantMessage: () => {
       streamFmt.reset();
     },

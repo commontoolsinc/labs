@@ -13,7 +13,7 @@
  */
 
 import { AgentSession } from "./agent-session.ts";
-import { filterOutput, policies } from "./policy.ts";
+import { type AgentPolicy, filterOutput, policies } from "./policy.ts";
 import { ToolResult } from "./protocol.ts";
 import { type Label, labels } from "../labels.ts";
 
@@ -185,6 +185,8 @@ export interface AgentLoopOptions {
     filtered: boolean,
     depth: number,
   ) => void;
+  /** Called when a sub-agent response is rejected and retried */
+  onTaskRetry?: (attempt: number, depth: number) => void;
 }
 
 export interface AgentLoopResult {
@@ -304,6 +306,7 @@ export async function runAgentLoop(
             onAssistantMessage,
             onTaskStart,
             onTaskEnd,
+            onTaskRetry,
           },
         );
         conversationLabel = labels.join(conversationLabel, taskResult.label);
@@ -379,6 +382,7 @@ async function executeTask(
       filtered: boolean,
       depth: number,
     ) => void;
+    onTaskRetry?: (attempt: number, depth: number) => void;
   },
 ): Promise<{ text: string; label: Label }> {
   const policy = policyName === "restricted"
@@ -401,6 +405,7 @@ async function executeTask(
 
     const MAX_RETRIES = 3;
     let history: Message[] | undefined;
+
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       const result = await runAgentLoop(
         attempt === 0 ? task : buildRetryMessage(ballots),
@@ -412,30 +417,34 @@ async function executeTask(
           history,
         },
       );
-      lastResult = result;
 
-      // Declassify the sub-agent's response
-      const declassified = parentAgent.declassifyReturn(
+      // Preview whether declassification would succeed without calling
+      // declassifyReturn (which calls child.end() on the no-match path).
+      const wouldPass = previewDeclassify(
         child,
         result.response,
         ballots,
-      );
-
-      // Filter declassified result through parent's visibility policy
-      const filtered = filterOutput(
-        declassified.content,
-        declassified.label,
         parentAgent.policy,
       );
 
-      const isFiltered = filtered.filtered ?? false;
+      if (wouldPass || attempt === MAX_RETRIES) {
+        // Commit: call the real declassifyReturn (may end the child)
+        const declassified = parentAgent.declassifyReturn(
+          child,
+          result.response,
+          ballots,
+        );
 
-      if (!isFiltered || attempt === MAX_RETRIES) {
-        // Success, or gave up after max retries
+        const filtered = filterOutput(
+          declassified.content,
+          declassified.label,
+          parentAgent.policy,
+        );
+
+        const isFiltered = filtered.filtered ?? false;
         const labelDesc = declassified.label.integrity.length > 0
           ? declassified.label.integrity.map((a) => a.kind).join(", ")
           : "none";
-
         const content = isFiltered
           ? `[FILTERED: ${filtered.reason ?? "policy"}]`
           : filtered.content;
@@ -455,6 +464,7 @@ async function executeTask(
       }
 
       // Response would be filtered — retry with correction
+      loopOptions.onTaskRetry?.(attempt + 1, childDepth);
       history = result.messages;
     }
 
@@ -476,6 +486,36 @@ async function executeTask(
 // ---------------------------------------------------------------------------
 // Sub-agent system prompt
 // ---------------------------------------------------------------------------
+
+/**
+ * Preview whether a sub-agent's response would pass declassification
+ * and the parent's visibility filter, WITHOUT calling declassifyReturn
+ * (which has side effects like ending the child session).
+ */
+function previewDeclassify(
+  child: AgentSession,
+  text: string,
+  ballots: string[],
+  parentPolicy: AgentPolicy,
+): boolean {
+  const trimmed = text.trim();
+
+  // 1. Ballot match → InjectionFree → always passes
+  if (ballots.some((b) => b.trim() === trimmed)) return true;
+
+  // 2. Stdout match → adopts that output's label
+  for (const { result } of child.getHistory()) {
+    if (!result.filtered && result.stdout.trim() === trimmed) {
+      return !filterOutput(trimmed, result.label, parentPolicy).filtered;
+    }
+  }
+
+  // 3. No match → tainted label → check if parent would filter
+  const accLabel = labels.joinAll(
+    child.getHistory().map((h) => h.result.label),
+  );
+  return !filterOutput(text, accLabel, parentPolicy).filtered;
+}
 
 /**
  * Build a correction message when the sub-agent's response would be
