@@ -141,7 +141,7 @@ const SYSTEM_PROMPT =
 
 You have two tools:
 - exec: Run a command in a sandboxed shell (NOT bash). Only built-in commands are available: cat, head, tail, wc, diff, grep, sed, sort, uniq, cut, tr, jq, base64, echo, printf, ls, pwd, cd, cp, mv, rm, mkdir, touch, tee, chmod, curl, date, test, true, false, sleep, read, which, xargs. Pipes and redirects work. Shell variables work.
-- task: Delegate work to a sub-agent that can see data you cannot. Your visibility policy filters out untrusted content (e.g., network-fetched HTML), but a sub-agent has a relaxed policy and can read it. The sub-agent's response is declassified before you see it: if it matches one of your ballots (safe return strings you provide), it's trusted. If it matches a captured command output (like wc -l), it inherits that output's label. Use task when you need to inspect or process untrusted data and report back a safe summary.
+- task: Delegate work to a sub-agent that can see data you cannot. Your visibility policy filters out untrusted content (e.g., network-fetched HTML), but a sub-agent has a relaxed policy and can read it. For classification tasks (yes/no questions), provide ballots — short fixed strings the sub-agent can return. For open-ended tasks (summaries, explanations, discoveries), omit ballots entirely — the response will pass through if all data the sub-agent accessed was clean (no curl/network data).
 
 Rules:
 - ALWAYS call the exec tool when the user asks you to do something. Do not just explain — execute.

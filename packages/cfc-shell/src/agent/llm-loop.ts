@@ -114,12 +114,12 @@ const TASK_SCHEMA = {
       type: "array",
       items: { type: "string" },
       description:
-        "Short fixed literal strings the sub-agent may return verbatim. " +
-        "Each ballot must be a single short word or phrase with NO " +
-        'placeholders, brackets, or variable parts. Good: ["YES", "NO", ' +
-        '"SAFE", "UNSAFE"]. Bad: ["YES - [description]", "NO - standard ' +
-        'Google logo"]. Put all instructions and detail in the task field ' +
-        "instead — ballots are just the allowed return values.",
+        "Optional. Only provide ballots when you need a RESTRICTED set of " +
+        "possible responses (e.g., classification tasks). For open-ended " +
+        "tasks (summaries, explanations, discoveries), omit ballots entirely " +
+        "and let the sub-agent respond freely. When you do use ballots, " +
+        'each must be a short fixed literal (e.g., ["YES", "NO"]) with no ' +
+        "placeholders or variable parts.",
     },
   },
   required: ["task"],
@@ -129,10 +129,11 @@ const TASK_DESC_MAIN =
   "Delegate a task to a sub-agent with a relaxed visibility " +
   "policy. The sub-agent can see data that this agent cannot (e.g., " +
   "untrusted network content). Use this when your exec output is " +
-  "filtered due to security policy. Always provide short ballots " +
-  '(e.g., ["YES", "NO"]) — put all detail in the task description, ' +
-  "not in the ballot strings. The sub-agent's response is declassified " +
-  "by checking it against ballots and captured command outputs.";
+  "filtered due to security policy. For classification tasks, provide " +
+  'short ballots (e.g., ["YES", "NO"]). For open-ended tasks ' +
+  "(summaries, explanations), omit ballots and let the sub-agent " +
+  "respond freely — its response will pass through if all the data " +
+  "it accessed was clean.";
 
 const TASK_DESC_SUB =
   "Delegate a subtask to another agent. Useful for breaking up work " +
