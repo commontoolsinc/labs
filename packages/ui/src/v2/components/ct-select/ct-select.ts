@@ -152,6 +152,7 @@ export class CTSelect extends BaseElement {
 
     private _buffer: unknown | unknown[] | undefined;
     private _initialValue: unknown | unknown[] | undefined;
+    private _lastCellValue: unknown | unknown[] | undefined;
     private _formUnregister?: () => void;
 
     /* ---------- Reactive properties ---------- */
@@ -216,6 +217,8 @@ export class CTSelect extends BaseElement {
         this._initialValue = this._cellController.getValue();
         // Initialize buffer with initial value
         this._buffer = this._initialValue;
+        // Track the last known cell value to detect external changes
+        this._lastCellValue = this._initialValue;
 
         // Register with form
         this._formUnregister = this._formContext.registerField({
@@ -227,6 +230,8 @@ export class CTSelect extends BaseElement {
           },
           flush: () => {
             this._cellController.setValue(this._buffer!);
+            // Update last known value so we don't think this was an external change
+            this._lastCellValue = this._buffer;
           },
           reset: () => {
             this._buffer = this._initialValue;
@@ -237,6 +242,20 @@ export class CTSelect extends BaseElement {
             message: this._select?.validationMessage,
           }),
         });
+      }
+    }
+
+    /**
+     * Sync buffer with cell value when it changes externally.
+     */
+    private _syncBufferWithCell() {
+      if (!this._formContext) return;
+
+      const currentCellValue = this._cellController.getValue();
+      if (currentCellValue !== this._lastCellValue) {
+        this._buffer = currentCellValue;
+        this._initialValue = currentCellValue;
+        this._lastCellValue = currentCellValue;
       }
     }
 
@@ -258,6 +277,9 @@ export class CTSelect extends BaseElement {
     }
 
     override updated(changed: Map<string | number | symbol, unknown>) {
+      // Sync buffer with cell when cell value changes externally (e.g., edit mode)
+      this._syncBufferWithCell();
+
       if (changed.has("items")) {
         // Rebuild key map each time items array changes
         this._buildKeyMap();

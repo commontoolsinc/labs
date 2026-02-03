@@ -295,6 +295,7 @@ export class CTTextarea extends BaseElement {
 
       private _buffer: string | undefined;
       private _initialValue: string | undefined;
+      private _lastCellValue: string | undefined;
       private _formUnregister?: () => void;
 
       constructor() {
@@ -388,6 +389,8 @@ export class CTTextarea extends BaseElement {
           this._initialValue = this._cellController.getValue();
           // Initialize buffer with initial value
           this._buffer = this._initialValue;
+          // Track the last known cell value to detect external changes
+          this._lastCellValue = this._initialValue;
 
           // Register with form
           this._formUnregister = this._formContext.registerField({
@@ -399,6 +402,8 @@ export class CTTextarea extends BaseElement {
             },
             flush: () => {
               this._cellController.setValue(this._buffer ?? "");
+              // Update last known value so we don't think this was an external change
+              this._lastCellValue = this._buffer;
             },
             reset: () => {
               this._buffer = this._initialValue;
@@ -409,6 +414,20 @@ export class CTTextarea extends BaseElement {
               message: this.validationMessage,
             }),
           });
+        }
+      }
+
+      /**
+       * Sync buffer with cell value when it changes externally.
+       */
+      private _syncBufferWithCell() {
+        if (!this._formContext) return;
+
+        const currentCellValue = this._cellController.getValue();
+        if (currentCellValue !== this._lastCellValue) {
+          this._buffer = currentCellValue;
+          this._initialValue = currentCellValue;
+          this._lastCellValue = currentCellValue;
         }
       }
 
@@ -423,6 +442,9 @@ export class CTTextarea extends BaseElement {
         changedProperties: Map<string | number | symbol, unknown>,
       ) {
         super.updated(changedProperties);
+
+        // Sync buffer with cell when cell value changes externally (e.g., edit mode)
+        this._syncBufferWithCell();
 
         if (changedProperties.has("value")) {
           // Bind the new value (Cell or plain) to the controller
