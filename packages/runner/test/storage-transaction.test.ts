@@ -1151,3 +1151,184 @@ describe("data: URI behaviors", () => {
     expect(result.error?.name).toBe("ReadOnlyAddressError");
   });
 });
+
+describe("Cell-level transaction isolation", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      storageManager,
+      apiUrl: new URL("http://localhost:8000"),
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("uncommitted writes should not be visible to get() outside transaction", async () => {
+    const cell = runtime.getCell<{ value: number }>(space, "isolation-test");
+
+    // Set initial value
+    const setupTx = runtime.edit();
+    cell.withTx(setupTx).set({ value: 42 });
+    await setupTx.commit();
+
+    // Start a new transaction and write a new value
+    const tx = runtime.edit();
+    cell.withTx(tx).set({ value: 999 });
+
+    // Before commit: get() should still see the old value
+    const beforeCommit = cell.get();
+    expect(beforeCommit?.value).toBe(42);
+
+    // After commit: get() should see the new value
+    await tx.commit();
+    const afterCommit = cell.get();
+    expect(afterCommit?.value).toBe(999);
+  });
+
+  it("uncommitted writes should not be visible to pull() outside transaction", async () => {
+    const cell = runtime.getCell<{ value: number }>(
+      space,
+      "isolation-pull-test",
+    );
+
+    // Set initial value
+    const setupTx = runtime.edit();
+    cell.withTx(setupTx).set({ value: 100 });
+    await setupTx.commit();
+
+    // Start a new transaction and write a new value
+    const tx = runtime.edit();
+    cell.withTx(tx).set({ value: 500 });
+
+    // Before commit: pull() should still see the old value
+    await cell.pull();
+    const beforeCommit = cell.get();
+    expect(beforeCommit?.value).toBe(100);
+
+    // After commit: pull() should see the new value
+    await tx.commit();
+    await cell.pull();
+    const afterCommit = cell.get();
+    expect(afterCommit?.value).toBe(500);
+  });
+
+  /*
+   * =========================================================================
+   * SURPRISING BEHAVIOR: Live references, not snapshots
+   * =========================================================================
+   *
+   * Unlike traditional database transactions, cell.get() returns a LIVE
+   * REFERENCE (proxy) to the current committed state, NOT a point-in-time
+   * snapshot.
+   *
+   * This differs from standard transaction semantics:
+   *
+   * - In SQL with SNAPSHOT ISOLATION: A transaction sees a consistent
+   *   snapshot from when it started. Reads within T1 would always return
+   *   the value as of T1's start time, regardless of concurrent commits.
+   *
+   * - In SQL with SERIALIZABLE: Concurrent modifications would cause one
+   *   transaction to fail (conflict detection / optimistic locking).
+   *
+   * - HERE: Reads return live proxies. If T2 commits while T1 is open,
+   *   T1's previously-read reference will reflect T2's changes. T1 will
+   *   NOT fail on commit. There is no conflict detection.
+   *
+   * IMPLICATION: If you need point-in-time semantics, you must explicitly
+   * deep-copy values when you read them (e.g., JSON.parse(JSON.stringify(...))).
+   * =========================================================================
+   */
+
+  it("get() returns live reference: concurrent commit changes what T1 sees", async () => {
+    const cellA = runtime.getCell<{ value: number }>(space, "live-ref-cell-a");
+    const cellB = runtime.getCell<{ value: number }>(space, "live-ref-cell-b");
+
+    // Setup: cellA has initial value
+    const setupTx = runtime.edit();
+    cellA.withTx(setupTx).set({ value: 100 });
+    await setupTx.commit();
+
+    // T1 starts and reads cellA - gets a LIVE REFERENCE
+    const t1 = runtime.edit();
+    const t1ReadValue = cellA.get();
+    expect(t1ReadValue?.value).toBe(100); // Looks like 100 right now...
+
+    // T2 starts, writes new value to cellA, and commits
+    const t2 = runtime.edit();
+    cellA.withTx(t2).set({ value: 999 });
+    await t2.commit();
+
+    // SURPRISE: t1ReadValue is a live reference - it now reflects T2's commit!
+    // In traditional DB semantics, t1ReadValue would still be 100.
+    expect(t1ReadValue?.value).toBe(999);
+
+    // T1 writes its "read value" to cellB and commits successfully
+    // (no conflict detection - T1 doesn't know or care that cellA changed)
+    cellB.withTx(t1).set(t1ReadValue!);
+    await t1.commit();
+
+    // cellB has T2's value, not the value T1 "thought" it read
+    expect(cellB.get()?.value).toBe(999);
+  });
+
+  it("deep copy at read time captures point-in-time snapshot", async () => {
+    const cellA = runtime.getCell<{ value: number }>(space, "snapshot-cell-a");
+    const cellB = runtime.getCell<{ value: number }>(space, "snapshot-cell-b");
+
+    // Setup: cellA has initial value
+    const setupTx = runtime.edit();
+    cellA.withTx(setupTx).set({ value: 100 });
+    await setupTx.commit();
+
+    // T1 starts and reads cellA - DEEP COPY to get true snapshot
+    const t1 = runtime.edit();
+    const t1Snapshot = JSON.parse(JSON.stringify(cellA.get()));
+    expect(t1Snapshot.value).toBe(100);
+
+    // T2 commits a new value
+    const t2 = runtime.edit();
+    cellA.withTx(t2).set({ value: 999 });
+    await t2.commit();
+
+    // The snapshot is unaffected by T2's commit
+    expect(t1Snapshot.value).toBe(100);
+
+    // T1 writes its snapshot to cellB
+    cellB.withTx(t1).set(t1Snapshot);
+    await t1.commit();
+
+    // cellB has the original value T1 captured
+    expect(cellB.get()?.value).toBe(100);
+  });
+
+  it("no conflict detection: T1 commits successfully despite concurrent modification", async () => {
+    const cell = runtime.getCell<{ value: number }>(space, "no-conflict-cell");
+
+    // Setup
+    const setupTx = runtime.edit();
+    cell.withTx(setupTx).set({ value: 1 });
+    await setupTx.commit();
+
+    // T1 starts (implicitly "reads" by existing while cell has value 1)
+    const t1 = runtime.edit();
+
+    // T2 modifies and commits
+    const t2 = runtime.edit();
+    cell.withTx(t2).set({ value: 2 });
+    await t2.commit();
+
+    // T1 now writes its own value - no conflict, no error
+    // In serializable isolation, this would fail.
+    cell.withTx(t1).set({ value: 3 });
+    await t1.commit(); // succeeds
+
+    // Last writer wins
+    expect(cell.get()?.value).toBe(3);
+  });
+});
