@@ -93,6 +93,18 @@ export function parseWishTarget(target: string): ParsedWishTarget {
   throw new WishError(`Wish path target "${target}" is not recognized.`);
 }
 
+/**
+ * Check if a tag string contains a hashtag matching the search term.
+ * Extracts all #hashtags from the tag and checks for exact match.
+ */
+function tagMatchesHashtag(
+  tag: string | undefined,
+  searchTermWithoutHash: string,
+): boolean {
+  const hashtags = tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ?? [];
+  return [...hashtags].some((m) => m[1] === searchTermWithoutHash);
+}
+
 type WishContext = {
   runtime: Runtime;
   tx: IExtendedStorageTransaction;
@@ -321,10 +333,7 @@ function resolveBase(
               }
 
               // Search schema tag for hashtags
-              const tag = entry.tag;
-              const hashtags = tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ??
-                [];
-              return [...hashtags].some((m) => m[1] === searchTermWithoutHash);
+              return tagMatchesHashtag(entry.tag, searchTermWithoutHash);
             });
 
             for (const match of matches) {
@@ -373,9 +382,7 @@ function resolveBase(
               // Schema not available yet
             }
 
-            const hashtags = tag?.toLowerCase().matchAll(/#([a-z0-9-]+)/g) ??
-              [];
-            return [...hashtags].some((m) => m[1] === searchTermWithoutHash);
+            return tagMatchesHashtag(tag, searchTermWithoutHash);
           });
 
           for (const match of matches) {
