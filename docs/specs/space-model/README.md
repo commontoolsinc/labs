@@ -45,9 +45,9 @@ The specification addresses:
 
 ## Topics
 
-- [Storage Format](./storage-format.md)
-- [Identity and References](./identity-and-references.md)
-- [Cells](./cells.md)
-- [Transactions](./transactions.md)
-- [Reactivity](./reactivity.md)
-- [Schemas](./schemas.md)
+- [Storage Format](./1-storage-format.md)
+- [Identity and References](./2-identity-and-references.md)
+- [Cells](./3-cells.md)
+- [Transactions](./4-transactions.md)
+- [Reactivity](./5-reactivity.md)
+- [Schemas](./6-schemas.md)
