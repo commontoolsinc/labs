@@ -25,10 +25,11 @@ Currently, the system distinguishes two kinds of cells:
 The Cell class exposes approximately 50 public methods. Investigation shows
 that usage is stratified by layer:
 
-#### Transaction Layer (~8 methods)
+#### Transaction Layer (~10 methods)
 
 The narrow core used for data access:
-- `get()`, `getRaw()` — read value
+- `get()`, `getRaw()` — read value (reactive)
+- `sample()` — read value (non-reactive, no dependency tracking)
 - `set()`, `setRaw()` — write value
 - `update()`, `push()`, `remove()` — mutate
 - `key()` — navigate to nested property

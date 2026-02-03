@@ -49,6 +49,9 @@ open and commit.
 - Even **identical writes** trigger conflict — detection is based on base state
   changing, not on whether final values differ
 - This is optimistic concurrency control
+- **Important**: Conflict detection only applies to cells that were READ within
+  the transaction. A write-only transaction will not conflict with concurrent
+  commits to the same cell.
 
 #### Example
 
@@ -60,6 +63,26 @@ Transaction A: set(2), commit  // FAILS — base state changed
 
 Transaction A fails even though it wrote the same value, because the base state
 it read from is no longer current.
+
+### Retry Semantics
+
+The `editWithRetry()` helper provides automatic retry on commit failure:
+
+```typescript
+const result = await runtime.editWithRetry(async (tx) => {
+  const current = cell.withTx(tx).get();
+  cell.withTx(tx).set(current + 1);
+  return current + 1;
+});
+```
+
+- Default maximum retries: 5
+- On commit error, re-runs the entire function with a fresh transaction
+- Returns `{ ok: result }` on success
+- Returns `{ error: CommitError }` after exhausting retries
+
+The scheduler also provides automatic retry for handlers, up to
+`MAX_RETRIES_FOR_REACTIVE` attempts on transaction conflict.
 
 ### Relationship to Handlers
 
@@ -101,9 +124,7 @@ streaming) builds on top.
 
 ## Open Questions
 
-- What are the exact retry semantics for `editWithRetry()`?
 - How do nested/child transactions work (if at all)?
-- What is the relationship between transactions and the scheduler?
 - How are transactions serialized for storage?
 - What consistency guarantees exist across spaces?
 

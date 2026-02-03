@@ -97,11 +97,14 @@ This enables pieces to start on-demand when events arrive.
 Cells are linked in an ownership hierarchy:
 
 ```
-resultCell ←─sourceCell─→ processCell
-                              │
-                              ├─ TYPE (recipe ID)
-                              └─ resultRef → resultCell
+resultCell ───source───> processCell
+     ^                        │
+     │                        ├─ TYPE (recipe ID)
+     └────── resultRef ───────┘
 ```
+
+The `source` property on a result cell points to its process cell. The process
+cell's `resultRef` property points back to the result cell.
 
 This chain enables:
 - Finding which recipe governs a cell
