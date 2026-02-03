@@ -10,11 +10,7 @@ import { HttpProgramResolver } from "@commontools/js-compiler";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
-import type {
-  IExtendedStorageTransaction,
-  MemorySpace,
-} from "../storage/interface.ts";
-import type { EntityId } from "../create-ref.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { type JSONSchema, NAME, type Recipe, UI } from "../builder/types.ts";
 import { getRecipeEnvironment } from "../env.ts";
 
@@ -35,32 +31,6 @@ class WishError extends Error {
     super(message);
     this.name = "WishError";
   }
-}
-
-type WishResolution = {
-  entityId: EntityId;
-  path?: readonly string[];
-};
-
-const WISH_TARGETS: Partial<Record<WishTag, WishResolution>> = {};
-
-function resolveWishTarget(
-  resolution: WishResolution,
-  runtime: Runtime,
-  space: MemorySpace,
-  tx: IExtendedStorageTransaction,
-): Cell<any> {
-  const cell = runtime.getCellFromEntityId(
-    space,
-    resolution.entityId,
-    resolution.path,
-    undefined,
-    tx,
-  );
-  if (!cell) {
-    throw new WishError("Failed to resolve wish target");
-  }
-  return cell;
 }
 
 export type ParsedWishTarget = {
@@ -420,8 +390,7 @@ function resolveSpaceTarget(
  * Resolution paths:
  * 1. Well-known space targets (/, #default, #mentionable, #allPieces, #recent, #now)
  * 2. Well-known home space targets (#favorites, #journal, #learned, #profile)
- * 3. Registry targets (WISH_TARGETS)
- * 4. Hashtag search (arbitrary #tags in favorites/mentionables)
+ * 3. Hashtag search (arbitrary #tags in favorites/mentionables)
  */
 function resolveBase(
   parsed: ParsedWishTarget,
@@ -434,18 +403,6 @@ function resolveBase(
   // Try home space targets
   const homeResult = resolveHomeSpaceTarget(parsed, ctx);
   if (homeResult) return homeResult;
-
-  // Check registry targets
-  const resolution = WISH_TARGETS[parsed.key];
-  if (resolution) {
-    const baseCell = resolveWishTarget(
-      resolution,
-      ctx.runtime,
-      ctx.parentCell.space,
-      ctx.tx,
-    );
-    return [{ cell: baseCell }];
-  }
 
   // Hashtag search
   if (parsed.key.startsWith("#")) {
