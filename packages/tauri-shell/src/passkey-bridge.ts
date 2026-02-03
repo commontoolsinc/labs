@@ -203,13 +203,13 @@ async function createPasskeyWebAuthn(
   const userIdBytes = base64UrlDecode(options.userId);
 
   const publicKeyOptions: PublicKeyCredentialCreationOptions = {
-    challenge: challengeBytes,
+    challenge: challengeBytes.buffer as ArrayBuffer,
     rp: {
       id: options.rpId,
       name: options.rpName,
     },
     user: {
-      id: userIdBytes,
+      id: userIdBytes.buffer as ArrayBuffer,
       name: options.userName,
       displayName: options.userDisplayName,
     },
@@ -277,12 +277,12 @@ async function getPasskeyWebAuthn(
   const challengeBytes = base64UrlDecode(options.challenge);
 
   const publicKeyOptions: PublicKeyCredentialRequestOptions = {
-    challenge: challengeBytes,
+    challenge: challengeBytes.buffer as ArrayBuffer,
     rpId: options.rpId,
     timeout: options.timeout ?? 60000,
     userVerification: options.userVerification ?? "required",
     allowCredentials: options.allowCredentials?.map((cred) => ({
-      id: base64UrlDecode(cred.id),
+      id: base64UrlDecode(cred.id).buffer as ArrayBuffer,
       type: cred.type,
       transports: cred.transports,
     })),
@@ -346,15 +346,15 @@ function base64UrlDecode(str: string): Uint8Array {
   return bytes;
 }
 
-function convertToCamelCase(obj: Record<string, unknown>): Record<string, unknown> {
+function convertToCamelCase<T extends object>(obj: T): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const key of Object.keys(obj)) {
     const camelKey = key.replace(/_([a-z])/g, (_, letter) =>
       letter.toUpperCase()
     );
-    const value = obj[key];
+    const value = (obj as Record<string, unknown>)[key];
     if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-      result[camelKey] = convertToCamelCase(value as Record<string, unknown>);
+      result[camelKey] = convertToCamelCase(value as object);
     } else {
       result[camelKey] = value;
     }

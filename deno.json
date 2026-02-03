@@ -25,6 +25,7 @@
     "./packages/seeder",
     "./packages/shell",
     "./packages/static",
+    "./packages/tauri-shell",
     "./packages/toolshed",
     "./packages/ui",
     "./packages/utils",

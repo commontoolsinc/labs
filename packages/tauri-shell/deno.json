@@ -2,6 +2,8 @@
   "name": "@commontools/tauri-shell",
   "version": "0.1.0",
   "tasks": {
+    "check": "deno check src/mod.ts src/passkey-bridge.ts",
+    "test": "deno test --allow-read test/",
     "tauri": "cargo tauri",
     "dev": "cargo tauri dev",
     "build": "cargo tauri build",
