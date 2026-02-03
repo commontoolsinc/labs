@@ -196,7 +196,7 @@ async function runOnce(
         await write(`\n${gutter(depth)}# ${task}\n`);
       } else {
         const cmd = String(input.command ?? "");
-        await write(`\n${fmtCommand(cmd, depth)}\n`);
+        await write(`\n\n${fmtCommand(cmd, depth)}\n`);
       }
     },
     onToolResult: async (_cmd, res, depth) => {
