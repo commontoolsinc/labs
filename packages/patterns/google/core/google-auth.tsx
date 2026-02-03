@@ -618,9 +618,11 @@ export default pattern<Input, Output>(
     const loggedIn = computed(() => !!auth?.user?.email);
 
     const grantedScopesUI = computed(() => {
-      const friendlyScopes = (auth?.scope || []).map(
-        getScopeFriendlyName,
-      ) as string[];
+      const scopes = auth.scope;
+      if (!scopes || scopes.length === 0) {
+        return <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }} />;
+      }
+      const friendlyScopes = scopes.map(getScopeFriendlyName) as string[];
       return (
         <ul style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
           {friendlyScopes.map((scope) => <li>{scope}</li>)}
