@@ -1386,6 +1386,41 @@ describe("Cell-level transaction isolation", () => {
     expect(cell.get()?.value).toBe(100);
   });
 
+  it("identical writes with sequential commits: second commit still fails", async () => {
+    const cell = runtime.getCell<{ value: number }>(
+      space,
+      "identical-sequential",
+    );
+
+    // Setup: cell has initial value
+    const setupTx = runtime.edit();
+    cell.withTx(setupTx).set({ value: 0 });
+    await setupTx.commit();
+
+    // T1 and T2 both open (both see value = 0)
+    const t1 = runtime.edit();
+    const t2 = runtime.edit();
+
+    // Both write the SAME value (neither has committed yet)
+    cell.withTx(t1).set({ value: 100 });
+    cell.withTx(t2).set({ value: 100 });
+
+    // T1 commits first - succeeds
+    const t1Result = await t1.commit();
+    expect(t1Result.error).toBeUndefined();
+    expect(cell.get()?.value).toBe(100);
+
+    // T2 commits second - still FAILS even though the value is identical
+    // The conflict detection is based on the base state changing, not the
+    // final value being different
+    const t2Result = await t2.commit();
+    expect(t2Result.error).toBeDefined();
+    expect(t2Result.error?.name).toBe("StorageTransactionInconsistent");
+
+    // Cell has the value (100) - same either way, but T2 was rejected
+    expect(cell.get()?.value).toBe(100);
+  });
+
   it("conflicting writes with parallel commits: one succeeds, one fails", async () => {
     const cell = runtime.getCell<{ value: number }>(
       space,
