@@ -200,11 +200,16 @@ async function runOnce(
         const ballots = Array.isArray(input.ballots)
           ? (input.ballots as string[]).map(String)
           : [];
-        const ballotsStr = ballots.length > 0
-          ? ` [ballots: ${ballots.map((b) => `"${b}"`).join(", ")}]`
+        const ballotsLine = ballots.length > 0
+          ? `\n${
+            fmtStatus(
+              `[ballots: ${ballots.map((b) => `"${b}"`).join(", ")}]`,
+              depth,
+            )
+          }`
           : "";
         await write(
-          `${sep}${fmtPrefixed("#", task + ballotsStr, depth)}\n`,
+          `${sep}${fmtPrefixed("#", task, depth)}${ballotsLine}\n`,
         );
       } else {
         const cmd = String(input.command ?? "");
