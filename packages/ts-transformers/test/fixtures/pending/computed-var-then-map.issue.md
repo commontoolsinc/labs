@@ -50,6 +50,16 @@ In `map-strategy.ts`, the checks for whether `.map()` needs transformation both 
 
 The `|| []` fallback expression gets wrapped in a derive by the transformer, but the resulting `.map()` call doesn't recognize its target as needing transformation.
 
+## Current Status
+
+**Compile-time error added**: The `PatternContextValidationTransformer` now detects this pattern and reports an error:
+```
+'.map()' on fallback expression with mixed reactive/non-reactive types is not supported.
+Use direct property access: 'x.map(...)' rather than '(x ?? fallback).map(...)'
+```
+
+This prevents the silent runtime failure and guides users to the workaround.
+
 ## Workaround
 
 Use direct property access without fallback:
@@ -61,7 +71,9 @@ Use direct property access without fallback:
 
 This requires making the property non-optional and ensuring it's always an array.
 
-## Potential Fixes
+## Potential Future Fixes
+
+To actually support this pattern (rather than just erroring), these approaches could work:
 
 1. **Track derive result identifiers**: When a variable is assigned from a derive call, mark it so `isDeriveCall()` can recognize the identifier
 

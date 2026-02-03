@@ -169,43 +169,7 @@ export default recipe({
             },
             required: ["state"]
         } as const satisfies __ctHelpers.JSONSchema, (__ct_handler_event, { state }) => {
-            const scaled = state.items.mapWithPattern(__ctHelpers.recipe({
-                type: "object",
-                properties: {
-                    element: {
-                        type: "object",
-                        properties: {
-                            value: {
-                                type: "number"
-                            }
-                        },
-                        required: ["value"]
-                    },
-                    params: {
-                        type: "object",
-                        properties: {
-                            state: {
-                                type: "object",
-                                properties: {
-                                    multiplier: {
-                                        type: "number",
-                                        asOpaque: true
-                                    }
-                                },
-                                required: ["multiplier"]
-                            }
-                        },
-                        required: ["state"]
-                    }
-                },
-                required: ["element", "params"]
-            } as const satisfies __ctHelpers.JSONSchema, {
-                type: "number"
-            } as const satisfies __ctHelpers.JSONSchema, ({ element: item, params: { state } }) => item.value * state.multiplier), {
-                state: {
-                    multiplier: state.multiplier
-                }
-            });
+            const scaled = state.items.map((item) => item.value * state.multiplier);
             console.log(scaled);
         })({
             state: {

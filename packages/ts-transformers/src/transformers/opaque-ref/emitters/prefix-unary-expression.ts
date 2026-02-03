@@ -14,8 +14,13 @@ export const emitPrefixUnaryExpression: Emitter = ({
   context,
   analysis,
   analyze,
+  inSafeContext,
 }) => {
   if (!ts.isPrefixUnaryExpression(expression)) return undefined;
+
+  // Skip derive wrapping in safe contexts - they don't need it
+  if (inSafeContext) return undefined;
+
   if (expression.operator !== ts.SyntaxKind.ExclamationToken) {
     return undefined;
   }

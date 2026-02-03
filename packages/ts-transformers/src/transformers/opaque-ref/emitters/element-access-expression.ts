@@ -12,8 +12,13 @@ export const emitElementAccessExpression = ({
   dataFlows,
   analysis,
   context,
+  inSafeContext,
 }: EmitterContext) => {
   if (!ts.isElementAccessExpression(expression)) return undefined;
+
+  // Skip derive wrapping in safe contexts - they don't need it
+  if (inSafeContext) return undefined;
+
   if (dataFlows.all.length === 0) return undefined;
 
   const relevantDataFlows = filterRelevantDataFlows(

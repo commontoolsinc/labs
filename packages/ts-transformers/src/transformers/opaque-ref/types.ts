@@ -16,10 +16,17 @@ export interface RewriteParams {
   readonly analysis: DataFlowAnalysis;
   readonly context: TransformationContext;
   readonly analyze: AnalyzeFn;
+  /**
+   * True when inside a safe callback wrapper (action, handler, computed, etc.)
+   * where opaque reading is allowed. In safe contexts, we still need to apply
+   * semantic transformations (&&->when, ||->unless) but NOT derive() wrappers.
+   */
+  readonly inSafeContext?: boolean;
 }
 
 export interface EmitterContext extends RewriteParams {
   readonly dataFlows: NormalizedDataFlowSet;
+  readonly inSafeContext: boolean;
   rewriteChildren(node: ts.Expression): ts.Expression;
 }
 

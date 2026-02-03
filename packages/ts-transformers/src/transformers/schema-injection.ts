@@ -771,8 +771,11 @@ export class SchemaInjectionTransformer extends Transformer {
           } else {
             // Normal case - infer from the argument type
             // Apply literal widening so `const x = 5; derive(x, fn)` produces `number`, not `5`
+            // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g., mapWithPattern calls)
+            // which have their types registered in the typeRegistry by ClosureTransformer
             const argumentType = widenLiteralType(
-              checker.getTypeAtLocation(firstArg),
+              getTypeAtLocationWithFallback(firstArg, checker, typeRegistry) ??
+                checker.getTypeAtLocation(firstArg),
               checker,
             );
             const inferred = collectFunctionSchemaTypeNodes(

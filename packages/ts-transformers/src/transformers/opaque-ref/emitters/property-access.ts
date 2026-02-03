@@ -11,8 +11,11 @@ import { isSafeEventHandlerCall } from "../../../ast/mod.ts";
 export function emitPropertyAccess(
   params: EmitterContext,
 ): ts.Expression | undefined {
-  const { expression, dataFlows, context } = params;
+  const { expression, dataFlows, context, inSafeContext } = params;
   if (!ts.isPropertyAccessExpression(expression)) return undefined;
+
+  // Skip derive wrapping in safe contexts - they don't need it
+  if (inSafeContext) return undefined;
 
   if (dataFlows.all.length === 0) return undefined;
   if (

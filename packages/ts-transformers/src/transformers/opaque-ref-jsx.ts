@@ -18,6 +18,33 @@ export class OpaqueRefJSXTransformer extends Transformer {
   }
 }
 
+/**
+ * Check if an expression contains binary logical operators (&& or ||) that may
+ * need when/unless transformation. This is used to determine if we should
+ * process expressions in safe contexts.
+ */
+function containsLogicalBinaryOperator(expr: ts.Expression): boolean {
+  if (ts.isBinaryExpression(expr)) {
+    const op = expr.operatorToken.kind;
+    if (
+      op === ts.SyntaxKind.AmpersandAmpersandToken ||
+      op === ts.SyntaxKind.BarBarToken
+    ) {
+      return true;
+    }
+  }
+  // Check children recursively
+  let found = false;
+  expr.forEachChild((child) => {
+    if (!found && ts.isExpression(child)) {
+      if (containsLogicalBinaryOperator(child)) {
+        found = true;
+      }
+    }
+  });
+  return found;
+}
+
 function transform(context: TransformationContext): ts.SourceFile {
   const checker = context.checker;
   const analyze = createDataFlowAnalyzer(context.checker);
@@ -33,27 +60,40 @@ function transform(context: TransformationContext): ts.SourceFile {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
-      // Skip if inside a safe callback wrapper (derive, computed, action, lift, handler)
-      // These contexts already provide reactive tracking, so JSX expressions
-      // don't need to be wrapped in derive.
-      if (isInsideSafeCallbackWrapper(node, checker)) {
-        return visitEachChildWithJsx(node, visit, context.tsContext);
-      }
+      // Detect if we're in a safe context (action, handler, computed, etc.)
+      // In safe contexts, we still need to transform && -> when() and || -> unless()
+      // but we don't need to wrap expressions in derive().
+      const inSafeContext = isInsideSafeCallbackWrapper(node, checker);
 
       const analysis = analyze(node.expression);
 
-      // Skip if doesn't require rewriting
-      if (!analysis.requiresRewrite) {
+      // Check if expression contains && or || that may need when/unless transformation
+      const hasLogicalOps = containsLogicalBinaryOperator(node.expression);
+
+      // Skip if doesn't require rewriting AND no logical operators that might need transformation
+      // We need to proceed even with requiresRewrite=false if there are && or || operators
+      // because the left side might be an OpaqueRef type (e.g., computed() returns OpaqueRef)
+      // which always needs when/unless for correct short-circuit semantics.
+      if (!analysis.requiresRewrite && !hasLogicalOps) {
+        return visitEachChildWithJsx(node, visit, context.tsContext);
+      }
+
+      // In safe contexts, only proceed if we have binary logical operators
+      // that may need when/unless transformation
+      if (inSafeContext && !hasLogicalOps) {
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
       if (context.options.mode === "error") {
-        context.reportDiagnostic({
-          type: "opaque-ref:jsx-expression",
-          message:
-            "JSX expression with OpaqueRef computation should use derive",
-          node: node.expression,
-        });
+        // Only report errors for non-safe contexts
+        if (!inSafeContext) {
+          context.reportDiagnostic({
+            type: "opaque-ref:jsx-expression",
+            message:
+              "JSX expression with OpaqueRef computation should use derive",
+            node: node.expression,
+          });
+        }
         return node;
       }
 
@@ -62,6 +102,7 @@ function transform(context: TransformationContext): ts.SourceFile {
         analysis,
         context,
         analyze,
+        inSafeContext,
       });
 
       if (result) {
