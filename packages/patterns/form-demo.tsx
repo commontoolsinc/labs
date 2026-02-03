@@ -54,12 +54,16 @@ const startEdit = handler<
 >((_event, { index, people, formData, editingIndex, showModal }) => {
   const list = people.get();
   const person = list[index];
+  console.log("startEdit called:", { index, person });
   if (person) {
-    formData.set({
+    const newFormData = {
       name: person.name,
       email: person.email,
       role: person.role,
-    });
+    };
+    console.log("setting formData to:", newFormData);
+    formData.set(newFormData);
+    console.log("formData after set:", formData.get());
     editingIndex.set(index);
     showModal.set(true);
   }

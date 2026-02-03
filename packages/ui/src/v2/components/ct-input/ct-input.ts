@@ -423,7 +423,8 @@ export class CTInput extends BaseElement {
       }
 
       private getValue(): string {
-        // If in form context, use buffer instead of cell value
+        // If in form context with an explicit buffer value, use it
+        // Otherwise fall back to cell value (handles both no-form and deferred init cases)
         if (this._formContext && this._buffer !== undefined) {
           return this._buffer;
         }
@@ -504,32 +505,42 @@ export class CTInput extends BaseElement {
       }
 
       private _registerWithForm() {
+        // Only register once
+        if (this._formUnregister) return;
+
         // Only register if we have both a form context and a cell value binding
         if (this._formContext && this.value) {
-          // Read initial value from cell
-          this._initialValue = this._cellController.getValue();
-          // Initialize buffer with initial value
-          this._buffer = this._initialValue;
-          // Track the last known cell value to detect external changes
-          this._lastCellValue = this._initialValue;
+          // Don't eagerly initialize buffer - let it stay undefined
+          // getValue() will fall back to cell value when buffer is undefined
+          // This avoids race conditions where cell hasn't propagated yet
+
+          console.log(
+            `ct-input[${this.name}] _registerWithForm (deferred init)`,
+          );
 
           // Register with form
           this._formUnregister = this._formContext.registerField({
             element: this,
             name: this.name || undefined,
-            getValue: () => this._buffer,
+            // Return buffer if user has typed, otherwise return current cell value
+            getValue: () => this._buffer ?? this._cellController.getValue(),
             setValue: (v) => {
               this._buffer = v as string;
               this.requestUpdate();
             },
             flush: () => {
-              console.log("ct-input flush:", this._buffer);
-              this._cellController.setValue(this._buffer ?? "");
-              // Update last known value so we don't think this was an external change
-              this._lastCellValue = this._buffer;
+              const valueToFlush = this._buffer ??
+                this._cellController.getValue();
+              console.log("ct-input flush:", valueToFlush);
+              this._cellController.setValue(valueToFlush);
+              // Update tracking so we don't think this was an external change
+              this._lastCellValue = valueToFlush;
             },
             reset: () => {
-              this._buffer = this._initialValue;
+              // Reset buffer to undefined - will fall back to cell value
+              this._buffer = undefined;
+              this._initialValue = undefined;
+              this._lastCellValue = undefined;
               this.requestUpdate();
             },
             validate: () => ({
@@ -540,22 +551,8 @@ export class CTInput extends BaseElement {
         }
       }
 
-      /**
-       * Sync buffer with cell value when it changes externally.
-       * This handles the case where the parent sets the cell value
-       * (e.g., opening a modal with existing data for editing).
-       */
-      private _syncBufferWithCell() {
-        if (!this._formContext) return;
-
-        const currentCellValue = this._cellController.getValue();
-        // If cell value changed externally (not from our flush), update buffer
-        if (currentCellValue !== this._lastCellValue) {
-          this._buffer = currentCellValue;
-          this._initialValue = currentCellValue;
-          this._lastCellValue = currentCellValue;
-        }
-      }
+      // Note: _syncBufferWithCell removed - with deferred init, getValue() always
+      // falls back to cell value when buffer is undefined, so no sync needed
 
       override disconnectedCallback() {
         super.disconnectedCallback();
@@ -579,9 +576,6 @@ export class CTInput extends BaseElement {
 
       override updated(changedProperties: Map<string, any>) {
         super.updated(changedProperties);
-
-        // Sync buffer with cell when cell value changes externally (e.g., edit mode)
-        this._syncBufferWithCell();
 
         // If value changed, ensure the DOM input is synchronized
         if (changedProperties.has("value") && this.input) {
