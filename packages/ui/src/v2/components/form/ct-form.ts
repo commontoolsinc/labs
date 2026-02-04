@@ -201,10 +201,21 @@ export class CTForm extends BaseElement {
 
     // 2. Flush all buffered values to their bound cells
     // Await all flush operations to ensure cell updates are committed
-    const flushPromises = Array.from(this._fields.values()).map((field) =>
-      field.flush()
-    );
-    await Promise.all(flushPromises);
+    try {
+      const flushPromises = Array.from(this._fields.values()).map((field) =>
+        field.flush()
+      );
+      await Promise.all(flushPromises);
+    } catch (error) {
+      // Emit error event if flush fails (e.g., network error, storage failure)
+      this.emit("ct-submit-error", {
+        error,
+        message: error instanceof Error
+          ? error.message
+          : "Failed to save form data",
+      });
+      return;
+    }
 
     // 3. Emit submit event - handlers read from cells directly
     // (Pattern handlers run in the runtime context where cells are updated)
@@ -262,5 +273,17 @@ export class CTForm extends BaseElement {
    */
   reportValidity(): boolean {
     return this._form?.reportValidity() ?? false;
+  }
+
+  /**
+   * Check if any field in the form has unsaved changes
+   */
+  isDirty(): boolean {
+    for (const field of this._fields.values()) {
+      if (field.isDirty()) {
+        return true;
+      }
+    }
+    return false;
   }
 }

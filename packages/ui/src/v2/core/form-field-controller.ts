@@ -55,8 +55,9 @@ export interface CellControllerLike<T> {
   /**
    * Optional method to get the underlying CellHandle for direct async operations.
    * Used by FormFieldController to await cell.set() during flush.
+   * Returns null if no Cell is bound, or the CellHandle with async set().
    */
-  getCell?(): { set(value: T): Promise<void> } | undefined;
+  getCell?(): { set(value: T): Promise<void> } | null;
 }
 
 /**
@@ -97,7 +98,8 @@ export class FormFieldController<T> implements ReactiveController {
 
   // Buffer state (only used when in form context)
   private _buffer: T | undefined;
-  private _lastCellValue: T | undefined;
+  // Original value captured when form field is registered - used for reset
+  private _originalValue: T | undefined;
 
   // Form registration cleanup function
   private _formUnregister?: () => void;
@@ -170,6 +172,9 @@ export class FormFieldController<T> implements ReactiveController {
     // Only register if we have a form context
     if (!this._formContext) return;
 
+    // Capture the original value at registration time for proper reset behavior
+    this._originalValue = this._cellController.getValue();
+
     this._formUnregister = this._formContext.registerField({
       element: this._host,
       name,
@@ -190,15 +195,20 @@ export class FormFieldController<T> implements ReactiveController {
           // Fallback to synchronous setValue (for non-Cell values)
           this._cellController.setValue(valueToFlush);
         }
-        this._lastCellValue = valueToFlush;
+        // Update original value after successful flush
+        this._originalValue = valueToFlush;
       },
       reset: () => {
-        // Clear buffer - getValue will fall back to cell value
+        // Restore to original value captured at registration time
+        // This ensures "cancel" restores the value from when the form opened
+        if (this._originalValue !== undefined) {
+          this._cellController.setValue(this._originalValue);
+        }
         this._buffer = undefined;
-        this._lastCellValue = undefined;
         this._host.requestUpdate();
       },
       validate: this._validate,
+      isDirty: () => this.isDirty(),
     });
   }
 
@@ -209,6 +219,47 @@ export class FormFieldController<T> implements ReactiveController {
   unregister(): void {
     this._formUnregister?.();
     this._formUnregister = undefined;
+    this._buffer = undefined;
+    this._originalValue = undefined;
+  }
+
+  /**
+   * Check if the field has unsaved changes.
+   * Compares current value (buffer or cell) against the original value.
+   */
+  isDirty(): boolean {
+    if (!this._formContext) return false;
+
+    const currentValue = this._buffer ?? this._cellController.getValue();
+    // Deep equality check for objects/arrays
+    return !this._deepEqual(currentValue, this._originalValue);
+  }
+
+  /**
+   * Reset the original value to the current cell value.
+   * Useful after programmatic updates that should be considered "saved".
+   */
+  captureOriginalValue(): void {
+    this._originalValue = this._cellController.getValue();
+  }
+
+  /**
+   * Simple deep equality check for comparing values
+   */
+  private _deepEqual(a: unknown, b: unknown): boolean {
+    if (a === b) return true;
+    if (a === null || b === null) return false;
+    if (typeof a !== typeof b) return false;
+    if (typeof a !== "object") return false;
+
+    const aObj = a as Record<string, unknown>;
+    const bObj = b as Record<string, unknown>;
+    const aKeys = Object.keys(aObj);
+    const bKeys = Object.keys(bObj);
+
+    if (aKeys.length !== bKeys.length) return false;
+
+    return aKeys.every((key) => this._deepEqual(aObj[key], bObj[key]));
   }
 
   // ReactiveController lifecycle

@@ -163,6 +163,7 @@ export class CTCheckbox extends BaseElement {
       checked: { type: Boolean, reflect: true },
       disabled: { type: Boolean, reflect: true },
       indeterminate: { type: Boolean, reflect: true },
+      required: { type: Boolean, reflect: true },
       name: { type: String },
       value: { type: String },
     };
@@ -170,6 +171,7 @@ export class CTCheckbox extends BaseElement {
     declare checked: CellHandle<boolean> | boolean;
     declare disabled: boolean;
     declare indeterminate: boolean;
+    declare required: boolean;
     declare name: string;
     declare value: string;
 
@@ -189,8 +191,13 @@ export class CTCheckbox extends BaseElement {
     // Form field controller handles buffering when in ct-form context
     private _formField = createFormFieldController<boolean>(this, {
       cellController: this._checkedCellController,
-      // Checkboxes don't have built-in validation
-      validate: () => ({ valid: true }),
+      validate: () => {
+        // Required checkbox must be checked
+        if (this.required && !this.getChecked()) {
+          return { valid: false, message: "This checkbox is required" };
+        }
+        return { valid: true };
+      },
     });
 
     constructor() {
@@ -198,6 +205,7 @@ export class CTCheckbox extends BaseElement {
       this.checked = false;
       this.disabled = false;
       this.indeterminate = false;
+      this.required = false;
       this.name = "";
       this.value = "on";
     }
@@ -221,8 +229,10 @@ export class CTCheckbox extends BaseElement {
       // Add event listeners to the host element to make entire component clickable
       this.addEventListener("click", this._handleClick);
       this.addEventListener("keydown", this._handleKeydown);
+    }
 
-      // Register with form after binding is complete
+    override firstUpdated() {
+      // Register with form after first render when context is available
       this._formField.register(this.name);
     }
 
