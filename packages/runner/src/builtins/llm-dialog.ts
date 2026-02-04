@@ -467,6 +467,7 @@ const internalSchema = {
   properties: {
     requestId: { type: "string" },
     lastActivity: { type: "number" },
+    initialMessageSent: { type: "boolean" },
   },
   required: ["requestId", "lastActivity"],
 } as const satisfies JSONSchema;
@@ -2008,6 +2009,23 @@ export function llmDialog(
           pending.withTx(tx).set(false);
         },
       );
+
+      // Auto-send initial message if provided
+      const initialMsg = inputs.key("initialMessage").withTx(tx).get();
+      if (initialMsg) {
+        // Use a one-time flag to prevent re-sending on reactive updates
+        const wasInitialized = internal.withTx(tx).key("initialMessageSent")
+          .get();
+        if (!wasInitialized) {
+          internal.withTx(tx).key("initialMessageSent").set(true);
+          // Send the initial message
+          (result.key("addMessage") as unknown as Stream<BuiltInLLMMessage>)
+            .withTx(tx).send({
+              role: "user",
+              content: initialMsg,
+            });
+        }
+      }
 
       sendResult(tx, result);
       cellsInitialized = true;
