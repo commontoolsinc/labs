@@ -183,6 +183,14 @@ intermediate representation.
 - Hash reflects actual data shape
 - Easier to reason about what changes affect identity
 
+#### Relationship to Late Serialization
+
+This proposal pairs with [Late Serialization](#late-serialization-rich-types-within-the-runtime):
+if rich types flow through the runtime, canonical hashing should operate on
+those types directly (via their deconstructed state for `StorableInstance`s),
+not on JSON-encoded forms. The hash becomes encoding-independent — the same
+identity whether later serialized to JSON, CBOR, or Automerge.
+
 #### Open Questions
 
 - What is the exact specification for canonical hashing?
@@ -388,6 +396,13 @@ The `deserialize` function needs runtime context to reconstitute rich types
 - **Format flexibility**: Different boundaries can use different contexts
 - **Better tooling**: Debuggers show actual Cells, not JSON blobs
 - **Extensible**: New storable types only need to implement the protocol
+
+#### Relationship to Canonical Hashing
+
+This proposal pairs with [Simplified Canonical Hashing](#simplified-canonical-hashing):
+canonical hashes can be computed over rich types directly, using deconstructed
+state for `StorableInstance`s and type-specific handling for built-in JS types.
+This makes identity hashing independent of any particular wire encoding.
 
 #### Trade-offs
 
