@@ -360,14 +360,8 @@ export class CTInput extends BaseElement {
           strategy: "debounce",
           delay: 300,
         },
-        onChange: (newValue: string, oldValue: string) => {
-          this.emit("ct-change", {
-            value: newValue,
-            oldValue,
-            name: this.name,
-            files: this.type === "file" ? this._input?.files : undefined,
-          });
-        },
+        // Note: ct-change is emitted by _handleChange to avoid duplicate events
+        // The cell controller onChange is used for internal state sync only
       });
 
       // Form field controller handles buffering when in ct-form context
@@ -426,7 +420,7 @@ export class CTInput extends BaseElement {
         return this._formField.getValue();
       }
 
-      private setValue(newValue: string, _files?: FileList | null): void {
+      private setValue(newValue: string): void {
         this._formField.setValue(newValue);
       }
 
@@ -605,10 +599,10 @@ export class CTInput extends BaseElement {
 
         // For file inputs, we can't set the value programmatically
         if (this.type !== "file") {
-          this.setValue(input.value, input.files);
+          this.setValue(input.value);
         } else {
           // For file inputs, still emit the event with files
-          this.setValue("", input.files);
+          this.setValue("");
         }
 
         // Emit ct-input event directly for non-cell interop
@@ -627,9 +621,9 @@ export class CTInput extends BaseElement {
         // Change events use the same setValue logic as input events
         // The timing controller will determine when to actually emit
         if (this.type !== "file") {
-          this.setValue(input.value, input.files);
+          this.setValue(input.value);
         } else {
-          this.setValue("", input.files);
+          this.setValue("");
         }
 
         // Emit ct-change event directly for non-cell interop

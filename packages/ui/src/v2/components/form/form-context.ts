@@ -35,6 +35,8 @@ export interface FieldRegistration {
   reset: () => void;
   /** Validate the current buffered value */
   validate: () => ValidationResult;
+  /** Check if the field has unsaved changes */
+  isDirty: () => boolean;
 }
 
 /**

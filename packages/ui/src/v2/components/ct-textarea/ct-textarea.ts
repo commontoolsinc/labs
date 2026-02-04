@@ -377,15 +377,21 @@ export class CTTextarea extends BaseElement {
         // Controllers handle cleanup automatically via ReactiveController
       }
 
+      override willUpdate(
+        changedProperties: Map<string | number | symbol, unknown>,
+      ) {
+        super.willUpdate(changedProperties);
+
+        // Bind value in willUpdate (before render) to avoid extra render cycle
+        if (changedProperties.has("value")) {
+          this._cellController.bind(this.value, stringSchema);
+        }
+      }
+
       override updated(
         changedProperties: Map<string | number | symbol, unknown>,
       ) {
         super.updated(changedProperties);
-
-        if (changedProperties.has("value")) {
-          // Bind the new value (Cell or plain) to the controller
-          this._cellController.bind(this.value, stringSchema);
-        }
 
         // Update timing options if they changed
         if (
