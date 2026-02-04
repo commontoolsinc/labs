@@ -2343,37 +2343,3 @@ function getNextCellLink(
   ]);
   return getNormalizedLink(doc.address, schema);
 }
-
-function getSchemaOptions(
-  schema: JSONSchema,
-  type: "anyOf" | "oneOf",
-): JSONSchema[] {
-  if (schema === true) {
-    return [true];
-  } else if (schema === false) {
-    return [];
-  } else {
-    const rv = [];
-    // There are a lot of valid logical schema flags, and we only handle
-    // a very limited set here, with no support for combinations.
-    const { anyOf, oneOf, ...restSchema } = schema;
-    const options =
-      (type === "anyOf" ? anyOf : type === "oneOf" ? oneOf : []) ?? [];
-    // Consider items without asCell or asStream first, since if we aren't
-    // traversing cells, we consider them a match.
-    const sortedOptions = [
-      ...options.filter((option) =>
-        !SchemaObjectTraverser.asCellOrStream(option)
-      ),
-      ...options.filter(SchemaObjectTraverser.asCellOrStream),
-    ];
-    for (const optionSchema of sortedOptions) {
-      if (ContextualFlowControl.isFalseSchema(optionSchema)) {
-        continue;
-      }
-      const mergedSchema = mergeSchemaOption(restSchema, optionSchema);
-      rv.push(mergedSchema);
-    }
-    return rv;
-  }
-}
