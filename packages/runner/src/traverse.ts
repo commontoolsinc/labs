@@ -1934,11 +1934,10 @@ export class SchemaObjectTraverser<V extends JSONValue>
           // to abort.
           logger.debug(
             "traverse",
-            () => ["Encountered broken redirect", curDoc, curSelector],
+            () => ["Encountered broken redirect", doc, curDoc],
           );
           return undefined;
         }
-
         // For my cell link, lastRedirDoc currently points to the last
         // redirect target, but we want cell properties to be based on the
         // link value at that location, so we effectively follow one more
@@ -1958,12 +1957,8 @@ export class SchemaObjectTraverser<V extends JSONValue>
         if (val !== undefined) {
           arrayObj.push(val);
         } else {
-          // If our item doesn't match our schema, we may be able to use null,
-          // but not if we're supposed to have a cell.
-          if (
-            this.isValidType(schema, "null") &&
-            !SchemaObjectTraverser.asCellOrStream(schema)
-          ) {
+          // If our item doesn't match our schema, we may be able to use null
+          if (this.isValidType(schema, "null")) {
             arrayObj.push(null);
           } else {
             // this array is invalid; one or more items do not match the schema
