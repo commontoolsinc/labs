@@ -66,12 +66,14 @@ const startEdit = handler<
 });
 
 const deletePerson = handler<
-  unknown,
+  Event,
   {
     index: number;
     people: Writable<Person[]>;
   }
->((_event, { index, people }) => {
+>((event, { index, people }) => {
+  // Stop propagation to prevent card's onClick (startEdit) from firing
+  event?.stopPropagation?.();
   const current = people.get();
   if (index >= 0 && index < current.length) {
     people.set(current.toSpliced(index, 1));

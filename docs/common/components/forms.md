@@ -270,15 +270,10 @@ detail. This provides type safety and avoids manual object reconstruction.
 ```tsx
 // ✅ Recommended: close over the cell and read from it
 const handleSubmit = handler((_, { formData, collection }) => {
-  const person = formData.get();  // Type: Person
+  // Copy the object to avoid sharing references across collection items
+  const person = { ...formData.get() };  // Type: Person
   collection.push(person);
 }, { formData, collection });
-
-// ❌ Avoid: reading from event detail (no type safety)
-const handleSubmit = handler((event, { collection }) => {
-  const values = event.detail.values;  // Type: Record<string, unknown>
-  collection.push(values as Person);  // Requires cast
-}, { collection });
 ```
 
 ### ct-form-invalid

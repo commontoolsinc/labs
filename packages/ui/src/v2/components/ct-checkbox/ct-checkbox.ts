@@ -220,6 +220,9 @@ export class CTCheckbox extends BaseElement {
 
     private setChecked(newValue: boolean): void {
       this._formField.setValue(newValue);
+      // Update aria attributes immediately since checked property doesn't change
+      // when buffering (the buffer is internal, not reflected to the property)
+      this._updateAriaAttributes();
     }
 
     override connectedCallback() {
@@ -255,6 +258,8 @@ export class CTCheckbox extends BaseElement {
 
       // If the checked property itself changed (e.g., switched to a different cell)
       if (changedProperties.has("checked")) {
+        // Clear the form buffer so we read from the new cell, not stale buffered data
+        this._formField.clearBuffer();
         // Bind the new checked (Cell or plain) to the controller
         this._checkedCellController.bind(this.checked, booleanSchema);
       }
