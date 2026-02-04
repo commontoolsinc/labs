@@ -190,6 +190,65 @@ intermediate representation.
 - How do special object shapes (references, streams, errors) participate?
 - What is the migration path from current CID-based identifiers?
 
+### CRDT-Based Storage Layer
+
+For collaborative features (multiple users editing shared data), the storage
+layer could be implemented using CRDTs (Conflict-free Replicated Data Types).
+Automerge is a candidate implementation.
+
+#### Automerge's Data Model
+
+Automerge is described as "JSON-like" but supports a richer type system:
+
+| Category | Types |
+|----------|-------|
+| Containers | Map (string keys), List, Text (collaborative UTF-8) |
+| Primitives | null, boolean, string, f64, i64, u64, bytes, timestamp, counter |
+
+Notable differences from the current system:
+- **Distinct integer types**: i64 and u64 vs JavaScript's single number type
+- **Native binary data**: `bytes` as a first-class type
+- **Timestamps**: Built-in, not a convention
+- **Counter**: Special type with additive merge semantics
+
+#### Type System Constraints
+
+Automerge has a **fixed type system by design** — merge semantics, binary format
+optimization, and cross-language interoperability require known types. Custom
+types must be handled at an application layer above Automerge.
+
+This means the current special object shapes (`"/"`, `$stream`, `@Error`) would
+need a mapping layer:
+- Store as Automerge primitives/containers
+- Interpret special shapes at a layer above Automerge
+- The `bytes` type could store arbitrary data but loses fine-grained merge
+  (entire blob becomes last-write-wins)
+
+#### Internal Structure
+
+Automerge documents store:
+- Full causal history with actor IDs (128-bit)
+- Operation sequences forming a change DAG (similar to git)
+- Columnar encoding with RLE compression
+
+This enables offline editing with automatic merge on reconnection.
+
+#### Trade-offs
+
+| Benefit | Cost |
+|---------|------|
+| Automatic conflict resolution | Fixed type system requires mapping layer |
+| Offline-first with sync | Causal history grows over time |
+| Proven merge semantics | Additional complexity vs simple last-write-wins |
+| Cross-language support | Must map custom types to Automerge types |
+
+#### Open Questions
+
+- Which data benefits from CRDT semantics vs simple last-write-wins?
+- How do Cells map to Automerge documents?
+- Should collaborative text (Text type) be exposed directly?
+- What is the compaction/garbage collection strategy for causal history?
+
 ---
 
 ## Open Questions
