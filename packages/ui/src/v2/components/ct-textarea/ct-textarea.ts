@@ -384,9 +384,10 @@ export class CTTextarea extends BaseElement {
 
         // Bind value in willUpdate (before render) to avoid extra render cycle
         if (changedProperties.has("value")) {
-          // Clear the form buffer so we read from the new cell, not stale buffered data
-          this._formField.clearBuffer();
+          // Bind the new cell first so getValue() returns the new value
           this._cellController.bind(this.value, stringSchema);
+          // Then clear buffer - this captures the new cell's value as baseline for reset/dirty
+          this._formField.clearBuffer();
         }
       }
 

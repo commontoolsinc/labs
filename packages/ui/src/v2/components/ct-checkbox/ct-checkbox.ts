@@ -258,10 +258,10 @@ export class CTCheckbox extends BaseElement {
 
       // If the checked property itself changed (e.g., switched to a different cell)
       if (changedProperties.has("checked")) {
-        // Clear the form buffer so we read from the new cell, not stale buffered data
-        this._formField.clearBuffer();
-        // Bind the new checked (Cell or plain) to the controller
+        // Bind the new cell first so getValue() returns the new value
         this._checkedCellController.bind(this.checked, booleanSchema);
+        // Then clear buffer - this captures the new cell's value as baseline for reset/dirty
+        this._formField.clearBuffer();
       }
     }
 
