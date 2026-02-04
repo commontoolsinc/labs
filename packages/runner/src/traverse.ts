@@ -1929,64 +1929,44 @@ export class SchemaObjectTraverser<V extends JSONValue>
         !this.traverseCells &&
         SchemaObjectTraverser.asCellOrStream(curSelector.schema)
       ) {
-        // For values where curDoc.address.path doesn't start with "value",
-        // we need to create a DataCellURI-style address so that getNextCellLink
-        // can generate a proper normalized link via getNormalizedLink.
-        // This handles:
-        // 1. Inline objects/primitives (item was never a link)
-        // 2. Links that resolved to a doc whose path doesn't start with "value"
-        // We skip this when the path already starts with "value" to preserve
-        // the original link's identity.
-        if (curDoc.address.path[0] !== "value") {
-          const elementLink: NormalizedFullLink = {
-            space: curDoc.address.space,
-            id: curDoc.address.id,
-            type: curDoc.address.type,
-            path: curDoc.address.path.slice(
-              curDoc.address.path[0] === "value" ? 1 : 0,
-            ),
-            schema: curSelector.schema,
-          };
-          curDoc = {
-            ...curDoc,
-            address: {
-              ...curDoc.address,
-              id: createDataCellURI(curDoc.value, elementLink),
-              path: ["value"],
-            },
-          };
-          curSelector.path = curDoc.address.path;
+        if (curDoc === undefined) {
+          // If we hit a broken link following write redirects, I think we have
+          // to abort.
+          logger.debug(
+            "traverse",
+            () => ["Encountered broken redirect", curDoc, curSelector],
+          );
+          return undefined;
         }
-        // For my cell link, lastRedirDoc currently points to the last redirect
-        // target, but we want cell properties to be based on the link value at
-        // that location, so we effectively follow one more link if available.
-        // TODO(@ubik2): Verify that this is what main does -- resolving two
-        // steps when we have an array of cells (and also that the array
-        // follow precedes the cell follow)
-        const cellLink = getNextCellLink(
-          curDoc,
-          itemSchema,
-        );
+
+        // For my cell link, lastRedirDoc currently points to the last
+        // redirect target, but we want cell properties to be based on the
+        // link value at that location, so we effectively follow one more
+        // link if available.
+        // If we have a value instead of a link, create a link to the element
+        // We don't traverse and validate, since this is an asCell boundary.
+        const cellLink = isPrimitiveCellLink(curDoc.value)
+          ? getNextCellLink(curDoc, curSelector.schema!)
+          : getNormalizedLink(curDoc.address, curSelector.schema);
         const val = this.objectCreator.createObject(cellLink, undefined);
         arrayObj.push(val);
       } else {
-        // We want those links to point directly at the linked cells, instead of
-        // using our path (e.g. ["items", "0"]), so don't pass in a modified link.
+        // We want those links to point directly at the linked cells, instead
+        // of using our path (e.g. ["items", "0"]), so don't pass in a
+        // modified link.
         const val = this.traverseWithSelector(curDoc, curSelector);
-        // If our item doesn't match our schema, we may be able to use null
         if (val !== undefined) {
           arrayObj.push(val);
         } else {
-          const schema = curSelector.schema!;
-          const isNullValid = [
-            schema,
-            ...getSchemaOptions(schema, "anyOf"),
-            ...getSchemaOptions(schema, "oneOf"),
-          ].some((schemaOption) => this.isValidType(schemaOption, "null"));
-          if (isNullValid) {
+          // If our item doesn't match our schema, we may be able to use null,
+          // but not if we're supposed to have a cell.
+          if (
+            this.isValidType(schema, "null") &&
+            !SchemaObjectTraverser.asCellOrStream(schema)
+          ) {
             arrayObj.push(null);
           } else {
-            // this array is invalid, since one or more items do not match the schema
+            // this array is invalid; one or more items do not match the schema
             logger.debug(
               "traverse",
               () => ["Item doesn't match array schema", curDoc, curSelector],
