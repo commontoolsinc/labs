@@ -97,6 +97,7 @@ export class DomApplicator {
       `Applied ${opCount} ops in ${elapsed?.toFixed(2)}ms`,
       `(${((elapsed ?? 0) / opCount).toFixed(3)}ms/op)`,
       `nodes=${this.nodes.size}`,
+      { ops: batch.ops },
     ]);
   }
 
