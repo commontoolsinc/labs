@@ -192,6 +192,10 @@ export class CTCheckbox extends BaseElement {
     private _formField = createFormFieldController<boolean>(this, {
       cellController: this._checkedCellController,
       validate: () => {
+        // Disabled fields should not cause form invalidation
+        if (this.disabled) {
+          return { valid: true };
+        }
         // Required checkbox must be checked
         if (this.required && !this.getChecked()) {
           return { valid: false, message: "This checkbox is required" };

@@ -360,8 +360,15 @@ export class CTInput extends BaseElement {
           strategy: "debounce",
           delay: 300,
         },
-        // Note: ct-change is emitted by _handleChange to avoid duplicate events
-        // The cell controller onChange is used for internal state sync only
+        onChange: (newValue: string, oldValue: string) => {
+          // ct-change is emitted via timing controller to honor timingStrategy
+          this.emit("ct-change", {
+            value: newValue,
+            oldValue,
+            name: this.name,
+            files: this.type === "file" ? this._input?.files : undefined,
+          });
+        },
       });
 
       // Form field controller handles buffering when in ct-form context
@@ -616,24 +623,15 @@ export class CTInput extends BaseElement {
 
       private _handleChange(event: Event) {
         const input = event.target as HTMLInputElement;
-        const oldValue = this.getValue();
 
-        // Change events use the same setValue logic as input events
-        // The timing controller will determine when to actually emit
+        // Update value through form field controller
+        // ct-change is emitted by the cell controller's onChange callback
+        // which honors the configured timingStrategy (debounce/throttle/blur)
         if (this.type !== "file") {
           this.setValue(input.value);
         } else {
           this.setValue("");
         }
-
-        // Emit ct-change event directly for non-cell interop
-        // This ensures the event is emitted regardless of timing strategy
-        this.emit("ct-change", {
-          value: this.type === "file" ? "" : input.value,
-          oldValue,
-          name: this.name,
-          files: this.type === "file" ? input.files : undefined,
-        });
       }
 
       private _handleFocus(_event: Event) {
