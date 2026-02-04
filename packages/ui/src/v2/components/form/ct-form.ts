@@ -7,7 +7,6 @@ import {
   type FormContext,
   formContext,
 } from "./form-context.ts";
-import type { CellHandle } from "@commontools/runtime-client";
 
 /**
  * CTForm Component
@@ -143,38 +142,17 @@ export class CTForm extends BaseElement {
   @property()
   action = "";
 
-  /**
-   * Optional data cell to sync after flushing field buffers.
-   * When provided, the form will await data.sync() after flushing
-   * to ensure the cell's local cache is updated before emitting ct-submit.
-   * This enables handlers to read the updated values via data.get().
-   */
-  @property({ attribute: false })
-  data?: CellHandle<unknown>;
-
   @query("form")
   private _form!: HTMLFormElement;
 
   /** Track registered fields for coordinated submit/reset */
   private _fields = new Map<HTMLElement, FieldRegistration>();
 
-  private _instanceId = Math.random().toString(36).slice(2, 8);
-
   /** Provide FormContext to descendant fields */
   @provide({ context: formContext })
   private _formContext: FormContext = {
     registerField: (reg) => this._registerField(reg),
   };
-
-  override connectedCallback() {
-    super.connectedCallback();
-    console.log(`[ct-form:${this._instanceId}] connectedCallback`);
-  }
-
-  override disconnectedCallback() {
-    super.disconnectedCallback();
-    console.log(`[ct-form:${this._instanceId}] disconnectedCallback`);
-  }
 
   /**
    * Register a field with the form
@@ -202,10 +180,7 @@ export class CTForm extends BaseElement {
     event.preventDefault();
     event.stopPropagation();
 
-    console.log(`[ct-form:${this._instanceId}] handleSubmit called`);
-
     if (!this._form) {
-      console.log(`[ct-form:${this._instanceId}] no form element, returning`);
       return;
     }
 
@@ -220,14 +195,9 @@ export class CTForm extends BaseElement {
 
     // If any fields are invalid, emit error event and return early
     if (errors.length > 0) {
-      console.log(`[ct-form:${this._instanceId}] validation failed`, errors);
       this.emit("ct-form-invalid", { errors });
       return;
     }
-
-    console.log(
-      `[ct-form:${this._instanceId}] validation passed, flushing fields...`,
-    );
 
     // 2. Flush all buffered values to their bound cells
     // Await all flush operations to ensure cell updates are committed
@@ -236,29 +206,11 @@ export class CTForm extends BaseElement {
     );
     await Promise.all(flushPromises);
 
-    console.log(
-      `[ct-form:${this._instanceId}] flush complete, syncing data cell...`,
-    );
-
-    // 3. Sync the data cell if provided to refresh its local cache
-    // This ensures handlers can read the updated values via data.get()
-    if (this.data?.sync) {
-      await this.data.sync();
-    }
-
-    console.log(
-      `[ct-form:${this._instanceId}] sync complete, emitting ct-submit...`,
-    );
-
-    // 4. Emit submit event - handlers read from cells, not event detail
+    // 3. Emit submit event - handlers read from cells directly
+    // (Pattern handlers run in the runtime context where cells are updated)
     const submitted = this.emit("ct-submit");
 
-    console.log(
-      `[ct-form:${this._instanceId}] ct-submit emitted, submitted =`,
-      submitted,
-    );
-
-    // 5. If event wasn't prevented, submit the form natively
+    // 4. If event wasn't prevented, submit the form natively
     if (submitted && this.action) {
       this._form.submit();
     }
