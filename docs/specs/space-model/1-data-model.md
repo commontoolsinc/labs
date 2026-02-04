@@ -190,6 +190,200 @@ intermediate representation.
 - How do special object shapes (references, streams, errors) participate?
 - What is the migration path from current CID-based identifiers?
 
+### Late Serialization: Rich Types Within the Runtime
+
+#### The Principle
+
+Rich types should flow through the runtime as themselves; serialization to
+wire/storage formats should happen only at boundary crossings.
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    Runtime Context                   │
+│                                                      │
+│   Cell ←→ Cell ←→ Error ←→ Cell ←→ [rich types]     │
+│                                                      │
+└──────────┬──────────────────┬───────────────────────┘
+           │                  │
+           ▼                  ▼
+    ┌──────────────┐   ┌──────────────┐
+    │   Storage    │   │   Network    │
+    │  (serialize) │   │  (serialize) │
+    └──────────────┘   └──────────────┘
+```
+
+#### Current State: Early Conversion
+
+Today, special JSON forms are created early and travel through the system:
+
+- `normalizeAndDiff()` converts Cells to SigilLinks (`{ "/": {...} }`) immediately
+- `convertCellsToLinks()` explicitly replaces Cell references with JSON forms
+- `toStorableValue()` wraps Errors as `{ "@Error": {...} }` during data updates
+- Stream markers (`{ $stream: true }`) are stored and compared as JSON objects
+
+The JSON forms then propagate through transactions, the reactive system, and
+query results. Code throughout the system must detect and handle these special
+shapes via `isSigilLink()`, `isStreamValue()`, `isErrorWrapper()`, etc.
+
+#### Proposed: Defer Conversion to Boundaries
+
+Keep rich types as themselves within the runtime:
+
+- **Cells remain Cells** through the reactive graph and transactions
+- **Errors remain Errors** until they cross a serialization boundary
+- **Streams are first-class** rather than marker objects
+- Serialization becomes a "last mile" concern at specific boundary points
+
+The `StorableValue` type would evolve from a closed union to a protocol-based
+definition — any type implementing the storable protocol becomes a valid
+`StorableValue`.
+
+#### The Storable Protocol
+
+Types opt into storability by implementing methods keyed by well-known symbols:
+
+```typescript
+const DECONSTRUCT = Symbol.for('common.deconstruct');
+const RECONSTRUCT = Symbol.for('common.reconstruct');
+
+// Instance protocol: "here's my essential state"
+interface StorableInstance {
+  [DECONSTRUCT](): unknown;
+}
+
+// Class protocol: "here's how to bring one back"
+interface StorableClass<T extends StorableInstance> {
+  [RECONSTRUCT](state: unknown, runtime: Runtime): T;
+}
+```
+
+The presence of `[DECONSTRUCT]` doubles as the brand — no separate marker needed:
+
+```typescript
+function isStorable(value: unknown): value is StorableInstance {
+  return value != null &&
+         typeof value === 'object' &&
+         DECONSTRUCT in value;
+}
+```
+
+Example implementation:
+
+```typescript
+class Cell<T> implements StorableInstance {
+  [DECONSTRUCT]() {
+    return { id: this.entityId, path: this.path, space: this.space };
+  }
+
+  static [RECONSTRUCT](state: CellState, runtime: Runtime): Cell<unknown> {
+    return runtime.getCell(state);
+  }
+}
+```
+
+This approach:
+- **Open for extension**: New storable types don't require modifying a central
+  type definition
+- **Co-located logic**: Each type knows how to deconstruct/reconstruct itself
+- **Symbol-based brands**: Unique symbols prevent collision with user data keys
+  and provide reliable runtime type discrimination
+
+#### Serialization Contexts
+
+Classes provide the *capability* to serialize but don't own the wire format.
+A **serialization context** owns the mapping between classes and tags:
+
+```typescript
+interface SerializationContext {
+  // Maps storable types to wire format tags
+  getTagFor(value: StorableInstance): string;
+  getClassFor(tag: string): StorableClass<StorableInstance>;
+
+  // Format-specific wrapping
+  wrap(tag: string, state: unknown): SerializedForm;
+  unwrap(data: SerializedForm): { tag: string; state: unknown };
+}
+```
+
+This separation enables:
+- **Protocol versioning**: Same class, different tags in v1 vs v2
+- **Format flexibility**: JSON context vs CBOR context vs Automerge context
+- **Migration paths**: Old context reads legacy format, new context writes modern format
+- **Testing**: Mock contexts for unit tests
+
+The flow becomes:
+
+```
+Serialize:   instance.[DECONSTRUCT]() → state → context.wrap(tag, state) → wire
+Deserialize: wire → context.unwrap() → { tag, state } → Class[RECONSTRUCT](state) → instance
+```
+
+#### Serialization Boundaries
+
+The boundaries where serialization occurs in the current architecture:
+
+| Boundary | Packages | Direction |
+|----------|----------|-----------|
+| **Persistence** | `memory` ↔ database | read/write |
+| **Iframe sandbox** | `runner` ↔ `iframe-sandbox` | postMessage |
+| **Background service** | `shell` ↔ `background-piece-service` | worker messages |
+| **Network sync** | `toolshed` ↔ remote peers | WebSocket/HTTP |
+| **Cross-space** | space A ↔ space B | if in separate processes |
+
+Each boundary would use a serialization context:
+
+```typescript
+// At boundary exit
+function serialize(value: StorableValue, context: SerializationContext): SerializedForm {
+  if (isStorable(value)) {
+    const state = value[DECONSTRUCT]();
+    const tag = context.getTagFor(value);
+    return context.wrap(tag, state);
+  }
+  // Handle primitives, arrays, plain objects recursively...
+}
+
+// At boundary entry
+function deserialize(data: SerializedForm, context: SerializationContext, runtime: Runtime): StorableValue {
+  const { tag, state } = context.unwrap(data);
+  if (tag) {
+    const cls = context.getClassFor(tag);
+    return cls[RECONSTRUCT](state, runtime);
+  }
+  // Handle primitives, arrays, plain objects recursively...
+}
+```
+
+The `deserialize` function needs runtime context to reconstitute rich types
+(e.g., looking up existing Cell instances rather than creating duplicates).
+
+#### Benefits
+
+- **Type safety**: Rich types carry more information than JSON shapes
+- **Simpler internal code**: No `isSigilLink()` checks scattered throughout
+- **Single conversion point**: Easier to maintain, audit, and change
+- **Format flexibility**: Different boundaries can use different contexts
+- **Better tooling**: Debuggers show actual Cells, not JSON blobs
+- **Extensible**: New storable types only need to implement the protocol
+
+#### Trade-offs
+
+- **Migration complexity**: Existing code assumes JSON forms internally
+- **Runtime context required**: Deserialization needs access to the runtime
+- **Comparison semantics**: Must define equality for rich types (by identity?
+  by deconstructed state?)
+
+#### Open Questions
+
+- What is the migration path from early to late conversion?
+- How do rich types participate in change detection and diffing?
+- What is the exact contract for deconstructed state? (Nested `StorableInstance`s
+  should be allowed; cycles likely banned.)
+- How are serialization contexts configured and selected at each boundary?
+- How does this interact with the proposed CRDT layer (below)?
+
+---
+
 ### CRDT-Based Storage Layer
 
 For collaborative features (multiple users editing shared data), the storage
