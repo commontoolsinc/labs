@@ -98,6 +98,8 @@ export class FormFieldController<T> implements ReactiveController {
 
   // Buffer state (only used when in form context)
   private _buffer: T | undefined;
+  // Flag to track if buffer has been set (allows undefined as a valid buffered value)
+  private _hasBuffer = false;
   // Original value captured when form field is registered - used for reset
   private _originalValue: T | undefined;
 
@@ -140,8 +142,8 @@ export class FormFieldController<T> implements ReactiveController {
    * Returns buffer if in form context and buffer is set, otherwise cell value.
    */
   getValue(): T {
-    if (this._formContext && this._buffer !== undefined) {
-      return this._buffer;
+    if (this._formContext && this._hasBuffer) {
+      return this._buffer as T;
     }
     return this._cellController.getValue();
   }
@@ -153,10 +155,20 @@ export class FormFieldController<T> implements ReactiveController {
   setValue(value: T): void {
     if (this._formContext) {
       this._buffer = value;
+      this._hasBuffer = true;
       this._host.requestUpdate();
     } else {
       this._cellController.setValue(value);
     }
+  }
+
+  /**
+   * Clear the buffer, reverting to cell value.
+   * Call this when the underlying cell binding changes.
+   */
+  clearBuffer(): void {
+    this._buffer = undefined;
+    this._hasBuffer = false;
   }
 
   /**
@@ -179,13 +191,17 @@ export class FormFieldController<T> implements ReactiveController {
       element: this._host,
       name,
       // Return buffer if set, otherwise fall back to cell value
-      getValue: () => this._buffer ?? this._cellController.getValue(),
+      getValue: () =>
+        this._hasBuffer ? this._buffer as T : this._cellController.getValue(),
       setValue: (v) => {
         this._buffer = v as T;
+        this._hasBuffer = true;
         this._host.requestUpdate();
       },
       flush: async () => {
-        const valueToFlush = this._buffer ?? this._cellController.getValue();
+        const valueToFlush = this._hasBuffer
+          ? this._buffer as T
+          : this._cellController.getValue();
         // If the cell controller can provide the underlying CellHandle,
         // call set() directly and await it to ensure the update is committed
         const cell = this._cellController.getCell?.();
@@ -205,6 +221,7 @@ export class FormFieldController<T> implements ReactiveController {
           this._cellController.setValue(this._originalValue);
         }
         this._buffer = undefined;
+        this._hasBuffer = false;
         this._host.requestUpdate();
       },
       validate: this._validate,
@@ -220,6 +237,7 @@ export class FormFieldController<T> implements ReactiveController {
     this._formUnregister?.();
     this._formUnregister = undefined;
     this._buffer = undefined;
+    this._hasBuffer = false;
     this._originalValue = undefined;
   }
 
@@ -230,7 +248,9 @@ export class FormFieldController<T> implements ReactiveController {
   isDirty(): boolean {
     if (!this._formContext) return false;
 
-    const currentValue = this._buffer ?? this._cellController.getValue();
+    const currentValue = this._hasBuffer
+      ? this._buffer
+      : this._cellController.getValue();
     // Deep equality check for objects/arrays
     return !this._deepEqual(currentValue, this._originalValue);
   }

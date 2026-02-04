@@ -498,6 +498,8 @@ export class CTInput extends BaseElement {
 
         // If the value property itself changed (e.g., switched to a different cell)
         if (changedProperties.has("value")) {
+          // Clear the form buffer so we read from the new cell, not stale buffered data
+          this._formField.clearBuffer();
           // Bind the new value (Cell or plain) to the controller
           // This updates the internal reference so getValue() returns the correct value
           this._cellController.bind(this.value, stringSchema);
