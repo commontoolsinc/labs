@@ -1,10 +1,10 @@
 /// <cts-enable />
 import {
   computed,
-  generateObject,
+  handler,
+  llmDialog,
   pattern,
   patternTool,
-  toSchema,
   UI,
   wish,
   type WishState,
@@ -12,40 +12,51 @@ import {
 } from "commontools";
 import { fetchAndRunPattern, listPatternIndex } from "./common-tools.tsx";
 
+// Handler that captures the result cell - (event, state) signature
+const presentResultHandler = handler(
+  (event: { cell: Writable<any> }, state: { resultCell: Writable<any> }) => {
+    state.resultCell.set(event.cell);
+  },
+);
+
 export default pattern<
   { situation: string; context: { [id: string]: any } },
   WishState<Writable<any>>
 >(({ situation, context }) => {
-  // Get user profile text from home pattern
   const profile = wish<string>({ query: "#profile" });
 
-  // Build profile context string for the system prompt
   const profileContext = computed(() => {
     const profileText = profile.result;
     return profileText ? `\n\n--- User Context ---\n${profileText}\n---` : "";
   });
 
-  // Build system prompt with profile context
   const systemPrompt = computed(() => {
-    const profileCtx = profileContext;
-    return `Find a useful pattern, run it, pass link to final result.${profileCtx}
+    return `Find a useful pattern, run it, then call presentResult with the result cell.${profileContext}
 
 Use the user context above to personalize your suggestions when relevant.`;
   });
 
-  const suggestion = generateObject({
+  // Cell to capture the final result
+  const result = Writable.of<Writable<any>>(undefined);
+
+  // Bind the handler to our result cell
+  const presentResult = presentResultHandler({ resultCell: result });
+
+  const { pending: _pending } = llmDialog({
     system: systemPrompt,
-    prompt: situation,
     context,
+    initialMessage: situation,
     tools: {
       fetchAndRunPattern: patternTool(fetchAndRunPattern),
       listPatternIndex: patternTool(listPatternIndex),
+      // Handler tool - directly writes to bound state
+      presentResult: {
+        handler: presentResult,
+        description: "Present the final result cell",
+      },
     },
     model: "anthropic:claude-haiku-4-5",
-    schema: toSchema<{ cell: Writable<any> }>(),
   });
-
-  const result = computed(() => suggestion.result?.cell);
 
   return {
     result,

@@ -1277,6 +1277,11 @@ export interface BuiltInLLMParams {
    * These cells appear in the system prompt with their schemas and current values.
    */
   context?: Record<string, AnyCell<any>>;
+  /**
+   * Initial message to auto-send when the dialog starts.
+   * This allows patterns to provide a default message that will be automatically submitted.
+   */
+  initialMessage?: string;
 }
 
 export interface BuiltInLLMState {
