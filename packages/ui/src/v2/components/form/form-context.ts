@@ -29,8 +29,8 @@ export interface FieldRegistration {
   getValue: () => unknown;
   /** Set the buffered value programmatically */
   setValue: (value: unknown) => void;
-  /** Write buffered value to bound cell */
-  flush: () => void;
+  /** Write buffered value to bound cell (async to await cell update) */
+  flush: () => Promise<void>;
   /** Restore to initial value from cell */
   reset: () => void;
   /** Validate the current buffered value */

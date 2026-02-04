@@ -52,6 +52,7 @@ const startEdit = handler<
     showModal: Writable<boolean>;
   }
 >((_event, { index, people, formData, editingIndex, showModal }) => {
+  console.log("[startEdit] called with index:", index);
   const list = people.get();
   const person = list[index];
   if (person) {
@@ -79,26 +80,25 @@ const deletePerson = handler<
 });
 
 // Form submit handler - must be at module scope
-// Event detail contains { values: { fieldName: value, ... } }
+// ct-form flushes buffered values to bound cells before emitting ct-submit,
+// so handlers read from the cells directly (type-safe, no reconstruction needed)
 const handleFormSubmit = handler<
-  { detail: { values: Record<string, unknown> } },
+  unknown,
   {
+    formData: Writable<Person>;
     people: Writable<Person[]>;
     editingIndex: Writable<number | null>;
     showModal: Writable<boolean>;
   }
->((event, { people, editingIndex, showModal }) => {
-  // Get values from event (passed by ct-form, survives serialization)
-  const values = event?.detail?.values || {};
-
-  // Build person from form values
-  const person: Person = {
-    name: (values.name as string) || "",
-    email: (values.email as string) || "",
-    role: (values.role as "user" | "admin") || "user",
-  };
+>((_, { formData, people, editingIndex, showModal }) => {
+  console.log("[handleFormSubmit] handler called");
+  // Read person directly from the bound cell (already flushed by ct-form)
+  // Create a copy to avoid sharing the same object reference across array items
+  const person: Person = { ...formData.get() };
+  console.log("[handleFormSubmit] person:", person);
 
   const idx = editingIndex.get();
+  console.log("[handleFormSubmit] editingIndex:", idx);
 
   if (idx !== null) {
     // Edit mode - update existing person
@@ -106,12 +106,15 @@ const handleFormSubmit = handler<
     const updated = [...list];
     updated[idx] = person;
     people.set(updated);
+    console.log("[handleFormSubmit] updated existing person at index", idx);
   } else {
     // Create mode - add new person
     people.push(person);
+    console.log("[handleFormSubmit] pushed new person");
   }
 
   // Close modal
+  console.log("[handleFormSubmit] closing modal");
   showModal.set(false);
   editingIndex.set(null);
 });
@@ -139,6 +142,7 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
 
   // Cancel handler - close modal without saving
   const handleCancel = action(() => {
+    console.log("[handleCancel] called");
     showModal.set(false);
     editingIndex.set(null);
     // Form fields automatically reset via form.reset()
@@ -146,6 +150,7 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
 
   // Open modal in create mode
   const startCreate = action(() => {
+    console.log("[startCreate] called");
     // Reset form data to defaults
     formData.set({
       name: "",
@@ -250,7 +255,9 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
           <span slot="header">{modalTitle}</span>
 
           <ct-form
+            data={formData}
             onct-submit={handleFormSubmit({
+              formData,
               people,
               editingIndex,
               showModal,

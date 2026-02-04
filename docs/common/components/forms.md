@@ -53,9 +53,9 @@ The form wrapper that coordinates field buffering and validation.
 **Key behaviors:**
 
 - Provides `FormContext` to descendant fields via Lit context
-- On submit: validates all fields, collects values, emits `ct-submit` event
+- On submit: validates all fields, flushes buffers to bound cells, emits `ct-submit`
 - On reset: restores all fields to their initial cell values
-- Emits serializable `{ values: { fieldName: value } }` in event detail
+- Handlers close over the bound cell and read from it directly (type-safe)
 
 ### Form Fields
 
@@ -70,17 +70,19 @@ the same behavior:
 
 ### Create Mode
 
-Bind fields to a fresh cell, then handle the values on submit:
+Bind fields to a staging cell, then copy to collection on submit:
 
 ```tsx
 const formData = Writable.of({ name: "", email: "" });
 
 <ct-form
-  onct-submit={handler((event, { formData }) => {
-    const values = event.detail.values;
-    // values = { name: "...", email: "..." }
-    collection.push(values);
-  }, { formData })}
+  data={formData}
+  onct-submit={handler((_, { formData, collection }) => {
+    // ct-form flushes buffers to cells before emitting ct-submit,
+    // so we can read the complete, typed object directly.
+    // IMPORTANT: Copy the object to avoid sharing references!
+    collection.push({ ...formData.get() });
+  }, { formData, collection })}
 >
   <ct-input name="name" $value={formData.key("name")} required />
   <ct-input name="email" $value={formData.key("email")} type="email" />
@@ -110,41 +112,48 @@ Common pattern combining create/edit in a modal:
 ```tsx
 const showModal = Writable.of(false);
 const editingIndex = Writable.of<number | null>(null);
-const formData = Writable.of({ name: "", email: "" });
+const formData = Writable.of<Person>({ name: "", email: "", role: "user" });
 
 // Open for create
 const startCreate = action(() => {
-  formData.set({ name: "", email: "" });
+  formData.set({ name: "", email: "", role: "user" });
   editingIndex.set(null);
   showModal.set(true);
 });
 
-// Open for edit
-const startEdit = handler((_, { index, people, formData, editingIndex }) => {
+// Open for edit - copy existing data into formData
+const startEdit = handler((_, { index, people, formData, editingIndex, showModal }) => {
   const person = people.get()[index];
   formData.set({ ...person });
   editingIndex.set(index);
   showModal.set(true);
 }, { index, people, formData, editingIndex, showModal });
 
-// Handle submit
-const handleSubmit = handler((event, { people, editingIndex, showModal }) => {
-  const values = event.detail.values;
+// Handle submit - read from formData cell directly (type-safe!)
+// IMPORTANT: Create a copy to avoid sharing object references
+const handleSubmit = handler((_, { formData, people, editingIndex, showModal }) => {
+  const person: Person = { ...formData.get() };  // Copy the object!
   const idx = editingIndex.get();
 
   if (idx !== null) {
     // Edit mode - update existing
     const list = people.get();
-    list[idx] = values;
-    people.set([...list]);
+    const updated = [...list];
+    updated[idx] = person;
+    people.set(updated);
   } else {
     // Create mode - add new
-    people.push(values);
+    people.push(person);
   }
 
   showModal.set(false);
-}, { people, editingIndex, showModal });
+  editingIndex.set(null);
+}, { formData, people, editingIndex, showModal });
 ```
+
+**Important:** Always copy the object with `{ ...formData.get() }` when adding to a
+collection. The staging cell (`formData`) is reused between submissions, so pushing
+the same object reference would cause all items to share the same data.
 
 ## Creating Form-Compatible Components
 
@@ -253,19 +262,25 @@ initialization and falling back to cell value, edit mode works correctly.
 
 ### ct-submit
 
-Emitted when form is submitted and all fields are valid.
+Emitted when form is submitted and all fields are valid. Before emitting this
+event, ct-form flushes all buffered field values to their bound cells.
 
-```typescript
-interface CTSubmitEvent {
-  detail: {
-    values: Record<string, unknown>; // { fieldName: value }
-    data: Record<string, unknown>; // Native FormData as object
-  };
-}
+**Important:** Handlers should read from the bound cell directly, not from event
+detail. This provides type safety and avoids manual object reconstruction.
+
+```tsx
+// ✅ Recommended: close over the cell and read from it
+const handleSubmit = handler((_, { formData, collection }) => {
+  const person = formData.get();  // Type: Person
+  collection.push(person);
+}, { formData, collection });
+
+// ❌ Avoid: reading from event detail (no type safety)
+const handleSubmit = handler((event, { collection }) => {
+  const values = event.detail.values;  // Type: Record<string, unknown>
+  collection.push(values as Person);  // Requires cast
+}, { collection });
 ```
-
-**Important:** Event detail is JSON-serializable (no DOM elements or functions)
-because Common Tools serializes events across worker boundaries.
 
 ### ct-form-invalid
 

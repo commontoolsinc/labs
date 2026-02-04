@@ -7,6 +7,7 @@ import {
   type FormContext,
   formContext,
 } from "./form-context.ts";
+import type { CellHandle } from "@commontools/runtime-client";
 
 /**
  * CTForm Component
@@ -142,17 +143,38 @@ export class CTForm extends BaseElement {
   @property()
   action = "";
 
+  /**
+   * Optional data cell to sync after flushing field buffers.
+   * When provided, the form will await data.sync() after flushing
+   * to ensure the cell's local cache is updated before emitting ct-submit.
+   * This enables handlers to read the updated values via data.get().
+   */
+  @property({ attribute: false })
+  data?: CellHandle<unknown>;
+
   @query("form")
   private _form!: HTMLFormElement;
 
   /** Track registered fields for coordinated submit/reset */
   private _fields = new Map<HTMLElement, FieldRegistration>();
 
+  private _instanceId = Math.random().toString(36).slice(2, 8);
+
   /** Provide FormContext to descendant fields */
   @provide({ context: formContext })
   private _formContext: FormContext = {
     registerField: (reg) => this._registerField(reg),
   };
+
+  override connectedCallback() {
+    super.connectedCallback();
+    console.log(`[ct-form:${this._instanceId}] connectedCallback`);
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    console.log(`[ct-form:${this._instanceId}] disconnectedCallback`);
+  }
 
   /**
    * Register a field with the form
@@ -175,16 +197,19 @@ export class CTForm extends BaseElement {
     `;
   }
 
-  private handleSubmit(event: Event): void {
+  private async handleSubmit(event: Event): Promise<void> {
     // Prevent default form submission
     event.preventDefault();
     event.stopPropagation();
 
+    console.log(`[ct-form:${this._instanceId}] handleSubmit called`);
+
     if (!this._form) {
+      console.log(`[ct-form:${this._instanceId}] no form element, returning`);
       return;
     }
 
-    // Validate all registered fields
+    // 1. Validate all registered fields
     const errors: Array<{ element: HTMLElement; message?: string }> = [];
     for (const [element, field] of this._fields) {
       const result = field.validate();
@@ -195,47 +220,45 @@ export class CTForm extends BaseElement {
 
     // If any fields are invalid, emit error event and return early
     if (errors.length > 0) {
+      console.log(`[ct-form:${this._instanceId}] validation failed`, errors);
       this.emit("ct-form-invalid", { errors });
       return;
     }
 
-    // Collect form data from native form
-    const formData = new FormData(this._form);
-    const nativeData: Record<string, any> = {};
+    console.log(
+      `[ct-form:${this._instanceId}] validation passed, flushing fields...`,
+    );
 
-    // Convert FormData to plain object
-    for (const [key, value] of formData.entries()) {
-      if (nativeData[key] !== undefined) {
-        // Handle multiple values with same name (like checkboxes)
-        if (!Array.isArray(nativeData[key])) {
-          nativeData[key] = [nativeData[key]];
-        }
-        nativeData[key].push(value);
-      } else {
-        nativeData[key] = value;
-      }
+    // 2. Flush all buffered values to their bound cells
+    // Await all flush operations to ensure cell updates are committed
+    const flushPromises = Array.from(this._fields.values()).map((field) =>
+      field.flush()
+    );
+    await Promise.all(flushPromises);
+
+    console.log(
+      `[ct-form:${this._instanceId}] flush complete, syncing data cell...`,
+    );
+
+    // 3. Sync the data cell if provided to refresh its local cache
+    // This ensures handlers can read the updated values via data.get()
+    if (this.data?.sync) {
+      await this.data.sync();
     }
 
-    // Collect buffered values from all registered ct-* fields
-    // Build a values object keyed by field name (if available)
-    // Only include JSON-serializable values (Common Tools serializes events across workers)
-    const values: Record<string, unknown> = {};
-    let fieldIndex = 0;
-    for (const field of this._fields.values()) {
-      // Use field name if available, otherwise use index
-      const key = field.name || `field_${fieldIndex}`;
-      values[key] = field.getValue();
-      fieldIndex++;
-    }
+    console.log(
+      `[ct-form:${this._instanceId}] sync complete, emitting ct-submit...`,
+    );
 
-    // IMPORTANT: Common Tools serializes event details across worker boundaries
-    // Only pass JSON-serializable data (no DOM elements, functions, or FormData)
-    const submitted = this.emit("ct-submit", {
-      values, // Object with field values keyed by name
-      data: nativeData, // Plain object from native FormData
-    });
+    // 4. Emit submit event - handlers read from cells, not event detail
+    const submitted = this.emit("ct-submit");
 
-    // If event wasn't prevented, submit the form natively
+    console.log(
+      `[ct-form:${this._instanceId}] ct-submit emitted, submitted =`,
+      submitted,
+    );
+
+    // 5. If event wasn't prevented, submit the form natively
     if (submitted && this.action) {
       this._form.submit();
     }
