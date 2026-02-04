@@ -4,17 +4,14 @@
  * Tests the "write gate" pattern where form fields buffer writes locally
  * when inside a ct-form, and flush atomically on submit.
  */
-import { beforeEach, describe, it } from "@std/testing/bdd";
+import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   type CellControllerLike,
   createFormFieldController,
   FormFieldController,
 } from "./form-field-controller.ts";
-import {
-  type FormContext,
-  formContext,
-} from "../components/form/form-context.ts";
+import { type FormContext } from "../components/form/form-context.ts";
 
 // Mock ReactiveControllerHost
 class MockHost {
@@ -58,8 +55,9 @@ class MockCellController<T> implements CellControllerLike<T> {
     this._value = initialValue;
     if (hasCell) {
       this._cell = {
-        set: async (value: T) => {
+        set: (value: T): Promise<void> => {
           this._value = value;
+          return Promise.resolve();
         },
       };
     }
@@ -113,19 +111,6 @@ class MockFormContext implements FormContext {
   getLastRegistration() {
     return this.registrations[this.registrations.length - 1];
   }
-}
-
-// Helper to create a host with form context
-function createHostWithFormContext(): {
-  host: MockHost & HTMLElement;
-  formContext: MockFormContext;
-} {
-  const mockFormContext = new MockFormContext();
-  const host = new MockHost() as unknown as MockHost & HTMLElement;
-
-  // Simulate Lit context consumer behavior by making the context available
-  // We'll need to manually trigger the context consumer callback
-  return { host, formContext: mockFormContext };
 }
 
 describe("FormFieldController", () => {
@@ -298,10 +283,12 @@ describe("FormFieldController registration behavior", () => {
     const host = new MockHost() as unknown as MockHost & HTMLElement;
     const cellController = new MockCellController("initial");
 
-    const formField = new FormFieldController(host, {
+    // Create controller to verify it doesn't throw (actual registration requires Lit context)
+    const _formField = new FormFieldController(host, {
       cellController,
       validate: () => ({ valid: true }),
     });
+    expect(_formField).toBeDefined();
 
     // Manually simulate what would happen when register() is called with a form context
     // We test the internal logic by creating a similar registration
@@ -417,8 +404,8 @@ describe("FormFieldController registration behavior", () => {
 
   it("should handle flush error", async () => {
     const mockCell = {
-      set: async (_value: string) => {
-        throw new Error("Network error");
+      set: (_value: string): Promise<void> => {
+        return Promise.reject(new Error("Network error"));
       },
     };
 
