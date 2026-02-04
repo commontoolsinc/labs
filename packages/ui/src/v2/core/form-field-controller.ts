@@ -52,6 +52,11 @@ import {
 export interface CellControllerLike<T> {
   getValue(): T;
   setValue(value: T): void;
+  /**
+   * Optional method to get the underlying CellHandle for direct async operations.
+   * Used by FormFieldController to await cell.set() during flush.
+   */
+  getCell?(): { set(value: T): Promise<void> } | undefined;
 }
 
 /**
@@ -174,9 +179,17 @@ export class FormFieldController<T> implements ReactiveController {
         this._buffer = v as T;
         this._host.requestUpdate();
       },
-      flush: () => {
+      flush: async () => {
         const valueToFlush = this._buffer ?? this._cellController.getValue();
-        this._cellController.setValue(valueToFlush);
+        // If the cell controller can provide the underlying CellHandle,
+        // call set() directly and await it to ensure the update is committed
+        const cell = this._cellController.getCell?.();
+        if (cell) {
+          await cell.set(valueToFlush);
+        } else {
+          // Fallback to synchronous setValue (for non-Cell values)
+          this._cellController.setValue(valueToFlush);
+        }
         this._lastCellValue = valueToFlush;
       },
       reset: () => {
