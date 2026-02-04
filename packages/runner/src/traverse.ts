@@ -1958,7 +1958,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
           arrayObj.push(val);
         } else {
           // If our item doesn't match our schema, we may be able to use null
-          if (this.isValidType(schema, "null")) {
+          if (this.isValidType(curSelector.schema!, "null")) {
             arrayObj.push(null);
           } else {
             // this array is invalid; one or more items do not match the schema
