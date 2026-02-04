@@ -76,7 +76,6 @@ Bind fields to a staging cell, then copy to collection on submit:
 const formData = Writable.of({ name: "", email: "" });
 
 <ct-form
-  data={formData}
   onct-submit={handler((_, { formData, collection }) => {
     // ct-form flushes buffers to cells before emitting ct-submit,
     // so we can read the complete, typed object directly.

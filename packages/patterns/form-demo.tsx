@@ -52,7 +52,6 @@ const startEdit = handler<
     showModal: Writable<boolean>;
   }
 >((_event, { index, people, formData, editingIndex, showModal }) => {
-  console.log("[startEdit] called with index:", index);
   const list = people.get();
   const person = list[index];
   if (person) {
@@ -91,14 +90,11 @@ const handleFormSubmit = handler<
     showModal: Writable<boolean>;
   }
 >((_, { formData, people, editingIndex, showModal }) => {
-  console.log("[handleFormSubmit] handler called");
   // Read person directly from the bound cell (already flushed by ct-form)
   // Create a copy to avoid sharing the same object reference across array items
   const person: Person = { ...formData.get() };
-  console.log("[handleFormSubmit] person:", person);
 
   const idx = editingIndex.get();
-  console.log("[handleFormSubmit] editingIndex:", idx);
 
   if (idx !== null) {
     // Edit mode - update existing person
@@ -106,15 +102,12 @@ const handleFormSubmit = handler<
     const updated = [...list];
     updated[idx] = person;
     people.set(updated);
-    console.log("[handleFormSubmit] updated existing person at index", idx);
   } else {
     // Create mode - add new person
     people.push(person);
-    console.log("[handleFormSubmit] pushed new person");
   }
 
   // Close modal
-  console.log("[handleFormSubmit] closing modal");
   showModal.set(false);
   editingIndex.set(null);
 });
@@ -142,7 +135,6 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
 
   // Cancel handler - close modal without saving
   const handleCancel = action(() => {
-    console.log("[handleCancel] called");
     showModal.set(false);
     editingIndex.set(null);
     // Form fields automatically reset via form.reset()
@@ -150,7 +142,6 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
 
   // Open modal in create mode
   const startCreate = action(() => {
-    console.log("[startCreate] called");
     // Reset form data to defaults
     formData.set({
       name: "",
@@ -255,7 +246,6 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
           <span slot="header">{modalTitle}</span>
 
           <ct-form
-            data={formData}
             onct-submit={handleFormSubmit({
               formData,
               people,
