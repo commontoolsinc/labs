@@ -163,12 +163,16 @@ export class FormFieldController<T> implements ReactiveController {
   }
 
   /**
-   * Clear the buffer, reverting to cell value.
-   * Call this when the underlying cell binding changes.
+   * Clear the buffer and update original value from current cell.
+   * Call this when the underlying cell binding changes (e.g., switching records).
+   * This ensures reset/dirty tracking uses the new cell's value as baseline.
    */
   clearBuffer(): void {
     this._buffer = undefined;
     this._hasBuffer = false;
+    // Update original value to the new cell's value so reset works correctly
+    // when reusing the same field for a different record
+    this._originalValue = this._cellController.getValue();
   }
 
   /**
