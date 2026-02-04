@@ -234,13 +234,36 @@ Keep rich types as themselves within the runtime:
 - **Streams are first-class** rather than marker objects
 - Serialization becomes a "last mile" concern at specific boundary points
 
-The `StorableValue` type would evolve from a closed union to a protocol-based
-definition — any type implementing the storable protocol becomes a valid
-`StorableValue`.
+The `StorableValue` type would expand to a union of three categories:
+
+```typescript
+type StorableValue =
+  // (a) Primitives
+  | null | boolean | number | string
+
+  // (b) Built-in JS types (cannot be patched with symbols)
+  | Error
+  | Map<StorableValue, StorableValue>
+  | Set<StorableValue>
+  | Uint8Array                           // or other byte-array type
+  | Date                                 // or Temporal type
+
+  // (c) Branded storables (our types implementing the protocol)
+  | StorableInstance
+
+  // Recursive containers
+  | StorableValue[]
+  | { [key: string]: StorableValue }
+```
+
+Built-in JS types require explicit serialization handling — we cannot (and
+should not) patch `Error.prototype` with symbol-keyed methods. The
+serialization context must recognize these types directly.
 
 #### The Storable Protocol
 
-Types opt into storability by implementing methods keyed by well-known symbols:
+Types *we control* opt into storability by implementing methods keyed by
+well-known symbols:
 
 ```typescript
 const DECONSTRUCT = Symbol.for('common.deconstruct');
@@ -380,6 +403,10 @@ The `deserialize` function needs runtime context to reconstitute rich types
 - What is the exact contract for deconstructed state? (Nested `StorableInstance`s
   should be allowed; cycles likely banned.)
 - How are serialization contexts configured and selected at each boundary?
+- Which built-in JS types should be included?
+  - Byte arrays: `Uint8Array`, `ArrayBuffer`, or both?
+  - Date/time: `Date`, `Temporal.Instant`, `Temporal.ZonedDateTime`?
+  - Are there others beyond Error, Map, Set?
 - How does this interact with the proposed CRDT layer (below)?
 
 ---
