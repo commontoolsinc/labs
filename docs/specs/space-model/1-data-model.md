@@ -233,6 +233,25 @@ Automerge documents store:
 
 This enables offline editing with automatic merge on reconnection.
 
+#### Layered CRDT Architecture
+
+CRDTs could operate at multiple levels simultaneously:
+
+- **Space level**: The entire space modeled as a single CRDT document, tracking
+  the evolution of the overall JSON-ish structure
+- **Component level**: Individual parts (e.g., a text field) modeled as their
+  own independent CRDT documents with type-specific merge semantics
+
+These layers work in harmony:
+- The space treats component CRDTs opaquely — just another value that changes
+- Recipes that understand specific CRDT types can work with the component's
+  native semantics (e.g., collaborative text editing with cursor positions)
+- The space-level CRDT handles structural changes (adding/removing fields)
+- Component-level CRDTs handle content changes within their boundaries
+
+This separation allows general-purpose space sync to coexist with specialized
+collaborative editing where needed.
+
 #### Trade-offs
 
 | Benefit | Cost |
