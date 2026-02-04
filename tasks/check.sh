@@ -10,6 +10,17 @@ if [[ ! " ${DENO_VERSIONS_ALLOWED[@]} " =~ " ${DENO_VERSION} " ]]; then
   exit 1
 fi
 
+# Figure out the symlink-resolved program name and directory.
+cmdName="$(readlink -f "$0")" || exit "$?"
+cmdDir="${cmdName%/*}"
+cmdName="${cmdName##*/}"
+baseDir="${cmdDir%/*}" # Parent of `cmdDir`, repo root in this case.
+
+# Switch to the root of the project, so that this script can be called when
+# `cd`ed anywhere. This is especially useful because the LLM agents often like
+# to do `git commit` (which triggers this) in a project subdirectory.
+cd "${baseDir}"
+
 # Collect all paths to check. Glob patterns will be expanded by bash.
 FILES_TO_CHECK=()
 
@@ -74,6 +85,21 @@ FILES_TO_CHECK+=(packages/patterns/google/extractors/*.tsx)
 FILES_TO_CHECK+=(packages/patterns/google/WIP/*.ts)
 FILES_TO_CHECK+=(packages/patterns/google/WIP/*.tsx)
 
+if (( ${#FILES_TO_CHECK[@]} == 0 )); then
+    # This can happen if the repo ends up in a very weird state, but it _can_
+    # happen!
+    echo 1>&2 "${cmdName}:" 'No files to check?! (Project is in an odd state.)'
+    exit 1
+fi
+
 echo "Type checking ${#FILES_TO_CHECK[@]} paths..."
-deno check --reload "${FILES_TO_CHECK[@]}"
+
+reloadArg=()
+if [[ "${GITHUB_ACTION}" != '' ]]; then
+    echo 'Running in a CI environment; rechecking from scratch...'
+    reloadArg=(--reload)
+fi
+
+deno check "${reloadArg[@]}" "${FILES_TO_CHECK[@]}"
+
 echo "Type check complete."
