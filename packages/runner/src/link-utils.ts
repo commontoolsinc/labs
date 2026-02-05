@@ -4,7 +4,6 @@ import {
   type Cell,
   isAnyCell,
   isCell,
-  isStream,
   type MemorySpace,
   type Stream,
 } from "./cell.ts";
@@ -107,7 +106,7 @@ export function parseLink(
   // see userland "/".
   if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
 
-  if (isCell(value) || isStream(value)) return value.getAsNormalizedFullLink();
+  if (isCell(value)) return value.getAsNormalizedFullLink();
 
   if (isPrimitiveCellLink(value)) {
     if (!base) {
