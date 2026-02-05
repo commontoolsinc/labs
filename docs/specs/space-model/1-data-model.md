@@ -248,6 +248,8 @@ The `StorableValue` type would expand to a union of three categories:
 type StorableValue =
   // (a) Primitives
   | null | boolean | number | string
+  | undefined                             // currently has special semantics; could become first-class
+  | bigint                                // currently rejected; could become first-class
 
   // (b) Built-in JS types (cannot be patched with symbols)
   | Error
@@ -422,6 +424,9 @@ This makes identity hashing independent of any particular wire encoding.
   - Byte arrays: `Uint8Array`, `ArrayBuffer`, or both?
   - Date/time: `Date`, `Temporal.Instant`, `Temporal.ZonedDateTime`?
   - Are there others beyond Error, Map, Set?
+- Should additional JS primitives become first-class?
+  - `undefined`: Currently has context-dependent semantics (deletion, absent, null)
+  - `bigint`: Currently rejected; useful for large integers
 - How does this interact with the proposed CRDT layer (below)?
 
 ---
