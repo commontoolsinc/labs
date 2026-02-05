@@ -92,7 +92,7 @@ export class PieceController<T = unknown> {
   }
 
   name(): string | undefined {
-    return this.#cell.asSchema(nameSchema).get()[NAME];
+    return this.#cell.asSchema(nameSchema).get()?.[NAME];
   }
 
   getCell(): Cell<T> {

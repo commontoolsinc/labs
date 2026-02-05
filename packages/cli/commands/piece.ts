@@ -119,15 +119,14 @@ export const piece = new Command()
     `Display a list of all pieces in "${RAW_EX_COMP.space}".`,
   )
   .action(async (options) => {
+    const pieces = await listPieces(parseSpaceOptions(options));
     const piecesData = [
       ["ID", "NAME", "RECIPE"],
-      ...((await listPieces(parseSpaceOptions(options))).map(
-        (
-          data,
-        ) => [
+      ...(pieces.map(
+        (data) => [
           data.id,
-          data.name ?? "<unnamed>",
-          data.recipeName ?? "<unnamed>",
+          data.error ? `<error: ${data.error}>` : (data.name ?? "<unnamed>"),
+          data.error ? "" : (data.recipeName ?? "<unnamed>"),
         ],
       )),
     ];
