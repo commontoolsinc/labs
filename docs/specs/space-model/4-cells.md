@@ -160,6 +160,12 @@ but event payloads do not persist.
   Process and computed cells: yes. Precious and stream identity: no.
 - **Identity mechanism**: All categories use the same `NormalizedFullLink`
   infrastructure for addressing and reactivity.
+- **Declared vs effective API**: The type system declares six cell variants
+  (`Cell`, `ReadonlyCell`, `WriteonlyCell`, `ComparableCell`, `OpaqueCell`,
+  `Stream`), each with a different subset of methods. In practice, pattern code
+  uses only two: `Cell` (aliased as `Writable`) for state, and `Stream` for
+  events. The restricted variants exist in the API declarations but have no
+  pattern-level consumers.
 
 ### Shared Identity Base
 
@@ -181,6 +187,35 @@ serialization patterns, not cell-specific code.
 The "Rarely Used Outside Foundation" methods could be made internal-only,
 reducing the public API surface and clarifying which methods are intended for
 general use.
+
+Beyond method visibility, the type hierarchy itself is wider than what consumers
+use. The API declares six cell variants with different capability subsets:
+
+| Variant | get | set | push | send | key | equals |
+|---------|-----|-----|------|------|-----|--------|
+| `Cell` / `Writable` | yes | yes | yes | yes | yes | yes |
+| `ReadonlyCell` | yes | — | — | — | yes | yes |
+| `WriteonlyCell` | — | yes | yes | — | yes | — |
+| `ComparableCell` | — | — | — | — | yes | yes |
+| `OpaqueCell` | — | — | — | — | yes | — |
+| `Stream` | — | — | — | yes | — | — |
+
+Pattern code uses only `Cell`/`Writable` and `Stream`. The effective
+pattern-level API is:
+
+- **Cell** (= `Writable`): `.get()`, `.set()`, `.push()` (dominant);
+  `.key()`, `.update()`, `.remove()`, `.equals()` (occasional)
+- **Stream**: `.send()`
+
+`Writable<T>` is a pure type alias for `Cell<T>` — same interface, same runtime
+object. It serves as a documentation convention in pattern input signatures to
+declare write intent, not as a distinct capability tier.
+
+The restricted variants (`ReadonlyCell`, `WriteonlyCell`, `ComparableCell`,
+`OpaqueCell`) are either aspirational — intended for future enforcement of
+capability restrictions — or dead weight. This should be resolved: either
+patterns should start using the restricted types (enforcing least-privilege), or
+the unused variants should be removed to reduce conceptual surface area.
 
 ### Unification via Timestamps
 
