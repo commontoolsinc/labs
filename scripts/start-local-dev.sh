@@ -87,7 +87,7 @@ check_port "$SHELL_PORT"
 
 # Start shell dev server in background
 cd packages/shell
-deno task dev-local > local-dev-shell.log 2>&1 &
+TOOLSHED_PORT="$TOOLSHED_PORT" deno task dev-local > local-dev-shell.log 2>&1 &
 SHELL_PID=$!
 
 # Wait a moment for shell to start
