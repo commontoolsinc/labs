@@ -242,6 +242,7 @@ const NATIVE_TYPE_SCHEMAS: Record<string, SchemaDefinition | boolean> = {
   Float64Array: true,
   BigInt64Array: true,
   BigUint64Array: true,
+  JSONSchema: true,
 };
 
 const NATIVE_TYPE_NAMES = new Set(Object.keys(NATIVE_TYPE_SCHEMAS));
