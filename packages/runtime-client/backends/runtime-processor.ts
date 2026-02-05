@@ -11,6 +11,9 @@ import {
 import {
   type Cancel,
   convertCellsToLinks,
+  getCellOrThrow,
+  isCell,
+  isCellResult,
   Runtime,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
@@ -78,6 +81,129 @@ import { cellRefToKey } from "../shared/utils.ts";
 import { RemoteResponse } from "@commontools/runtime-client";
 import { WorkerReconciler } from "@commontools/html/worker";
 import type { VDomOp } from "../protocol/types.ts";
+
+const MAX_SERIALIZATION_DEPTH = 5;
+
+/**
+ * Formats a cell link for display in console output.
+ * Returns a string like "[Cell: of:bafy.../path/to/prop]"
+ */
+function formatCellLink(cell: { getAsLink: () => unknown }): string {
+  try {
+    const link = cell.getAsLink() as {
+      "/": { "link@1": { id?: string; path?: readonly string[] } };
+    };
+    const inner = link["/"]["link@1"];
+    const pathStr = inner.path?.length ? `/${inner.path.join("/")}` : "";
+    return `[Cell: ${inner.id ?? "?"}${pathStr}]`;
+  } catch {
+    return "[Cell]";
+  }
+}
+
+/**
+ * Deep-walks a value and converts uncloneable parts (Cells, Proxies, functions)
+ * into cloneable representations for postMessage. Preserves the structure of
+ * objects so that `console.log({ self, name: "test" })` shows both the cell
+ * reference AND the other properties.
+ *
+ * Exported for testing.
+ */
+export function sanitizeForPostMessage(
+  value: unknown,
+  seen = new WeakSet<object>(),
+  depth = 0,
+): unknown {
+  // Handle primitives immediately
+  if (value === null || value === undefined) return value;
+  const type = typeof value;
+  if (type !== "object" && type !== "function") return value;
+
+  // Functions can't be cloned
+  if (type === "function") return "[Function]";
+
+  // Depth limit to prevent runaway recursion
+  if (depth >= MAX_SERIALIZATION_DEPTH) {
+    return "[Max depth exceeded]";
+  }
+
+  const obj = value as object;
+
+  // Circular reference protection
+  if (seen.has(obj)) return "[Circular]";
+  seen.add(obj);
+
+  // Check for Cell (direct cell reference)
+  if (isCell(value)) {
+    return formatCellLink(value);
+  }
+
+  // Check for query result proxy (has toCell symbol) - walk the data AND show the ref
+  // Wrap in try-catch since isCellResult accesses a symbol property, which can throw
+  // on hostile Proxies with throwing get traps
+  try {
+    if (isCellResult(value)) {
+      try {
+        const cell = getCellOrThrow(value);
+        const cellRef = formatCellLink(cell);
+
+        // Walk the proxy's enumerable properties to extract the actual data
+        // This works because the Proxy forwards property access to the underlying value
+        const data: Record<string, unknown> = { __ref: cellRef };
+        for (const key of Object.keys(value as object)) {
+          try {
+            data[key] = sanitizeForPostMessage(
+              (value as Record<string, unknown>)[key],
+              seen,
+              depth + 1,
+            );
+          } catch {
+            data[key] = "[Unreadable]";
+          }
+        }
+        return data;
+      } catch {
+        // If we can't get the cell, fall through to regular object handling
+      }
+    }
+  } catch {
+    // isCellResult threw - this is a hostile Proxy, fall through to regular handling
+  }
+
+  // Arrays
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeForPostMessage(item, seen, depth + 1));
+  }
+
+  // Plain objects - walk properties
+  try {
+    const result: Record<string, unknown> = {};
+    for (const key of Object.keys(obj)) {
+      try {
+        result[key] = sanitizeForPostMessage(
+          (obj as Record<string, unknown>)[key],
+          seen,
+          depth + 1,
+        );
+      } catch {
+        result[key] = "[Unreadable]";
+      }
+    }
+    return result;
+  } catch {
+    // Object doesn't support iteration (e.g., Proxy with throwing traps)
+    // Try to get constructor name for a more helpful message
+    try {
+      const name = obj.constructor?.name;
+      if (name && name !== "Object") {
+        return `[${name} - uncloneable]`;
+      }
+    } catch {
+      // Ignore
+    }
+    return "[Object - uncloneable]";
+  }
+}
 
 export class RuntimeProcessor {
   private runtime: Runtime;
@@ -147,35 +273,11 @@ export class RuntimeProcessor {
       recipeEnvironment: { apiUrl: apiUrlObj },
       telemetry,
       consoleHandler: ({ metadata, method, args }) => {
-        // Sanitize args to handle objects that can't be cloned via postMessage
-        // (e.g., Proxy objects, functions, DOM nodes). Without this, logging
-        // such objects causes a DataCloneError that surfaces as a cryptic
-        // "null" error to the user.
-        const sanitizedArgs = args.map((arg: unknown) => {
-          try {
-            structuredClone(arg);
-            return arg;
-          } catch {
-            // Return a placeholder for uncloneable objects
-            const type = typeof arg;
-            if (arg === null) return null;
-            if (type === "function") return `[Function]`;
-            if (type === "object") {
-              // Guard constructor access - Proxies with throwing traps
-              // could throw again here
-              try {
-                const name = (arg as object).constructor?.name;
-                if (name && name !== "Object") {
-                  return `[${name} - uncloneable]`;
-                }
-              } catch {
-                // Ignore - fall through to generic placeholder
-              }
-              return `[Object - uncloneable]`;
-            }
-            return `[${type} - uncloneable]`;
-          }
-        });
+        // Deep-walk args to convert uncloneable objects (Cells, Proxies,
+        // functions) into cloneable representations for postMessage.
+        // This preserves object structure so `console.log({ self, name })`
+        // shows both the cell reference and other properties.
+        const sanitizedArgs = args.map((arg) => sanitizeForPostMessage(arg));
         self.postMessage({
           type: NotificationType.ConsoleMessage,
           metadata,
