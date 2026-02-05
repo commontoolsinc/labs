@@ -278,6 +278,7 @@ well-known symbols:
 ```typescript
 const DECONSTRUCT = Symbol.for('common.deconstruct');
 const RECONSTRUCT = Symbol.for('common.reconstruct');
+// If protocol evolution is needed: Symbol.for('common.deconstruct@2')
 
 // Instance protocol: "here's my essential state"
 interface StorableInstance {
@@ -329,6 +330,50 @@ This approach:
 - **Co-located logic**: Each type knows how to deconstruct/reconstruct itself
 - **Symbol-based brands**: Unique symbols prevent collision with user data keys
   and provide reliable runtime type discrimination
+
+#### Deconstructed State and Recursion
+
+The value returned by `[DECONSTRUCT]()` can contain any value that is itself
+deconstructable — including other `StorableInstance`s, built-in types like
+`Error` or `Map`, and of course primitives and plain objects/arrays.
+
+The **serialization system handles recursion**, not the individual deconstructor
+methods. A `[DECONSTRUCT]` implementation simply returns its essential state; it
+does not (and should not) recursively deconstruct nested values. The
+deconstructor methods won't have access to the serialization machinery required
+for that — by design, as it would be a layering violation.
+
+Similarly, `[RECONSTRUCT]` receives state where nested values have already been
+reconstructed by the serialization system.
+
+#### Unknown Types
+
+When deserializing, a context may encounter a type tag it doesn't recognize —
+for example, data written by a newer version of the system. Unknown types should
+be **passed through** rather than rejected, preserving forward compatibility.
+
+This requires a generic `StorableInstance` to hold unrecognized types:
+
+```typescript
+class UnknownStorable implements StorableInstance {
+  constructor(
+    readonly typeTag: string,   // e.g., "FutureType@2"
+    readonly state: unknown,    // the raw state, already recursively processed
+  ) {}
+
+  [DECONSTRUCT]() {
+    return this.state;
+  }
+
+  static [RECONSTRUCT](state: unknown, _runtime: Runtime, typeTag: string): UnknownStorable {
+    return new UnknownStorable(typeTag, state);
+  }
+}
+```
+
+When re-serializing, the context uses the preserved `typeTag` to produce the
+original wire format, allowing data to round-trip through systems that don't
+understand it.
 
 #### Serialization Contexts
 
@@ -426,8 +471,8 @@ This makes identity hashing independent of any particular wire encoding.
 
 - What is the migration path from early to late conversion?
 - How do rich types participate in change detection and diffing?
-- What is the exact contract for deconstructed state? (Nested `StorableInstance`s
-  should be allowed; cycles likely banned.)
+- Should cycles in deconstructed state be detected and rejected, or is this
+  left to the serialization system?
 - How are serialization contexts configured and selected at each boundary?
 - Which built-in JS types should be included?
   - Byte arrays: `Uint8Array`, `ArrayBuffer`, or both?
@@ -522,29 +567,35 @@ If user data needs to store an object whose single key starts with `/`, it can
 be wrapped in a **literal escape**:
 
 ```json
-{ "/=": { "/bloop": ["i", "am", "literal"] } }
+{ "/quote": { "/bloop": ["i", "am", "literal"] } }
 ```
 
-The `/=` key signals "the value is literal data, not a special type." On
+The `/quote` key signals "the value is literal data, not a special type." On
 deserialization, the wrapper is stripped and the inner value is returned as-is.
 
 This allows round-tripping any JSON structure, even those that would otherwise
 be interpreted as special types.
+
+#### Unknown Type Handling
+
+When a JSON context encounters a `/<type>@<version>` key it doesn't recognize,
+it uses `UnknownStorable` (see [Unknown Types](#unknown-types) in the Storable
+Protocol section) to preserve the data for round-tripping.
 
 #### Relationship to Serialization Contexts
 
 This wire format is what serialization contexts produce. The context's `wrap()`
 and `unwrap()` methods would generate and parse these `/<type>@<version>` keys,
 mapping between rich runtime types and their serialized form. The context is
-also responsible for applying `/=` escaping when serializing plain objects
-that happen to have slash-prefixed keys.
+also responsible for:
+- Applying `/quote` escaping when serializing plain objects that happen to have
+  slash-prefixed keys
+- Wrapping unknown types using the `typeTag` preserved in `UnknownStorable`
 
 #### Open Questions
 
 - What is the migration path from current formats?
-- Should unknown `/` types be preserved (passed through) or rejected?
 - Is `.minor` versioning needed, or is major-only sufficient?
-- Is `/=` the right escape key, or would another form be clearer?
 
 ---
 
