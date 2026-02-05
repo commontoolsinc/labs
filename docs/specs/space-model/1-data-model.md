@@ -431,7 +431,17 @@ This makes identity hashing independent of any particular wire encoding.
 
 ---
 
-### Unified Wire Format for Special Types
+### JSON Encoding for Special Types
+
+This section describes the **JSON-compatible** representation of special types.
+While the system will likely maintain a JSON encoding indefinitely (especially
+useful for debugging and interoperability), the wire format is not limited to
+JSON. Other encodings like CBOR may represent types more directly — for example,
+using CBOR's native byte array rather than `{ "/Bytes@1": "base64..." }`.
+
+The `/<type>@<version>` convention described here applies specifically to the
+JSON encoding. Serialization contexts for other formats may use format-native
+representations where appropriate.
 
 #### Current State: Three Conventions
 
@@ -482,7 +492,8 @@ A value is a special type if:
 2. It has exactly one key
 3. That key starts with `/`
 
-This simple rule provides maximum flexibility to evolve the key format.
+This simple rule is quick to check and provides maximum flexibility to evolve
+the key format.
 
 #### Stateless Types
 
