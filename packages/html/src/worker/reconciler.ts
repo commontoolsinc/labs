@@ -340,6 +340,18 @@ export class WorkerReconciler {
       : null;
     const newTagName = newVNode?.name ?? null;
 
+    logger.debug("reconcile-check", () => ({
+      oldId: oldState?.nodeId,
+      oldTagName,
+      newTagName,
+      match: Boolean(
+        oldState && oldTagName && newTagName && oldTagName === newTagName,
+      ),
+      newVNodeName: newVNode?.name,
+      oldStateHasTagName: oldState && "tagName" in oldState,
+      isOldStateText: oldState?.tagName === "#text",
+    }));
+
     // Case 1: Same element type - update in place
     if (oldState && oldTagName && newTagName && oldTagName === newTagName) {
       const sanitized = this.sanitizeNode(newVNode!);
@@ -576,6 +588,11 @@ export class WorkerReconciler {
   ): void {
     const eventType = getEventType(key);
 
+    // Equality check: if value is same as current, do nothing
+    if (existingState && existingState.currentValue === value) {
+      return;
+    }
+
     // Cancel existing subscription
     if (existingState) {
       existingState.cancel();
@@ -599,7 +616,11 @@ export class WorkerReconciler {
         eventType,
         handlerId,
       }]);
-      state.propSubscriptions.set(key, { cell: undefined, cancel: () => {} });
+      state.propSubscriptions.set(key, {
+        cell: undefined,
+        cancel: () => {},
+        currentValue: value,
+      });
     } else if (isEventHandler(value)) {
       const handlerId = ctx.registerHandler(value);
       state.eventHandlers.set(eventType, handlerId);
@@ -609,8 +630,16 @@ export class WorkerReconciler {
         eventType,
         handlerId,
       }]);
-      state.propSubscriptions.set(key, { cell: undefined, cancel: () => {} });
+      state.propSubscriptions.set(key, {
+        cell: undefined,
+        cancel: () => {},
+        currentValue: value,
+      });
     } else if (isCell(value)) {
+      // For Cells, we don't store currentValue to compare the Cell itself here
+      // because the value passed to updateEventProp is usually the Cell itself.
+      // If updatePropsInPlace passed the Cell, then `currentValue === value` check above covers it.
+
       const cancel = (value as Cell<(event: unknown) => void>).sink(
         (handler) => {
           if (handler) {
@@ -630,6 +659,7 @@ export class WorkerReconciler {
       state.propSubscriptions.set(key, {
         cell: value as Cell<unknown>,
         cancel,
+        currentValue: value,
       });
     }
   }
@@ -1014,6 +1044,7 @@ export class WorkerReconciler {
           state.propSubscriptions.set(key, {
             cell: undefined,
             cancel: () => {},
+            currentValue: value,
           });
         } else if (isEventHandler(value)) {
           // Plain function event handler
@@ -1028,6 +1059,7 @@ export class WorkerReconciler {
           state.propSubscriptions.set(key, {
             cell: undefined,
             cancel: () => {},
+            currentValue: value,
           });
         } else if (isCell(value)) {
           // Cell containing event handler - not common but handle it
@@ -1053,6 +1085,7 @@ export class WorkerReconciler {
           state.propSubscriptions.set(key, {
             cell: value as Cell<unknown>,
             cancel: sinkCancel,
+            currentValue: value,
           });
         }
       } else if (isBindingProp(key)) {
@@ -1377,6 +1410,85 @@ export class WorkerReconciler {
       cell.sink((resolvedChild) => {
         const isInitialRender = childState.nodeId === -1;
 
+        // Try to update in place if not initial render
+        if (
+          !isInitialRender &&
+          childState.nodeId !== -1
+        ) {
+          // Check if we can update in place
+          // We need to extract VNode info to compare tags
+          // This logic mirrors reconcileIntoWrapper
+          const oldState = childState.elementState;
+          const node = resolvedChild;
+
+          // Extract VNode from new content (handling [UI] chain)
+          // We duplicate extractVNode logic here or use helper if possible,
+          // but for now let's just handle WorkerVNode directly for tag comparison
+          let newTagName: string | null = null;
+          if (isWorkerVNode(node)) {
+            newTagName = node.name;
+          }
+
+          if (!newTagName && typeof node === "object" && node && UI in node) {
+            // Optimization: if it's a UI object, we might want to follow it,
+            // but for robust diffing we might need to fully resolve.
+            // For now, let's keep it simple: if complicated, replace.
+            // Or we can try to reuse the same logic as reconcileIntoWrapper?
+            // But reconcileIntoWrapper expects a wrapper object.
+            // Let's implement partial logic: if it IS a vnode, check tag.
+            // If resolvedChild is a primitive, and old was text, update text.
+          }
+
+          // Case 1: Text update
+          if (
+            childState.isText &&
+            (typeof resolvedChild === "string" ||
+              typeof resolvedChild === "number")
+          ) {
+            logger.debug(
+              "reconcile-cell-child",
+              () => ({
+                id: childState.nodeId,
+                type: "text-update",
+                value: resolvedChild,
+              }),
+            );
+            this.queueOps([{
+              op: "update-text",
+              nodeId: childState.nodeId,
+              text: String(resolvedChild),
+            }]);
+            return;
+          }
+
+          // Case 2: VNode update
+          if (oldState && newTagName && oldState.tagName === newTagName) {
+            // Update in place!
+            const sanitized = this.sanitizeNode(node as WorkerVNode);
+            if (sanitized) {
+              logger.debug(
+                "reconcile-cell-child",
+                () => ({
+                  id: childState.nodeId,
+                  type: "vnode-update",
+                  tagName: newTagName,
+                }),
+              );
+              this.updatePropsInPlace(ctx, oldState, sanitized.props);
+              if (sanitized.children !== undefined) {
+                this.updateChildrenInPlace(
+                  ctx,
+                  oldState,
+                  sanitized.children,
+                  new Set(visited),
+                );
+              }
+              return;
+            }
+          }
+        }
+
+        // Fallback: Replace (existing logic)
         // Clean up previous (skip if initial render - nothing to clean)
         if (!isInitialRender) {
           if (currentCancel) {
@@ -1385,12 +1497,22 @@ export class WorkerReconciler {
           }
           // Clean up event handlers before removing node
           this.cleanupNodeHandlers(childState);
+          // Log replacement
+          logger.debug(
+            "reconcile-cell-child",
+            () => ({
+              id: childState.nodeId,
+              type: "replace",
+              reason: "fallback",
+            }),
+          );
           this.queueOps([{ op: "remove-node", nodeId: childState.nodeId }]);
         }
 
         // Reset nodeId
         childState.nodeId = -1;
         childState.elementState = undefined;
+        childState.isText = false;
 
         if (resolvedChild === null || resolvedChild === undefined) {
           return;
@@ -1405,11 +1527,10 @@ export class WorkerReconciler {
         if (newState) {
           childState.nodeId = newState.nodeId;
           childState.elementState = newState.elementState;
+          childState.isText = newState.isText;
           currentCancel = newState.cancel;
 
           // Only insert on subsequent updates, not initial render.
-          // Initial render is handled by updateChildren's backward iteration
-          // which ensures correct ordering of all children.
           if (!isInitialRender) {
             const beforeId = this.findNextSiblingId(
               parentState.children,

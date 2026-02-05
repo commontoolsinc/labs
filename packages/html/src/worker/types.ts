@@ -71,6 +71,8 @@ export interface PropState {
   cell: Cell<unknown> | undefined;
   /** Cancel function for this prop's subscription */
   cancel: Cancel;
+  /** The specific value bound (for equality checking of static props/handlers) */
+  currentValue?: unknown;
 }
 
 /**

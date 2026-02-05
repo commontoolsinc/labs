@@ -14,6 +14,7 @@
     "jsr:@deno/graph@0.86": "0.86.9",
     "jsr:@deno/loader@~0.3.10": "0.3.11",
     "jsr:@denosaurs/plug@1": "1.1.0",
+    "jsr:@std/assert@*": "1.0.16",
     "jsr:@std/assert@0.217": "0.217.0",
     "jsr:@std/assert@1": "1.0.16",
     "jsr:@std/assert@^1.0.14": "1.0.16",
