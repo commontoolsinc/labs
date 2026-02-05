@@ -17,12 +17,11 @@
  *   - Variant A: `{ self: TestOutput }` (typed) - FAILS (tries to destructure)
  *   - Variant B: `{ self: any }` (untyped) - WORKS (can use optional chaining)
  *
- * NOTE: Even the working "any" variant triggers a spurious VDOM error:
- *   "[RuntimeClient Error] {type: 'callback:error', message: 'null'}"
- * This appears to be a separate bug in the VDOM reconciler where something
- * throws `null` during re-render after the handler successfully completes.
- * The handler DOES work - count increments correctly - the error is benign
- * but should be investigated separately (see reconciler.ts dispatchEvent).
+ * NOTE: `self` is a Proxy object that cannot be serialized via structuredClone.
+ * If you console.log(self) directly, it will cause a DataCloneError when the
+ * worker tries to postMessage the args. This surfaces as a cryptic "null" error.
+ * See fix/console-handler-uncloneable-args branch for a fix that sanitizes
+ * console args before posting.
  */
 import {
   action,
@@ -68,21 +67,13 @@ const showSelfAny = handler<
   // deno-lint-ignore no-explicit-any
   { self: any; count: Writable<number> }
 >((_, { self, count }) => {
-  try {
-    console.log("ANY WORKAROUND - self:", self);
-    console.log(
-      "ANY WORKAROUND - self keys:",
-      self ? Object.keys(self) : "null",
-    );
-    console.log("ANY WORKAROUND - self.count:", self?.count);
-    console.log("ANY WORKAROUND - self.$NAME:", self?.$NAME);
-    // Prove we can read from self by logging the count
-    count.set(count.get() + 1000);
-    console.log("ANY WORKAROUND - completed successfully");
-  } catch (e) {
-    console.log("ANY WORKAROUND - caught error:", e);
-    throw e;
-  }
+  // NOTE: Don't console.log(self) directly - it's a Proxy that can't be cloned
+  // for postMessage. Log specific properties instead.
+  console.log("ANY WORKAROUND - self keys:", self ? Object.keys(self) : "null");
+  console.log("ANY WORKAROUND - self.count:", self?.count);
+  console.log("ANY WORKAROUND - self.$NAME:", self?.$NAME);
+  // Prove it works by incrementing
+  count.set(count.get() + 1000);
 });
 
 // ============================================================================
