@@ -141,7 +141,7 @@ export function compileAndRun(
     if (hash === previousCallHash) return;
 
     // Check if inputs are undefined/empty (e.g., during rehydration before cells load)
-    const hasValidInputs = program.main && program.files &&
+    const hasValidInputs = program && program.main && program.files &&
       program.files.length > 0;
 
     // Special case: if inputs are invalid AND this is the hash for empty inputs,

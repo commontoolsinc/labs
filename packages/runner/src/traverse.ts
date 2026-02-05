@@ -974,7 +974,10 @@ function followPointer(
       ? error.path
       : valueEntry.address.path;
     if (valueEntry === undefined || valueEntry.value === undefined) {
-      const lastExisting = lastPath.slice(0, -1);
+      // Never slice below "value" - it's the minimum valid path for getNormalizedLink
+      const lastExisting = lastPath.length <= 1
+        ? ["value"]
+        : lastPath.slice(0, -1);
       const remaining = target.path.slice(lastExisting.length);
       const partialTarget = { ...target, path: lastExisting };
       const lastValue = tx.readOrThrow(partialTarget)!;

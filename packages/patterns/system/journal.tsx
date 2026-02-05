@@ -19,7 +19,7 @@ import {
 type JournalEntry = {
   timestamp?: number;
   eventType?: string;
-  subject?: { cell: { "/": string }; path: string[] };
+  subject?: Writable<unknown>;
   snapshot?: {
     name?: string;
     schemaTag?: string;

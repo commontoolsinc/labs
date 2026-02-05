@@ -14,13 +14,9 @@ import {
   Stream,
   UI,
   VNode,
+  wish,
   Writable,
 } from "commontools";
-import {
-  type AccountType,
-  createGoogleAuth,
-  type ScopeKey,
-} from "./util/google-auth-manager.tsx";
 import TurndownService from "turndown";
 import { GmailClient } from "./util/gmail-client.ts";
 
@@ -1033,15 +1029,6 @@ const toggleResolveInlineImages = handler<
   },
 );
 
-// Handler to change account type - must be at module scope
-const setAccountType = handler<
-  { target: { value: string } },
-  { selectedType: Writable<AccountType> }
->((event, state) => {
-  const newType = event.target.value as AccountType;
-  state.selectedType.set(newType);
-});
-
 // Pattern tool callbacks - must be defined at module scope
 const searchEmailsCallback = (
   { query, emails }: { query: string; emails: Email[] },
@@ -1092,23 +1079,67 @@ export default pattern<{
     const historyId = Writable.of("").for("historyId");
     const fetching = Writable.of(false).for("fetching");
 
-    // Local writable cell for account type selection
-    const selectedAccountType = Writable.of<AccountType>("default").for(
-      "account type",
-    );
-
-    // Use createGoogleAuth utility with reactive accountType
-    const {
-      auth: wishedAuth,
-      fullUI: authUI,
-    } = createGoogleAuth({
-      requiredScopes: ["gmail"] as ScopeKey[],
-      accountType: selectedAccountType,
-      debugMode: settings.debugMode,
+    // Wish for auth directly - MUST be at pattern body level
+    // Only search home favorites (scope: ["~"]) to avoid multiple matches
+    // which cause double-wrapping via the picker pattern
+    const wishResult = wish({
+      query: "#googleAuth",
+      scope: ["."],
     });
 
-    // Choose auth source based on overrideAuth availability
+    // Extract auth from wish result, fallback to overrideAuth if provided
+    // With scope: ["~"] (favorites only), we get single match = direct result (no picker nesting)
+    const wishedAuth = derive(wishResult, (wr: any) => {
+      const result = wr?.result;
+      const resultKeys = result && typeof result === "object"
+        ? Object.keys(result)
+        : [];
+
+      // Check if this is picker-wrapped (has nested 'result') or direct
+      const isPicker = resultKeys.includes("result");
+      const actualPiece = isPicker ? result?.result : result;
+      const authCell = actualPiece?.auth;
+
+      console.log("[gmail-importer] wishResult:", {
+        hasResult: !!result,
+        resultKeys,
+        isPicker,
+        hasActualPiece: !!actualPiece,
+        hasAuthCell: !!authCell,
+        authToken: authCell?.token ? "[present]" : "[missing]",
+      });
+      return authCell ?? null;
+    });
+
+    // Debug: log overrideAuth state
+    computed(() => {
+      console.log(
+        "[gmail-importer] overrideAuth.token:",
+        overrideAuth.token ? "[present]" : "[missing]",
+      );
+    });
+
     const auth = ifElse(overrideAuth.token, overrideAuth, wishedAuth);
+
+    // Simple auth status UI
+    const authUI = (
+      <div
+        style={{
+          padding: "12px",
+          borderRadius: "8px",
+          backgroundColor: computed(() => auth.token ? "#d4edda" : "#f8d7da"),
+          border: computed(() =>
+            `1px solid ${auth.token ? "#c3e6cb" : "#f5c6cb"}`
+          ),
+        }}
+      >
+        {ifElse(
+          auth.token,
+          <span>Connected as {auth.user?.email}</span>,
+          <span>Please favorite a Google Auth piece with #googleAuth tag</span>,
+        )}
+      </div>
+    );
     const isReady = computed(() => !!auth.token);
     const currentEmail = computed(() => auth.user?.email ?? "");
 
@@ -1162,52 +1193,7 @@ export default pattern<{
       [UI]: (
         <ct-screen>
           <div slot="header">
-            <ct-hstack align="center" gap="2">
-              <ct-heading level={3}>Gmail Importer</ct-heading>
-
-              {/* Account type selector for multi-account support */}
-              <select
-                onChange={setAccountType({ selectedType: selectedAccountType })}
-                style={{
-                  padding: "4px 8px",
-                  borderRadius: "4px",
-                  border: "1px solid #d1d5db",
-                  fontSize: "12px",
-                  backgroundColor: derive(
-                    selectedAccountType,
-                    (type: AccountType) => {
-                      switch (type) {
-                        case "personal":
-                          return "#dbeafe"; // blue tint
-                        case "work":
-                          return "#fee2e2"; // red tint
-                        default:
-                          return "#fff";
-                      }
-                    },
-                  ),
-                }}
-              >
-                <option
-                  value="default"
-                  selected={selectedAccountType.get() === "default"}
-                >
-                  Any Account
-                </option>
-                <option
-                  value="personal"
-                  selected={selectedAccountType.get() === "personal"}
-                >
-                  Personal
-                </option>
-                <option
-                  value="work"
-                  selected={selectedAccountType.get() === "work"}
-                >
-                  Work
-                </option>
-              </select>
-            </ct-hstack>
+            <ct-heading level={3}>Gmail Importer</ct-heading>
           </div>
 
           <ct-vscroll flex showScrollbar>
