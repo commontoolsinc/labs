@@ -441,10 +441,6 @@ translation from "native types" to JSON. Other encodings like CBOR may represent
 types more directly — for example, using CBOR's native byte array rather than `{
 "/Bytes@1": "base64..." }`.
 
-The `/<type>@<version>` convention described here applies specifically to the
-JSON encoding. Serialization contexts for other formats may use format-native
-representations where appropriate.
-
 #### Current State: Three Conventions
 
 The current system uses three different conventions for special object shapes:
@@ -478,6 +474,10 @@ Examples:
 { "/Date@1": "2026-02-05T12:34:56Z" }
 { "/BigInt@1": "12345678901234567890" }
 ```
+
+**Note:** The `/<type>@<version>` convention described here applies specifically
+to the JSON encoding. Serialization contexts for other formats are free to use
+whatever representation makes the most sense in their context.
 
 #### Benefits
 
