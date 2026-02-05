@@ -41,12 +41,15 @@ Storable values are JSON-compatible with specific constraints:
 - Must be dense (no holes)
 - Must not contain `undefined` elements
 - Sparse arrays are densified during conversion (`undefined` → `null`)
-- Named properties on arrays are rejected
+- Non-index keys (named properties) cause rejection as not-storable
 
 #### Objects
 
 - Plain objects only (no class instances)
-- Keys are strings; values are storable
+- Keys must be strings; symbol keys cause rejection as not-storable
+- Values must be storable
+- No distinction between regular and null-prototype objects; reconstruction
+  produces regular plain objects
 
 ### Special Values
 
@@ -345,6 +348,19 @@ for that — by design, as it would be a layering violation.
 
 Similarly, `[RECONSTRUCT]` receives state where nested values have already been
 reconstructed by the serialization system.
+
+#### Reconstruction Guarantees
+
+The system aims for an **immutable-forward** design:
+
+- **Plain objects and arrays** are frozen (`Object.freeze()`) upon reconstruction
+- **`StorableInstance`s** should ideally be frozen as well — this is the north
+  star, though not yet a strict requirement
+- **No distinction** is made between regular and null-prototype plain objects;
+  reconstruction always produces regular plain objects
+
+This immutability guarantee enables safe sharing of reconstructed values and
+aligns with the reactive system's assumption that values don't mutate in place.
 
 #### Unknown Types
 
