@@ -150,11 +150,11 @@ function searchFavoritesForHashtag(
 /**
  * Search mentionables in current space for pieces matching a hashtag.
  */
-function searchMentionablesForHashtag(
+async function searchMentionablesForHashtag(
   ctx: WishContext,
   searchTermWithoutHash: string,
   pathPrefix: string[],
-): BaseResolution[] {
+): Promise<BaseResolution[]> {
   const mentionableCell = getSpaceCell(ctx)
     .key("defaultPattern")
     .key("backlinksIndex")
@@ -162,7 +162,7 @@ function searchMentionablesForHashtag(
     .resolveAsCell()
     .asSchema(mentionableListSchema);
   // Sync to ensure data is loaded
-  mentionableCell.sync();
+  await mentionableCell.sync();
   const mentionables = (mentionableCell.get() || []) as Cell<any>[];
 
   const matches = mentionables.filter((pieceCell: Cell<any>) => {
@@ -196,10 +196,10 @@ function searchMentionablesForHashtag(
 /**
  * Search for pieces by hashtag across favorites and/or mentionables based on scope.
  */
-function searchByHashtag(
+async function searchByHashtag(
   parsed: ParsedWishTarget,
   ctx: WishContext,
-): BaseResolution[] {
+): Promise<BaseResolution[]> {
   const searchTerm = parsed.key.toLowerCase();
   const searchTermWithoutHash = searchTerm.slice(1);
 
@@ -218,7 +218,11 @@ function searchByHashtag(
 
   if (searchMentionables) {
     allMatches.push(
-      ...searchMentionablesForHashtag(ctx, searchTermWithoutHash, parsed.path),
+      ...(await searchMentionablesForHashtag(
+        ctx,
+        searchTermWithoutHash,
+        parsed.path,
+      )),
     );
   }
 
@@ -392,10 +396,10 @@ function resolveSpaceTarget(
  * 2. Well-known home space targets (#favorites, #journal, #learned, #profile)
  * 3. Hashtag search (arbitrary #tags in favorites/mentionables)
  */
-function resolveBase(
+async function resolveBase(
   parsed: ParsedWishTarget,
   ctx: WishContext,
-): BaseResolution[] {
+): Promise<BaseResolution[]> {
   // Try space targets first (most common)
   const spaceResult = resolveSpaceTarget(parsed, ctx);
   if (spaceResult) return spaceResult;
@@ -406,7 +410,7 @@ function resolveBase(
 
   // Hashtag search
   if (parsed.key.startsWith("#")) {
-    return searchByHashtag(parsed, ctx);
+    return await searchByHashtag(parsed, ctx);
   }
 
   throw new WishError(`Wish target "${parsed.key}" is not recognized.`);
@@ -619,7 +623,7 @@ export function wish(
       try {
         const parsed = parseWishTarget(wishTarget);
         const ctx: WishContext = { runtime, tx, parentCell };
-        const baseResolutions = resolveBase(parsed, ctx);
+        const baseResolutions = await resolveBase(parsed, ctx);
 
         // Just use the first result (if there aren't any, the above throws)
         const combinedPath = baseResolutions[0].pathPrefix
@@ -681,7 +685,7 @@ export function wish(
             path: path ?? [],
           };
           const ctx: WishContext = { runtime, tx, parentCell, scope };
-          const baseResolutions = resolveBase(parsed, ctx);
+          const baseResolutions = await resolveBase(parsed, ctx);
           const resultCells = baseResolutions.map((baseResolution) => {
             const combinedPath = baseResolution.pathPrefix
               ? [...baseResolution.pathPrefix, ...(path ?? [])]
