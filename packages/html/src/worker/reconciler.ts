@@ -109,7 +109,9 @@ export class WorkerReconciler {
   mount(vnode: WorkerVNode | Cell<WorkerVNode> | Cell<unknown>): Cancel {
     logger.debug(
       "mount",
-      () => ({ vnodeType: isCell(vnode) ? "Cell" : typeof vnode }),
+      () => ({
+        vnodeType: isCell(vnode) ? this.getCellDebugId(vnode) : typeof vnode,
+      }),
     );
     if (this.rootCancel) {
       this.rootCancel();
