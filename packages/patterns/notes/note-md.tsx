@@ -12,8 +12,8 @@ import {
 } from "commontools";
 import {
   type MentionablePiece,
-  type NotePiece,
   type NoteMdInput,
+  type NotePiece,
 } from "./schemas.tsx";
 
 // Handler for clicking a backlink chip - must be at module scope
