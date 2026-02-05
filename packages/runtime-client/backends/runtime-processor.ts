@@ -147,11 +147,33 @@ export class RuntimeProcessor {
       recipeEnvironment: { apiUrl: apiUrlObj },
       telemetry,
       consoleHandler: ({ metadata, method, args }) => {
+        // Sanitize args to handle objects that can't be cloned via postMessage
+        // (e.g., Proxy objects, functions, DOM nodes). Without this, logging
+        // such objects causes a DataCloneError that surfaces as a cryptic
+        // "null" error to the user.
+        const sanitizedArgs = args.map((arg: unknown) => {
+          try {
+            structuredClone(arg);
+            return arg;
+          } catch {
+            // Return a placeholder for uncloneable objects
+            const type = typeof arg;
+            if (arg === null) return null;
+            if (type === "function") return `[Function]`;
+            if (type === "object") {
+              const name = (arg as object).constructor?.name;
+              return name && name !== "Object"
+                ? `[${name} - uncloneable]`
+                : `[Object - uncloneable]`;
+            }
+            return `[${type} - uncloneable]`;
+          }
+        });
         self.postMessage({
           type: NotificationType.ConsoleMessage,
           metadata,
           method,
-          args,
+          args: sanitizedArgs,
         });
         return args;
       },
