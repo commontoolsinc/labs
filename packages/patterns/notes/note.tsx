@@ -24,6 +24,7 @@ import {
   type MinimalPiece,
   type NotebookPiece,
   type NoteInput,
+  type NotePiece,
 } from "./schemas.tsx";
 
 // ===== Output Type =====
@@ -36,7 +37,6 @@ interface NoteOutput {
   content: string;
   mentioned: Default<MentionablePiece[], []>;
   backlinks: MentionablePiece[];
-  parentNotebook: NotebookPiece | null;
   isHidden: boolean;
   noteId: string;
   grep: PatternToolResult<{ content: string }>;
@@ -96,14 +96,7 @@ const handleBacklinkClick = handler<
   (_, { piece }) => navigateTo(piece),
 );
 
-// Navigate to parent notebook - binds self to access parentNotebook
-const goToParentHandler = handler<
-  Record<string, never>,
-  { self: { parentNotebook?: unknown } }
->((_, { self }) => {
-  const p = self?.parentNotebook;
-  if (p) navigateTo(p);
-});
+// NOTE: goToParent converted to action inside pattern
 
 // ===== Utility functions =====
 
@@ -137,7 +130,7 @@ const Note = pattern<NoteInput, NoteOutput>(
     isHidden,
     noteId,
     linkPattern,
-    parentNotebook: parentNotebookProp,
+    parentNotebook,
     [SELF]: self,
   }) => {
     const { allPieces } =
@@ -155,16 +148,6 @@ const Note = pattern<NoteInput, NoteOutput>(
     // Backlinks - populated by backlinks-index.tsx
     const backlinks = Writable.of<MentionablePiece[]>([]);
 
-    // ===== Computed values =====
-
-    // Parent notebook: use direct reference (set when navigating from notebook)
-    const parentNotebook = computed(() => {
-      const selfParent = (self as any)?.parentNotebook;
-      if (selfParent) return selfParent;
-      if (parentNotebookProp) return parentNotebookProp;
-      return null;
-    });
-
     // ===== Actions =====
 
     const toggleMenu = action(() => menuOpen.set(!menuOpen.get()));
@@ -179,7 +162,10 @@ const Note = pattern<NoteInput, NoteOutput>(
       }
     });
 
-    const goToParent = goToParentHandler({ self });
+    const goToParent = action((_: Record<string, never>) => {
+      const p = parentNotebook.get();
+      if (p) navigateTo(p);
+    });
 
     const goToViewer = action(() => {
       return navigateTo(
@@ -196,9 +182,9 @@ const Note = pattern<NoteInput, NoteOutput>(
       );
     });
 
-    // Create new note action - closes over allPieces and parentNotebookProp
+    // Create new note action - closes over allPieces and parentNotebook
     const createNewNote = action(() => {
-      const notebook = parentNotebookProp;
+      const notebook = parentNotebook.get();
 
       const note = Note({
         title: "New Note",
@@ -212,9 +198,11 @@ const Note = pattern<NoteInput, NoteOutput>(
       // Add to parent notebook if we can find it in mentionable
       if (notebook) {
         const nbName = notebook[NAME];
-        const found = mentionable.find((c) => c[NAME] === nbName) as any;
+        const found = mentionable.find((c) => c[NAME] === nbName) as
+          | NotebookPiece
+          | undefined;
         if (found?.isNotebook && found?.notes) {
-          found.notes.push(note);
+          (found.notes as NotePiece[]).push(note);
         }
       }
 
@@ -286,10 +274,10 @@ const Note = pattern<NoteInput, NoteOutput>(
 
     // ===== Pre-computed UI values =====
 
-    // Parent notebook display state
-    const hasParentNotebook = computed(() => !!(self as any).parentNotebook);
+    // Parent notebook display state - read from input prop
+    const hasParentNotebook = computed(() => !!parentNotebook.get());
     const parentNotebookLabel = computed(() => {
-      const p = (self as any).parentNotebook;
+      const p = parentNotebook.get();
       return p?.[NAME] ?? p?.title ?? "Notebook";
     });
 
@@ -519,7 +507,6 @@ const Note = pattern<NoteInput, NoteOutput>(
       content,
       mentioned,
       backlinks,
-      parentNotebook,
       isHidden,
       noteId,
       grep: patternTool(grepFn, { content }),
