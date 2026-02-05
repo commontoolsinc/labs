@@ -431,6 +431,91 @@ This makes identity hashing independent of any particular wire encoding.
 
 ---
 
+### Unified Wire Format for Special Types
+
+#### Current State: Three Conventions
+
+The current system uses three different conventions for special object shapes:
+
+| Convention | Example | Used For |
+|------------|---------|----------|
+| IPLD sigil | `{ "/": { "link@1": {...} } }` | Cell references |
+| `@` prefix | `{ "@Error": {...} }` | Error instances |
+| `$` prefix | `{ "$stream": true }` | Stream markers |
+
+This inconsistency complicates parsing and adds cognitive overhead.
+
+#### Proposed: Unified `/<Type>@<Version>` Keys
+
+Unify all special types under a single convention: single-key objects where the
+key follows the pattern `/<Type>@<Version>`:
+
+- `/` — sigil prefix (nodding to IPLD heritage)
+- `<Type>` — UpperCamelCase type name
+- `@<Version>` — version number (natural number, optionally `.<minor>`)
+
+Examples:
+
+```json
+{ "/Link@1": { "id": "of:abc...", "path": ["x", "y"], "space": "..." } }
+{ "/Error@1": { "name": "TypeError", "message": "...", "stack": "..." } }
+{ "/Stream@1": {} }
+{ "/Map@1": [ ["key1", "value1"], ["key2", "value2"] ] }
+{ "/Set@1": [ "a", "b", "c" ] }
+{ "/Bytes@1": "base64encoded..." }
+{ "/Date@1": "2026-02-05T12:34:56Z" }
+{ "/BigInt@1": "12345678901234567890" }
+```
+
+#### Benefits
+
+- **Single convention**: One pattern to recognize and parse
+- **Flat structure**: One level of nesting (vs two for current IPLD style)
+- **Self-describing**: Type and version visible in the key
+- **Compact**: Shorter than `{ "/": { "link@1": {...} } }`
+- **Versionable**: Built-in version field supports evolution
+
+#### Detection
+
+A value is a special type if:
+1. It is a plain object
+2. It has exactly one key
+3. That key starts with `/`
+
+This simple rule provides maximum flexibility to evolve the key format.
+
+#### Escaping Literal Values
+
+If user data needs to store an object whose single key starts with `/`, it can
+be wrapped in a **literal escape**:
+
+```json
+{ "/=": { "/bloop": ["i", "am", "literal"] } }
+```
+
+The `/=` key signals "the value is literal data, not a special type." On
+deserialization, the wrapper is stripped and the inner value is returned as-is.
+
+This allows round-tripping any JSON structure, even those that would otherwise
+be interpreted as special types.
+
+#### Relationship to Serialization Contexts
+
+This wire format is what serialization contexts produce. The context's `wrap()`
+and `unwrap()` methods would generate and parse these `/<Type>@<Version>` keys,
+mapping between rich runtime types and their serialized form. The context is
+also responsible for applying `/=` escaping when serializing plain objects
+that happen to have slash-prefixed keys.
+
+#### Open Questions
+
+- What is the migration path from current formats?
+- Should unknown `/` types be preserved (passed through) or rejected?
+- Is `.minor` versioning needed, or is major-only sufficient?
+- Is `/=` the right escape key, or would another form be clearer?
+
+---
+
 ### CRDT-Based Storage Layer
 
 For collaborative features (multiple users editing shared data), the storage
