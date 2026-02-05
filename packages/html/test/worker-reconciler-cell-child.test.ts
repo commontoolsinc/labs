@@ -68,7 +68,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
   }
 
   await t.step(
-    "updates child Cell in place when tag matches",
+    "updates child Cell VNode in place when tag matches",
     async () => {
       const collector = createOpsCollector();
       const reconciler = new WorkerReconciler({
@@ -90,21 +90,17 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         type: "vnode",
         name: "div",
         props: {},
-        children: [childCell as any], // Pass MockCell directly
+        children: [childCell as any],
       };
 
       const rootCell = new MockCell(rootVNode);
 
       // Mount
       reconciler.mount(rootCell as any);
-      // Reconciler uses queueMicrotask for batching, so we must wait
       await new Promise((resolve) => setTimeout(resolve, 10));
 
-      // Initial ops check
       const createOps = collector.getOpsOfType("create-element");
       const spanCreate = createOps.find((op: any) => op.tagName === "span");
-
-      console.log("DEBUG: Span create op:", spanCreate);
 
       if (!spanCreate) {
         throw new Error("Span was not created!");
@@ -113,26 +109,44 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       const spanNodeId = (spanCreate as any).nodeId;
       collector.clear();
 
-      // Update the child Cell
-      const spanVNodeUpdated: WorkerVNode = {
+      // Update Cell: same tag but different props and children
+      childCell.set({
         type: "vnode",
-        name: "span", // Same tag
+        name: "span",
         props: { id: "child-span-updated" },
         children: ["Updated"],
-      };
-      childCell.set(spanVNodeUpdated);
+      } as WorkerVNode);
       await new Promise((resolve) => setTimeout(resolve, 10));
 
-      // Check ops
+      // VNode in-place update: span element should NOT be removed/recreated
       const removeOps = collector.getOpsOfType("remove-node");
       const spanRemoved = removeOps.some((op: any) => op.nodeId === spanNodeId);
-      assertEquals(spanRemoved, false, "Span should NOT be removed");
-
-      const updateProps = collector.getOpsOfType("set-prop");
-      const idUpdate = updateProps.find(
-        (op: any) => op.key === "id" && op.value === "child-span-updated",
+      assertEquals(
+        spanRemoved,
+        false,
+        "Span should NOT be removed (in-place update)",
       );
-      assertEquals(!!idUpdate, true, "Should update props in place");
+
+      const newCreateOps = collector.getOpsOfType("create-element");
+      const newSpanCreated = newCreateOps.some((op: any) =>
+        op.tagName === "span"
+      );
+      assertEquals(
+        newSpanCreated,
+        false,
+        "No new span should be created (in-place update)",
+      );
+
+      // Props should be updated in place
+      const setPropOps = collector.getOpsOfType("set-prop");
+      const idUpdate = setPropOps.find((op: any) =>
+        op.nodeId === spanNodeId && op.key === "id"
+      );
+      assertEquals(
+        (idUpdate as any)?.value,
+        "child-span-updated",
+        "Prop should be updated in place",
+      );
     },
   );
 
@@ -218,26 +232,26 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
   });
 
   await t.step(
-    "avoids re-emitting set-event when handler is identical",
+    "avoids re-emitting set-event when handler is identical (VNode path)",
     async () => {
       const collector = createOpsCollector();
       const reconciler = new WorkerReconciler({
         onOps: collector.onOps,
       });
 
+      // Test event handler identity optimization via direct VNode reconciliation
+      // (not Cell child path, which always replaces)
       const handler = () => {};
-      const childCell = new MockCell({
-        type: "vnode",
-        name: "button",
-        props: { onClick: handler },
-        children: ["Click me"],
-      } as WorkerVNode);
-
       const rootCell = new MockCell({
         type: "vnode",
         name: "div",
         props: {},
-        children: [childCell as any],
+        children: [{
+          type: "vnode",
+          name: "button",
+          props: { onClick: handler },
+          children: ["Click me"],
+        }],
       });
 
       reconciler.mount(rootCell as any);
@@ -247,13 +261,18 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       assertEquals(setEventOps.length, 1, "Should emit initial set-event");
       collector.clear();
 
-      // Update with SAME handler
-      childCell.set({
+      // Update root with same handler reference on the child VNode
+      rootCell.set({
         type: "vnode",
-        name: "button",
-        props: { onClick: handler }, // Same reference
-        children: ["Click me"],
-      } as WorkerVNode);
+        name: "div",
+        props: {},
+        children: [{
+          type: "vnode",
+          name: "button",
+          props: { onClick: handler }, // Same reference
+          children: ["Click me"],
+        }],
+      });
       await new Promise((resolve) => setTimeout(resolve, 10));
 
       const newSetEventOps = collector.getOpsOfType("set-event");

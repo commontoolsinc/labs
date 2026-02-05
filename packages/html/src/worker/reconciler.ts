@@ -285,6 +285,32 @@ export class WorkerReconciler {
   }
 
   /**
+   * Check if new children are structurally the same as existing children.
+   * Used by Cell child VNode in-place update to decide whether to skip
+   * children reconciliation (same children have active sinks) or do a
+   * full replace (children changed).
+   */
+  private areChildrenSame(
+    state: NodeState,
+    newChildren: WorkerRenderNode | WorkerRenderNode[],
+  ): boolean {
+    // Cell<children>: same Cell link means same subscription
+    if (isCell(newChildren)) {
+      return !!(
+        state.childrenState?.cell &&
+        areLinksSame(state.childrenState.cell, newChildren)
+      );
+    }
+
+    // Static children: compare keys
+    const childArray = Array.isArray(newChildren) ? newChildren : [newChildren];
+    const newKeys = generateChildKeys(childArray);
+
+    if (newKeys.length !== state.childOrder.length) return false;
+    return newKeys.every((key, i) => key === state.childOrder[i]);
+  }
+
+  /**
    * Create a wrapper state for reactive roots.
    */
   private createWrapperState(_ctx: ReconcileContext, nodeId: number): {
@@ -1361,6 +1387,7 @@ export class WorkerReconciler {
     const newKeyOrder: string[] = [];
 
     // Process each new child
+    let hasNewChildren = false;
     for (let i = 0; i < newChildren.length; i++) {
       const child = newChildren[i];
       const key = newKeys[i];
@@ -1376,6 +1403,7 @@ export class WorkerReconciler {
         // (For now, we trust the key - updates happen through Cell subscriptions)
       } else {
         // Create new child, passing parent state and key for position tracking
+        hasNewChildren = true;
         const childState = this.renderChild(ctx, child, visited, state, key);
         if (childState) {
           newMapping.set(key, childState);
@@ -1390,12 +1418,15 @@ export class WorkerReconciler {
       this.queueOps([{ op: "remove-node", nodeId: oldState.nodeId }]);
     }
 
-    // Check if order needs update
-    const isOrderSame = newKeyOrder.length === state.childOrder.length &&
+    // Check if order needs update - only skip inserts when ALL children were
+    // reused (no new children created). New children need insert-child ops
+    // even if the key order is identical.
+    const isOrderSame = !hasNewChildren &&
+      newKeyOrder.length === state.childOrder.length &&
       newKeyOrder.every((key, i) => key === state.childOrder[i]);
 
     if (isOrderSame) {
-      // Order is identical, and we've updated children map/state implicitly
+      // Order is identical and all children were reused from previous state
       state.children = newMapping;
       return;
     }
@@ -1406,11 +1437,15 @@ export class WorkerReconciler {
     // This ensures each insertBefore has a valid reference node.
     // Processing in reverse means each child is inserted before the
     // previously processed child (which is already in the DOM).
+    // Skip children with nodeId === -1 (pending Cell children that haven't
+    // resolved yet). Using -1 as a beforeId would break the ordering chain
+    // because the applicator can't find the node and falls back to appendChild.
+    // Pending children will self-insert via renderCellChild when they resolve.
     let nextNodeId: number | null = null;
     for (let i = newKeyOrder.length - 1; i >= 0; i--) {
       const key = newKeyOrder[i];
       const childState = newMapping.get(key);
-      if (!childState) continue;
+      if (!childState || childState.nodeId === -1) continue;
 
       // Insert this child before the next one (or append if it's the last)
       this.queueOps([
@@ -1492,45 +1527,12 @@ export class WorkerReconciler {
           !isInitialRender &&
           childState.nodeId !== -1
         ) {
-          // Check if we can update in place
-          // We need to extract VNode info to compare tags
-          // This logic mirrors reconcileIntoWrapper
-          const oldState = childState.elementState;
-          const node = resolvedChild;
-
-          // Extract VNode from new content (handling [UI] chain)
-          // We duplicate extractVNode logic here or use helper if possible,
-          // but for now let's just handle WorkerVNode directly for tag comparison
-          let newTagName: string | null = null;
-          if (isWorkerVNode(node)) {
-            newTagName = node.name;
-          }
-
-          if (!newTagName && typeof node === "object" && node && UI in node) {
-            // Optimization: if it's a UI object, we might want to follow it,
-            // but for robust diffing we might need to fully resolve.
-            // For now, let's keep it simple: if complicated, replace.
-            // Or we can try to reuse the same logic as reconcileIntoWrapper?
-            // But reconcileIntoWrapper expects a wrapper object.
-            // Let's implement partial logic: if it IS a vnode, check tag.
-            // If resolvedChild is a primitive, and old was text, update text.
-          }
-
           // Case 1: Text update
           if (
             childState.isText &&
             (typeof resolvedChild === "string" ||
               typeof resolvedChild === "number")
           ) {
-            logger.debug(
-              "reconcile-cell-child",
-              () => ({
-                id: childState.nodeId,
-                cellId: this.getCellDebugId(cell),
-                type: "text-update",
-                value: resolvedChild,
-              }),
-            );
             this.queueOps([{
               op: "update-text",
               nodeId: childState.nodeId,
@@ -1539,30 +1541,42 @@ export class WorkerReconciler {
             return;
           }
 
-          // Case 2: VNode update
-          if (oldState && newTagName && oldState.tagName === newTagName) {
-            // Update in place!
-            const sanitized = this.sanitizeNode(node as WorkerVNode);
-            if (sanitized) {
-              logger.debug(
-                "reconcile-cell-child",
-                () => ({
-                  id: childState.nodeId,
-                  cellId: this.getCellDebugId(cell),
-                  type: "vnode-update",
-                  tagName: newTagName,
-                }),
-              );
-              this.updatePropsInPlace(ctx, oldState, sanitized.props);
-              if (sanitized.children !== undefined) {
-                this.updateChildrenInPlace(
+          // Case 2: VNode in-place update (same tag)
+          if (childState.elementState) {
+            const newVNode = this.extractVNode(
+              resolvedChild as WorkerRenderNode,
+            );
+            if (newVNode) {
+              const sanitized = this.sanitizeNode(newVNode);
+              if (
+                sanitized &&
+                sanitized.name === childState.elementState.tagName
+              ) {
+                // Same tag - update props in place
+                this.updatePropsInPlace(
                   ctx,
-                  oldState,
-                  sanitized.children,
-                  new Set(visited),
+                  childState.elementState,
+                  sanitized.props,
                 );
+
+                // Check children: if same, do nothing (sinks active);
+                // if different, tear down and rebuild
+                if (sanitized.children !== undefined) {
+                  const childrenSame = this.areChildrenSame(
+                    childState.elementState,
+                    sanitized.children,
+                  );
+                  if (!childrenSame) {
+                    this.updateChildrenInPlace(
+                      ctx,
+                      childState.elementState,
+                      sanitized.children,
+                      new Set(),
+                    );
+                  }
+                }
+                return;
               }
-              return;
             }
           }
         }
@@ -1610,21 +1624,23 @@ export class WorkerReconciler {
           childState.isText = newState.isText;
           currentCancel = newState.cancel;
 
-          // Only insert on subsequent updates, not initial render.
-          if (!isInitialRender) {
-            const beforeId = this.findNextSiblingId(
-              parentState.children,
-              childKey,
-            );
-            this.queueOps([
-              {
-                op: "insert-child",
-                parentId: parentState.nodeId,
-                childId: newState.nodeId,
-                beforeId,
-              },
-            ]);
-          }
+          // Always insert the child into its parent. On initial render,
+          // updateChildren also emits insert-child but may see nodeId=-1
+          // (Cell hasn't resolved yet), making that op a no-op. This
+          // ensures the node is inserted once it actually exists.
+          // Double inserts are harmless (DOM appendChild/insertBefore is idempotent).
+          const beforeId = this.findNextSiblingId(
+            parentState.children,
+            childKey,
+          );
+          this.queueOps([
+            {
+              op: "insert-child",
+              parentId: parentState.nodeId,
+              childId: newState.nodeId,
+              beforeId,
+            },
+          ]);
         }
       }),
     );
