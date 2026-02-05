@@ -123,6 +123,9 @@ export class WorkerReconciler {
       // Create a wrapper state that tracks the current child in the container
       const wrapperState = this.createWrapperState(ctx, CONTAINER_NODE_ID);
 
+      // Ensure the current child is cancelled when the root is cancelled
+      addCancel(() => wrapperState.cancel());
+
       addCancel(
         vnode.sink((resolvedVnode: unknown) => {
           logger.debug("root-cell-update", () => ({ resolvedVnode }));
