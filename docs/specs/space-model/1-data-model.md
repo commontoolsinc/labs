@@ -362,18 +362,23 @@ class UnknownStorable implements StorableInstance {
   ) {}
 
   [DECONSTRUCT]() {
-    return this.state;
+    return { type: this.typeTag, state: this.state };
   }
 
-  static [RECONSTRUCT](state: unknown, _runtime: Runtime, typeTag: string): UnknownStorable {
-    return new UnknownStorable(typeTag, state);
+  static [RECONSTRUCT](
+    state: { type: string; state: unknown },
+    _runtime: Runtime,
+  ): UnknownStorable {
+    return new UnknownStorable(state.type, state.state);
   }
 }
 ```
 
-When re-serializing, the context uses the preserved `typeTag` to produce the
-original wire format, allowing data to round-trip through systems that don't
-understand it.
+The serialization system has special knowledge of `UnknownStorable`: when it
+encounters an unknown type tag during deserialization, it wraps the original
+tag and state into `{ type, state }` and passes that to `[RECONSTRUCT]`. When
+re-serializing, it uses the preserved `typeTag` to produce the original wire
+format, allowing data to round-trip through systems that don't understand it.
 
 #### Serialization Contexts
 
@@ -474,6 +479,8 @@ This makes identity hashing independent of any particular wire encoding.
 - Should cycles in deconstructed state be detected and rejected, or is this
   left to the serialization system?
 - How are serialization contexts configured and selected at each boundary?
+- How is the type registry within a context managed? (Static registration?
+  Dynamic discovery? Who owns the registry?)
 - Which built-in JS types should be included?
   - Byte arrays: `Uint8Array`, `ArrayBuffer`, or both?
   - Date/time: `Date`, `Temporal.Instant`, `Temporal.ZonedDateTime`?
