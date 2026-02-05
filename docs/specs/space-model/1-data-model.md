@@ -445,14 +445,14 @@ The current system uses three different conventions for special object shapes:
 
 This inconsistency complicates parsing and adds cognitive overhead.
 
-#### Proposed: Unified `/<Type>@<Version>` Keys
+#### Proposed: Unified `/<type>@<version>` Keys
 
 Unify all special types under a single convention: single-key objects where the
-key follows the pattern `/<Type>@<Version>`:
+key follows the pattern `/<type>@<version>`:
 
 - `/` — sigil prefix (nodding to IPLD heritage)
-- `<Type>` — UpperCamelCase type name
-- `@<Version>` — version number (natural number, optionally `.<minor>`)
+- `<type>` — `UpperCamelCase` type name
+- `@<version>` — version number (natural number, optionally `.<minor>`)
 
 Examples:
 
@@ -512,7 +512,7 @@ be interpreted as special types.
 #### Relationship to Serialization Contexts
 
 This wire format is what serialization contexts produce. The context's `wrap()`
-and `unwrap()` methods would generate and parse these `/<Type>@<Version>` keys,
+and `unwrap()` methods would generate and parse these `/<type>@<version>` keys,
 mapping between rich runtime types and their serialized form. The context is
 also responsible for applying `/=` escaping when serializing plain objects
 that happen to have slash-prefixed keys.
