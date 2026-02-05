@@ -22,7 +22,7 @@ describe("CTPicker", () => {
   it("should have default properties", () => {
     const element = new CTPicker();
     expect(element.disabled).toBe(false);
-    expect(element.minHeight).toBe("200px");
+    expect(element.minHeight).toBe("");
   });
 
   it("should have disabled state property", () => {
