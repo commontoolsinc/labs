@@ -484,6 +484,10 @@ This makes identity hashing independent of any particular wire encoding.
 - What happens when `[DECONSTRUCT]` or `[RECONSTRUCT]` fails partway through?
   (Might want a `ProblematicStorable` with similar structure/use to
   `UnknownStorable`.)
+- How do schemas integrate with the storable protocol? Each `StorableInstance`
+  type implies a schema for its deconstructed state. The storable layer should
+  provide serialization contexts access to these schemas. What changes to the
+  schema language are required? (See [Schemas](./7-schemas.md).)
 - Which built-in JS types should be included?
   - Byte arrays: `Uint8Array`, `ArrayBuffer`, or both?
   - Date/time: `Date`, `Temporal.Instant`, `Temporal.ZonedDateTime`?
