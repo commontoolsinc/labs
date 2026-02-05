@@ -93,7 +93,7 @@ describe("counter direct operations test", () => {
       const updatedText = await counterResult.evaluate((el: HTMLElement) =>
         el.textContent
       );
-      return updatedText?.trim() === "Counter is the 42th number";
+      return updatedText?.trim() === "Counter is the 42nd number";
     });
 
     // Verify we can also read the value back
@@ -127,7 +127,7 @@ describe("counter direct operations test", () => {
       const textAfterRefresh = await counterResult.evaluate((el: HTMLElement) =>
         el.textContent
       );
-      return textAfterRefresh?.trim() === "Counter is the 42th number";
+      return textAfterRefresh?.trim() === "Counter is the 42nd number";
     });
   });
 });
