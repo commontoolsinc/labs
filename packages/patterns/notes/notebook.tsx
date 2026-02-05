@@ -21,8 +21,8 @@ import {
   getPieceName,
   type MentionablePiece,
   type MinimalPiece,
-  type NotebookPiece,
   type NotebookInput,
+  type NotebookPiece,
   type NotePiece,
 } from "./schemas.tsx";
 
@@ -97,7 +97,6 @@ interface NotebookOutput {
   noteCount: number;
   isNotebook: boolean;
   isHidden: boolean;
-  parentNotebook: NotebookPiece | null;
   backlinks: MentionablePiece[];
   // LLM-callable streams for omnibot integration
   createNote: Stream<{ title: string; content: string }>;
@@ -372,10 +371,10 @@ const handleBacklinkClick = handler<
 // Handler to navigate to parent notebook
 const goToParent = handler<
   Record<string, never>,
-  { self: any }
+  { parentNotebook: Writable<NotebookPiece | null> }
 >(
-  (_, { self }) => {
-    const p = (self as any).parentNotebook;
+  (_, { parentNotebook }) => {
+    const p = parentNotebook.get();
     if (p) navigateTo(p);
   },
 );
@@ -948,10 +947,10 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
 
     // ===== Pre-computed UI values =====
 
-    // Parent notebook display state
-    const hasParentNotebook = computed(() => !!(self as any).parentNotebook);
+    // Parent notebook display state - read from input prop
+    const hasParentNotebook = computed(() => !!parentNotebook.get());
     const parentNotebookLabel = computed(() => {
-      const p = (self as any).parentNotebook;
+      const p = parentNotebook.get();
       return p?.[NAME] ?? p?.title ?? "Parent";
     });
 
@@ -1037,7 +1036,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                   <ct-chip
                     label={parentNotebookLabel}
                     interactive
-                    onct-click={goToParent({ self })}
+                    onct-click={goToParent({ parentNotebook })}
                   />
                 </ct-hstack>
                 {/* Spacer when no parent */}
@@ -1565,7 +1564,6 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       title,
       notes,
       noteCount,
-      parentNotebook,
       backlinks,
       // Make notes discoverable via [[ autocomplete system-wide
       mentionable: notes,

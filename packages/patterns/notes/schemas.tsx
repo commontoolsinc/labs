@@ -73,8 +73,8 @@ export interface NoteInput {
   noteId?: Default<string, "">;
   /** Pattern JSON for [[wiki-links]]. Defaults to creating new Notes. */
   linkPattern?: Writable<Default<string, "">>;
-  /** Parent notebook reference (passed via SELF from notebook.tsx) */
-  parentNotebook?: NotebookPiece;
+  /** Parent notebook reference. Set at creation, can be updated for moves. */
+  parentNotebook?: Writable<Default<NotebookPiece | null, null>>;
 }
 
 export interface NotebookInput {
@@ -82,7 +82,8 @@ export interface NotebookInput {
   notes?: Writable<Default<NotePiece[], []>>;
   isNotebook?: Default<boolean, true>;
   isHidden?: Default<boolean, false>;
-  parentNotebook?: NotebookPiece;
+  /** Parent notebook reference. Set at creation, can be updated for moves. */
+  parentNotebook?: Writable<Default<NotebookPiece | null, null>>;
 }
 
 export interface NoteMdInput {
