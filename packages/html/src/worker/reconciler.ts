@@ -1476,6 +1476,12 @@ export class WorkerReconciler {
       cell.sink((resolvedChild) => {
         const isInitialRender = childState.nodeId === -1;
 
+        // Dedupe updates
+        if (!isInitialRender && resolvedChild === childState.currentValue) {
+          return;
+        }
+        childState.currentValue = resolvedChild;
+
         // Try to update in place if not initial render
         if (
           !isInitialRender &&

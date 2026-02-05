@@ -130,6 +130,9 @@ export interface ChildNodeState {
 
   /** For element nodes, the full node state */
   elementState?: NodeState;
+
+  /** Track current value for deduping updates */
+  currentValue?: unknown;
 }
 
 /**
