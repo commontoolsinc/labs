@@ -375,16 +375,17 @@ export const resolve = (
     } else {
       // If the value is undefined, the path doesn't exist, but we can still
       // write onto it. Return error with last valid path component.
-      if (value === undefined || value === null) {
+      if (value === undefined) {
         return {
           error: NotFound(source, address, path.slice(0, Math.max(0, at))),
         };
       }
       // Type mismatch - trying to access property on non-object
+      const actualType = value === null ? "null" : typeof value;
       return {
         error: TypeMismatchError(
           { ...address, path: path.slice(0, at + 1) },
-          typeof value,
+          actualType,
           "read",
         ),
       };
