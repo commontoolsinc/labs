@@ -110,6 +110,9 @@ export interface NodeState {
 
   /** Children Cell reference for diffing during updates */
   childrenState?: ChildrenState;
+
+  /** Track child order to optimize inserts */
+  childOrder: string[];
 }
 
 /**

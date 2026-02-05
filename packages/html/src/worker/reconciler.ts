@@ -901,6 +901,7 @@ export class WorkerReconciler {
       children: new Map(),
       propSubscriptions: new Map(),
       eventHandlers: new Map(),
+      childOrder: [],
     };
 
     // Bind props
@@ -937,6 +938,7 @@ export class WorkerReconciler {
       children: new Map(),
       propSubscriptions: new Map(),
       eventHandlers: new Map(),
+      childOrder: [],
     };
   }
 
@@ -954,6 +956,7 @@ export class WorkerReconciler {
       children: new Map(),
       propSubscriptions: new Map(),
       eventHandlers: new Map(),
+      childOrder: [],
     };
   }
 
@@ -979,6 +982,7 @@ export class WorkerReconciler {
       children: new Map(),
       propSubscriptions: new Map(),
       eventHandlers: new Map(),
+      childOrder: [],
     };
 
     // Render each child and insert it
@@ -1380,6 +1384,18 @@ export class WorkerReconciler {
       this.cleanupNodeHandlers(oldState);
       this.queueOps([{ op: "remove-node", nodeId: oldState.nodeId }]);
     }
+
+    // Check if order needs update
+    const isOrderSame = newKeyOrder.length === state.childOrder.length &&
+      newKeyOrder.every((key, i) => key === state.childOrder[i]);
+
+    if (isOrderSame) {
+      // Order is identical, and we've updated children map/state implicitly
+      state.children = newMapping;
+      return;
+    }
+
+    state.childOrder = newKeyOrder;
 
     // Update children order by inserting from END to BEGINNING.
     // This ensures each insertBefore has a valid reference node.
