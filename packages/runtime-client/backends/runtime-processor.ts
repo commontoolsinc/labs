@@ -161,10 +161,17 @@ export class RuntimeProcessor {
             if (arg === null) return null;
             if (type === "function") return `[Function]`;
             if (type === "object") {
-              const name = (arg as object).constructor?.name;
-              return name && name !== "Object"
-                ? `[${name} - uncloneable]`
-                : `[Object - uncloneable]`;
+              // Guard constructor access - Proxies with throwing traps
+              // could throw again here
+              try {
+                const name = (arg as object).constructor?.name;
+                if (name && name !== "Object") {
+                  return `[${name} - uncloneable]`;
+                }
+              } catch {
+                // Ignore - fall through to generic placeholder
+              }
+              return `[Object - uncloneable]`;
             }
             return `[${type} - uncloneable]`;
           }
