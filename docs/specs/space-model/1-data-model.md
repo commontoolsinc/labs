@@ -481,6 +481,9 @@ This makes identity hashing independent of any particular wire encoding.
 - How are serialization contexts configured and selected at each boundary?
 - How is the type registry within a context managed? (Static registration?
   Dynamic discovery? Who owns the registry?)
+- What happens when `[DECONSTRUCT]` or `[RECONSTRUCT]` fails partway through?
+  (Might want a `ProblematicStorable` with similar structure/use to
+  `UnknownStorable`.)
 - Which built-in JS types should be included?
   - Byte arrays: `Uint8Array`, `ArrayBuffer`, or both?
   - Date/time: `Date`, `Temporal.Instant`, `Temporal.ZonedDateTime`?
