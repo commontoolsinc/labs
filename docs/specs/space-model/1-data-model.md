@@ -459,7 +459,7 @@ Examples:
 ```json
 { "/Link@1": { "id": "of:abc...", "path": ["x", "y"], "space": "..." } }
 { "/Error@1": { "name": "TypeError", "message": "...", "stack": "..." } }
-{ "/Stream@1": {} }
+{ "/Stream@1": null }
 { "/Map@1": [ ["key1", "value1"], ["key2", "value2"] ] }
 { "/Set@1": [ "a", "b", "c" ] }
 { "/Bytes@1": "base64encoded..." }
@@ -483,6 +483,16 @@ A value is a special type if:
 3. That key starts with `/`
 
 This simple rule provides maximum flexibility to evolve the key format.
+
+#### Stateless Types
+
+Types that require no reconstruction state use `null` as the value:
+
+```json
+{ "/Stream@1": null }
+```
+
+This clearly distinguishes "no state needed" from "empty state" (`{}`).
 
 #### Escaping Literal Values
 
