@@ -3,6 +3,8 @@ import { type Config } from "@commontools/felt";
 const PRODUCTION = !!Deno.env.get("PRODUCTION");
 const ENVIRONMENT = PRODUCTION ? "production" : "development";
 
+const SHELL_PORT = parseInt(Deno.env.get("SHELL_PORT") || "5173", 10);
+
 const config: Config = {
   entries: [
     { in: "src/index.ts", out: "scripts/index" },
@@ -13,7 +15,7 @@ const config: Config = {
   ],
   outDir: "dist",
   hostname: "127.0.0.1",
-  port: 5173,
+  port: SHELL_PORT,
   publicDir: "public",
   watchDir: "src",
   redirectToIndex: /^\/(?!((assets|scripts|styles|static)\/.*))/,
