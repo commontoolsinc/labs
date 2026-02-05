@@ -579,6 +579,20 @@ export class WorkerReconciler {
   /**
    * Update an event prop.
    */
+  /**
+   * Helper to get a debug ID for a cell (space/id or similar).
+   */
+  private getCellDebugId(cell: Cell<unknown>): string {
+    try {
+      // Accessing internal link info for debugging
+      const link = cell.getAsNormalizedFullLink();
+      const path = link.path.length > 0 ? `:${link.path.join("/")}` : "";
+      return `cell:${link.space?.toString() ?? "?"}/${link.id ?? "?"}${path}`;
+    } catch {
+      return "cell:unknown";
+    }
+  }
+
   private updateEventProp(
     ctx: ReconcileContext,
     state: NodeState,
@@ -592,6 +606,42 @@ export class WorkerReconciler {
     if (existingState && existingState.currentValue === value) {
       return;
     }
+
+    // Special check for Cell equality if both are cells
+    if (
+      isCell(value) && existingState?.currentValue &&
+      isCell(existingState.currentValue)
+    ) {
+      if (
+        areLinksSame(value, existingState.currentValue)
+      ) {
+        // Same cell link, no update needed
+        return;
+      }
+    }
+
+    // Log for debugging
+    let valueId = "";
+    if (isCell(value)) {
+      valueId = this.getCellDebugId(value as Cell<unknown>);
+    }
+
+    let oldValueId = "";
+    const oldValue = existingState?.currentValue;
+    if (isCell(oldValue)) {
+      oldValueId = this.getCellDebugId(oldValue as Cell<unknown>);
+    }
+
+    logger.debug(
+      "update-event-prop",
+      () => ({
+        nodeId: state.nodeId,
+        key,
+        valueId,
+        oldValueId: oldValueId || (oldValue ? String(oldValue) : undefined),
+        isCell: isCell(value),
+      }),
+    );
 
     // Cancel existing subscription
     if (existingState) {
@@ -1449,6 +1499,7 @@ export class WorkerReconciler {
               "reconcile-cell-child",
               () => ({
                 id: childState.nodeId,
+                cellId: this.getCellDebugId(cell),
                 type: "text-update",
                 value: resolvedChild,
               }),
@@ -1470,6 +1521,7 @@ export class WorkerReconciler {
                 "reconcile-cell-child",
                 () => ({
                   id: childState.nodeId,
+                  cellId: this.getCellDebugId(cell),
                   type: "vnode-update",
                   tagName: newTagName,
                 }),
@@ -1502,6 +1554,7 @@ export class WorkerReconciler {
             "reconcile-cell-child",
             () => ({
               id: childState.nodeId,
+              cellId: this.getCellDebugId(cell),
               type: "replace",
               reason: "fallback",
             }),
