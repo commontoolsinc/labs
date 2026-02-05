@@ -264,4 +264,112 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       );
     },
   );
+
+  await t.step(
+    "deduplicates identical values from Cell",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const childCell = new MockCell("Hello");
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [childCell],
+      });
+
+      reconciler.mount(rootCell as any);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      collector.clear();
+
+      // Emit exact SAME value
+      childCell.set("Hello");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const ops = collector.getOps();
+      assertEquals(ops.length, 0, "Should emit NO ops for identical value");
+
+      // Emit DIFFERENT value
+      childCell.set("World");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const updateOps = collector.getOpsOfType("update-text");
+      assertEquals(
+        updateOps.length,
+        1,
+        "Should emit update-text for new value",
+      );
+      assertEquals((updateOps[0] as any).text, "World", "Check new value");
+    },
+  );
+
+  await t.step(
+    "skips redundant inserts on stable updates",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      // Keyed children (using keys in VNode or implicit index?)
+      // Reconciler uses index if no keys.
+      // Let's use explicit keys to be safe/clear.
+      const child1 = {
+        type: "vnode",
+        name: "div",
+        props: { key: "a" },
+        children: ["A"],
+      };
+      const child2 = {
+        type: "vnode",
+        name: "div",
+        props: { key: "b" },
+        children: ["B"],
+      };
+
+      const rootVNode = {
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [child1, child2],
+      };
+      const rootCell = new MockCell(rootVNode);
+
+      reconciler.mount(rootCell as any);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      collector.clear();
+
+      // Update parent with SAME children order
+      const rootVNodeUpdated = {
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [child1, child2], // Same objects, same keys
+      };
+      rootCell.set(rootVNodeUpdated);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const insertOps = collector.getOpsOfType("insert-child");
+      assertEquals(insertOps.length, 0, "Should skip inserts if order is same");
+
+      // Update parent with SWAPPED children
+      const rootVNodeSwapped = {
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [child2, child1], // Swap
+      };
+      rootCell.set(rootVNodeSwapped);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const swapInserts = collector.getOpsOfType("insert-child");
+      // Naive reorder: remove/insert or move.
+      // With implementation "insert from end", it likely emits inserts.
+      // At least 1 insert is expected (to move).
+      assertEquals(swapInserts.length > 0, true, "Should insert to re-order");
+    },
+  );
 });
