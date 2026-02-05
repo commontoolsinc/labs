@@ -23,11 +23,8 @@ const handleBacklinkClick = (piece: MentionablePiece) => {
 
 // Handler for Edit button - go back to note editor (module scope)
 const goToEdit = handler<void, { sourceNote: any }>((_ev, { sourceNote }) => {
-  console.log("goToEdit called, sourceNote:", sourceNote);
   if (sourceNote) {
     return navigateTo(sourceNote);
-  } else {
-    console.log("sourceNote is null/undefined, cannot navigate");
   }
 });
 
@@ -39,12 +36,6 @@ const handleCheckboxToggle = handler<
 >((event, { content }) => {
   const currentContent = content.get();
   const { index, checked } = event.detail;
-
-  console.log("Toggling checkbox", {
-    index,
-    checked,
-    contentLength: currentContent.length,
-  });
 
   // Find all checkbox patterns in the content
   const checkboxPattern = /- \[([ xX])\]/g;
@@ -67,7 +58,6 @@ const handleCheckboxToggle = handler<
 
   if (result !== currentContent) {
     content.set(result);
-    console.log("Updated content via Writable.set()");
   }
 });
 
@@ -114,7 +104,6 @@ export default pattern<NoteMdInput, NoteMdOutput>(
     // Use sourceNoteRef directly if provided, otherwise fall back to noteId lookup
     const sourceNote = computed(() => {
       if (sourceNoteRef) {
-        console.log("Using sourceNoteRef directly");
         return sourceNoteRef;
       }
       const myNoteId = note?.noteId;
