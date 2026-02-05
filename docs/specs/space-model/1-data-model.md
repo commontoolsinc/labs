@@ -290,6 +290,15 @@ interface StorableClass<T extends StorableInstance> {
 }
 ```
 
+`[RECONSTRUCT]` is a dedicated static method rather than using the class
+constructor for two reasons:
+
+1. **Reconstruction-specific context**: It receives the `Runtime` (and
+   potentially other context) which shouldn't be mandated in a regular
+   constructor's signature.
+2. **Instance interning**: It can return existing instances rather than always
+   creating new ones — essential for types like `Cell` where identity matters.
+
 The presence of `[DECONSTRUCT]` doubles as the brand — no separate marker needed:
 
 ```typescript
