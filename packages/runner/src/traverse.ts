@@ -1938,7 +1938,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
           );
           return undefined;
         }
-        // For my cell link, lastRedirDoc currently points to the last
+        // For my cell link, curDoc currently points to the last
         // redirect target, but we want cell properties to be based on the
         // link value at that location, so we effectively follow one more
         // link if available.
@@ -2025,16 +2025,28 @@ export class SchemaObjectTraverser<V extends JSONValue>
         this.objectCreator.addOptionalProperty(filteredObj, propKey, propValue);
         continue;
       }
-      const elementDoc = {
-        address: {
-          ...doc.address,
-          path: [...doc.address.path, propKey],
-        },
-        value: propValue,
+      const propAddress = {
+        ...doc.address,
+        path: [...doc.address.path, propKey],
       };
-      const val = this.traverseWithSchema(elementDoc, propSchema);
-      if (val !== undefined) {
+      // If we have a link, the traverseWithSchema will handle that for us.
+      // If we have a value, we instead need to handle it ourselves
+      if (
+        !this.traverseCells &&
+        SchemaObjectTraverser.asCellOrStream(propSchema) &&
+        !isPrimitiveCellLink(propValue)
+      ) {
+        // If we have a value instead of a link, create a link to the value
+        // We don't traverse and validate, since this is an asCell boundary.
+        const cellLink = getNormalizedLink(propAddress, propSchema);
+        const val = this.objectCreator.createObject(cellLink, undefined);
         filteredObj[propKey] = val;
+      } else {
+        const propDoc = { address: propAddress, value: propValue };
+        const val = this.traverseWithSchema(propDoc, propSchema);
+        if (val !== undefined) {
+          filteredObj[propKey] = val;
+        }
       }
     }
 
@@ -2056,7 +2068,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
           ...doc.address,
           path: [...doc.address.path, propKey],
         };
-        if (propSchema.asCell || propSchema.asStream) {
+        if (SchemaObjectTraverser.asCellOrStream(propSchema)) {
           const val = this.traverseWithSchema({
             address: propAddress,
             value: undefined,
