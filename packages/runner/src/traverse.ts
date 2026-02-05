@@ -1612,7 +1612,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
           return merged;
         }
         // None of the anyOf patterns matched
-        logger.debug(
+        logger.info(
           "traverse",
           () => [
             "No matching anyOf",
@@ -1888,7 +1888,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
         curDoc = linkDoc;
         curSelector = linkSelector!;
         if (curDoc.value === undefined) {
-          logger.debug(
+          logger.info(
             "traverse",
             () => ["Value is undefined following array element link", curDoc],
           );
@@ -1929,10 +1929,10 @@ export class SchemaObjectTraverser<V extends JSONValue>
         !this.traverseCells &&
         SchemaObjectTraverser.asCellOrStream(curSelector.schema)
       ) {
-        if (curDoc === undefined) {
+        if (curDoc.value === undefined) {
           // If we hit a broken link following write redirects, I think we have
           // to abort.
-          logger.debug(
+          logger.info(
             "traverse",
             () => ["Encountered broken redirect", doc, curDoc],
           );
@@ -1962,7 +1962,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
             arrayObj.push(null);
           } else {
             // this array is invalid; one or more items do not match the schema
-            logger.debug(
+            logger.info(
               "traverse",
               () => ["Item doesn't match array schema", curDoc, curSelector],
             );
@@ -2103,7 +2103,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
       if (Array.isArray(required)) {
         for (const requiredProperty of required) {
           if (!(requiredProperty in filteredObj)) {
-            logger.debug("traverse", () => [
+            logger.info("traverse", () => [
               "Missing required property",
               requiredProperty,
               "in object",
@@ -2136,7 +2136,7 @@ export class SchemaObjectTraverser<V extends JSONValue>
       "writeRedirect",
     );
     if (redirDoc.value === undefined) {
-      logger.debug(
+      logger.info(
         "traversePointerWithSchema",
         () => [
           "Encountered link to undefined value",
@@ -2259,25 +2259,6 @@ export class SchemaObjectTraverser<V extends JSONValue>
       2,
     );
   }
-}
-
-/**
- * Is schemaA a superset of schemaB.
- * That is, will every object matched by schema B also be matched by schemaA.
- *
- * @param schemaA
- * @param schemaB
- * @returns true if schemaA is a superset, or false if it cannot be determined.
- */
-// TDDO(@ubik2): In cache.ts, we have a SelectorTracker which does more
-// sophisticated matching. Break that out into a schema module so we can use
-// that logic here.
-export function isSchemaSuperset(
-  schemaA: JSONSchema,
-  schemaB: JSONSchema,
-) {
-  return (ContextualFlowControl.isTrueSchema(schemaA)) ||
-    deepEqual(schemaA, schemaB) || (schemaB === false);
 }
 
 /**
