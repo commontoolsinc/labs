@@ -591,20 +591,47 @@ Types that require no reconstruction state use `null` as the value:
 
 This clearly distinguishes "no state needed" from "empty state" (`{}`).
 
-#### Escaping Literal Values
+#### Escaping and Literal Values
 
-If user data needs to store an object whose single key starts with `/`, it can
-be wrapped in a **literal escape**:
+Two escape mechanisms handle cases where user data might be mistaken for special
+types:
+
+**`/object` — Single-layer escape, values still interpreted**
+
+Wraps a plain object whose key(s) might look like special types, but the values
+are still processed normally:
 
 ```json
-{ "/quote": { "/bloop": ["i", "am", "literal"] } }
+{ "/object": { "/myKey": { "/Link@1": { "id": "..." } } } }
 ```
 
-The `/quote` key signals "the value is literal data, not a special type." On
-deserialization, the wrapper is stripped and the inner value is returned as-is.
+Deserializes to: `{ "/myKey": <reconstructed Link> }`
 
-This allows round-tripping any JSON structure, even those that would otherwise
-be interpreted as special types.
+The `/object` wrapper is stripped, the inner object's keys are taken literally,
+but its values go through normal deserialization (the Link is reconstructed).
+
+**`/quote` — Fully literal, no interpretation**
+
+Wraps a value that should be returned exactly as-is, with no deserialization of
+any nested special forms:
+
+```json
+{ "/quote": { "/Link@1": { "id": "..." } } }
+```
+
+Deserializes to: `{ "/Link@1": { "id": "..." } }` — the inner structure is *not*
+reconstructed as a Link; it remains a plain object.
+
+Use cases for `/quote`:
+- Storing schemas or examples that describe special types without instantiating them
+- Metaprogramming and introspection
+- Optimization: skip deserialization when the subtree is known to be plain data
+- Round-tripping JSON structures that happen to look like special types
+
+**When to use which:**
+- `/object`: You have a plain object with a slash-prefixed key, but values should
+  still be interpreted normally
+- `/quote`: You want the entire subtree treated as literal JSON data
 
 #### Unknown Type Handling
 
@@ -618,8 +645,8 @@ This wire format is what serialization contexts produce. The context's `wrap()`
 and `unwrap()` methods would generate and parse these `/<type>@<version>` keys,
 mapping between rich runtime types and their serialized form. The context is
 also responsible for:
-- Applying `/quote` escaping when serializing plain objects that happen to have
-  slash-prefixed keys
+- Applying `/object` or `/quote` escaping when serializing plain objects that
+  happen to have slash-prefixed keys
 - Wrapping unknown types using the `typeTag` preserved in `UnknownStorable`
 
 #### Open Questions
