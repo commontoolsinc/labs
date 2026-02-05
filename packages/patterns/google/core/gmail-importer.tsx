@@ -19,6 +19,7 @@ import {
 } from "commontools";
 import TurndownService from "turndown";
 import { GmailClient } from "./util/gmail-client.ts";
+import { MentionablePiece } from "../../system/backlinks-index.tsx";
 
 type CFC<T, C extends string> = T;
 type Secret<T> = CFC<T, "secret">;
@@ -74,6 +75,7 @@ turndown.addRule("removeStyleTags", {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** An #email */
 export type Email = {
   // Unique identifier for the email
   id: string;
@@ -85,11 +87,11 @@ export type Email = {
   snippet: string;
   // Email subject line
   subject: string;
-  // Sender's email address
+  // Sender's #email-address
   from: string;
   // Date and time when the email was sent
   date: string;
-  // Recipient's email address
+  // Recipient's #email-address
   to: string;
   // Email content in plain text format (often empty)
   plainText: string;
@@ -120,6 +122,8 @@ interface Output {
   [UI]: VNode;
   /** Array of imported emails */
   emails: Email[];
+  /** Mentionables */
+  mentionable: Email[];
   /** Number of emails imported */
   emailCount: number;
   /** Auth UI component for managing Google OAuth connection */
@@ -1382,6 +1386,53 @@ export default pattern<{
       ),
       authUI,
       emails,
+      mentionable: computed(() =>
+        emails.map((e) => {
+          return {
+            ...e,
+            [NAME]: e.subject,
+            [UI]: (
+              <div
+                style={{
+                  padding: "12px",
+                  border: "1px solid #e0e0e0",
+                  borderRadius: "8px",
+                  backgroundColor: "#fafafa",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "16px",
+                    fontWeight: "bold",
+                    marginBottom: "4px",
+                    color: "#333",
+                  }}
+                >
+                  {e.subject}
+                </div>
+                <div
+                  style={{
+                    fontSize: "14px",
+                    color: "#666",
+                    marginBottom: "8px",
+                  }}
+                >
+                  From: {e.from}
+                </div>
+                <div
+                  style={{
+                    fontSize: "14px",
+                    color: "#555",
+                    lineHeight: "1.4",
+                  }}
+                >
+                  {e.snippet}
+                </div>
+              </div>
+            ),
+          } as Email;
+        })
+      ),
       emailCount: derive(emails, (list: Email[]) => list?.length || 0),
       bgUpdater: googleUpdaterStream,
       isReady,

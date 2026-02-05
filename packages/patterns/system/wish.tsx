@@ -35,6 +35,7 @@ export default pattern<
 
     return {
       result,
+      candidates,
       [UI]: computed(() => {
         if (candidates.length === 0) return <div>No candidates</div>;
         if (confirmedIndex.get() !== null) return result;

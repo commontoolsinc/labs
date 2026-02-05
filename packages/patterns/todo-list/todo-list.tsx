@@ -13,6 +13,7 @@ import {
 
 // ===== Types =====
 
+/** A #todo item */
 export interface TodoItem {
   title: string;
   done: Default<boolean, false>;
@@ -26,6 +27,7 @@ interface TodoListOutput {
   [NAME]: string;
   [UI]: VNode;
   items: TodoItem[];
+  mentionable: TodoItem[];
   itemCount: number;
   addItem: Stream<{ title: string }>;
   removeItem: Stream<{ item: TodoItem }>;
@@ -110,6 +112,39 @@ export default pattern<TodoListInput, TodoListOutput>(({ items }) => {
       </ct-screen>
     ),
     items,
+    mentionable: computed(() =>
+      items.map((e) => {
+        return {
+          ...e,
+          [NAME]: e.title,
+          [UI]: (
+            <div
+              style={{
+                padding: "12px",
+                border: "1px solid #e0e0e0",
+                borderRadius: "8px",
+                backgroundColor: "#fafafa",
+              }}
+            >
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "8px" }}
+              >
+                <ct-checkbox $checked={e.done} />
+                <div
+                  style={{
+                    fontSize: "16px",
+                    fontWeight: "bold",
+                    color: "#333",
+                  }}
+                >
+                  {e.title}
+                </div>
+              </div>
+            </div>
+          ),
+        } as TodoItem;
+      })
+    ),
     itemCount,
     addItem,
     removeItem,
