@@ -432,21 +432,15 @@ export default recipe(false as const satisfies __ctHelpers.JSONSchema, {
             type: "object",
             properties: {
                 typedCellRef: {
-                    type: "object",
-                    properties: {
-                        length: {
-                            type: "number"
-                        }
-                    },
-                    required: ["length"]
+                    type: "array",
+                    items: true,
+                    asOpaque: true
                 }
             },
             required: ["typedCellRef"]
         } as const satisfies __ctHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __ctHelpers.JSONSchema, { typedCellRef: {
-                length: typedCellRef?.length
-            } }, ({ typedCellRef }) => !typedCellRef?.length), <div>No charms created yet</div>, <ul>
+        } as const satisfies __ctHelpers.JSONSchema, { typedCellRef: typedCellRef }, ({ typedCellRef }) => !typedCellRef?.length), <div>No charms created yet</div>, <ul>
             {typedCellRef.mapWithPattern(__ctHelpers.recipe({
                 type: "object",
                 properties: {
