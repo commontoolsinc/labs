@@ -20,6 +20,9 @@ import { isCell } from "@commontools/runner";
  */
 export function generateKey(node: unknown): string {
   try {
+    // Cell.toJSON() is called by JSON.stringify, producing a stable ID
+    // based on the cell's link (space/id/path), not its current data.
+    // The cellReplacer handles nested Cells that aren't top-level.
     return JSON.stringify(node, cellReplacer);
   } catch {
     // Circular structure or other JSON error - use fallback

@@ -71,6 +71,8 @@ export interface PropState {
   cell: Cell<unknown> | undefined;
   /** Cancel function for this prop's subscription */
   cancel: Cancel;
+  /** The specific value bound (for equality checking of static props/handlers) */
+  currentValue?: unknown;
 }
 
 /**
@@ -108,6 +110,9 @@ export interface NodeState {
 
   /** Children Cell reference for diffing during updates */
   childrenState?: ChildrenState;
+
+  /** Track child order to optimize inserts */
+  childOrder: string[];
 }
 
 /**
@@ -125,6 +130,9 @@ export interface ChildNodeState {
 
   /** For element nodes, the full node state */
   elementState?: NodeState;
+
+  /** Track current value for deduping updates */
+  currentValue?: unknown;
 }
 
 /**

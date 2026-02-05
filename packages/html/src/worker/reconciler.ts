@@ -23,6 +23,7 @@ import {
   UI,
   useCancelGroup,
 } from "@commontools/runner";
+import { getLogger } from "@commontools/utils/logger";
 import type {
   ChildNodeState,
   NodeState,
@@ -49,6 +50,11 @@ import {
  * The main thread registers the actual container DOM element with this ID.
  */
 export const CONTAINER_NODE_ID = 0;
+
+const logger = getLogger("worker-reconciler", {
+  enabled: false,
+  level: "debug",
+});
 
 /**
  * Main reconciler class for worker-side VDOM rendering.
@@ -101,6 +107,12 @@ export class WorkerReconciler {
    * @returns A cancel function to unmount the tree
    */
   mount(vnode: WorkerVNode | Cell<WorkerVNode> | Cell<unknown>): Cancel {
+    logger.debug(
+      "mount",
+      () => ({
+        vnodeType: isCell(vnode) ? this.getCellDebugId(vnode) : typeof vnode,
+      }),
+    );
     if (this.rootCancel) {
       this.rootCancel();
     }
@@ -113,8 +125,12 @@ export class WorkerReconciler {
       // Create a wrapper state that tracks the current child in the container
       const wrapperState = this.createWrapperState(ctx, CONTAINER_NODE_ID);
 
+      // Ensure the current child is cancelled when the root is cancelled
+      addCancel(() => wrapperState.cancel());
+
       addCancel(
         vnode.sink((resolvedVnode: unknown) => {
+          logger.debug("root-cell-update", () => ({ resolvedVnode }));
           if (!resolvedVnode) return;
           // Validate that the resolved value is a valid render node
           if (!this.isValidRenderNode(resolvedVnode)) {
@@ -179,6 +195,7 @@ export class WorkerReconciler {
    * Unmount the current VDOM tree.
    */
   unmount(): void {
+    logger.debug("unmount", () => ({ rootChildId: this.rootChildId }));
     if (this.rootCancel) {
       this.rootCancel();
       this.rootCancel = null;
@@ -240,6 +257,7 @@ export class WorkerReconciler {
     this.flushScheduled = false;
     if (this.pendingOps.length > 0) {
       const ops = this.pendingOps;
+      logger.debug("flush-ops", () => ({ count: ops.length, ops }));
       this.pendingOps = [];
       this.onOps(ops);
     }
@@ -264,6 +282,32 @@ export class WorkerReconciler {
         }
       }
     }
+  }
+
+  /**
+   * Check if new children are structurally the same as existing children.
+   * Used by Cell child VNode in-place update to decide whether to skip
+   * children reconciliation (same children have active sinks) or do a
+   * full replace (children changed).
+   */
+  private areChildrenSame(
+    state: NodeState,
+    newChildren: WorkerRenderNode | WorkerRenderNode[],
+  ): boolean {
+    // Cell<children>: same Cell link means same subscription
+    if (isCell(newChildren)) {
+      return !!(
+        state.childrenState?.cell &&
+        areLinksSame(state.childrenState.cell, newChildren)
+      );
+    }
+
+    // Static children: compare keys
+    const childArray = Array.isArray(newChildren) ? newChildren : [newChildren];
+    const newKeys = generateChildKeys(childArray);
+
+    if (newKeys.length !== state.childOrder.length) return false;
+    return newKeys.every((key, i) => key === state.childOrder[i]);
   }
 
   /**
@@ -327,10 +371,27 @@ export class WorkerReconciler {
       : null;
     const newTagName = newVNode?.name ?? null;
 
+    logger.debug("reconcile-check", () => ({
+      oldId: oldState?.nodeId,
+      oldTagName,
+      newTagName,
+      match: Boolean(
+        oldState && oldTagName && newTagName && oldTagName === newTagName,
+      ),
+      newVNodeName: newVNode?.name,
+      oldStateHasTagName: oldState && "tagName" in oldState,
+      isOldStateText: oldState?.tagName === "#text",
+    }));
+
     // Case 1: Same element type - update in place
     if (oldState && oldTagName && newTagName && oldTagName === newTagName) {
       const sanitized = this.sanitizeNode(newVNode!);
       if (sanitized) {
+        logger.debug("reconcile-node", () => ({
+          id: wrapper.nodeId,
+          strategy: "update-in-place",
+          tagName: newTagName,
+        }));
         // Update props in place with proper diffing
         this.updatePropsInPlace(ctx, oldState, sanitized.props);
 
@@ -350,6 +411,12 @@ export class WorkerReconciler {
 
     // Case 2: Different type, text node, array, or no previous - destroy and recreate
     if (wrapper.currentChild) {
+      logger.debug("reconcile-node", () => ({
+        id: wrapper.nodeId,
+        strategy: "replace",
+        oldTag: oldTagName,
+        newTag: newTagName,
+      }));
       wrapper.cancel();
       this.cleanupNodeHandlers(wrapper.currentChild);
       this.queueOps([{
@@ -392,6 +459,7 @@ export class WorkerReconciler {
       const existingState = state.propSubscriptions.get("__cellProps__");
       if (existingState?.cell && areLinksSame(existingState.cell, newProps)) {
         // Same Cell, leave subscription in place
+        logger.debug("props-same-cell", () => ({ nodeId: state.nodeId }));
         return;
       }
       // Different Cell - cancel old and set up new
@@ -410,6 +478,10 @@ export class WorkerReconciler {
       // Set up new Cell<Props> subscription
       let currentPropsCancel: Cancel | undefined;
       const cancel = newProps.sink((resolvedProps) => {
+        logger.debug(
+          "cell-props-update",
+          () => ({ nodeId: state.nodeId, props: resolvedProps }),
+        );
         if (currentPropsCancel) {
           currentPropsCancel();
           currentPropsCancel = undefined;
@@ -470,6 +542,7 @@ export class WorkerReconciler {
         // Reactive prop - check if Cell is same
         if (existingState?.cell && areLinksSame(existingState.cell, value)) {
           // Same Cell, leave subscription in place
+          logger.debug("prop-same-cell", () => ({ nodeId: state.nodeId, key }));
           continue;
         }
         // Different Cell - cancel old and set up new
@@ -477,6 +550,10 @@ export class WorkerReconciler {
           existingState.cancel();
         }
         const cancel = (value as Cell<unknown>).sink((resolvedValue) => {
+          logger.debug(
+            "prop-update",
+            () => ({ nodeId: state.nodeId, key, value: resolvedValue }),
+          );
           const propValue = this.transformPropValue(key, resolvedValue);
           this.queueOps([{
             op: "set-prop",
@@ -533,6 +610,20 @@ export class WorkerReconciler {
   /**
    * Update an event prop.
    */
+  /**
+   * Helper to get a debug ID for a cell (space/id or similar).
+   */
+  private getCellDebugId(cell: Cell<unknown>): string {
+    try {
+      // Accessing internal link info for debugging
+      const link = cell.getAsNormalizedFullLink();
+      const path = link.path.length > 0 ? `:${link.path.join("/")}` : "";
+      return `cell:${link.space?.toString() ?? "?"}/${link.id ?? "?"}${path}`;
+    } catch {
+      return "cell:unknown";
+    }
+  }
+
   private updateEventProp(
     ctx: ReconcileContext,
     state: NodeState,
@@ -541,6 +632,47 @@ export class WorkerReconciler {
     existingState: PropState | undefined,
   ): void {
     const eventType = getEventType(key);
+
+    // Equality check: if value is same as current, do nothing
+    if (existingState && existingState.currentValue === value) {
+      return;
+    }
+
+    // Special check for Cell equality if both are cells
+    if (
+      isCell(value) && existingState?.currentValue &&
+      isCell(existingState.currentValue)
+    ) {
+      if (
+        areLinksSame(value, existingState.currentValue)
+      ) {
+        // Same cell link, no update needed
+        return;
+      }
+    }
+
+    // Log for debugging
+    let valueId = "";
+    if (isCell(value)) {
+      valueId = this.getCellDebugId(value as Cell<unknown>);
+    }
+
+    let oldValueId = "";
+    const oldValue = existingState?.currentValue;
+    if (isCell(oldValue)) {
+      oldValueId = this.getCellDebugId(oldValue as Cell<unknown>);
+    }
+
+    logger.debug(
+      "update-event-prop",
+      () => ({
+        nodeId: state.nodeId,
+        key,
+        valueId,
+        oldValueId: oldValueId || (oldValue ? String(oldValue) : undefined),
+        isCell: isCell(value),
+      }),
+    );
 
     // Cancel existing subscription
     if (existingState) {
@@ -565,7 +697,11 @@ export class WorkerReconciler {
         eventType,
         handlerId,
       }]);
-      state.propSubscriptions.set(key, { cell: undefined, cancel: () => {} });
+      state.propSubscriptions.set(key, {
+        cell: undefined,
+        cancel: () => {},
+        currentValue: value,
+      });
     } else if (isEventHandler(value)) {
       const handlerId = ctx.registerHandler(value);
       state.eventHandlers.set(eventType, handlerId);
@@ -575,8 +711,16 @@ export class WorkerReconciler {
         eventType,
         handlerId,
       }]);
-      state.propSubscriptions.set(key, { cell: undefined, cancel: () => {} });
+      state.propSubscriptions.set(key, {
+        cell: undefined,
+        cancel: () => {},
+        currentValue: value,
+      });
     } else if (isCell(value)) {
+      // For Cells, we don't store currentValue to compare the Cell itself here
+      // because the value passed to updateEventProp is usually the Cell itself.
+      // If updatePropsInPlace passed the Cell, then `currentValue === value` check above covers it.
+
       const cancel = (value as Cell<(event: unknown) => void>).sink(
         (handler) => {
           if (handler) {
@@ -596,6 +740,7 @@ export class WorkerReconciler {
       state.propSubscriptions.set(key, {
         cell: value as Cell<unknown>,
         cancel,
+        currentValue: value,
       });
     }
   }
@@ -614,6 +759,10 @@ export class WorkerReconciler {
     if (isCell(value)) {
       // Check if same Cell
       if (existingState?.cell && areLinksSame(existingState.cell, value)) {
+        logger.debug(
+          "binding-same-cell",
+          () => ({ nodeId: state.nodeId, key }),
+        );
         return; // Same binding, leave it alone
       }
 
@@ -650,6 +799,7 @@ export class WorkerReconciler {
       const existingState = state.childrenState;
       if (existingState?.cell && areLinksSame(existingState.cell, children)) {
         // Same Cell, leave subscription in place
+        logger.debug("children-same-cell", () => ({ nodeId: state.nodeId }));
         return;
       }
 
@@ -662,6 +812,12 @@ export class WorkerReconciler {
       const cancel = (children as Cell<WorkerRenderNode | WorkerRenderNode[]>)
         .sink(
           (resolvedChildren) => {
+            logger.debug("children-update", () => ({
+              nodeId: state.nodeId,
+              count: Array.isArray(resolvedChildren)
+                ? resolvedChildren.length
+                : 1,
+            }));
             this.updateChildren(ctx, state, resolvedChildren, visited);
           },
         );
@@ -776,6 +932,7 @@ export class WorkerReconciler {
       children: new Map(),
       propSubscriptions: new Map(),
       eventHandlers: new Map(),
+      childOrder: [],
     };
 
     // Bind props
@@ -812,6 +969,7 @@ export class WorkerReconciler {
       children: new Map(),
       propSubscriptions: new Map(),
       eventHandlers: new Map(),
+      childOrder: [],
     };
   }
 
@@ -829,6 +987,7 @@ export class WorkerReconciler {
       children: new Map(),
       propSubscriptions: new Map(),
       eventHandlers: new Map(),
+      childOrder: [],
     };
   }
 
@@ -854,6 +1013,7 @@ export class WorkerReconciler {
       children: new Map(),
       propSubscriptions: new Map(),
       eventHandlers: new Map(),
+      childOrder: [],
     };
 
     // Render each child and insert it
@@ -969,6 +1129,7 @@ export class WorkerReconciler {
           state.propSubscriptions.set(key, {
             cell: undefined,
             cancel: () => {},
+            currentValue: value,
           });
         } else if (isEventHandler(value)) {
           // Plain function event handler
@@ -983,6 +1144,7 @@ export class WorkerReconciler {
           state.propSubscriptions.set(key, {
             cell: undefined,
             cancel: () => {},
+            currentValue: value,
           });
         } else if (isCell(value)) {
           // Cell containing event handler - not common but handle it
@@ -1008,6 +1170,7 @@ export class WorkerReconciler {
           state.propSubscriptions.set(key, {
             cell: value as Cell<unknown>,
             cancel: sinkCancel,
+            currentValue: value,
           });
         }
       } else if (isBindingProp(key)) {
@@ -1224,6 +1387,7 @@ export class WorkerReconciler {
     const newKeyOrder: string[] = [];
 
     // Process each new child
+    let hasNewChildren = false;
     for (let i = 0; i < newChildren.length; i++) {
       const child = newChildren[i];
       const key = newKeys[i];
@@ -1239,6 +1403,7 @@ export class WorkerReconciler {
         // (For now, we trust the key - updates happen through Cell subscriptions)
       } else {
         // Create new child, passing parent state and key for position tracking
+        hasNewChildren = true;
         const childState = this.renderChild(ctx, child, visited, state, key);
         if (childState) {
           newMapping.set(key, childState);
@@ -1253,15 +1418,34 @@ export class WorkerReconciler {
       this.queueOps([{ op: "remove-node", nodeId: oldState.nodeId }]);
     }
 
+    // Check if order needs update - only skip inserts when ALL children were
+    // reused (no new children created). New children need insert-child ops
+    // even if the key order is identical.
+    const isOrderSame = !hasNewChildren &&
+      newKeyOrder.length === state.childOrder.length &&
+      newKeyOrder.every((key, i) => key === state.childOrder[i]);
+
+    if (isOrderSame) {
+      // Order is identical and all children were reused from previous state
+      state.children = newMapping;
+      return;
+    }
+
+    state.childOrder = newKeyOrder;
+
     // Update children order by inserting from END to BEGINNING.
     // This ensures each insertBefore has a valid reference node.
     // Processing in reverse means each child is inserted before the
     // previously processed child (which is already in the DOM).
+    // Skip children with nodeId === -1 (pending Cell children that haven't
+    // resolved yet). Using -1 as a beforeId would break the ordering chain
+    // because the applicator can't find the node and falls back to appendChild.
+    // Pending children will self-insert via renderCellChild when they resolve.
     let nextNodeId: number | null = null;
     for (let i = newKeyOrder.length - 1; i >= 0; i--) {
       const key = newKeyOrder[i];
       const childState = newMapping.get(key);
-      if (!childState) continue;
+      if (!childState || childState.nodeId === -1) continue;
 
       // Insert this child before the next one (or append if it's the last)
       this.queueOps([
@@ -1332,6 +1516,72 @@ export class WorkerReconciler {
       cell.sink((resolvedChild) => {
         const isInitialRender = childState.nodeId === -1;
 
+        // Dedupe updates
+        if (!isInitialRender && resolvedChild === childState.currentValue) {
+          return;
+        }
+        childState.currentValue = resolvedChild;
+
+        // Try to update in place if not initial render
+        if (
+          !isInitialRender &&
+          childState.nodeId !== -1
+        ) {
+          // Case 1: Text update
+          if (
+            childState.isText &&
+            (typeof resolvedChild === "string" ||
+              typeof resolvedChild === "number")
+          ) {
+            this.queueOps([{
+              op: "update-text",
+              nodeId: childState.nodeId,
+              text: String(resolvedChild),
+            }]);
+            return;
+          }
+
+          // Case 2: VNode in-place update (same tag)
+          if (childState.elementState) {
+            const newVNode = this.extractVNode(
+              resolvedChild as WorkerRenderNode,
+            );
+            if (newVNode) {
+              const sanitized = this.sanitizeNode(newVNode);
+              if (
+                sanitized &&
+                sanitized.name === childState.elementState.tagName
+              ) {
+                // Same tag - update props in place
+                this.updatePropsInPlace(
+                  ctx,
+                  childState.elementState,
+                  sanitized.props,
+                );
+
+                // Check children: if same, do nothing (sinks active);
+                // if different, tear down and rebuild
+                if (sanitized.children !== undefined) {
+                  const childrenSame = this.areChildrenSame(
+                    childState.elementState,
+                    sanitized.children,
+                  );
+                  if (!childrenSame) {
+                    this.updateChildrenInPlace(
+                      ctx,
+                      childState.elementState,
+                      sanitized.children,
+                      new Set(),
+                    );
+                  }
+                }
+                return;
+              }
+            }
+          }
+        }
+
+        // Fallback: Replace (existing logic)
         // Clean up previous (skip if initial render - nothing to clean)
         if (!isInitialRender) {
           if (currentCancel) {
@@ -1340,12 +1590,23 @@ export class WorkerReconciler {
           }
           // Clean up event handlers before removing node
           this.cleanupNodeHandlers(childState);
+          // Log replacement
+          logger.debug(
+            "reconcile-cell-child",
+            () => ({
+              id: childState.nodeId,
+              cellId: this.getCellDebugId(cell),
+              type: "replace",
+              reason: "fallback",
+            }),
+          );
           this.queueOps([{ op: "remove-node", nodeId: childState.nodeId }]);
         }
 
         // Reset nodeId
         childState.nodeId = -1;
         childState.elementState = undefined;
+        childState.isText = false;
 
         if (resolvedChild === null || resolvedChild === undefined) {
           return;
@@ -1360,25 +1621,26 @@ export class WorkerReconciler {
         if (newState) {
           childState.nodeId = newState.nodeId;
           childState.elementState = newState.elementState;
+          childState.isText = newState.isText;
           currentCancel = newState.cancel;
 
-          // Only insert on subsequent updates, not initial render.
-          // Initial render is handled by updateChildren's backward iteration
-          // which ensures correct ordering of all children.
-          if (!isInitialRender) {
-            const beforeId = this.findNextSiblingId(
-              parentState.children,
-              childKey,
-            );
-            this.queueOps([
-              {
-                op: "insert-child",
-                parentId: parentState.nodeId,
-                childId: newState.nodeId,
-                beforeId,
-              },
-            ]);
-          }
+          // Always insert the child into its parent. On initial render,
+          // updateChildren also emits insert-child but may see nodeId=-1
+          // (Cell hasn't resolved yet), making that op a no-op. This
+          // ensures the node is inserted once it actually exists.
+          // Double inserts are harmless (DOM appendChild/insertBefore is idempotent).
+          const beforeId = this.findNextSiblingId(
+            parentState.children,
+            childKey,
+          );
+          this.queueOps([
+            {
+              op: "insert-child",
+              parentId: parentState.nodeId,
+              childId: newState.nodeId,
+              beforeId,
+            },
+          ]);
         }
       }),
     );
