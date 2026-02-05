@@ -435,9 +435,11 @@ This makes identity hashing independent of any particular wire encoding.
 
 This section describes the **JSON-compatible** representation of special types.
 While the system will likely maintain a JSON encoding indefinitely (especially
-useful for debugging and interoperability), the wire format is not limited to
-JSON. Other encodings like CBOR may represent types more directly — for example,
-using CBOR's native byte array rather than `{ "/Bytes@1": "base64..." }`.
+useful for debugging and interoperability), the intent is for other wire and
+storage formats to be available which _are not_ themselves layered on top of a
+translation from "native types" to JSON. Other encodings like CBOR may represent
+types more directly — for example, using CBOR's native byte array rather than `{
+"/Bytes@1": "base64..." }`.
 
 The `/<type>@<version>` convention described here applies specifically to the
 JSON encoding. Serialization contexts for other formats may use format-native
