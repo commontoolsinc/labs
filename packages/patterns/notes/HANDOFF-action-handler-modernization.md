@@ -2,24 +2,30 @@
 
 ## Summary
 
-This document captures the guidance updates and refactoring work needed to properly distinguish between `action()` and `handler()` in CommonTools patterns.
+This document captures the guidance updates and refactoring work needed to
+properly distinguish between `action()` and `handler()` in CommonTools patterns.
 
 ## Core Principle
 
-**Prefer `action()` by default. Use `handler()` only when you need to bind different data to different handler instantiations.**
+**Prefer `action()` by default. Use `handler()` only when you need to bind
+different data to different handler instantiations.**
 
 ### When to use `action()`
+
 - The handler is specific to this pattern
-- It closes over pattern-scope variables (inputs, Writables, computeds, wish results)
+- It closes over pattern-scope variables (inputs, Writables, computeds, wish
+  results)
 - All instantiations use the same closed-over data
 - Examples: button clicks, form submissions, modal open/close, state toggles
 
 ### When to use `handler()`
+
 - You need different data bound per instantiation
 - Common scenarios:
   - `.map()` loops where each item needs its own binding
   - Reusable handlers shared across multiple patterns
-  - Cases where the same handler definition is called with different bindings in different places
+  - Cases where the same handler definition is called with different bindings in
+    different places
 - Examples: list item clicks, per-row actions in tables, delete buttons per item
 
 ## Part 1: Skill Guidance Updates
@@ -41,13 +47,15 @@ Add new category "13. Action vs Handler Choice":
 ```markdown
 ### 13. Action vs Handler Choice
 
-| Violation | Fix |
-|-----------|-----|
-| `handler()` at module scope not used in `.map()` or multi-binding scenario | Convert to `action()` inside pattern body |
-| `handler()` when all instantiations use same data | Convert to `action()` |
-| `action()` inside `.map()` creating new action per item | Use `handler()` at module scope with binding |
+| Violation                                                                  | Fix                                          |
+| -------------------------------------------------------------------------- | -------------------------------------------- |
+| `handler()` at module scope not used in `.map()` or multi-binding scenario | Convert to `action()` inside pattern body    |
+| `handler()` when all instantiations use same data                          | Convert to `action()`                        |
+| `action()` inside `.map()` creating new action per item                    | Use `handler()` at module scope with binding |
 
-**Key Question:** Does this handler need different data bound to different instantiations?
+**Key Question:** Does this handler need different data bound to different
+instantiations?
+
 - YES → Use `handler()` at module scope, bind with item-specific data
 - NO → Use `action()` inside pattern body, close over what you need
 ```
@@ -56,10 +64,11 @@ Add new category "13. Action vs Handler Choice":
 
 Add to "Development Approach" section:
 
-```markdown
+````markdown
 ## action() vs handler()
 
 **Default to `action()`** - define inside pattern body, close over variables:
+
 ```typescript
 const Note = pattern<Input, Output>(({ title, content }) => {
   const menuOpen = Writable.of(false);
@@ -70,18 +79,23 @@ const Note = pattern<Input, Output>(({ title, content }) => {
   // Action closes over content - no binding needed
   const clearContent = action(() => content.set(""));
 
-  return { /* ... */ };
+  return {/* ... */};
 });
 ```
+````
 
 **Use `handler()` only for per-item binding** (e.g., in `.map()`):
+
 ```typescript
 // Module scope - will be bound with different items
-const deleteItem = handler<void, { item: Writable<Item>; items: Writable<Item[]> }>(
+const deleteItem = handler<
+  void,
+  { item: Writable<Item>; items: Writable<Item[]> }
+>(
   (_, { item, items }) => {
     const list = items.get();
-    items.set(list.filter(i => i !== item));
-  }
+    items.set(list.filter((i) => i !== item));
+  },
 );
 
 const List = pattern<Input, Output>(({ items }) => {
@@ -101,8 +115,8 @@ const List = pattern<Input, Output>(({ items }) => {
   };
 });
 ```
-```
 
+````
 ## Part 2: notes-import-export.tsx Refactoring
 
 ### Current State
@@ -198,21 +212,23 @@ const selectAllNotes = handler<
 const bound = selectAllNotes({ notes, selectedNoteIndices });
 // In JSX:
 <ct-button onClick={bound}>Select All</ct-button>
-```
+````
 
 **After (action in pattern body):**
+
 ```typescript
 // In pattern body:
 const selectAllNotes = action(() => {
   selectedNoteIndices.set(notes.get().map((_, i) => i));
 });
 // In JSX:
-<ct-button onClick={selectAllNotes}>Select All</ct-button>
+<ct-button onClick={selectAllNotes}>Select All</ct-button>;
 ```
 
 ### Verification Steps
 
 After refactoring:
+
 1. `deno check notes/notes-import-export.tsx` - type check passes
 2. Deploy locally and test:
    - Selection (select all, deselect all for notes and notebooks)
@@ -223,15 +239,21 @@ After refactoring:
 
 ## Files Modified in This Session
 
-- `packages/patterns/notes/note-md.tsx` - Converted goToEdit and handleCheckboxToggle to actions, kept handleBacklinkClick as handler (used in .map())
+- `packages/patterns/notes/note-md.tsx` - Converted goToEdit and
+  handleCheckboxToggle to actions, kept handleBacklinkClick as handler (used in
+  .map())
 
 ## Files to Modify (Future Work)
 
 - `.claude/skills/pattern-dev/SKILL.md` - Add action vs handler guidance
-- `.claude/skills/pattern-critic/SKILL.md` - Add violation category for handler misuse
-- `packages/patterns/notes/notes-import-export.tsx` - Convert 33 handlers to actions
+- `.claude/skills/pattern-critic/SKILL.md` - Add violation category for handler
+  misuse
+- `packages/patterns/notes/notes-import-export.tsx` - Convert 33 handlers to
+  actions
 
 ## Related Commits
 
-- `e260e2486` - refactor(patterns): use void instead of Record<string, never> for handler event types
-- `593403dd9` - refactor(patterns): modernize note-md.tsx with actions and better types
+- `e260e2486` - refactor(patterns): use void instead of Record<string, never>
+  for handler event types
+- `593403dd9` - refactor(patterns): modernize note-md.tsx with actions and
+  better types
