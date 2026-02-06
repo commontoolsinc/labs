@@ -10,63 +10,35 @@
  *
  * Usage:
  * ```typescript
- * const { auth, fullUI, isReady, protectedContent } = createGoogleAuth({
+ * const { auth, fullUI, isReady } = createGoogleAuth({
  *   requiredScopes: ["gmail", "drive"],
  * });
  *
  * // Guard API calls with isReady
- * const doSomething = handler(() => {
- *   if (!isReady.get()) return;
- *   // Use auth.get().token for API calls
- * });
+ * if (!isReady) return;
+ * // Use auth.token for API calls
  *
  * // In UI: {fullUI} handles all auth states
- * // Use protectedContent() to show action buttons only when authenticated
- * return { [UI]: <div>
- *   {fullUI}
- *   {protectedContent(<button onClick={doSomething}>Do Something</button>)}
- * </div> };
+ * return { [UI]: <div>{fullUI}</div> };
  * ```
  *
  * IMPORTANT: Token refresh is currently broken in the framework!
  * This utility detects expired tokens but relies on manual re-authentication.
- *
- * IMPORTANT: Accessing authInfo properties in computed()
- *
- * The `authInfo` return value is an OpaqueRef. If you need to derive
- * values from its properties, use derive() not computed():
- *
- * ```typescript
- * // WRONG - will fail with "opaque value" error:
- * const x = computed(() => authInfo.hasRequiredScopes ? "Yes" : "No");
- *
- * // CORRECT:
- * const x = derive(authInfo, (info) => info.hasRequiredScopes ? "Yes" : "No");
- *
- * // For arrays, use Array.from() to break proxy chain:
- * derive(authInfo, (info) => Array.from(info.missingScopes).map(...));
- * ```
- *
- * For simple checks, use the pre-unwrapped helpers instead:
- * - isReady - boolean for `state === "ready"`
- * - currentEmail - string of signed-in email
- * - currentState - current AuthState value
  */
 
 import {
+  action,
   computed,
   Default,
-  handler,
+  ifElse,
   navigateTo,
   pattern,
   UI,
   wish,
-  type WishState,
   Writable,
 } from "commontools";
 
 // Import GoogleAuth pattern for creating new auth pieces
-// Note: Path is relative from util/ directory (go up to jkomoros/, then find google-auth.tsx)
 import GoogleAuth, { type Auth } from "../google-auth.tsx";
 
 // Re-export Auth type for consumers
@@ -108,11 +80,11 @@ export type ScopeKey = keyof typeof SCOPE_MAP;
  */
 export type AuthState =
   | "loading" // Wish in progress
-  | "selecting" // Multiple matches, showing picker (wishResult has [UI])
+  | "selecting" // Multiple matches, showing picker
   | "not-found" // No matching auth favorited
   | "needs-login" // Auth piece found but user not signed in
   | "missing-scopes" // Authenticated but missing required scopes
-  | "token-expired" // Token has expired (expiresAt < now)
+  | "token-expired" // Token has expired
   | "ready"; // All good - auth is usable
 
 /**
@@ -122,7 +94,6 @@ export type TokenExpiryWarning = "ok" | "warning" | "expired";
 
 /**
  * Complete auth info bundle.
- * Uses single computed for all derived state to prevent reactive thrashing.
  */
 export interface AuthInfo {
   state: AuthState;
@@ -135,16 +106,12 @@ export interface AuthInfo {
   missingScopes: ScopeKey[];
   tokenExpiresAt: number | null;
   isTokenExpired: boolean;
-  // Token expiry display fields
   tokenTimeRemaining: number | null;
   tokenExpiryWarning: TokenExpiryWarning;
   tokenExpiryDisplay: string;
-  // Status display
   statusDotColor: string;
   statusText: string;
-  // For navigation/actions (internal use - typed as unknown to avoid exposing private type)
   piece: unknown;
-  // UI components from wished piece (to avoid accessing wishResult in fullUI)
   userChip: unknown;
   pieceUI: unknown;
 }
@@ -176,30 +143,14 @@ export interface GoogleAuthManagerOutput {
 
 /** Type for the Google Auth piece returned by wish (internal) */
 interface GoogleAuthPiece {
-  auth: Writable<Auth>;
+  auth?: Auth;
   scopes?: string[];
   selectedScopes?: Record<ScopeKey, boolean>;
-  /** Compact user display with avatar, name, and email */
   userChip?: unknown;
-  refreshToken?: {
-    send: (
-      event: Record<string, never>,
-      onCommit?: (tx: unknown) => void,
-    ) => void;
-  };
 }
 
-/**
- * Type for unwrapped wish result inside derive/computed callbacks.
- * WishState includes result, error, and [UI] properties.
- * The [UI] property is accessed via the UI symbol from commontools.
- */
-type UnwrappedWishResult = WishState<GoogleAuthPiece> & {
-  [UI]?: { props?: { $cell?: unknown } };
-};
-
 // Status colors
-const STATUS_COLORS = {
+const STATUS_COLORS: Record<AuthState, string> = {
   loading: "var(--ct-color-yellow-500, #eab308)",
   selecting: "var(--ct-color-blue-500, #3b82f6)",
   "not-found": "var(--ct-color-red-500, #ef4444)",
@@ -207,7 +158,7 @@ const STATUS_COLORS = {
   "missing-scopes": "var(--ct-color-orange-500, #f97316)",
   "token-expired": "var(--ct-color-red-500, #ef4444)",
   ready: "var(--ct-color-green-500, #22c55e)",
-} as const;
+};
 
 // Status messages
 const STATUS_MESSAGES: Record<AuthState, string> = {
@@ -222,63 +173,6 @@ const STATUS_MESSAGES: Record<AuthState, string> = {
 
 // Token expiry warning threshold (10 minutes)
 const TOKEN_WARNING_THRESHOLD_MS = 10 * 60 * 1000;
-
-// =============================================================================
-// MODULE-SCOPE HANDLERS
-// Handlers MUST be at module scope to work in JSX. Handlers defined inside
-// functions fail with "X is not a function" errors at runtime.
-// =============================================================================
-
-/**
- * Handler to create new Google Auth piece with pre-selected scopes.
- */
-const createAuthHandler = handler<unknown, { scopes: ScopeKey[] }>(
-  (_event, { scopes }) => {
-    const selectedScopes: Record<ScopeKey, boolean> = {
-      gmail: false,
-      gmailSend: false,
-      gmailModify: false,
-      calendar: false,
-      calendarWrite: false,
-      drive: false,
-      docs: false,
-      contacts: false,
-    };
-
-    for (const scope of scopes) {
-      if (scope in selectedScopes) {
-        selectedScopes[scope] = true;
-      }
-    }
-
-    const authPiece = GoogleAuth({
-      selectedScopes,
-      auth: {
-        token: "",
-        tokenType: "",
-        scope: [],
-        expiresIn: 0,
-        expiresAt: 0,
-        refreshToken: "",
-        user: { email: "", name: "", picture: "" },
-      },
-    });
-
-    return navigateTo(authPiece);
-  },
-);
-
-/**
- * Handler to navigate to existing auth piece.
- * Note: piece is typed as unknown in the public interface to avoid exposing private types,
- * but internally we know it's a GoogleAuthPiece.
- */
-const goToAuthHandler = handler<unknown, { piece: unknown }>(
-  (_event, { piece }) => {
-    // piece is the reactive value from authInfo.piece
-    if (piece) return navigateTo(piece as GoogleAuthPiece);
-  },
-);
 
 /**
  * Format time remaining in a human-readable way
@@ -300,465 +194,327 @@ function formatTimeRemaining(ms: number | null): string {
   return "< 1 min";
 }
 
-// =============================================================================
-// MAIN PATTERN
-// =============================================================================
-
-/**
- * Google Auth management pattern.
- *
- * Encapsulates all auth discovery, validation, and UI in one place.
- *
- * CRITICAL IMPLEMENTATION NOTES:
- * 1. wish() is called at pattern body level, NOT inside derive()
- * 2. Property access (wishResult?.result?.auth) NOT derive() for auth cell
- *    - derive() creates read-only projection, breaks token refresh
- * 3. Single computed() for all derived state to prevent thrashing
- * 4. Token refresh is currently broken - we detect but don't auto-refresh
- */
 // Debug logging helper
 function debugLog(debug: boolean, ...args: unknown[]) {
   if (debug) console.log("[GoogleAuthManager]", ...args);
 }
+
+// =============================================================================
+// MAIN PATTERN
+// =============================================================================
 
 export const GoogleAuthManager = pattern<
   GoogleAuthManagerInput,
   GoogleAuthManagerOutput
 >(
   ({ requiredScopes, accountType, debugMode }) => {
-    // Compute the wish tag
-    // IMPORTANT: wish() requires a string value, NOT a Cell. Passing a Cell
-    // causes wish() to never resolve, leaving the pattern stuck in "loading" state.
-    // For static accountType (the common case), compute the string directly.
-    // TODO(@jkomoros): For reactive account switching (Writable<AccountType>), we need a different
-    // approach since wish() doesn't support Cell query values.
-    const tag = computed(() => {
+    // ========================================================================
+    // WISH SETUP - Writable tag with accountType sync
+    // ========================================================================
+    const wishTag = Writable.of("#googleAuth");
+    // Sync accountType -> wishTag (idempotent side-effect)
+    computed(() => {
       const type = accountType;
-      return type === "personal"
+      const newTag = type === "personal"
         ? "#googleAuthPersonal"
         : type === "work"
         ? "#googleAuthWork"
         : "#googleAuth";
+      if (wishTag.get() !== newTag) wishTag.set(newTag);
     });
 
-    // CRITICAL: wish() at pattern body level, NOT inside derive
-    const wishResult = wish<GoogleAuthPiece>({ query: tag, scope: [".", "~"] });
+    const wishResult = wish<GoogleAuthPiece>({
+      query: wishTag,
+      scope: [".", "~"],
+    });
 
-    // computed() closes over all accessed cells (wishResult, requiredScopes, debugMode)
-    const authInfo = computed((): AuthInfo => {
+    // ========================================================================
+    // REACTIVE AUTH ACCESS - Direct property chain (no .get())
+    // ========================================================================
+    const auth = wishResult.result.auth;
+
+    // ========================================================================
+    // SMALL FOCUSED COMPUTEDS
+    // ========================================================================
+    const hasAuth = computed(() => !!auth);
+    const hasToken = computed(() => !!auth?.token);
+    const hasEmail = computed(() => !!auth?.user?.email);
+
+    // Token expiry
+    const isTokenExpired = computed(() => {
+      const expiresAt = auth?.expiresAt ?? 0;
+      return expiresAt > 0 && expiresAt < Date.now();
+    });
+
+    const tokenTimeRemaining = computed((): number | null => {
+      const expiresAt = auth?.expiresAt ?? 0;
+      if (!expiresAt) return null;
+      return expiresAt - Date.now();
+    });
+
+    const tokenExpiryWarning = computed((): TokenExpiryWarning => {
+      const tr = tokenTimeRemaining as number | null;
+      if (tr === null) return "ok";
+      if (tr < 0) return "expired";
+      if (tr < TOKEN_WARNING_THRESHOLD_MS) return "warning";
+      return "ok";
+    });
+
+    const tokenExpiryDisplay = computed(() =>
+      formatTimeRemaining(tokenTimeRemaining as number | null)
+    );
+
+    // Scope verification
+    const missingScopes = computed((): ScopeKey[] => {
+      const granted: string[] = (auth?.scope ?? []) as string[];
+      return (requiredScopes as ScopeKey[]).filter(
+        (key) => !granted.includes(SCOPE_MAP[key]),
+      );
+    });
+    const hasRequiredScopes = computed(
+      () => (missingScopes as ScopeKey[]).length === 0,
+    );
+
+    // Picker UI from wish (null when no picker)
+    const pickerUI = computed(() => wishResult[UI] ?? null);
+
+    // State machine
+    const currentState = computed((): AuthState => {
       const debug = debugMode as boolean;
-      const wr = wishResult as UnwrappedWishResult | null | undefined;
-      const authCell = wr?.result?.auth;
-      const authData = authCell?.get?.() ?? null;
 
-      debugLog(debug, "authInfo recomputing", {
-        hasWishResult: !!wr,
-        hasResult: !!wr?.result,
-        hasError: !!wr?.error,
-        error: wr?.error,
-        hasUI: !!wr?.[UI],
-        authCell: !!authCell,
-        authData: authData
-          ? { email: authData.user?.email, hasToken: !!authData.token }
-          : null,
-      });
+      if (wishResult.error) {
+        debugLog(debug, "state: not-found (wish error)", wishResult.error);
+        return "not-found";
+      }
 
-      // Determine state from wish result
-      let state: AuthState = "loading";
-
-      // Detect picker mode: for multiple candidates, wish returns picker UI
-      // (ct-card with ct-picker) instead of cellLinkUI (which has $cell prop).
-      // Unified wish shape: result is always the selected cell directly.
-      const hasPickerUI = wr?.[UI] && !wr?.[UI]?.props?.$cell;
-
-      if (!wr) {
-        state = "loading";
-        debugLog(debug, "state: loading (no wish result yet)");
-      } else if (wr.error) {
-        // Wish returned error - no matches found
-        state = "not-found";
-        debugLog(debug, "state: not-found (wish error)", wr.error);
-      } else if (hasPickerUI) {
-        // Multiple matches - show picker for user to choose
-        state = "selecting";
-        debugLog(debug, "state: selecting (multiple matches, picker UI shown)");
-      } else if (wr.result) {
-        // Single match - evaluate auth state
-        const email = authData?.user?.email;
-        if (email && email !== "") {
-          state = "ready"; // Will be refined below
-          debugLog(debug, "state: ready (single match)", { email });
-        } else {
-          state = "needs-login";
-          debugLog(debug, "state: needs-login (no email in auth data)");
+      if (!hasAuth) {
+        // If wish provides a picker UI, we're in selecting mode
+        if (pickerUI) {
+          debugLog(debug, "state: selecting (picker UI shown)");
+          return "selecting";
         }
+        debugLog(debug, "state: loading (no auth resolved)");
+        return "loading";
       }
 
-      // Check granted scopes
-      const grantedScopes: string[] = authData?.scope ?? [];
-      const scopesArray = requiredScopes as ScopeKey[];
-      const missingScopes: ScopeKey[] = scopesArray.filter((key) => {
-        const scopeUrl = SCOPE_MAP[key];
-        return scopeUrl && !grantedScopes.includes(scopeUrl);
-      });
-      const hasRequiredScopes = missingScopes.length === 0;
-
-      debugLog(debug, "scope check", {
-        required: scopesArray,
-        granted: grantedScopes,
-        missing: missingScopes,
-        hasAll: hasRequiredScopes,
-      });
-
-      // Refine state based on scopes
-      if (state === "ready" && !hasRequiredScopes) {
-        state = "missing-scopes";
-        debugLog(debug, "state refined: missing-scopes");
+      if (!hasToken || !hasEmail) {
+        debugLog(debug, "state: needs-login");
+        return "needs-login";
       }
 
-      // Check token expiry
-      const tokenExpiresAt = authData?.expiresAt || null;
-      const now = Date.now();
-      const tokenTimeRemaining = tokenExpiresAt ? tokenExpiresAt - now : null;
-      const isTokenExpired = tokenTimeRemaining !== null &&
-        tokenTimeRemaining < 0;
-
-      // Calculate token expiry warning level
-      const tokenExpiryWarning: TokenExpiryWarning = tokenTimeRemaining === null
-        ? "ok"
-        : tokenTimeRemaining < 0
-        ? "expired"
-        : tokenTimeRemaining < TOKEN_WARNING_THRESHOLD_MS
-        ? "warning"
-        : "ok";
-
-      // Format time remaining for display
-      const tokenExpiryDisplay = formatTimeRemaining(tokenTimeRemaining);
-
-      // Refine state based on token expiry
-      if (state === "ready" && isTokenExpired) {
-        state = "token-expired";
-        debugLog(debug, "state refined: token-expired");
+      if (!hasRequiredScopes) {
+        debugLog(debug, "state: missing-scopes");
+        return "missing-scopes";
       }
 
-      debugLog(debug, "token check", {
-        tokenExpiresAt,
-        tokenTimeRemaining,
-        isTokenExpired,
-        tokenExpiryWarning,
-        tokenExpiryDisplay,
-      });
-
-      debugLog(debug, "final state:", state);
-
-      // Generate status display
-      const email = authData?.user?.email ?? "";
-      const statusDotColor = STATUS_COLORS[state];
-      let statusText = STATUS_MESSAGES[state];
-
-      if (state === "ready") {
-        statusText = `Signed in as ${email}`;
-      } else if (state === "missing-scopes") {
-        const missingNames = missingScopes.map((k) =>
-          SCOPE_DESCRIPTIONS[k as ScopeKey]
-        )
-          .join(
-            ", ",
-          );
-        statusText = `Missing: ${missingNames}`;
+      if (isTokenExpired) {
+        debugLog(debug, "state: token-expired");
+        return "token-expired";
       }
 
-      return {
-        state,
-        auth: authData,
-        authCell: authCell ?? null, // Writable cell for token refresh
-        email,
-        hasRequiredScopes,
-        grantedScopes,
-        missingScopes,
-        tokenExpiresAt,
-        isTokenExpired,
-        tokenTimeRemaining,
-        tokenExpiryWarning,
-        tokenExpiryDisplay,
-        statusDotColor,
-        statusText,
-        piece: (wr?.result ?? null) as GoogleAuthPiece | null,
-        // Include UI components from wished piece so fullUI doesn't need to access wishResult directly
-        userChip: wr?.result?.userChip ?? null,
-        // Access [UI] symbol property from the result (piece's UI)
-        pieceUI:
-          (wr?.result as (GoogleAuthPiece & { [UI]?: unknown }) | undefined)
-            ?.[UI] ?? null,
-      };
+      debugLog(debug, "state: ready", { email: auth?.user?.email });
+      return "ready";
     });
 
-    // ==========================================================================
-    // PRE-BOUND HANDLERS
-    // Handlers are defined at module scope. Here we bind them with the required
-    // state so they can be used in JSX. These bound handlers work in direct JSX
-    // but NOT inside derive() callbacks.
-    // ==========================================================================
+    // Derived values from state
+    const isReady = computed(() => currentState === "ready");
+    const currentEmail = computed(() => (auth?.user?.email ?? "") as string);
 
-    // Pre-create piece cell for goToAuth binding
-    const pieceCell = authInfo.piece;
+    const statusDotColor = computed(
+      () => STATUS_COLORS[currentState as AuthState] ?? STATUS_COLORS.loading,
+    );
 
-    // Bind handlers with their required state
-    const boundCreateAuth = createAuthHandler({ scopes: requiredScopes });
-    const boundGoToAuth = goToAuthHandler({ piece: pieceCell });
+    const statusText = computed(() => {
+      const state = currentState as AuthState;
+      if (state === "ready") return `Signed in as ${currentEmail}`;
+      if (state === "missing-scopes") {
+        const names = (missingScopes as ScopeKey[])
+          .map((k) => SCOPE_DESCRIPTIONS[k])
+          .join(", ");
+        return `Missing: ${names}`;
+      }
+      return STATUS_MESSAGES[state];
+    });
 
-    // ==========================================================================
-    // UI COMPONENTS
-    // ==========================================================================
+    // Assemble authInfo from sub-computeds
+    const authInfo = computed((): AuthInfo => ({
+      state: currentState as AuthState,
+      auth: (auth ?? null) as Auth | null,
+      authCell: auth,
+      email: (currentEmail ?? "") as string,
+      hasRequiredScopes: hasRequiredScopes as boolean,
+      grantedScopes: ((auth?.scope ?? []) as string[]).slice(),
+      missingScopes: Array.from(missingScopes as ScopeKey[]),
+      tokenExpiresAt: (auth?.expiresAt ?? null) as number | null,
+      isTokenExpired: isTokenExpired as boolean,
+      tokenTimeRemaining: tokenTimeRemaining as number | null,
+      tokenExpiryWarning: tokenExpiryWarning as TokenExpiryWarning,
+      tokenExpiryDisplay: (tokenExpiryDisplay ?? "") as string,
+      statusDotColor: (statusDotColor ?? STATUS_COLORS.loading) as string,
+      statusText: (statusText ?? "") as string,
+      piece: wishResult.result ?? null,
+      userChip: wishResult.result?.userChip ?? null,
+      pieceUI: null,
+    }));
 
-    // Minimal status indicator (avatar + dot + text + token expiry)
-    const statusUI = computed(() => {
-      const info = authInfo;
-      // Determine background color based on state and token warning
-      const bgColor = info.state !== "ready"
-        ? "#fef3c7"
-        : info.tokenExpiryWarning === "warning"
-        ? "#fef3c7"
-        : "#d1fae5";
-
-      const avatarUrl = info.auth?.user?.picture;
-
-      return (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            padding: "8px 12px",
-            borderRadius: "6px",
-            backgroundColor: bgColor,
-            fontSize: "14px",
-          }}
-        >
-          {/* Avatar when ready and available */}
-          {info.state === "ready" && avatarUrl && (
-            <img
-              src={avatarUrl}
-              alt=""
-              style={{
-                width: "20px",
-                height: "20px",
-                borderRadius: "50%",
-              }}
-            />
-          )}
-          {/* Status dot when no avatar or not ready */}
-          {(!avatarUrl || info.state !== "ready") && (
-            <span
-              style={{
-                width: "10px",
-                height: "10px",
-                borderRadius: "50%",
-                backgroundColor: info.statusDotColor,
-              }}
-            />
-          )}
-          <span>{info.statusText}</span>
-          {/* Show token expiry countdown when ready and has expiry time */}
-          {info.state === "ready" && info.tokenExpiryDisplay && (
-            <span
-              style={{
-                marginLeft: "4px",
-                fontSize: "12px",
-                color: info.tokenExpiryWarning === "warning"
-                  ? "#b45309"
-                  : "#666",
-                fontWeight: info.tokenExpiryWarning === "warning"
-                  ? "500"
-                  : "normal",
-              }}
-            >
-              • {info.tokenExpiryDisplay}
-            </span>
-          )}
-        </div>
+    // ========================================================================
+    // ACTIONS (replaces module-scope handlers)
+    // ========================================================================
+    const createAuth = action(() => {
+      const selected: Record<ScopeKey, boolean> = {
+        gmail: false,
+        gmailSend: false,
+        gmailModify: false,
+        calendar: false,
+        calendarWrite: false,
+        drive: false,
+        docs: false,
+        contacts: false,
+      };
+      for (const scope of requiredScopes as ScopeKey[]) {
+        if (scope in selected) selected[scope] = true;
+      }
+      return navigateTo(
+        GoogleAuth({
+          selectedScopes: selected,
+          auth: {
+            token: "",
+            tokenType: "",
+            scope: [],
+            expiresIn: 0,
+            expiresAt: 0,
+            refreshToken: "",
+            user: { email: "", name: "", picture: "" },
+          },
+        }),
       );
     });
 
-    // Picker UI - renders wishResult[UI] when multiple matches
-    const pickerUI = computed(() => {
-      const wr = wishResult as UnwrappedWishResult | null | undefined;
-      if (!wr) return null;
-      if (wr[UI]) return wr[UI];
-      return null;
-    });
+    const reauthenticate = action(() => navigateTo(wishResult.result));
 
-    // Helper to format scope list for display
-    const formatScopesList = computed(() =>
-      requiredScopes.map((k) => SCOPE_DESCRIPTIONS[k as ScopeKey]).join(", ")
+    // ========================================================================
+    // UI COMPONENTS (no computed() wrappers on JSX)
+    // ========================================================================
+
+    // --- Status UI helpers ---
+    const statusBgColor = computed(() => {
+      if (currentState !== "ready") return "#fef3c7";
+      if (tokenExpiryWarning === "warning") return "#fef3c7";
+      return "#d1fae5";
+    });
+    const showAvatar = computed(
+      () => currentState === "ready" && !!auth?.user?.picture,
+    );
+    const avatarUrl = computed(() => (auth?.user?.picture ?? "") as string);
+    const showExpiryInStatus = computed(
+      () => currentState === "ready" && !!tokenExpiryDisplay,
+    );
+    const expiryHintColor = computed(
+      () => (tokenExpiryWarning === "warning" ? "#b45309" : "#666"),
+    );
+    const expiryHintWeight = computed(
+      () => (tokenExpiryWarning === "warning" ? "500" : "normal"),
     );
 
-    // ==========================================================================
-    // UI PIECES (with handlers)
-    // These use pre-bound handlers and are defined OUTSIDE derive() callbacks.
-    // Handlers don't work inside derive() - they fail with "X is not a function".
-    // ==========================================================================
-
-    // Scope list for display
-    const scopeListItems = requiredScopes.map((scope) => (
-      <li style={{ marginBottom: "4px" }}>
-        {SCOPE_DESCRIPTIONS[scope as ScopeKey]}
-      </li>
-    ));
-
-    // "Connect" button - uses pre-bound handler, defined outside derive
-    const connectButton = (
-      <button
-        type="button"
-        onClick={boundCreateAuth}
+    // --- Status UI ---
+    const statusUI = (
+      <div
         style={{
-          padding: "10px 20px",
-          backgroundColor: "#3b82f6",
-          color: "white",
-          border: "none",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          padding: "8px 12px",
           borderRadius: "6px",
-          cursor: "pointer",
-          fontWeight: "500",
+          backgroundColor: statusBgColor,
           fontSize: "14px",
         }}
       >
-        Connect Google Account
-      </button>
-    );
-
-    // "Add new account" button (outline style)
-    const addAccountButton = (
-      <button
-        type="button"
-        onClick={boundCreateAuth}
-        style={{
-          marginTop: "12px",
-          padding: "8px 16px",
-          backgroundColor: "transparent",
-          color: "#1e40af",
-          border: "1px solid #3b82f6",
-          borderRadius: "6px",
-          cursor: "pointer",
-          fontSize: "13px",
-        }}
-      >
-        + Add new account
-      </button>
-    );
-
-    // "Manage this account" button
-    const manageAccountButton = (
-      <button
-        type="button"
-        onClick={boundGoToAuth}
-        style={{
-          padding: "6px 12px",
-          backgroundColor: "transparent",
-          color: "#4b5563",
-          border: "1px solid #d1d5db",
-          borderRadius: "4px",
-          cursor: "pointer",
-          fontSize: "13px",
-        }}
-      >
-        Manage this account
-      </button>
-    );
-
-    // "Use different account" button
-    const useDifferentAccountButton = (
-      <button
-        type="button"
-        onClick={boundCreateAuth}
-        style={{
-          padding: "6px 12px",
-          backgroundColor: "transparent",
-          color: "#3b82f6",
-          border: "1px solid #3b82f6",
-          borderRadius: "4px",
-          cursor: "pointer",
-          fontSize: "13px",
-        }}
-      >
-        + Use different account
-      </button>
-    );
-
-    // "Switch" button for ready state
-    const switchButton = (
-      <button
-        type="button"
-        onClick={boundGoToAuth}
-        style={{
-          background: "none",
-          border: "none",
-          color: "#047857",
-          cursor: "pointer",
-          fontSize: "12px",
-          padding: "2px 6px",
-          borderRadius: "4px",
-        }}
-      >
-        Switch
-      </button>
-    );
-
-    // "+ Add" button for ready state
-    const addButton = (
-      <button
-        type="button"
-        onClick={boundCreateAuth}
-        style={{
-          background: "none",
-          border: "none",
-          color: "#047857",
-          cursor: "pointer",
-          fontSize: "12px",
-          padding: "2px 6px",
-          borderRadius: "4px",
-        }}
-      >
-        + Add
-      </button>
-    );
-
-    // Action buttons row for error states
-    const actionButtonsRow = (
-      <div
-        style={{
-          padding: "12px 16px",
-          backgroundColor: "#f9fafb",
-          display: "flex",
-          gap: "12px",
-          alignItems: "center",
-        }}
-      >
-        <span style={{ fontSize: "13px", color: "#6b7280" }}>Or:</span>
-        {manageAccountButton}
-        {useDifferentAccountButton}
+        {ifElse(
+          showAvatar,
+          <img
+            src={avatarUrl}
+            alt=""
+            style={{ width: "20px", height: "20px", borderRadius: "50%" }}
+          />,
+          <span
+            style={{
+              width: "10px",
+              height: "10px",
+              borderRadius: "50%",
+              backgroundColor: statusDotColor,
+            }}
+          />,
+        )}
+        <span>{statusText}</span>
+        {ifElse(
+          showExpiryInStatus,
+          <span
+            style={{
+              marginLeft: "4px",
+              fontSize: "12px",
+              color: expiryHintColor,
+              fontWeight: expiryHintWeight,
+            }}
+          >
+            • {tokenExpiryDisplay}
+          </span>,
+          null,
+        )}
       </div>
     );
 
-    // ==========================================================================
-    // FULL UI (using ifElse for state-based rendering)
-    // The buttons with handlers are defined above, outside any derive context.
-    // ==========================================================================
-
-    // State checks for conditional rendering
-    const isLoadingOrNotFound = computed(() =>
-      authInfo.state === "loading" || authInfo.state === "not-found"
+    // --- State boolean computeds for fullUI ---
+    const isLoading = computed(
+      () => currentState === "loading" || currentState === "not-found",
     );
-    const isSelecting = computed(() => authInfo.state === "selecting");
-    const needsAction = computed(() =>
-      authInfo.state === "needs-login" || authInfo.state === "missing-scopes" ||
-      authInfo.state === "token-expired"
+    const isSelecting = computed(() => currentState === "selecting");
+    const isNeedsLogin = computed(() => currentState === "needs-login");
+    const isMissingScopes = computed(() => currentState === "missing-scopes");
+    const isTokenExpiredState = computed(
+      () => currentState === "token-expired",
     );
-    const isAuthReady = computed(() => authInfo.state === "ready");
+    const isReadyState = computed(() => currentState === "ready");
 
-    // Check if we have required scopes to display
-    const hasRequiredScopes = computed(() => requiredScopes.length > 0);
+    // Helper for scope display
+    const scopesList = computed(() =>
+      (requiredScopes as ScopeKey[]).map((k) => SCOPE_DESCRIPTIONS[k]).join(
+        ", ",
+      )
+    );
+    const missingScopesList = computed(() =>
+      (missingScopes as ScopeKey[]).map((k) => SCOPE_DESCRIPTIONS[k]).join(
+        ", ",
+      )
+    );
 
-    // Loading/Not-found UI
+    // Shared button styles
+    const manageButtonStyle = {
+      padding: "6px 12px",
+      backgroundColor: "transparent",
+      color: "#4b5563",
+      border: "1px solid #d1d5db",
+      borderRadius: "4px",
+      cursor: "pointer",
+      fontSize: "13px",
+    };
+    const altButtonStyle = {
+      padding: "6px 12px",
+      backgroundColor: "transparent",
+      color: "#3b82f6",
+      border: "1px solid #3b82f6",
+      borderRadius: "4px",
+      cursor: "pointer",
+      fontSize: "13px",
+    };
+    const actionRowStyle = {
+      padding: "12px 16px",
+      backgroundColor: "#f9fafb",
+      display: "flex",
+      gap: "12px",
+      alignItems: "center",
+    };
+
+    // --- Loading / Not-found UI ---
     const loadingUI = (
       <div
         style={{
@@ -773,24 +529,29 @@ export const GoogleAuthManager = pattern<
         </h4>
         <p style={{ margin: "0 0 12px 0", fontSize: "14px", color: "#4b5563" }}>
           To use this feature, connect a Google account with these permissions:
+          {" "}
+          {scopesList}
         </p>
-        {hasRequiredScopes && (
-          <ul
-            style={{
-              margin: "0 0 16px 0",
-              paddingLeft: "20px",
-              fontSize: "13px",
-              color: "#6b7280",
-            }}
-          >
-            {scopeListItems}
-          </ul>
-        )}
-        {connectButton}
+        <button
+          type="button"
+          onClick={createAuth}
+          style={{
+            padding: "10px 20px",
+            backgroundColor: "#3b82f6",
+            color: "white",
+            border: "none",
+            borderRadius: "6px",
+            cursor: "pointer",
+            fontWeight: "500",
+            fontSize: "14px",
+          }}
+        >
+          Connect Google Account
+        </button>
       </div>
     );
 
-    // Selecting UI (multiple matches)
+    // --- Selecting UI (multiple matches, picker shown) ---
     const selectingUI = (
       <div
         style={{
@@ -802,231 +563,276 @@ export const GoogleAuthManager = pattern<
         <h4 style={{ margin: "0 0 8px 0", color: "#1e40af" }}>
           Select a Google Account
         </h4>
-        {hasRequiredScopes && (
+        {ifElse(
+          computed(() => (requiredScopes as ScopeKey[]).length > 0),
           <p
-            style={{ margin: "0 0 12px 0", fontSize: "13px", color: "#4b5563" }}
+            style={{
+              margin: "0 0 12px 0",
+              fontSize: "13px",
+              color: "#4b5563",
+            }}
           >
-            This feature needs access to: {formatScopesList}
-          </p>
+            This feature needs access to: {scopesList}
+          </p>,
+          null,
         )}
         {pickerUI}
-        {addAccountButton}
+        <button
+          type="button"
+          onClick={createAuth}
+          style={{
+            marginTop: "12px",
+            padding: "8px 16px",
+            backgroundColor: "transparent",
+            color: "#1e40af",
+            border: "1px solid #3b82f6",
+            borderRadius: "6px",
+            cursor: "pointer",
+            fontSize: "13px",
+          }}
+        >
+          + Add new account
+        </button>
       </div>
     );
 
-    // Needs-action UI (needs-login, missing-scopes, token-expired)
-    // This one needs dynamic content from authInfo
-    // but the buttons are still the pre-bound ones from above
-    const needsActionUI = computed(() => {
-      const info = authInfo;
-      if (
-        info.state !== "needs-login" && info.state !== "missing-scopes" &&
-        info.state !== "token-expired"
-      ) {
-        return null;
-      }
-
-      // Build missing scopes message
-      const missingScopesMessage = info.state === "missing-scopes"
-        ? (
-          <div>
-            <p
-              style={{
-                margin: "0 0 8px 0",
-                fontSize: "13px",
-                color: "#4b5563",
-              }}
-            >
-              Connected as{" "}
-              <strong>{info.email}</strong>, but this feature needs additional
-              permissions:
-            </p>
-            <ul style={{ margin: "0", paddingLeft: "20px", fontSize: "13px" }}>
-              {info.missingScopes.map((scope, i) => (
-                <li key={i} style={{ color: "#c2410c", marginBottom: "2px" }}>
-                  {SCOPE_DESCRIPTIONS[scope as ScopeKey]}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )
-        : null;
-
-      const stateConfig = {
-        "needs-login": {
-          title: "Sign In Required",
-          message: (
-            <span>Please sign in with your Google account to continue.</span>
-          ),
-          bgColor: "#fee2e2",
-          borderColor: "#ef4444",
-          titleColor: "#dc2626",
-        },
-        "missing-scopes": {
-          title: "Additional Permissions Needed",
-          message: missingScopesMessage,
-          bgColor: "#ffedd5",
-          borderColor: "#f97316",
-          titleColor: "#c2410c",
-        },
-        "token-expired": {
-          title: "Session Expired",
-          message: (
-            <span>
-              Your Google session has expired. Please sign in again to continue.
-            </span>
-          ),
-          bgColor: "#fee2e2",
-          borderColor: "#ef4444",
-          titleColor: "#dc2626",
-        },
-      };
-
-      const config = stateConfig[
-        info.state as "needs-login" | "missing-scopes" | "token-expired"
-      ];
-
-      return (
+    // --- Needs login UI ---
+    const needsLoginUI = (
+      <div
+        style={{
+          borderRadius: "8px",
+          border: "1px solid #ef4444",
+          overflow: "hidden",
+        }}
+      >
         <div
           style={{
-            borderRadius: "8px",
-            border: `1px solid ${config.borderColor}`,
-            overflow: "hidden",
+            padding: "12px 16px",
+            backgroundColor: "#fee2e2",
+            borderBottom: "1px solid #ef4444",
           }}
         >
-          <div
-            style={{
-              padding: "12px 16px",
-              backgroundColor: config.bgColor,
-              borderBottom: `1px solid ${config.borderColor}`,
-            }}
+          <h4
+            style={{ margin: "0 0 4px 0", color: "#dc2626", fontSize: "14px" }}
           >
-            <h4
-              style={{
-                margin: "0 0 4px 0",
-                color: config.titleColor,
-                fontSize: "14px",
-              }}
-            >
-              {config.title}
-            </h4>
-            <div style={{ margin: "0", fontSize: "13px", color: "#4b5563" }}>
-              {config.message || ""}
-            </div>
+            Sign In Required
+          </h4>
+          <div style={{ margin: "0", fontSize: "13px", color: "#4b5563" }}>
+            Please sign in with your Google account to continue.
           </div>
-          <div style={{ backgroundColor: "white" }}>
-            {info.pieceUI as any}
-          </div>
-          {actionButtonsRow}
         </div>
-      );
-    });
+        <div style={actionRowStyle}>
+          <button
+            type="button"
+            onClick={reauthenticate}
+            style={manageButtonStyle}
+          >
+            Manage this account
+          </button>
+          <button type="button" onClick={createAuth} style={altButtonStyle}>
+            + Use different account
+          </button>
+        </div>
+      </div>
+    );
 
-    // Ready state UI
-    const readyUI = computed(() => {
-      const info = authInfo;
-      if (info.state !== "ready") return null;
+    // --- Missing scopes UI ---
+    const missingScopesUI = (
+      <div
+        style={{
+          borderRadius: "8px",
+          border: "1px solid #f97316",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            padding: "12px 16px",
+            backgroundColor: "#ffedd5",
+            borderBottom: "1px solid #f97316",
+          }}
+        >
+          <h4
+            style={{ margin: "0 0 4px 0", color: "#c2410c", fontSize: "14px" }}
+          >
+            Additional Permissions Needed
+          </h4>
+          <div style={{ margin: "0", fontSize: "13px", color: "#4b5563" }}>
+            Connected as <strong>{currentEmail}</strong>, but missing:{" "}
+            {missingScopesList}
+          </div>
+        </div>
+        <div style={actionRowStyle}>
+          <button
+            type="button"
+            onClick={reauthenticate}
+            style={manageButtonStyle}
+          >
+            Manage this account
+          </button>
+          <button type="button" onClick={createAuth} style={altButtonStyle}>
+            + Use different account
+          </button>
+        </div>
+      </div>
+    );
 
-      return (
-        <div>
+    // --- Token expired UI ---
+    const tokenExpiredUI = (
+      <div
+        style={{
+          borderRadius: "8px",
+          border: "1px solid #ef4444",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            padding: "12px 16px",
+            backgroundColor: "#fee2e2",
+            borderBottom: "1px solid #ef4444",
+          }}
+        >
+          <h4
+            style={{ margin: "0 0 4px 0", color: "#dc2626", fontSize: "14px" }}
+          >
+            Session Expired
+          </h4>
+          <div style={{ margin: "0", fontSize: "13px", color: "#4b5563" }}>
+            Your Google session has expired. Please sign in again to continue.
+          </div>
+        </div>
+        <div style={actionRowStyle}>
+          <button
+            type="button"
+            onClick={reauthenticate}
+            style={manageButtonStyle}
+          >
+            Manage this account
+          </button>
+          <button type="button" onClick={createAuth} style={altButtonStyle}>
+            + Use different account
+          </button>
+        </div>
+      </div>
+    );
+
+    // --- Ready UI ---
+    const showTokenWarning = computed(() => tokenExpiryWarning === "warning");
+    const readyBorderRadius = computed(() =>
+      tokenExpiryWarning === "warning" ? "8px 8px 0 0" : "8px"
+    );
+    const readyBorderBottom = computed(() =>
+      tokenExpiryWarning === "warning" ? "none" : "1px solid #10b981"
+    );
+    const showExpiryInReady = computed(() => !!tokenExpiryDisplay);
+
+    const readyUI = (
+      <div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            padding: "12px 16px",
+            backgroundColor: "#d1fae5",
+            borderRadius: readyBorderRadius,
+            border: "1px solid #10b981",
+            borderBottom: readyBorderBottom,
+          }}
+        >
+          {wishResult.result?.userChip as any}
           <div
             style={{
+              marginLeft: "auto",
               display: "flex",
               alignItems: "center",
-              gap: "8px",
-              padding: "12px 16px",
-              backgroundColor: "#d1fae5",
-              borderRadius: info.tokenExpiryWarning === "warning"
-                ? "8px 8px 0 0"
-                : "8px",
-              border: "1px solid #10b981",
-              borderBottom: info.tokenExpiryWarning === "warning"
-                ? "none"
-                : "1px solid #10b981",
+              gap: "12px",
             }}
           >
-            {info.userChip as any}
-            <div
+            {ifElse(
+              showExpiryInReady,
+              <span style={{ fontSize: "12px", color: "#059669" }}>
+                {tokenExpiryDisplay}
+              </span>,
+              null,
+            )}
+            <button
+              type="button"
+              onClick={reauthenticate}
               style={{
-                marginLeft: "auto",
-                display: "flex",
-                alignItems: "center",
-                gap: "12px",
+                background: "none",
+                border: "none",
+                color: "#047857",
+                cursor: "pointer",
+                fontSize: "12px",
+                padding: "2px 6px",
+                borderRadius: "4px",
               }}
             >
-              {info.tokenExpiryDisplay && (
-                <span style={{ fontSize: "12px", color: "#059669" }}>
-                  {info.tokenExpiryDisplay}
-                </span>
-              )}
-              {switchButton}
-              {addButton}
-            </div>
+              Switch
+            </button>
+            <button
+              type="button"
+              onClick={createAuth}
+              style={{
+                background: "none",
+                border: "none",
+                color: "#047857",
+                cursor: "pointer",
+                fontSize: "12px",
+                padding: "2px 6px",
+                borderRadius: "4px",
+              }}
+            >
+              + Add
+            </button>
           </div>
-          {info.tokenExpiryWarning === "warning" && (
-            <div
-              style={{
-                padding: "8px 16px",
-                backgroundColor: "#fef3c7",
-                borderRadius: "0 0 8px 8px",
-                border: "1px solid #f59e0b",
-                borderTop: "none",
-                fontSize: "13px",
-                color: "#b45309",
-              }}
-            >
-              ⚠️ Token expires soon. You may need to re-authenticate shortly.
-            </div>
-          )}
         </div>
-      );
-    });
+        {ifElse(
+          showTokenWarning,
+          <div
+            style={{
+              padding: "8px 16px",
+              backgroundColor: "#fef3c7",
+              borderRadius: "0 0 8px 8px",
+              border: "1px solid #f59e0b",
+              borderTop: "none",
+              fontSize: "13px",
+              color: "#b45309",
+            }}
+          >
+            Token expires soon. You may need to re-authenticate shortly.
+          </div>,
+          null,
+        )}
+      </div>
+    );
 
-    // Compose fullUI using JSX conditionals
+    // --- Compose fullUI ---
     const fullUI = (
       <>
-        {isLoadingOrNotFound && loadingUI}
-        {isSelecting && selectingUI}
-        {needsAction && needsActionUI}
-        {isAuthReady && readyUI}
+        {ifElse(isLoading, loadingUI, null)}
+        {ifElse(isSelecting, selectingUI, null)}
+        {ifElse(isNeedsLogin, needsLoginUI, null)}
+        {ifElse(isMissingScopes, missingScopesUI, null)}
+        {ifElse(isTokenExpiredState, tokenExpiredUI, null)}
+        {ifElse(isReadyState, readyUI, null)}
       </>
     );
 
-    // ==========================================================================
+    // ========================================================================
     // RETURN
-    // ==========================================================================
-
-    // Helper getters - pre-unwrapped for convenience (avoids OpaqueRef footgun)
-    const isReady = computed(() => authInfo.state === "ready");
-    const currentEmail = authInfo.email;
-    const currentState = authInfo.state;
-
-    // Extract the writable auth cell directly from wishResult (not through derive)
-    // IMPORTANT: Using computed() preserves the original cell reference for token refresh writes
-    // derive() would create a read-only projection, breaking auth.update() calls in clients
-    const auth = computed(() =>
-      (wishResult as UnwrappedWishResult | null)?.result?.auth ?? null
-    );
-
+    // ========================================================================
     return {
-      // Core auth cell - WRITABLE for token refresh
-      // Note: This is extracted from authInfo.authCell which preserves the original cell reference
-      auth,
-
-      // Single computed with all state - use authInfo.state for state checks
+      auth: computed(() => (auth ?? null) as Auth | null),
       authInfo,
-
-      // Helper getters (pre-unwrapped to avoid OpaqueRef issues)
       isReady,
       currentEmail,
       currentState,
-
-      // UI Components
       pickerUI,
       statusUI,
       fullUI,
-
-      // Pattern's main UI
       [UI]: fullUI,
     };
   },
@@ -1036,5 +842,4 @@ export const GoogleAuthManager = pattern<
 export default GoogleAuthManager;
 
 // Backward-compatible export for existing code that uses createGoogleAuth()
-// This allows patterns to call GoogleAuthManager as a function
 export const createGoogleAuth = GoogleAuthManager;
