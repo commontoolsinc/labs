@@ -154,7 +154,7 @@ export async function newPiece(
       }`,
     );
     console.warn(
-      "Patterns using wish('#mentionable') or wish('#default') may not work.",
+      "Patterns using wish({ query: '#mentionable' }) or wish({ query: '#default' }) may not work.",
     );
     // Continue anyway - user's pattern might not need defaultPattern
   }

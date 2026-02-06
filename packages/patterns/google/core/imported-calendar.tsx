@@ -354,8 +354,8 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
   // WISH FOR CALENDAR EVENTS from Google Calendar Importer
   // ==========================================================================
   const { events: importedEvents } = wish<{ events: CalendarEvent[] }>(
-    "#calendarEvents",
-  );
+    { query: "#calendarEvents" },
+  ).result;
 
   // Navigation State (Writable so navigation buttons work)
   const startDate = Writable.of(getWeekStart(getTodayDate()));

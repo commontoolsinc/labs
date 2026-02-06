@@ -17,7 +17,7 @@ interface Charm {
 }
 
 export default pattern(() => {
-  const { allCharms } = wish<{ allCharms: Charm[] }>("/");
+  const { allCharms } = wish<{ allCharms: Charm[] }>({ query: "/" }).result;
 
   return {
     [NAME]: computed(() => `Charms (${allCharms.length})`),

@@ -5,7 +5,7 @@
  * Refactored to use the gmail-agentic-search base pattern.
  * Finds hotel loyalty program membership numbers in Gmail.
  *
- * Usage: wish("#hotelMemberships") to get discovered memberships.
+ * Usage: wish({ query: "#hotelMemberships" }) to get discovered memberships.
  */
 import {
   Default,
@@ -571,7 +571,7 @@ Report memberships as you find them. Don't wait until the end.`,
     return {
       [NAME]: "🏨 Hotel Membership Extractor",
 
-      // Output: Export memberships for wish("#hotelMemberships")
+      // Output: Export memberships for wish({ query: "#hotelMemberships" })
       memberships,
       lastScanAt,
       count: totalMemberships,

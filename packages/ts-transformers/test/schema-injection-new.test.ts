@@ -72,8 +72,8 @@ Deno.test("Schema Injection - wish", async () => {
   const code = `
     /// <cts-enable />
     import { wish } from "commontools";
-    const w1 = wish<string>("query");
-    const w2: string = wish("query");
+    const w1 = wish<string>({ query: "query" });
+    const w2: string = wish({ query: "query" });
   `.trim();
 
   const result = await transformSource(code, options);
@@ -81,12 +81,12 @@ Deno.test("Schema Injection - wish", async () => {
 
   assert(
     normalize(result).includes(
-      'wish<string>("query", { type: "string" } as const satisfies __ctHelpers.JSONSchema)',
+      'wish<string>({ query: "query" }, { type: "string" } as const satisfies __ctHelpers.JSONSchema)',
     ),
   );
   assert(
     normalize(result).includes(
-      'wish("query", { type: "string" } as const satisfies __ctHelpers.JSONSchema)',
+      'wish({ query: "query" }, { type: "string" } as const satisfies __ctHelpers.JSONSchema)',
     ),
   );
 });

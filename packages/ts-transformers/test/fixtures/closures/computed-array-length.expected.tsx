@@ -17,7 +17,7 @@ interface Charm {
 export default pattern(() => {
     const { allCharms } = wish<{
         allCharms: Charm[];
-    }>("/", {
+    }>({ query: "/" }, {
         type: "object",
         properties: {
             allCharms: {
@@ -42,7 +42,7 @@ export default pattern(() => {
                 required: ["id", "name"]
             }
         }
-    } as const satisfies __ctHelpers.JSONSchema);
+    } as const satisfies __ctHelpers.JSONSchema).result;
     return {
         [NAME]: __ctHelpers.derive({
             type: "object",

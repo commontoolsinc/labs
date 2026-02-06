@@ -195,37 +195,40 @@ This branch adds automatic schema injection for:
 
 **Happy Path:**
 
-- [x] Explicit type arg: `wish<string>("query")`
+- [x] Explicit type arg: `wish<string>({ query: "query" })`
 - [x] No type arg, infer from variable annotation:
-      `const w: string = wish("query")`
+      `const w: string = wish({ query: "query" })`
 - [ ] No type arg, infer from parameter:
-      `function f(w: number = wish("query")) {}`
+      `function f(w: number = wish({ query: "query" })) {}`
 - [ ] No type arg, infer from return type:
-      `function f(): string { return wish("query"); }`
-- [ ] Infer from WishResult wrapper: `const w: WishResult<T> = wish("query")`
+      `function f(): string { return wish({ query: "query" }); }`
+- [ ] Infer from WishResult wrapper:
+      `const w: WishResult<T> = wish({ query: "query" })`
 
 **Edge Cases:**
 
-- [ ] Generic type: `wish<Array<User>>("query")`
-- [ ] Union type: `wish<string | number>("query")`
-- [ ] Complex nested type: `wish<{ users: User[], total: number }>("query")`
+- [ ] Generic type: `wish<Array<User>>({ query: "query" })`
+- [ ] Union type: `wish<string | number>({ query: "query" })`
+- [ ] Complex nested type:
+      `wish<{ users: User[], total: number }>({ query: "query" })`
 
 #### B. Query Argument Variations
 
 **Different query formats:**
 
-- [ ] String literal: `wish<T>("simple query")`
-- [ ] Template literal: `wish<T>(\`query with \${var}\`)`
-- [ ] Variable: `const q = "query"; wish<T>(q)`
-- [ ] Expression: `wish<T>("prefix" + variable)`
+- [ ] String literal: `wish<T>({ query: "simple query" })`
+- [ ] Template literal: `wish<T>({ query: \`query with \${var}\` })`
+- [ ] Variable: `const q = "query"; wish<T>({ query: q })`
+- [ ] Expression: `wish<T>({ query: "prefix" + variable })`
 
 #### C. Double-Injection Prevention
 
 **Should NOT transform:**
 
-- [ ] Already has 2 arguments: `wish<T>("query", schema)` → leave unchanged
-- [ ] Has more than 2 arguments: `wish<T>("query", schema, extra)` → leave
+- [ ] Already has 2 arguments: `wish<T>({ query: "query" }, schema)` → leave
       unchanged
+- [ ] Has more than 2 arguments: `wish<T>({ query: "query" }, schema, extra)` →
+      leave unchanged
 
 ---
 
@@ -325,7 +328,7 @@ This branch adds automatic schema injection for:
 
 - [ ] `cell(value, schema)` → leave unchanged
 - [ ] `Cell.for("x").asSchema(schema)` → leave unchanged
-- [ ] `wish("query", schema)` → leave unchanged
+- [ ] `wish({ query: "query" }, schema)` → leave unchanged
 - [ ] `generateObject({ schema })` → leave unchanged
 
 #### C. Non-CommonTools Functions

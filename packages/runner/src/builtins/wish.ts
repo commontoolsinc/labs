@@ -477,19 +477,14 @@ function cellLinkUI(cell: Cell<unknown>): VNode {
 }
 
 const TARGET_SCHEMA = {
-  anyOf: [{
-    type: "string",
-    default: "",
-  }, {
-    type: "object",
-    properties: {
-      query: { type: "string" },
-      path: { type: "array", items: { type: "string" } },
-      context: { type: "object", additionalProperties: { asCell: true } },
-      scope: { type: "array", items: { type: "string" } },
-    },
-    required: ["query"],
-  }],
+  type: "object",
+  properties: {
+    query: { type: "string" },
+    path: { type: "array", items: { type: "string" } },
+    context: { type: "object", additionalProperties: { asCell: true } },
+    scope: { type: "array", items: { type: "string" } },
+  },
+  required: ["query"],
 } as const satisfies JSONSchema;
 
 export function wish(
@@ -612,57 +607,7 @@ export function wish(
     const inputsWithTx = inputsCell.withTx(tx);
     const targetValue = inputsWithTx.asSchema(TARGET_SCHEMA).get();
 
-    // TODO(seefeld): Remove legacy wish string support mid December 2025
-    if (typeof targetValue === "string") {
-      const wishTarget = targetValue.trim();
-      if (!wishTarget) {
-        sendResult(tx, undefined);
-        return;
-      }
-      try {
-        const parsed = parseWishTarget(wishTarget);
-        const ctx: WishContext = { runtime, tx, parentCell };
-        const baseResolutions = await resolveBase(parsed, ctx);
-
-        // Just use the first result (if there aren't any, the above throws)
-        const combinedPath = baseResolutions[0].pathPrefix
-          ? [...baseResolutions[0].pathPrefix, ...parsed.path]
-          : parsed.path;
-        const resolvedCell = resolvePath(baseResolutions[0].cell, combinedPath);
-        // Sync the cell to ensure data is loaded (required for pull-based scheduler)
-        await resolvedCell.sync();
-        sendResult(tx, resolvedCell);
-      } catch (e) {
-        // Provide helpful feedback for common defaultPattern issues
-        if (
-          wishTarget.startsWith("#mentionable") ||
-          wishTarget.startsWith("#default")
-        ) {
-          const errorMsg =
-            `${wishTarget} failed: ${
-              e instanceof Error ? e.message : String(e)
-            }. This usually means the space's defaultPattern is not initialized. ` +
-            `Visit the space in browser first, or ensure ensureDefaultPattern() is called.`;
-          console.warn(errorMsg);
-          // Return error state instead of undefined for better UX
-          sendResult(
-            tx,
-            { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<
-              any
-            >,
-          );
-          return;
-        }
-
-        // For other errors, also return error state
-        const errorMsg = e instanceof Error ? e.message : String(e);
-        sendResult(
-          tx,
-          { error: errorMsg, [UI]: errorUI(errorMsg) } satisfies WishState<any>,
-        );
-      }
-      return;
-    } else if (typeof targetValue === "object") {
+    if (typeof targetValue === "object") {
       const { query, path, schema, context, scope } = targetValue as WishParams;
 
       if (query === undefined || query === null || query === "") {
