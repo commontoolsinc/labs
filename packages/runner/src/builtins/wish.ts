@@ -677,18 +677,16 @@ export function wish(
       }
 
       // If the query is a path or a hash tag, resolve it directly
-      if (query.startsWith("/") || /^#[a-zA-Z0-9-]+$/.test(query)) {
+      if (query.startsWith("/") || /^#[a-zA-Z0-9-]+/.test(query)) {
         try {
-          const parsed: ParsedWishTarget = {
-            key: query as WishTag,
-            path: path ?? [],
-          };
+          const parsed = parseWishTarget(query);
+          parsed.path = [...parsed.path, ...(path ?? [])];
           const ctx: WishContext = { runtime, tx, parentCell, scope };
           const baseResolutions = await resolveBase(parsed, ctx);
           const resultCells = baseResolutions.map((baseResolution) => {
             const combinedPath = baseResolution.pathPrefix
-              ? [...baseResolution.pathPrefix, ...(path ?? [])]
-              : path ?? [];
+              ? [...baseResolution.pathPrefix, ...parsed.path]
+              : parsed.path;
             const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
             return schema ? resolvedCell.asSchema(schema) : resolvedCell;
           });
