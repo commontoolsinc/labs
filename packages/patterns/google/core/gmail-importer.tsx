@@ -1082,20 +1082,19 @@ export default pattern<{
     const historyId = Writable.of("").for("historyId");
     const fetching = Writable.of(false).for("fetching");
 
-    // Use minimal auth manager - working baseline
+    // ULTRA MINIMAL TEST
     const authManager = GoogleAuthManagerMinimal({});
 
-    // Extract auth from the sub-pattern's wishResult using derive
-    const wishedAuth = derive(authManager.wishResult, (wr: any) => {
-      return wr?.result?.auth ?? null;
+    // Q1: Can we access wishResult?
+    const wishedAuth = computed(() => {
+      console.log("[gmail-importer] derive fired, auth:", authManager.auth);
+      return authManager.auth;
     });
 
-    // Use the sub-pattern's UI
+    // Q2: Does authManager[UI] render?
     const authUI = authManager[UI];
 
-    // Use override auth if provided, otherwise use auth from manager
     const auth = ifElse(overrideAuth.token, overrideAuth, wishedAuth);
-
     const isReady = computed(() => !!auth?.token);
     const currentEmail = computed(() => auth.user?.email ?? "");
 

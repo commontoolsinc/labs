@@ -342,7 +342,7 @@ export const GoogleAuthManager = pattern<
     });
 
     // CRITICAL: wish() at pattern body level, NOT inside derive
-    const wishResult = wish<GoogleAuthPiece>({ query: tag });
+    const wishResult = wish<GoogleAuthPiece>({ query: tag, scope: [".", "~"] });
 
     // computed() closes over all accessed cells (wishResult, requiredScopes, debugMode)
     const authInfo = computed((): AuthInfo => {
