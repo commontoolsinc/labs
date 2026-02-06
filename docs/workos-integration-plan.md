@@ -82,6 +82,10 @@ WORKOS_API_KEY: z.string().default(""),
 WORKOS_CLIENT_ID: z.string().default(""),
 WORKOS_REDIRECT_URI: z.string().default(""),
 WORKOS_WEBHOOK_SECRET: z.string().default(""),
+// Dedicated secret for deriving WorkOS user/org DIDs.
+// Separate from IDENTITY_PASSPHRASE to isolate from server key rotation.
+// MUST be kept stable — changing this re-keys all WorkOS-derived identities.
+WORKOS_IDENTITY_SECRET: z.string().default(""),
 ```
 
 **Dependency:** Add the `@workos-inc/node` SDK. It supports Deno via the
@@ -137,41 +141,90 @@ export class WorkOSClient {
 
 The critical design decision: how to map a WorkOS user to a Common Tools DID.
 
-**Approach: Server-derived deterministic identity**
+**Approach: Dedicated WorkOS root key, separate from server identity**
 
-The server holds a root secret. For each WorkOS user, it deterministically
-derives an Ed25519 identity from `server_secret + workos_user_id`. This means:
+A dedicated root key (derived from `WORKOS_IDENTITY_SECRET` env var) is used
+exclusively for WorkOS identity derivation. This is intentionally decoupled
+from the server's operational identity (`IDENTITY` / `IDENTITY_PASSPHRASE`) so
+that server key rotation doesn't break WorkOS-derived DIDs.
 
-- Same WorkOS user always gets the same DID
-- The server is the trust anchor (acceptable for enterprise deployments)
-- No passkey needed for enterprise users
+WorkOS user IDs are globally unique (prefixed UUIDs like
+`user_01E4ZCR3C56J083X43JQXF3JK5`), so the derivation path
+`workos:user:{id}` is collision-free.
+
+The derived identities are standard Ed25519 keypairs and produce `did:key:*`
+DIDs. They participate in the existing UCAN/ACL auth system without any changes
+to the identity or memory packages.
 
 ```typescript
 import { Identity } from "@commontools/identity";
-import { identity as serverIdentity } from "@/lib/identity.ts";
+import env from "@/env.ts";
+
+// Dedicated root key for all WorkOS identity derivation.
+// Separate from the server's operational identity to isolate
+// from server key rotation.
+const workosRoot: Identity = await Identity.fromPassphrase(
+  env.WORKOS_IDENTITY_SECRET,
+);
 
 /**
  * Derive a deterministic Common Tools identity for a WorkOS user.
- * Uses the server's root identity to derive a child key scoped to
- * the WorkOS user ID, ensuring consistency across sessions.
+ * Same user ID always yields the same DID.
  */
 export async function identityForWorkOSUser(
   workosUserId: string,
 ): Promise<Identity> {
-  // Deterministic derivation: same user ID always yields same DID
-  return serverIdentity.derive(`workos:user:${workosUserId}`);
+  return workosRoot.derive(`workos:user:${workosUserId}`);
 }
 
 /**
- * Derive a deterministic space DID for a WorkOS organization.
- * All members of the org share this space.
+ * Derive a deterministic space identity for a WorkOS organization.
+ *
+ * This identity owns the org space (signs the first transaction to
+ * anchor it). It immediately delegates to org members via ACL entries.
+ * The server holds this key and uses it for:
+ *   - initial space creation (first transaction)
+ *   - ACL changes triggered by directory sync webhooks
+ *
+ * Once the platform supports proper key rotation / delegation chains,
+ * this becomes one node in that delegation tree.
  */
 export async function spaceForWorkOSOrg(
   workosOrgId: string,
 ): Promise<Identity> {
-  return serverIdentity.derive(`workos:org:${workosOrgId}`);
+  return workosRoot.derive(`workos:org:${workosOrgId}`);
 }
 ```
+
+#### Space Ownership Model
+
+When a WorkOS org space is first accessed:
+
+1. The server derives the space identity via `spaceForWorkOSOrg(orgId)`
+2. The server signs the first transaction with this identity, anchoring the
+   space in an unforgeable `did:key:*` — same as any other space
+3. The server immediately sets up ACL entries granting org members access
+4. Ongoing ACL mutations (from directory sync webhooks) are signed by this
+   same org space identity
+
+The org space identity is held server-side. Individual users interact with
+the space using their own `did:key:*` (derived from their WorkOS user ID),
+authorized via ACL entries.
+
+#### Company-Provided Keys (Opt-in, Future)
+
+For enterprises that want sovereign control over their space:
+
+1. Company generates their own Ed25519 keypair
+2. Their space DID is `did:key:{company_pubkey}` — they own it
+3. They create a delegation granting the WorkOS-derived org identity
+   OWNER-level access in the ACL
+4. WorkOS integration operates under this delegation
+5. Company can revoke and re-key independently
+
+This inverts the trust model: the company is the root, WorkOS is the delegate.
+Requires the company to manage key material, so it's opt-in for sophisticated
+deployments.
 
 ### 1.4 Server Routes
 
@@ -544,14 +597,20 @@ that provides buttons to:
 
 ## Key Design Decisions
 
-### 1. Server-derived identity (not client-side)
+### 1. Dedicated WorkOS root key (not the server identity)
 
-For WorkOS users, the server derives their DID from `serverRoot.derive("workos:user:{id}")`.
-This is a trust model shift — the server becomes the identity authority for
-enterprise users. This is acceptable because:
-- Enterprise deployments already trust their IdP + the deployment operator
-- The alternative (passkey per user) defeats the purpose of SSO
-- Personal passkey users continue to derive identity client-side
+All WorkOS-derived DIDs (users and org spaces) come from a dedicated root key
+(`WORKOS_IDENTITY_SECRET`), separate from the server's operational identity.
+This means:
+- Server key rotation doesn't break WorkOS-derived identities
+- The WorkOS root is a single secret to protect/back up
+- Enterprise deployments trust their IdP + the WorkOS root key holder
+- Personal passkey users continue to derive identity client-side (unaffected)
+
+The derived identities are standard `did:key:*` — they participate in the
+existing UCAN/ACL system unchanged. No custom DID methods needed (a future
+`did:workos:*` method could add resolution-level semantics but isn't required
+for the first take).
 
 ### 2. WorkOS SDK vs raw fetch
 
@@ -614,3 +673,15 @@ personal identity is sovereign.
 4. **Key rotation** — If a WorkOS user is deprovisioned and re-provisioned,
    they get the same DID (deterministic from user ID). Is that desired?
    Probably yes — their data should persist.
+
+5. **`WORKOS_IDENTITY_SECRET` lifecycle** — This secret is the root of all
+   WorkOS-derived identities. Changing it re-keys every user and org space.
+   Need a clear operational story: how is it generated, backed up, and
+   (eventually) rotated? Once the platform has proper delegation chains,
+   rotation becomes: derive from new secret, delegate from old identities
+   to new ones.
+
+6. **Company-provided keys** — The opt-in model where a company provides
+   their own keypair and delegates to WorkOS is clean but adds onboarding
+   complexity. Should this be a Phase 2+ feature, or should we design the
+   schema to accommodate it from the start (even if not exposed in UI)?
