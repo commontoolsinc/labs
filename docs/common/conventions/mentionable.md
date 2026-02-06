@@ -44,4 +44,4 @@ const result = wish<{ content: string }>({ query: "#note", scope: ["."] });
 const result = wish<{ content: string }>({ query: "#note", scope: ["~", "."] });
 ```
 
-See [[FAVORITES]] for full documentation of the `wish` scope parameter.
+See [[wish]] for full documentation of `wish()`, including the result shape and scope parameter.
