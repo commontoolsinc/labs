@@ -114,14 +114,27 @@ export const GoogleAuthManagerMinimal = pattern<
   // Actions
   const createAuth = action(() => {
     const selected: Record<ScopeKey, boolean> = {
-      gmail: false, gmailSend: false, gmailModify: false,
-      calendar: false, calendarWrite: false,
-      drive: false, docs: false, contacts: false,
+      gmail: false,
+      gmailSend: false,
+      gmailModify: false,
+      calendar: false,
+      calendarWrite: false,
+      drive: false,
+      docs: false,
+      contacts: false,
     };
     for (const key of requiredScopes as ScopeKey[]) selected[key] = true;
     return navigateTo(GoogleAuth({
       selectedScopes: selected,
-      auth: { token: "", tokenType: "", scope: [], expiresIn: 0, expiresAt: 0, refreshToken: "", user: { email: "", name: "", picture: "" } },
+      auth: {
+        token: "",
+        tokenType: "",
+        scope: [],
+        expiresIn: 0,
+        expiresAt: 0,
+        refreshToken: "",
+        user: { email: "", name: "", picture: "" },
+      },
     }));
   });
 
@@ -129,11 +142,11 @@ export const GoogleAuthManagerMinimal = pattern<
 
   // UI color based on state
   const bgColor = computed(() => {
-    if (!hasAuth) return "#fee2e2";      // red - no auth
-    if (!hasToken) return "#fef3c7";     // yellow - needs login
-    if (isExpired) return "#fecaca";     // light red - expired
-    if (!hasScopes) return "#ffedd5";    // orange - missing scopes
-    return "#d1fae5";                    // green - ready
+    if (!hasAuth) return "#fee2e2"; // red - no auth
+    if (!hasToken) return "#fef3c7"; // yellow - needs login
+    if (isExpired) return "#fecaca"; // light red - expired
+    if (!hasScopes) return "#ffedd5"; // orange - missing scopes
+    return "#d1fae5"; // green - ready
   });
 
   return {
@@ -142,7 +155,13 @@ export const GoogleAuthManagerMinimal = pattern<
     isExpired,
     missingScopes,
     [UI]: (
-      <div style={{ padding: "8px", backgroundColor: bgColor, borderRadius: "6px" }}>
+      <div
+        style={{
+          padding: "8px",
+          backgroundColor: bgColor,
+          borderRadius: "6px",
+        }}
+      >
         <ct-select
           items={[
             { label: "Any", value: "#googleAuth" },
@@ -168,8 +187,16 @@ export const GoogleAuthManagerMinimal = pattern<
                 <span>Authenticated as {auth?.user.email}</span>,
                 // Missing scopes state
                 <div>
-                  <span>Missing: {computed(() => (missingScopes as ScopeKey[]).map((s) => SCOPE_DESCRIPTIONS[s]).join(", "))}</span>
-                  <ct-button onClick={reauthenticate}>Add permissions</ct-button>
+                  <span>
+                    Missing: {computed(() =>
+                      (missingScopes as ScopeKey[]).map((s) =>
+                        SCOPE_DESCRIPTIONS[s]
+                      ).join(", ")
+                    )}
+                  </span>
+                  <ct-button onClick={reauthenticate}>
+                    Add permissions
+                  </ct-button>
                 </div>,
               ),
             ),

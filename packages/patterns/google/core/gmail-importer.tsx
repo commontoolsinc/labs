@@ -1091,7 +1091,9 @@ export default pattern<{
     const authUI = authManager[UI];
 
     const auth = ifElse(overrideAuth.token, overrideAuth, wishedAuth);
-    const isReady = computed(() => overrideAuth.token ? true : authManager.isReady);
+    const isReady = computed(() =>
+      overrideAuth.token ? true : authManager.isReady
+    );
     const currentEmail = computed(() => auth.user?.email ?? "");
 
     const googleUpdaterStream = googleUpdater({
