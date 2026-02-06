@@ -111,6 +111,53 @@ Task({
 
 **Always run pattern-critic before first deploy.** It's fast (uses haiku) and catches mistakes that cause runtime errors. Skip only for tiny fixes where you're confident.
 
+## action() vs handler()
+
+**Default to `action()`** — define inside pattern body, close over variables:
+```typescript
+const Note = pattern<NoteInput, NoteOutput>(({ title, content }) => {
+  const menuOpen = Writable.of(false);
+
+  // Action closes over menuOpen - no binding needed
+  const toggleMenu = action(() => menuOpen.set(!menuOpen.get()));
+
+  // Action closes over content - no binding needed
+  const clearContent = action(() => content.set(""));
+
+  return { /* ... */ };
+});
+```
+
+**Use `handler()` only for per-item binding** (e.g., in `.map()` or when the same handler needs different data bound in different places):
+```typescript
+// Module scope - will be bound with different items
+const deleteItem = handler<void, { item: Writable<Item>; items: Writable<Item[]> }>(
+  (_, { item, items }) => {
+    const list = items.get();
+    items.set(list.filter(i => i !== item));
+  }
+);
+
+const List = pattern<ListInput, ListOutput>(({ items }) => ({
+  [UI]: (
+    <ul>
+      {items.map((item) => (
+        <li>
+          {item.name}
+          {/* Each item gets its own binding */}
+          <button onClick={deleteItem({ item, items })}>Delete</button>
+        </li>
+      ))}
+    </ul>
+  ),
+  items,
+}));
+```
+
+**Decision question:** Does this handler need different data bound to different instantiations?
+- **YES** → Use `handler()` at module scope, bind with item-specific data
+- **NO** → Use `action()` inside pattern body, close over what you need
+
 ## Documentation
 
 Start with `docs/common/patterns/`—especially `docs/common/patterns/meta/` which contains generalizable idioms that grow over time.

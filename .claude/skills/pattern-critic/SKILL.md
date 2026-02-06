@@ -114,7 +114,35 @@ Check that these are NOT inside the pattern body:
 | Handler created per-item in `.map()` | Create handler once, bind with item |
 | Expensive computation inside loop | Pre-compute outside, reference result |
 
-### 11. Design Review
+### 11. Action vs Handler Choice
+
+**Key Principle:** Prefer `action()` by default. Use `handler()` only when you need to bind different data to different handler instantiations.
+
+| Violation | Fix |
+|-----------|-----|
+| `handler()` at module scope not used in `.map()` or multi-binding scenario | Convert to `action()` inside pattern body |
+| `handler()` when all instantiations use same data | Convert to `action()` |
+| `action()` inside `.map()` creating new action per item | Use `handler()` at module scope with binding |
+
+**When to use `action()`** (the default):
+- Handler is specific to this pattern
+- Closes over pattern-scope variables (inputs, Writables, computeds, wish results)
+- All instantiations use the same closed-over data
+- Examples: button clicks, form submissions, modal open/close, state toggles
+
+**When to use `handler()`**:
+- You need different data bound per instantiation
+- Common scenarios:
+  - `.map()` loops where each item needs its own binding
+  - Reusable handlers shared across multiple patterns
+  - Same handler definition called with different bindings in different places
+- Examples: list item clicks, per-row actions in tables, delete buttons per item
+
+**Decision Question:** Does this handler need different data bound to different instantiations?
+- YES → Use `handler()` at module scope, bind with item-specific data
+- NO → Use `action()` inside pattern body, close over what you need
+
+### 12. Design Review
 
 Check the domain model quality:
 
@@ -127,7 +155,7 @@ Check the domain model quality:
 | Self-documenting types | Type names and fields are clear without comments |
 | Appropriate granularity | Not too fine (trivial patterns) or too coarse (god patterns) |
 
-### 12. Regression Check (for updates only)
+### 13. Regression Check (for updates only)
 
 When reviewing changes to existing code:
 
@@ -159,12 +187,17 @@ When reviewing changes to existing code:
 
 [...continue for all categories...]
 
-### 11. Design Review
+### 11. Action vs Handler Choice
+- [PASS] Actions used for pattern-specific handlers
+- [FAIL] handler() used but not needed for multi-binding (line 45)
+  Fix: Convert to action() inside pattern body
+
+### 12. Design Review
 - [PASS] Clear entity boundaries
 - [WARN] Handler names could be clearer (moveCard vs reorderCard)
 - [PASS] Unidirectional data flow
 
-### 12. Regression Check (if updating)
+### 13. Regression Check (if updating)
 - [PASS] Existing tests pass
 - [N/A] No type signature changes
 
@@ -189,14 +222,52 @@ When reviewing changes to existing code:
 
 ## Quick Patterns
 
-### Correct Module-Scope Handler
+### Correct action() Usage (Default Choice)
 ```typescript
-const addItem = handler<{ title: string }, { items: Writable<Item[]> }>(
-  ({ title }, { items }) => items.push({ title })
+// action() inside pattern body - closes over pattern variables
+export default pattern<MyInput, MyOutput>(({ items, title }) => {
+  const menuOpen = Writable.of(false);
+
+  // Action closes over menuOpen - no binding needed
+  const toggleMenu = action(() => menuOpen.set(!menuOpen.get()));
+
+  // Action closes over items - no binding needed
+  const addItem = action(() => items.push({ title: title.get() }));
+
+  return {
+    [UI]: (
+      <>
+        <ct-button onClick={toggleMenu}>Menu</ct-button>
+        <ct-button onClick={addItem}>Add</ct-button>
+      </>
+    ),
+    items,
+  };
+});
+```
+
+### Correct handler() Usage (Only for Multi-Binding)
+```typescript
+// handler() at module scope - will be bound with different items in .map()
+const deleteItem = handler<void, { item: Writable<Item>; items: Writable<Item[]> }>(
+  (_, { item, items }) => {
+    const list = items.get();
+    items.set(list.filter(i => i !== item));
+  }
 );
 
-export default pattern<Input, Input>(({ items }) => ({
-  [UI]: <ct-button onClick={addItem({ items })}>Add</ct-button>,
+export default pattern<MyInput, MyOutput>(({ items }) => ({
+  [UI]: (
+    <ul>
+      {items.map((item) => (
+        <li>
+          {item.name}
+          {/* Each item gets its own binding */}
+          <ct-button onClick={deleteItem({ item, items })}>Delete</ct-button>
+        </li>
+      ))}
+    </ul>
+  ),
   items,
 }));
 ```
