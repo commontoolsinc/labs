@@ -81,6 +81,12 @@ directly. What is persisted:
 From this persistent data, the system can reconstruct the dataflow graph by
 loading recipes and registering handlers.
 
+The dependency graph is also **dynamic and state-dependent**. Conditional
+constructs like `ifElse(cond, left, right)` cause downstream nodes to react to
+changes in `left` or `right` depending on the current value of `cond`. The
+edges in the graph shift as state changes. This means the set of dependencies
+for a given computation can only be known by actually running it.
+
 ### Subscription Mechanisms
 
 #### `sink()` — Subscribe to Changes
@@ -174,13 +180,31 @@ This would eliminate the special-casing for streams.
 
 ---
 
-## Open Questions
+## Open Questions (Answered)
 
-- What is the exact scheduling algorithm (priority, ordering)?
-- How are cycles in the dependency graph handled?
-- What are the consistency guarantees during propagation?
-- How does batching work for multiple simultaneous changes?
-- What is the relationship between reactivity and transactions?
+- ~~What is the exact scheduling algorithm?~~ Two implementations exist: **push**
+  (eagerly executes all dirty nodes) and **pull** (only computes what is needed,
+  driven by dirty effects registered via `.sink()` or `.pull()` calls). Both
+  topologically sort the dirty nodes before execution.
+- ~~How are cycles in the dependency graph handled?~~ Cycles are detected and
+  re-executed in a tight loop with bounds. The expectation is that they converge
+  quickly.
+- ~~What are the consistency guarantees during propagation?~~ Effects (sinks)
+  should only run once all computations are done, so they observe a consistent
+  state. Exceptions exist for deliberate debouncing or threshold-based execution.
+- ~~How does batching work for multiple simultaneous changes?~~ Each
+  action/handler invocation is its own transaction. The transaction mechanism is
+  used for marking dependencies dirty, which then triggers propagation.
+- ~~What is the relationship between reactivity and transactions?~~ See above —
+  the transaction commit is the event that marks dependencies dirty and triggers
+  the reactive propagation cycle.
+
+## Remaining Open Questions
+
+- Should the last reads made by an action be persisted? This would allow
+  reconstructing current dependency edges on load and determining dirtiness
+  from changes without re-running the computation.
+- How should deliberate debouncing and threshold-based execution be specified?
 
 ---
 

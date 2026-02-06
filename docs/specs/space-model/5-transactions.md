@@ -84,9 +84,12 @@ Transaction B has committed, so A's baseline already reflects B's changes.
 
 This system does not implement SQL-style transaction isolation. Key differences:
 
-- **Live references, not snapshots**: `cell.get()` returns a live proxy to
-  committed state. If another transaction commits while yours is open, your
-  previously-read reference reflects their changes — no isolation.
+- **Live references, not snapshots**: For cells with `any` type (no schema),
+  `cell.get()` returns a live proxy to committed state. If another transaction
+  commits while yours is open, your previously-read reference reflects their
+  changes — no isolation. (This proxy behavior exists because for untyped cells,
+  reading eagerly might require crawling the entire space via links. Cells with
+  schemas may behave differently since the schema scopes the read.)
 
 - **Conflict detection is baseline-based**: The first access to a cell (read
   or write) captures the committed value as a baseline. If the committed value
@@ -157,9 +160,12 @@ streaming) builds on top.
 
 ## Open Questions
 
-- How do nested/child transactions work (if at all)?
-- How are transactions serialized for storage?
-- What consistency guarantees exist across spaces?
+- ~~How do nested/child transactions work (if at all)?~~ Not supported. For
+  cases where nested semantics might be useful (e.g. a chain of events with
+  rollback), branches and merging branches may be the better mechanism.
+  Transactions are intended for short-lived operations.
+- ~~How are transactions serialized for storage?~~ As UCAN invocations.
+- ~~What consistency guarantees exist across spaces?~~ None so far.
 
 ---
 

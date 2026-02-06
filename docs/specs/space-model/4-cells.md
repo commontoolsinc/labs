@@ -209,18 +209,21 @@ pattern-level API is:
 - **Stream**: `.send()`
 
 `Writable<T>` is a pure type alias for `Cell<T>` — same interface, same runtime
-object. It is nominally a documentation convention to declare write intent, but
-in practice every use of `Cell<T>` in pattern code is also a write context
-(handler state parameters, input interfaces whose fields get mutated). The
-codebase is inconsistent about which name is used — some patterns write
-`Writable<T>`, others write `Cell<T>` in identical roles. The alias carries no
-enforced semantics and no actual information.
+object. It carries no enforced semantics: the runtime does not distinguish the
+two. However, the naming serves a practical purpose: LLM-based code generators
+were observed to confuse read-only pattern parameters (which are also reactive)
+with writable state when both used the `Cell<T>` name. Renaming the writable
+variant improved LLM comprehension of intent. The codebase is currently
+inconsistent about which name is used — some patterns write `Writable<T>`,
+others write `Cell<T>` in identical roles — but the intent is for `Writable<T>`
+to signal write access.
 
 The restricted variants (`ReadonlyCell`, `WriteonlyCell`, `ComparableCell`,
-`OpaqueCell`) are either aspirational — intended for future enforcement of
-capability restrictions — or dead weight. This should be resolved: either
-patterns should start using the restricted types (enforcing least-privilege), or
-the unused variants should be removed to reduce conceptual surface area.
+`OpaqueCell`) are not yet used by pattern code. The plan is to introduce a
+transformer step that automatically narrows declared types to match actual usage
+— e.g. `OpaqueCell` for reference-only passing, `WriteonlyCell` for write-only
+cells. This would enforce least-privilege without requiring pattern authors to
+manually select the right variant.
 
 ### Unification via Timestamps
 
@@ -269,6 +272,32 @@ The "event-ness" emerges from the data shape. Event producers include timestamps
 - Clear convention for timestamp fields
 - Possibly: schema-level indication of "where does the timestamp come from"
 - Migration path for existing stream usages
+
+#### Concerns and Constraints
+
+The original stream/cell distinction was intentional and reflects real semantic
+differences beyond change detection:
+
+- **Scheduler context**: Computed values (lifts) are idempotent — they receive
+  the same context across re-invocations, and re-running them with the same
+  inputs should produce the same result. Event handlers are not idempotent —
+  each invocation receives a fresh context, and side effects should not be
+  replayed. A unified cell type would still need to distinguish these execution
+  modes.
+- **Reactive trigger semantics**: A lift re-executes when *any* input changes.
+  An event handler should execute only when the event fires, not when other
+  inputs change. This "react to event only" behavior is distinct from "react to
+  any dependency" and would need to be preserved or re-expressed.
+- **Stored last-event utility**: Unified cells could store the last event value,
+  but the use cases for reading "the last click event" are unclear compared to
+  reading current state.
+- **DX clarity**: "Stream" is an established concept with well-understood
+  semantics. Replacing it with timestamp conventions may reduce clarity.
+
+Any implementation of unification should adopt the existing behavioral
+distinctions (scheduler context, trigger semantics) rather than trying to
+eliminate them. The goal is to unify the *storage and type representation*, not
+to pretend that state and events have identical execution semantics.
 
 #### Current State: No Timestamps
 

@@ -73,9 +73,11 @@ Provides default values:
 ### Schema-Driven Behavior
 
 Schemas influence runtime behavior:
-- **Transformation**: Schema-aware traversal resolves references and shapes data.
-  Non-conforming values may return as `undefined` rather than being strictly
-  rejected — this is transformation, not validation in the strict sense.
+- **Validation and transformation**: Schema-aware traversal resolves references
+  and shapes data. Non-conforming values are rejected: required properties that
+  don't match return `undefined` at the top level (and `null` for array elements
+  where null is allowed). Optional properties that don't match are simply absent.
+  The result is always either a valid value or `undefined`.
 - **Cell creation**: `asCell` properties become cell references
 - **Stream detection**: `asStream` properties get event semantics
 

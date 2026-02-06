@@ -127,9 +127,14 @@ information.
 
 ### Circular References
 
-Circular references are detected and throw an error. The system does not support
-storing cyclic data structures. Shared references (the same object appearing
-multiple times) are preserved correctly.
+Within a single document, circular references are detected and throw an error.
+The system does not support storing cyclic data within a document's value.
+Shared references (the same object appearing multiple times) are preserved
+correctly.
+
+Cycles *across* documents are supported via explicit links (sigil links). Two
+cells can reference each other, forming a cycle in the broader data graph. The
+no-cycles constraint applies only to the serializable content of a single cell.
 
 ---
 
@@ -137,32 +142,38 @@ multiple times) are preserved correctly.
 
 ### Current State
 
-The system uses content-derived hashes for entity identification:
+The system uses merkle-tree hashing with CID-formatted output:
 
 1. Content is translated into a binary tree representation
 2. Tree nodes are hashed using SHA-256
 3. Result is formatted as a CID (Content Identifier)
 
-Content hashes are used for:
-- Entity identification
-- Recipe ID generation
+However, entity data is generally **not content-addressed**. Entity IDs are
+stable addresses (analogous to IPNS names) that point to the most current
+version of the data. Hashes are primarily used for:
+- Recipe ID generation (derived from recipe definition)
 - Request deduplication
-- Causal chain references
+- Causal chain references (hashing the causal tree of what led to the data's
+  existence, not the data content itself)
 
-### Concerns: IPFS Clothing Without IPFS Functionality
+The `"/"` sigil convention is reused as a general escape mechanism for special
+object shapes, not specifically tied to IPLD/IPFS semantics. Only some legacy
+links use the `{ "/": string }` form to avoid conflicting with IPFS-style CIDs.
 
-The system wears the "clothing" of IPFS — using CID formatting, the `"/"` sigil
-convention from DAG-JSON, and merkle tree hashing — but gains none of the
-benefits:
+### Concerns: IPFS Conventions Without IPFS Benefits
+
+The system uses IPFS-derived conventions — CID formatting and merkle tree
+hashing — but does not participate in the IPFS network:
 
 - **No content retrieval by CID**: The system doesn't fetch data from IPFS
 - **No pinning**: Content isn't published to or retrieved from the IPFS network
 - **No external verification**: CIDs aren't verified against external sources
 - **No deduplication across peers**: The distributed storage benefits don't apply
 
-The IPLD formatting adds complexity (tree translation, specific encoding rules)
-without providing interoperability. The CID is used purely as a local identifier,
-which a simpler hash would serve equally well.
+Since entity IDs are addresses (not content hashes), the CID formatting adds
+encoding complexity without providing interoperability. A simpler hashing scheme
+would serve the actual use cases (recipe IDs, deduplication, causal chains)
+equally well.
 
 ---
 
@@ -487,6 +498,13 @@ This makes identity hashing independent of any particular wire encoding.
 - **Runtime context required**: Deserialization needs access to the runtime
 - **Comparison semantics**: Must define equality for rich types (by identity?
   by deconstructed state?)
+- **Not "zero transformations"**: Late serialization eliminates serialization
+  copies within the runtime, but does not eliminate all transformations.
+  Schema-driven reads still select and shape data (resolving links, projecting
+  fields). Link construction still needs to know which data belongs to which
+  document. CFC validation will require traversing data on write. The benefit is
+  eliminating one copy (sometimes more, when pass-through data can be detected
+  as already frozen), not eliminating all data traversal.
 
 #### Open Questions
 
