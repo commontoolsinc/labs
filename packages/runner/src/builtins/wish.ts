@@ -715,12 +715,11 @@ export function wish(
               candidates: candidatesCell,
             }, tx);
 
-            // Return unified shape from picker
-            const wishPatternValue = wishPatternCell.get();
+            // Return reactive references into the picker cell
             sendResult(tx, {
-              result: wishPatternValue.result,
+              result: wishPatternCell.key("result"),
               candidates: candidatesCell,
-              [UI]: wishPatternValue[UI],
+              [UI]: wishPatternCell.key(UI),
             });
           }
         } catch (e) {
