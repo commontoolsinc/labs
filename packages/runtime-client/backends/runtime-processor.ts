@@ -29,6 +29,7 @@ import {
 import {
   BooleanResponse,
   type CellGetRequest,
+  type CellGetSourceCellRequest,
   type CellResolveAsCellRequest,
   CellResponse,
   type CellSendRequest,
@@ -327,6 +328,17 @@ export class RuntimeProcessor {
     };
   }
 
+  handleCellGetSourceCell(
+    request: CellGetSourceCellRequest,
+  ): CellResponse {
+    const cell = getCell(this.runtime, request.cell);
+    const sourceCell = cell.getSourceCell();
+    // Return undefined cell if no source - client will check for this
+    return {
+      cell: sourceCell ? createCellRef(sourceCell) : (undefined as any),
+    };
+  }
+
   handleGetCell(request: GetCellRequest): CellResponse {
     const cell = this.runtime.getCell(
       request.space,
@@ -603,6 +615,8 @@ export class RuntimeProcessor {
         return this.handleCellUnsubscribe(request);
       case RequestType.CellResolveAsCell:
         return this.handleCellResolveAsCell(request);
+      case RequestType.CellGetSourceCell:
+        return this.handleCellGetSourceCell(request);
       case RequestType.GetCell:
         return this.handleGetCell(request);
       case RequestType.GetHomeSpaceCell:

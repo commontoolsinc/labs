@@ -10,6 +10,8 @@ import { type NameSchema, stringSchema } from "@commontools/runner/schemas";
 import { updatePageTitle } from "../../shared/mod.ts";
 import { KeyboardController } from "../lib/keyboard-router.ts";
 import { NAME, PageHandle } from "@commontools/runtime-client";
+import { LinksFromController } from "../lib/links-from-controller.ts";
+import "../components/LinksBar.ts";
 
 export class XAppView extends BaseView {
   static override styles = css`
@@ -58,6 +60,8 @@ export class XAppView extends BaseView {
 
   private debuggerController = new DebuggerController(this);
   private _keyboard = new KeyboardController(this);
+  private _linksController = new LinksFromController(this);
+  private _boundPatternId?: string;
 
   _spaceRootPattern = new Task(this, {
     task: async (
@@ -208,6 +212,24 @@ export class XAppView extends BaseView {
     }
   }
 
+  override willUpdate(changedProperties: Map<string, unknown>) {
+    super.willUpdate(changedProperties);
+
+    // Bind links controller when active pattern changes
+    const currentActivePattern = this._patterns.value?.activePattern;
+    const currentPatternId = currentActivePattern?.id();
+
+    if (currentActivePattern && currentPatternId !== this._boundPatternId) {
+      // Pattern changed or first time, bind to the new pattern
+      this._linksController.bind(currentActivePattern.cell());
+      this._boundPatternId = currentPatternId;
+    } else if (!currentActivePattern && this._boundPatternId) {
+      // No active pattern but we had one before, unbind
+      this._linksController.unbind();
+      this._boundPatternId = undefined;
+    }
+  }
+
   #handlePatternRecreated = () => {
     // Re-run the space root pattern task to pick up the newly recreated pattern
     this._spaceRootPattern.run();
@@ -265,6 +287,11 @@ export class XAppView extends BaseView {
           .showSidebar="${config.showSidebar ?? false}"
           @pattern-recreated="${this.#handlePatternRecreated}"
         ></x-header-view>
+        ${this.app.identity && activePattern
+          ? html`
+            <x-links-bar .links="${this._linksController.links}"></x-links-bar>
+          `
+          : ""}
         <div class="content-area">
           ${content}
         </div>

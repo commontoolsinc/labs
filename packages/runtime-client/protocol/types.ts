@@ -29,6 +29,7 @@ export enum RequestType {
   CellSubscribe = "cell:subscribe",
   CellUnsubscribe = "cell:unsubscribe",
   CellResolveAsCell = "cell:resolveAsCell",
+  CellGetSourceCell = "cell:getSourceCell",
 
   // Runtime operations
   GetCell = "runtime:getCell",
@@ -141,6 +142,11 @@ export interface CellUnsubscribeRequest extends BaseRequest {
 
 export interface CellResolveAsCellRequest extends BaseRequest {
   type: RequestType.CellResolveAsCell;
+  cell: CellRef;
+}
+
+export interface CellGetSourceCellRequest extends BaseRequest {
+  type: RequestType.CellGetSourceCell;
   cell: CellRef;
 }
 
@@ -388,6 +394,7 @@ export type IPCClientRequest =
   | CellSubscribeRequest
   | CellUnsubscribeRequest
   | CellResolveAsCellRequest
+  | CellGetSourceCellRequest
   | GetCellRequest
   | GetHomeSpaceCellRequest
   | EnsureHomePatternRunningRequest
@@ -613,6 +620,10 @@ export type Commands = {
   [RequestType.CellResolveAsCell]: {
     request: CellResolveAsCellRequest;
     response: CellResponse;
+  };
+  [RequestType.CellGetSourceCell]: {
+    request: CellGetSourceCellRequest;
+    response: CellResponse; // cell may be undefined if no source exists
   };
   // Page requests
   [RequestType.PageCreate]: {
