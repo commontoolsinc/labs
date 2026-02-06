@@ -366,12 +366,12 @@ type DetectedDuplicate = {
 function performImport(
   parsedNotes: ParsedNote[],
   allPieces: Writable<NotePiece[]>,
-  notebooks: Writable<NotebookPiece[]>,
+  notebooks: NotebookPiece[],
   skipTitles: Set<string>,
   rawMarkdown?: string,
   onComplete?: () => void,
 ) {
-  const notebooksList = notebooks.get();
+  const notebooksList = notebooks;
 
   // Build set of existing notebook names
   const existingNames = new Set<string>();
@@ -872,9 +872,18 @@ const NotesImportExport = pattern<Input, Output>(
       const anyVisible = notes.some((n: any) => !n?.isHidden);
       const newHiddenState = anyVisible;
 
-      notes.forEach((_n: any, idx: number) => {
-        const noteCell = notes.key(idx);
-        (noteCell.key("isHidden") as unknown as Writable<boolean>).set(newHiddenState);
+      // notes is a computed filter of allPieces, so we need to find the actual index in allPieces
+      const notesList = notes;
+      const allPiecesList = allPieces.get();
+
+      notesList.forEach((note: any) => {
+        const noteId = note?.noteId;
+        if (!noteId) return;
+
+        const allPiecesIdx = allPiecesList.findIndex((p: any) => p?.noteId === noteId);
+        if (allPiecesIdx >= 0) {
+          allPieces.key(allPiecesIdx).key("isHidden").set(newHiddenState);
+        }
       });
     });
 
@@ -884,9 +893,18 @@ const NotesImportExport = pattern<Input, Output>(
       const anyVisible = notebooks.some((nb: any) => !nb?.isHidden);
       const newHiddenState = anyVisible;
 
-      notebooks.forEach((_nb: any, idx: number) => {
-        const notebookCell = notebooks.key(idx);
-        (notebookCell.key("isHidden") as unknown as Writable<boolean>).set(newHiddenState);
+      // notebooks is a computed filter of allPieces, find indices in allPieces
+      const notebooksList = notebooks;
+      const allPiecesList = allPieces.get();
+
+      notebooksList.forEach((nb: any) => {
+        const nbName = (nb as any)?.[NAME];
+        if (!nbName) return;
+
+        const allPiecesIdx = allPiecesList.findIndex((p: any) => (p as any)?.[NAME] === nbName);
+        if (allPiecesIdx >= 0) {
+          allPieces.key(allPiecesIdx).key("isHidden").set(newHiddenState);
+        }
       });
     });
 
@@ -897,7 +915,7 @@ const NotesImportExport = pattern<Input, Output>(
         content: "",
         noteId: generateId(),
       });
-      (allPieces as unknown as Writable<NotePiece[]>).push(note);
+      allPieces.push(note);
     });
 
     const _duplicateSelectedNotes = action(() => {
@@ -912,7 +930,7 @@ const NotesImportExport = pattern<Input, Output>(
             content: original.content ?? "",
             noteId: generateId(),
           });
-          (allPieces as unknown as Writable<NotePiece[]>).push(newNote);
+          allPieces.push(newNote);
         }
       }
       selectedNoteIndices.set([]);
@@ -934,23 +952,30 @@ const NotesImportExport = pattern<Input, Output>(
       };
 
       // Remove from all notebooks
-      for (let nbIdx = 0; nbIdx < notebooks.length; nbIdx++) {
-        const nbCell = notebooks.key(nbIdx);
-        const nbNotesCell = nbCell.key("notes") as unknown as Writable<NotePiece[]>;
+      const notebooksList = notebooks;
+      const allPiecesList = allPieces.get();
+
+      notebooksList.forEach((nb: any) => {
+        const nbName = (nb as any)?.[NAME];
+        if (!nbName) return;
+
+        const nbIdx = allPiecesList.findIndex((p: any) => (p as any)?.[NAME] === nbName);
+        if (nbIdx < 0) return;
+
+        const nbNotesCell = allPieces.key(nbIdx).key("notes");
         const nbNotes = nbNotesCell.get() ?? [];
 
         const filtered = nbNotes.filter((n: any) => !shouldDelete(n));
         if (filtered.length !== nbNotes.length) {
           nbNotesCell.set(filtered);
         }
-      }
+      });
 
       // Remove from allPieces
-      const allPiecesList = allPieces.get();
       const filteredPieces = allPiecesList.filter((piece: any) =>
         !shouldDelete(piece)
       );
-      (allPieces as unknown as Writable<NotePiece[]>).set(filteredPieces);
+      allPieces.set(filteredPieces);
 
       selectedNoteIndices.set([]);
     });
@@ -966,7 +991,7 @@ const NotesImportExport = pattern<Input, Output>(
             title: baseTitle + " (Clone)",
             notes: [...((original as any)?.notes ?? [])],
           });
-          (allPieces as unknown as Writable<NotePiece[]>).push(nb);
+          allPieces.push(nb);
         }
       }
       selectedNotebookIndices.set([]);
@@ -988,7 +1013,7 @@ const NotesImportExport = pattern<Input, Output>(
           );
 
           for (const note of newNotes) {
-            (allPieces as unknown as Writable<NotePiece[]>).push(note);
+            allPieces.push(note);
           }
 
           const baseTitle = getCleanNotebookTitle(original);
@@ -996,7 +1021,7 @@ const NotesImportExport = pattern<Input, Output>(
             title: baseTitle + " (Copy)",
             notes: newNotes,
           });
-          (allPieces as unknown as Writable<NotePiece[]>).push(nb);
+          allPieces.push(nb);
         }
       }
       selectedNotebookIndices.set([]);
@@ -1018,15 +1043,32 @@ const NotesImportExport = pattern<Input, Output>(
       if (nbIndex < 0) return;
 
       const selected = selectedNoteIndices.get();
-      const notebookCell = notebooks.key(nbIndex);
-      const notebookNotes = notebookCell.key("notes") as unknown as Writable<NotePiece[]>;
+      const notebooksList = notebooks;
+      const allPiecesList = allPieces.get();
+
+      // Find the notebook in allPieces
+      const targetNotebook = notebooksList[nbIndex];
+      const targetNbName = (targetNotebook as any)?.[NAME];
+      if (!targetNbName) return;
+
+      const targetNbIdx = allPiecesList.findIndex((p: any) => (p as any)?.[NAME] === targetNbName);
+      if (targetNbIdx < 0) return;
+
+      const notebookNotes = allPieces.key(targetNbIdx).key("notes");
 
       for (const idx of selected) {
         const note = notes[idx];
         if (note) {
           notebookNotes.push(note);
-          const noteCell = notes.key(idx);
-          (noteCell.key("isHidden") as unknown as Writable<boolean>).set(true);
+
+          // Find note in allPieces and set isHidden
+          const noteId = (note as any)?.noteId;
+          if (noteId) {
+            const noteIdx = allPiecesList.findIndex((p: any) => p?.noteId === noteId);
+            if (noteIdx >= 0) {
+              allPieces.key(noteIdx).key("isHidden").set(true);
+            }
+          }
         }
       }
 
@@ -1049,8 +1091,18 @@ const NotesImportExport = pattern<Input, Output>(
       if (nbIndex < 0) return;
 
       const selected = selectedNoteIndices.get();
-      const targetNotebookCell = notebooks.key(nbIndex);
-      const targetNotebookNotes = targetNotebookCell.key("notes") as unknown as Writable<NotePiece[]>;
+      const notebooksList = notebooks;
+      const allPiecesList = allPieces.get();
+
+      // Find target notebook in allPieces
+      const targetNotebook = notebooksList[nbIndex];
+      const targetNbName = (targetNotebook as any)?.[NAME];
+      if (!targetNbName) return;
+
+      const targetNbIdx = allPiecesList.findIndex((p: any) => (p as any)?.[NAME] === targetNbName);
+      if (targetNbIdx < 0) return;
+
+      const targetNotebookNotes = allPieces.key(targetNbIdx).key("notes");
 
       const selectedNoteIds: string[] = [];
       const itemsToMove: NotePiece[] = [];
@@ -1063,8 +1115,13 @@ const NotesImportExport = pattern<Input, Output>(
         if (noteId) selectedNoteIds.push(noteId);
         itemsToMove.push(item);
 
-        const noteCell = notes.key(idx);
-        (noteCell.key("isHidden") as unknown as Writable<boolean>).set(true);
+        // Find note in allPieces and set isHidden
+        if (noteId) {
+          const noteIdx = allPiecesList.findIndex((p: any) => p?.noteId === noteId);
+          if (noteIdx >= 0) {
+            allPieces.key(noteIdx).key("isHidden").set(true);
+          }
+        }
       }
 
       const shouldRemove = (n: any) => {
@@ -1073,18 +1130,23 @@ const NotesImportExport = pattern<Input, Output>(
       };
 
       // Remove from all notebooks except target
-      for (let nbIdx = 0; nbIdx < notebooks.length; nbIdx++) {
-        if (nbIdx === nbIndex) continue;
+      notebooksList.forEach((nb: any, localIdx: number) => {
+        if (localIdx === nbIndex) return; // Skip target notebook
 
-        const nbCell = notebooks.key(nbIdx);
-        const nbNotesCell = nbCell.key("notes") as unknown as Writable<NotePiece[]>;
+        const nbName = (nb as any)?.[NAME];
+        if (!nbName) return;
+
+        const nbIdx = allPiecesList.findIndex((p: any) => (p as any)?.[NAME] === nbName);
+        if (nbIdx < 0) return;
+
+        const nbNotesCell = allPieces.key(nbIdx).key("notes");
         const nbNotes = nbNotesCell.get() ?? [];
 
         const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
         if (filtered.length !== nbNotes.length) {
           nbNotesCell.set(filtered);
         }
-      }
+      });
 
       // Add to target
       for (const item of itemsToMove) {
@@ -1119,7 +1181,7 @@ const NotesImportExport = pattern<Input, Output>(
           if (noteId) {
             for (let i = 0; i < allPiecesList.length; i++) {
               if ((allPiecesList[i] as any)?.noteId === noteId) {
-                (allPieces.key(i).key("isHidden") as unknown as Writable<boolean>).set(false);
+                allPieces.key(i).key("isHidden").set(false);
                 break;
               }
             }
@@ -1147,7 +1209,7 @@ const NotesImportExport = pattern<Input, Output>(
       const filteredPieces = allPiecesList.filter((_: any, i: number) =>
         !allPiecesIndicesToDelete.has(i)
       );
-      (allPieces as unknown as Writable<NotePiece[]>).set(filteredPieces);
+      allPieces.set(filteredPieces);
 
       selectedNotebookIndices.set([]);
       showDeleteNotebookModal.set(false);
@@ -1195,7 +1257,7 @@ const NotesImportExport = pattern<Input, Output>(
         if (noteId && noteIdsToDelete.includes(noteId)) return false;
         return true;
       });
-      (allPieces as unknown as Writable<NotePiece[]>).set(filteredPieces);
+      allPieces.set(filteredPieces);
 
       selectedNotebookIndices.set([]);
       showDeleteNotebookModal.set(false);
@@ -1213,7 +1275,7 @@ const NotesImportExport = pattern<Input, Output>(
     const createStandaloneNotebookAndOpen = action(() => {
       const title = standaloneNotebookTitle.get().trim() || "New Notebook";
       const nb = Notebook({ title });
-      (allPieces as unknown as Writable<NotePiece[]>).push(nb);
+      allPieces.push(nb);
       showStandaloneNotebookPrompt.set(false);
       standaloneNotebookTitle.set("");
       return navigateTo(nb);
@@ -1222,7 +1284,7 @@ const NotesImportExport = pattern<Input, Output>(
     const createStandaloneNotebookAndContinue = action(() => {
       const title = standaloneNotebookTitle.get().trim() || "New Notebook";
       const nb = Notebook({ title });
-      (allPieces as unknown as Writable<NotePiece[]>).push(nb);
+      allPieces.push(nb);
       standaloneNotebookTitle.set("");
     });
 
@@ -1255,25 +1317,38 @@ const NotesImportExport = pattern<Input, Output>(
       };
 
       const newNotebook = Notebook({ title: name, notes: selectedItems });
-      (allPieces as unknown as Writable<NotePiece[]>).push(newNotebook);
+      allPieces.push(newNotebook);
 
       // Mark selected items as hidden
+      const allPiecesList = allPieces.get();
       for (const idx of selected) {
-        const noteCell = notes.key(idx);
-        (noteCell.key("isHidden") as unknown as Writable<boolean>).set(true);
+        const note = notes[idx];
+        const noteId = (note as any)?.noteId;
+        if (noteId) {
+          const noteIdx = allPiecesList.findIndex((p: any) => p?.noteId === noteId);
+          if (noteIdx >= 0) {
+            allPieces.key(noteIdx).key("isHidden").set(true);
+          }
+        }
       }
 
       // For move: remove from existing notebooks
       if (actionType === "move") {
-        for (let nbIdx = 0; nbIdx < notebooks.length; nbIdx++) {
-          const nbCell = notebooks.key(nbIdx);
-          const nbNotesCell = nbCell.key("notes") as unknown as Writable<NotePiece[]>;
+        const notebooksList = notebooks;
+        notebooksList.forEach((nb: any) => {
+          const nbName = (nb as any)?.[NAME];
+          if (!nbName) return;
+
+          const nbIdx = allPiecesList.findIndex((p: any) => (p as any)?.[NAME] === nbName);
+          if (nbIdx < 0) return;
+
+          const nbNotesCell = allPieces.key(nbIdx).key("notes");
           const nbNotes = nbNotesCell.get() ?? [];
           const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
           if (filtered.length !== nbNotes.length) {
             nbNotesCell.set(filtered);
           }
-        }
+        });
       }
 
       selectedNoteIndices.set([]);
@@ -1298,7 +1373,7 @@ const NotesImportExport = pattern<Input, Output>(
         [...notebooks],
         allPiecesArray,
       );
-      (exportedMarkdown as unknown as Writable<string>).set(result.markdown);
+      exportedMarkdown.set(result.markdown);
       showExportAllModal.set(true);
     });
 
@@ -1358,7 +1433,6 @@ const NotesImportExport = pattern<Input, Output>(
 
     const closeImportModal = action(() => {
       showImportModal.set(false);
-      (importMarkdown as unknown as Writable<string>).set("");
       showPasteSection.set(true);
     });
 
@@ -1413,22 +1487,21 @@ const NotesImportExport = pattern<Input, Output>(
         showImportModal.set(false);
         showPasteSection.set(true);
       } else {
-        (importMarkdown as unknown as Writable<string>).set("");
         showImportModal.set(false);
         showPasteSection.set(true);
         importComplete.set(false);
-        (importProgressMessage as unknown as Writable<string>).set(`Importing ${importSummary}...`);
+        importProgressMessage.set(`Importing ${importSummary}...`);
         showImportProgressModal.set(true);
 
         performImport(
           parsedNotes,
-          allPieces as unknown as Writable<NotePiece[]>,
-          notebooks as unknown as Writable<NotebookPiece[]>,
+          allPieces,
+          [...notebooks],
           new Set(),
           markdown,
         );
 
-        (importProgressMessage as unknown as Writable<string>).set(`Imported ${importSummary}!`);
+        importProgressMessage.set(`Imported ${importSummary}!`);
         importComplete.set(true);
       }
     });
@@ -1496,18 +1569,18 @@ const NotesImportExport = pattern<Input, Output>(
         showImportModal.set(false);
         showPasteSection.set(true);
         importComplete.set(false);
-        (importProgressMessage as unknown as Writable<string>).set(`Importing ${importSummary}...`);
+        importProgressMessage.set(`Importing ${importSummary}...`);
         showImportProgressModal.set(true);
 
         performImport(
           parsedNotes,
-          allPieces as unknown as Writable<NotePiece[]>,
-          notebooks as unknown as Writable<NotebookPiece[]>,
+          allPieces,
+          [...notebooks],
           new Set(),
           content,
         );
 
-        (importProgressMessage as unknown as Writable<string>).set(`Imported ${importSummary}!`);
+        importProgressMessage.set(`Imported ${importSummary}!`);
         importComplete.set(true);
       }
     });
@@ -1522,15 +1595,14 @@ const NotesImportExport = pattern<Input, Output>(
 
       pendingImportData.set("");
       detectedDuplicates.set([]);
-      (importMarkdown as unknown as Writable<string>).set("");
       showDuplicateModal.set(false);
       importComplete.set(false);
-      (importProgressMessage as unknown as Writable<string>).set(`Importing ${importCount} notes...`);
+      importProgressMessage.set(`Importing ${importCount} notes...`);
       showImportProgressModal.set(true);
 
-      performImport(parsed, allPieces as unknown as Writable<NotePiece[]>, notebooks as unknown as Writable<NotebookPiece[]>, skipTitles, markdown);
+      performImport(parsed, allPieces, [...notebooks], skipTitles, markdown);
 
-      (importProgressMessage as unknown as Writable<string>).set(`Imported ${importCount} notes!`);
+      importProgressMessage.set(`Imported ${importCount} notes!`);
       importComplete.set(true);
     });
 
@@ -1540,15 +1612,14 @@ const NotesImportExport = pattern<Input, Output>(
 
       pendingImportData.set("");
       detectedDuplicates.set([]);
-      (importMarkdown as unknown as Writable<string>).set("");
       showDuplicateModal.set(false);
       importComplete.set(false);
-      (importProgressMessage as unknown as Writable<string>).set(`Importing ${parsed.length} notes...`);
+      importProgressMessage.set(`Importing ${parsed.length} notes...`);
       showImportProgressModal.set(true);
 
-      performImport(parsed, allPieces as unknown as Writable<NotePiece[]>, notebooks as unknown as Writable<NotebookPiece[]>, new Set(), markdown);
+      performImport(parsed, allPieces, [...notebooks], new Set(), markdown);
 
-      (importProgressMessage as unknown as Writable<string>).set(`Imported ${parsed.length} notes!`);
+      importProgressMessage.set(`Imported ${parsed.length} notes!`);
       importComplete.set(true);
     });
 
@@ -1561,15 +1632,17 @@ const NotesImportExport = pattern<Input, Output>(
     // Action: duplicate selected notes
     const doDuplicateSelectedNotes = action(() => {
       const selected = selectedNoteIndices.get();
+      const notesList = notes;
+
       for (const idx of selected) {
-        const original = notes.key(idx);
+        const original = notesList[idx];
         if (original) {
           const newNote = Note({
             title: ((original as any).title ?? "Note") + " (Copy)",
             content: (original as any).content ?? "",
             noteId: generateId(),
           });
-          (allPieces as unknown as Writable<NotePiece[]>).push(newNote as any);
+          allPieces.push(newNote);
         }
       }
       selectedNoteIndices.set([]);
