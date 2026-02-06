@@ -1,5 +1,6 @@
 /// <cts-enable />
 import {
+  action,
   computed,
   handler,
   NAME,
@@ -16,50 +17,11 @@ import {
   type NotePiece,
 } from "./schemas.tsx";
 
-// Handler for clicking a backlink chip - must be at module scope
-const handleBacklinkClick = (piece: MentionablePiece) => {
-  return navigateTo(piece as any);
-};
-
-// Handler for Edit button - go back to note editor (module scope)
-const goToEdit = handler<void, { sourceNote: any }>((_ev, { sourceNote }) => {
-  if (sourceNote) {
-    return navigateTo(sourceNote);
-  }
-});
-
-// Handler for checkbox toggle in markdown
-// Uses properly typed Writable<string> for content updates
-const handleCheckboxToggle = handler<
-  { detail: { index: number; checked: boolean } },
-  { content: Writable<string> }
->((event, { content }) => {
-  const currentContent = content.get();
-  const { index, checked } = event.detail;
-
-  // Find all checkbox patterns in the content
-  const checkboxPattern = /- \[([ xX])\]/g;
-  let match;
-  let currentIndex = 0;
-  let result = currentContent;
-
-  checkboxPattern.lastIndex = 0;
-
-  while ((match = checkboxPattern.exec(currentContent)) !== null) {
-    if (currentIndex === index) {
-      const newCheckbox = checked ? "- [x]" : "- [ ]";
-      result = currentContent.slice(0, match.index) +
-        newCheckbox +
-        currentContent.slice(match.index + match[0].length);
-      break;
-    }
-    currentIndex++;
-  }
-
-  if (result !== currentContent) {
-    content.set(result);
-  }
-});
+// Handler for clicking a backlink chip - module scope required for .map() binding
+const handleBacklinkClick = handler<
+  void,
+  { piece: Writable<MentionablePiece> }
+>((_, { piece }) => navigateTo(piece));
 
 // ===== Output Type =====
 
@@ -98,8 +60,9 @@ export default pattern<NoteMdInput, NoteMdOutput>(
     });
 
     // Get allPieces for noteId lookup fallback
+    // Contains mixed piece types, so we use NotePiece for note-specific lookups
     const { allPieces } =
-      wish<{ allPieces: any[] }>({ query: "#default" }).result;
+      wish<{ allPieces: NotePiece[] }>({ query: "#default" }).result;
 
     // Use sourceNoteRef directly if provided, otherwise fall back to noteId lookup
     const sourceNote = computed(() => {
@@ -108,12 +71,47 @@ export default pattern<NoteMdInput, NoteMdOutput>(
       }
       const myNoteId = note?.noteId;
       if (!myNoteId) return null;
-      return allPieces.find((piece: any) => piece?.noteId === myNoteId);
+      return allPieces.find((piece) => piece?.noteId === myNoteId);
     });
 
-    // Bind checkbox toggle handler with properly typed Writable<string>
-    // Content is required for checkbox updates to work
-    const boundCheckboxToggle = handleCheckboxToggle({ content: content! });
+    // Action: navigate back to source note for editing
+    const goToEdit = action(() => {
+      if (sourceNote) {
+        return navigateTo(sourceNote);
+      }
+    });
+
+    // Action: handle checkbox toggle in markdown content
+    const handleCheckboxToggle = action(
+      (event: { detail: { index: number; checked: boolean } }) => {
+        if (!content) return;
+        const currentContent = content.get();
+        const { index, checked } = event.detail;
+
+        // Find all checkbox patterns in the content
+        const checkboxPattern = /- \[([ xX])\]/g;
+        let match;
+        let currentIndex = 0;
+        let result = currentContent;
+
+        checkboxPattern.lastIndex = 0;
+
+        while ((match = checkboxPattern.exec(currentContent)) !== null) {
+          if (currentIndex === index) {
+            const newCheckbox = checked ? "- [x]" : "- [ ]";
+            result = currentContent.slice(0, match.index) +
+              newCheckbox +
+              currentContent.slice(match.index + match[0].length);
+            break;
+          }
+          currentIndex++;
+        }
+
+        if (result !== currentContent) {
+          content.set(result);
+        }
+      },
+    );
 
     // Scrollable content with markdown + backlinks (for print support)
     const markdownViewer = (
@@ -122,7 +120,7 @@ export default pattern<NoteMdInput, NoteMdOutput>(
           {/* Markdown content with wiki-links converted to clickable links */}
           <ct-markdown
             content={processedContent}
-            onct-checkbox-change={boundCheckboxToggle}
+            onct-checkbox-change={handleCheckboxToggle}
           />
 
           {/* Backlinks section - ct-chips at bottom */}
@@ -152,7 +150,7 @@ export default pattern<NoteMdInput, NoteMdOutput>(
                 <ct-chip
                   label={piece?.[NAME] ?? "Untitled"}
                   interactive
-                  onct-click={() => handleBacklinkClick(piece)}
+                  onct-click={handleBacklinkClick({ piece })}
                 />
               ))}
             </ct-hstack>
@@ -178,11 +176,7 @@ export default pattern<NoteMdInput, NoteMdOutput>(
               {computed(() => note?.title || "Untitled Note")}
             </ct-heading>
             {/* Edit button - navigates back to source note for editing */}
-            <ct-button
-              variant="secondary"
-              size="sm"
-              onClick={goToEdit({ sourceNote })}
-            >
+            <ct-button variant="secondary" size="sm" onClick={goToEdit}>
               Edit
             </ct-button>
           </ct-hstack>
