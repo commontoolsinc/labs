@@ -54,9 +54,9 @@ function _getNotebookNotesArray(notebook: unknown): unknown[] {
   return Array.isArray(notes) ? notes : [];
 }
 
-// Helper to get a comparable name from a piece (handles both local and wish("#default") pieces)
+// Helper to get a comparable name from a piece (handles both local and wish({ query: "#default" }) pieces)
 function getPieceName(piece: unknown): string {
-  // First try [NAME] (works for wish("#default") pieces)
+  // First try [NAME] (works for wish({ query: "#default" }) pieces)
   const symbolName = (piece as any)?.[NAME];
   if (typeof symbolName === "string") return symbolName;
   // Fallback to title (works for local pieces)
@@ -1207,7 +1207,7 @@ const Notebook = pattern<Input, Output>(
     });
 
     // Filter to find all notebooks by checking if [NAME] contains "Notebook" or starts with notebook emoji
-    // Pieces from wish("#default") only expose [NAME] at top level, not other properties
+    // Pieces from wish({ query: "#default" }) only expose [NAME] at top level, not other properties
     const notebooks = computed(() =>
       allPieces.get().filter((piece: any) => {
         const name = piece?.[NAME];

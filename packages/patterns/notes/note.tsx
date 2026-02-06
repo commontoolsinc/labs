@@ -323,7 +323,8 @@ const Note = pattern<Input, Output>(
       [SELF]: self,
     },
   ) => {
-    const { allPieces } = wish<{ allPieces: MinimalPiece[] }>({ query: "#default" }).result;
+    const { allPieces } =
+      wish<{ allPieces: MinimalPiece[] }>({ query: "#default" }).result;
     const mentionable = wish<Default<MentionablePiece[], []>>(
       { query: "#mentionable" },
     ).result;

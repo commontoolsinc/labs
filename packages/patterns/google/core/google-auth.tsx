@@ -764,7 +764,7 @@ export default pattern<Input, Output>(
               <strong>Tip:</strong>{" "}
               Favorite this piece (click ⭐) to share your Google auth across
               all your patterns. Any pattern using{" "}
-              <code>wish("#googleAuth")</code>{" "}
+              <code>wish({"{"} query: "#googleAuth" {"}"})</code>{" "}
               will automatically find and use it.
             </div>
           )}
