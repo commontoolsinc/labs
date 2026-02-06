@@ -796,6 +796,8 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       if (existing) {
         return navigateTo(existing);
       }
+      // No "All Notes" piece exists - can't create one here due to circular import
+      // User should create it from default-app or deploy notes-import-export directly
     });
 
     const selectAllNotesAction = action(() => {
