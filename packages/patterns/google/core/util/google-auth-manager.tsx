@@ -464,9 +464,6 @@ export const GoogleAuthManager = pattern<
     );
 
     // --- State boolean computeds for fullUI ---
-    const isLoading = computed(
-      () => currentState === "loading" || currentState === "not-found",
-    );
     const isSelecting = computed(() => currentState === "selecting");
     const isNeedsLogin = computed(() => currentState === "needs-login");
     const isMissingScopes = computed(() => currentState === "missing-scopes");
@@ -809,17 +806,17 @@ export const GoogleAuthManager = pattern<
       </div>
     );
 
-    // --- Compose fullUI ---
-    const fullUI = (
-      <>
-        {ifElse(isLoading, loadingUI, null)}
-        {ifElse(isSelecting, selectingUI, null)}
-        {ifElse(isNeedsLogin, needsLoginUI, null)}
-        {ifElse(isMissingScopes, missingScopesUI, null)}
-        {ifElse(isTokenExpiredState, tokenExpiredUI, null)}
-        {ifElse(isReadyState, readyUI, null)}
-      </>
+    // --- Compose fullUI via chained ifElse (no null branches) ---
+    // Built inside-out to avoid TS2589 (type instantiation too deep)
+    const selectOrLoad = ifElse(isSelecting, selectingUI, loadingUI);
+    const loginOrPrev = ifElse(isNeedsLogin, needsLoginUI, selectOrLoad);
+    const scopesOrPrev = ifElse(isMissingScopes, missingScopesUI, loginOrPrev);
+    const expiredOrPrev = ifElse(
+      isTokenExpiredState,
+      tokenExpiredUI,
+      scopesOrPrev,
     );
+    const fullUI = ifElse(isReadyState, readyUI, expiredOrPrev);
 
     // ========================================================================
     // RETURN
