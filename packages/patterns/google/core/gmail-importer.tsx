@@ -14,11 +14,11 @@ import {
   Stream,
   UI,
   VNode,
-  wish,
   Writable,
 } from "commontools";
 import TurndownService from "turndown";
 import { GmailClient } from "./util/gmail-client.ts";
+import { GoogleAuthManagerMinimal } from "./util/google-auth-manager-minimal.tsx";
 
 type CFC<T, C extends string> = T;
 type Secret<T> = CFC<T, "secret">;
@@ -1082,59 +1082,21 @@ export default pattern<{
     const historyId = Writable.of("").for("historyId");
     const fetching = Writable.of(false).for("fetching");
 
-    // Wish for auth directly - MUST be at pattern body level
-    // Only search home favorites (scope: ["~"]) to avoid multiple matches
-    // which cause double-wrapping via the picker pattern
-    const wishResult = wish({
-      query: "#googleAuth",
-      scope: ["."],
+    // Use minimal auth manager - working baseline
+    const authManager = GoogleAuthManagerMinimal({});
+
+    // Extract auth from the sub-pattern's wishResult using derive
+    const wishedAuth = derive(authManager.wishResult, (wr: any) => {
+      return wr?.result?.auth ?? null;
     });
 
-    // Extract auth from wish result, fallback to overrideAuth if provided
-    // Unified wish shape: result is always the selected piece directly (no nesting)
-    const wishedAuth = derive(wishResult, (wr: any) => {
-      // With unified wish shape, result is always the selected cell directly
-      const piece = wr?.result;
-      const authCell = piece?.auth;
+    // Use the sub-pattern's UI
+    const authUI = authManager[UI];
 
-      console.log("[gmail-importer] wishResult:", {
-        hasResult: !!piece,
-        hasAuthCell: !!authCell,
-        authToken: authCell?.token ? "[present]" : "[missing]",
-      });
-      return authCell ?? null;
-    });
-
-    // Debug: log overrideAuth state
-    computed(() => {
-      console.log(
-        "[gmail-importer] overrideAuth.token:",
-        overrideAuth.token ? "[present]" : "[missing]",
-      );
-    });
-
+    // Use override auth if provided, otherwise use auth from manager
     const auth = ifElse(overrideAuth.token, overrideAuth, wishedAuth);
 
-    // Simple auth status UI
-    const authUI = (
-      <div
-        style={{
-          padding: "12px",
-          borderRadius: "8px",
-          backgroundColor: computed(() => auth.token ? "#d4edda" : "#f8d7da"),
-          border: computed(() =>
-            `1px solid ${auth.token ? "#c3e6cb" : "#f5c6cb"}`
-          ),
-        }}
-      >
-        {ifElse(
-          auth.token,
-          <span>Connected as {auth.user?.email}</span>,
-          <span>Please favorite a Google Auth piece with #googleAuth tag</span>,
-        )}
-      </div>
-    );
-    const isReady = computed(() => !!auth.token);
+    const isReady = computed(() => !!auth?.token);
     const currentEmail = computed(() => auth.user?.email ?? "");
 
     const googleUpdaterStream = googleUpdater({
