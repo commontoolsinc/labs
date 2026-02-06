@@ -149,6 +149,48 @@ export const GoogleAuthManagerMinimal = pattern<
     return "#d1fae5"; // green - ready
   });
 
+  // UI branches extracted to avoid deeply nested ifElse (causes TS2589)
+  const scopeStatus = ifElse(
+    hasScopes,
+    <span>Authenticated as {auth?.user.email}</span>,
+    <div>
+      <span>
+        Missing: {computed(() =>
+          (missingScopes as ScopeKey[]).map((s) => SCOPE_DESCRIPTIONS[s])
+            .join(", ")
+        )}
+      </span>
+      <ct-button onClick={reauthenticate}>Add permissions</ct-button>
+    </div>,
+  );
+
+  const tokenStatus = ifElse(
+    isExpired,
+    <div>
+      Token expired
+      <ct-button onClick={reauthenticate}>Refresh</ct-button>
+    </div>,
+    scopeStatus,
+  );
+
+  const loginStatus = ifElse(
+    hasToken,
+    tokenStatus,
+    <div>
+      Needs login
+      <ct-button onClick={reauthenticate}>Sign in</ct-button>
+    </div>,
+  );
+
+  const authStatus = ifElse(
+    hasAuth,
+    loginStatus,
+    <div>
+      No Auth
+      <ct-button onClick={createAuth}>Create one</ct-button>
+    </div>,
+  );
+
   return {
     auth,
     isReady,
@@ -170,48 +212,7 @@ export const GoogleAuthManagerMinimal = pattern<
           ]}
           $value={wishTag}
         />
-        {ifElse(
-          hasAuth,
-          ifElse(
-            hasToken,
-            ifElse(
-              isExpired,
-              // Expired state
-              <div>
-                Token expired
-                <ct-button onClick={reauthenticate}>Refresh</ct-button>
-              </div>,
-              ifElse(
-                hasScopes,
-                // Ready state
-                <span>Authenticated as {auth?.user.email}</span>,
-                // Missing scopes state
-                <div>
-                  <span>
-                    Missing: {computed(() =>
-                      (missingScopes as ScopeKey[]).map((s) =>
-                        SCOPE_DESCRIPTIONS[s]
-                      ).join(", ")
-                    )}
-                  </span>
-                  <ct-button onClick={reauthenticate}>
-                    Add permissions
-                  </ct-button>
-                </div>,
-              ),
-            ),
-            // Needs login state
-            <div>
-              Needs login
-              <ct-button onClick={reauthenticate}>Sign in</ct-button>
-            </div>,
-          ),
-          // No auth state
-          <div>
-            No Auth
-            <ct-button onClick={createAuth}>Create one</ct-button>
-          </div>,
-        )}
+        {authStatus}
       </div>
     ),
   };
