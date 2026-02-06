@@ -679,21 +679,21 @@ const toggleNotebookCheckbox = handler<
 
 // Select all/deselect all handlers
 const selectAllNotes = handler<
-  Record<string, never>,
+  void,
   { notes: Writable<NotePiece[]>; selectedNoteIndices: Writable<number[]> }
 >((_, { notes, selectedNoteIndices }) => {
   selectedNoteIndices.set(notes.get().map((_, i) => i));
 });
 
 const deselectAllNotes = handler<
-  Record<string, never>,
+  void,
   { selectedNoteIndices: Writable<number[]> }
 >((_, { selectedNoteIndices }) => {
   selectedNoteIndices.set([]);
 });
 
 const selectAllNotebooks = handler<
-  Record<string, never>,
+  void,
   {
     notebooks: Writable<NotebookPiece[]>;
     selectedNotebookIndices: Writable<number[]>;
@@ -703,7 +703,7 @@ const selectAllNotebooks = handler<
 });
 
 const deselectAllNotebooks = handler<
-  Record<string, never>,
+  void,
   { selectedNotebookIndices: Writable<number[]> }
 >((_, { selectedNotebookIndices }) => {
   selectedNotebookIndices.set([]);
@@ -725,7 +725,7 @@ const goToNotebook = handler<void, { notebook: Writable<NotebookPiece> }>(
 
 // Toggle individual note visibility
 const toggleNoteVisibility = handler<
-  Record<string, never>,
+  void,
   { note: Writable<NotePiece> }
 >((_, { note }) => {
   const isHiddenCell = note.key("isHidden");
@@ -735,7 +735,7 @@ const toggleNoteVisibility = handler<
 
 // Toggle individual notebook visibility
 const toggleNotebookVisibility = handler<
-  Record<string, never>,
+  void,
   { notebook: Writable<NotebookPiece> }
 >((_, { notebook }) => {
   const isHiddenCell = notebook.key("isHidden");
@@ -745,7 +745,7 @@ const toggleNotebookVisibility = handler<
 
 // Toggle all notes visibility (bulk)
 const toggleAllNotesVisibility = handler<
-  Record<string, never>,
+  void,
   { notes: Writable<NotePiece[]> }
 >((_, { notes }) => {
   const notesList = notes.get();
@@ -762,7 +762,7 @@ const toggleAllNotesVisibility = handler<
 
 // Toggle all notebooks visibility (bulk)
 const toggleAllNotebooksVisibility = handler<
-  Record<string, never>,
+  void,
   { notebooks: Writable<NotebookPiece[]> }
 >((_, { notebooks }) => {
   const notebooksList = notebooks.get();
@@ -779,7 +779,7 @@ const toggleAllNotebooksVisibility = handler<
 
 // Create a new note
 const createNote = handler<
-  Record<string, never>,
+  void,
   { allPieces: Writable<NotePiece[]> }
 >((_, { allPieces }) => {
   const note = Note({
@@ -792,7 +792,7 @@ const createNote = handler<
 
 // Duplicate selected notes (reserved for future use)
 const _duplicateSelectedNotes = handler<
-  Record<string, never>,
+  void,
   {
     notes: Writable<NotePiece[]>;
     selectedNoteIndices: Writable<number[]>;
@@ -819,7 +819,7 @@ const _duplicateSelectedNotes = handler<
 
 // Delete selected notes
 const deleteSelectedNotes = handler<
-  Record<string, never>,
+  void,
   {
     notes: Writable<NotePiece[]>;
     selectedNoteIndices: Writable<number[]>;
@@ -982,7 +982,7 @@ const moveToNotebook = handler<
 
 // Clone selected notebooks (shallow copy)
 const cloneSelectedNotebooks = handler<
-  Record<string, never>,
+  void,
   {
     notebooks: Writable<NotebookPiece[]>;
     selectedNotebookIndices: Writable<number[]>;
@@ -1009,7 +1009,7 @@ const cloneSelectedNotebooks = handler<
 
 // Duplicate selected notebooks (deep copy)
 const duplicateSelectedNotebooks = handler<
-  Record<string, never>,
+  void,
   {
     notebooks: Writable<NotebookPiece[]>;
     selectedNotebookIndices: Writable<number[]>;
@@ -1049,7 +1049,7 @@ const duplicateSelectedNotebooks = handler<
 
 // Show delete notebooks confirmation modal
 const confirmDeleteNotebooks = handler<
-  Record<string, never>,
+  void,
   {
     selectedNotebookIndices: Writable<number[]>;
     showDeleteNotebookModal: Writable<boolean>;
@@ -1062,7 +1062,7 @@ const confirmDeleteNotebooks = handler<
 
 // Delete notebooks only (keep notes visible)
 const deleteNotebooksOnly = handler<
-  Record<string, never>,
+  void,
   {
     notebooks: Writable<NotebookPiece[]>;
     selectedNotebookIndices: Writable<number[]>;
@@ -1127,7 +1127,7 @@ const deleteNotebooksOnly = handler<
 
 // Delete notebooks AND their notes
 const deleteNotebooksAndNotes = handler<
-  Record<string, never>,
+  void,
   {
     notebooks: Writable<NotebookPiece[]>;
     selectedNotebookIndices: Writable<number[]>;
@@ -1187,7 +1187,7 @@ const deleteNotebooksAndNotes = handler<
 });
 
 const cancelDeleteNotebooks = handler<
-  Record<string, never>,
+  void,
   { showDeleteNotebookModal: Writable<boolean> }
 >((_, { showDeleteNotebookModal }) => {
   showDeleteNotebookModal.set(false);
@@ -1360,7 +1360,7 @@ const closeExportAllModal = handler<
 
 // Export selected notebooks
 const exportSelectedNotebooks = handler<
-  Record<string, never>,
+  void,
   {
     notebooks: Writable<NotebookPiece[]>;
     selectedNotebookIndices: Writable<number[]>;
@@ -1417,7 +1417,7 @@ const exportSelectedNotebooks = handler<
 
 // Close export notebooks modal
 const closeExportNotebooksModal = handler<
-  Record<string, never>,
+  void,
   {
     showExportNotebooksModal: Writable<boolean>;
     exportNotebooksMarkdown: Writable<string>;
@@ -1458,13 +1458,13 @@ const closeImportModal = handler<
 
 // Hide paste section
 const _hidePasteSection = handler<
-  Record<string, never>,
+  void,
   { showPasteSection: Writable<boolean> }
 >((_, { showPasteSection }) => showPasteSection.set(false));
 
 // Analyze import and detect duplicates
 const analyzeImport = handler<
-  Record<string, never>,
+  void,
   {
     importMarkdown: Writable<string>;
     notes: Writable<NotePiece[]>;
@@ -1644,7 +1644,7 @@ const handleImportFileUpload = handler<
 
 // Import skipping duplicates
 const importSkipDuplicates = handler<
-  Record<string, never>,
+  void,
   {
     pendingImportData: Writable<string>;
     allPieces: Writable<NotePiece[]>;
@@ -1680,7 +1680,7 @@ const importSkipDuplicates = handler<
 
 // Import all as copies
 const importAllAsCopies = handler<
-  Record<string, never>,
+  void,
   {
     pendingImportData: Writable<string>;
     allPieces: Writable<NotePiece[]>;
@@ -1712,7 +1712,7 @@ const importAllAsCopies = handler<
 
 // Cancel import
 const cancelImport = handler<
-  Record<string, never>,
+  void,
   {
     showDuplicateModal: Writable<boolean>;
     detectedDuplicates: Writable<DetectedDuplicate[]>;

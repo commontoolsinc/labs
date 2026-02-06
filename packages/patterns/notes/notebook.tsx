@@ -165,7 +165,7 @@ const createNote = handler<
 
 // Handler to remove a note from this notebook (but keep it in the space)
 const removeFromNotebook = handler<
-  Record<string, never>,
+  void,
   { note: Writable<NotePiece>; notes: Writable<NotePiece[]> }
 >((_, { note, notes }) => {
   const notebookNotes = notes.get();
@@ -370,7 +370,7 @@ const handleBacklinkClick = handler<
 
 // Handler to navigate to parent notebook
 const goToParent = handler<
-  Record<string, never>,
+  void,
   { parentNotebook: Writable<NotebookPiece | null> }
 >(
   (_, { parentNotebook }) => {
@@ -381,7 +381,7 @@ const goToParent = handler<
 
 // Handler to navigate to a child (note or notebook) - sets parent for back navigation
 const navigateToChild = handler<
-  Record<string, never>,
+  void,
   { child: Writable<any>; self: any }
 >(
   (_, { child, self }) => {
@@ -395,7 +395,7 @@ const navigateToChild = handler<
 
 // Handler to permanently delete selected notes from the space
 const deleteSelectedNotes = handler<
-  Record<string, never>,
+  void,
   {
     notes: Writable<NotePiece[]>;
     selectedNoteIndices: Writable<number[]>;

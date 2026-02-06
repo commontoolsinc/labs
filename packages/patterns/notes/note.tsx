@@ -101,7 +101,7 @@ const handleBacklinkClick = handler<
 // Handler to navigate to markdown viewer
 // NOTE: Must be module-scope handler because actions can't close over SELF (runtime bug)
 const goToViewerHandler = handler<
-  Record<string, never>,
+  void,
   {
     title: Writable<string>;
     content: Writable<string>;
