@@ -299,16 +299,24 @@ distinctions (scheduler context, trigger semantics) rather than trying to
 eliminate them. The goal is to unify the *storage and type representation*, not
 to pretend that state and events have identical execution semantics.
 
-#### Current State: No Timestamps
+#### Current State: No Timestamps on Payloads (but Invocations Are Unique)
 
-The current system does **not** add timestamps or unique IDs to events:
+The current system does **not** add timestamps or unique IDs to event payloads:
 - `stream.send(event)` passes the payload directly to the scheduler
 - DOM events have a `timeStamp` property, but `sanitizeEvent()` does not
   include it in the allowlist of properties passed through
-- No deduplication or idempotency mechanism exists
 
-For unification, timestamps would need to be injected somewhere — either at
-the `send()` layer, in `sanitizeEvent()`, or by event producers explicitly.
+However, each handler **invocation** does receive a unique identity. When an
+event handler is invoked, the runner generates a fresh UUID
+(`crypto.randomUUID()` in `runner.ts:1219`) and includes it in the `cause`
+object used to derive cell identities for handler results. This ensures that
+each invocation produces distinct result cells, even for identical event
+payloads. The uniqueness is in the invocation context, not in the event data
+itself.
+
+For unification, timestamps or IDs would need to be part of the **event payload
+or cell value** (not just the invocation context) — either injected at the
+`send()` layer, in `sanitizeEvent()`, or by event producers explicitly.
 
 #### Event Replay Consideration
 
