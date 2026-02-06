@@ -150,11 +150,11 @@ function searchFavoritesForHashtag(
 /**
  * Search mentionables in current space for pieces matching a hashtag.
  */
-function searchMentionablesForHashtag(
+async function searchMentionablesForHashtag(
   ctx: WishContext,
   searchTermWithoutHash: string,
   pathPrefix: string[],
-): BaseResolution[] {
+): Promise<BaseResolution[]> {
   const mentionableCell = getSpaceCell(ctx)
     .key("defaultPattern")
     .key("backlinksIndex")
@@ -162,7 +162,7 @@ function searchMentionablesForHashtag(
     .resolveAsCell()
     .asSchema(mentionableListSchema);
   // Sync to ensure data is loaded
-  mentionableCell.sync();
+  await mentionableCell.sync();
   const mentionables = (mentionableCell.get() || []) as Cell<any>[];
 
   const matches = mentionables.filter((pieceCell: Cell<any>) => {
@@ -196,10 +196,10 @@ function searchMentionablesForHashtag(
 /**
  * Search for pieces by hashtag across favorites and/or mentionables based on scope.
  */
-function searchByHashtag(
+async function searchByHashtag(
   parsed: ParsedWishTarget,
   ctx: WishContext,
-): BaseResolution[] {
+): Promise<BaseResolution[]> {
   const searchTerm = parsed.key.toLowerCase();
   const searchTermWithoutHash = searchTerm.slice(1);
 
@@ -218,7 +218,11 @@ function searchByHashtag(
 
   if (searchMentionables) {
     allMatches.push(
-      ...searchMentionablesForHashtag(ctx, searchTermWithoutHash, parsed.path),
+      ...(await searchMentionablesForHashtag(
+        ctx,
+        searchTermWithoutHash,
+        parsed.path,
+      )),
     );
   }
 
@@ -392,10 +396,10 @@ function resolveSpaceTarget(
  * 2. Well-known home space targets (#favorites, #journal, #learned, #profile)
  * 3. Hashtag search (arbitrary #tags in favorites/mentionables)
  */
-function resolveBase(
+async function resolveBase(
   parsed: ParsedWishTarget,
   ctx: WishContext,
-): BaseResolution[] {
+): Promise<BaseResolution[]> {
   // Try space targets first (most common)
   const spaceResult = resolveSpaceTarget(parsed, ctx);
   if (spaceResult) return spaceResult;
@@ -406,7 +410,7 @@ function resolveBase(
 
   // Hashtag search
   if (parsed.key.startsWith("#")) {
-    return searchByHashtag(parsed, ctx);
+    return await searchByHashtag(parsed, ctx);
   }
 
   throw new WishError(`Wish target "${parsed.key}" is not recognized.`);
@@ -468,7 +472,6 @@ function errorUI(message: string): VNode {
   return h("span", { style: "color: red" }, `⚠️ ${message}`);
 }
 
-// TODO(seefeld): Add button to replace this with wish.tsx getting more options
 function cellLinkUI(cell: Cell<unknown>): VNode {
   return h("ct-cell-link", { $cell: cell });
 }
@@ -619,7 +622,7 @@ export function wish(
       try {
         const parsed = parseWishTarget(wishTarget);
         const ctx: WishContext = { runtime, tx, parentCell };
-        const baseResolutions = resolveBase(parsed, ctx);
+        const baseResolutions = await resolveBase(parsed, ctx);
 
         // Just use the first result (if there aren't any, the above throws)
         const combinedPath = baseResolutions[0].pathPrefix
@@ -674,49 +677,53 @@ export function wish(
       }
 
       // If the query is a path or a hash tag, resolve it directly
-      if (query.startsWith("/") || /^#[a-zA-Z0-9-]+$/.test(query)) {
+      if (query.startsWith("/") || /^#[a-zA-Z0-9-]+/.test(query)) {
         try {
-          const parsed: ParsedWishTarget = {
-            key: query as WishTag,
-            path: path ?? [],
-          };
+          const parsed = parseWishTarget(query);
+          parsed.path = [...parsed.path, ...(path ?? [])];
           const ctx: WishContext = { runtime, tx, parentCell, scope };
-          const baseResolutions = resolveBase(parsed, ctx);
+          const baseResolutions = await resolveBase(parsed, ctx);
           const resultCells = baseResolutions.map((baseResolution) => {
             const combinedPath = baseResolution.pathPrefix
-              ? [...baseResolution.pathPrefix, ...(path ?? [])]
-              : path ?? [];
+              ? [...baseResolution.pathPrefix, ...parsed.path]
+              : parsed.path;
             const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
             return schema ? resolvedCell.asSchema(schema) : resolvedCell;
           });
           // Sync all result cells to ensure data is loaded
           await Promise.all(resultCells.map((cell) => cell.sync()));
 
+          // Unified shape: always return { result, candidates, [UI] }
+          // For single result, use fast path (no picker needed)
+          // For multiple results, launch wish pattern for picker
+          const candidatesCell = runtime.getImmutableCell(
+            parentCell.space,
+            resultCells,
+            undefined,
+            tx,
+          );
+
           if (resultCells.length === 1) {
-            // Single result - return directly
+            // Single result - fast path with unified shape
+            // Prefer the result cell's own [UI]; fall back to ct-cell-link
+            const resultUI = resultCells[0].key(UI).get();
             sendResult(tx, {
               result: resultCells[0],
-              [UI]: cellLinkUI(resultCells[0]),
+              candidates: candidatesCell,
+              [UI]: resultUI ?? cellLinkUI(resultCells[0]),
             });
           } else {
-            // Multiple results - show picker for user to choose
-            const candidatesCell = runtime.getImmutableCell(
-              parentCell.space,
-              resultCells,
-              undefined,
-              tx,
-            );
-
-            const pickerCell = await launchWishPattern({
+            // Multiple results - launch picker pattern
+            const wishPatternCell = await launchWishPattern({
               ...targetValue as WishParams,
               candidates: candidatesCell,
             }, tx);
 
-            // Return the picker pattern - its [UI] shows picker, then chosen cell
-            // After confirmation: wishResult.result.result gives the chosen cell
+            // Return reactive references into the picker cell
             sendResult(tx, {
-              result: pickerCell,
-              [UI]: pickerCell.get()[UI],
+              result: wishPatternCell.key("result"),
+              candidates: candidatesCell,
+              [UI]: wishPatternCell.key(UI),
             });
           }
         } catch (e) {

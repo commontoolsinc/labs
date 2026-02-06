@@ -16,13 +16,9 @@ import {
   VNode,
   Writable,
 } from "commontools";
-import {
-  type AccountType,
-  createGoogleAuth,
-  type ScopeKey,
-} from "./util/google-auth-manager.tsx";
 import TurndownService from "turndown";
 import { GmailClient } from "./util/gmail-client.ts";
+import { GoogleAuthManagerMinimal } from "./util/google-auth-manager-minimal.tsx";
 
 type CFC<T, C extends string> = T;
 type Secret<T> = CFC<T, "secret">;
@@ -78,6 +74,7 @@ turndown.addRule("removeStyleTags", {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** An #email */
 export type Email = {
   // Unique identifier for the email
   id: string;
@@ -89,11 +86,11 @@ export type Email = {
   snippet: string;
   // Email subject line
   subject: string;
-  // Sender's email address
+  // Sender's #email-address
   from: string;
   // Date and time when the email was sent
   date: string;
-  // Recipient's email address
+  // Recipient's #email-address
   to: string;
   // Email content in plain text format (often empty)
   plainText: string;
@@ -124,6 +121,8 @@ interface Output {
   [UI]: VNode;
   /** Array of imported emails */
   emails: Email[];
+  /** Mentionables */
+  mentionable: Email[];
   /** Number of emails imported */
   emailCount: number;
   /** Auth UI component for managing Google OAuth connection */
@@ -1033,15 +1032,6 @@ const toggleResolveInlineImages = handler<
   },
 );
 
-// Handler to change account type - must be at module scope
-const setAccountType = handler<
-  { target: { value: string } },
-  { selectedType: Writable<AccountType> }
->((event, state) => {
-  const newType = event.target.value as AccountType;
-  state.selectedType.set(newType);
-});
-
 // Pattern tool callbacks - must be defined at module scope
 const searchEmailsCallback = (
   { query, emails }: { query: string; emails: Email[] },
@@ -1092,24 +1082,18 @@ export default pattern<{
     const historyId = Writable.of("").for("historyId");
     const fetching = Writable.of(false).for("fetching");
 
-    // Local writable cell for account type selection
-    const selectedAccountType = Writable.of<AccountType>("default").for(
-      "account type",
-    );
-
-    // Use createGoogleAuth utility with reactive accountType
-    const {
-      auth: wishedAuth,
-      fullUI: authUI,
-    } = createGoogleAuth({
-      requiredScopes: ["gmail"] as ScopeKey[],
-      accountType: selectedAccountType,
-      debugMode: settings.debugMode,
+    // Use auth manager with required scopes
+    const authManager = GoogleAuthManagerMinimal({
+      requiredScopes: ["gmail"],
     });
 
-    // Choose auth source based on overrideAuth availability
+    const wishedAuth = authManager.auth;
+    const authUI = authManager[UI];
+
     const auth = ifElse(overrideAuth.token, overrideAuth, wishedAuth);
-    const isReady = computed(() => !!auth.token);
+    const isReady = computed(() =>
+      overrideAuth.token ? true : authManager.isReady
+    );
     const currentEmail = computed(() => auth.user?.email ?? "");
 
     const googleUpdaterStream = googleUpdater({
@@ -1162,52 +1146,7 @@ export default pattern<{
       [UI]: (
         <ct-screen>
           <div slot="header">
-            <ct-hstack align="center" gap="2">
-              <ct-heading level={3}>Gmail Importer</ct-heading>
-
-              {/* Account type selector for multi-account support */}
-              <select
-                onChange={setAccountType({ selectedType: selectedAccountType })}
-                style={{
-                  padding: "4px 8px",
-                  borderRadius: "4px",
-                  border: "1px solid #d1d5db",
-                  fontSize: "12px",
-                  backgroundColor: derive(
-                    selectedAccountType,
-                    (type: AccountType) => {
-                      switch (type) {
-                        case "personal":
-                          return "#dbeafe"; // blue tint
-                        case "work":
-                          return "#fee2e2"; // red tint
-                        default:
-                          return "#fff";
-                      }
-                    },
-                  ),
-                }}
-              >
-                <option
-                  value="default"
-                  selected={selectedAccountType.get() === "default"}
-                >
-                  Any Account
-                </option>
-                <option
-                  value="personal"
-                  selected={selectedAccountType.get() === "personal"}
-                >
-                  Personal
-                </option>
-                <option
-                  value="work"
-                  selected={selectedAccountType.get() === "work"}
-                >
-                  Work
-                </option>
-              </select>
-            </ct-hstack>
+            <ct-heading level={3}>Gmail Importer</ct-heading>
           </div>
 
           <ct-vscroll flex showScrollbar>
@@ -1396,6 +1335,53 @@ export default pattern<{
       ),
       authUI,
       emails,
+      mentionable: computed(() =>
+        emails.map((e) => {
+          return {
+            ...e,
+            [NAME]: e.subject,
+            [UI]: (
+              <div
+                style={{
+                  padding: "12px",
+                  border: "1px solid #e0e0e0",
+                  borderRadius: "8px",
+                  backgroundColor: "#fafafa",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "16px",
+                    fontWeight: "bold",
+                    marginBottom: "4px",
+                    color: "#333",
+                  }}
+                >
+                  {e.subject}
+                </div>
+                <div
+                  style={{
+                    fontSize: "14px",
+                    color: "#666",
+                    marginBottom: "8px",
+                  }}
+                >
+                  From: {e.from}
+                </div>
+                <div
+                  style={{
+                    fontSize: "14px",
+                    color: "#555",
+                    lineHeight: "1.4",
+                  }}
+                >
+                  {e.snippet}
+                </div>
+              </div>
+            ),
+          } as Email;
+        })
+      ),
       emailCount: derive(emails, (list: Email[]) => list?.length || 0),
       bgUpdater: googleUpdaterStream,
       isReady,

@@ -1,5 +1,6 @@
 /// <cts-enable />
 import {
+  Cell,
   computed,
   Default,
   derive,
@@ -29,10 +30,10 @@ const handleSend = handler<
 export default pattern<Input>(({ title }) => {
   const topic = Writable.of("");
 
-  const profile = wish<string>({ query: "#profile" });
+  const profile = wish<Cell<string>>({ query: "#profile" });
 
   const systemPrompt = computed(() => {
-    const profileText = profile.result;
+    const profileText = profile.result.get();
     const profileSection = profileText
       ? `\n\n--- About the User ---\n${profileText}\n---\n`
       : "";
@@ -51,23 +52,13 @@ Write content personalized to the user when appropriate.`;
       <div>
         <h2>{title}</h2>
 
-        <ct-cell-context $cell={profile.result}>
-          {derive(profile.result, (p) =>
-            p
-              ? (
-                <div style="margin-bottom: 16px; padding: 12px; background: #f5f5f5; border-radius: 4px;">
-                  <h4 style="margin-top: 0;">Profile Context:</h4>
-                  <blockquote style="margin: 0; font-size: 0.9em; color: #666;">
-                    {p}
-                  </blockquote>
-                </div>
-              )
-              : (
-                <div style="margin-bottom: 16px; padding: 12px; background: #fff3cd; border-radius: 4px; color: #856404;">
-                  No profile found. Content will be generic.
-                </div>
-              ))}
-        </ct-cell-context>
+        <ct-card>
+          <h4 style="margin-top: 0;">Profile Context:</h4>
+          <ct-code-editor
+            $value={profile.result}
+            style={{ maxHeight: "256px" }}
+          />
+        </ct-card>
 
         <div>
           <ct-message-input

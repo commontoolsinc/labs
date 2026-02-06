@@ -505,6 +505,58 @@ describe("wish built-in", () => {
       expect(result.key("firstTitle").get()?.result).toEqual("First Title");
     });
 
+    it("resolves slashed path embedded in tag query", async () => {
+      const allPiecesCell = runtime.getCellFromEntityId<unknown[]>(
+        space,
+        { "/": ALL_PIECES_ID },
+        [],
+        undefined,
+        tx,
+      );
+      const piecesData = [
+        { name: "Alpha", title: "First Title" },
+        { name: "Beta", title: "Second Title" },
+      ];
+      allPiecesCell.withTx(tx).set(piecesData);
+
+      // Set up defaultPattern to own allPieces
+      const spaceCell = runtime.getCell<{ allPieces?: unknown[] }>(space, space)
+        .withTx(tx);
+      const defaultPatternCell = runtime.getCell(space, "default-pattern")
+        .withTx(tx);
+      (defaultPatternCell as any).key("allPieces").set(
+        allPiecesCell.withTx(tx),
+      );
+      (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishRecipe = recipe("wish object syntax slashed query", () => {
+        const firstTitle = wish<string>({
+          query: "#allPieces/0/title",
+        });
+        return { firstTitle };
+      });
+
+      const resultCell = runtime.getCell<{
+        firstTitle?: { result?: string };
+      }>(
+        space,
+        "wish object syntax slashed query result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      expect(result.key("firstTitle").get()?.result).toEqual("First Title");
+    });
+
     it("resolves space cell using / tag", async () => {
       const spaceCell = runtime.getCell(space, space).withTx(tx);
       const spaceData = { testField: "space cell value" };
@@ -651,7 +703,7 @@ describe("wish built-in", () => {
       expect(missingResult?.error).toMatch(/no query/);
     });
 
-    it("returns UI with ct-cell-link on success", async () => {
+    it("returns cell UI or ct-cell-link fallback on success", async () => {
       const spaceCell = runtime.getCell(space, space).withTx(tx);
       const spaceData = { testField: "space cell value" };
       spaceCell.set(spaceData);
@@ -686,6 +738,7 @@ describe("wish built-in", () => {
       expect(wishResult?.error).toBeUndefined();
       expect(wishResult?.result).toEqual(spaceData);
 
+      // Plain data has no [UI], so falls back to ct-cell-link
       const ui = wishResult?.[UI] as { type: string; name: string; props: any };
       expect(ui?.type).toEqual("vnode");
       expect(ui?.name).toEqual("ct-cell-link");
@@ -740,6 +793,46 @@ describe("wish built-in", () => {
       } finally {
         console.error = originalError;
       }
+    });
+
+    it("returns unified shape with candidates for single result", async () => {
+      const spaceCell = runtime.getCell(space, space).withTx(tx);
+      const spaceData = { testField: "unified shape test" };
+      spaceCell.set(spaceData);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishRecipe = recipe("wish unified shape candidates", () => {
+        const spaceResult = wish({ query: "/" });
+        return { spaceResult };
+      });
+
+      const resultCell = runtime.getCell<{
+        spaceResult?: { result?: unknown; candidates?: unknown[] };
+      }>(
+        space,
+        "wish unified shape result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      const wishResult = result.key("spaceResult").get() as Record<
+        string | symbol,
+        unknown
+      >;
+      // Unified shape: result is present
+      expect(wishResult?.result).toEqual(spaceData);
+      // Unified shape: candidates is present (array containing the single match)
+      expect(wishResult?.candidates).toBeDefined();
+      expect(Array.isArray(wishResult?.candidates)).toBe(true);
+      expect((wishResult?.candidates as unknown[]).length).toBe(1);
     });
   });
 

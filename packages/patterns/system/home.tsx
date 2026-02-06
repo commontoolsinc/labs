@@ -33,7 +33,7 @@ type JournalSnapshot = {
 type JournalEntry = {
   timestamp?: number;
   eventType?: string;
-  subject?: { cell: { "/": string }; path: string[] };
+  subject?: Writable<unknown>;
   snapshot?: JournalSnapshot;
   narrative?: string;
   narrativePending?: boolean;
@@ -146,7 +146,7 @@ const addFavorite = handler<
     journal.push({
       timestamp: Date.now(),
       eventType: "piece:favorited",
-      subject: piece as any,
+      subject: piece,
       snapshot,
       narrative: "",
       narrativePending: true,
