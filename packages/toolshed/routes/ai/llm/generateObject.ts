@@ -11,10 +11,26 @@ import {
 import { Ajv } from "ajv";
 import { DEFAULT_GENERATE_OBJECT_MODELS } from "@commontools/llm";
 import { trace } from "@opentelemetry/api";
+import {
+  acquireSlot,
+  getLLMConcurrencyStats,
+  releaseSlot,
+  setLLMConcurrencyLimit,
+} from "./throttle.ts";
+
+// Re-export throttling configuration functions for backwards compatibility
+export { getLLMConcurrencyStats, setLLMConcurrencyLimit };
 
 export async function generateObject(
   params: LLMGenerateObjectRequest,
 ): Promise<LLMGenerateObjectResponse> {
+  // Extract space from metadata for per-space throttling
+  const spaceId = typeof params.metadata?.space === "string"
+    ? params.metadata.space
+    : undefined;
+
+  // Throttle concurrent LLM requests to prevent CPU saturation (per-space)
+  await acquireSlot(spaceId);
   try {
     const modelConfig = findModel(
       params.model ?? DEFAULT_GENERATE_OBJECT_MODELS,
@@ -82,5 +98,7 @@ export async function generateObject(
     throw error instanceof Error
       ? error
       : new Error(`Failed to generate object: ${error}`);
+  } finally {
+    releaseSlot(spaceId);
   }
 }
