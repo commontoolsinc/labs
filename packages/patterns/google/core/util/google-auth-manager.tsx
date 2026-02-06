@@ -194,11 +194,6 @@ function formatTimeRemaining(ms: number | null): string {
   return "< 1 min";
 }
 
-// Debug logging helper
-function debugLog(debug: boolean, ...args: unknown[]) {
-  if (debug) console.log("[GoogleAuthManager]", ...args);
-}
-
 // =============================================================================
 // MAIN PATTERN
 // =============================================================================
@@ -207,7 +202,7 @@ export const GoogleAuthManager = pattern<
   GoogleAuthManagerInput,
   GoogleAuthManagerOutput
 >(
-  ({ requiredScopes, accountType, debugMode }) => {
+  ({ requiredScopes, accountType }) => {
     // ========================================================================
     // WISH SETUP - Writable tag with accountType sync
     // ========================================================================
@@ -275,49 +270,23 @@ export const GoogleAuthManager = pattern<
       () => (missingScopes as ScopeKey[]).length === 0,
     );
 
-    // Picker UI from wish (null when no picker)
-    const pickerUI = computed(() => wishResult[UI] ?? null);
+    // Picker UI from wish - used directly in JSX, NOT inside computeds
+    // (accessing wishResult[UI] inside a computed crashes the reactive graph)
+    const pickerUI = wishResult[UI];
 
     // State machine
     const currentState = computed((): AuthState => {
-      const debug = debugMode as boolean;
-
-      if (wishResult.error) {
-        debugLog(debug, "state: not-found (wish error)", wishResult.error);
-        return "not-found";
-      }
-
-      if (!hasAuth) {
-        // If wish provides a picker UI, we're in selecting mode
-        if (pickerUI) {
-          debugLog(debug, "state: selecting (picker UI shown)");
-          return "selecting";
-        }
-        debugLog(debug, "state: loading (no auth resolved)");
-        return "loading";
-      }
-
-      if (!hasToken || !hasEmail) {
-        debugLog(debug, "state: needs-login");
-        return "needs-login";
-      }
-
-      if (!hasRequiredScopes) {
-        debugLog(debug, "state: missing-scopes");
-        return "missing-scopes";
-      }
-
-      if (isTokenExpired) {
-        debugLog(debug, "state: token-expired");
-        return "token-expired";
-      }
-
-      debugLog(debug, "state: ready", { email: auth?.user?.email });
+      if (!hasAuth) return "loading";
+      if (!hasToken || !hasEmail) return "needs-login";
+      if (!hasRequiredScopes) return "missing-scopes";
+      if (isTokenExpired) return "token-expired";
       return "ready";
     });
 
-    // Derived values from state
-    const isReady = computed(() => currentState === "ready");
+    // isReady computed directly from booleans (matches minimal version pattern)
+    const isReady = computed(
+      () => hasToken && !isTokenExpired && hasRequiredScopes,
+    );
     const currentEmail = computed(() => (auth?.user?.email ?? "") as string);
 
     const statusDotColor = computed(
@@ -464,7 +433,6 @@ export const GoogleAuthManager = pattern<
     );
 
     // --- State boolean computeds for fullUI ---
-    const isSelecting = computed(() => currentState === "selecting");
     const isNeedsLogin = computed(() => currentState === "needs-login");
     const isMissingScopes = computed(() => currentState === "missing-scopes");
     const isTokenExpiredState = computed(
@@ -511,7 +479,8 @@ export const GoogleAuthManager = pattern<
       alignItems: "center",
     };
 
-    // --- Loading / Not-found UI ---
+    // --- Loading / Not-found / Selecting UI (merged) ---
+    // Includes the wish picker when available (for multi-account selection)
     const loadingUI = (
       <div
         style={{
@@ -529,6 +498,7 @@ export const GoogleAuthManager = pattern<
           {" "}
           {scopesList}
         </p>
+        {pickerUI}
         <button
           type="button"
           onClick={createAuth}
@@ -544,51 +514,6 @@ export const GoogleAuthManager = pattern<
           }}
         >
           Connect Google Account
-        </button>
-      </div>
-    );
-
-    // --- Selecting UI (multiple matches, picker shown) ---
-    const selectingUI = (
-      <div
-        style={{
-          padding: "16px",
-          backgroundColor: "#dbeafe",
-          borderRadius: "8px",
-        }}
-      >
-        <h4 style={{ margin: "0 0 8px 0", color: "#1e40af" }}>
-          Select a Google Account
-        </h4>
-        {ifElse(
-          computed(() => (requiredScopes as ScopeKey[]).length > 0),
-          <p
-            style={{
-              margin: "0 0 12px 0",
-              fontSize: "13px",
-              color: "#4b5563",
-            }}
-          >
-            This feature needs access to: {scopesList}
-          </p>,
-          null,
-        )}
-        {pickerUI}
-        <button
-          type="button"
-          onClick={createAuth}
-          style={{
-            marginTop: "12px",
-            padding: "8px 16px",
-            backgroundColor: "transparent",
-            color: "#1e40af",
-            border: "1px solid #3b82f6",
-            borderRadius: "6px",
-            cursor: "pointer",
-            fontSize: "13px",
-          }}
-        >
-          + Add new account
         </button>
       </div>
     );
@@ -808,9 +733,8 @@ export const GoogleAuthManager = pattern<
 
     // --- Compose fullUI via chained ifElse (no null branches) ---
     // Built inside-out to avoid TS2589 (type instantiation too deep)
-    const selectOrLoad = ifElse(isSelecting, selectingUI, loadingUI);
-    const loginOrPrev = ifElse(isNeedsLogin, needsLoginUI, selectOrLoad);
-    const scopesOrPrev = ifElse(isMissingScopes, missingScopesUI, loginOrPrev);
+    const loginOrLoad = ifElse(isNeedsLogin, needsLoginUI, loadingUI);
+    const scopesOrPrev = ifElse(isMissingScopes, missingScopesUI, loginOrLoad);
     const expiredOrPrev = ifElse(
       isTokenExpiredState,
       tokenExpiredUI,
