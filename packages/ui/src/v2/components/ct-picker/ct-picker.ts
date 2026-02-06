@@ -281,7 +281,9 @@ export class CTPicker extends BaseElement {
   override render() {
     const items = this._getItems();
     const hasMultipleItems = items.length > 1;
-    const currentIndex = this._currentIndex;
+    const currentIndex = items.length
+      ? Math.min(this._currentIndex, items.length - 1)
+      : 0;
 
     return html`
       <div
@@ -482,7 +484,10 @@ export class CTPicker extends BaseElement {
   }
 
   getSelectedItem(): any | undefined {
-    return this._getItemAt(this._currentIndex);
+    const items = this._getItems();
+    if (!items.length) return undefined;
+    const index = Math.min(this._currentIndex, items.length - 1);
+    return this._getItemAt(index);
   }
 
   selectByIndex(index: number): void {
