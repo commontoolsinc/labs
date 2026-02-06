@@ -163,9 +163,10 @@ but event payloads do not persist.
 - **Declared vs effective API**: The type system declares six cell variants
   (`Cell`, `ReadonlyCell`, `WriteonlyCell`, `ComparableCell`, `OpaqueCell`,
   `Stream`), each with a different subset of methods. In practice, pattern code
-  uses only two: `Cell` (aliased as `Writable`) for state, and `Stream` for
-  events. The restricted variants exist in the API declarations but have no
-  pattern-level consumers.
+  uses only two: `Cell` and `Stream`. `Writable<T>` is a type alias for
+  `Cell<T>` with no distinct semantics — the codebase uses them
+  interchangeably. The restricted variants exist in the API declarations but
+  have no pattern-level consumers.
 
 ### Shared Identity Base
 
@@ -208,8 +209,12 @@ pattern-level API is:
 - **Stream**: `.send()`
 
 `Writable<T>` is a pure type alias for `Cell<T>` — same interface, same runtime
-object. It serves as a documentation convention in pattern input signatures to
-declare write intent, not as a distinct capability tier.
+object. It is nominally a documentation convention to declare write intent, but
+in practice every use of `Cell<T>` in pattern code is also a write context
+(handler state parameters, input interfaces whose fields get mutated). The
+codebase is inconsistent about which name is used — some patterns write
+`Writable<T>`, others write `Cell<T>` in identical roles. The alias carries no
+enforced semantics and no actual information.
 
 The restricted variants (`ReadonlyCell`, `WriteonlyCell`, `ComparableCell`,
 `OpaqueCell`) are either aspirational — intended for future enforcement of
