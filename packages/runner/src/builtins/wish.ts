@@ -472,6 +472,10 @@ function errorUI(message: string): VNode {
   return h("span", { style: "color: red" }, `⚠️ ${message}`);
 }
 
+function cellLinkUI(cell: Cell<unknown>): VNode {
+  return h("ct-cell-link", { $cell: cell });
+}
+
 const TARGET_SCHEMA = {
   anyOf: [{
     type: "string",
@@ -703,10 +707,12 @@ export function wish(
 
           if (resultCells.length === 1) {
             // Single result - fast path with unified shape
+            // Prefer the result cell's own [UI]; fall back to ct-cell-link
+            const resultUI = resultCells[0].key(UI).get();
             sendResult(tx, {
               result: resultCells[0],
               candidates: candidatesCell,
-              [UI]: resultCells[0].key(UI),
+              [UI]: resultUI ?? cellLinkUI(resultCells[0]),
             });
           } else {
             // Multiple results - launch picker pattern
