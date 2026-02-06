@@ -3686,6 +3686,9 @@ interface CTFormAttributes<T> extends CTHTMLAttributes<T> {
   "method"?: "GET" | "POST" | CellLike<"GET" | "POST">;
   "action"?: string | CellLike<string>;
   "onct-submit"?: EventHandler<any>;
+  "onct-form-invalid"?: EventHandler<{
+    errors: Array<{ element: HTMLElement; message?: string }>;
+  }>;
 }
 
 interface CTSliderAttributes<T> extends CTHTMLAttributes<T> {

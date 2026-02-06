@@ -42,7 +42,7 @@ export * from "./components/ct-drop-zone/index.ts";
 export * from "./components/ct-fab/index.ts";
 export * from "./components/ct-file-download/index.ts";
 export * from "./components/ct-file-input/index.ts";
-export * from "./components/ct-form/index.ts";
+export * from "./components/form/index.ts";
 export * from "./components/ct-fragment/index.ts";
 export * from "./components/ct-google-oauth/index.ts";
 export * from "./components/ct-grid/index.ts";
