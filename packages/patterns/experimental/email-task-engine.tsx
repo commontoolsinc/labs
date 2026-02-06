@@ -457,7 +457,8 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   const sortNewestFirst = Writable.of(true).for("sortNewestFirst");
 
   // Get all pieces for note discovery
-  const { allPieces } = wish<{ allPieces: NotePiece[] }>("#default");
+  const { allPieces } =
+    wish<{ allPieces: NotePiece[] }>({ query: "#default" }).result;
 
   // Use createGoogleAuth for scopes that include gmailModify
   const {
