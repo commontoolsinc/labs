@@ -39,30 +39,46 @@ transaction.
 
 ### Conflict Detection
 
-The system detects conflicts when the base state changes between transaction
-open and commit.
+The system detects conflicts when the committed state changes between first
+cell access and commit.
 
 #### Behavior
 
-- When committing, if the underlying data has changed since the transaction
-  started, the commit fails
-- Even **identical writes** trigger conflict — detection is based on base state
-  changing, not on whether final values differ
+- The first operation on a cell within a transaction (whether `get()` or
+  `set()`) captures the current committed value as the **baseline**
+- On commit, if the committed state no longer matches the baseline, the commit
+  fails with `StorageTransactionInconsistent`
+- Even **identical writes** trigger conflict — detection is based on baseline
+  divergence, not on whether final values differ
 - This is optimistic concurrency control
-- **Important**: Conflict detection only applies to cells that were READ within
-  the transaction. A write-only transaction will not conflict with concurrent
-  commits to the same cell.
+- **Important**: Simply opening a transaction does not capture any baselines.
+  Conflict detection only applies to cells that were **accessed** (read or
+  written) within the transaction. If T2 commits before T1 touches a cell, T1's
+  subsequent access captures T2's committed value as the baseline, so no
+  conflict occurs.
 
-#### Example
+#### Examples
+
+Conflict (both transactions access before either commits):
 
 ```
-Transaction A: open, read cell (value=1)
-Transaction B: open, read cell (value=1), set(2), commit  // succeeds
-Transaction A: set(2), commit  // FAILS — base state changed
+Transaction A: open, set cell (captures baseline=1)
+Transaction B: open, set cell (captures baseline=1), commit  // succeeds
+Transaction A: commit  // FAILS — baseline 1 ≠ committed 2
 ```
 
-Transaction A fails even though it wrote the same value, because the base state
-it read from is no longer current.
+No conflict (T1 accesses after T2 commits):
+
+```
+Transaction A: open
+Transaction B: open, set cell (2), commit  // succeeds, cell is now 2
+Transaction A: set cell (3)  // captures baseline=2 (T2's committed value)
+Transaction A: commit  // succeeds — baseline 2 = committed 2
+```
+
+In the conflict case, both transactions captured the original value as their
+baseline. In the no-conflict case, Transaction A's first access happens after
+Transaction B has committed, so A's baseline already reflects B's changes.
 
 ### Non-Traditional Transaction Semantics
 
@@ -72,10 +88,11 @@ This system does not implement SQL-style transaction isolation. Key differences:
   committed state. If another transaction commits while yours is open, your
   previously-read reference reflects their changes — no isolation.
 
-- **Conflict detection is conditional**: Conflicts only occur when both
-  transactions have pending writes based on the same original state. If T2
-  commits *before* T1 writes, T1 observes the new state via live reference
-  and commits successfully — no conflict.
+- **Conflict detection is baseline-based**: The first access to a cell (read
+  or write) captures the committed value as a baseline. If the committed value
+  changes before commit, the transaction fails. If T2 commits *before* T1
+  touches the cell, T1's access captures T2's value as its baseline and commits
+  successfully — no conflict.
 
 - **Two read modes**: `cell.get()` returns committed state (live proxy);
   `cell.withTx(tx).get()` returns pending writes (read-your-writes).
