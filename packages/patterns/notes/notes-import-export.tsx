@@ -7,6 +7,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  type Stream,
   UI,
   type VNode,
   Writable,
@@ -59,6 +60,32 @@ interface Output {
   noteCount: number;
   notebookCount: number;
   mentionable: NotePiece[];
+
+  // Observable state for testing
+  notes: readonly NotePiece[];
+  notebooks: readonly NotebookPiece[];
+  detectedDuplicates: readonly DetectedDuplicate[];
+  showDuplicateModal: boolean;
+  showImportModal: boolean;
+  showImportProgressModal: boolean;
+  importComplete: boolean;
+  selectedNoteIndices: readonly number[];
+  selectedNotebookIndices: readonly number[];
+
+  // Actions as Stream<T> for testing
+  analyzeImport: Stream<void>;
+  openImportModal: Stream<void>;
+  closeImportModal: Stream<void>;
+  importSkipDuplicates: Stream<void>;
+  importAllAsCopies: Stream<void>;
+  cancelImport: Stream<void>;
+  createNote: Stream<void>;
+  selectAllNotes: Stream<void>;
+  deselectAllNotes: Stream<void>;
+  selectAllNotebooks: Stream<void>;
+  deselectAllNotebooks: Stream<void>;
+  openExportAllModal: Stream<void>;
+  closeExportAllModal: Stream<void>;
 }
 
 // Helper to resolve proxy value to primitive string
@@ -357,10 +384,12 @@ function topologicalSortNotebooks(notebooks: ParsedNotebook[]): number[] {
 // Import Execution
 // ============================================================================
 
-type DetectedDuplicate = {
+// Exported for tests
+export type DetectedDuplicate = {
   title: string;
   noteId?: string;
   existingNotebook: string;
+  isNotebook?: boolean;
 };
 
 function performImport(
@@ -609,6 +638,226 @@ function performImport(
   }
 
   onComplete?.();
+}
+
+// ============================================================================
+// Centralized Import Processing Types & Functions
+// ============================================================================
+
+/**
+ * Result from analyzing markdown content for import.
+ */
+type ImportAnalysisResult = {
+  parsedNotes: ParsedNote[];
+  parsedNotebooks: ParsedNotebook[];
+  duplicates: DetectedDuplicate[];
+  importSummary: string;
+};
+
+/**
+ * Context needed for processing import results.
+ * Passed from pattern body to allow module-scope function to update state.
+ */
+type ImportProcessingContext = {
+  allPieces: Writable<NotePiece[]>;
+  notebooks: NotebookPiece[];
+  pendingImportData: Writable<string>;
+  detectedDuplicates: Writable<DetectedDuplicate[]>;
+  showDuplicateModal: Writable<boolean>;
+  showImportModal: Writable<boolean>;
+  showPasteSection: Writable<boolean>;
+  showImportProgressModal: Writable<boolean>;
+  importProgressMessage: Writable<string>;
+  importComplete: Writable<boolean>;
+};
+
+/**
+ * Analyzes markdown content for import, detecting duplicates against existing notes/notebooks.
+ * Shared by both paste and file upload import paths.
+ */
+function analyzeImportContent(
+  markdown: string,
+  existingNotes: NotePiece[],
+  existingNotebooks: NotebookPiece[],
+): ImportAnalysisResult | null {
+  const parsedNotes = parseNotesFromMarkdown(markdown);
+  const parsedNotebooks = parseNotebooksFromMarkdown(markdown);
+
+  if (parsedNotes.length === 0 && parsedNotebooks.length === 0) {
+    return null;
+  }
+
+  // Check for duplicate notes
+  const existingNotesByTitle = new Map<string, NotePiece>();
+  existingNotes.forEach((note: NotePiece) => {
+    const title = note?.title;
+    if (title) existingNotesByTitle.set(title, note);
+  });
+
+  const duplicates: DetectedDuplicate[] = [];
+
+  // Detect duplicate notes
+  for (const noteData of parsedNotes) {
+    if (existingNotesByTitle.has(noteData.title)) {
+      duplicates.push({
+        title: noteData.title,
+        noteId: noteData.noteId,
+        existingNotebook: "this space",
+        isNotebook: false,
+      });
+    }
+  }
+
+  // Detect duplicate notebooks
+  const existingNotebookTitles = new Set<string>();
+  existingNotebooks.forEach((nb: NotebookPiece) => {
+    const cleanTitle = getCleanNotebookTitle(nb);
+    if (cleanTitle) existingNotebookTitles.add(cleanTitle);
+  });
+
+  for (const nbData of parsedNotebooks) {
+    if (existingNotebookTitles.has(nbData.title)) {
+      duplicates.push({
+        title: `📓 ${nbData.title}`,
+        existingNotebook: "this space",
+        isNotebook: true,
+      });
+    }
+  }
+
+  // Build import summary
+  const itemCounts: string[] = [];
+  if (parsedNotes.length > 0) {
+    itemCounts.push(
+      `${parsedNotes.length} note${parsedNotes.length !== 1 ? "s" : ""}`,
+    );
+  }
+  if (parsedNotebooks.length > 0) {
+    itemCounts.push(
+      `${parsedNotebooks.length} notebook${
+        parsedNotebooks.length !== 1 ? "s" : ""
+      }`,
+    );
+  }
+  const importSummary = itemCounts.join(" and ");
+
+  return { parsedNotes, parsedNotebooks, duplicates, importSummary };
+}
+
+/**
+ * Process import analysis result - handles both duplicate detection flow
+ * and direct import flow. Called by both paste and file upload paths.
+ */
+function processImportResult(
+  markdown: string,
+  result: ImportAnalysisResult,
+  ctx: ImportProcessingContext,
+): void {
+  const { parsedNotes, duplicates, importSummary } = result;
+
+  // Close import modal and reset paste section visibility
+  ctx.showImportModal.set(false);
+  ctx.showPasteSection.set(true);
+
+  if (duplicates.length > 0) {
+    // Duplicates detected - show duplicate modal for user decision
+    ctx.pendingImportData.set(markdown);
+    ctx.detectedDuplicates.set(duplicates);
+    ctx.showDuplicateModal.set(true);
+  } else {
+    // No duplicates - proceed with import directly
+    ctx.importComplete.set(false);
+    ctx.importProgressMessage.set(`Importing ${importSummary}...`);
+    ctx.showImportProgressModal.set(true);
+
+    performImport(
+      parsedNotes,
+      ctx.allPieces,
+      ctx.notebooks,
+      new Set(),
+      markdown,
+    );
+
+    ctx.importProgressMessage.set(`Imported ${importSummary}!`);
+    ctx.importComplete.set(true);
+  }
+}
+
+/**
+ * Execute a pending import after user has made a decision about duplicates.
+ * Used by both "Skip Duplicates" and "Import as Copies" flows.
+ *
+ * @param skipDuplicates - If true, skip items that were detected as duplicates.
+ *                         If false, import everything (duplicates become copies).
+ * @param ctx - The import context with state and dependencies
+ */
+function executePendingImport(
+  skipDuplicates: boolean,
+  ctx: ImportProcessingContext,
+): void {
+  const markdown = ctx.pendingImportData.get();
+  if (!markdown) {
+    return;
+  }
+
+  const parsedNotes = parseNotesFromMarkdown(markdown);
+  const parsedNotebooks = parseNotebooksFromMarkdown(markdown);
+  const duplicates = ctx.detectedDuplicates.get();
+
+  // Build skip sets if skipping duplicates
+  const skipNoteTitles = new Set<string>();
+  const skipNotebookTitles = new Set<string>();
+
+  if (skipDuplicates) {
+    for (const d of duplicates) {
+      if (d.isNotebook) {
+        // Remove the 📓 prefix that was added for display
+        skipNotebookTitles.add(d.title.replace(/^📓\s*/, ""));
+      } else {
+        skipNoteTitles.add(d.title);
+      }
+    }
+  }
+
+  // Calculate import counts for summary
+  const noteImportCount = parsedNotes.length -
+    (skipDuplicates ? skipNoteTitles.size : 0);
+  const notebookImportCount = parsedNotebooks.length -
+    (skipDuplicates ? skipNotebookTitles.size : 0);
+
+  const itemCounts: string[] = [];
+  if (noteImportCount > 0) {
+    itemCounts.push(
+      `${noteImportCount} note${noteImportCount !== 1 ? "s" : ""}`,
+    );
+  }
+  if (notebookImportCount > 0) {
+    itemCounts.push(
+      `${notebookImportCount} notebook${notebookImportCount !== 1 ? "s" : ""}`,
+    );
+  }
+  const importSummary = itemCounts.join(" and ") || "items";
+
+  // Clear duplicate state and show progress
+  ctx.pendingImportData.set("");
+  ctx.detectedDuplicates.set([]);
+  ctx.showDuplicateModal.set(false);
+  ctx.importComplete.set(false);
+  ctx.importProgressMessage.set(`Importing ${importSummary}...`);
+  ctx.showImportProgressModal.set(true);
+
+  // Execute the import
+  // Note: performImport currently only supports skipping notes, not notebooks
+  performImport(
+    parsedNotes,
+    ctx.allPieces,
+    ctx.notebooks,
+    skipNoteTitles,
+    markdown,
+  );
+
+  ctx.importProgressMessage.set(`Imported ${importSummary}!`);
+  ctx.importComplete.set(true);
 }
 
 // ============================================================================
@@ -880,7 +1129,9 @@ const NotesImportExport = pattern<Input, Output>(
         const noteId = note?.noteId;
         if (!noteId) return;
 
-        const allPiecesIdx = allPiecesList.findIndex((p: any) => p?.noteId === noteId);
+        const allPiecesIdx = allPiecesList.findIndex((p: any) =>
+          p?.noteId === noteId
+        );
         if (allPiecesIdx >= 0) {
           allPieces.key(allPiecesIdx).key("isHidden").set(newHiddenState);
         }
@@ -901,7 +1152,9 @@ const NotesImportExport = pattern<Input, Output>(
         const nbName = (nb as any)?.[NAME];
         if (!nbName) return;
 
-        const allPiecesIdx = allPiecesList.findIndex((p: any) => (p as any)?.[NAME] === nbName);
+        const allPiecesIdx = allPiecesList.findIndex((p: any) =>
+          (p as any)?.[NAME] === nbName
+        );
         if (allPiecesIdx >= 0) {
           allPieces.key(allPiecesIdx).key("isHidden").set(newHiddenState);
         }
@@ -959,7 +1212,9 @@ const NotesImportExport = pattern<Input, Output>(
         const nbName = (nb as any)?.[NAME];
         if (!nbName) return;
 
-        const nbIdx = allPiecesList.findIndex((p: any) => (p as any)?.[NAME] === nbName);
+        const nbIdx = allPiecesList.findIndex((p: any) =>
+          (p as any)?.[NAME] === nbName
+        );
         if (nbIdx < 0) return;
 
         const nbNotesCell = allPieces.key(nbIdx).key("notes");
@@ -1028,134 +1283,148 @@ const NotesImportExport = pattern<Input, Output>(
     });
 
     // Notebook operations
-    const addToNotebook = action((event: { target?: { value: string }; detail?: { value: string } }) => {
-      const value = event.target?.value ?? event.detail?.value ?? "";
-      if (!value) return;
+    const addToNotebook = action(
+      (event: { target?: { value: string }; detail?: { value: string } }) => {
+        const value = event.target?.value ?? event.detail?.value ?? "";
+        if (!value) return;
 
-      if (value === "new") {
-        pendingNotebookAction.set("add");
-        showNewNotebookPrompt.set(true);
+        if (value === "new") {
+          pendingNotebookAction.set("add");
+          showNewNotebookPrompt.set(true);
+          selectedNotebook.set("");
+          return;
+        }
+
+        const nbIndex = parseInt(value, 10);
+        if (nbIndex < 0) return;
+
+        const selected = selectedNoteIndices.get();
+        const notebooksList = notebooks;
+        const allPiecesList = allPieces.get();
+
+        // Find the notebook in allPieces
+        const targetNotebook = notebooksList[nbIndex];
+        const targetNbName = (targetNotebook as any)?.[NAME];
+        if (!targetNbName) return;
+
+        const targetNbIdx = allPiecesList.findIndex((p: any) =>
+          (p as any)?.[NAME] === targetNbName
+        );
+        if (targetNbIdx < 0) return;
+
+        const notebookNotes = allPieces.key(targetNbIdx).key("notes");
+
+        for (const idx of selected) {
+          const note = notes[idx];
+          if (note) {
+            notebookNotes.push(note);
+
+            // Find note in allPieces and set isHidden
+            const noteId = (note as any)?.noteId;
+            if (noteId) {
+              const noteIdx = allPiecesList.findIndex((p: any) =>
+                p?.noteId === noteId
+              );
+              if (noteIdx >= 0) {
+                allPieces.key(noteIdx).key("isHidden").set(true);
+              }
+            }
+          }
+        }
+
+        selectedNoteIndices.set([]);
         selectedNotebook.set("");
-        return;
-      }
+      },
+    );
 
-      const nbIndex = parseInt(value, 10);
-      if (nbIndex < 0) return;
+    const moveToNotebook = action(
+      (event: { target?: { value: string }; detail?: { value: string } }) => {
+        const value = event.target?.value ?? event.detail?.value ?? "";
+        if (!value) return;
 
-      const selected = selectedNoteIndices.get();
-      const notebooksList = notebooks;
-      const allPiecesList = allPieces.get();
+        if (value === "new") {
+          pendingNotebookAction.set("move");
+          showNewNotebookPrompt.set(true);
+          selectedMoveNotebook.set("");
+          return;
+        }
 
-      // Find the notebook in allPieces
-      const targetNotebook = notebooksList[nbIndex];
-      const targetNbName = (targetNotebook as any)?.[NAME];
-      if (!targetNbName) return;
+        const nbIndex = parseInt(value, 10);
+        if (nbIndex < 0) return;
 
-      const targetNbIdx = allPiecesList.findIndex((p: any) => (p as any)?.[NAME] === targetNbName);
-      if (targetNbIdx < 0) return;
+        const selected = selectedNoteIndices.get();
+        const notebooksList = notebooks;
+        const allPiecesList = allPieces.get();
 
-      const notebookNotes = allPieces.key(targetNbIdx).key("notes");
+        // Find target notebook in allPieces
+        const targetNotebook = notebooksList[nbIndex];
+        const targetNbName = (targetNotebook as any)?.[NAME];
+        if (!targetNbName) return;
 
-      for (const idx of selected) {
-        const note = notes[idx];
-        if (note) {
-          notebookNotes.push(note);
+        const targetNbIdx = allPiecesList.findIndex((p: any) =>
+          (p as any)?.[NAME] === targetNbName
+        );
+        if (targetNbIdx < 0) return;
+
+        const targetNotebookNotes = allPieces.key(targetNbIdx).key("notes");
+
+        const selectedNoteIds: string[] = [];
+        const itemsToMove: NotePiece[] = [];
+
+        for (const idx of selected) {
+          const item = notes[idx];
+          if (!item) continue;
+
+          const noteId = (item as any)?.noteId;
+          if (noteId) selectedNoteIds.push(noteId);
+          itemsToMove.push(item);
 
           // Find note in allPieces and set isHidden
-          const noteId = (note as any)?.noteId;
           if (noteId) {
-            const noteIdx = allPiecesList.findIndex((p: any) => p?.noteId === noteId);
+            const noteIdx = allPiecesList.findIndex((p: any) =>
+              p?.noteId === noteId
+            );
             if (noteIdx >= 0) {
               allPieces.key(noteIdx).key("isHidden").set(true);
             }
           }
         }
-      }
 
-      selectedNoteIndices.set([]);
-      selectedNotebook.set("");
-    });
+        const shouldRemove = (n: any) => {
+          if (n?.noteId && selectedNoteIds.includes(n.noteId)) return true;
+          return false;
+        };
 
-    const moveToNotebook = action((event: { target?: { value: string }; detail?: { value: string } }) => {
-      const value = event.target?.value ?? event.detail?.value ?? "";
-      if (!value) return;
+        // Remove from all notebooks except target
+        notebooksList.forEach((nb: any, localIdx: number) => {
+          if (localIdx === nbIndex) return; // Skip target notebook
 
-      if (value === "new") {
-        pendingNotebookAction.set("move");
-        showNewNotebookPrompt.set(true);
-        selectedMoveNotebook.set("");
-        return;
-      }
+          const nbName = (nb as any)?.[NAME];
+          if (!nbName) return;
 
-      const nbIndex = parseInt(value, 10);
-      if (nbIndex < 0) return;
+          const nbIdx = allPiecesList.findIndex((p: any) =>
+            (p as any)?.[NAME] === nbName
+          );
+          if (nbIdx < 0) return;
 
-      const selected = selectedNoteIndices.get();
-      const notebooksList = notebooks;
-      const allPiecesList = allPieces.get();
+          const nbNotesCell = allPieces.key(nbIdx).key("notes");
+          const nbNotes = nbNotesCell.get() ?? [];
 
-      // Find target notebook in allPieces
-      const targetNotebook = notebooksList[nbIndex];
-      const targetNbName = (targetNotebook as any)?.[NAME];
-      if (!targetNbName) return;
-
-      const targetNbIdx = allPiecesList.findIndex((p: any) => (p as any)?.[NAME] === targetNbName);
-      if (targetNbIdx < 0) return;
-
-      const targetNotebookNotes = allPieces.key(targetNbIdx).key("notes");
-
-      const selectedNoteIds: string[] = [];
-      const itemsToMove: NotePiece[] = [];
-
-      for (const idx of selected) {
-        const item = notes[idx];
-        if (!item) continue;
-
-        const noteId = (item as any)?.noteId;
-        if (noteId) selectedNoteIds.push(noteId);
-        itemsToMove.push(item);
-
-        // Find note in allPieces and set isHidden
-        if (noteId) {
-          const noteIdx = allPiecesList.findIndex((p: any) => p?.noteId === noteId);
-          if (noteIdx >= 0) {
-            allPieces.key(noteIdx).key("isHidden").set(true);
+          const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
+          if (filtered.length !== nbNotes.length) {
+            nbNotesCell.set(filtered);
           }
+        });
+
+        // Add to target
+        for (const item of itemsToMove) {
+          targetNotebookNotes.push(item);
         }
-      }
 
-      const shouldRemove = (n: any) => {
-        if (n?.noteId && selectedNoteIds.includes(n.noteId)) return true;
-        return false;
-      };
-
-      // Remove from all notebooks except target
-      notebooksList.forEach((nb: any, localIdx: number) => {
-        if (localIdx === nbIndex) return; // Skip target notebook
-
-        const nbName = (nb as any)?.[NAME];
-        if (!nbName) return;
-
-        const nbIdx = allPiecesList.findIndex((p: any) => (p as any)?.[NAME] === nbName);
-        if (nbIdx < 0) return;
-
-        const nbNotesCell = allPieces.key(nbIdx).key("notes");
-        const nbNotes = nbNotesCell.get() ?? [];
-
-        const filtered = nbNotes.filter((n: any) => !shouldRemove(n));
-        if (filtered.length !== nbNotes.length) {
-          nbNotesCell.set(filtered);
-        }
-      });
-
-      // Add to target
-      for (const item of itemsToMove) {
-        targetNotebookNotes.push(item);
-      }
-
-      selectedNoteIndices.set([]);
-      selectedMoveNotebook.set("");
-    });
+        selectedNoteIndices.set([]);
+        selectedMoveNotebook.set("");
+      },
+    );
 
     const confirmDeleteNotebooks = action(() => {
       if (selectedNotebookIndices.get().length > 0) {
@@ -1325,7 +1594,9 @@ const NotesImportExport = pattern<Input, Output>(
         const note = notes[idx];
         const noteId = (note as any)?.noteId;
         if (noteId) {
-          const noteIdx = allPiecesList.findIndex((p: any) => p?.noteId === noteId);
+          const noteIdx = allPiecesList.findIndex((p: any) =>
+            p?.noteId === noteId
+          );
           if (noteIdx >= 0) {
             allPieces.key(noteIdx).key("isHidden").set(true);
           }
@@ -1339,7 +1610,9 @@ const NotesImportExport = pattern<Input, Output>(
           const nbName = (nb as any)?.[NAME];
           if (!nbName) return;
 
-          const nbIdx = allPiecesList.findIndex((p: any) => (p as any)?.[NAME] === nbName);
+          const nbIdx = allPiecesList.findIndex((p: any) =>
+            (p as any)?.[NAME] === nbName
+          );
           if (nbIdx < 0) return;
 
           const nbNotesCell = allPieces.key(nbIdx).key("notes");
@@ -1384,8 +1657,11 @@ const NotesImportExport = pattern<Input, Output>(
     const exportSelectedNotebooks = action(() => {
       const selected = selectedNotebookIndices.get();
 
-      const allNotes: { title: string; content: string; notebookName: string }[] =
-        [];
+      const allNotes: {
+        title: string;
+        content: string;
+        notebookName: string;
+      }[] = [];
       for (const idx of selected) {
         const nb = notebooks[idx];
         const cleanName = getCleanNotebookTitle(nb);
@@ -1440,187 +1716,91 @@ const NotesImportExport = pattern<Input, Output>(
       showPasteSection.set(false);
     });
 
+    // ========================================================================
+    // Import Actions - use centralized helpers at module scope
+    // ========================================================================
+
     const analyzeImport = action(() => {
       const markdown = importMarkdown;
-      const parsedNotes = parseNotesFromMarkdown(markdown);
-      const parsedNotebooks = parseNotebooksFromMarkdown(markdown);
-
-      if (parsedNotes.length === 0 && parsedNotebooks.length === 0) return;
-
-      const existingNotes = notes;
-      const existingByTitle = new Map<string, NotePiece>();
-      existingNotes.forEach((note: any) => {
-        const title = note?.title;
-        if (title) existingByTitle.set(title, note);
+      const result = analyzeImportContent(markdown, [...notes], [...notebooks]);
+      if (!result) return;
+      processImportResult(markdown, result, {
+        allPieces,
+        notebooks: [...notebooks],
+        pendingImportData,
+        detectedDuplicates,
+        showDuplicateModal,
+        showImportModal,
+        showPasteSection,
+        showImportProgressModal,
+        importProgressMessage,
+        importComplete,
       });
-
-      const duplicates: DetectedDuplicate[] = [];
-      for (const noteData of parsedNotes) {
-        if (existingByTitle.has(noteData.title)) {
-          duplicates.push({
-            title: noteData.title,
-            noteId: noteData.noteId,
-            existingNotebook: "this space",
-          });
-        }
-      }
-
-      const itemCounts: string[] = [];
-      if (parsedNotes.length > 0) {
-        itemCounts.push(
-          `${parsedNotes.length} note${parsedNotes.length !== 1 ? "s" : ""}`,
-        );
-      }
-      if (parsedNotebooks.length > 0) {
-        itemCounts.push(
-          `${parsedNotebooks.length} notebook${
-            parsedNotebooks.length !== 1 ? "s" : ""
-          }`,
-        );
-      }
-      const importSummary = itemCounts.join(" and ");
-
-      if (duplicates.length > 0) {
-        pendingImportData.set(markdown);
-        detectedDuplicates.set(duplicates);
-        showDuplicateModal.set(true);
-        showImportModal.set(false);
-        showPasteSection.set(true);
-      } else {
-        showImportModal.set(false);
-        showPasteSection.set(true);
-        importComplete.set(false);
-        importProgressMessage.set(`Importing ${importSummary}...`);
-        showImportProgressModal.set(true);
-
-        performImport(
-          parsedNotes,
-          allPieces,
-          [...notebooks],
-          new Set(),
-          markdown,
-        );
-
-        importProgressMessage.set(`Imported ${importSummary}!`);
-        importComplete.set(true);
-      }
     });
 
-    const handleImportFileUpload = action((event: { detail: { files: Array<{ url: string; name: string }> } }) => {
-      const files = event.detail?.files ?? [];
-      if (files.length === 0) return;
+    const handleImportFileUpload = action(
+      (event: { detail: { files: Array<{ url: string; name: string }> } }) => {
+        const files = event.detail?.files ?? [];
+        if (files.length === 0) return;
 
-      const dataUrl = files[0].url;
-      const base64Part = dataUrl.split(",")[1];
-      if (!base64Part) return;
+        const dataUrl = files[0].url;
+        const base64Part = dataUrl.split(",")[1];
+        if (!base64Part) return;
 
-      const binaryString = atob(base64Part);
-      const bytes = Uint8Array.from(binaryString, (char) => char.charCodeAt(0));
-      const content = new TextDecoder().decode(bytes);
-
-      const parsedNotes = parseNotesFromMarkdown(content);
-      const parsedNotebooks = parseNotebooksFromMarkdown(content);
-
-      if (parsedNotes.length === 0 && parsedNotebooks.length === 0) {
-        console.warn("Import: No notes or notebooks found in file");
-        return;
-      }
-
-      const existingNotes = notes;
-      const existingByTitle = new Map<string, NotePiece>();
-      existingNotes.forEach((note: any) => {
-        const title = note?.title;
-        if (title) existingByTitle.set(title, note);
-      });
-
-      const duplicates: DetectedDuplicate[] = [];
-      for (const noteData of parsedNotes) {
-        if (existingByTitle.has(noteData.title)) {
-          duplicates.push({
-            title: noteData.title,
-            noteId: noteData.noteId,
-            existingNotebook: "this space",
-          });
-        }
-      }
-
-      const itemCounts: string[] = [];
-      if (parsedNotes.length > 0) {
-        itemCounts.push(
-          `${parsedNotes.length} note${parsedNotes.length !== 1 ? "s" : ""}`,
+        const binaryString = atob(base64Part);
+        const bytes = Uint8Array.from(
+          binaryString,
+          (char) => char.charCodeAt(0),
         );
-      }
-      if (parsedNotebooks.length > 0) {
-        itemCounts.push(
-          `${parsedNotebooks.length} notebook${
-            parsedNotebooks.length !== 1 ? "s" : ""
-          }`,
-        );
-      }
-      const importSummary = itemCounts.join(" and ");
+        const content = new TextDecoder().decode(bytes);
 
-      if (duplicates.length > 0) {
-        pendingImportData.set(content);
-        detectedDuplicates.set(duplicates);
-        showDuplicateModal.set(true);
-        showImportModal.set(false);
-        showPasteSection.set(true);
-      } else {
-        showImportModal.set(false);
-        showPasteSection.set(true);
-        importComplete.set(false);
-        importProgressMessage.set(`Importing ${importSummary}...`);
-        showImportProgressModal.set(true);
-
-        performImport(
-          parsedNotes,
+        const result = analyzeImportContent(content, [...notes], [
+          ...notebooks,
+        ]);
+        if (!result) return;
+        processImportResult(content, result, {
           allPieces,
-          [...notebooks],
-          new Set(),
-          content,
-        );
-
-        importProgressMessage.set(`Imported ${importSummary}!`);
-        importComplete.set(true);
-      }
-    });
+          notebooks: [...notebooks],
+          pendingImportData,
+          detectedDuplicates,
+          showDuplicateModal,
+          showImportModal,
+          showPasteSection,
+          showImportProgressModal,
+          importProgressMessage,
+          importComplete,
+        });
+      },
+    );
 
     const importSkipDuplicates = action(() => {
-      const markdown = pendingImportData.get();
-      const parsed = parseNotesFromMarkdown(markdown);
-      const duplicates = detectedDuplicates.get();
-
-      const skipTitles = new Set(duplicates.map((d: any) => d.title));
-      const importCount = parsed.length - skipTitles.size;
-
-      pendingImportData.set("");
-      detectedDuplicates.set([]);
-      showDuplicateModal.set(false);
-      importComplete.set(false);
-      importProgressMessage.set(`Importing ${importCount} notes...`);
-      showImportProgressModal.set(true);
-
-      performImport(parsed, allPieces, [...notebooks], skipTitles, markdown);
-
-      importProgressMessage.set(`Imported ${importCount} notes!`);
-      importComplete.set(true);
+      executePendingImport(true, {
+        allPieces,
+        notebooks: [...notebooks],
+        pendingImportData,
+        detectedDuplicates,
+        showDuplicateModal,
+        showImportModal,
+        showPasteSection,
+        showImportProgressModal,
+        importProgressMessage,
+        importComplete,
+      });
     });
 
     const importAllAsCopies = action(() => {
-      const markdown = pendingImportData.get();
-      const parsed = parseNotesFromMarkdown(markdown);
-
-      pendingImportData.set("");
-      detectedDuplicates.set([]);
-      showDuplicateModal.set(false);
-      importComplete.set(false);
-      importProgressMessage.set(`Importing ${parsed.length} notes...`);
-      showImportProgressModal.set(true);
-
-      performImport(parsed, allPieces, [...notebooks], new Set(), markdown);
-
-      importProgressMessage.set(`Imported ${parsed.length} notes!`);
-      importComplete.set(true);
+      executePendingImport(false, {
+        allPieces,
+        notebooks: [...notebooks],
+        pendingImportData,
+        detectedDuplicates,
+        showDuplicateModal,
+        showImportModal,
+        showPasteSection,
+        showImportProgressModal,
+        importProgressMessage,
+        importComplete,
+      });
     });
 
     const cancelImport = action(() => {
@@ -2428,6 +2608,32 @@ const NotesImportExport = pattern<Input, Output>(
       noteCount,
       notebookCount,
       mentionable: notes,
+
+      // Observable state for testing
+      notes,
+      notebooks,
+      detectedDuplicates: computed(() => detectedDuplicates.get()),
+      showDuplicateModal: computed(() => showDuplicateModal.get()),
+      showImportModal: computed(() => showImportModal.get()),
+      showImportProgressModal: computed(() => showImportProgressModal.get()),
+      importComplete: computed(() => importComplete.get()),
+      selectedNoteIndices: computed(() => selectedNoteIndices.get()),
+      selectedNotebookIndices: computed(() => selectedNotebookIndices.get()),
+
+      // Actions for testing
+      analyzeImport,
+      openImportModal,
+      closeImportModal,
+      importSkipDuplicates,
+      importAllAsCopies,
+      cancelImport,
+      createNote,
+      selectAllNotes,
+      deselectAllNotes,
+      selectAllNotebooks,
+      deselectAllNotebooks,
+      openExportAllModal,
+      closeExportAllModal,
     };
   },
 );
