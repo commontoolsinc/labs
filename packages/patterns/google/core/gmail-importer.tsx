@@ -1082,20 +1082,16 @@ export default pattern<{
     const historyId = Writable.of("").for("historyId");
     const fetching = Writable.of(false).for("fetching");
 
-    // ULTRA MINIMAL TEST
-    const authManager = GoogleAuthManagerMinimal({});
-
-    // Q1: Can we access wishResult?
-    const wishedAuth = computed(() => {
-      console.log("[gmail-importer] derive fired, auth:", authManager.auth);
-      return authManager.auth;
+    // Use auth manager with required scopes
+    const authManager = GoogleAuthManagerMinimal({
+      requiredScopes: ["gmail"],
     });
 
-    // Q2: Does authManager[UI] render?
+    const wishedAuth = authManager.auth;
     const authUI = authManager[UI];
 
     const auth = ifElse(overrideAuth.token, overrideAuth, wishedAuth);
-    const isReady = computed(() => !!auth?.token);
+    const isReady = computed(() => overrideAuth.token ? true : authManager.isReady);
     const currentEmail = computed(() => auth.user?.email ?? "");
 
     const googleUpdaterStream = googleUpdater({
