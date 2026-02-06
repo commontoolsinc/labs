@@ -472,11 +472,6 @@ function errorUI(message: string): VNode {
   return h("span", { style: "color: red" }, `⚠️ ${message}`);
 }
 
-// TODO(seefeld): Add button to replace this with wish.tsx getting more options
-function cellLinkUI(cell: Cell<unknown>): VNode {
-  return h("ct-cell-link", { $cell: cell });
-}
-
 const TARGET_SCHEMA = {
   anyOf: [{
     type: "string",
@@ -711,7 +706,7 @@ export function wish(
             sendResult(tx, {
               result: resultCells[0],
               candidates: candidatesCell,
-              [UI]: cellLinkUI(resultCells[0]),
+              [UI]: resultCells[0].key(UI),
             });
           } else {
             // Multiple results - launch picker pattern
