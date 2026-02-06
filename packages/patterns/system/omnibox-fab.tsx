@@ -89,8 +89,8 @@ const listRecent = pattern<
 
 export default pattern<OmniboxFABInput>(
   (_) => {
-    const mentionable = wish<MentionablePiece[]>("#mentionable");
-    const recentPieces = wish<MentionablePiece[]>("#recent");
+    const mentionable = wish<MentionablePiece[]>({ query: "#mentionable" }).result;
+    const recentPieces = wish<MentionablePiece[]>({ query: "#recent" }).result;
 
     const profile = wish<string>({ query: "#profile" });
 

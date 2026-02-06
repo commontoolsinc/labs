@@ -126,7 +126,7 @@ export default pattern<Input, Output>(({ note, sourceNoteRef, content }) => {
   });
 
   // Get allPieces for noteId lookup fallback
-  const { allPieces } = wish<{ allPieces: any[] }>("#default");
+  const { allPieces } = wish<{ allPieces: any[] }>({ query: "#default" }).result;
 
   // Use sourceNoteRef directly if provided, otherwise fall back to noteId lookup
   const sourceNote = computed(() => {

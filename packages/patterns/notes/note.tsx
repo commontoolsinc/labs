@@ -323,11 +323,11 @@ const Note = pattern<Input, Output>(
       [SELF]: self,
     },
   ) => {
-    const { allPieces } = wish<{ allPieces: MinimalPiece[] }>("#default");
+    const { allPieces } = wish<{ allPieces: MinimalPiece[] }>({ query: "#default" }).result;
     const mentionable = wish<Default<MentionablePiece[], []>>(
-      "#mentionable",
-    );
-    const _recentPieces = wish<MinimalPiece[]>("#recent");
+      { query: "#mentionable" },
+    ).result;
+    const _recentPieces = wish<MinimalPiece[]>({ query: "#recent" }).result;
     const mentioned = Writable.of<MentionablePiece[]>([]);
 
     // Dropdown menu state

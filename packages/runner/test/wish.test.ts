@@ -59,14 +59,16 @@ describe("wish built-in", () => {
     tx = runtime.edit();
 
     const wishRecipe = recipe("wish resolves all pieces", () => {
-      const allPieces = wish<Array<Record<string, unknown>>>("/allPieces");
-      const firstPieceTitle = wish("/allPieces/0/title");
+      const allPieces = wish<Array<Record<string, unknown>>>({
+        query: "/allPieces",
+      });
+      const firstPieceTitle = wish({ query: "/allPieces/0/title" });
       return { allPieces, firstPieceTitle };
     });
 
     const resultCell = runtime.getCell<{
-      allPieces?: unknown[];
-      firstPieceTitle?: string;
+      allPieces?: { result?: unknown[] };
+      firstPieceTitle?: { result?: string };
     }>(
       space,
       "wish built-in result",
@@ -80,16 +82,19 @@ describe("wish built-in", () => {
     // Pull to trigger computation
     await result.pull();
 
-    const actualCell = result.key("allPieces");
-    const rawValue = actualCell.getRaw() as
+    const wishResultCell = result.key("allPieces");
+    const allPiecesResultCell = wishResultCell.key("result");
+    const rawValue = allPiecesResultCell.getRaw() as
       | { ["/"]: Record<string, unknown> }
       | undefined;
     const linkData = rawValue?.["/"]?.[LINK_V1_TAG] as
       | { id?: string; overwrite?: string }
       | undefined;
 
-    expect(result.key("allPieces").get()).toEqual(piecesData);
-    expect(result.key("firstPieceTitle").get()).toEqual(piecesData[0].title);
+    expect(result.key("allPieces").get()?.result).toEqual(piecesData);
+    expect(result.key("firstPieceTitle").get()?.result).toEqual(
+      piecesData[0].title,
+    );
     expect(linkData?.id).toEqual(`of:${ALL_PIECES_ID}`);
   });
 
@@ -121,14 +126,14 @@ describe("wish built-in", () => {
 
     const wishRecipe = recipe("wish semantic target", () => {
       return {
-        semanticAllPieces: wish("#allPieces"),
-        semanticFirstTitle: wish("#allPieces/0/title"),
+        semanticAllPieces: wish({ query: "#allPieces" }),
+        semanticFirstTitle: wish({ query: "#allPieces/0/title" }),
       };
     });
 
     const resultCell = runtime.getCell<{
-      semanticAllPieces?: unknown[];
-      semanticFirstTitle?: string;
+      semanticAllPieces?: { result?: unknown[] };
+      semanticFirstTitle?: { result?: string };
     }>(
       space,
       "wish semantic",
@@ -142,8 +147,8 @@ describe("wish built-in", () => {
     // Pull to trigger computation
     await result.pull();
 
-    expect(result.key("semanticAllPieces").get()).toEqual(piecesData);
-    expect(result.key("semanticFirstTitle").get()).toEqual("Alpha");
+    expect(result.key("semanticAllPieces").get()?.result).toEqual(piecesData);
+    expect(result.key("semanticFirstTitle").get()?.result).toEqual("Alpha");
   });
 
   it("resolves the default pattern with #default", async () => {
@@ -164,14 +169,14 @@ describe("wish built-in", () => {
 
     const wishRecipe = recipe("wish default pattern", () => {
       return {
-        defaultTitle: wish("#default/title"),
-        defaultGreeting: wish("#default/argument/greeting"),
+        defaultTitle: wish({ query: "#default/title" }),
+        defaultGreeting: wish({ query: "#default/argument/greeting" }),
       };
     });
 
     const resultCell = runtime.getCell<{
-      defaultTitle?: string;
-      defaultGreeting?: string;
+      defaultTitle?: { result?: string };
+      defaultGreeting?: { result?: string };
     }>(
       space,
       "wish default pattern result",
@@ -185,8 +190,8 @@ describe("wish built-in", () => {
     // Pull to trigger computation
     await result.pull();
 
-    expect(result.key("defaultTitle").get()).toEqual("Default App");
-    expect(result.key("defaultGreeting").get()).toEqual("hello");
+    expect(result.key("defaultTitle").get()?.result).toEqual("Default App");
+    expect(result.key("defaultGreeting").get()?.result).toEqual("hello");
   });
 
   it("resolves mentionable backlinks via #mentionable", async () => {
@@ -207,14 +212,14 @@ describe("wish built-in", () => {
 
     const wishRecipe = recipe("wish mentionable", () => {
       return {
-        mentionable: wish("#mentionable"),
-        firstMentionable: wish("#mentionable/0/name"),
+        mentionable: wish({ query: "#mentionable" }),
+        firstMentionable: wish({ query: "#mentionable/0/name" }),
       };
     });
 
     const resultCell = runtime.getCell<{
-      mentionable?: unknown[];
-      firstMentionable?: string;
+      mentionable?: { result?: unknown[] };
+      firstMentionable?: { result?: string };
     }>(
       space,
       "wish mentionable result",
@@ -227,11 +232,11 @@ describe("wish built-in", () => {
 
     await result.pull();
 
-    expect(result.key("mentionable").get()).toEqual([
+    expect(result.key("mentionable").get()?.result).toEqual([
       { name: "Alpha" },
       { name: "Beta" },
     ]);
-    expect(result.key("firstMentionable").get()).toEqual("Alpha");
+    expect(result.key("firstMentionable").get()?.result).toEqual("Alpha");
   });
 
   it("resolves recent pieces via #recent", async () => {
@@ -256,14 +261,14 @@ describe("wish built-in", () => {
 
     const wishRecipe = recipe("wish recent pieces", () => {
       return {
-        recent: wish("#recent"),
-        recentFirst: wish("#recent/0/name"),
+        recent: wish({ query: "#recent" }),
+        recentFirst: wish({ query: "#recent/0/name" }),
       };
     });
 
     const resultCell = runtime.getCell<{
-      recent?: unknown[];
-      recentFirst?: string;
+      recent?: { result?: unknown[] };
+      recentFirst?: { result?: string };
     }>(
       space,
       "wish recent pieces result",
@@ -276,16 +281,16 @@ describe("wish built-in", () => {
 
     await result.pull();
 
-    expect(result.key("recent").get()).toEqual(recentData);
-    expect(result.key("recentFirst").get()).toEqual("Piece A");
+    expect(result.key("recent").get()?.result).toEqual(recentData);
+    expect(result.key("recentFirst").get()?.result).toEqual("Piece A");
   });
 
   it("returns current timestamp via #now", async () => {
     const wishRecipe = recipe("wish now", () => {
-      return { nowValue: wish("#now") };
+      return { nowValue: wish({ query: "#now" }) };
     });
 
-    const resultCell = runtime.getCell<{ nowValue?: number }>(
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
       space,
       "wish now result",
       undefined,
@@ -299,7 +304,7 @@ describe("wish built-in", () => {
     await result.pull();
 
     const after = Date.now();
-    const nowValue = result.key("nowValue").get();
+    const nowValue = result.key("nowValue").get()?.result;
     expect(typeof nowValue).toBe("number");
     expect(nowValue).toBeGreaterThanOrEqual(before);
     expect(nowValue).toBeLessThanOrEqual(after);
@@ -317,11 +322,11 @@ describe("wish built-in", () => {
     spaceCell.withTx(tx).set(spaceData);
 
     const wishRecipe = recipe("wish space cell", () => {
-      const spaceResult = wish("/");
+      const spaceResult = wish({ query: "/" });
       return { spaceResult };
     });
 
-    const resultCell = runtime.getCell<{ spaceResult?: unknown }>(
+    const resultCell = runtime.getCell<{ spaceResult?: { result?: unknown } }>(
       space,
       "wish built-in space",
       undefined,
@@ -336,7 +341,7 @@ describe("wish built-in", () => {
     const readTx = runtime.readTx();
     const spaceResultCell = result.withTx(readTx).key("spaceResult");
 
-    expect(spaceResultCell.get()).toEqual(spaceData);
+    expect(spaceResultCell.get()?.result).toEqual(spaceData);
   });
 
   it("resolves space cell subpaths using slash notation", async () => {
@@ -352,14 +357,14 @@ describe("wish built-in", () => {
 
     const wishRecipe = recipe("wish space subpaths", () => {
       return {
-        configLink: wish("/config"),
-        dataLink: wish("/nested/deep/data"),
+        configLink: wish({ query: "/config" }),
+        dataLink: wish({ query: "/nested/deep/data" }),
       };
     });
 
     const resultCell = runtime.getCell<{
-      configLink?: unknown;
-      dataLink?: unknown;
+      configLink?: { result?: unknown };
+      dataLink?: { result?: unknown };
     }>(
       space,
       "wish built-in space subpaths",
@@ -375,15 +380,15 @@ describe("wish built-in", () => {
     const readTx = runtime.readTx();
 
     const configCell = result.withTx(readTx).key("configLink");
-    expect(configCell.get()).toEqual({ setting: "value" });
+    expect(configCell.get()?.result).toEqual({ setting: "value" });
 
     const dataCell = result.withTx(readTx).key("dataLink");
-    expect(dataCell.get()).toEqual(["Alpha"]);
+    expect(dataCell.get()?.result).toEqual(["Alpha"]);
   });
 
   it("returns error for unknown wishes", async () => {
     const wishRecipe = recipe("wish unknown target", () => {
-      const missing = wish("commontools://unknown");
+      const missing = wish({ query: "" });
       return { missing };
     });
 
@@ -400,8 +405,8 @@ describe("wish built-in", () => {
     await result.pull();
 
     const missingResult = result.key("missing").get();
-    // Unknown wish targets now return an error object for better UX
-    expect(missingResult?.error).toMatch(/not recognized/);
+    // Empty query returns an error object
+    expect(missingResult?.error).toMatch(/no query/);
   });
 
   describe("object-based wish syntax", () => {

@@ -125,8 +125,8 @@ export const TitleGenerator = pattern<
 export default pattern<ChatInput, ChatOutput>(
   ({ messages, tools, theme, system }) => {
     const model = Writable.of<string>("anthropic:claude-sonnet-4-5");
-    const mentionable = wish<MentionablePiece[]>("#mentionable");
-    const recentPieces = wish<{ [NAME]: string }[]>("#recent");
+    const mentionable = wish<MentionablePiece[]>({ query: "#mentionable" }).result;
+    const recentPieces = wish<{ [NAME]: string }[]>({ query: "#recent" }).result;
 
     const latest = computed(() => recentPieces[0]);
     const latestName = computed(() => recentPieces[0]?.[NAME] ?? "latest");

@@ -286,16 +286,9 @@ export function wish<T = unknown>(
   schema: JSONSchema,
 ): OpaqueRef<Required<WishState<T>>>;
 export function wish<T = unknown>(
-  target: Opaque<string>,
-): OpaqueRef<T>;
-export function wish<T = unknown>(
-  target: Opaque<string>,
-  schema: JSONSchema,
-): OpaqueRef<T>;
-export function wish<T = unknown>(
-  target: Opaque<string> | Opaque<WishParams>,
+  target: Opaque<WishParams>,
   schema?: JSONSchema,
-): OpaqueRef<T | Required<WishState<T>>> {
+): OpaqueRef<Required<WishState<T>>> {
   let param;
   let resultSchema;
 
@@ -315,19 +308,14 @@ export function wish<T = unknown>(
     type: "ref",
     implementation: "wish",
     argumentSchema: {
-      anyOf: [{
-        type: "string",
-        default: "",
-      }, {
-        type: "object",
-        properties: {
-          query: { type: "string" },
-          path: { type: "array", items: { type: "string" } },
-          schema: { type: "object" },
-          context: { type: "object", additionalProperties: { asCell: true } },
-          scope: { type: "array", items: { type: "string" } },
-        },
-      }],
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        path: { type: "array", items: { type: "string" } },
+        schema: { type: "object" },
+        context: { type: "object", additionalProperties: { asCell: true } },
+        scope: { type: "array", items: { type: "string" } },
+      },
     } as const satisfies JSONSchema,
     resultSchema,
   })(param);

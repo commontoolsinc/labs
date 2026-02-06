@@ -607,7 +607,9 @@ const handleFileUpload = handler<
 
 export default pattern<Input, Output>(({ importJson }) => {
   // Get all pieces in the space
-  const { allPieces } = wish<{ allPieces: RecordPiece[] }>("#default");
+  const { allPieces } = wish<{ allPieces: RecordPiece[] }>({
+    query: "#default",
+  }).result;
 
   // Build export data
   const exportData = buildExportData({ allPieces });

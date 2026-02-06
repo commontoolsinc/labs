@@ -409,12 +409,6 @@ declare module "commontools" {
       target: Opaque<import("commontools").WishParams>,
       schema: S,
     ): OpaqueRef<Required<import("commontools").WishState<Schema<S>>>>;
-
-    // TODO(seefeld): Remove old interface mid December 2025
-    <S extends JSONSchema = JSONSchema>(
-      target: Opaque<string>,
-      schema: S,
-    ): OpaqueRef<Schema<S>>;
   }
 
   // Augment IResolvable with schema-based getArgumentCell overload

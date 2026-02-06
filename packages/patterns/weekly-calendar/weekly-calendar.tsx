@@ -365,7 +365,7 @@ const handleSetTitle = handler<
 
 const WeeklyCalendar = pattern<Input, Output>(
   ({ title, events, isCalendar, isHidden }) => {
-    const { allPieces } = wish<{ allPieces: EventPiece[] }>("#default");
+    const { allPieces } = wish<{ allPieces: EventPiece[] }>({ query: "#default" }).result;
 
     // Navigation State
     const startDate = Cell.of(getWeekStart(getTodayDate()));
