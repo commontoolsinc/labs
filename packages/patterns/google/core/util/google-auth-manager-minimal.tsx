@@ -155,7 +155,8 @@ export const GoogleAuthManagerMinimal = pattern<
     <span>Authenticated as {auth?.user.email}</span>,
     <div>
       <span>
-        Missing: {computed(() =>
+        Missing:{" "}
+        {computed(() =>
           (missingScopes as ScopeKey[]).map((s) => SCOPE_DESCRIPTIONS[s])
             .join(", ")
         )}
