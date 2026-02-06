@@ -19,7 +19,6 @@ import {
 } from "commontools";
 import TurndownService from "turndown";
 import { GmailClient } from "./util/gmail-client.ts";
-import { MentionablePiece } from "../../system/backlinks-index.tsx";
 
 type CFC<T, C extends string> = T;
 type Secret<T> = CFC<T, "secret">;
@@ -1092,23 +1091,14 @@ export default pattern<{
     });
 
     // Extract auth from wish result, fallback to overrideAuth if provided
-    // With scope: ["~"] (favorites only), we get single match = direct result (no picker nesting)
+    // Unified wish shape: result is always the selected piece directly (no nesting)
     const wishedAuth = derive(wishResult, (wr: any) => {
-      const result = wr?.result;
-      const resultKeys = result && typeof result === "object"
-        ? Object.keys(result)
-        : [];
-
-      // Check if this is picker-wrapped (has nested 'result') or direct
-      const isPicker = resultKeys.includes("result");
-      const actualPiece = isPicker ? result?.result : result;
-      const authCell = actualPiece?.auth;
+      // With unified wish shape, result is always the selected cell directly
+      const piece = wr?.result;
+      const authCell = piece?.auth;
 
       console.log("[gmail-importer] wishResult:", {
-        hasResult: !!result,
-        resultKeys,
-        isPicker,
-        hasActualPiece: !!actualPiece,
+        hasResult: !!piece,
         hasAuthCell: !!authCell,
         authToken: authCell?.token ? "[present]" : "[missing]",
       });

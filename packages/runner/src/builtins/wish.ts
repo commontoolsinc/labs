@@ -696,31 +696,36 @@ export function wish(
           // Sync all result cells to ensure data is loaded
           await Promise.all(resultCells.map((cell) => cell.sync()));
 
+          // Unified shape: always return { result, candidates, [UI] }
+          // For single result, use fast path (no picker needed)
+          // For multiple results, launch wish pattern for picker
+          const candidatesCell = runtime.getImmutableCell(
+            parentCell.space,
+            resultCells,
+            undefined,
+            tx,
+          );
+
           if (resultCells.length === 1) {
-            // Single result - return directly
+            // Single result - fast path with unified shape
             sendResult(tx, {
               result: resultCells[0],
+              candidates: candidatesCell,
               [UI]: cellLinkUI(resultCells[0]),
             });
           } else {
-            // Multiple results - show picker for user to choose
-            const candidatesCell = runtime.getImmutableCell(
-              parentCell.space,
-              resultCells,
-              undefined,
-              tx,
-            );
-
-            const pickerCell = await launchWishPattern({
+            // Multiple results - launch picker pattern
+            const wishPatternCell = await launchWishPattern({
               ...targetValue as WishParams,
               candidates: candidatesCell,
             }, tx);
 
-            // Return the picker pattern - its [UI] shows picker, then chosen cell
-            // After confirmation: wishResult.result.result gives the chosen cell
+            // Return unified shape from picker
+            const wishPatternValue = wishPatternCell.get();
             sendResult(tx, {
-              result: pickerCell,
-              [UI]: pickerCell.get()[UI],
+              result: wishPatternValue.result,
+              candidates: candidatesCell,
+              [UI]: wishPatternValue[UI],
             });
           }
         } catch (e) {

@@ -741,6 +741,46 @@ describe("wish built-in", () => {
         console.error = originalError;
       }
     });
+
+    it("returns unified shape with candidates for single result", async () => {
+      const spaceCell = runtime.getCell(space, space).withTx(tx);
+      const spaceData = { testField: "unified shape test" };
+      spaceCell.set(spaceData);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishRecipe = recipe("wish unified shape candidates", () => {
+        const spaceResult = wish({ query: "/" });
+        return { spaceResult };
+      });
+
+      const resultCell = runtime.getCell<{
+        spaceResult?: { result?: unknown; candidates?: unknown[] };
+      }>(
+        space,
+        "wish unified shape result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      const wishResult = result.key("spaceResult").get() as Record<
+        string | symbol,
+        unknown
+      >;
+      // Unified shape: result is present
+      expect(wishResult?.result).toEqual(spaceData);
+      // Unified shape: candidates is present (array containing the single match)
+      expect(wishResult?.candidates).toBeDefined();
+      expect(Array.isArray(wishResult?.candidates)).toBe(true);
+      expect((wishResult?.candidates as unknown[]).length).toBe(1);
+    });
   });
 
   describe("scope-based wish search", () => {

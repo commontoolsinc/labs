@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   computed,
-  DID,
   NAME,
   pattern,
   UI,
@@ -34,7 +33,7 @@ export default pattern<Record<string, never>>((_) => {
         <hr />
         <ct-textarea $value={wishText} />
         <hr />
-        {wishResult.result}
+        {wishResult}
       </div>
     ),
   };

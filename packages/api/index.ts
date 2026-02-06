@@ -1650,6 +1650,7 @@ export type WishParams = {
 
 export type WishState<T> = {
   result?: T;
+  candidates?: T[];
   error?: any;
   [UI]?: VNode;
 };

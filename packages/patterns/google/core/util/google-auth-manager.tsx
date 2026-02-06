@@ -366,10 +366,9 @@ export const GoogleAuthManager = pattern<
       // Determine state from wish result
       let state: AuthState = "loading";
 
-      // Detect picker mode: when wish() finds multiple matches, it returns a picker UI
+      // Detect picker mode: for multiple candidates, wish returns picker UI
       // (ct-card with ct-picker) instead of cellLinkUI (which has $cell prop).
-      // This check MUST come before wr.result check, because wish() sets result
-      // even when multiple matches exist (to the first candidate).
+      // Unified wish shape: result is always the selected cell directly.
       const hasPickerUI = wr?.[UI] && !wr?.[UI]?.props?.$cell;
 
       if (!wr) {

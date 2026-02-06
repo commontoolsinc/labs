@@ -1,7 +1,6 @@
 /// <cts-enable />
 import {
   computed,
-  DID,
   NAME,
   pattern,
   UI,
@@ -14,22 +13,22 @@ import { Contact } from "../contacts/contact-detail.tsx";
 
 export default pattern<Record<string, never>>((_) => {
   const emailResult = wish<
-    { [UI]: VNode; candidates: (Email & { [UI]: VNode })[] }
+    (Email & { [UI]: VNode })
   >({
     query: "#email",
     scope: ["."],
   });
 
-  const emails = emailResult.result.candidates;
+  const emails = emailResult.candidates;
 
   const peopleResult = wish<
-    { [UI]: VNode; candidates: (Contact & { [NAME]: string })[] }
+    (Contact & { [NAME]: string })
   >({
     query: "#person",
     scope: ["."],
   });
 
-  const people = peopleResult.result.candidates;
+  const people = peopleResult.candidates;
   const selectedPerson = Writable.of<Contact | null>(null);
 
   return {
