@@ -136,6 +136,11 @@ Cycles *across* documents are supported via explicit links (sigil links). Two
 cells can reference each other, forming a cycle in the broader data graph. The
 no-cycles constraint applies only to the serializable content of a single cell.
 
+The within-document prohibition is inherited from JSON's tree structure, not from
+a deep architectural requirement. If a future storage format supports cyclic
+references natively (e.g. CBOR with shared references, or a CRDT layer with
+internal pointers), this constraint could be relaxed.
+
 ---
 
 ## Hashing and Content Addressing
