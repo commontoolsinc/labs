@@ -167,6 +167,10 @@ When editing `ct-*` components in `packages/ui/`, restart the local dev server t
 
 ## Background Piece Service (Optional)
 
+> **Note:** This package is still named `background-charm-service` in the
+> codebase. "Charm" is the legacy name for "piece"; they refer to the same
+> concept.
+
 The background-charm-service polls registered pieces and triggers their `bgUpdater` handlers server-side. This is **optional** - only needed if you're testing background/scheduled piece execution.
 
 ### Quick Setup

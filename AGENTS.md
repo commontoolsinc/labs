@@ -26,7 +26,7 @@ Common Tools product.
 
 If you are developing patterns, use Claude Skills (pattern-dev) to do the work.
 
-### Useful Recipe/Pattern documentation
+### Useful Pattern documentation
 
 **Start here:**
 
@@ -50,7 +50,7 @@ If you are developing patterns, use Claude Skills (pattern-dev) to do the work.
 
 **Reference:**
 
-- `packages/patterns/INDEX.md` - Catalog of all pattern examples with summaries,
+- `packages/patterns/index.md` - Catalog of all pattern examples with summaries,
   data types, and keywords
 
 **Important:** Ignore the top level `recipes` folder - it is defunct.

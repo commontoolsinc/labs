@@ -16,7 +16,7 @@ Use `$` prefix for automatic two-way sync. No handler needed for simple updates.
 
 **Native HTML inputs are one-way only.** Always use `ct-*` components for form inputs.
 
-For when to use handlers vs binding, see [PATTERNS.md](PATTERNS.md).
+For when to use handlers vs binding, see [two-way-binding](../patterns/two-way-binding.md).
 
 ## Property Names: Use CamelCase
 
@@ -179,7 +179,7 @@ const gridView = GridView({ items });
 // Both views stay in sync automatically
 ```
 
-See [PATTERNS.md](PATTERNS.md) Level 4 for more on composition.
+See [composition](../patterns/composition.md) for more on pattern composition.
 
 ---
 
