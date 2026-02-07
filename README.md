@@ -60,9 +60,9 @@ prefixed components for pattern UIs.
 **Examples & Patterns ([packages/patterns](./packages/patterns))**: Example
 patterns for building with CommonTools.
 
-**Pattern Development**: Patterns can be developed using LLM assistance with
-the `/pattern-dev` skill. See
-[Pattern Documentation](./docs/common/) for patterns, components, and handlers.
+**Pattern Development**: Patterns can be developed using LLM assistance with the
+`/pattern-dev` skill. See [Pattern Documentation](./docs/common/) for patterns,
+components, and handlers.
 
 ## Development & Integrations
 
