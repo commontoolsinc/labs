@@ -24,7 +24,7 @@ const reminders: string[] = [];
 // Check for .tsx files (pattern development)
 if (filePath.endsWith(".tsx")) {
   reminders.push(
-    "Pattern docs: docs/common/PATTERNS.md, docs/common/COMPONENTS.md",
+    "Pattern docs: docs/common/patterns/, docs/common/components/COMPONENTS.md",
     "Test with /start-local-dev",
   );
 }

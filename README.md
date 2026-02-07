@@ -13,13 +13,13 @@ flow in the system, enabling safe & private collaboration at scale.
 
 ### Core Concepts
 
-**Recipes** are reactive programs that can be linked together to create data and
-program networks. They're written in TypeScript/JSX and run in a secure sandbox
-environment. Recipes can:
+**Patterns** are reactive programs that can be linked together to create data
+and program networks. They're written in TypeScript/JSX and run in a secure
+sandbox environment. Patterns can:
 
 - Process and transform data
 - Render interactive UIs using `ct-` prefixed components
-- React to changes from linked recipes
+- React to changes from linked patterns
 - Connect to external APIs
 
 **Pieces** are deployed instances of patterns running in CommonTools spaces.
@@ -31,8 +31,15 @@ can run their own spaces or use hosted versions.
 
 ## Quick Start (Development)
 
-Check out the repo, install `deno` and `claude` and then run `/onboarding`
-within Claude Code.
+1. Install [Deno 2](https://docs.deno.com/runtime/getting_started/installation/)
+2. Clone this repo
+3. Start local dev servers: `./scripts/start-local-dev.sh`
+4. Access the application at <http://localhost:8000>
+
+For Claude Code users, run `/deps` to verify prerequisites and
+`/start-local-dev` to start the dev servers. See
+[LOCAL_DEV_SERVERS.md](./docs/development/LOCAL_DEV_SERVERS.md) for
+troubleshooting.
 
 ## Architecture
 
@@ -48,28 +55,28 @@ Lit Web Components for interacting with CommonTools spaces.
 deploying to spaces. Run `deno task ct --help` for command reference.
 
 **UI Components ([packages/ui](./packages/ui))**: Custom VDOM layer and `ct-`
-prefixed components for recipe UIs.
+prefixed components for pattern UIs.
 
 **Examples & Patterns ([packages/patterns](./packages/patterns))**: Example
-recipes and common patterns for building with CommonTools.
+patterns for building with CommonTools.
 
 **Pattern Development**: Patterns can be developed using LLM assistance with
-commands like `/imagine-recipe`, `/pattern-dev`, and `/explore-recipe`. See
+the `/pattern-dev` skill. See
 [Pattern Documentation](./docs/common/) for patterns, components, and handlers.
 
 ## Development & Integrations
 
-### Claude Code Commands
+### Claude Code Skills & Commands
 
-This repository includes many Claude Code commands in
-[`.claude/commands/`](./.claude/commands/) for common workflows:
+This repository includes Claude Code skills and commands for common workflows:
 
-- `/pattern-dev` - Work on existing patterns with LLM assistance
-- `/imagine-recipe` - Create new recipes from ideas
-- `/explore-recipe` - Test recipes interactively with Playwright
-- `/linear` - Task management integration
+- `/pattern-dev` - Develop patterns with LLM assistance
+- `/pattern-test` - Write and run pattern tests
+- `/pattern-deploy` - Deploy patterns and test with CLI
+- `/start-local-dev` - Start local dev servers
 - `/deps` - Dependency and integration setup
-- And many more - see the commands directory
+- `/fix-issue` - Fix a specific issue
+- `/oracle` - Investigate how things actually work
 
 ### Dependencies & Integrations
 
@@ -81,9 +88,8 @@ This repository includes many Claude Code commands in
 **Recommended Integrations**:
 
 - [GitHub CLI](https://github.com/cli/cli) - For PR and issue workflows
-- [Claude Code MCP integrations](./deps.md):
-  - Linear Server MCP for task management
-  - Playwright MCP for browser-based recipe testing
+- Claude Code MCP integrations (run `/deps` in Claude Code for setup):
+  - Playwright MCP for browser-based pattern testing
 
 ### Development Practices
 
@@ -107,19 +113,27 @@ By default the backend will run at <http://localhost:8000>
 
 ## Running the frontend
 
-Run the dev server
+**Recommended:** Use `./scripts/start-local-dev.sh` to start both backend and
+frontend together. See
+[LOCAL_DEV_SERVERS.md](./docs/development/LOCAL_DEV_SERVERS.md) for details.
+
+**Manual setup** (if you need to run servers separately):
 
 ```bash
+# Against local backend (use dev-local, NOT dev)
 cd ./packages/shell
-deno task dev
+deno task dev-local
 ```
 
-By default, the frontend dev server runs at <http://localhost:5173>. Access the
-application at <http://localhost:8000>, where toolshed proxies to shell.
+**Important:** `deno task dev` points to the production backend. Use
+`deno task dev-local` when running against a local Toolshed instance.
 
-If you are not actively making updates to the backend, you can also point to the
-backend running in the cloud, by running the following command:
+The frontend dev server runs at <http://localhost:5173>. Access the application
+at <http://localhost:8000>, where toolshed proxies to shell.
+
+If you are not running a local backend, you can point to the cloud:
 
 ```shell
-API_URL=https://toolshed.saga-castor.ts.net/ deno task dev
+cd ./packages/shell
+deno task dev
 ```
