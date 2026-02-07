@@ -278,8 +278,9 @@ export default pattern(() => {
   const assert_initial_no_notebooks = computed(
     () => instance.notebookCount === 0,
   );
+  // Note: Use spread + length to work around reactive proxy .length issue
   const assert_initial_no_duplicates = computed(
-    () => instance.detectedDuplicates.length === 0,
+    () => [...instance.detectedDuplicates].length === 0,
   );
   const assert_initial_modals_closed = computed(
     () =>
@@ -322,7 +323,7 @@ export default pattern(() => {
   // ==========================================================================
 
   const assert_duplicate_note_detected = computed(() => {
-    const dups = instance.detectedDuplicates;
+    const dups = [...instance.detectedDuplicates];
     return (
       dups.length === 1 &&
       dups[0].title === "Existing Note" &&
@@ -339,7 +340,7 @@ export default pattern(() => {
   // ==========================================================================
 
   const assert_duplicate_notebook_detected = computed(() => {
-    const dups = instance.detectedDuplicates;
+    const dups = [...instance.detectedDuplicates];
     // The notebook duplicate has emoji prefix added for display
     return dups.length === 1 && dups[0].isNotebook === true;
   });
@@ -349,7 +350,7 @@ export default pattern(() => {
   // ==========================================================================
 
   const assert_both_duplicates_detected = computed(() => {
-    const dups = instance.detectedDuplicates;
+    const dups = [...instance.detectedDuplicates];
     const hasNoteDup = dups.some(
       (d) => d.title === "Existing Note" && !d.isNotebook,
     );
@@ -376,7 +377,7 @@ export default pattern(() => {
   });
 
   const assert_duplicates_cleared = computed(
-    () => instance.detectedDuplicates.length === 0,
+    () => [...instance.detectedDuplicates].length === 0,
   );
 
   const assert_duplicate_modal_closed = computed(
@@ -407,7 +408,7 @@ export default pattern(() => {
     () =>
       instance.noteCount === 1 &&
       instance.notebookCount === 1 &&
-      instance.detectedDuplicates.length === 0 &&
+      [...instance.detectedDuplicates].length === 0 &&
       !instance.showDuplicateModal,
   );
 
