@@ -10,6 +10,7 @@ import {
 } from "@commontools/utils/logger";
 import {
   type Cancel,
+  type Cell,
   convertCellsToLinks,
   getCellOrThrow,
   isCell,
@@ -18,6 +19,7 @@ import {
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
   setRecipeEnvironment,
+  type SigilLink,
 } from "@commontools/runner";
 import {
   NameSchema,
@@ -88,11 +90,9 @@ const MAX_SERIALIZATION_DEPTH = 5;
  * Formats a cell link for display in console output.
  * Returns a string like "[Cell: of:bafy.../path/to/prop]"
  */
-function formatCellLink(cell: { getAsLink: () => unknown }): string {
+function formatCellLink(cell: Cell<unknown>): string {
   try {
-    const link = cell.getAsLink() as {
-      "/": { "link@1": { id?: string; path?: readonly string[] } };
-    };
+    const link: SigilLink = cell.getAsLink();
     const inner = link["/"]["link@1"];
     const pathStr = inner.path?.length ? `/${inner.path.join("/")}` : "";
     return `[Cell: ${inner.id ?? "?"}${pathStr}]`;
@@ -143,36 +143,35 @@ export function sanitizeForPostMessage(
   // on hostile Proxies with throwing get traps
   try {
     if (isCellResult(value)) {
-      try {
-        const cell = getCellOrThrow(value);
-        const cellRef = formatCellLink(cell);
+      const cell = getCellOrThrow(value);
+      const cellRef = formatCellLink(cell);
 
-        // Walk the proxy's enumerable properties to extract the actual data
-        // This works because the Proxy forwards property access to the underlying value
-        const data: Record<string, unknown> = { __ref: cellRef };
-        for (const key of Object.keys(value as object)) {
-          try {
-            data[key] = sanitizeForPostMessage(
-              (value as Record<string, unknown>)[key],
-              seen,
-              depth + 1,
-            );
-          } catch {
-            data[key] = "[Unreadable]";
-          }
+      // Walk the proxy's enumerable properties to extract the actual data
+      // This works because the Proxy forwards property access to the underlying value
+      const data: Record<string, unknown> = { __ref: cellRef };
+      for (const key of Object.keys(value as object)) {
+        try {
+          data[key] = sanitizeForPostMessage(
+            (value as Record<string, unknown>)[key],
+            seen,
+            depth + 1,
+          );
+        } catch {
+          data[key] = "[Unreadable]";
         }
-        return data;
-      } catch {
-        // If we can't get the cell, fall through to regular object handling
       }
+      return data;
     }
   } catch {
-    // isCellResult threw - this is a hostile Proxy, fall through to regular handling
+    // isCellResult or getCellOrThrow threw - hostile Proxy, bail out
+    return "[Object - uncloneable]";
   }
 
-  // Arrays
-  if (Array.isArray(value)) {
-    return value.map((item) => sanitizeForPostMessage(item, seen, depth + 1));
+  // Arrays — cast needed because isCell/isCellResult type guards over-narrow
+  if (Array.isArray(value as object)) {
+    return (value as unknown[]).map((item) =>
+      sanitizeForPostMessage(item, seen, depth + 1)
+    );
   }
 
   // Plain objects - walk properties
