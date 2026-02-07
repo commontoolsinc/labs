@@ -1692,17 +1692,16 @@ export class SchemaObjectTraverser<V extends JSONValue>
         ? this.traversePrimitive(doc, schemaObj)
         : undefined;
     } else if (isString(doc.value)) {
-      return this.isValidType(schemaObj, "string")
-        ? this.traversePrimitive(doc, schemaObj)
-        : undefined;
+      // Always return primitive values even when the schema type doesn't
+      // match. The closure transformer may generate { type: "object" } for
+      // string values when native properties are accessed (e.g.,
+      // label.length). Returning the primitive lets JavaScript handle
+      // property access natively rather than returning undefined.
+      return this.traversePrimitive(doc, schemaObj);
     } else if (isNumber(doc.value)) {
-      return this.isValidType(schemaObj, "number")
-        ? this.traversePrimitive(doc, schemaObj)
-        : undefined;
+      return this.traversePrimitive(doc, schemaObj);
     } else if (isBoolean(doc.value)) {
-      return this.isValidType(schemaObj, "boolean")
-        ? this.traversePrimitive(doc, schemaObj)
-        : undefined;
+      return this.traversePrimitive(doc, schemaObj);
     } else if (Array.isArray(doc.value)) {
       if (this.isValidType(schemaObj, "array")) {
         const newValue: any = [];
