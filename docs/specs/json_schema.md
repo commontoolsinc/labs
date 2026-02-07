@@ -25,8 +25,20 @@ We add several custom fields to the schema that are meaningful to our system:
 - **`asStream`**: Indicates that this object should be treated as a stream
   interface for easily connecting events to their listeners, rather than as a
   traditional cell
-- **`ifc`**: Allows us to specify additional properties, such as the list of
-  `classification` properties associated with the data
+- **`ifc`**: Information Flow Control (IFC) annotations (see [IFC](#ifc))
+
+### IFC
+
+The `ifc` extension attaches Information Flow Control metadata to schema nodes.
+Today it is used to track `classification` tags that drive access control,
+redaction, and label propagation in higher layers.
+
+```json
+{
+  "type": "string",
+  "ifc": { "classification": ["secret"] }
+}
+```
 
 ## Special Handling of additionalProperties
 
