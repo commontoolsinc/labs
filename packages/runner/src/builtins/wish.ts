@@ -635,27 +635,34 @@ export function wish(
             const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
             return schema ? resolvedCell.asSchema(schema) : resolvedCell;
           });
+
+          // Deduplicate result cells using Cell.equals()
+          const uniqueResultCells = resultCells.filter(
+            (cell, index) =>
+              resultCells.findIndex((c) => c.equals(cell)) === index,
+          );
+
           // Sync all result cells to ensure data is loaded
-          await Promise.all(resultCells.map((cell) => cell.sync()));
+          await Promise.all(uniqueResultCells.map((cell) => cell.sync()));
 
           // Unified shape: always return { result, candidates, [UI] }
           // For single result, use fast path (no picker needed)
           // For multiple results, launch wish pattern for picker
           const candidatesCell = runtime.getImmutableCell(
             parentCell.space,
-            resultCells,
+            uniqueResultCells,
             undefined,
             tx,
           );
 
-          if (resultCells.length === 1) {
+          if (uniqueResultCells.length === 1) {
             // Single result - fast path with unified shape
             // Prefer the result cell's own [UI]; fall back to ct-cell-link
             const resultUI = resultCells[0].key(UI).get();
             sendResult(tx, {
-              result: resultCells[0],
+              result: uniqueResultCells[0],
               candidates: candidatesCell,
-              [UI]: resultUI ?? cellLinkUI(resultCells[0]),
+              [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
             });
           } else {
             // Multiple results - launch picker pattern
