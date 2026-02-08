@@ -18,6 +18,8 @@ import type {
 } from "@commontools/memory/interface";
 import type { Cancel } from "@commontools/runner";
 import type {
+  IMemoryChange,
+  IMergedChanges,
   ISpaceReplica,
   IStorageProviderWithReplica,
   IStorageSubscription,
@@ -66,6 +68,32 @@ function toV1Cause(hash: unknown): State["cause"] {
 }
 
 /**
+ * Build an IMemoryChange for an entity, comparing before and after values.
+ */
+function makeChange(
+  entityId: string,
+  before: StorableDatum | undefined,
+  after: StorableDatum | undefined,
+): IMemoryChange {
+  return {
+    address: { id: entityId as URI, type: V2_MIME, path: [] },
+    before,
+    after,
+  };
+}
+
+/**
+ * Wrap an array of IMemoryChange as IMergedChanges (iterable).
+ */
+function asChanges(items: IMemoryChange[]): IMergedChanges {
+  return {
+    [Symbol.iterator]() {
+      return items[Symbol.iterator]();
+    },
+  };
+}
+
+/**
  * v2 Replica implementing ISpaceReplica.
  *
  * Wraps a v2 ConsumerSession to provide get/commit for the runner.
@@ -80,6 +108,7 @@ class ReplicaV2 implements ISpaceReplica {
   >();
   private localState = new Map<string, Revision<State>>();
   private subscriptionIds = new Map<string, InvocationId>();
+  suppressSubscriptionUpdates = false;
 
   constructor(
     spaceId: MemorySpace,
@@ -151,11 +180,25 @@ class ReplicaV2 implements ISpaceReplica {
     }
 
     try {
+      // Suppress subscription updates during our own commit to prevent
+      // double-notification. The v2 subscription system fires updates
+      // synchronously during transact(), but we handle state updates
+      // ourselves and fire the commit notification with proper source/changeGroup.
+      this.suppressSubscriptionUpdates = true;
       const commit = this.consumer.transact(operations);
+      this.suppressSubscriptionUpdates = false;
 
-      // Update local state with committed values
+      // Compute changes and update local state
+      const changes: IMemoryChange[] = [];
       for (const storedFact of commit.facts) {
         const entityId = storedFact.fact.id;
+        const before = this.localState.get(entityId)?.is as
+          | StorableDatum
+          | undefined;
+        const after = storedFact.fact.type === "delete"
+          ? undefined
+          : (storedFact.fact as { value?: JSONValue }).value as StorableDatum;
+
         const state = (storedFact.fact.type === "delete"
           ? {
             the: V2_MIME,
@@ -166,26 +209,27 @@ class ReplicaV2 implements ISpaceReplica {
           : {
             the: V2_MIME,
             of: entityId as URI,
-            is: (storedFact.fact as { value?: JSONValue })
-              .value as StorableDatum,
+            is: after,
             cause: toV1Cause(storedFact.hash),
             since: commit.version,
           }) as Revision<Fact>;
 
         this.localState.set(entityId, state);
+        changes.push(makeChange(entityId, before, after));
         this.notifySubscribers(entityId, state);
       }
 
-      // Notify the storage subscription
+      // Notify the storage subscription with actual changes
       this.subscription.next({
         type: "commit",
         space: this.spaceId,
-        changes: [],
+        changes: asChanges(changes),
         source: _source,
       });
 
       return Promise.resolve({ ok: {} as Unit });
     } catch (err) {
+      this.suppressSubscriptionUpdates = false;
       const error = err as Error;
       if (error.name === "ConflictError") {
         return Promise.resolve({
@@ -303,11 +347,21 @@ class ReplicaV2 implements ISpaceReplica {
    * Handle incremental subscription updates.
    */
   private handleSubscriptionUpdate(update: SubscriptionUpdate): void {
+    // Skip if we're processing our own commit — we handle state updates
+    // and notifications in commit() itself with proper source/changeGroup.
+    if (this.suppressSubscriptionUpdates) return;
+
+    const changes: IMemoryChange[] = [];
+
     for (const revision of update.revisions) {
       const entityId = revision.fact.id;
+      const before = this.localState.get(entityId)?.is as
+        | StorableDatum
+        | undefined;
       const value = revision.fact.type === "set"
         ? (revision.fact as { value?: JSONValue }).value
         : undefined;
+      const after = value as StorableDatum | undefined;
 
       const state = (value !== undefined
         ? {
@@ -325,13 +379,14 @@ class ReplicaV2 implements ISpaceReplica {
         }) as Revision<Fact>;
 
       this.localState.set(entityId, state);
+      changes.push(makeChange(entityId, before, after));
       this.notifySubscribers(entityId, state);
     }
 
     this.subscription.next({
       type: "integrate",
       space: this.spaceId,
-      changes: [],
+      changes: asChanges(changes),
     });
   }
 
@@ -354,6 +409,25 @@ class ReplicaV2 implements ISpaceReplica {
   updateLocalState(entityId: string, state: Revision<State>): void {
     this.localState.set(entityId, state);
     this.notifySubscribers(entityId, state);
+  }
+
+  /**
+   * Resets the replica's internal state for reconnection scenarios.
+   * Preserves subscribers but clears all cached state.
+   */
+  reset(): void {
+    // Save subscribers
+    const savedSubscribers = new Map(this.subscribers);
+    // Clear all state
+    this.localState.clear();
+    this.subscriptionIds.clear();
+    // Restore subscribers
+    this.subscribers = savedSubscribers;
+
+    this.subscription.next({
+      type: "reset",
+      space: this.spaceId,
+    });
   }
 
   /**
