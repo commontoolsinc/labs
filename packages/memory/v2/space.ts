@@ -30,6 +30,7 @@ import type {
   PatchOp,
   PatchWrite,
   Reference,
+  Selector,
   SetWrite,
   StoredFact,
   ValidationResult,
@@ -413,7 +414,7 @@ export class SpaceV2 {
    * For now supports simple entity-by-id queries and wildcard (*).
    */
   query(
-    selector: Record<string, { parent?: string }>,
+    selector: Selector,
     branch: string = DEFAULT_BRANCH,
   ): FactSet {
     const result: FactSet = {};
