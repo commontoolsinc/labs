@@ -336,6 +336,15 @@ class ReplicaV2 implements ISpaceReplica {
   }
 
   /**
+   * Update local state for an entity. Used by ProviderV2.send() to keep
+   * the replica in sync after direct transact calls.
+   */
+  updateLocalState(entityId: string, state: Revision<State>): void {
+    this.localState.set(entityId, state);
+    this.notifySubscribers(entityId, state);
+  }
+
+  /**
    * Clean up all subscriptions.
    */
   close(): void {
@@ -425,7 +434,30 @@ export class ProviderV2 implements IStorageProviderWithReplica {
     }
 
     try {
-      this.consumer.transact(operations);
+      const commit = this.consumer.transact(operations);
+
+      // Update replica local state with committed values so get() works
+      for (const storedFact of commit.facts) {
+        const entityId = storedFact.fact.id;
+        const state = (storedFact.fact.type === "delete"
+          ? {
+            the: V2_MIME,
+            of: entityId as URI,
+            cause: storedFact.hash,
+            since: commit.version,
+          }
+          : {
+            the: V2_MIME,
+            of: entityId as URI,
+            is: (storedFact.fact as { value?: JSONValue })
+              .value as StorableDatum,
+            cause: storedFact.hash,
+            since: commit.version,
+          }) as Revision<Fact>;
+
+        this.replica.updateLocalState(entityId, state);
+      }
+
       return Promise.resolve({ ok: {} as Unit });
     } catch (err) {
       return Promise.resolve({ error: err as Error });
