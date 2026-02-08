@@ -61,7 +61,7 @@ interface SetWrite {
 interface PatchWrite {
   type: "patch";
   id: EntityId;
-  ops: PatchOperation[];   // Ordered list of patch operations
+  ops: PatchOp[];          // Ordered list of patch operations
   parent: Reference;       // Hash of the previous fact, or EMPTY
 }
 
@@ -131,7 +131,10 @@ point-in-time reconstruction.
 
 A **Reference** is a content hash that uniquely identifies an immutable value.
 References are computed using SHA-256 over a canonical merkle-tree encoding of
-the value (the same `merkle-reference` algorithm used in v1).
+the value (the same `merkle-reference` algorithm used in v1). The hash algorithm
+is SHA-256 applied to the canonical merkle-reference encoding (as implemented in
+the `merkle-reference` package). This produces a multihash-encoded, multibase
+base32-lower string.
 
 ```typescript
 /**
@@ -162,6 +165,11 @@ const EMPTY = refer({ id: entityId });
 
 When a fact's `parent` equals the Empty reference for that entity, it is the
 first fact in the entity's causal chain.
+
+In the database, the first fact in an entity's causal chain stores `NULL` in its
+`parent` column. The Empty reference is a TypeScript-level concept used by
+client code and the commit model. The storage layer maps between the two: `NULL`
+in SQL corresponds to the Empty reference in TypeScript.
 
 ### 3.3 Reference Serialization
 
@@ -318,7 +326,7 @@ interface SpliceOp {
   add: JSONValue[];        // Elements to insert at the index
 }
 
-type PatchOperation = ReplaceOp | AddOp | RemoveOp | MoveOp | SpliceOp;
+type PatchOp = ReplaceOp | AddOp | RemoveOp | MoveOp | SpliceOp;
 ```
 
 ### 6.3 Patch Application Semantics
@@ -329,7 +337,7 @@ patch list is invalid (e.g., removing a non-existent path), the entire patch
 fails and the fact is rejected.
 
 ```typescript
-function applyPatch(state: JSONValue, ops: PatchOperation[]): JSONValue {
+function applyPatch(state: JSONValue, ops: PatchOp[]): JSONValue {
   let current = state;
   for (const op of ops) {
     current = applyOp(current, op);
@@ -357,8 +365,8 @@ A `PatchWrite` fact stores its patch operations directly. The fact's content
 hash covers the full patch operation list, ensuring integrity.
 
 In the storage layer, patch operations are serialized as JSON and stored as a
-blob (content-addressed in the `blob` table). The fact table references this
-blob via a `value_ref` column. See §02 Storage for details.
+content-addressed value in the `value` table. The fact table references this
+value via a `value_ref` column. See §02 Storage for details.
 
 ---
 
@@ -376,7 +384,7 @@ interface Snapshot {
   /** The version (Lamport clock) at which this snapshot was taken. */
   version: number;
 
-  /** Reference to the full value blob in the blob table. */
+  /** Reference to the full value in the value table. */
   valueRef: Reference;
 
   /** Branch this snapshot belongs to (see §06 Branching). */
@@ -482,3 +490,69 @@ This decoupling means:
   validation.
 - Validation is performed by higher layers (the runtime, the client).
 - An entity's schema can evolve independently of its data.
+
+---
+
+## 9. System Entities
+
+In v1, system metadata (ACLs, labels, schemas) was distinguished from regular
+data using the `the` dimension. In v2, there is no `the` dimension — system
+metadata is stored as **regular entities** with well-known ID conventions.
+
+### 9.1 Well-Known Entity ID Patterns
+
+| Pattern | Purpose | Example |
+|---------|---------|---------|
+| `urn:acl:<space>` | Access control list for a space | `urn:acl:did:key:z6Mkk...` |
+| `urn:label:<entity>` | IFC labels for an entity | `urn:label:urn:entity:abc123` |
+| `urn:schema:<name>` | Schema definition | `urn:schema:todo-item` |
+
+### 9.2 Design Rationale
+
+System entities are normal entities. They benefit from all entity features:
+versioning, causal chains, patches, conflict detection, point-in-time reads,
+and branch isolation. There is no special storage path or query path for system
+entities — the well-known ID convention is sufficient to distinguish them.
+
+This approach replaces v1's `the` dimension with a simpler, more uniform model:
+instead of a two-dimensional key space `(the, of)`, every entity is identified
+by a single `id` whose URI scheme communicates its purpose.
+
+---
+
+## 10. Common Types
+
+The following type definitions are used throughout the specification:
+
+```typescript
+/** Branch identifier string. */
+type BranchId = string;
+
+/** Human-readable branch name ('' for the default branch). */
+type BranchName = string;
+
+/** A decentralized identifier for a space. */
+type SpaceId = `did:${string}`;
+
+/** A decentralized identifier (generic). */
+type DID = `did:${string}`;
+
+/** Any valid JSON value. */
+type JSONValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JSONValue[]
+  | { [key: string]: JSONValue };
+
+/** A JSON Schema definition. */
+type JSONSchema =
+  | boolean
+  | {
+      type?: string;
+      properties?: Record<string, JSONSchema>;
+      items?: JSONSchema;
+      [key: string]: unknown;
+    };
+```

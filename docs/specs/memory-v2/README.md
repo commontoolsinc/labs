@@ -40,7 +40,7 @@ transactional, content-addressed store that underlies the Common Tools runtime.
 | `Changes` | `Operation[]` | Flat list of typed operations |
 | `Selection` | `FactSet` | Query result set |
 | `Selector` | `Query` / `Selector` | Query pattern |
-| `datum` table | `blob` table | Content-addressed JSON value storage |
+| `datum` table | `value` table | Content-addressed JSON value storage |
 | `memory` table | `head` table | Current state pointer per entity per branch |
 | Heap | Confirmed | Server-acknowledged client state |
 | Nursery | Pending | Optimistic unconfirmed client state |
@@ -78,7 +78,7 @@ transactional, content-addressed store that underlies the Common Tools runtime.
 │  ┌────────────────────────▼────────────────────────────────┐ │
 │  │                   Storage (SQLite)                      │ │
 │  │  Per-space database, tables:                            │ │
-│  │  blob | fact | head | commit | snapshot | branch        │ │
+│  │  value | fact | head | commit | snapshot | branch       │ │
 │  │  blob_store (immutable binary blobs)                    │ │
 │  └─────────────────────────────────────────────────────────┘ │
 │                                                              │
@@ -94,12 +94,12 @@ transactional, content-addressed store that underlies the Common Tools runtime.
 
 | Section | File | Content |
 |---------|------|---------|
-| 1 | [01-data-model.md](./01-data-model.md) | Entities, Facts (set/patch/delete), References, Blobs, Metadata, Patches, Snapshots, Type System |
-| 2 | [02-storage.md](./02-storage.md) | SQLite schema, tables, indices, patch storage, read path, snapshot creation, branch storage, point-in-time reads |
+| 1 | [01-data-model.md](./01-data-model.md) | Entities, Facts (set/patch/delete), References, Blobs, Metadata, Patches, Snapshots, Type System, System Entities, Common Types |
+| 2 | [02-storage.md](./02-storage.md) | SQLite schema, tables, indices, patch storage, read path, snapshot creation, branch storage, point-in-time reads, garbage collection |
 | 3 | [03-commit-model.md](./03-commit-model.md) | Operations, Transactions, Confirmed/Pending state, Validation rule, Stacked commits, Conflict handling |
-| 4 | [04-protocol.md](./04-protocol.md) | WebSocket/HTTP transports, Message format, Commands (transact/query/subscribe/graph.query), UCAN auth, Client API |
-| 5 | [05-queries.md](./05-queries.md) | Simple queries, Schema traversal, Cycle detection, Subscriptions, Point-in-time, Classification/redaction |
-| 6 | [06-branching.md](./06-branching.md) | Branch lifecycle, Isolation, Merging, Conflict resolution, Point-in-time on branches |
+| 4 | [04-protocol.md](./04-protocol.md) | WebSocket/HTTP transports, Message format, Commands (transact/query/subscribe/graph.query/branch), UCAN auth, Client API |
+| 5 | [05-queries.md](./05-queries.md) | Simple queries, Schema traversal, Cycle detection, Subscriptions, Point-in-time, Classification/redaction, Entity references, Reactivity boundaries |
+| 6 | [06-branching.md](./06-branching.md) | Branch lifecycle, Isolation, Merging, Conflict resolution, Point-in-time on branches, Branch diff, Depth limits |
 
 ## Key Type Summary
 
@@ -111,17 +111,17 @@ type EntityId = `${string}:${string}`;
 type Reference = string & { readonly __brand: unique symbol };
 
 // Facts — state transitions
-interface SetWrite  { type: "set";    id: EntityId; value: JSONValue;      parent: Reference; }
-interface PatchWrite { type: "patch";  id: EntityId; ops: PatchOperation[]; parent: Reference; }
-interface Delete    { type: "delete"; id: EntityId;                        parent: Reference; }
+interface SetWrite  { type: "set";    id: EntityId; value: JSONValue;  parent: Reference; }
+interface PatchWrite { type: "patch";  id: EntityId; ops: PatchOp[];   parent: Reference; }
+interface Delete    { type: "delete"; id: EntityId;                    parent: Reference; }
 type Fact = SetWrite | PatchWrite | Delete;
 
 // Operations in transactions
-interface SetOperation    { op: "set";    id: EntityId; value: JSONValue;   parent: Reference; }
-interface PatchOperation  { op: "patch";  id: EntityId; patches: PatchOp[]; parent: Reference; }
-interface DeleteOperation { op: "delete"; id: EntityId;                     parent: Reference; }
-interface ClaimOperation  { op: "claim";  id: EntityId;                     parent: Reference; }
-type Operation = SetOperation | PatchOperation | DeleteOperation | ClaimOperation;
+interface SetOperation        { op: "set";    id: EntityId; value: JSONValue;   parent: Reference; }
+interface PatchWriteOperation { op: "patch";  id: EntityId; patches: PatchOp[]; parent: Reference; }
+interface DeleteOperation     { op: "delete"; id: EntityId;                     parent: Reference; }
+interface ClaimOperation      { op: "claim";  id: EntityId;                     parent: Reference; }
+type Operation = SetOperation | PatchWriteOperation | DeleteOperation | ClaimOperation;
 
 // Transaction
 interface Transaction {
@@ -145,30 +145,18 @@ interface ClientCommit {
 //   For each entity read: read.version >= server.head[entity].version
 ```
 
-## Open Items
+## System Entity Conventions
 
-The following cross-section inconsistencies should be resolved during
-implementation:
+With the removal of the `the` dimension, system-level data (ACLs, schemas,
+labels) is stored as regular entities with well-known ID conventions:
 
-1. **Selector structure** — `04-protocol.md` defines Selectors with a three-level
-   nesting (entity → mimeType → parent) carrying over v1's structure. Since we
-   dropped the `the` dimension, selectors should be simplified to two levels
-   (entity → match). The query spec (`05-queries.md`) uses the simpler form.
-   Resolve in favor of the simpler form.
+| Entity Type | ID Pattern | Example |
+|-------------|------------|---------|
+| Access Control List | `urn:acl:<space-did>` | `urn:acl:did:key:z6Mk...` |
+| Schema | `urn:schema:<name>` | `urn:schema:contact` |
+| Labels | `urn:label:<entity-id>` | `urn:label:urn:entity:abc` |
+| Blob Metadata | `urn:blob-meta:<hash>` | `urn:blob-meta:bafk...` |
 
-2. **FactSet structure** — `05-queries.md` defines FactSet with a contentType
-   level. This should be removed to match the "no type dimension" design. A
-   FactSet should be `{ [entityId]: { value, version, parent } }`.
-
-3. **Version scope** — `03-commit-model.md` §3.7.3 says versions are per-branch.
-   `06-branching.md` §6.4.3 says versions are globally shared (space-wide
-   Lamport clock). The global version is correct — it ensures cross-branch
-   ordering for point-in-time queries. Resolve in favor of global version.
-
-4. **Branch lifecycle protocol bindings** — `06-branching.md` defines branch
-   operations (create, merge, delete, list) but `04-protocol.md` does not
-   include corresponding commands. Add these as:
-   - `/memory/branch/create`
-   - `/memory/branch/merge`
-   - `/memory/branch/delete`
-   - `/memory/branch/list`
+These are regular entities — they benefit from versioning, causal chains,
+conflict detection, and branch isolation. No special storage dimension is
+needed. See §01 Data Model, section 9 for details.

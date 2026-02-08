@@ -27,7 +27,7 @@ interface SetOperation {
 }
 
 // Incremental change — apply patch operations to the current value
-interface PatchOperation {
+interface PatchWriteOperation {
   op: "patch";
   id: EntityId;
   patches: PatchOp[];  // Ordered list of JSON Patch operations
@@ -48,7 +48,7 @@ interface ClaimOperation {
   parent: Reference;   // Hash of the fact that was read
 }
 
-type Operation = SetOperation | PatchOperation | DeleteOperation | ClaimOperation;
+type Operation = SetOperation | PatchWriteOperation | DeleteOperation | ClaimOperation;
 ```
 
 **`set`** replaces the entity's entire value. The stored fact records the
@@ -56,9 +56,10 @@ complete new state. This is the simplest mutation and the only one required for
 a minimal implementation.
 
 **`patch`** applies an ordered list of incremental operations to the entity's
-current state. The stored fact records the patch ops themselves (not the
-resulting value). See section 2 (Storage) for how patches are stored and
-replayed. Patch operations follow JSON Patch (RFC 6902) with extensions:
+current state (`PatchWriteOperation`). The stored fact records the patch ops
+themselves (not the resulting value). See section 2 (Storage) for how patches
+are stored and replayed. Patch operations follow JSON Patch (RFC 6902) with
+extensions:
 
 ```typescript
 type PatchOp =
@@ -298,6 +299,11 @@ doesn't conflict semantically. Version-based validation allows more
 concurrency: as long as your read is not stale (no newer version exists), your
 commit is valid.
 
+Optionally, the server MAY also verify that the hash in the confirmed read
+matches the hash of the fact at the claimed version. This catches bugs where a
+client reports the correct version but an incorrect hash, indicating a
+desynchronized local cache.
+
 ### 3.6.2 Validation Algorithm
 
 ```typescript
@@ -384,9 +390,9 @@ it in the commit log.
 ### 3.7.1 Processing Steps
 
 1. **Validate** all read dependencies (section 3.6)
-2. **Assign version**: The commit receives the next version number for the space
-   (on the target branch). Version numbers are monotonically increasing — a
-   Lamport clock scoped to the space.
+2. **Assign version**: The commit receives the next version number from the
+   space-global Lamport clock. Version numbers are monotonically increasing
+   and shared across all branches (see §3.7.3).
 3. **Apply operations**: For each write/patch/delete operation:
    - Compute the fact hash (includes the `parent` reference)
    - Store the fact in the fact table
@@ -436,12 +442,15 @@ be reproduced.
 
 ### 3.7.3 Version Assignment
 
-Versions are assigned per space, per branch. The version is a monotonically
-increasing integer (Lamport clock):
+Versions are assigned from a single space-global Lamport clock. All branches
+share the same version sequence. This ensures cross-branch ordering for
+point-in-time queries.
 
 ```
-Branch "main": version 1, 2, 3, 4, ...
-Branch "draft": version 1, 2, 3, ...
+Commit on "main":  version 1
+Commit on "main":  version 2
+Commit on "draft": version 3   ← global, not per-branch
+Commit on "main":  version 4
 ```
 
 All facts produced by a single commit share the same version number. This
@@ -585,7 +594,7 @@ v2 model described in this section.
 | `Assert { is: value }` | `SetOperation` | Same semantics, cleaner type |
 | `Retract { is?: void }` | `DeleteOperation` | Same semantics |
 | `Claim = true` | `ClaimOperation` | Same semantics, explicit type |
-| *(no equivalent)* | `PatchOperation` | New in v2 |
+| *(no equivalent)* | `PatchWriteOperation` | New in v2 |
 | Heap | Confirmed | Same concept, standard name |
 | Nursery | Pending | Same concept, standard name |
 | `since` | `version` | Same concept, standard name |

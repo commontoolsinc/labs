@@ -141,15 +141,32 @@ interface TransactCommand {
   cmd: "/memory/transact";
   sub: SpaceId;
   args: {
+    reads: {
+      confirmed: ConfirmedRead[];
+      pending: PendingRead[];
+    };
     operations: Operation[];
     codeCID?: Reference;
     branch?: BranchId;
   };
 }
 
+// The `args` field carries a ClientCommit (see §3.4). The Transaction type
+// from §3.2 is a simplified form used for documentation; the wire format
+// always includes the `reads` field.
+
 // Success response
 interface TransactSuccess {
   ok: Commit;  // The recorded commit, including version assignment
+}
+
+// Commit — the server's response after a successful transaction
+interface Commit {
+  hash: Reference;       // Content hash of the commit
+  version: number;       // Server-assigned version number
+  branch: BranchId;      // Branch the commit was applied to
+  facts: StoredFact[];   // Facts produced by this commit
+  createdAt: string;     // ISO-8601 timestamp
 }
 
 // Error responses
@@ -159,9 +176,9 @@ type TransactError =
   | { error: AuthorizationError };
 ```
 
-**Commit** in the success response includes the version number, the facts
-produced, and the commit hash. This gives the client everything it needs to
-move the affected entities from pending to confirmed.
+The `Commit` in the success response includes the version number, the facts
+produced, the commit hash, and the target branch. This gives the client
+everything it needs to move the affected entities from pending to confirmed.
 
 ### 4.3.2 `query` — Read Entities
 
@@ -270,22 +287,16 @@ interface GraphQueryCommand {
   cmd: "/memory/graph/query";
   sub: SpaceId;
   args: {
-    selectSchema: SchemaSelector;   // Starting points + schema for traversal
-    since?: number;                  // Version cursor
-    subscribe?: boolean;             // If true, also subscribe to changes
-    excludeSent?: boolean;           // If true, omit already-sent entities
+    selectSchema: SchemaSelector;  // Starting points + schema for traversal
+    since?: number;                // Version cursor
+    subscribe?: boolean;           // If true, also subscribe to changes
+    excludeSent?: boolean;         // If true, omit already-sent entities
     branch?: BranchId;
   };
 }
 
-// Schema selector structure
-type SchemaSelector = {
-  [entityId: EntityId | "_"]: {           // "_" = wildcard, match by type
-    [mimeType: string | "_"]: {
-      [parent: string | "_"]: SchemaPathSelector;
-    };
-  };
-};
+// Schema selector structure — maps entity IDs to schema path selectors
+type SchemaSelector = Record<EntityId | "*", SchemaPathSelector>;
 
 interface SchemaPathSelector {
   path: readonly string[];   // JSON path from fact root to start traversal
@@ -303,52 +314,116 @@ query's schema graph. When any reachable entity changes, the server re-evaluates
 the affected portion of the graph and pushes updates (as `task/effect`). See
 section 5 (Queries) for details on schema traversal.
 
+### 4.3.6 Branch Lifecycle Commands
+
+Commands for creating, merging, deleting, and listing branches. See section 6
+(Branching) for full semantics.
+
+```typescript
+// Create a new branch
+interface CreateBranchCommand {
+  cmd: "/memory/branch/create";
+  sub: SpaceId;
+  args: {
+    name: BranchName;            // Name for the new branch
+    fromBranch?: BranchName;     // Branch to fork from (default branch if omitted)
+    atVersion?: number;          // Version to fork at (head if omitted)
+  };
+}
+
+interface CreateBranchResult {
+  ok: {
+    name: BranchName;
+    forkedFrom: BranchName;
+    atVersion: number;
+  };
+}
+
+// Merge a branch into another
+interface MergeBranchCommand {
+  cmd: "/memory/branch/merge";
+  sub: SpaceId;
+  args: {
+    source: BranchName;         // Branch to merge from
+    target: BranchName;         // Branch to merge into
+    resolutions?: Record<EntityId, JSONValue | null>;  // Manual conflict resolutions
+  };
+}
+
+interface MergeBranchResult {
+  ok: {
+    commit: Commit;             // The merge commit on the target branch
+    merged: number;             // Number of entities merged
+  };
+}
+
+// Delete a branch
+interface DeleteBranchCommand {
+  cmd: "/memory/branch/delete";
+  sub: SpaceId;
+  args: {
+    name: BranchName;           // Branch to delete
+  };
+}
+
+// Response: { ok: {} }
+
+// List branches
+interface ListBranchesCommand {
+  cmd: "/memory/branch/list";
+  sub: SpaceId;
+  args: {
+    includeDeleted?: boolean;   // Include soft-deleted branches (default: false)
+  };
+}
+
+interface ListBranchesResult {
+  ok: {
+    branches: BranchInfo[];
+  };
+}
+
+interface BranchInfo {
+  name: BranchName;
+  headVersion: number;
+  createdAt: string;
+  deletedAt?: string;
+}
+```
+
 ---
 
 ## 4.4 Selectors
 
-A **Selector** defines a pattern for matching entities. It uses a three-level
-nested structure: entity ID, MIME type, and parent hash. Each level supports a
-wildcard (`"_"`) to match all values.
+A **Selector** defines a pattern for matching entities. It uses a two-level
+structure: entity ID to match specification. The entity ID can be a specific ID
+or `"*"` to match all entities. The match specification can optionally filter by
+parent hash.
 
 ```typescript
-type Selector = {
-  [entityId: EntityId | "_"]: {
-    [mimeType: string | "_"]: {
-      [parent: string | "_"]: { is?: {} };
-    };
-  };
-};
+type Selector = Record<EntityId | "*", EntityMatch>;
+
+interface EntityMatch {
+  parent?: Reference | "*";  // Optional parent filter ("*" = any)
+}
 ```
 
 Examples:
 
 ```typescript
-// Select a specific entity
+// Select a specific entity (current head)
 const specific: Selector = {
-  "urn:entity:abc123": {
-    "application/json": {
-      "_": { is: {} }
-    }
-  }
+  "urn:entity:abc123": {}
 };
 
-// Select all entities of a type
-const allJson: Selector = {
-  "_": {
-    "application/json": {
-      "_": { is: {} }
-    }
-  }
+// Select all entities
+const all: Selector = {
+  "*": {}
 };
 
-// Select a specific entity at a specific version
+// Select a specific entity at a specific version (by parent hash)
 const versioned: Selector = {
-  "urn:entity:abc123": {
-    "application/json": {
-      "baedrei...hash": { is: {} }
-    }
-  }
+  "urn:entity:abc123": { parent: "baedrei...hash" }
 };
 ```
 
@@ -418,7 +493,13 @@ are hierarchical: `OWNER` implies `WRITE`, which implies `READ`.
 |---------|---------------------|
 | `query`, `query.subscribe`, `graph.query` | `READ` |
 | `transact` | `WRITE` |
+| `branch/create`, `branch/merge`, `branch/delete` | `WRITE` |
 | ACL modifications | `OWNER` |
+
+The ACL is stored as a regular entity at the well-known ID
+`urn:acl:<space-did>`. It is a JSON object mapping DIDs to capability levels.
+ACL modifications require `OWNER` capability and follow the normal commit path
+(transact with a set operation on the ACL entity).
 
 ---
 
@@ -455,8 +536,8 @@ overlap.
 ```typescript
 // Server-side per-session tracking
 interface SessionState {
-  // Last version sent for each entity (keyed by "entityId/mimeType")
-  lastRevision: Map<string, number>;
+  // Last version sent for each entity (keyed by entityId)
+  lastRevision: Map<EntityId, number>;
 }
 ```
 
@@ -509,6 +590,12 @@ interface ConnectionError extends Error {
   address: string;
 }
 
+// Rate limit exceeded
+interface RateLimitError extends Error {
+  name: "RateLimitError";
+  retryAfter: number;  // Seconds until the client can retry
+}
+
 // Underlying system error
 interface SystemError extends Error {
   code: number;
@@ -552,8 +639,12 @@ This returns a `SpaceSession` with methods for reading and writing:
 
 ```typescript
 interface SpaceSession {
-  // Submit a transaction
+  // Submit a transaction (args is a ClientCommit — see §3.4)
   transact(args: {
+    reads: {
+      confirmed: ConfirmedRead[];
+      pending: PendingRead[];
+    };
     operations: Operation[];
     codeCID?: Reference;
     branch?: BranchId;
@@ -607,7 +698,7 @@ Usage:
 
 ```typescript
 const result = await space.query({
-  select: { "urn:entity:abc": { "application/json": { "_": { is: {} } } } }
+  select: { "urn:entity:abc": {} }
 });
 
 if (result.ok) {
@@ -722,6 +813,7 @@ await space.query({
 
 // Write to a branch
 await space.transact({
+  reads: { confirmed: [...], pending: [] },
   operations: [...],
   branch: "draft",
 });
@@ -734,8 +826,8 @@ await space.queryGraph({
 });
 ```
 
-Branch lifecycle (creation, merging, deletion) is covered in section 6
-(Branching).
+Branch lifecycle commands (creation, merging, deletion) are defined in §4.3.6.
+Full branching semantics are covered in section 6 (Branching).
 
 ---
 

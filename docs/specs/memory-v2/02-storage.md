@@ -65,25 +65,29 @@ For newly created databases (before any content is written):
 PRAGMA page_size = 32768;
 ```
 
+For high-throughput workloads, the storage layer may cache prepared statements
+for frequently-used queries (head lookup, fact insertion, snapshot lookup).
+Statement caching is an implementation optimization and is not specified here.
+
 ---
 
 ## 3. Tables
 
-### 3.1 `blob` — Content-Addressed Value Storage
+### 3.1 `value` — Content-Addressed Value Storage
 
 Stores the serialized JSON content of entity values (both full values and patch
 operation lists). This is the equivalent of v1's `datum` table, renamed for
-clarity. Every distinct JSON value is stored once; facts reference blobs by
+clarity. Every distinct JSON value is stored once; facts reference values by
 hash.
 
 ```sql
-CREATE TABLE blob (
+CREATE TABLE value (
   hash  TEXT NOT NULL PRIMARY KEY,  -- Merkle reference of the JSON content
   data  JSON                        -- Serialized JSON (NULL for the "empty" sentinel)
 );
 
 -- Sentinel row for deleted/empty values (replaces v1's "undefined" record)
-INSERT OR IGNORE INTO blob (hash, data) VALUES ('__empty__', NULL);
+INSERT OR IGNORE INTO value (hash, data) VALUES ('__empty__', NULL);
 ```
 
 **Design notes:**
@@ -105,13 +109,14 @@ state transitions across all entities in the space.
 CREATE TABLE fact (
   hash        TEXT    NOT NULL PRIMARY KEY,  -- Content hash of this fact
   id          TEXT    NOT NULL,              -- Entity identifier
-  value_ref   TEXT    NOT NULL,              -- FK → blob.hash (value or patch ops)
+  value_ref   TEXT    NOT NULL,              -- FK → value.hash (value or patch ops)
   parent      TEXT,                          -- Hash of previous fact (NULL for first write)
+  branch      TEXT    NOT NULL DEFAULT '',   -- Branch this fact was committed on (denormalized)
   version     INTEGER NOT NULL,             -- Lamport clock at commit time
   commit_ref  TEXT    NOT NULL,             -- FK → commit.hash
   fact_type   TEXT    NOT NULL,             -- 'set' | 'patch' | 'delete'
 
-  FOREIGN KEY (value_ref)  REFERENCES blob(hash),
+  FOREIGN KEY (value_ref)  REFERENCES value(hash),
   FOREIGN KEY (commit_ref) REFERENCES commit(hash)
 );
 
@@ -126,6 +131,9 @@ CREATE INDEX idx_fact_id_version ON fact (id, version);
 
 -- Query facts by commit (for commit inspection)
 CREATE INDEX idx_fact_commit ON fact (commit_ref);
+
+-- Query facts by branch (for branch-scoped reads)
+CREATE INDEX idx_fact_branch ON fact (branch);
 ```
 
 **Column details:**
@@ -134,8 +142,9 @@ CREATE INDEX idx_fact_commit ON fact (commit_ref);
 |--------|-------------|
 | `hash` | Content hash of `{type, id, value/ops, parent}`. Immutable identity. |
 | `id` | The entity this fact is about. URI format. |
-| `value_ref` | Points to the blob table. For `set`: the full JSON value. For `patch`: the JSON-serialized patch operation list. For `delete`: the `__empty__` sentinel. |
+| `value_ref` | Points to the value table. For `set`: the full JSON value. For `patch`: the JSON-serialized patch operation list. For `delete`: the `__empty__` sentinel. |
 | `parent` | Hash of the previous fact for this entity. `NULL` when this is the entity's first fact (parent is the Empty reference, which is implicit). |
+| `branch` | Branch this fact was committed on. Denormalized from the commit for efficient branch-scoped queries. Default `''` (main branch). |
 | `version` | Space-global Lamport clock, assigned at commit time. All facts in the same commit share the same version. |
 | `commit_ref` | Hash of the commit that included this fact. |
 | `fact_type` | Discriminant: `'set'`, `'patch'`, or `'delete'`. |
@@ -150,6 +159,7 @@ CREATE TABLE head (
   branch    TEXT    NOT NULL,    -- Branch name ('' for the default branch)
   id        TEXT    NOT NULL,    -- Entity identifier
   fact_hash TEXT    NOT NULL,    -- FK → fact.hash (the current head fact)
+  version   INTEGER NOT NULL,   -- Version of the head fact (for fast version lookups)
 
   PRIMARY KEY (branch, id),
   FOREIGN KEY (fact_hash) REFERENCES fact(hash)
@@ -207,11 +217,11 @@ fast reads without full patch replay.
 CREATE TABLE snapshot (
   id         TEXT    NOT NULL,    -- Entity identifier
   version    INTEGER NOT NULL,    -- Version at which this snapshot was taken
-  value_ref  TEXT    NOT NULL,    -- FK → blob.hash (the full materialized value)
+  value_ref  TEXT    NOT NULL,    -- FK → value.hash (the full materialized value)
   branch     TEXT    NOT NULL DEFAULT '',  -- Branch this snapshot belongs to
 
   PRIMARY KEY (branch, id, version),
-  FOREIGN KEY (value_ref) REFERENCES blob(hash)
+  FOREIGN KEY (value_ref) REFERENCES value(hash)
 );
 
 -- Find the nearest snapshot before a target version
@@ -240,7 +250,7 @@ INSERT OR IGNORE INTO branch (name, head_version) VALUES ('', 0);
 ### 3.7 `blob_store` — Immutable Content-Addressed Binary Data
 
 Stores raw binary blobs (images, files, compiled code). This is distinct from
-the `blob` table, which stores JSON values. The `blob_store` table holds
+the `value` table, which stores JSON values. The `blob_store` table holds
 arbitrary binary data.
 
 ```sql
@@ -254,7 +264,7 @@ CREATE TABLE blob_store (
 
 **Design notes:**
 
-- Two separate tables (`blob` for JSON, `blob_store` for binary) avoids
+- Two separate tables (`value` for JSON, `blob_store` for binary) avoids
   conflating serialized JSON with raw bytes.
 - Binary blobs are never modified or deleted (content-addressed and immutable).
 - The `hash` column uses the same SHA-256 algorithm but applied to raw bytes
@@ -268,11 +278,11 @@ database:
 ```sql
 BEGIN TRANSACTION;
 
-CREATE TABLE IF NOT EXISTS blob (
+CREATE TABLE IF NOT EXISTS value (
   hash  TEXT NOT NULL PRIMARY KEY,
   data  JSON
 );
-INSERT OR IGNORE INTO blob (hash, data) VALUES ('__empty__', NULL);
+INSERT OR IGNORE INTO value (hash, data) VALUES ('__empty__', NULL);
 
 CREATE TABLE IF NOT EXISTS commit (
   hash        TEXT    NOT NULL PRIMARY KEY,
@@ -289,21 +299,24 @@ CREATE TABLE IF NOT EXISTS fact (
   id          TEXT    NOT NULL,
   value_ref   TEXT    NOT NULL,
   parent      TEXT,
+  branch      TEXT    NOT NULL DEFAULT '',
   version     INTEGER NOT NULL,
   commit_ref  TEXT    NOT NULL,
   fact_type   TEXT    NOT NULL,
-  FOREIGN KEY (value_ref)  REFERENCES blob(hash),
+  FOREIGN KEY (value_ref)  REFERENCES value(hash),
   FOREIGN KEY (commit_ref) REFERENCES commit(hash)
 );
 CREATE INDEX IF NOT EXISTS idx_fact_version    ON fact (version);
 CREATE INDEX IF NOT EXISTS idx_fact_id         ON fact (id);
 CREATE INDEX IF NOT EXISTS idx_fact_id_version ON fact (id, version);
 CREATE INDEX IF NOT EXISTS idx_fact_commit     ON fact (commit_ref);
+CREATE INDEX IF NOT EXISTS idx_fact_branch     ON fact (branch);
 
 CREATE TABLE IF NOT EXISTS head (
-  branch    TEXT NOT NULL,
-  id        TEXT NOT NULL,
-  fact_hash TEXT NOT NULL,
+  branch    TEXT    NOT NULL,
+  id        TEXT    NOT NULL,
+  fact_hash TEXT    NOT NULL,
+  version   INTEGER NOT NULL,
   PRIMARY KEY (branch, id),
   FOREIGN KEY (fact_hash) REFERENCES fact(hash)
 );
@@ -315,7 +328,7 @@ CREATE TABLE IF NOT EXISTS snapshot (
   value_ref  TEXT    NOT NULL,
   branch     TEXT    NOT NULL DEFAULT '',
   PRIMARY KEY (branch, id, version),
-  FOREIGN KEY (value_ref) REFERENCES blob(hash)
+  FOREIGN KEY (value_ref) REFERENCES value(hash)
 );
 CREATE INDEX IF NOT EXISTS idx_snapshot_lookup ON snapshot (branch, id, version);
 
@@ -339,6 +352,22 @@ CREATE TABLE IF NOT EXISTS blob_store (
 COMMIT;
 ```
 
+### 3.9 `state` — Convenience View
+
+A read-only view that joins heads with their facts and values for convenient
+querying of current state:
+
+```sql
+CREATE VIEW state AS
+SELECT h.branch, h.id, f.fact_type, f.version, v.data AS value
+FROM head h
+JOIN fact f ON f.hash = h.fact_hash
+JOIN value v ON v.hash = f.value_ref;
+```
+
+This view is not used by the storage layer's internal read/write paths but is
+useful for debugging and ad-hoc queries.
+
 ---
 
 ## 4. Patch Storage
@@ -357,12 +386,12 @@ When a transaction contains a patch operation for an entity, the system:
 
 2. Computes the merkle reference of this JSON array.
 
-3. Inserts the serialized ops into the `blob` table (deduplicated by hash).
+3. Inserts the serialized ops into the `value` table (deduplicated by hash).
 
 4. Inserts a fact row with `fact_type = 'patch'` and `value_ref` pointing to
-   the blob containing the ops.
+   the value row containing the ops.
 
-A `set` write works the same way except the blob contains the complete JSON
+A `set` write works the same way except the value row contains the complete JSON
 value and `fact_type = 'set'`.
 
 A `delete` sets `value_ref` to the `__empty__` sentinel and `fact_type = 'delete'`.
@@ -370,48 +399,48 @@ A `delete` sets `value_ref` to the `__empty__` sentinel and `fact_type = 'delete
 ### 4.2 Write Path — Insert a Patch Fact
 
 ```sql
--- Step 1: Insert the patch ops blob (deduplicated)
-INSERT OR IGNORE INTO blob (hash, data)
+-- Step 1: Insert the patch ops value (deduplicated)
+INSERT OR IGNORE INTO value (hash, data)
 VALUES (:ops_hash, :ops_json);
 
 -- Step 2: Insert the fact
-INSERT INTO fact (hash, id, value_ref, parent, version, commit_ref, fact_type)
-VALUES (:fact_hash, :entity_id, :ops_hash, :parent_hash, :version, :commit_hash, 'patch');
+INSERT INTO fact (hash, id, value_ref, parent, branch, version, commit_ref, fact_type)
+VALUES (:fact_hash, :entity_id, :ops_hash, :parent_hash, :branch, :version, :commit_hash, 'patch');
 
 -- Step 3: Update (or insert) the head pointer
-INSERT INTO head (branch, id, fact_hash)
-VALUES (:branch, :entity_id, :fact_hash)
-ON CONFLICT (branch, id) DO UPDATE SET fact_hash = :fact_hash;
+INSERT INTO head (branch, id, fact_hash, version)
+VALUES (:branch, :entity_id, :fact_hash, :version)
+ON CONFLICT (branch, id) DO UPDATE SET fact_hash = :fact_hash, version = :version;
 ```
 
 ### 4.3 Write Path — Insert a Set Fact
 
 ```sql
--- Step 1: Insert the value blob (deduplicated)
-INSERT OR IGNORE INTO blob (hash, data)
+-- Step 1: Insert the value (deduplicated)
+INSERT OR IGNORE INTO value (hash, data)
 VALUES (:value_hash, :value_json);
 
 -- Step 2: Insert the fact
-INSERT INTO fact (hash, id, value_ref, parent, version, commit_ref, fact_type)
-VALUES (:fact_hash, :entity_id, :value_hash, :parent_hash, :version, :commit_hash, 'set');
+INSERT INTO fact (hash, id, value_ref, parent, branch, version, commit_ref, fact_type)
+VALUES (:fact_hash, :entity_id, :value_hash, :parent_hash, :branch, :version, :commit_hash, 'set');
 
 -- Step 3: Update the head pointer
-INSERT INTO head (branch, id, fact_hash)
-VALUES (:branch, :entity_id, :fact_hash)
-ON CONFLICT (branch, id) DO UPDATE SET fact_hash = :fact_hash;
+INSERT INTO head (branch, id, fact_hash, version)
+VALUES (:branch, :entity_id, :fact_hash, :version)
+ON CONFLICT (branch, id) DO UPDATE SET fact_hash = :fact_hash, version = :version;
 ```
 
 ### 4.4 Write Path — Insert a Delete Fact
 
 ```sql
 -- Step 1: Insert the fact (value_ref = __empty__ sentinel)
-INSERT INTO fact (hash, id, value_ref, parent, version, commit_ref, fact_type)
-VALUES (:fact_hash, :entity_id, '__empty__', :parent_hash, :version, :commit_hash, 'delete');
+INSERT INTO fact (hash, id, value_ref, parent, branch, version, commit_ref, fact_type)
+VALUES (:fact_hash, :entity_id, '__empty__', :parent_hash, :branch, :version, :commit_hash, 'delete');
 
 -- Step 2: Update the head pointer to the delete fact
-INSERT INTO head (branch, id, fact_hash)
-VALUES (:branch, :entity_id, :fact_hash)
-ON CONFLICT (branch, id) DO UPDATE SET fact_hash = :fact_hash;
+INSERT INTO head (branch, id, fact_hash, version)
+VALUES (:branch, :entity_id, :fact_hash, :version)
+ON CONFLICT (branch, id) DO UPDATE SET fact_hash = :fact_hash, version = :version;
 ```
 
 ---
@@ -424,10 +453,10 @@ To read an entity's current value on a branch:
 
 ```sql
 -- Step 1: Find the current head fact
-SELECT f.fact_type, f.version, b.data
+SELECT f.fact_type, f.version, v.data
 FROM head h
 JOIN fact f ON f.hash = h.fact_hash
-JOIN blob b ON b.hash = f.value_ref
+JOIN value v ON v.hash = f.value_ref
 WHERE h.branch = :branch AND h.id = :entity_id;
 ```
 
@@ -439,9 +468,9 @@ If `fact_type = 'patch'`, we need to find a base value and replay:
 
 ```sql
 -- Step 2: Find the nearest snapshot
-SELECT s.version, b.data AS snapshot_value
+SELECT s.version, v.data AS snapshot_value
 FROM snapshot s
-JOIN blob b ON b.hash = s.value_ref
+JOIN value v ON v.hash = s.value_ref
 WHERE s.branch = :branch
   AND s.id = :entity_id
   AND s.version <= :head_version
@@ -451,9 +480,9 @@ LIMIT 1;
 
 ```sql
 -- Step 3: If no snapshot, find the most recent 'set' fact
-SELECT f.version, b.data AS set_value
+SELECT f.version, v.data AS set_value
 FROM fact f
-JOIN blob b ON b.hash = f.value_ref
+JOIN value v ON v.hash = f.value_ref
 WHERE f.id = :entity_id
   AND f.fact_type = 'set'
   AND f.version <= :head_version
@@ -463,9 +492,9 @@ LIMIT 1;
 
 ```sql
 -- Step 4: Collect all patches between base and head
-SELECT b.data AS patch_ops, f.version
+SELECT v.data AS patch_ops, f.version
 FROM fact f
-JOIN blob b ON b.hash = f.value_ref
+JOIN value v ON v.hash = f.value_ref
 WHERE f.id = :entity_id
   AND f.fact_type = 'patch'
   AND f.version > :base_version
@@ -509,9 +538,9 @@ Read an entity's value at a specific version on a branch:
 ```sql
 -- Find the fact that was the head at the target version
 -- (the latest fact for this entity with version <= target)
-SELECT f.hash, f.fact_type, f.version, b.data
+SELECT f.hash, f.fact_type, f.version, v.data
 FROM fact f
-JOIN blob b ON b.hash = f.value_ref
+JOIN value v ON v.hash = f.value_ref
 WHERE f.id = :entity_id
   AND f.version <= :target_version
 ORDER BY f.version DESC
@@ -525,9 +554,9 @@ algorithm as §5.1 but with `target_version` as the upper bound.
 
 ```sql
 -- Snapshot lookup for PIT read
-SELECT s.version, b.data AS snapshot_value
+SELECT s.version, v.data AS snapshot_value
 FROM snapshot s
-JOIN blob b ON b.hash = s.value_ref
+JOIN value v ON v.hash = s.value_ref
 WHERE s.branch = :branch
   AND s.id = :entity_id
   AND s.version <= :target_version
@@ -535,9 +564,9 @@ ORDER BY s.version DESC
 LIMIT 1;
 
 -- Patches between snapshot and target
-SELECT b.data AS patch_ops, f.version
+SELECT v.data AS patch_ops, f.version
 FROM fact f
-JOIN blob b ON b.hash = f.value_ref
+JOIN value v ON v.hash = f.value_ref
 WHERE f.id = :entity_id
   AND f.fact_type = 'patch'
   AND f.version > :snapshot_version
@@ -580,8 +609,8 @@ To create a snapshot, read the entity's current value using the standard read
 path (§5.1), then store it:
 
 ```sql
--- Step 1: Store the materialized value as a blob
-INSERT OR IGNORE INTO blob (hash, data)
+-- Step 1: Store the materialized value
+INSERT OR IGNORE INTO value (hash, data)
 VALUES (:value_hash, :value_json);
 
 -- Step 2: Insert the snapshot record
@@ -611,9 +640,57 @@ for popular versions.
 
 ---
 
-## 7. Branch Storage
+## 7. Garbage Collection
 
-### 7.1 Branch Representation
+The storage layer accumulates data over time: old facts, orphaned values, and
+redundant snapshots. Garbage collection (GC) reclaims space without affecting
+correctness.
+
+### 7.1 Fact Compaction
+
+Old facts can be compacted once a snapshot exists beyond them, since the
+snapshot captures the materialized state. However, facts that are referenced as
+`parent` by other facts must be retained to preserve causal chain integrity.
+
+```sql
+-- Find facts that are safe to compact:
+-- facts older than a snapshot, not referenced as parent by any other fact
+DELETE FROM fact
+WHERE version < :retention_version
+  AND hash NOT IN (SELECT parent FROM fact WHERE parent IS NOT NULL);
+```
+
+### 7.2 Orphaned Values
+
+Values in the `value` table that are not referenced by any fact's `value_ref`
+can be safely deleted. The `__empty__` sentinel must never be deleted.
+
+```sql
+DELETE FROM value
+WHERE hash != '__empty__'
+  AND hash NOT IN (SELECT value_ref FROM fact)
+  AND hash NOT IN (SELECT value_ref FROM snapshot);
+```
+
+### 7.3 Old Snapshots
+
+Only the most recent snapshot per entity per branch is needed for efficient
+current-value reads. Historical snapshots may be retained for point-in-time
+read performance. See §6.3 for the compaction query.
+
+### 7.4 Policy
+
+- GC runs as a **background task**, never during commits.
+- GC is configurable with a retention period. Facts and values within the
+  retention window are never collected.
+- **Default policy: retain all** (no automatic GC). GC must be explicitly
+  enabled per space.
+
+---
+
+## 8. Branch Storage
+
+### 8.1 Branch Representation
 
 Branches share the global `fact` table but maintain separate head pointers in
 the `head` table. The `branch` table tracks metadata.
@@ -624,23 +701,24 @@ When a branch is created:
 -- Record the fork point
 INSERT INTO branch (name, parent_branch, fork_version, head_version)
 VALUES (:branch_name, :parent_branch, :fork_version, :fork_version);
-
--- Copy all head pointers from the parent branch at the fork version
-INSERT INTO head (branch, id, fact_hash)
-SELECT :branch_name, h.id, h.fact_hash
-FROM head h
-WHERE h.branch = :parent_branch;
 ```
 
-### 7.2 Branch Writes
+Head pointers are **not** eagerly copied from the parent branch. Instead, reads
+on a child branch resolve heads lazily: if no head exists for an entity on the
+child branch, the system falls back to the parent branch's head at or before
+the fork version. This avoids an O(N) copy of all head pointers at fork time
+and makes branch creation O(1). See §06 Branching for the full resolution
+algorithm.
+
+### 8.2 Branch Writes
 
 Writing to a branch is identical to writing to the default branch — the same
-fact and blob insertion, but the head update targets the branch name:
+fact and value insertion, but the head update targets the branch name:
 
 ```sql
-INSERT INTO head (branch, id, fact_hash)
-VALUES (:branch_name, :entity_id, :fact_hash)
-ON CONFLICT (branch, id) DO UPDATE SET fact_hash = :fact_hash;
+INSERT INTO head (branch, id, fact_hash, version)
+VALUES (:branch_name, :entity_id, :fact_hash, :version)
+ON CONFLICT (branch, id) DO UPDATE SET fact_hash = :fact_hash, version = :version;
 ```
 
 The `commit` row records which branch was written to:
@@ -650,22 +728,24 @@ INSERT INTO commit (hash, version, branch, reads)
 VALUES (:commit_hash, :version, :branch_name, :reads_json);
 ```
 
-### 7.3 Branch Version Numbering
+### 8.3 Branch Version Numbering
 
 Each branch maintains its own `head_version` in the `branch` table. When a
-commit is applied to a branch, `head_version` is incremented:
+commit is applied to a branch, `head_version` is set to the commit's global
+version number:
 
 ```sql
 UPDATE branch
-SET head_version = head_version + 1
+SET head_version = :version
 WHERE name = :branch_name;
 ```
 
-The Lamport clock (`version` on facts and commits) is still space-global — it
-increases across all branches. This ensures that version numbers are globally
-unique and orderable, even across branches.
+The Lamport clock (`version` on facts and commits) is space-global — it
+increases across all branches. The branch's `head_version` tracks the latest
+global version applied to that branch, ensuring that version numbers are
+globally unique and orderable, even across branches.
 
-### 7.4 Branch Deletion
+### 8.4 Branch Deletion
 
 ```sql
 -- Remove all head pointers for the branch
@@ -682,11 +762,11 @@ DELETE FROM branch WHERE name = :branch_name;
 
 ---
 
-## 8. Point-in-Time Read Implementation
+## 9. Point-in-Time Read Implementation
 
 Point-in-time reads combine fact lookup and snapshot-based reconstruction.
 
-### 8.1 Algorithm
+### 9.1 Algorithm
 
 ```typescript
 function readAtVersion(
@@ -727,7 +807,7 @@ function readAtVersion(
 }
 ```
 
-### 8.2 Branch-Aware PIT Reads
+### 9.2 Branch-Aware PIT Reads
 
 For point-in-time reads on a branch, the query must consider that the branch
 was forked at a specific version. Facts before the fork version are inherited
@@ -735,14 +815,14 @@ from the parent branch.
 
 ```sql
 -- Facts for an entity on a branch (including inherited pre-fork facts)
-SELECT f.hash, f.fact_type, f.version, b.data
+SELECT f.hash, f.fact_type, f.version, v.data
 FROM fact f
-JOIN blob b ON b.hash = f.value_ref
+JOIN value v ON v.hash = f.value_ref
 WHERE f.id = :entity_id
   AND f.version <= :target_version
   AND (
     -- Facts committed on this branch
-    f.commit_ref IN (SELECT hash FROM commit WHERE branch = :branch_name)
+    f.branch = :branch_name
     OR
     -- Facts from before the fork point (inherited)
     f.version <= (SELECT fork_version FROM branch WHERE name = :branch_name)
@@ -753,9 +833,9 @@ LIMIT 1;
 
 ---
 
-## 9. Blob Store Operations
+## 10. Blob Store Operations
 
-### 9.1 Write a Blob
+### 10.1 Write a Blob
 
 ```sql
 -- Content-addressed: INSERT OR IGNORE deduplicates automatically
@@ -763,7 +843,7 @@ INSERT OR IGNORE INTO blob_store (hash, data, content_type, size)
 VALUES (:hash, :data, :content_type, :size);
 ```
 
-### 9.2 Read a Blob
+### 10.2 Read a Blob
 
 ```sql
 SELECT data, content_type, size
@@ -771,7 +851,7 @@ FROM blob_store
 WHERE hash = :hash;
 ```
 
-### 9.3 Blob Metadata
+### 10.3 Blob Metadata
 
 Blob metadata is stored as a regular entity (see §01 Data Model, section 5).
 The metadata entity id is derived from the blob hash:
@@ -784,7 +864,7 @@ Reading and writing blob metadata uses the standard entity read/write paths.
 
 ---
 
-## 10. Migration
+## 11. Migration
 
 Memory v2 is a **clean break** from v1. There is no migration path from the v1
 database schema to v2. Existing v1 databases are not modified; new v2 databases

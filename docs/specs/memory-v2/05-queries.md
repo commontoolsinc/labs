@@ -54,6 +54,11 @@ interface EntityMatch {
 | Specific id (e.g. `"urn:entity:abc123"`) | Match exactly that entity |
 | `"*"` (wildcard) | Match all entities in the space |
 
+When using the wildcard `"*"` selector, the server MAY impose a fan-out limit
+(e.g., 10,000 entities) to prevent excessive memory use. If the limit is
+exceeded, the server returns a paginated result (see section 5.8) rather than an
+error.
+
 ### 5.2.2 Version Filtering
 
 The `since` parameter enables incremental synchronization. When provided, the
@@ -103,15 +108,17 @@ interface SchemaQuery extends QueryOptions {
   selectSchema: SchemaSelector;
   since?: number;
   classification?: string[];  // IFC claims for access control
+  limits?: SchemaQueryLimits;
 }
 
-// SchemaSelector mirrors the old selector structure but carries
-// schema information instead of simple match objects.
-// Keyed by entity id, then content type.
-type SchemaSelector = Record<
-  EntityId | "*",
-  Record<string, SchemaPathSelector>
->;
+interface SchemaQueryLimits {
+  maxDepth?: number;      // Maximum traversal depth (default: 10)
+  maxEntities?: number;   // Maximum entities to visit (default: 1000)
+}
+
+// SchemaSelector maps entity ids to schema path selectors.
+// The path+schema pair applies directly per entity.
+type SchemaSelector = Record<EntityId | "*", SchemaPathSelector>;
 
 // A path + schema pair that describes what to traverse
 // within a matched entity's value.
@@ -209,8 +216,7 @@ This mirrors the `SchemaObjectTraverser.traverseWithSchema` method from
 When the traverser encounters a reference (a value that points to another
 entity), it:
 
-1. **Parses the reference** to extract the target entity id, content type, and
-   sub-path.
+1. **Parses the reference** to extract the target entity id and sub-path.
 2. **Checks the cycle tracker** to prevent infinite loops when following
    circular references.
 3. **Loads the target entity** from the store.
@@ -324,7 +330,7 @@ mapping entity keys to `SchemaPathSelector` sets):
 
 ```typescript
 type SchemaTracker = MapSet<
-  string,                // Key: "{space}/{id}/{contentType}"
+  string,                // Key: "{space}/{entityId}"
   SchemaPathSelector     // The schema+path used when visiting this entity
 >;
 ```
@@ -395,7 +401,7 @@ For simple queries, the server:
    c. Update the highest version sent.
 
 Matching uses the same rules as `subscription.ts`: an entity matches if its id
-(or the wildcard `*`) and content type intersect with the subscription pattern.
+(or the wildcard `*`) intersects with the subscription pattern.
 
 ### 5.4.3 Schema-Aware Subscriptions
 
@@ -434,7 +440,15 @@ duplicate data:
   `excludeSent: true` is set in the query, entities already sent are omitted
   from incremental updates unless their value has changed.
 
-### 5.4.5 Subscription State
+### 5.4.5 Update Coalescing
+
+When multiple commits occur in rapid succession, the server MAY coalesce
+subscription updates. Instead of sending one update per commit, the server
+batches changes and sends a single update covering all commits since the last
+sent update. The coalesced update includes the latest `FactEntry` per entity,
+not intermediate states.
+
+### 5.4.6 Subscription State
 
 ```typescript
 interface SubscriptionState {
@@ -581,30 +595,26 @@ interface QueryResult {
   [spaceId: string]: FactSet;
 }
 
-// Facts organized by entity id, then by content type
+// Facts organized by entity id
 interface FactSet {
-  [entityId: EntityId]: {
-    [contentType: string]: {
-      [parentHash: Reference]: FactEntry;
-    };
-  };
+  [entityId: EntityId]: FactEntry;
 }
 
 // A single fact entry in the result
 interface FactEntry {
   value?: JSONValue;   // The entity value (absent for deletes/tombstones)
   version: number;     // The version when this fact was committed
+  hash: Reference;     // Hash of the current head fact
 }
 ```
 
 ### 5.7.2 Result Semantics
 
-- **Present entity**: has a `FactEntry` with `value` populated.
-- **Deleted entity**: has a `FactEntry` without `value` (tombstone).
+- **Present entity**: has a `FactEntry` with `value` populated. The `hash`
+  field identifies the head fact.
+- **Deleted entity**: has a `FactEntry` without `value` (tombstone). The `hash`
+  still identifies the delete fact.
 - **Unknown entity**: no entry in the `FactSet` at all.
-- **Empty match**: an entity id key exists in the `FactSet` but has an empty
-  object as its value. This indicates the entity was specifically queried but
-  has no data.
 
 ---
 
@@ -672,3 +682,98 @@ queries targeting each branch.
 Branch and version interact naturally: `{ branch: "feature-x", atVersion: 42 }`
 reads the state of the `feature-x` branch as it was at version 42. The
 reconstruction algorithm (5.5) scopes its fact lookup to the specified branch.
+
+---
+
+## 5.10 Entity References and Links
+
+Entity values may contain references (links) to other entities. This section
+defines the reference formats used in the query and traversal system.
+
+### 5.10.1 Link Format
+
+A reference embedded in an entity value uses the CID link format -- a JSON
+object with a single `"/"` key:
+
+```typescript
+// A reference/link embedded in an entity value
+interface EntityLink {
+  "/": Reference;  // Content-addressed reference to a fact or entity
+}
+```
+
+Example:
+
+```json
+{
+  "author": { "/": "bafy...abc123" },
+  "title": "My Document"
+}
+```
+
+### 5.10.2 Link Resolution
+
+Given a link, the traverser:
+
+1. Extracts the `Reference` from the `"/"` key.
+2. Looks up the entity whose current head fact has that hash.
+3. Loads the target entity's value and continues traversal with the appropriate
+   schema context (see 5.3.4 Schema Narrowing).
+
+### 5.10.3 Entity ID References
+
+Values can also reference entities by ID directly as a string field. The schema
+determines which fields are entity ID references versus plain strings. Schema
+properties marked with `$ref` or with a custom `x-entity-reference: true`
+annotation indicate fields that should be followed as links during traversal.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "owner": {
+      "type": "string",
+      "x-entity-reference": true
+    }
+  }
+}
+```
+
+The traversal algorithm in section 5.3.2 uses both formats. Content-addressed
+links (`{ "/": "<reference>" }`) are detected structurally. Entity ID references
+require schema annotations to distinguish them from plain string values.
+
+---
+
+## 5.11 Reactivity Boundaries
+
+When schema traversal encounters a reference and resolves it to another entity,
+the resolved entity becomes a separate **reactive unit**. This section defines
+how reactivity boundaries interact with the query system.
+
+### 5.11.1 asCell
+
+`asCell(entityId)` returns a reactive cell that updates when the entity's head
+changes. The cell holds the entity's current value and re-evaluates when a new
+fact is committed for that entity on the target branch.
+
+### 5.11.2 asStream
+
+`asStream(query)` returns a reactive stream of `FactSet` updates. Each emission
+contains the incremental changes since the last emission, following the
+subscription semantics defined in section 5.4.
+
+### 5.11.3 Boundary Rules
+
+The boundary between "data included in the parent cell" and "data in a separate
+cell" is determined by the schema:
+
+- **Top-level properties** of a queried entity are part of the parent cell's
+  reactive scope. Changes to these properties trigger an update on the parent
+  cell.
+- **Referenced entities** (followed via links) are separate cells. Changes to a
+  referenced entity trigger an update on that entity's cell, but do not
+  automatically trigger an update on the referencing (parent) cell.
+- **Schema-aware subscriptions** (section 5.4.3) bridge this boundary: the
+  schema tracker monitors all reachable entities, so the subscription stream
+  emits updates for any change in the reachable graph.

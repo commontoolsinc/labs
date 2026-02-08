@@ -204,6 +204,14 @@ resolveHead(branch, entityId):
   return null  // Entity does not exist
 ```
 
+#### Head Resolution Caching
+
+When a head is resolved by falling back to the parent branch, the resolved head
+MAY be cached in the child branch's head table to avoid repeated parent lookups.
+This cache entry is written lazily on first read, not eagerly at branch creation
+time. Subsequent reads for the same entity on the same branch hit the cache
+directly, turning a multi-hop parent chain walk into a single local lookup.
+
 ### 6.5.2 Subscriptions on Branches
 
 Subscriptions can target a specific branch. The server sends updates when
@@ -314,7 +322,16 @@ branch's facts are already in the shared fact history, so no data copying is
 needed. The target branch's head table is simply updated to point to the source
 branch's head fact.
 
-### 6.7.4 Merge Commit
+### 6.7.4 CRDT Merge (Future Extension)
+
+For entities that carry commutative, convergent data structures (CRDTs), the
+merge algorithm could apply type-specific merge functions instead of reporting
+conflicts. This would require schema annotations declaring an entity's merge
+strategy (e.g., `"x-merge-strategy": "counter"` or `"x-merge-strategy":
+"lww-register"`). This extension is not part of the current specification but
+is noted as a natural evolution of the merge system.
+
+### 6.7.5 Merge Commit
 
 A successful merge creates a **merge commit** on the target branch. This commit:
 
@@ -544,3 +561,60 @@ Multiple users can work on separate branches and merge their changes:
 5. merge({ source: "bob-edits", target: "main" })      // Bob may hit conflicts
 6. // Bob resolves conflicts, re-merges
 ```
+
+---
+
+## 6.13 Branch Depth and Performance
+
+Head resolution walks the parent chain (see 6.5.1). When branches are created
+from other branches (fork from a fork), the parent chain grows deeper. Deep
+chains degrade read performance because each head lookup may require traversing
+multiple parent branches before finding an explicit head entry.
+
+### 6.13.1 Depth Limits
+
+The server SHOULD limit branch depth to **8 levels**. The server MAY reject
+branch creation requests that would exceed this depth with an error indicating
+that the maximum branch depth has been reached.
+
+### 6.13.2 Materialization (Rebasing)
+
+As an alternative to hard depth limits, the server can periodically
+**materialize** (snapshot) a branch's heads. Materialization copies all resolved
+heads from parent branches into the branch's own head table, effectively
+"rebasing" the branch and eliminating the need to walk the parent chain. After
+materialization, head resolution for the branch is O(1) regardless of the
+original chain depth.
+
+Materialization is transparent to clients -- it does not change the logical
+state of the branch, only its physical storage.
+
+---
+
+## 6.14 Branch Diff
+
+The branch diff operation compares entity state between two branches, useful for
+code-review-style workflows and pre-merge inspection.
+
+### 6.14.1 API
+
+```typescript
+interface DiffRequest {
+  source: BranchName;
+  target: BranchName;
+}
+
+interface DiffResult {
+  added: EntityId[];      // Entities on source but not target
+  removed: EntityId[];    // Entities on target but not source
+  modified: EntityId[];   // Entities changed on both
+}
+```
+
+### 6.14.2 Semantics
+
+The diff is computed relative to the common ancestor (fork point) of the two
+branches. An entity is **added** if it exists on the source but not at the
+common ancestor or on the target. An entity is **removed** if it exists on the
+target but was deleted on the source. An entity is **modified** if both branches
+have a different head for it compared to the ancestor.
