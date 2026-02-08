@@ -67,7 +67,7 @@ export function parseWishTarget(target: string): ParsedWishTarget {
  * Check if a tag string contains a hashtag matching the search term.
  * Extracts all #hashtags from the tag and checks for exact match.
  */
-function tagMatchesHashtag(
+export function tagMatchesHashtag(
   tag: string | undefined,
   searchTermWithoutHash: string,
 ): boolean {
