@@ -499,13 +499,15 @@ export class ProviderV2 implements IStorageProviderWithReplica {
 
     for (const { uri, value } of batch) {
       if (value.value !== undefined) {
+        // JSON roundtrip to strip undefined values (same as v1 Provider.send).
+        // merkle-reference's refer() cannot handle undefined.
+        const content = JSON.parse(
+          JSON.stringify({ value: value.value, source: value.source }),
+        ) as JSONValue;
         operations.push({
           op: "set",
           id: uri,
-          value: {
-            value: value.value,
-            source: value.source,
-          } as unknown as JSONValue,
+          value: content,
         });
       } else {
         operations.push({
