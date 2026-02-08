@@ -8,6 +8,7 @@ import {
 import * as StorageSubscription from "./subscription.ts";
 import type { MemorySpace } from "@commontools/memory/interface";
 import type { IStorageSubscription } from "./interface.ts";
+import { ProviderV2 } from "./v2/provider.ts";
 export * from "./cache.ts";
 
 export class StorageManagerEmulator extends BaseStorageManager {
@@ -27,6 +28,13 @@ export class StorageManagerEmulator extends BaseStorageManager {
     return this.#session;
   }
   override connect(space: MemorySpace) {
+    // v2 flag: create a v2 provider instead of v1
+    if (this.memoryVersion === "v2") {
+      return ProviderV2.open({
+        spaceId: space,
+        subscription: this.#subscription,
+      });
+    }
     return Provider.open({
       space,
       session: this.session(),

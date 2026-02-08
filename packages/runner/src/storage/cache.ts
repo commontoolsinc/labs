@@ -2044,6 +2044,13 @@ export interface Options {
    * (Temporary) Space identity.
    */
   spaceIdentity?: Signer;
+
+  /**
+   * Memory version to use. "v1" is the default (current).
+   * "v2" uses the new v2 storage engine with simplified selectors
+   * and no MIME type dimension.
+   */
+  memoryVersion?: "v1" | "v2";
 }
 
 export class StorageManager implements IStorageManager {
@@ -2052,6 +2059,7 @@ export class StorageManager implements IStorageManager {
   id: string;
   settings: IRemoteStorageProviderSettings;
   spaceIdentity?: Signer;
+  memoryVersion: "v1" | "v2";
   #providers: Map<string, IStorageProviderWithReplica> = new Map();
   #subscription = SubscriptionManager.create();
   #crossSpacesPromises: Set<Promise<void>> = new Set();
@@ -2073,6 +2081,7 @@ export class StorageManager implements IStorageManager {
       id = crypto.randomUUID(),
       settings = defaultSettings,
       spaceIdentity,
+      memoryVersion = "v1",
     }: Options,
   ) {
     this.address = address;
@@ -2080,6 +2089,7 @@ export class StorageManager implements IStorageManager {
     this.as = as;
     this.id = id;
     this.spaceIdentity = spaceIdentity;
+    this.memoryVersion = memoryVersion;
   }
 
   /**
