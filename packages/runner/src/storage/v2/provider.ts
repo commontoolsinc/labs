@@ -46,12 +46,24 @@ import type {
   SubscriptionUpdate,
 } from "@commontools/memory/v2/protocol";
 import { BaseMemoryAddress } from "../../traverse.ts";
+import { fromString, is as isV1Reference } from "@commontools/memory/reference";
 
 /**
  * The fixed MIME type used for v2 provider.
  * v2 drops the `the` dimension; we use a constant for v1 compatibility.
  */
 const V2_MIME = "application/json" as const;
+
+/**
+ * Ensure a v2 hash (which may be a string from SQLite or a View from
+ * hashFact) is a proper v1 Reference object (merkle-reference View).
+ * The v1 transaction layer uses `"/" in cause` which requires an object.
+ */
+function toV1Cause(hash: unknown): State["cause"] {
+  if (hash == null) return undefined;
+  if (isV1Reference(hash)) return hash as State["cause"];
+  return fromString(String(hash)) as unknown as State["cause"];
+}
 
 /**
  * v2 Replica implementing ISpaceReplica.
@@ -148,7 +160,7 @@ class ReplicaV2 implements ISpaceReplica {
           ? {
             the: V2_MIME,
             of: entityId as URI,
-            cause: storedFact.hash,
+            cause: toV1Cause(storedFact.hash),
             since: commit.version,
           }
           : {
@@ -156,7 +168,7 @@ class ReplicaV2 implements ISpaceReplica {
             of: entityId as URI,
             is: (storedFact.fact as { value?: JSONValue })
               .value as StorableDatum,
-            cause: storedFact.hash,
+            cause: toV1Cause(storedFact.hash),
             since: commit.version,
           }) as Revision<Fact>;
 
@@ -272,13 +284,13 @@ class ReplicaV2 implements ISpaceReplica {
           the: V2_MIME,
           of: entityId as URI,
           is: entry.value as StorableDatum,
-          cause: entry.hash,
+          cause: toV1Cause(entry.hash),
           since: entry.version,
         }
         : {
           the: V2_MIME,
           of: entityId as URI,
-          cause: entry.hash,
+          cause: toV1Cause(entry.hash),
           since: entry.version,
         }) as Revision<Fact>;
 
@@ -302,13 +314,13 @@ class ReplicaV2 implements ISpaceReplica {
           the: V2_MIME,
           of: entityId as URI,
           is: value as StorableDatum,
-          cause: revision.hash,
+          cause: toV1Cause(revision.hash),
           since: update.commit.version,
         }
         : {
           the: V2_MIME,
           of: entityId as URI,
-          cause: revision.hash,
+          cause: toV1Cause(revision.hash),
           since: update.commit.version,
         }) as Revision<Fact>;
 
@@ -443,7 +455,7 @@ export class ProviderV2 implements IStorageProviderWithReplica {
           ? {
             the: V2_MIME,
             of: entityId as URI,
-            cause: storedFact.hash,
+            cause: toV1Cause(storedFact.hash),
             since: commit.version,
           }
           : {
@@ -451,7 +463,7 @@ export class ProviderV2 implements IStorageProviderWithReplica {
             of: entityId as URI,
             is: (storedFact.fact as { value?: JSONValue })
               .value as StorableDatum,
-            cause: storedFact.hash,
+            cause: toV1Cause(storedFact.hash),
             since: commit.version,
           }) as Revision<Fact>;
 

@@ -8,7 +8,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Runtime } from "../src/runtime.ts";
-import { type Cell } from "../src/cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -203,7 +202,7 @@ describe("Storage v2", () => {
 
       await provider.send([{
         uri,
-        value: { value: "direct write", source: {} },
+        value: { value: "direct write", source: undefined },
       }]);
 
       const value = provider.get(uri);
@@ -221,12 +220,12 @@ describe("Storage v2", () => {
 
       await provider.send([{
         uri,
-        value: { value: "first", source: {} },
+        value: { value: "first", source: undefined },
       }]);
 
       await provider.send([{
         uri,
-        value: { value: "second", source: {} },
+        value: { value: "second", source: undefined },
       }]);
 
       // We should have received updates
