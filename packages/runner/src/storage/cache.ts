@@ -66,6 +66,7 @@ import * as SubscriptionManager from "./subscription.ts";
 import * as Differential from "./differential.ts";
 import * as Address from "./transaction/address.ts";
 import { ACL_TYPE, ANYONE_USER } from "@commontools/memory/acl";
+import { ProviderV2 } from "./v2/provider.ts";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -2108,20 +2109,20 @@ export class StorageManager implements IStorageManager {
   }
 
   protected connect(space: MemorySpace): IStorageProviderWithReplica {
-    // v2 flag: when memoryVersion is "v2", we want to use ProviderV2.
-    // However, ProviderV2 currently only supports local (in-process)
-    // connections, not remote WebSocket connections. The production
-    // StorageManager uses WebSocket-based Consumer/Provider, so we must
-    // fall back to v1 for now.  The emulator override in cache.deno.ts
-    // handles v2 correctly for local/in-process use.
-    //
-    // TODO(@ubik2): Once ProviderV2 gains remote/WebSocket support, create a
-    // ProviderV2 here instead of falling back to v1.
     if (this.memoryVersion === "v2") {
-      logger.info("connect-v2-fallback", () => [
-        "memoryVersion is 'v2' but remote ProviderV2 is not yet supported; " +
-        "falling back to v1 Provider for WebSocket connection",
-      ]);
+      // Build v2 WebSocket URL
+      const wsUrl = new URL(this.address.href);
+      wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
+      wsUrl.pathname = wsUrl.pathname.replace(/\/?$/, "") +
+        "/api/storage/memory/v2";
+      wsUrl.searchParams.set("space", space);
+
+      return ProviderV2.connectRemote({
+        spaceId: space,
+        wsUrl,
+        subscription: this.#subscription,
+        connectionTimeout: this.settings.connectionTimeout,
+      });
     }
 
     const { id, address, as, settings } = this;

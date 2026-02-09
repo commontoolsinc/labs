@@ -48,7 +48,9 @@
     "./v2/space": "./v2/space.ts",
     "./v2/provider": "./v2/provider.ts",
     "./v2/consumer": "./v2/consumer.ts",
-    "./v2/protocol": "./v2/protocol.ts"
+    "./v2/protocol": "./v2/protocol.ts",
+    "./v2/codec": "./v2/codec.ts",
+    "./v2/remote": "./v2/remote.ts"
   },
   "imports": {
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",

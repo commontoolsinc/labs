@@ -39,6 +39,7 @@ import { ProviderSession } from "@commontools/memory/v2/provider";
 import { connectLocal, ConsumerSession } from "@commontools/memory/v2/consumer";
 import type {
   ConsumerTransactResult,
+  SubscriptionCallback,
   UserOperation,
 } from "@commontools/memory/v2/consumer";
 import type {
@@ -50,6 +51,7 @@ import type {
   InvocationId,
   SubscriptionUpdate,
 } from "@commontools/memory/v2/protocol";
+import { connectRemote, RemoteConsumer } from "@commontools/memory/v2/remote";
 import { BaseMemoryAddress } from "../../traverse.ts";
 import { fromString, is as isV1Reference } from "@commontools/memory/reference";
 
@@ -97,14 +99,40 @@ function asChanges(items: IMemoryChange[]): IMergedChanges {
 }
 
 /**
+ * Shared consumer interface used by ReplicaV2.
+ * Both ConsumerSession (local) and RemoteConsumer (WebSocket) implement this.
+ */
+interface ConsumerLike {
+  transact(
+    userOps: UserOperation[],
+    options?: { branch?: string },
+  ): ConsumerTransactResult;
+  query(
+    select: Selector,
+    options?: { since?: number; branch?: string },
+  ): FactSet;
+  subscribe(
+    select: Selector,
+    callback: SubscriptionCallback,
+    options?: { since?: number; branch?: string },
+  ): { facts: FactSet; subscriptionId: InvocationId };
+  unsubscribe(subscriptionId: InvocationId): void;
+  getConfirmed(
+    entityId: string,
+    branch?: string,
+  ): ReturnType<ConsumerSession["getConfirmed"]>;
+  close(): void;
+}
+
+/**
  * v2 Replica implementing ISpaceReplica.
  *
- * Wraps a v2 ConsumerSession to provide get/commit for the runner.
+ * Wraps a v2 ConsumerSession (or RemoteConsumer) to provide get/commit for the runner.
  * The `the` dimension is always "application/json".
  */
 class ReplicaV2 implements ISpaceReplica {
   private spaceId: MemorySpace;
-  private consumer: ConsumerSession;
+  private consumer: ConsumerLike;
   private subscribers = new Map<
     string,
     Set<(revision?: Revision<State>) => void>
@@ -115,7 +143,7 @@ class ReplicaV2 implements ISpaceReplica {
 
   constructor(
     spaceId: MemorySpace,
-    consumer: ConsumerSession,
+    consumer: ConsumerLike,
     private subscription: IStorageSubscription,
   ) {
     this.spaceId = spaceId;
@@ -455,14 +483,17 @@ class ReplicaV2 implements ISpaceReplica {
 /**
  * v2 Storage Provider implementing IStorageProviderWithReplica.
  *
- * Wraps a v2 SpaceV2 + ProviderSession + ConsumerSession to present
- * the v1 IStorageProvider interface used by the runner.
+ * Wraps a v2 consumer (local or remote) to present the v1
+ * IStorageProvider interface used by the runner.
  */
 export class ProviderV2 implements IStorageProviderWithReplica {
   readonly replica: ReplicaV2;
-  private space: SpaceV2;
-  private providerSession: ProviderSession;
-  private consumer: ConsumerSession;
+  private consumer: ConsumerLike;
+  /** Local-only resources (null for remote mode) */
+  private space: SpaceV2 | null;
+  private providerSession: ProviderSession | null;
+  /** Remote consumer (null for local mode), kept for destroy() */
+  private remoteConsumer: RemoteConsumer | null;
   private subscribers = new Map<
     string,
     Set<(value: StorageValue<StorableDatum>) => void>
@@ -470,12 +501,16 @@ export class ProviderV2 implements IStorageProviderWithReplica {
 
   constructor(options: {
     spaceId: MemorySpace;
-    space: SpaceV2;
+    consumer: ConsumerLike;
     subscription: IStorageSubscription;
+    space?: SpaceV2 | null;
+    providerSession?: ProviderSession | null;
+    remoteConsumer?: RemoteConsumer | null;
   }) {
-    this.space = options.space;
-    this.providerSession = new ProviderSession(this.space);
-    this.consumer = connectLocal(this.providerSession);
+    this.consumer = options.consumer;
+    this.space = options.space ?? null;
+    this.providerSession = options.providerSession ?? null;
+    this.remoteConsumer = options.remoteConsumer ?? null;
     this.replica = new ReplicaV2(
       options.spaceId,
       this.consumer,
@@ -484,17 +519,49 @@ export class ProviderV2 implements IStorageProviderWithReplica {
   }
 
   /**
-   * Factory: create a v2 provider for a space.
+   * Factory: create a local (in-process) v2 provider for a space.
    */
   static open(options: {
     spaceId: MemorySpace;
     subscription: IStorageSubscription;
   }): ProviderV2 {
     const space = SpaceV2.open({ url: new URL("memory:v2") });
+    const providerSession = new ProviderSession(space);
+    const consumer = connectLocal(providerSession);
     return new ProviderV2({
       ...options,
+      consumer,
       space,
+      providerSession,
     });
+  }
+
+  /**
+   * Factory: create a remote (WebSocket) v2 provider for a space.
+   */
+  static connectRemote(options: {
+    spaceId: MemorySpace;
+    wsUrl: URL;
+    subscription: IStorageSubscription;
+    connectionTimeout?: number;
+  }): ProviderV2 {
+    const remoteConsumer = connectRemote(options.wsUrl, {
+      connectionTimeout: options.connectionTimeout,
+    });
+
+    const provider = new ProviderV2({
+      spaceId: options.spaceId,
+      consumer: remoteConsumer,
+      subscription: options.subscription,
+      remoteConsumer,
+    });
+
+    // Wire reconnection: reset replica state and re-subscribe
+    remoteConsumer.connection.onReconnect = () => {
+      provider.replica.reset();
+    };
+
+    return provider;
   }
 
   /**
@@ -628,9 +695,15 @@ export class ProviderV2 implements IStorageProviderWithReplica {
    */
   destroy(): Promise<void> {
     this.replica.close();
-    this.consumer.close();
-    this.providerSession.close();
-    this.space.close();
+    if (this.remoteConsumer) {
+      // Remote mode: RemoteConsumer.close() tears down connection, local shadow, etc.
+      this.remoteConsumer.close();
+    } else {
+      // Local mode: close consumer, provider session, and space
+      this.consumer.close();
+      this.providerSession?.close();
+      this.space?.close();
+    }
     return Promise.resolve();
   }
 
