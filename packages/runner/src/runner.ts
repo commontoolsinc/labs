@@ -618,9 +618,18 @@ export class Runner {
     // Step 5: Check whether the recipe is available, otherwise load it
     const recipeId = processCell.key(TYPE).getRaw() as string | undefined;
     if (!recipeId) {
-      return Promise.reject(
-        new Error(`Cannot start: no recipe ID ($TYPE)`),
-      );
+      // Process cell data may not be loaded yet (e.g. v2 remote doesn't do
+      // graph traversal, so the source cell entity isn't pre-fetched).
+      // Sync the process cell and retry.
+      return Promise.resolve(processCell.sync()).then(() => {
+        const retryId = processCell.key(TYPE).getRaw() as string | undefined;
+        if (!retryId) {
+          return Promise.reject(
+            new Error(`Cannot start: no recipe ID ($TYPE)`),
+          );
+        }
+        return this.doStart(rootCell, seenCells);
+      });
     }
     const recipe = this.runtime.recipeManager.recipeById(recipeId);
     if (!recipe) {

@@ -159,6 +159,7 @@ class ReplicaV2 implements ISpaceReplica {
   >();
   private localState = new Map<string, Revision<State>>();
   private subscriptionIds = new Map<string, InvocationId>();
+  private hasWildcardSubscription = false;
   private pendingReady: Promise<void>[] = [];
   suppressSubscriptionUpdates = false;
 
@@ -360,11 +361,27 @@ class ReplicaV2 implements ISpaceReplica {
 
   /**
    * Set up a v2 subscription for an entity and start receiving updates.
+   *
+   * Uses a single wildcard subscription per space to fetch all entities,
+   * matching v1's graph-query behavior where related entities (nested
+   * objects stored as separate docs) are returned together.
    */
   setupSubscription(entityId: string): void {
     if (this.subscriptionIds.has(entityId)) return;
 
-    const selector = { [entityId]: {} } as unknown as Selector;
+    // Mark as subscribed (even before the actual subscribe call completes).
+    this.subscriptionIds.set(entityId, entityId as InvocationId);
+
+    // Use a single wildcard "*" subscription for the whole space.
+    // The cell framework stores nested objects as separate entities linked
+    // by {"/": id} references. A per-entity subscription would miss these
+    // linked entities, causing data like recipe metadata (with nested
+    // program/files) to appear incomplete. The wildcard subscription matches
+    // v1's graph-query behavior which returns all related entities.
+    if (this.hasWildcardSubscription) return;
+    this.hasWildcardSubscription = true;
+
+    const selector = { "*": {} } as unknown as Selector;
     const { facts, subscriptionId, ready } = this.consumer.subscribe(
       selector,
       (update: SubscriptionUpdate) => {
@@ -372,7 +389,8 @@ class ReplicaV2 implements ISpaceReplica {
       },
     );
 
-    this.subscriptionIds.set(entityId, subscriptionId);
+    // Store under a sentinel key
+    this.subscriptionIds.set("*", subscriptionId);
     this.applyFactSet(facts);
 
     // For remote consumers: apply server initial state when it arrives
@@ -523,6 +541,7 @@ class ReplicaV2 implements ISpaceReplica {
     // Clear all state
     this.localState.clear();
     this.subscriptionIds.clear();
+    this.hasWildcardSubscription = false;
     // Restore subscribers
     this.subscribers = savedSubscribers;
 
