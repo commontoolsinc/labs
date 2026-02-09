@@ -26,6 +26,7 @@ async function test() {
     storageManager: StorageManager.open({
       as: identity,
       address: new URL("/api/storage/memory", API_URL),
+      memoryVersion: "v1", // v2 remote transport doesn't support graph queries yet
     }),
   });
   const provider1: Provider =
@@ -66,6 +67,7 @@ async function test() {
     storageManager: StorageManager.open({
       as: identity,
       address: new URL("/api/storage/memory", API_URL),
+      memoryVersion: "v1", // v2 remote transport doesn't support graph queries yet
     }),
   });
 
