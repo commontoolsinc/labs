@@ -219,9 +219,9 @@ export class SchemaGenerator implements ISchemaGenerator {
     typeNode?: ts.TypeNode,
     checker?: ts.TypeChecker,
   ): string | ts.Type {
-    // Handle Default types (both direct and aliased) with enhanced keys to
-    // avoid false cycles
     if (typeNode && ts.isTypeReferenceNode(typeNode)) {
+      // Handle Default types (both direct and aliased) with enhanced keys to
+      // avoid false cycles
       const isDirectDefault = ts.isIdentifier(typeNode.typeName) &&
         typeNode.typeName.text === "Default";
       const isAliasedDefault = checker && isDefaultTypeRef(typeNode, checker);
@@ -236,6 +236,25 @@ export class SchemaGenerator implements ISchemaGenerator {
         const locationHash = typeNode.getSourceFile?.()?.fileName || "";
         const position = typeNode.pos || 0;
         return `Default_${type.flags}_${argTexts}_${locationHash}_${position}`;
+      }
+
+      // Cell-like wrappers (Cell, Writable, Stream, OpaqueRef) share their
+      // ts.Type identity with the same wrapper instantiation at other positions.
+      // When a recursive type like TodoItem contains `Writable<TodoItem[]>`,
+      // TypeScript reuses the same Cell<TodoItem[]> type object, causing the
+      // cycle to be detected in wrapper context where it can't be properly
+      // stored. Give each wrapper occurrence a unique stack key so the cycle
+      // is instead detected at the inner type level where it can be handled.
+      if (checker) {
+        const wrapperKind = detectWrapperViaNode(typeNode, checker);
+        if (wrapperKind) {
+          const argTexts = typeNode.typeArguments
+            ? typeNode.typeArguments.map((arg) => arg.getText()).join(",")
+            : "";
+          const locationHash = typeNode.getSourceFile?.()?.fileName || "";
+          const position = typeNode.pos || 0;
+          return `${wrapperKind}_${type.flags}_${argTexts}_${locationHash}_${position}`;
+        }
       }
     }
     return type;
