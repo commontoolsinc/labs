@@ -805,6 +805,13 @@ export function getAtPath(
           value: elementAt(curDoc.value, part),
         };
       }
+    } else if (isString(curDoc.value) && part === "length") {
+      // Handle native property access on string primitives (e.g., .length)
+      curDoc = {
+        ...curDoc,
+        address: { ...curDoc.address, path: [...curDoc.address.path, part] },
+        value: curDoc.value.length,
+      };
     } else if (
       isObject(curDoc.value) && part in (curDoc.value as Immutable<JSONObject>)
     ) {
