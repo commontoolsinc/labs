@@ -1390,6 +1390,81 @@ describe("wish built-in", () => {
       expect(resultData?.error).toMatch(/No mentionables found matching/i);
     });
 
+    it('#default with scope: ["~"] resolves against home space', async () => {
+      // Setup: Add default pattern to home space
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultPatternCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-pattern-tilde",
+        undefined,
+        tx,
+      );
+      homeDefaultPatternCell.set({
+        title: "Home Default",
+        value: "from-home",
+      });
+      (homeSpaceCell as any).key("defaultPattern").set(
+        homeDefaultPatternCell,
+      );
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Setup: Add different default pattern to current space
+      const spaceCell = runtime.getCell(
+        patternSpace.did(),
+        patternSpace.did(),
+      ).withTx(tx);
+      const currentDefaultPattern = runtime.getCell(
+        patternSpace.did(),
+        "current-default-pattern-tilde",
+        undefined,
+        tx,
+      );
+      currentDefaultPattern.set({
+        title: "Current Default",
+        value: "from-current",
+      });
+      (spaceCell as any).key("defaultPattern").set(currentDefaultPattern);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      // Execute: #default with scope: ["~"] should resolve from home space
+      const wishRecipe = recipe("default with tilde scope", () => {
+        return {
+          result: wish({
+            query: "#default",
+            scope: ["~"],
+          }),
+        };
+      });
+
+      const resultCell = runtime.getCell<{
+        result?: { result?: unknown };
+      }>(
+        patternSpace.did(),
+        "default-tilde-scope-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishRecipe, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      // Verify: Should return home space's default pattern, not current space's
+      const wishResult = result.key("result").get();
+      expect(wishResult?.error).toBeUndefined();
+      const defaultData = wishResult?.result;
+      expect(defaultData).toBeDefined();
+      expect((defaultData as any)?.title).toBe("Home Default");
+      expect((defaultData as any)?.value).toBe("from-home");
+    });
+
     describe("arbitrary DID scope", () => {
       let otherSpace: Identity;
 

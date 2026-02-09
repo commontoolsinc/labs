@@ -417,13 +417,28 @@ function resolveSpaceTarget(
     results.push({ cell: getSpaceCell(ctx), pathPrefix: [...pathPrefix] });
   }
 
+  // "~" → include home space
+  if (ctx.scope?.includes("~") && ctx.runtime.userIdentityDID) {
+    const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
+    results.push({ cell: homeSpaceCell, pathPrefix: [...pathPrefix] });
+  }
+
   // Arbitrary DIDs → include each space
   for (const did of getArbitraryDIDs(ctx.scope)) {
     const didSpaceCell = getSpaceCellForDID(ctx.runtime, did, ctx.tx);
     results.push({ cell: didSpaceCell, pathPrefix: [...pathPrefix] });
   }
 
-  return results.length > 0 ? results : null;
+  if (results.length === 0) {
+    console.warn(
+      `[wish] Target "${parsed.key}" cannot resolve with scope: [${
+        ctx.scope?.join(", ")
+      }]`,
+    );
+    return null;
+  }
+
+  return results;
 }
 
 /**
