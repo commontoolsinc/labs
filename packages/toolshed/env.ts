@@ -1,6 +1,17 @@
 import { z } from "zod";
 import * as Path from "@std/path";
 
+// Parse CLI args for --port (needed because deno --watch doesn't pass env vars)
+function parseCliArgs(): Record<string, string> {
+  const overrides: Record<string, string> = {};
+  for (const arg of Deno.args) {
+    if (arg.startsWith("--port=")) {
+      overrides.PORT = arg.split("=")[1];
+    }
+  }
+  return overrides;
+}
+
 // NOTE: This is where we define the environment variable types and defaults.
 const EnvSchema = z.object({
   ENV: z.string().default("development"),
@@ -122,7 +133,12 @@ const EnvSchema = z.object({
 
 export type env = z.infer<typeof EnvSchema>;
 
-const { data: env, error } = EnvSchema.safeParse(Deno.env.toObject());
+// CLI args override env vars (needed for --watch compatibility)
+const cliOverrides = parseCliArgs();
+const { data: env, error } = EnvSchema.safeParse({
+  ...Deno.env.toObject(),
+  ...cliOverrides,
+});
 
 if (error) {
   console.error("❌ Invalid env:");

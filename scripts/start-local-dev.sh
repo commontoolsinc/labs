@@ -13,10 +13,15 @@ TOOLSHED_PORT=${TOOLSHED_PORT:-}
 
 # Parse command line arguments
 FORCE=false
+WATCH=false
 while [[ $# -gt 0 ]]; do
     case $1 in
         --force)
             FORCE=true
+            shift
+            ;;
+        --watch)
+            WATCH=true
             shift
             ;;
         --port-offset)
@@ -94,17 +99,14 @@ SHELL_PID=$!
 sleep 2
 
 # Start toolshed dev server in background
-# NOTE: We skip --watch when PORT_OFFSET is set because deno's --watch flag
-# doesn't pass environment variables to the subprocess it spawns.
+# We pass --port= as CLI arg because deno --watch doesn't pass env vars to subprocess
 cd ../toolshed
-if [[ "$PORT_OFFSET" -eq 0 ]]; then
-    # Normal dev mode with --watch for auto-reload
-    SHELL_URL="http://localhost:$SHELL_PORT" deno task dev > local-dev-toolshed.log 2>&1 &
-else
-    # Integration test mode without --watch so PORT env var works
-    SHELL_URL="http://localhost:$SHELL_PORT" PORT="$TOOLSHED_PORT" \
-        deno run --unstable-otel -A --env-file=.env index.ts > local-dev-toolshed.log 2>&1 &
+WATCH_FLAG=""
+if [[ "$WATCH" == "true" ]]; then
+    WATCH_FLAG="--watch"
 fi
+SHELL_URL="http://localhost:$SHELL_PORT" \
+    deno run --unstable-otel -A $WATCH_FLAG --env-file=.env index.ts --port="$TOOLSHED_PORT" > local-dev-toolshed.log 2>&1 &
 TOOLSHED_PID=$!
 
 # # Function to cleanup background processes
