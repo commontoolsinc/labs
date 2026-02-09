@@ -39,6 +39,20 @@ import type {
 } from "./protocol.ts";
 
 /**
+ * Result of a consumer transact() call.
+ * Contains the synchronously-applied local commit and a promise
+ * that resolves when the server confirms (or rejects) the commit.
+ * For local providers, the promise is already resolved.
+ */
+export interface ConsumerTransactResult {
+  /** The locally-applied commit (available synchronously). */
+  commit: Commit;
+  /** Resolves when the server confirms, rejects on conflict.
+   *  For local providers this is already resolved. */
+  confirmed: Promise<Commit>;
+}
+
+/**
  * Pending commit entry tracking optimistic local state.
  */
 export interface PendingEntry {
@@ -110,12 +124,16 @@ export class ConsumerSession {
 
   /**
    * Submit a transaction.
-   * Returns the commit result or throws on conflict.
+   * Returns the locally-applied commit and a confirmation promise.
+   * The confirmation promise resolves when the server acknowledges the commit.
+   * For local providers, the promise is already resolved.
+   *
+   * NOT async — local state is updated synchronously.
    */
   transact(
     userOps: UserOperation[],
     options: { branch?: string } = {},
-  ): Commit {
+  ): ConsumerTransactResult {
     const branch = options.branch ?? DEFAULT_BRANCH;
 
     // Build confirmed reads and resolve parent references
@@ -180,7 +198,8 @@ export class ConsumerSession {
       });
     }
 
-    return commit;
+    // For local provider, confirmation is immediate
+    return { commit, confirmed: Promise.resolve(commit) };
   }
 
   /**

@@ -34,7 +34,7 @@ Deno.test("session - transact: write and read back", () => {
     { op: "set", id: "entity-1", value: { name: "Alice" } },
   ];
 
-  const commit = consumer.transact(ops);
+  const { commit } = consumer.transact(ops);
   assertEquals(commit.version, 1);
   assertEquals(commit.facts.length, 1);
   assertEquals(commit.facts[0].fact.id, "entity-1");
@@ -56,7 +56,7 @@ Deno.test("session - transact: multiple entities", () => {
     { op: "set", id: "c", value: 3 },
   ];
 
-  const commit = consumer.transact(ops);
+  const { commit } = consumer.transact(ops);
   assertEquals(commit.version, 1);
   assertEquals(commit.facts.length, 3);
 
@@ -71,12 +71,12 @@ Deno.test("session - transact: multiple entities", () => {
 Deno.test("session - transact: sequential commits", () => {
   const { consumer, space } = createSession();
 
-  const c1 = consumer.transact([
+  const { commit: c1 } = consumer.transact([
     { op: "set", id: "x", value: "first" },
   ]);
   assertEquals(c1.version, 1);
 
-  const c2 = consumer.transact([
+  const { commit: c2 } = consumer.transact([
     { op: "set", id: "x", value: "second" },
   ]);
   assertEquals(c2.version, 2);

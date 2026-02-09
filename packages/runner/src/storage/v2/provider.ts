@@ -37,7 +37,10 @@ import type { Result, Unit } from "@commontools/memory/interface";
 import { SpaceV2 } from "@commontools/memory/v2/space";
 import { ProviderSession } from "@commontools/memory/v2/provider";
 import { connectLocal, ConsumerSession } from "@commontools/memory/v2/consumer";
-import type { UserOperation } from "@commontools/memory/v2/consumer";
+import type {
+  ConsumerTransactResult,
+  UserOperation,
+} from "@commontools/memory/v2/consumer";
 import type {
   FactSet,
   JSONValue,
@@ -179,57 +182,19 @@ class ReplicaV2 implements ISpaceReplica {
       return Promise.resolve({ ok: {} as Unit });
     }
 
+    let result: ConsumerTransactResult;
     try {
       // Suppress subscription updates during our own commit to prevent
       // double-notification. The v2 subscription system fires updates
       // synchronously during transact(), but we handle state updates
       // ourselves and fire the commit notification with proper source/changeGroup.
       this.suppressSubscriptionUpdates = true;
-      const commit = this.consumer.transact(operations);
-      this.suppressSubscriptionUpdates = false;
-
-      // Compute changes and update local state
-      const changes: IMemoryChange[] = [];
-      for (const storedFact of commit.facts) {
-        const entityId = storedFact.fact.id;
-        const before = this.localState.get(entityId)?.is as
-          | StorableDatum
-          | undefined;
-        const after = storedFact.fact.type === "delete"
-          ? undefined
-          : (storedFact.fact as { value?: JSONValue }).value as StorableDatum;
-
-        const state = (storedFact.fact.type === "delete"
-          ? {
-            the: V2_MIME,
-            of: entityId as URI,
-            cause: toV1Cause(storedFact.hash),
-            since: commit.version,
-          }
-          : {
-            the: V2_MIME,
-            of: entityId as URI,
-            is: after,
-            cause: toV1Cause(storedFact.hash),
-            since: commit.version,
-          }) as Revision<Fact>;
-
-        this.localState.set(entityId, state);
-        changes.push(makeChange(entityId, before, after));
-        this.notifySubscribers(entityId, state);
+      try {
+        result = this.consumer.transact(operations);
+      } finally {
+        this.suppressSubscriptionUpdates = false;
       }
-
-      // Notify the storage subscription with actual changes
-      this.subscription.next({
-        type: "commit",
-        space: this.spaceId,
-        changes: asChanges(changes),
-        source: _source,
-      });
-
-      return Promise.resolve({ ok: {} as Unit });
     } catch (err) {
-      this.suppressSubscriptionUpdates = false;
       const error = err as Error;
       if (error.name === "ConflictError") {
         return Promise.resolve({
@@ -246,6 +211,50 @@ class ReplicaV2 implements ISpaceReplica {
         } as import("../interface.ts").StorageTransactionRejected,
       });
     }
+
+    // Synchronously compute changes and update local state
+    const { commit } = result;
+    const changes: IMemoryChange[] = [];
+    for (const storedFact of commit.facts) {
+      const entityId = storedFact.fact.id;
+      const before = this.localState.get(entityId)?.is as
+        | StorableDatum
+        | undefined;
+      const after = storedFact.fact.type === "delete"
+        ? undefined
+        : (storedFact.fact as { value?: JSONValue }).value as StorableDatum;
+
+      const state = (storedFact.fact.type === "delete"
+        ? {
+          the: V2_MIME,
+          of: entityId as URI,
+          cause: toV1Cause(storedFact.hash),
+          since: commit.version,
+        }
+        : {
+          the: V2_MIME,
+          of: entityId as URI,
+          is: after,
+          cause: toV1Cause(storedFact.hash),
+          since: commit.version,
+        }) as Revision<Fact>;
+
+      this.localState.set(entityId, state);
+      changes.push(makeChange(entityId, before, after));
+      this.notifySubscribers(entityId, state);
+    }
+
+    // Notify the storage subscription with actual changes
+    this.subscription.next({
+      type: "commit",
+      space: this.spaceId,
+      changes: asChanges(changes),
+      source: _source,
+    });
+
+    // Return the confirmation promise (not the local commit).
+    // For local: resolves immediately. For remote: resolves on server ack.
+    return result.confirmed.then(() => ({ ok: {} as Unit }));
   }
 
   /**
@@ -521,35 +530,39 @@ export class ProviderV2 implements IStorageProviderWithReplica {
       return Promise.resolve({ ok: {} as Unit });
     }
 
+    let result: ConsumerTransactResult;
     try {
-      const commit = this.consumer.transact(operations);
-
-      // Update replica local state with committed values so get() works
-      for (const storedFact of commit.facts) {
-        const entityId = storedFact.fact.id;
-        const state = (storedFact.fact.type === "delete"
-          ? {
-            the: V2_MIME,
-            of: entityId as URI,
-            cause: toV1Cause(storedFact.hash),
-            since: commit.version,
-          }
-          : {
-            the: V2_MIME,
-            of: entityId as URI,
-            is: (storedFact.fact as { value?: JSONValue })
-              .value as StorableDatum,
-            cause: toV1Cause(storedFact.hash),
-            since: commit.version,
-          }) as Revision<Fact>;
-
-        this.replica.updateLocalState(entityId, state);
-      }
-
-      return Promise.resolve({ ok: {} as Unit });
+      result = this.consumer.transact(operations);
     } catch (err) {
       return Promise.resolve({ error: err as Error });
     }
+
+    // Synchronously update replica local state so get() works
+    const { commit } = result;
+    for (const storedFact of commit.facts) {
+      const entityId = storedFact.fact.id;
+      const state = (storedFact.fact.type === "delete"
+        ? {
+          the: V2_MIME,
+          of: entityId as URI,
+          cause: toV1Cause(storedFact.hash),
+          since: commit.version,
+        }
+        : {
+          the: V2_MIME,
+          of: entityId as URI,
+          is: (storedFact.fact as { value?: JSONValue })
+            .value as StorableDatum,
+          cause: toV1Cause(storedFact.hash),
+          since: commit.version,
+        }) as Revision<Fact>;
+
+      this.replica.updateLocalState(entityId, state);
+    }
+
+    // Return the confirmation promise.
+    // For local: resolves immediately. For remote: resolves on server ack.
+    return result.confirmed.then(() => ({ ok: {} as Unit }));
   }
 
   /**
