@@ -365,3 +365,51 @@ sudo update-ca-certificates
 - To run a single test file use `deno test path/to/test.ts`.
 - To test a specific package, `cd` into the package directory and run
   `deno task test`.
+
+### Running Integration Tests
+
+Integration tests require running servers. Use the repo-level integration
+runner:
+
+```bash
+# Run all integration tests (auto-starts servers, cleans up after)
+deno task integration
+
+# Run integration tests for a specific package
+deno task integration cli
+deno task integration patterns
+deno task integration shell
+
+# Filter tests by name within a package
+deno task integration patterns counter
+```
+
+**How it works:**
+
+- Generates a random `PORT_OFFSET` (100-1000) to avoid port conflicts
+- Starts local dev servers on offset ports (Toolshed: 8000+offset, Shell:
+  5173+offset)
+- Runs integration tests with `API_URL` pointing to the local server
+- **Automatically stops servers after tests complete**
+
+**Available packages:** `runner`, `runtime-client`, `shell`,
+`background-charm-service`, `patterns`, `cli`, `generated-patterns`
+
+**Log files:** After servers start, check these if something goes wrong:
+
+- `packages/shell/local-dev-shell.log`
+- `packages/toolshed/local-dev-toolshed.log`
+
+**Advanced usage with PORT_OFFSET:**
+
+If you set `PORT_OFFSET` in the environment, the runner assumes you're managing
+servers yourself:
+
+```bash
+# Stop any existing servers on this offset, start new ones, run tests,
+# but leave servers running after
+PORT_OFFSET=500 deno task integration cli
+```
+
+This is useful when you want to keep servers running between test runs for
+faster iteration.
