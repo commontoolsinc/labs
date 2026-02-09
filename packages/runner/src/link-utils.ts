@@ -51,8 +51,7 @@ export function isCellLink(
   return (
     isCellResultForDereferencing(value) ||
     isPrimitiveCellLink(value) ||
-    isCell(value) ||
-    (isRecord(value) && "/" in value && typeof value["/"] === "string") // EntityId format
+    isCell(value)
   );
 }
 

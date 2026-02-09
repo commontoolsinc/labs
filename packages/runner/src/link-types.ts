@@ -3,7 +3,6 @@ import { type JSONSchema } from "./builder/types.ts";
 import { type MemorySpace } from "./cell.ts";
 import {
   type LegacyAlias,
-  type LegacyJSONCellLink,
   LINK_V1_TAG,
   type SigilLink,
   type SigilValue,
@@ -42,9 +41,7 @@ export type NormalizedFullLink = NormalizedLink & IMemorySpaceAddress;
  */
 export type PrimitiveCellLink =
   | SigilLink
-  | LegacyJSONCellLink // @deprecated
-  | LegacyAlias // @deprecated
-  | { "/": string }; // @deprecated
+  | LegacyAlias; // @deprecated
 
 /**
  * Check if value is a sigil value with any type
@@ -56,19 +53,6 @@ export function isSigilValue(value: any): value is SigilValue<any> {
     "/" in value &&
     Object.keys(value).length === 1 &&
     isObject(value["/"]);
-}
-
-/**
- * Check if value is a JSON cell link (storage format).
- * @deprecated Switch to isLink instead.
- */
-export function isJSONCellLink(value: any): value is LegacyJSONCellLink {
-  return (
-    isRecord(value) &&
-    isRecord(value.cell) &&
-    typeof value.cell["/"] === "string" &&
-    Array.isArray(value.path)
-  );
 }
 
 export function isSigilLink(value: any): value is SigilLink {
@@ -85,22 +69,11 @@ export function isSigilWriteRedirectLink(
     value["/"][LINK_V1_TAG].overwrite === "redirect";
 }
 
-/**
- * Check if value is a deprecated link of type `{ "/": <string> }`
- * @deprecated Switch to isLink instead.
- */
-export function isDeprecatedStringLink(
-  value: any,
-): value is { "/": string } {
-  return isRecord(value) && "/" in value && typeof value["/"] === "string"; // EntityId format
-}
-
 export function isPrimitiveCellLink(
   value: any,
 ): value is PrimitiveCellLink {
   return isSigilLink(value) ||
-    isJSONCellLink(value) ||
-    isLegacyAlias(value) || isDeprecatedStringLink(value);
+    isLegacyAlias(value);
 }
 
 export function isNormalizedLink(value: any): value is NormalizedLink {
@@ -187,20 +160,6 @@ export function parseLinkPrimitive(
       type: "application/json",
       ...(link.schema !== undefined && { schema: link.schema }),
       ...(link.overwrite === "redirect" && { overwrite: "redirect" }),
-    };
-  } else if (isJSONCellLink(value)) {
-    return {
-      id: toURI(value.cell["/"]),
-      path: value.path.map((p) => p.toString()),
-      ...(base?.space && { space: base.space }),
-      type: "application/json",
-    };
-  } else if (isDeprecatedStringLink(value)) {
-    return {
-      id: toURI(value["/"]),
-      path: [],
-      ...(base?.space && { space: base.space }), // Space must come from context for JSON links
-      type: "application/json",
     };
   } else if (isLegacyAlias(value)) {
     const alias = value.$alias;

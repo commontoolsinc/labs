@@ -49,7 +49,8 @@ import type {
   WriterError,
 } from "./storage/interface.ts";
 import { resolve } from "./storage/transaction/attestation.ts";
-import { isWriteRedirectLink } from "./link-types.ts";
+import { isSigilLink, isWriteRedirectLink } from "./link-types.ts";
+import { LINK_V1_TAG } from "./sigil-types.ts";
 import { LastNode } from "./link-resolution.ts";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 
@@ -1074,7 +1075,26 @@ export function loadSource(
   }
   // We also want to include the source cells
   const source = targetObj["source"];
-  if (!isObject(source) || !("/" in source) || !isString(source["/"])) {
+  let shortId: string | undefined;
+
+  // New sigil link format: { "/": { "link@1": { id, ... } } }
+  if (isSigilLink(source)) {
+    const linkInner =
+      (source["/"] as Record<string, unknown>)[LINK_V1_TAG] as Record<
+        string,
+        unknown
+      >;
+    const id = linkInner.id as string | undefined;
+    if (id) {
+      // id is a URI like "of:xxx", extract the short id
+      shortId = id.startsWith("of:") ? id.slice(3) : id;
+    }
+  } // Legacy EntityId format: { "/": string }
+  else if (isObject(source) && "/" in source && isString(source["/"])) {
+    shortId = source["/"];
+  }
+
+  if (!shortId) {
     // undefined is strange, but acceptable
     if (source !== undefined) {
       logger.warn(
@@ -1084,7 +1104,6 @@ export function loadSource(
     }
     return;
   }
-  const shortId: string = source["/"];
   if (cycleCheck.has(shortId)) {
     return;
   }

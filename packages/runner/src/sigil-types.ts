@@ -62,13 +62,3 @@ export type LegacyAlias = {
     schema?: JSONSchema;
   };
 };
-
-/**
- * JSON cell link format used in storage.
- *
- * @deprecated Switch to sigil links instead.
- */
-export type LegacyJSONCellLink = {
-  cell: { "/": string };
-  path: (string | number)[];
-};

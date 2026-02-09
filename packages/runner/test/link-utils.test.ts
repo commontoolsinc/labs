@@ -145,8 +145,8 @@ describe("link-utils", () => {
       expect(isCellLink(cell)).toBe(true);
     });
 
-    it("should identify EntityId format as links", () => {
-      expect(isCellLink({ "/": "of:test" })).toBe(true);
+    it("should not identify EntityId format as links", () => {
+      expect(isCellLink({ "/": "of:test" })).toBe(false);
     });
 
     it("should not identify non-links as links", () => {
@@ -373,22 +373,6 @@ describe("link-utils", () => {
         space: space,
         type: "application/json",
         schema: undefined,
-      });
-    });
-
-    it("should parse JSON cell links to normalized links", () => {
-      const jsonLink = {
-        cell: { "/": "of:test" },
-        path: ["nested", "value"],
-      };
-      const baseCell = runtime.getCell(space, "base");
-      const result = parseLink(jsonLink, baseCell);
-
-      expect(result).toEqual({
-        id: "of:test",
-        path: ["nested", "value"],
-        space: space,
-        type: "application/json",
       });
     });
 
