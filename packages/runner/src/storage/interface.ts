@@ -1,6 +1,5 @@
 import type { Immutable } from "@commontools/utils/types";
 import type { EntityId } from "../create-ref.ts";
-import type { SigilLink } from "../sigil-types.ts";
 import type { Cancel } from "../cancel.ts";
 import type {
   Assertion,
@@ -77,7 +76,7 @@ export type Labels = {
 /** Immutable storage value container. */
 export interface StorageValue<T extends StorableValue = StorableValue> {
   readonly value: Immutable<T>;
-  readonly source?: EntityId | SigilLink;
+  readonly source?: EntityId;
   readonly labels?: Immutable<Labels>;
 }
 

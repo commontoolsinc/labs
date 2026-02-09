@@ -1198,32 +1198,16 @@ export class CellImpl<T extends StorableValue>
     | undefined;
   getSourceCell(schema?: JSONSchema): Cell<any> | undefined {
     if (!this.synced) this.sync(); // No await, just kicking this off
-    const sourceValue = this.runtime.readTx(this.tx).readOrThrow(
+    let sourceCellId = this.runtime.readTx(this.tx).readOrThrow(
       { ...this.link, path: ["source"] },
-    );
-    if (!sourceValue) return undefined;
-
-    let sourceCellId: string | undefined;
-
-    // New sigil link format: { "/": { "link@1": { id, ... } } }
-    if (
-      isRecord(sourceValue) && isRecord(sourceValue["/"]) &&
-      LINK_V1_TAG in (sourceValue["/"] as Record<string, unknown>)
+    ) as string | undefined;
+    if (!sourceCellId) return undefined;
+    if (isRecord(sourceCellId)) {
+      sourceCellId = toURI(sourceCellId);
+    } else if (
+      typeof sourceCellId === "string" && sourceCellId.startsWith('{"/":')
     ) {
-      const linkInner =
-        (sourceValue["/"] as Record<string, unknown>)[LINK_V1_TAG] as Record<
-          string,
-          unknown
-        >;
-      sourceCellId = linkInner.id as string;
-    } // Legacy EntityId format: { "/": string }
-    else if (isRecord(sourceValue) && typeof sourceValue["/"] === "string") {
-      sourceCellId = toURI(sourceValue);
-    } // Legacy stringified JSON: '{"/":...}'
-    else if (
-      typeof sourceValue === "string" && sourceValue.startsWith('{"/":')
-    ) {
-      sourceCellId = toURI(JSON.parse(sourceValue));
+      sourceCellId = toURI(JSON.parse(sourceCellId));
     }
 
     if (typeof sourceCellId !== "string" || !sourceCellId.startsWith("of:")) {
@@ -1251,7 +1235,8 @@ export class CellImpl<T extends StorableValue>
     }
     this.tx.writeOrThrow(
       { ...this.link, path: ["source"] },
-      createSigilLinkFromParsedLink({ id: sourceLink.id, path: [] }),
+      // TODO(@ubik2): Transition source links to sigil links?
+      { "/": fromURI(sourceLink.id) },
     );
   }
 

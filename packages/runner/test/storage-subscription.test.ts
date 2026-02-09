@@ -11,7 +11,6 @@ import type { MIME, URI } from "@commontools/memory/interface";
 import * as Fact from "@commontools/memory/fact";
 import * as Changes from "@commontools/memory/changes";
 import { Runtime } from "../src/runtime.ts";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
 const signer = await Identity.fromPassphrase("test storage subscription");
 const space = signer.did();
@@ -504,17 +503,9 @@ describe("Storage Subscription", () => {
       expect(commit.space).toBe(space);
       expect([...commit.changes].length).toBeGreaterThanOrEqual(1);
       const change = [...commit.changes][0];
-      // The actual value contains the full document where source field is a sigil link
-      const expectedSource = {
-        "/": {
-          [LINK_V1_TAG]: {
-            id: cell.sourceURI,
-            path: [],
-          },
-        },
-      };
+      // The actual value contains the full document where source field has the JSON string
       expect(change.after).toEqual({
-        source: expectedSource,
+        source: JSON.parse(JSON.stringify(cell.entityId)),
       });
       expect((change.before as any)?.source).toBeUndefined();
     });
