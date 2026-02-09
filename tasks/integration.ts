@@ -118,9 +118,17 @@ async function runPackageIntegration(
     env.API_URL = apiUrl;
   }
 
-  // Add HEADLESS for browser test packages
+  // For browser test packages, pass through HEADLESS and PIPE_CONSOLE
   if (HEADLESS_PACKAGES.includes(pkg)) {
-    env.HEADLESS = "1";
+    // Default HEADLESS to "1" unless explicitly set in environment
+    const headlessEnv = Deno.env.get("HEADLESS");
+    env.HEADLESS = headlessEnv ?? "1";
+
+    // Pass through PIPE_CONSOLE if set
+    const pipeConsoleEnv = Deno.env.get("PIPE_CONSOLE");
+    if (pipeConsoleEnv) {
+      env.PIPE_CONSOLE = pipeConsoleEnv;
+    }
   }
 
   let result: { success: boolean; code: number };
